@@ -1,0 +1,13 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Regenerate with: pip-compile pyproject.toml -o requirements.txt
+#
+# Core dependencies for gaia-study (The Subconscious)
+
+# gaia-common[vector] is installed separately via volume mount
+# -e /gaia-common[vector]
+
+fastapi>=0.115.0
+uvicorn>=0.29.0
+httpx>=0.25.0
+sentence-transformers>=2.7.0
+chromadb>=0.4.24

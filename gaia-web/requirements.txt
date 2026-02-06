@@ -1,0 +1,15 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Regenerate with: pip-compile pyproject.toml -o requirements.txt
+#
+# Core dependencies for gaia-web (The Face)
+
+# gaia-common is installed separately via volume mount
+# -e /gaia-common
+
+flask>=2.3.0
+fastapi>=0.115.0
+uvicorn>=0.29.0
+httpx>=0.25.0
+sse-starlette>=1.6.0
+python-multipart>=0.0.6
+discord.py>=2.3.0

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaia-web"
+version = "0.1.0"
+description = "GAIA Web - The Face: UI and API gateway"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "GAIA Project", email = "gaia@localhost"},
+]
+dependencies = [
+    "gaia-common",
+    "flask>=2.3.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.25.0",
+    "sse-starlette>=1.6.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gaia_web"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

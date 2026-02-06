@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaia-core"
+version = "0.1.0"
+description = "GAIA Core - The Brain: Cognitive loop and reasoning engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "GAIA Project", email = "gaia@localhost"},
+]
+dependencies = [
+    "gaia-common @ file:///gaia-common",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "regex>=2023.0.0",
+    "requests",
+    "discord.py",
+    "PyYAML",
+    # LLM dependencies (to be refined during migration)
+    "vllm>=0.11.2",
+    "llama-cpp-python>=0.3.16",
+    "transformers>=4.39.0",
+    "torch>=2.3.0",
+    # API fallback providers
+    "groq>=0.4.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "vllm>=0.11.2",
+    "torch>=2.3.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gaia_core"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.hatch.metadata]
+allow-direct-references = true

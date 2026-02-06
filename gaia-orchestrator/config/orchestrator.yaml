@@ -1,0 +1,37 @@
+# GAIA Orchestrator Configuration
+# Override these values with environment variables prefixed with ORCHESTRATOR_
+
+# Service settings
+host: "0.0.0.0"
+port: 6410
+debug: false
+
+# State persistence
+state_dir: "/shared/orchestrator"
+state_file: "state.json"
+
+# Service endpoints (inside Docker network)
+core_url: "http://gaia-core:6415"
+core_candidate_url: "http://gaia-core-candidate:6416"
+web_url: "http://gaia-web:6414"
+study_url: "http://gaia-study:8766"
+mcp_url: "http://gaia-mcp:8765"
+
+# Docker settings
+docker_socket: "/var/run/docker.sock"
+compose_file_live: "/gaia/GAIA_Project/docker-compose.yml"
+compose_file_candidate: "/gaia/GAIA_Project/docker-compose.candidate.yml"
+
+# GPU settings
+# VRAM usage below this threshold (MB) = GPU is considered free
+gpu_cleanup_threshold_mb: 500
+# Max time to wait for CUDA to release memory
+gpu_cleanup_timeout_seconds: 30
+# How often to poll VRAM during cleanup
+gpu_cleanup_poll_interval: 1.0
+
+# Handoff settings
+handoff_timeout_seconds: 120
+
+# HTTP client timeout
+http_timeout_seconds: 30.0

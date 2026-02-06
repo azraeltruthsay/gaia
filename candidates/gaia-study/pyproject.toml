@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaia-study"
+version = "0.1.0"
+description = "GAIA Study - The Subconscious: Background processing and learning"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "GAIA Project", email = "gaia@localhost"},
+]
+dependencies = [
+    "gaia-common[vector]",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.25.0",
+    "sentence-transformers>=2.7.0",
+    "chromadb>=0.4.24",
+    # Training dependencies (optional, for LoRA adapters)
+    # "peft>=0.7.0",
+    # "bitsandbytes>=0.41.0",
+]
+
+[project.optional-dependencies]
+training = [
+    "peft>=0.7.0",
+    "bitsandbytes>=0.41.0",
+    "accelerate>=0.24.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gaia_study"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

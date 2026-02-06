@@ -1,0 +1,94 @@
+# GAIA Development Override - Hot Reload Configuration
+#
+# This file is automatically loaded by docker-compose alongside docker-compose.yml
+# It enables development features like hot-reload and source code mounting.
+#
+# Usage:
+#   docker compose up              # Uses both files (dev mode)
+#   docker compose -f docker-compose.yml up  # Production only (no override)
+#
+# To disable dev mode temporarily:
+#   COMPOSE_FILE=docker-compose.yml docker compose up
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core: Development overrides
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-core:
+    build:
+      context: .
+      dockerfile: gaia-core/Dockerfile
+      args:
+        - INSTALL_DEV=true
+    volumes:
+      # Mount source code for hot-reload
+      - ./gaia-core/gaia_core:/app/gaia_core:ro
+      # Shared library (already mounted in base)
+      - ./gaia-common:/gaia-common:ro
+    environment:
+      - GAIA_ENV=development
+      - LOG_LEVEL=DEBUG
+    # Enable uvicorn reload
+    command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-web: Development overrides
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-web:
+    build:
+      context: .
+      dockerfile: gaia-web/Dockerfile
+      args:
+        - INSTALL_DEV=true
+    volumes:
+      # Mount source code for hot-reload
+      - ./gaia-web/gaia_web:/app/gaia_web:ro
+      # Mount static assets
+      - ./gaia-web/static:/app/static:ro
+      # Shared library
+      - ./gaia-common:/gaia-common:ro
+    environment:
+      - GAIA_ENV=development
+      - LOG_LEVEL=DEBUG
+    # Enable uvicorn reload
+    command: ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414", "--reload", "--reload-dir", "/app/gaia_web"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-study: Development overrides
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-study:
+    build:
+      context: .
+      dockerfile: gaia-study/Dockerfile
+      args:
+        - INSTALL_DEV=true
+    volumes:
+      # Mount source code for hot-reload
+      - ./gaia-study/gaia_study:/app/gaia_study:ro
+      # Shared library
+      - ./gaia-common:/gaia-common:ro
+    environment:
+      - GAIA_ENV=development
+      - LOG_LEVEL=DEBUG
+    # Enable uvicorn reload
+    command: ["python", "-m", "uvicorn", "gaia_study.main:app", "--host", "0.0.0.0", "--port", "8766", "--reload", "--reload-dir", "/app/gaia_study"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-mcp: Development overrides
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-mcp:
+    build:
+      context: .
+      dockerfile: gaia-mcp/Dockerfile
+      args:
+        - INSTALL_DEV=true
+    volumes:
+      # Mount source code for hot-reload
+      - ./gaia-mcp/gaia_mcp:/app/gaia_mcp:ro
+      # Shared library
+      - ./gaia-common:/gaia-common:ro
+    environment:
+      - GAIA_ENV=development
+      - LOG_LEVEL=DEBUG
+    # Enable uvicorn reload
+    command: ["python", "-m", "uvicorn", "gaia_mcp.main:app", "--host", "0.0.0.0", "--port", "8765", "--reload", "--reload-dir", "/app/gaia_mcp"]

@@ -1,0 +1,362 @@
+# GAIA Service-Oriented Architecture - Master Composition
+#
+# Services:
+#   - gaia-core:  The Brain   - Cognitive loop and reasoning (GPU)
+#   - gaia-web:   The Face    - UI and API gateway
+#   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
+#   - gaia-mcp:   The Hands   - Sandboxed tool execution
+#
+# Volume Access:
+#   - knowledge/:       RO for all, RW for gaia-study
+#   - vector_store/:    RO for gaia-core, RW for gaia-study (SOLE WRITER)
+#   - gaia-models/:     RO for gaia-core, RW for gaia-study (LoRA adapters)
+#   - gaia-common/:     RO for all (shared library)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up gaia-web        # Start web + dependencies
+#   docker compose logs -f gaia-core  # Follow core logs
+#   docker compose down               # Stop all services
+#
+# Modular Swap (inject candidate into live flow):
+#   # Swap MCP: live core -> candidate MCP
+#   MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc docker compose up -d gaia-core
+#
+#   # Swap Core: live web -> candidate core
+#   CORE_ENDPOINT=http://gaia-core-candidate:6415 docker compose up -d gaia-web
+#
+#   # Swap Study: live core -> candidate study
+#   STUDY_ENDPOINT=http://gaia-study-candidate:8766 docker compose up -d gaia-core
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-orchestrator: The Coordinator - GPU and container lifecycle management
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-orchestrator:
+    build:
+      context: ./gaia-orchestrator
+      dockerfile: Dockerfile
+    image: gaia-orchestrator:latest
+    container_name: gaia-orchestrator
+    hostname: gaia-orchestrator
+    restart: unless-stopped
+
+    volumes:
+      # Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Shared state for persistence
+      - gaia-shared:/shared:rw
+      # Project root for compose file access (read-only)
+      - .:/gaia/GAIA_Project:ro
+
+    environment:
+      - ORCHESTRATOR_HOST=0.0.0.0
+      - ORCHESTRATOR_PORT=6410
+      - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
+      - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
+      - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
+      # Service endpoints (inside Docker network)
+      - ORCHESTRATOR_CORE_URL=http://gaia-core:6415
+      - ORCHESTRATOR_WEB_URL=http://gaia-web:6414
+      - ORCHESTRATOR_STUDY_URL=http://gaia-study:8766
+      - ORCHESTRATOR_MCP_URL=http://gaia-mcp:8765
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "6410:6410"
+
+    networks:
+      - gaia-net
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6410/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core: The Brain - Cognitive loop and reasoning
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-core:
+    build:
+      context: .
+      dockerfile: ./gaia-core/Dockerfile
+    image: localhost:5000/gaia-core:local
+    container_name: gaia-core
+    hostname: gaia-core
+    restart: unless-stopped
+
+    volumes:
+      # Source code (development mode)
+      - ./gaia-core:/app:rw
+      # Shared library (development mode - mount for live reload)
+      - ./gaia-common:/gaia-common:ro
+      # Knowledge base (read-only)
+      - ./knowledge:/knowledge:ro
+      # Vector store (read-only - gaia-study is SOLE WRITER)
+      - ./knowledge/vector_store:/vector_store:ro
+      # Model files (read-only)
+      - ./gaia-models:/models:ro
+      # Shared state
+      - gaia-shared:/shared:rw
+
+    environment:
+      - GAIA_SERVICE=core
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - KNOWLEDGE_DIR=/knowledge
+      - VECTOR_STORE_PATH=/vector_store
+      - MODELS_DIR=/models
+      - SHARED_DIR=/shared
+      # Service endpoints (configurable for candidate injection)
+      - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
+      # GPU settings
+      - N_GPU_LAYERS=${N_GPU_LAYERS:-8}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - VLLM_DISABLE_CUSTOM_CUDA_MODULES=1
+      # GAIA_VLLM_SAFE_MODE=1 caps gpu_memory_utilization at 0.4 - disabled to allow full memory usage
+      - GAIA_VLLM_SAFE_MODE=0
+      # Model loading - disabled by default, models load on first use
+      - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
+      - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
+      # Force spawn for vLLM to avoid CUDA fork issues
+      - GAIA_VLLM_WORKER_METHOD=spawn
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Segfault workaround for vLLM/torch.compile
+      - TORCH_COMPILE_DISABLE=1
+
+    ports:
+      - "6415:6415"
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      gaia-mcp:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6415/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-web: The Face - UI and API gateway
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-web:
+    build:
+      context: .
+      dockerfile: ./gaia-web/Dockerfile
+    image: localhost:5000/gaia-web:local
+    container_name: gaia-web
+    hostname: gaia-web
+    restart: unless-stopped
+
+    env_file:
+      - .env.discord
+
+    volumes:
+      # Source code (development mode)
+      - ./gaia-web:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # Knowledge base (read-only, for static content)
+      - ./knowledge:/knowledge:ro
+      # Static assets (if needed)
+      - ./gaia-web/static:/app/static:ro
+
+    environment:
+      - GAIA_SERVICE=web
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Service endpoints (configurable for candidate injection)
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      # Web server settings
+      - HOST=0.0.0.0
+      - PORT=6414
+      # Discord integration (Unified Interface Gateway)
+      # DISCORD_BOT_TOKEN loaded from env_file: .env.discord
+      - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "6414:6414"
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      gaia-core:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6414/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-study: The Subconscious - Background processing
+  # SOLE WRITER to vector store and LoRA adapters
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-study:
+    build:
+      context: .
+      dockerfile: ./gaia-study/Dockerfile
+    image: localhost:5000/gaia-study:local
+    container_name: gaia-study
+    hostname: gaia-study
+    restart: unless-stopped
+
+    volumes:
+      # Source code (development mode)
+      - ./gaia-study:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # Knowledge base (FULL ACCESS for indexing)
+      - ./knowledge:/knowledge:rw
+      # Vector store (SOLE WRITER)
+      - ./knowledge/vector_store:/vector_store:rw
+      # Model files (WRITE for LoRA adapters)
+      - ./gaia-models:/models:rw
+      # Shared state
+      - gaia-shared:/shared:rw
+
+    environment:
+      - GAIA_SERVICE=study
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - KNOWLEDGE_DIR=/knowledge
+      - VECTOR_STORE_PATH=/vector_store
+      - MODELS_DIR=/models
+      - SHARED_DIR=/shared
+      # GPU settings for embedding
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      # Embedding model
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "8766:8766"
+
+    networks:
+      - gaia-net
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8766/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-mcp: The Hands - Sandboxed tool execution
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-mcp:
+    build:
+      context: .
+      dockerfile: ./gaia-mcp/Dockerfile
+    image: localhost:5000/gaia-mcp:local
+    container_name: gaia-mcp
+    hostname: gaia-mcp
+    restart: unless-stopped
+
+    volumes:
+      # Source code (development mode)
+      - ./gaia-mcp:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # Knowledge base (read-only for tool reference)
+      - ./knowledge:/knowledge:rw
+      # Model files (read-only for embeddings)
+      - ./gaia-models:/models:ro
+      # Sandboxed workspace (isolated)
+      - gaia-sandbox:/sandbox:rw
+
+    environment:
+      - GAIA_SERVICE=mcp
+      - MODELS_DIR=/models
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - SANDBOX_ROOT=/sandbox
+      - KNOWLEDGE_DIR=/knowledge
+      # Security
+      - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
+      - MCP_APPROVAL_TTL=900
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "8765:8765"
+
+    networks:
+      - gaia-net
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════════════════
+networks:
+  gaia-net:
+    name: gaia-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Volumes
+# ═══════════════════════════════════════════════════════════════════════════
+volumes:
+  # Shared state between services (sessions, packets, etc.)
+  gaia-shared:
+    name: gaia-shared
+
+  # Isolated sandbox for MCP tool execution
+  gaia-sandbox:
+    name: gaia-sandbox

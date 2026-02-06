@@ -1,0 +1,73 @@
+# ============================================
+# GAIA Project .gitignore
+# ============================================
+
+# --- Large directories / binaries ---
+archive/
+gaia-models/
+google-cloud-sdk/
+artifacts/
+GAIA_Condensed_flat/
+
+# --- Virtual environments ---
+.venv/
+venv_notebooklm/
+
+# --- Environment / secrets ---
+.env
+.env.*
+
+# --- Logs ---
+logs/
+*.log
+build_log.txt
+mcp_logs.txt
+latest_test.txt
+
+# --- Temp files ---
+tmp/
+tmp_*.py
+
+# --- Binaries / large standalone files ---
+llama_cpp
+inspect
+sys
+logging
+*.tar.gz
+
+# --- Generated output ---
+gaia_tree.txt
+nvidia_pre_debug.txt
+nvidia_post_debug.txt
+
+# --- Tools / config not tracked ---
+tools/
+.claude/
+
+# --- Standalone root files (not part of SOA services) ---
+Geppitti Persona & Interaction Overview
+notebooklm_sync.py
+start_notebooklm_sync.sh
+setup_models.py
+count_file_types.sh
+create_flat_representation.sh
+flatten_soa.sh
+interactive_gaia_start.sh
+run_dnd_test.sh
+test_candidate.sh
+test_gaia_core_imports.sh
+prompt
+recall
+
+# --- Knowledge exclusions (DND project) ---
+knowledge/dnd_campaign/
+knowledge/projects/dnd-campaign/
+knowledge/logs/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Node ---
+node_modules/

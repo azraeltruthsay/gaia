@@ -1,0 +1,218 @@
+[
+  {
+    "task": "Thought seed creation tooling",
+    "purpose": "Enable seed prompts via UI or CLI",
+    "urgency": "High",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "resolved",
+    "created": "2025-05-23T14:30:13.647666",
+    "resolved": "2025-07-21T13:48:44.541092"
+  },
+  {
+    "task": "Self-reflection triggers real code review",
+    "purpose": "Match reflection intent with behavior",
+    "urgency": "High",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "resolved",
+    "created": "2025-05-23T14:30:13.647690",
+    "resolved": "2025-07-21T13:48:44.545759"
+  },
+  {
+    "task": "Dynamic function reference querying",
+    "purpose": "Ask GAIA about her own methods",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647696"
+  },
+  {
+    "task": "Initiative loop expanded actions",
+    "purpose": "Respond to topics beyond self_analysis",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647700"
+  },
+  {
+    "task": "Persona schema validation",
+    "purpose": "Catch corrupt or invalid personas",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647704"
+  },
+  {
+    "task": "LoRA adapter hook-up",
+    "purpose": "Enable persona-tuned inference",
+    "urgency": "Medium",
+    "impact": "Low",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647708"
+  },
+  {
+    "task": "TTS integration (pyttsx3/pydub)",
+    "purpose": "Voice output for accessibility",
+    "urgency": "Medium",
+    "impact": "Low",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647735"
+  },
+  {
+    "task": "WireGuard from phone to WSL",
+    "purpose": "Remote shell or webhook from phone",
+    "urgency": "High",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647738"
+  },
+  {
+    "task": "Discord integration",
+    "purpose": "Allow GAIA to chat on a Discord channel",
+    "urgency": "Medium",
+    "impact": "High",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647742"
+  },
+  {
+    "task": "Expose ai.status to UI",
+    "purpose": "Give real-time system feedback",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647744"
+  },
+  {
+    "task": "Command DSL expansion",
+    "purpose": "Natural language command interpretation",
+    "urgency": "Low",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647748"
+  },
+  {
+    "task": "Graceful shutdown hooks",
+    "purpose": "Ensure session save, tree scan, embedding updates on Ctrl+C or final exit",
+    "urgency": "High",
+    "impact": "High",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647750"
+  },
+  {
+    "task": "System state snapshot tool",
+    "purpose": "Capture full tagged+timestamped archive of GAIA instance",
+    "urgency": "High",
+    "impact": "Medium",
+    "source": "bootstrap",
+    "status": "open",
+    "created": "2025-05-23T14:30:13.647752"
+  },
+  {
+    "task": "Migrate priority matrix to persistent dev_matrix",
+    "purpose": "Create GAIA-native dev roadmap with tracked task metadata",
+    "urgency": "High",
+    "impact": "High",
+    "source": "bootstrap",
+    "status": "resolved",
+    "created": "2025-05-23T14:30:13.647755",
+    "resolved": "2025-05-23T14:30:13.647757"
+  },
+  {
+    "task": "CI/CD integration",
+    "purpose": "Automate testing and deployment of GAIA updates",
+    "urgency": "High",
+    "impact": "High",
+    "source": "feature_extension",
+    "status": "open",
+    "created": "2025-05-23T16:27:06.905564"
+  },
+  {
+    "task": "Lite mode quick-reply (universal)",
+    "purpose": "Use quick_thought() outside Discord for low-latency replies in all contexts",
+    "urgency": "High",
+    "impact": "Medium",
+    "source": "feature_extension",
+    "status": "open",
+    "created": "2025-05-23T16:27:06.905573"
+  },
+  {
+    "task": "Web search + scrape + embed",
+    "purpose": "Research and generate documents on-demand using external content",
+    "urgency": "High",
+    "impact": "High",
+    "source": "feature_extension",
+    "status": "open",
+    "created": "2025-05-23T16:27:06.905576"
+  },
+  {
+    "task": "Security analyst mode",
+    "purpose": "Review firewall, permissions, services, and suggest hardening steps",
+    "urgency": "Medium",
+    "impact": "High",
+    "source": "feature_extension",
+    "status": "open",
+    "created": "2025-05-23T16:27:06.905578"
+  },
+  {
+    "task": "Observer response validation",
+    "purpose": "Validate observer feedback and signal correctness",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "manual",
+    "status": "open",
+    "created": "2025-10-18T14:00:00.000000"
+  },
+  {
+    "task": "GAIA's self-assessment and updating process",
+    "status": "resolved",
+    "resolved": "2025-10-20T03:46:27.014523",
+    "audit": [
+      {
+        "by": "gaia_self_review",
+        "justification": "The thought seed outlines a clear plan for GAIA to continuously refine her self-assessment and updating process by checking the status of tasks in dev_matrix.json, assessing their completion, updating their status, and reporting the updated list. This process aligns with the goal of optimizing efficiency and accuracy in task management.",
+        "ts": "2025-10-20T03:46:27.014529"
+      }
+    ]
+  },
+  {
+    "task": "dev_matrix.json",
+    "status": "resolved",
+    "resolved": "2025-10-20T04:57:59.097958",
+    "audit": [
+      {
+        "by": "gaia_self_review",
+        "justification": "Based on the exchange, the 'resolved' status for tasks that were previously marked as incomplete but should be considered complete has been updated correctly. However, it's essential to verify that the 'completed' field is indeed set to false for these tasks to ensure accurate marking.",
+        "ts": "2025-10-20T04:57:59.097964"
+      }
+    ]
+  },
+  {
+    "task": "Use MD5 hash to validate GCP packets",
+    "purpose": "Use a faster hashing algorithm for lightweight integrity checks of GCP packets.",
+    "urgency": "Medium",
+    "impact": "Medium",
+    "source": "user_suggestion",
+    "status": "open",
+    "created": "2026-01-13T04:04:13.123456"
+  },
+  {
+    "task": "GCP packet fragmentation and re-assembly",
+    "purpose": "Handle long responses by fragmenting them into smaller chunks, storing them in the sketchpad, and then re-assembling them.",
+    "urgency": "Medium",
+    "impact": "High",
+    "source": "user_suggestion",
+    "status": "open",
+    "created": "2026-01-13T04:04:13.123456"
+  }
+]

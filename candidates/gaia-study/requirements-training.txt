@@ -1,0 +1,10 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Optional training dependencies for LoRA adapter fine-tuning
+#
+# Install with: pip install -r requirements.txt -r requirements-training.txt
+
+-r requirements.txt
+
+peft>=0.7.0
+bitsandbytes>=0.41.0
+accelerate>=0.24.0

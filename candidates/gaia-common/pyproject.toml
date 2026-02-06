@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaia-common"
+version = "0.1.0"
+description = "Shared data structures and utilities for the GAIA project."
+authors = [
+    { name = "GAIA", email = "dev@gaia.com" },
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "pydantic",
+    "dataclasses-json",
+    "requests",
+    "httpx>=0.25.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/your-repo/gaia"
+"Bug Tracker" = "https://github.com/your-repo/gaia/issues"

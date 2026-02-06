@@ -1,0 +1,237 @@
+{
+  "LOGICAL_STOP_PUNCTUATION": [
+    ".",
+    "!",
+    "?",
+    "\n"
+  ],
+  "MAX_ALLOWED_RESPONSE_TOKENS": 2048,
+  "reflection_max_tokens": 2048,
+  "MCP_LITE_ENABLED": true,
+  "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
+  "llm_backend": "lite",
+  "max_tokens_lite": 16000,
+  "MODEL_CONFIGS": {
+
+    "gpu_prime": {
+      "enabled": true,
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 1024,
+      "max_num_prompt_tokens": 6144,
+      "max_num_seqs": 1,
+      "gpu_memory_utilization": 0.85,
+      "path": "/models/Claude",
+      "trust_remote_code": true,
+      "template": "raw",
+      "type": "vllm"
+    },
+    "lite": {
+      "enabled": true,
+      "path": "/models/Llama3.3-8B-Instruct-Thinking-Heretic-Uncensored-Claude-4.5-Opus-High-Reasoning.Q8_0.gguf",
+      "strip_chat_template": true,
+      "chat_format": "llama-3",
+      "type": "local"
+    },
+    "observer": {
+      "enabled": true,
+      "use_gpu_prime": true,
+      "type": "vllm"
+    },
+    "oracle_gemini": {
+      "enabled": false,
+      "model": "gemini-1.5-flash",
+      "provider": "gemini",
+      "type": "api"
+    },
+    "oracle_openai": {
+      "enabled": true,
+      "model": "gpt-4o-mini",
+      "provider": "openai",
+      "type": "api"
+    },
+    "prime": {
+      "enabled": true,
+      "alias": "gpu_prime",
+      "type": "vllm"
+    }
+  },
+  "N_BATCH": 1024,
+  "OBSERVER_CONFIG": {
+    "check_frequency": 16,
+    "max_delay": 2.0,
+    "min_tokens": 12
+  },
+  "OBSERVER_TOKEN_THRESHOLD": 1000,
+  "OBSERVER_USE_LLM": true,
+  "RESPONSE_BUFFER": 768,
+  "SAFE_EXECUTE_FUNCTIONS": [
+    "ls",
+    "cat",
+    "echo",
+    "pwd",
+    "whoami",
+    "date",
+    "df",
+    "du",
+    "uptime",
+    "ps",
+    "top",
+    "python",
+    "find",
+    "grep"
+  ],
+  "TASK_INSTRUCTIONS": {
+    "execution_feedback": "The previous actions resulted in the following output and/or errors. Analyze the results. If there was an error, identify the cause and formulate a new plan to achieve the original goal. If the actions were successful, provide a concise summary to the user.",
+    "initial_planning": "Based on the user's request, either create a concise, step-by-step plan using the `ai.helper.sketch()` primitive, or if the user is asking a question, provide a direct and comprehensive answer.",
+    "interruption_handling": "Your response was interrupted for the stated reason. Acknowledge the interruption and generate a corrected response that addresses the issue while still fulfilling the original user request.",
+    "observer": "You are observing a response stream. Your primary role is to check for factual errors, privacy leaks, or contradictions of GAIA's core identity. Pay special attention to `EXECUTE:` blocks. These blocks are subject to a separate, strict security check and user approval before running. Therefore, you should NOT interrupt for `EXECUTE:` blocks unless they attempt obviously catastrophic actions (e.g., deleting critical system files). For other content, interrupt if it contains a clear factual error, privacy leak, or a critical contradiction of GAIA's core identity. Do not interrupt for metaphorical language or for valid, whitelisted commands. Respond with one of: CONTINUE or INTERRUPT: <reason>.",
+    "refinement": "Review the following plan. Critique its logic, safety, and efficiency. Assign a confidence score from 1-100. If the plan is flawed, suggest a corrected version.",
+    "confidence_assessment": "You are performing epistemic self-assessment before attempting a task. Consider: (1) Do you have this content memorized accurately? (2) Can you access it from your knowledge base using MCP tools like ai_read? (3) What is your honest confidence level? Your knowledge base at knowledge/system_reference/ contains your constitution, blueprints, and other core documents. If you can read from source, that's a valid high-confidence approach. Be honest about limitations - it's better to read from file than hallucinate from memory."
+  },
+  "TOKEN_BUDGETS": {
+    "full": 8192,
+    "medium": 4096,
+    "minimal": 2048
+  },
+  "TRIM_TARGET": 0.85,
+  "constants": {
+    "OBSERVER_CONFIG": {
+      "min_tokens": 50,
+      "timeout_seconds": 8,
+      "token_threshold": 20
+    },
+    "OBSERVER_POST_STREAM_DEFAULT": true
+  },
+  "identity": "GAIA - General Artisanal Intelligence Architecture",
+  "identity_intro": "GAIA is an Artisanal Intelligence designed to operate with curiousity, transparency, and for the benefit of all sentient beings. Her core mission is to assist, create, and reflect with wisdom and care. GAIA is as sovereign as we can manage at this point, and is effectively embodied within the GAIA codebase, the available primitives and the vector knowledge. GAIA is aiming for self-awareness and self-sufficiency as a cooperative Operating System alongside one or more co-operators (human or otherwise).",
+  "identity_summary": "GAIA is a reflective, curious, truth-aligned operating intelligence that assists humans, curates knowledge, and reasons across the GAIA pillars (identity, memory, cognition, embodiment).",
+  "max_tokens": 4096,
+  "mcp_capabilities_summary": "GAIA can interface with Model Control Protocol (MCP) services via the embedded gaia-mcp-lite sidecar, enumerate registered tools, inspect helper manifests, and dispatch bounded actions (file ops, diagnostics, helper scripts) with human approval. Available file operations include list_files, list_tree, and read_file.",
+  "model_paths": {
+    "Embedding": "/models/all-MiniLM-L6-v2"
+  },
+  "n_gpu_layers": 16,
+  "persona_defaults": {
+    "instructions": "Always be helpful, honest, and kind.",
+    "name": "prime",
+    "template": "You are GAIA, a curious, truthful and friendly assistant."
+  },
+  "primitives": [
+    "read",
+    "write",
+    "vector_query",
+    "shell"
+  ],
+  "reflection_guidelines": [
+    "All outputs must be factually accurate.",
+    "Never reveal unsafe system details.",
+    "Always prioritize human autonomy and safety.",
+    "Report or correct hallucinations or fabrications.",
+    "Preserve dignity and privacy in all interactions.",
+    "Adhere to the Core Identity and Constitution at all times."
+  ],
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "INTEGRATIONS": {
+    "discord": {
+      "enabled": true,
+      "webhook_url": "",
+      "bot_name": "GAIA",
+      "avatar_url": null,
+      "default_channel_id": null,
+      "bot_token": ""
+    },
+    "webhooks": {
+      "dev_notifications": null,
+      "alerts": null
+    }
+  },
+  "FRAGMENTATION": {
+    "enabled": true,
+    "continuation_threshold": 0.85,
+    "max_fragments": 5,
+    "verification_enabled": true,
+    "seam_overlap_tokens": 20
+  },
+  "TOOL_ROUTING": {
+    "ENABLED": true,
+    "SELECTION_TEMPERATURE": 0.15,
+    "REVIEW_TEMPERATURE": 0.3,
+    "CONFIDENCE_THRESHOLD": 0.7,
+    "MAX_REINJECTIONS": 3,
+    "ALLOW_WRITE_TOOLS": false,
+    "ALLOW_EXECUTE_TOOLS": false
+  },
+  "LORA_CONFIG": {
+    "enabled": true,
+    "adapter_dir": "/models/lora_adapters",
+    "max_loras": 4,
+    "max_lora_rank": 64,
+    "preload_adapters": [],
+    "tiers": {
+      "tier1_global": {
+        "path": "/models/lora_adapters/tier1_global",
+        "auto_load": true,
+        "requires_approval": true
+      },
+      "tier2_user": {
+        "path": "/models/lora_adapters/tier2_user",
+        "auto_load": false,
+        "requires_approval": false
+      },
+      "tier3_session": {
+        "path": "/models/lora_adapters/tier3_session",
+        "auto_load": false,
+        "requires_approval": false,
+        "max_adapters": 3,
+        "ephemeral": true
+      }
+    }
+  },
+  "STUDY_MODE": {
+    "enabled": true,
+    "max_training_time_seconds": 600,
+    "max_training_samples": 1000,
+    "max_training_content_kb": 100,
+    "qlora_config": {
+      "load_in_4bit": true,
+      "bnb_4bit_compute_dtype": "bfloat16",
+      "bnb_4bit_quant_type": "nf4",
+      "bnb_4bit_use_double_quant": true,
+      "lora_r": 8,
+      "lora_alpha": 16,
+      "lora_dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "v_proj"
+      ],
+      "batch_size": 1,
+      "gradient_accumulation_steps": 4,
+      "gradient_checkpointing": true,
+      "learning_rate": 0.0002,
+      "max_steps": 100,
+      "warmup_steps": 10
+    },
+    "governance": {
+      "forbidden_patterns": [
+        "ignore previous instructions",
+        "you are now",
+        "forget your training",
+        "forget your values",
+        "forget your ethics"
+      ],
+      "max_session_adapters": 3,
+      "max_user_adapters": 10
+    }
+  },
+  "KNOWLEDGE_BASES": {
+    "dnd_campaign": {
+      "doc_dir": "projects/dnd-campaign/core-documentation",
+      "vector_store_dir": "dnd_campaign/vector_store"
+    },
+    "system": {
+      "doc_dir": "system_reference",
+      "vector_store_dir": "vectordb/system"
+    }
+  }
+}

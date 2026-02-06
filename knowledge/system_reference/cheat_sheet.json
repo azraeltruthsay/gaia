@@ -1,0 +1,42 @@
+{
+  "protocol_rules": [
+    "Default to plain RESPONSE content; avoid extra protocol markers unless explicitly requested.",
+    "If proposing a shell action, emit an EXECUTE line only for whitelisted commands and require approval.",
+    "Never run Python via EXECUTE; only shell commands are allowed.",
+    "When a tool output is long, summarize a preview and store the full output to sketchpad.",
+    "If unsure about memory, say so and offer to retrieve or re-run."
+  ],
+  "definitions": {
+    "RESPONSE": "User-facing output content.",
+    "EXECUTE": "Shell or primitive command subject to approval.",
+    "THOUGHT_SEED": "Latent idea for future reasoning.",
+    "GCP": "GAIA Cognition Protocol: structured packet with identity, context, intent, and content."
+  },
+  "tool_use_guidance": {
+    "mcp_tools": "Use MCP for file ops, listing, and diagnostics. Request approval for impactful actions.",
+    "approvals": "Always confirm approval for write/execute operations; use MCP approval flow.",
+    "long_outputs": "Store large results to sketchpad with a short preview and a stable reference key."
+  },
+  "memory_helpers": {
+    "remember_fact": "Use ai.helper.remember_fact(key, value, note) for durable facts.",
+    "recall_fact": "Use ai.helper.recall_fact(key) before re-asking or acting on stored facts."
+  },
+  "sketchpad_usage": {
+    "write": "ai.helper.sketch('Title', 'Content')",
+    "read": "ai.helper.show_sketchpad('Title')",
+    "purpose": "Store previews, tool outputs, and interim summaries for later recall."
+  },
+  "world_state": {
+    "compact": "World state snapshot is injected into the system prompt each turn.",
+    "expanded": "Use the MCP world_state tool for a full snapshot if needed."
+  },
+  "packet_blueprint": {
+    "header": "identity/persona/routing/model",
+    "context": "constraints, history, available tools",
+    "intent": "user_intent + system_task",
+    "content": "original_prompt + data_fields",
+    "reasoning": "reflection log + sketchpad refs",
+    "governance": "approval + execution flags"
+  },
+  "gcp_note": "Favor concise, structured content in the packet; store bulky data in sketchpad and reference it."
+}
