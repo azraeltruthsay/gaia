@@ -71,6 +71,26 @@ _GCP_SECTIONS = ['HEADER', 'ROUTING', 'MODEL', 'CONTEXT', 'INTENT', 'CONTENT',
 strip_think_tags = _strip_think_tags_robust
 
 
+def _format_retrieved_session_context(results: dict) -> str:
+    """Format RAG-retrieved session turns and topics into a readable context block."""
+    parts = []
+    turns = results.get("turns", [])
+    topics = results.get("topics", [])
+    if not turns and not topics:
+        return ""
+    if topics:
+        parts.append("Earlier conversation topics:")
+        for t in topics:
+            parts.append(f"- {t.get('label', 'Topic')} (similarity: {t.get('similarity', '?')})")
+    if turns:
+        parts.append("Relevant earlier exchanges:")
+        for t in turns:
+            parts.append(f"[Turn {t.get('idx', '?')}, sim={t.get('similarity', '?')}]")
+            parts.append(f"  User: {t.get('user', '')[:500]}")
+            parts.append(f"  Assistant: {t.get('assistant', '')[:500]}")
+    return "\n".join(parts)
+
+
 # Known documents that can be recited, with keyword triggers and file paths
 # Keywords are checked case-insensitively against the user's request
 RECITABLE_DOCUMENTS = {
@@ -309,16 +329,21 @@ class AgentCore:
             tags=[]
         )
 
-        # 🧩 SAFETY PATCH: Handle missing message IDs in history gracefully
+        # Sliding window: only the most recent turn-pairs go into the packet directly.
+        # Older turns are retrieved via semantic RAG (see session_history_indexer).
+        SLIDING_WINDOW_SIZE = 6  # Last 3 turn-pairs
+        all_history = history or []
+        window = all_history[-SLIDING_WINDOW_SIZE:]
+
         relevant_history_snippet = []
-        for i, msg in enumerate(history or []):
+        for i, msg in enumerate(window):
             msg_id = msg.get('id', f"auto_{i}")
             msg_role = msg.get('role', 'unknown')
             msg_content = msg.get('content', '')
             relevant_history_snippet.append(
                 RelevantHistorySnippet(id=msg_id, role=msg_role, summary=strip_think_tags(msg_content[:2000]))
             )
-        if any(m.get('id') is None for m in history or []):
+        if any(m.get('id') is None for m in window):
             self.logger.warning("AgentCore: Missing IDs found in history; temporary auto_ IDs assigned.")
 
         # Discover available MCP tools
@@ -376,6 +401,28 @@ class AgentCore:
             # best-effort; don't fail packet creation
             self.logger.exception("AgentCore: Failed to add identity and world state to packet.")
             pass
+
+        # RAG retrieval for older session history (beyond the sliding window)
+        if len(all_history) > SLIDING_WINDOW_SIZE:
+            try:
+                from gaia_core.memory.session_history_indexer import SessionHistoryIndexer
+                indexer = SessionHistoryIndexer.instance(session_id)
+                results = indexer.retrieve(
+                    query=user_input,
+                    top_k_turns=3,
+                    top_k_topics=2,
+                    exclude_recent_n=SLIDING_WINDOW_SIZE
+                )
+                retrieved_context = _format_retrieved_session_context(results)
+                if retrieved_context:
+                    content.data_fields.append(DataField(
+                        key='retrieved_session_context',
+                        value=retrieved_context,
+                        type='session_rag'
+                    ))
+                    self.logger.info(f"Session RAG: injected {len(results.get('turns', []))} turns + {len(results.get('topics', []))} topics")
+            except Exception as e:
+                self.logger.warning(f"Session RAG retrieval failed (non-fatal): {e}")
 
         # Initialize empty containers
         reasoning = Reasoning()

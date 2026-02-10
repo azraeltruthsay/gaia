@@ -462,6 +462,31 @@ DO NOT invent facts, statistics, dates, names, or other specific details. Episte
         except IOError as e:
             logger.error(f"Could not read summary file {summary_file_path}: {e}")
 
+    # --- Tier 1.5: Retrieved Session Context (RAG from older turns) ---
+    session_rag_prompt = {}
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'retrieved_session_context':
+                rag_content = getattr(df, 'value', '')
+                if rag_content:
+                    # Cap at 30% of remaining budget
+                    rag_budget = int(remaining_budget * 0.30)
+                    rag_tokens = count_tokens(rag_content)
+                    if rag_tokens > rag_budget and rag_budget > 0:
+                        char_limit = rag_budget * 4
+                        rag_content = rag_content[:char_limit] + "\n[...truncated]"
+                        rag_tokens = count_tokens(rag_content)
+                    if rag_tokens <= remaining_budget:
+                        session_rag_prompt = {
+                            "role": "system",
+                            "content": f"[Relevant context from earlier in this conversation]\n{rag_content}"
+                        }
+                        remaining_budget -= rag_tokens
+                        logger.debug(f"Tier 1.5 session RAG: {rag_tokens} tokens, budget remaining: {remaining_budget}")
+                break
+    except Exception:
+        logger.debug("Failed to extract session RAG context", exc_info=True)
+
     # --- Tier 2: Add Relevant History Snippets (Short-Term Memory) ---
     history_to_include = []
     # Defensive access to history snippets: a missing context or attribute
@@ -521,7 +546,9 @@ DO NOT invent facts, statistics, dates, names, or other specific details. Episte
     # --- Assemble the final prompt in the correct order (with normalization) ---
     final_prompt = [system_prompt]
     if summary_prompt:
-        final_prompt.append(summary_prompt)
+        final_prompt.append(summary_prompt)        # Tier 1
+    if session_rag_prompt:
+        final_prompt.append(session_rag_prompt)     # Tier 1.5
 
     # Normalize history + the final user prompt together so collapsing works across boundaries
     messages_to_normalize = []

@@ -71,7 +71,7 @@ Tools are dispatched via `tools.py` using the central registry from `gaia_common
 | `read_file` | Read file contents | No |
 | `list_dir`, `list_files`, `list_tree` | Directory operations | No |
 | `find_files`, `find_relevant_documents` | Search | No |
-| `write_file` | Write to file | Yes (not yet implemented) |
+| `write_file` | Write to file (allowlisted: `/knowledge`, `/sandbox`) | Yes |
 | `ai_write` | LLM-assisted writing | Yes |
 | `world_state` | System state snapshot | No |
 | `memory_status`, `memory_query` | Knowledge base access | No |

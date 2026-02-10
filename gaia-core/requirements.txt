@@ -37,3 +37,4 @@ yarl==1.22.0
 numpy>=1.24.0
 tiktoken>=0.5.0
 llama-cpp-python>=0.3.16
+sentence-transformers>=2.2.0

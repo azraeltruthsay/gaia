@@ -53,7 +53,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
     tool_map = {
         "run_shell": lambda p: run_shell_safe(p.get("command"), set(_config_instance.SAFE_EXECUTE_FUNCTIONS)),
         "read_file": lambda p: _read_file_impl(p),
-        "write_file": lambda p: "Not yet implemented for security.", # Placeholder
+        "write_file": lambda p: _write_file_impl(p),
         "ai_write": lambda p: _ai_write_impl(p, _gaia_helper),
         "list_dir": lambda p: _list_dir_impl(p),
         "list_files": lambda p: _list_files_impl(p),
@@ -145,6 +145,41 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
     except Exception as e:
         logger.error(f"ai_write failed for {params.get('path')}: {e}")
         raise
+
+
+def _write_file_impl(params: dict) -> dict:
+    """Write content to a file, restricted to writable data volumes."""
+    path = params.get("path")
+    content = params.get("content", "")
+    if not path:
+        raise ValueError("path is required")
+
+    # Resolve to absolute path
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path("/sandbox") / p
+    p = p.resolve()
+
+    # Allowlist: only the writable data volumes from docker-compose.yml
+    # Excludes /app (source code) and /gaia-common, /models (read-only)
+    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve()]
+    if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
+        raise ValueError(f"Path not allowed — write_file is restricted to: {[str(a) for a in allow_roots]}")
+
+    # Re-check after resolve to prevent symlink traversal
+    real = p.resolve()
+    if not any(str(real).startswith(str(a) + "/") or str(real) == str(a) for a in allow_roots):
+        raise ValueError("Path not allowed after symlink resolution")
+
+    # Create parent directories
+    real.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write file
+    with open(real, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    logger.info(f"write_file: wrote {len(content)} bytes to {real}")
+    return {"ok": True, "path": str(real), "bytes": len(content)}
 
 
 def _list_dir_impl(params: dict):

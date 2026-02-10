@@ -129,6 +129,18 @@ class SessionManager:
         session.history.append({"role": role, "content": content})
         logger.debug(f"💬 Added '{role}' message to session '{session_id}'. History length: {len(session.history)}")
 
+        # Index completed turn-pairs for session RAG retrieval
+        if role == "assistant" and len(session.history) >= 2:
+            try:
+                from gaia_core.memory.session_history_indexer import SessionHistoryIndexer
+                indexer = SessionHistoryIndexer.instance(session_id)
+                user_msg = session.history[-2].get("content", "")
+                assistant_msg = session.history[-1].get("content", "")
+                turn_idx = len(session.history) // 2 - 1
+                indexer.index_turn(turn_idx, user_msg, assistant_msg)
+            except Exception as e:
+                logger.warning(f"Session indexing failed (non-fatal): {e}")
+
         # Check if the conversation is long enough to be archived
         if len(session.history) >= self.max_active_messages:
             self.summarize_and_archive(session_id)
@@ -168,6 +180,14 @@ class SessionManager:
                 summary=summary,
                 keywords=keywords
             )
+
+            # 3.5 Archive session vector index alongside conversation archive
+            try:
+                from gaia_core.memory.session_history_indexer import SessionHistoryIndexer
+                indexer = SessionHistoryIndexer.instance(session_id)
+                indexer.archive_and_reset()
+            except Exception:
+                logger.debug("Session vector index archive failed (non-fatal)", exc_info=True)
 
             # 4. Clear the active history to manage context size for the next turn
             session.history.clear()

@@ -102,7 +102,7 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
     tool_map = {
         "run_shell": lambda p: run_shell_safe(p.get("command"), set(config.SAFE_EXECUTE_FUNCTIONS)),
         "read_file": lambda p: _read_file_impl(p),
-        "write_file": lambda p: "Not yet implemented for security.", # Placeholder
+        "write_file": lambda p: _write_file_impl(p),
         "ai_write": lambda p: _ai_write_impl(p),
         "list_dir": lambda p: _list_dir_impl(p),
         "list_files": lambda p: _list_files_impl(p),
@@ -317,7 +317,12 @@ def _read_file_impl(params: dict):
     if not path:
         raise ValueError("path is required")
     p = Path(path).resolve()
-    allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+    allow_roots = [
+        Path("/knowledge").resolve(),
+        Path("/sandbox").resolve(),
+        Path("/gaia-assistant").resolve(),
+        Path("/models").resolve(),
+    ]
     if not any(str(p).startswith(str(a)) for a in allow_roots):
         raise ValueError("Path not allowed")
     if not p.is_file():
@@ -331,6 +336,41 @@ def _read_file_impl(params: dict):
     except Exception:
         text = data.decode("latin-1", errors="replace")
     return {"ok": True, "path": str(p), "bytes": len(data), "content": text}
+
+def _write_file_impl(params: dict) -> dict:
+    """Write content to a file, restricted to writable data volumes."""
+    path = params.get("path")
+    content = params.get("content", "")
+    if not path:
+        raise ValueError("path is required")
+
+    # Resolve to absolute path
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path("/sandbox") / p
+    p = p.resolve()
+
+    # Allowlist: only the writable data volumes from docker-compose.yml
+    # Excludes /app (source code) and /gaia-common, /models (read-only)
+    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve()]
+    if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
+        raise ValueError(f"Path not allowed — write_file is restricted to: {[str(a) for a in allow_roots]}")
+
+    # Re-check after resolve to prevent symlink traversal
+    real = p.resolve()
+    if not any(str(real).startswith(str(a) + "/") or str(real) == str(a) for a in allow_roots):
+        raise ValueError("Path not allowed after symlink resolution")
+
+    # Create parent directories
+    real.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write file
+    with open(real, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    logger.info(f"write_file: wrote {len(content)} bytes to {real}")
+    return {"ok": True, "path": str(real), "bytes": len(content)}
+
 
 VECTOR_INDEX_PATH = Path("/knowledge/vector_store/index.json")
 
@@ -817,6 +857,8 @@ async def approve_action(request: Request):
             logging.getLogger("GAIA.MCPServer").exception("Failed to write audit entry")
 
         return {"ok": True, "result": result, "approved_at": approved_at}
+    except ValueError as e:
+        return {"ok": False, "error": str(e), "approved_at": datetime.utcfromtimestamp(time.time()).isoformat()}
     except Exception as e:
         logging.getLogger("GAIA.MCPServer").error(f"Error executing approved action: {e}", exc_info=True)
         return JSONResponse(content={"error": f"execution failed: {e}"}, status_code=500)
