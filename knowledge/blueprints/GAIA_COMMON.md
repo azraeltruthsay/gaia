@@ -2,57 +2,108 @@
 
 ## Role and Overview
 
-`gaia-common` is a shared Python library designed to encapsulate common functionalities, data structures, and protocols used across multiple GAIA services. Its primary purpose is to ensure consistency, reduce code duplication, and facilitate seamless inter-service communication. By defining shared interfaces and utilities, it acts as the glue that binds the distributed GAIA architecture together.
+`gaia-common` is a shared Python library consumed by all GAIA services. It provides common protocols, data structures, utilities, and configuration management. It is not a running service — it is installed as an editable package (`pip install -e`) or made available via `PYTHONPATH` in each service container.
 
-## Internal Architecture and Key Components
+## Installation Methods
 
-*   **Directory Structure**:
-    *   `/gaia/GAIA_Project/gaia-common/gaia_common/` is the Python package root.
-    *   Subdirectories like `protocols/`, `constants/`, `config/`, `integrations/`, `utils/`, and `base/` organize specific types of shared components.
+- **Dockerfile**: `COPY gaia-common /gaia-common && pip install -e /gaia-common/`
+- **docker-compose**: Volume mount `./gaia-common:/gaia-common:ro` + `PYTHONPATH=/app:/gaia-common`
+- **Local development**: `pip install -e ./gaia-common/`
 
-*   **`CognitionPacket` Definition (`gaia_common/protocols/cognition_packet.py`)**:
-    *   **The most critical component**: Defines the `CognitionPacket` Pydantic model. This is the central data structure for orchestrating tasks and communicating state between `gaia-web`, `gaia-core`, and `gaia-mcp`.
-    *   Includes fields like `Header`, `Reasoning`, `ToolRoutingState`, `OutputRouting`, `DataField`, etc.
-    *   Ensures that all services understand and can correctly interpret the current state of a cognitive task.
+## Source Structure
 
-*   **Configuration Utilities (`gaia_common/config.py`)**:
-    *   Provides a standardized mechanism for loading configuration across GAIA services.
-    *   Likely implements a singleton pattern or similar to ensure a single source of truth for runtime settings.
-    *   Supports hierarchical configuration loading (e.g., from defaults, `gaia_constants.json`, environment variables).
+```
+gaia-common/
+├── pyproject.toml                    # Package metadata
+├── setup.py                          # Setuptools configuration
+├── requirements.txt                  # Core dependencies
+├── gaia_common/
+│   ├── __init__.py
+│   ├── config.py                     # Config singleton, loads gaia_constants.json
+│   ├── protocols/                    # Core data structures
+│   │   └── cognition_packet.py       # CognitionPacket v0.3 (central protocol)
+│   ├── constants/
+│   │   └── gaia_constants.json       # Shared constants reference
+│   ├── base/                         # Abstract base classes
+│   │   ├── persona.py               # Persona data structures
+│   │   └── identity.py              # Identity guardianship protocols
+│   ├── integrations/                 # External service integrations
+│   │   ├── discord.py               # DiscordConfig, env var + constants loading
+│   │   └── discord_connector.py     # Discord bot connection utilities
+│   └── utils/                        # Utilities (55+ files)
+│       ├── service_client.py         # HTTP client for inter-service communication
+│       ├── vector_client.py          # Vector store read-only access
+│       ├── logging_setup.py          # Centralized logging configuration
+│       ├── chat_logger.py            # Conversation logging
+│       ├── heartbeat_logger.py       # Health check log compression
+│       ├── install_health_check_filter # Health check log filter
+│       ├── packet_utils.py           # CognitionPacket manipulation
+│       ├── packet_templates.py       # Packet construction templates
+│       ├── safe_execution.py         # Sandboxed code execution
+│       ├── tools_registry.py         # Central tool registry (used by gaia-mcp)
+│       ├── world_state.py            # System state tracking
+│       ├── vector_indexer.py         # Vector store operations
+│       ├── knowledge_index.py        # Knowledge base indexing
+│       ├── gaia_rescue_helper.py     # Rescue/fallback utilities
+│       ├── code_analyzer/            # Document analysis pipeline
+│       │   ├── file_scanner.py
+│       │   ├── language_detection.py
+│       │   ├── structure_extraction.py
+│       │   └── llm_analysis.py
+│       └── background/              # Background task management
+│           ├── task_queue.py
+│           └── idle_monitor.py
+```
 
-*   **Constants (`gaia_common/constants.py`)**:
-    *   Stores global constants used throughout the GAIA system.
-    *   This could include magic strings, default values, enumeration types, or other fixed parameters.
+## Key Components
 
-*   **Base Models/Classes (`gaia_common/base/`)**:
-    *   May contain base Pydantic models, abstract base classes, or other foundational structures that services can inherit from or extend.
-    *   Promotes code reuse and maintains a consistent object model.
+### CognitionPacket (v0.3)
 
-*   **Integrations (`gaia_common/integrations/`)**:
-    *   Shared code for integrating with common external systems or libraries that multiple GAIA services might need.
-    *   Examples could include shared HTTP client configurations (`requests`, `httpx`), logging configurations, or common authentication helpers.
+The central data structure for inter-service communication. Defined in `protocols/cognition_packet.py`.
 
-*   **Utilities (`gaia_common/utils/`)**:
-    *   A collection of helper functions and generic utilities that are broadly useful but don't fit into more specific categories.
-    *   Could include things like timestamp formatting, data validation helpers, or error handling utilities.
+**Sections**:
+- **Header**: datetime, session_id, packet_id, persona, origin, routing, model config
+- **Content**: original_prompt, system_prompt, task_instructions, data_fields
+- **Context**: conversation_history, knowledge_base, constraints, safety_profile
+- **Reasoning**: thoughts, planning, execution, reflection logs
+- **Response**: candidate text, confidence, finish_reason
+- **Governance**: safety_profile_id, approval_required, tool_execution_status
+- **Metrics**: token_usage, latency, inference_time, model_name
+- **Status**: state (initialized/processing/completed/aborted), error_message, warnings
 
-## Usage and Data Flow
+**Key Enums**: `PersonaRole`, `SystemTask`, `TargetEngine`, `OutputDestination`, `Origin`
 
-1.  **Importing**: Services `gaia-web`, `gaia-core`, `gaia-mcp`, `gaia-study`, and `gaia-orchestrator` all import modules and classes directly from `gaia-common`.
-2.  **`CognitionPacket` Exchange**: When `gaia-web` creates a `CognitionPacket`, it uses the definition from `gaia-common`. When it sends this packet to `gaia-core`, both services rely on the `gaia-common` definition to serialize and deserialize it correctly. The same applies when `gaia-core` communicates with `gaia-mcp`.
-3.  **Consistent Configuration**: Services use `gaia-common/config.py` to load their respective configurations, ensuring that environment variables and default values are handled uniformly.
-4.  **Shared Logic**: Any helper functions or base classes defined in `gaia-common/utils/` or `gaia_common/base/` are reused across services, reducing redundancy and potential for bugs.
+### Config (`config.py`)
 
-## Interaction Points with Other Services
+Singleton configuration class that loads from `gaia_constants.json`. Provides:
+- Model configurations and backend selection
+- Path management (models, knowledge, personas, LoRA adapters)
+- Feature toggles and runtime parameters
 
-*   **All GAIA Services (`gaia-web`, `gaia-core`, `gaia-mcp`, `gaia-study`, `gaia-orchestrator`)**:
-    *   **Consumer**: All other GAIA services are consumers of `gaia-common`. They import and utilize its definitions and utilities.
-    *   `gaia-common` itself is not a running service; it's a library. Therefore, it does not act as a caller or callee in the same way as the other services. Its interaction is through providing shared code.
+### DiscordConfig (`integrations/discord.py`)
 
-## Key Design Patterns within `gaia-common`
+Loads Discord settings from both `gaia_constants.json` and environment variables. Env vars override constants:
+- `DISCORD_BOT_TOKEN` overrides `constants.INTEGRATIONS.discord.bot_token`
+- `DISCORD_WEBHOOK_URL` overrides `constants.INTEGRATIONS.discord.webhook_url`
 
-*   **Shared Library**: The most fundamental pattern, centralizing common code.
-*   **Data Transfer Object (DTO)**: The `CognitionPacket` is a prime example, facilitating structured data exchange.
-*   **Protocol Definition**: Explicitly defines communication contracts between services (e.g., the structure of a `CognitionPacket`).
-*   **Configuration as Code**: Provides a programmatic way to manage application settings.
-*   **Dependency Inversion (Implicit)**: By providing stable interfaces (like `CognitionPacket`), higher-level services depend on abstractions rather than concrete implementations of other services.
+### Utilities
+
+- **`service_client.py`**: HTTP client with retry logic for inter-service calls
+- **`vector_client.py`**: Read-only vector store access (respects sole-writer pattern)
+- **`safe_execution.py`**: `run_shell_safe()` for sandboxed command execution
+- **`tools_registry.py`**: Central TOOLS dict consumed by `gaia-mcp`
+- **`install_health_check_filter`**: Suppresses repetitive health check access logs
+
+## Dependencies
+
+**Runtime**: pydantic, dataclasses-json, requests, httpx >=0.25.0
+**Dev**: pytest, ruff, mypy
+
+## Consumed By
+
+Every GAIA service imports from `gaia-common`:
+- **`gaia-core`**: CognitionPacket, config, vector_client, packet_utils
+- **`gaia-web`**: CognitionPacket, health_check_filter
+- **`gaia-mcp`**: tools_registry, safe_execution, CognitionPacket
+- **`gaia-study`**: config, vector_indexer
+- **`gaia-orchestrator`**: health_check_filter

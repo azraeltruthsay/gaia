@@ -1,70 +1,101 @@
-# GAIA Service Blueprint: `gaia-study`
+# GAIA Service Blueprint: `gaia-study` (The Subconscious)
 
 ## Role and Overview
 
-`gaia-study` is the continuous learning and knowledge management service within the GAIA ecosystem. Its primary function is to process new information, generate and manage vector embeddings, fine-tune models, and update the system's overall knowledge base. It is designed to operate in the background, ensuring GAIA's intelligence evolves and improves over time without directly impacting the real-time cognitive processing of `gaia-core`.
+`gaia-study` is the GPU-enabled background processing service for knowledge management and model fine-tuning. It is the **sole writer** to the vector store, ensuring data consistency. It generates embeddings, builds search indices, and manages QLoRA adapter training. Other services (primarily `gaia-core`) have read-only access to the vector store.
 
-## Internal Architecture and Key Components
+## Container Configuration
 
-*   **Entry Point (`gaia_study/main.py`)**:
-    *   Initializes the FastAPI application.
-    *   Configures API routes for ingesting data, triggering learning tasks, and serving knowledge.
-    *   Sets up connections to vector databases (e.g., ChromaDB) and model repositories.
+**Base Image**: `nvidia/cuda:12.4.0-devel-ubuntu22.04` (GPU-enabled with CUDA toolkit)
 
-*   **Data Ingestion Pipelines**:
-    *   Handles receiving raw data or structured information.
-    *   Processes various data types (text, code, logs, sensor data).
-    *   May involve data cleaning, parsing, and normalization.
+**Port**: 8766 (live), 8768 (candidate)
 
-*   **Vector Embedding Generation**:
-    *   Utilizes sentence transformers or other embedding models to convert incoming data into dense vector representations.
-    *   These embeddings are crucial for semantic search and Retrieval-Augmented Generation (RAG).
+**Health Check**: `curl -f http://localhost:8766/health` (30s interval, 60s start_period)
 
-*   **Vector Database Management**:
-    *   **Sole Writer**: `gaia-study` is the *only* service with write access to the vector database (e.g., ChromaDB). This ensures data integrity and prevents conflicts.
-    *   Handles indexing, updating, and querying of the vector store.
-    *   Stores embeddings along with their original content or metadata.
+**Startup**: `uvicorn gaia_study.main:app --host 0.0.0.0 --port 8766`
 
-*   **Model Fine-tuning and Adaptation (e.g., QLoRA)**:
-    *   Responsible for training or fine-tuning models (e.g., LoRA adapters) based on new data or specific learning objectives.
-    *   Utilizes frameworks like `peft`, `bitsandbytes`, `accelerate` for efficient model training, especially for LoRA adapters.
-    *   Manages the lifecycle of these adapted models.
+### GPU Allocation
 
-*   **Knowledge Graph / Semantic Store (Conceptual)**:
-    *   May involve building and maintaining a knowledge graph or other semantic stores to represent relationships between pieces of information, further enhancing GAIA's understanding.
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
+```
 
-*   **Asynchronous Task Queues**:
-    *   Likely uses background tasks or a message queue system (e.g., Celery, RabbitMQ) to handle computationally intensive tasks like embedding generation and model training, allowing the service to remain responsive.
+**Note**: On single-GPU systems, this creates contention with `gaia-prime` (which claims 1 GPU). May need CPU-only embedding mode or careful scheduling via `gaia-orchestrator`.
 
-## Data Flow and Learning Process
+### Key Environment Variables
 
-1.  **Information Ingestion**:
-    *   `gaia-study` receives new information from various sources. This could be raw text, observation logs from `gaia-core`, user feedback, or external data feeds.
-    *   Data can be pushed via API endpoints or pulled from designated data sources.
-2.  **Preprocessing**: The ingested data undergoes cleaning, structuring, and tokenization as needed.
-3.  **Embedding Generation**: The processed data is fed into an embedding model to generate vector representations.
-4.  **Vector Store Update**: These new embeddings (and associated metadata/content) are added to the vector database. `gaia-study` is the sole writer, ensuring consistency.
-5.  **Model Fine-tuning (Conditional)**:
-    *   Based on specific triggers (e.g., a certain volume of new data, performance metrics, explicit commands), `gaia-study` initiates model fine-tuning processes.
-    *   New LoRA adapters might be trained or existing ones updated.
-6.  **Knowledge Availability**: Once the vector store or models are updated, `gaia-core` and other services can read from these updated knowledge sources, leveraging the newly acquired intelligence. This read-only access is crucial for other services.
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `CUDA_VISIBLE_DEVICES` | `0` | GPU device selection |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence transformer model |
+| `KNOWLEDGE_DIR` | `/knowledge` | Knowledge base directory |
+| `VECTOR_STORE_PATH` | `/vector_store` | Vector index storage |
+| `MODELS_DIR` | `/models` | Model files directory |
 
-## Interaction Points with Other Services
+### Volume Mounts
 
-*   **`gaia-core`**:
-    *   **Caller**: `gaia-core` performs read-only queries against `gaia-study`'s vector database for RAG (Retrieval-Augmented Generation) purposes to retrieve relevant context during its reasoning process.
-    *   **Callee**: `gaia-core` might send observational data or successful reasoning paths to `gaia-study` to be incorporated into its learning.
-*   **`gaia-web`**:
-    *   Could potentially provide an interface for users to review or curate the knowledge base, or monitor the learning process.
-*   **External Data Sources**:
-    *   `gaia-study` actively pulls or receives data from various external sources (e.g., web crawlers, RSS feeds, internal logs) to continuously expand GAIA's knowledge.
-*   **`gaia-common`**:
-    *   Relies on shared data structures and utilities defined in `gaia-common`, especially for protocols related to knowledge representation or data packets.
+- `./gaia-study:/app:rw` — Source code
+- `./gaia-common:/gaia-common:ro` — Shared library
+- `./knowledge:/knowledge:rw` — Full knowledge base (for indexing)
+- `gaia-vector-store:/vector_store:rw` — Vector index (**sole writer**)
+- `./gaia-models:/models:rw` — Model files + LoRA adapters
+- `gaia-shared:/shared:rw` — Shared state
 
-## Key Design Patterns within `gaia-study`
+## Internal Architecture
 
-*   **Observer Pattern**: Potentially observes events or data changes from other services or external sources to trigger learning processes.
-*   **Singleton Writer Pattern**: `gaia-study` is the exclusive writer to critical data stores (vector DBs, LoRA adapters), enforcing data integrity.
-*   **Asynchronous Processing**: Utilizes background processing to handle computationally intensive tasks, ensuring responsiveness.
-*   **Knowledge Base / Vector Store**: Central to its function, providing a mechanism for efficient storage and retrieval of semantic information.
-*   **Continuous Integration/Deployment of Knowledge**: The continuous learning loop acts as a form of CI/CD for GAIA's intelligence.
+### Key Components
+
+1. **`main.py`** — FastAPI entry point, initializes VectorIndexer
+
+2. **`indexer.py`** (VectorIndexer) — Core vector store manager
+   - Singleton per knowledge base
+   - **Sole writer** pattern for vector store integrity
+   - Uses `sentence-transformers` for embedding generation (default: `all-MiniLM-L6-v2`)
+   - Index format: JSON with documents, embeddings, metadata
+   - Methods:
+     - `build_index_from_docs(directory)` — Initial full index build
+     - `add_document(file_path)` — Incremental document addition
+     - `query(query_text, top_k=5)` — Similarity search
+     - `save_index()` — Persist to JSON
+
+3. **`qlora_trainer.py`** (QLoRA Trainer) — Memory-efficient fine-tuning
+   - Targets consumer GPUs (RTX 5080 16GB)
+   - Lazy imports for heavy libraries (transformers, PEFT, bitsandbytes)
+   - **QLoRAConfig**:
+     - Load in 4-bit quantization (bitsandbytes)
+     - LoRA rank=8, alpha=16, dropout=0.05
+     - Batch size=1, gradient accumulation=4
+     - Learning rate=2e-4, max_steps=100
+     - Max sequence length=512
+
+4. **`study_mode_manager.py`** — Controls study/training modes, coordinates with orchestrator
+
+5. **`training_utils.py`** — Helper functions for model training
+
+## Data Flow
+
+1. **Ingestion**: Receives documents from knowledge directory or API
+2. **Preprocessing**: Clean, structure, tokenize
+3. **Embedding**: Generate vectors via sentence-transformers
+4. **Indexing**: Store in vector database (JSON-backed)
+5. **Fine-tuning** (conditional): QLoRA adapter training when triggered
+6. **Availability**: Updated index available to gaia-core for RAG queries
+
+## Interaction with Other Services
+
+- **`gaia-core`** (reader): Performs read-only queries against the vector store for RAG
+- **`gaia-orchestrator`** (coordinator): Coordinates GPU handoffs between study and prime
+- **`gaia-common`** (library): Shared data structures and utilities
+
+## Sole Writer Pattern
+
+`gaia-study` has exclusive write access to `/vector_store`. This prevents concurrent write corruption:
+- `gaia-study`: RW access to vector store
+- `gaia-core`: RO access via `VectorClient` (from `gaia-common`)
+- All other services: No direct vector store access

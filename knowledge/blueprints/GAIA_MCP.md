@@ -1,66 +1,109 @@
-# GAIA Service Blueprint: `gaia-mcp` (Multi-tool Control Plane)
+# GAIA Service Blueprint: `gaia-mcp` (The Hands)
 
 ## Role and Overview
 
-`gaia-mcp` is the Multi-tool Control Plane service within the GAIA ecosystem. Its primary role is to provide a secure, sandboxed, and controlled environment for `gaia-core` to execute external tools. This isolation is critical for security, preventing malicious or erroneous tool actions from compromising the core system. It acts as a gatekeeper and executor for all external actions GAIA takes.
+`gaia-mcp` is the Multi-tool Control Plane service. It provides a secure, sandboxed environment for `gaia-core` to execute external tools. All tool execution flows through gaia-mcp, which enforces approval workflows for sensitive operations and runs with hardened Linux security settings.
 
-## Internal Architecture and Key Components
+## Container Configuration
 
-*   **Entry Point (`gaia_mcp/main.py`)**:
-    *   Initializes the FastAPI application for `gaia-mcp`.
-    *   Configures API routes for tool execution requests.
-    *   Sets up necessary security and sandboxing mechanisms.
+**Base Image**: `python:3.11-slim` (runs as non-root user `gaia`)
 
-*   **Tool Registry (`gaia_mcp/tools.py`)**:
-    *   Maintains a registry of available tools that `gaia-mcp` can execute.
-    *   Each tool is defined with its function, parameters, and execution logic.
-    *   Ensures that only whitelisted and approved tools can be invoked.
+**Port**: 8765 (live), 8767 (candidate)
 
-*   **Approval Mechanism (`gaia_mcp/approval.py` - conceptual)**:
-    *   While not explicitly detailed, a secure tool execution plane would likely incorporate some form of approval logic. This could involve:
-        *   Pre-defined allow-lists for tool arguments.
-        *   Human-in-the-loop approval for sensitive operations.
-        *   Monitoring and logging of all tool executions for auditability.
+**Health Check**: `curl -f http://localhost:8765/health` (30s interval, 30s start_period)
 
-*   **Sandboxing Environment (Implicit)**:
-    *   `gaia-mcp` is designed to provide a "sandboxed" environment. This implies:
-        *   **Containerization**: Tools might run within isolated Docker containers or similar environments.
-        *   **Resource Limits**: Preventing tools from consuming excessive CPU, memory, or network resources.
-        *   **Restricted Permissions**: Tools operate with the least necessary privileges, limiting access to the host system.
-        *   **Network Isolation**: Controlling what external networks or services a tool can access.
+### Security Hardening
 
-*   **JSON-RPC Server (`gaia_mcp/server.py`)**:
-    *   Handles incoming JSON-RPC requests from `gaia-core` for tool execution.
-    *   Parses the tool name and arguments from the request.
-    *   Dispatches the request to the appropriate tool handler.
+```yaml
+security_opt:
+  - no-new-privileges:true
+cap_drop:
+  - ALL
+cap_add:
+  - CHOWN
+  - SETGID
+  - SETUID
+```
 
-## Data Flow and `CognitionPacket` Processing
+### Key Environment Variables
 
-1.  **Tool Request from `gaia-core`**: `gaia-core` determines that a tool needs to be executed. It updates the `ToolRoutingState` within the `CognitionPacket` and sends a JSON-RPC request (containing the tool name and its parameters, potentially derived from the `CognitionPacket`) to `gaia-mcp`.
-2.  **Request Reception**: `gaia-mcp` receives the JSON-RPC request via its server.
-3.  **Tool Validation and Selection**: `gaia-mcp` validates the requested tool against its internal registry (`tools.py`) and ensures the parameters are well-formed and safe.
-4.  **Sandboxed Execution**: The validated tool is executed within `gaia-mcp`'s controlled, sandboxed environment. This step might involve:
-    *   Spawning a new process or container.
-    *   Injecting necessary context or input data into the tool.
-    *   Monitoring the tool's execution for timeouts, errors, or unauthorized actions.
-5.  **Result Capture**: The output or result of the tool's execution (e.g., standard output, error messages, return values) is captured by `gaia-mcp`.
-6.  **Response to `gaia-core`**: `gaia-mcp` encapsulates the tool's result, along with any relevant status or error information, into a JSON-RPC response and sends it back to `gaia-core`.
-7.  **`CognitionPacket` Update**: `gaia-core` receives this response and incorporates it as an `Observation` within its `CognitionPacket`, allowing the reasoning loop to continue.
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `MCP_APPROVAL_REQUIRED` | `true` | Require approval for sensitive tools |
+| `MCP_APPROVAL_TTL` | `900` | Approval timeout (15 minutes) |
+| `SANDBOX_ROOT` | `/sandbox` | Isolated sandbox directory |
+| `GAIA_MCP_BYPASS` | `false` | Bypass approval (security risk) |
+| `LOG_LEVEL` | `INFO` | Logging level |
 
-## Interaction Points with Other Services
+### Volume Mounts
 
-*   **`gaia-core`**:
-    *   **Callee**: `gaia-mcp` receives tool execution requests (via JSON-RPC) from `gaia-core`.
-    *   **Caller (Implicit)**: Returns the results of tool execution back to `gaia-core`.
-*   **External APIs/Systems**:
-    *   `gaia-mcp` acts as an intermediary to interact with any external APIs, databases, file systems, or other systems that the tools are designed to use. This interaction happens from within the sandbox.
-*   **`gaia-common`**:
-    *   Utilizes shared data structures and protocols (like `CognitionPacket`) defined in `gaia-common` for understanding requests and formatting responses.
+- `./gaia-mcp:/app:rw` — Source code
+- `./gaia-common:/gaia-common:ro` — Shared library
+- `./knowledge:/knowledge:rw` — Knowledge base (for tool reference)
+- `./gaia-models:/models:ro` — Model files for embeddings
+- `gaia-sandbox:/sandbox:rw` — Isolated sandbox workspace
 
-## Key Design Patterns within `gaia-mcp`
+## Source Structure
 
-*   **Sandbox Pattern**: Critical for security and stability, isolating tool execution from the main GAIA system.
-*   **Proxy Pattern**: `gaia-mcp` acts as a proxy between `gaia-core` and external tools/systems.
-*   **Command Pattern**: Tool requests can be seen as commands that `gaia-mcp` executes.
-*   **Whitelisting/Blacklisting**: Ensures only approved tools and operations are allowed.
-*   **RPC (Remote Procedure Call)**: Uses JSON-RPC for efficient communication with `gaia-core`.
+```
+gaia-mcp/
+├── Dockerfile           # python:3.11-slim, non-root user
+├── requirements.txt     # FastAPI, uvicorn, httpx
+├── pyproject.toml       # Project metadata
+├── gaia_mcp/
+│   ├── __init__.py
+│   ├── main.py          # FastAPI entry, approval store init, sensitive tools list
+│   ├── server.py        # HTTP/JSON-RPC server
+│   ├── tools.py         # Tool dispatcher and implementations
+│   └── approval.py      # ApprovalStore with challenge-response workflow
+└── tests/
+    ├── conftest.py
+    └── test_*.py
+```
+
+## Tool Registry
+
+Tools are dispatched via `tools.py` using the central registry from `gaia_common.utils.tools_registry`:
+
+| Tool | Purpose | Sensitive |
+|------|---------|-----------|
+| `run_shell` | Sandboxed shell execution | No (uses `safe_execution.run_shell_safe`) |
+| `read_file` | Read file contents | No |
+| `list_dir`, `list_files`, `list_tree` | Directory operations | No |
+| `find_files`, `find_relevant_documents` | Search | No |
+| `write_file` | Write to file | Yes (not yet implemented) |
+| `ai_write` | LLM-assisted writing | Yes |
+| `world_state` | System state snapshot | No |
+| `memory_status`, `memory_query` | Knowledge base access | No |
+| `memory_rebuild_index` | Rebuild vector index | Yes |
+| `fragment_write`, `fragment_read`, `fragment_assemble` | Response fragmentation | No |
+| `fragment_list_pending`, `fragment_clear` | Fragment management | No |
+| `embed_documents`, `query_knowledge`, `add_document` | Vector indexing | No |
+
+### Sensitive Tools (require approval)
+
+`{ai_write, write_file, run_shell, memory_rebuild_index}`
+
+## Approval Workflow
+
+**`approval.py`** — `ApprovalStore` class:
+
+1. Tool request arrives for a sensitive operation
+2. `create_pending()` generates a 5-character alphabetic challenge
+3. Human reviews the pending action via API
+4. Human reverses the challenge string to approve
+5. Approval expires after `MCP_APPROVAL_TTL` (default 900s / 15 min)
+
+Methods: `create_pending()`, `approve_action()`, `get_pending()`, `list_pending_actions()`
+
+## Communication Protocol
+
+- **Inbound**: JSON-RPC requests from `gaia-core` via `MCP_ENDPOINT` (default: `http://gaia-mcp:8765/jsonrpc`)
+- **Outbound**: Tool execution results returned as JSON-RPC responses
+- `gaia-core` uses `utils/mcp_client.py` as the client
+
+## Interaction with Other Services
+
+- **`gaia-core`** (caller): Receives tool execution requests via JSON-RPC, returns results
+- **`gaia-common`** (library): Uses tools registry, safe execution utilities, CognitionPacket protocol
+- **External systems**: Tools can interact with file systems, APIs, and databases from within the sandbox
