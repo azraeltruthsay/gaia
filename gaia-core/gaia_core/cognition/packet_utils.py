@@ -11,15 +11,38 @@ from gaia_common.protocols.cognition_packet import (
 )
 
 
+# Tools that can execute without human approval (read-only, memory, fragments)
+SAFE_SIDECAR_TOOLS = {
+    "read_file", "list_dir", "list_files", "list_tree", "find_files",
+    "find_relevant_documents", "world_state", "memory_status", "memory_query",
+    "query_knowledge", "embed_documents", "add_document",
+    "fragment_write", "fragment_read", "fragment_assemble",
+    "fragment_list_pending", "fragment_clear",
+}
+
+
 def is_execution_safe(packet: CognitionPacket) -> bool:
-    """Executor-facing function to check if a packet is approved for action."""
-    # If there are no sidecar actions, there's nothing to gate.
+    """
+    Check if a packet is approved for action execution.
+
+    Uses a tiered approach:
+    - If governance explicitly allows execution (whitelist set), all actions pass.
+    - Otherwise, only actions in SAFE_SIDECAR_TOOLS are allowed through.
+    - Sensitive tools (write_file, run_shell, etc.) are routed to MCP approval.
+    """
     if not packet.response.sidecar_actions:
         return True
-    
+
     safety = packet.governance.safety
-    # Execution is safe only if it's explicitly allowed AND a whitelist is specified.
-    return safety.execution_allowed and safety.allowed_commands_whitelist_id is not None
+    # If governance explicitly allows, pass everything
+    if safety.execution_allowed and safety.allowed_commands_whitelist_id is not None:
+        return True
+
+    # Otherwise, allow only if ALL actions are non-sensitive
+    return all(
+        action.action_type in SAFE_SIDECAR_TOOLS
+        for action in packet.response.sidecar_actions
+    )
 
 def upgrade_v2_to_v3_packet(old_packet_data: Dict) -> CognitionPacket:
     """

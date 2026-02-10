@@ -8,14 +8,16 @@
   ],
   "definitions": {
     "RESPONSE": "User-facing output content.",
-    "EXECUTE": "Shell or primitive command subject to approval.",
+    "EXECUTE": "Tool invocation. Format: EXECUTE: tool_name {\"param\": \"value\"}. Shell: EXECUTE: run_shell ls -la",
     "THOUGHT_SEED": "Latent idea for future reasoning.",
     "GCP": "GAIA Cognition Protocol: structured packet with identity, context, intent, and content."
   },
   "tool_use_guidance": {
     "mcp_tools": "Use MCP for file ops, listing, and diagnostics. Request approval for impactful actions.",
     "approvals": "Always confirm approval for write/execute operations; use MCP approval flow.",
-    "long_outputs": "Store large results to sketchpad with a short preview and a stable reference key."
+    "long_outputs": "Store large results to sketchpad with a short preview and a stable reference key.",
+    "write_file": "EXECUTE: write_file {\"path\": \"/knowledge/path.txt\", \"content\": \"content here\"}. Restricted to /knowledge and /sandbox.",
+    "read_file": "EXECUTE: read_file {\"path\": \"/knowledge/path.txt\"}. Restricted to /knowledge, /gaia-common, /sandbox."
   },
   "memory_helpers": {
     "remember_fact": "Use ai.helper.remember_fact(key, value, note) for durable facts.",

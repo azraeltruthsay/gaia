@@ -107,8 +107,24 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
         logger.info(f"[{ts}] Dispatching action to MCP server: method={action.action_type} id={request_id} params_keys={list(rpc_params.keys())}")
 
         try:
-            response = requests.post(endpoint, json=payload, timeout=20)  # 20 second timeout
-            response.raise_for_status()  # Raise an exception for bad status codes
+            response = requests.post(endpoint, json=payload, timeout=20)
+            if response.status_code == 403:
+                # Sensitive tool — route through approval flow with auto-pending
+                logger.info(f"[{ts}] Action '{action.action_type}' requires approval (403). Routing to approval flow.")
+                approval_result = request_approval_via_mcp(
+                    method=action.action_type,
+                    params={**rpc_params, "_allow_pending": True}
+                )
+                results.append({
+                    "id": request_id,
+                    "dispatched_at": ts,
+                    "pending_approval": True,
+                    "action_id": approval_result.get("action_id"),
+                    "challenge": approval_result.get("challenge"),
+                    "proposal": approval_result.get("proposal"),
+                })
+                continue
+            response.raise_for_status()
             try:
                 data = response.json()
             except Exception:

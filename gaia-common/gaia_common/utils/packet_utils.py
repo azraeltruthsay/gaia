@@ -14,13 +14,24 @@ from typing import Any, Dict, TYPE_CHECKING
 if TYPE_CHECKING:
     from gaia_common.protocols import CognitionPacket
 
+# Tools that can execute without human approval (read-only, memory, fragments)
+SAFE_SIDECAR_TOOLS = {
+    "read_file", "list_dir", "list_files", "list_tree", "find_files",
+    "find_relevant_documents", "world_state", "memory_status", "memory_query",
+    "query_knowledge", "embed_documents", "add_document",
+    "fragment_write", "fragment_read", "fragment_assemble",
+    "fragment_list_pending", "fragment_clear",
+}
+
 
 def is_execution_safe(packet: "CognitionPacket") -> bool:
     """
     Check if a packet is approved for action execution.
 
-    This is the executor-facing function to gate sidecar actions.
-    Execution is safe only if explicitly allowed AND a whitelist is specified.
+    Uses a tiered approach:
+    - If governance explicitly allows execution (whitelist set), all actions pass.
+    - Otherwise, only actions in SAFE_SIDECAR_TOOLS are allowed through.
+    - Sensitive tools (write_file, run_shell, etc.) are routed to MCP approval.
 
     Args:
         packet: The CognitionPacket to check
@@ -28,13 +39,19 @@ def is_execution_safe(packet: "CognitionPacket") -> bool:
     Returns:
         True if execution is safe, False otherwise
     """
-    # If there are no sidecar actions, there's nothing to gate
     if not packet.response.sidecar_actions:
         return True
 
     safety = packet.governance.safety
-    # Execution is safe only if explicitly allowed AND a whitelist is specified
-    return safety.execution_allowed and safety.allowed_commands_whitelist_id is not None
+    # If governance explicitly allows, pass everything
+    if safety.execution_allowed and safety.allowed_commands_whitelist_id is not None:
+        return True
+
+    # Otherwise, allow only if ALL actions are non-sensitive
+    return all(
+        action.action_type in SAFE_SIDECAR_TOOLS
+        for action in packet.response.sidecar_actions
+    )
 
 
 def upgrade_v2_to_v3_packet(old_packet_data: Dict[str, Any]) -> "CognitionPacket":
@@ -160,6 +177,7 @@ def upgrade_v2_to_v3_packet(old_packet_data: Dict[str, Any]) -> "CognitionPacket
 
 
 __all__ = [
+    "SAFE_SIDECAR_TOOLS",
     "is_execution_safe",
     "upgrade_v2_to_v3_packet",
 ]

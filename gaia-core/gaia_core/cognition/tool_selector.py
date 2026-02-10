@@ -62,7 +62,24 @@ AVAILABLE_TOOLS = {
             "top_k": "Number of results to return (default: 5)"
         },
         "requires_approval": False
-    }
+    },
+    "write_file": {
+        "description": "Write content to a file via MCP (restricted to /knowledge and /sandbox)",
+        "params": ["path", "content"],
+        "param_descriptions": {
+            "path": "Absolute path to write (must be under /knowledge or /sandbox)",
+            "content": "Content to write to the file"
+        },
+        "requires_approval": True
+    },
+    "read_file": {
+        "description": "Read a file via MCP (restricted to /knowledge, /gaia-common, /sandbox)",
+        "params": ["path"],
+        "param_descriptions": {
+            "path": "Absolute path to the file to read"
+        },
+        "requires_approval": False
+    },
 }
 
 

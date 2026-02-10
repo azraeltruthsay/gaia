@@ -7,6 +7,7 @@ Handles:
 - Sidecar action dispatch
 - Destination routing
 """
+import json
 import logging
 import re
 from typing import Dict, Any, Optional
@@ -260,12 +261,24 @@ def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket):
         clean_text = re.sub(r"^(THOUGHT_SEED:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
         packet.response.candidate = clean_text
 
-    # Extract legacy EXECUTE and convert to SidecarActions
-    # This is a transitional step.
+    # Extract EXECUTE directives and convert to SidecarActions.
+    # Supports two formats:
+    #   Structured: EXECUTE: write_file {"path": "/knowledge/doc.txt", "content": "..."}
+    #   Legacy:     EXECUTE: run_shell ls -la /knowledge
     execute_matches = re.findall(r"EXECUTE:\s*(.*)", response_text)
     for cmd_str in execute_matches:
-        # This is a very basic parser; a real one would handle args.
-        parts = cmd_str.strip().split()
+        parts = cmd_str.strip().split(None, 1)  # Split into tool_name + rest
         action_type = parts[0]
-        params = {"command": " ".join(parts[1:])} if len(parts) > 1 else {}
+        raw_args = parts[1] if len(parts) > 1 else ""
+
+        # Try JSON params first (structured format)
+        params = {}
+        if raw_args.lstrip().startswith("{"):
+            try:
+                params = json.loads(raw_args)
+            except json.JSONDecodeError:
+                params = {"command": raw_args}
+        else:
+            params = {"command": raw_args} if raw_args else {}
+
         packet.response.sidecar_actions.append(SidecarAction(action_type=action_type, params=params))

@@ -4184,10 +4184,28 @@ Start your response with the first line of the file."""
                 )
 
             else:
-                return ToolExecutionResult(
-                    success=False,
-                    error=f"Unknown tool: {tool.tool_name}"
+                # Dispatch via MCP JSON-RPC for tools not handled locally
+                logger.info(f"Dispatching unknown tool '{tool.tool_name}' via MCP JSON-RPC")
+                rpc_result = mcp_client.call_jsonrpc(
+                    method=tool.tool_name,
+                    params=tool.params or {}
                 )
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                if rpc_result.get("ok"):
+                    rpc_response = rpc_result.get("response", {})
+                    actual_result = rpc_response.get("result", rpc_response)
+                    return ToolExecutionResult(
+                        success=actual_result.get("ok", True) if isinstance(actual_result, dict) else True,
+                        output=actual_result,
+                        error=actual_result.get("error") if isinstance(actual_result, dict) else None,
+                        execution_time_ms=elapsed_ms
+                    )
+                else:
+                    return ToolExecutionResult(
+                        success=False,
+                        error=rpc_result.get("error", "MCP call failed"),
+                        execution_time_ms=elapsed_ms
+                    )
 
             elapsed_ms = int((time.time() - start_time) * 1000)
 
