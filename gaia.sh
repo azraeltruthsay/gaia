@@ -65,10 +65,11 @@ show_status() {
     fi
 
     echo -e "\n${BLUE}Live Services:${NC}"
-    for svc in core web mcp study; do
+    for svc in prime core web mcp study; do
         local container="gaia-${svc}"
         local port
         case "$svc" in
+            prime) port=7777 ;;
             core) port=6415 ;;
             web) port=6414 ;;
             mcp) port=8765 ;;
@@ -87,10 +88,11 @@ show_status() {
     done
 
     echo -e "\n${BLUE}Candidate Services:${NC}"
-    for svc in core web mcp study; do
+    for svc in prime core web mcp study; do
         local container="gaia-${svc}-candidate"
         local port
         case "$svc" in
+            prime) port=7778 ;;
             core) port=6416 ;;
             web) port=6417 ;;
             mcp) port=8767 ;;
@@ -116,11 +118,7 @@ cmd_live() {
 
     case "$action" in
         start)
-            # Ensure network is managed by compose, remove if it exists from a prior manual creation
-            if docker network inspect gaia-network >/dev/null 2>&1; then
-                log_info "Removing pre-existing gaia-network to ensure Docker Compose manages it properly..."
-                docker network rm gaia-network
-            fi
+            ensure_network
             log_info "Starting live stack..."
             docker compose -f "$LIVE_COMPOSE" --env-file ./.env.discord up -d
             log_success "Live stack started"
@@ -149,7 +147,7 @@ cmd_candidate() {
         start)
             ensure_network
             log_info "Starting candidate stack..."
-            docker compose -f "$CANDIDATE_COMPOSE" --profile full up -d
+            docker compose -f "$CANDIDATE_COMPOSE" --env-file ./.env.discord --profile full up -d
             log_success "Candidate stack started"
             ;;
         stop)
@@ -182,10 +180,10 @@ cmd_swap() {
 
     # Validate service
     case "$service" in
-        core|web|mcp|study) ;;
+        prime|core|web|mcp|study) ;;
         *)
             log_error "Unknown service: $service"
-            echo "Valid services: core, web, mcp, study"
+            echo "Valid services: prime, core, web, mcp, study"
             exit 1
             ;;
     esac
@@ -268,22 +266,14 @@ cmd_orchestrator() {
 
     case "$action" in
         start)
-            ensure_network
             log_info "Starting orchestrator..."
-            docker run -d \
-                --name gaia-orchestrator \
-                --network gaia-network \
-                -p ${ORCHESTRATOR_PORT}:${ORCHESTRATOR_PORT} \
-                -v /var/run/docker.sock:/var/run/docker.sock:ro \
-                -v gaia-shared:/shared:rw \
-                -v "${PROJECT_ROOT}:/gaia/GAIA_Project:ro" \
-                gaia-orchestrator:latest
+            docker compose -f "$LIVE_COMPOSE" up -d gaia-orchestrator
             log_success "Orchestrator started on port ${ORCHESTRATOR_PORT}"
             ;;
         stop)
             log_info "Stopping orchestrator..."
-            docker stop gaia-orchestrator 2>/dev/null || true
-            docker rm gaia-orchestrator 2>/dev/null || true
+            docker compose -f "$LIVE_COMPOSE" stop gaia-orchestrator
+            docker compose -f "$LIVE_COMPOSE" rm -f gaia-orchestrator
             log_success "Orchestrator stopped"
             ;;
         status)
@@ -296,11 +286,11 @@ cmd_orchestrator() {
             ;;
         build)
             log_info "Building orchestrator image..."
-            docker build -t gaia-orchestrator:latest "${PROJECT_ROOT}/gaia-orchestrator"
+            docker compose -f "$LIVE_COMPOSE" build gaia-orchestrator
             log_success "Orchestrator image built"
             ;;
         logs)
-            docker logs -f gaia-orchestrator
+            docker compose -f "$LIVE_COMPOSE" logs -f gaia-orchestrator
             ;;
         *)
             log_error "Unknown action: $action"
@@ -414,7 +404,7 @@ main() {
             echo "  handoff [prime-to-study|study-to-prime|status]  GPU handoff"
             echo "  status                           Show all service status"
             echo ""
-            echo "Services: core, web, mcp, study"
+            echo "Services: prime, core, web, mcp, study"
             echo ""
             echo "Examples:"
             echo "  $0 live start              # Start live stack"

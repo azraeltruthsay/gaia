@@ -52,10 +52,20 @@ try:
     VLLMChatModel = _VLLMChatModel
 except Exception:
     VLLMChatModel = None
+VLLMRemoteModel = None
+try:
+    from .vllm_remote_model import VLLMRemoteModel as _VLLMRemoteModel
+    VLLMRemoteModel = _VLLMRemoteModel
+except Exception:
+    VLLMRemoteModel = None
+try:
+    from .groq_model import GroqAPIModel as _GroqAPIModel
+    GroqAPIModel = _GroqAPIModel
+except Exception:
+    GroqAPIModel = None
 import json, time, os
 from datetime import datetime
 from typing import List
-import threading
 
 # --- resolver imports (added) ----------------------------------------------
 import subprocess, shlex
@@ -262,54 +272,6 @@ class ModelPool:
             self._prime_guard_override = os.getenv("GAIA_ALLOW_PRIME_LOAD", "0") == "1"
         except Exception:
             self._prime_guard_override = False
-
-    def _notify_oracle_fallback(self, fallback_model: str, original_role: str, reason: str = ""):
-        """
-        Notify the orchestrator that we're using an API/Oracle model as fallback.
-
-        This is called when the requested local model (e.g., 'prime') is not available
-        and we're falling back to a cloud-based API model.
-
-        Args:
-            fallback_model: Name of the model being used as fallback
-            original_role: The role that was originally requested
-            reason: Optional explanation of why fallback is needed
-        """
-        orchestrator_url = os.getenv("ORCHESTRATOR_URL", "http://gaia-orchestrator:6410")
-
-        def send_notification():
-            try:
-                import urllib.request
-                import urllib.error
-
-                payload = json.dumps({
-                    "fallback_model": fallback_model,
-                    "original_role": original_role,
-                    "reason": reason or f"Local model for '{original_role}' not available",
-                }).encode('utf-8')
-
-                req = urllib.request.Request(
-                    f"{orchestrator_url}/notify/oracle-fallback",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    if response.status == 200:
-                        logger.debug(f"Oracle fallback notification sent: {fallback_model} for {original_role}")
-                    else:
-                        logger.warning(f"Oracle fallback notification returned {response.status}")
-
-            except urllib.error.URLError as e:
-                # Orchestrator may not be running - this is fine, just log it
-                logger.debug(f"Could not notify orchestrator of oracle fallback: {e}")
-            except Exception as e:
-                logger.debug(f"Oracle fallback notification failed: {e}")
-
-        # Send notification in background thread to avoid blocking
-        thread = threading.Thread(target=send_notification, daemon=True)
-        thread.start()
 
     def register_dev_model(self, name: str):
         """
@@ -520,6 +482,22 @@ class ModelPool:
                     "model": observer_hf,
                     "enabled": True,
                 }
+
+            # Remote vLLM inference via PRIME_ENDPOINT — switches gpu_prime to
+            # a remote HTTP backend so gaia-core doesn't need local GPU access.
+            prime_endpoint = os.getenv("PRIME_ENDPOINT")
+            if prime_endpoint:
+                self.config.MODEL_CONFIGS["gpu_prime"] = {
+                    "type": "vllm_remote",
+                    "endpoint": prime_endpoint,
+                    "path": os.getenv("PRIME_MODEL", "/models/Claude"),
+                    "enabled": True,
+                    "lora_config": self.config.constants.get("LORA_CONFIG", {}),
+                }
+                self.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True}
+                if "cpu_prime" in self.config.MODEL_CONFIGS:
+                    self.config.MODEL_CONFIGS["cpu_prime"]["enabled"] = False
+                logger.info("PRIME_ENDPOINT set: gpu_prime -> vllm_remote @ %s", prime_endpoint)
         except Exception:
             logger.exception("Failed to apply GAIA_* model overrides")
 
@@ -669,6 +647,23 @@ class ModelPool:
                 logger.info(f"🔹 Loading vLLM model {model_name}")
                 gpu_info = _get_gpu_free_total_bytes()
                 self.models[model_name] = VLLMChatModel(model_config, self.config, gpu_info=gpu_info)
+            elif model_type == 'vllm_remote':
+                if VLLMRemoteModel is None:
+                    logger.warning("VLLMRemoteModel unavailable (import failed)")
+                    return False
+                logger.info(f"🔹 Loading vLLM remote model {model_name}")
+                self.models[model_name] = VLLMRemoteModel(model_config, self.config)
+            elif model_type == 'groq':
+                if GroqAPIModel is None:
+                    logger.warning("GroqAPIModel unavailable (groq package not installed)")
+                    return False
+                logger.info(f"🔹 Loading Groq API model {model_name}")
+                api_key = os.getenv("GROQ_API_KEY")
+                if not api_key:
+                    logger.warning(f"GROQ_API_KEY not set; skipping {model_name}")
+                    return False
+                model_id = model_config.get("model", "llama-3.3-70b-versatile")
+                self.models[model_name] = GroqAPIModel(model_name=model_id, api_key=api_key)
             else:
                 if model_type and model_type != 'api':
                     logger.warning("Unknown model type '%s' for %s; skipping", model_type, model_name)
@@ -946,22 +941,10 @@ class ModelPool:
         # Fallback: first available model
         for name in ('prime', 'lite', 'cpu_prime', 'gpu_prime'):
             if name in self.models:
-                # Check if this is an API-based fallback (oracle)
-                model = self.models[name]
-                model_type = type(model).__name__
-                if model_type in ('GPTAPIModel', 'GeminiAPIModel') and name != role:
-                    logger.warning(f"Using API model '{name}' as fallback for role '{role}'")
-                    self._notify_oracle_fallback(name, role, "Local model not available")
-                return model
+                return self.models[name]
         # Last resort: any model
         if self.models:
-            fallback_name = next(iter(self.models.keys()))
-            fallback_model = self.models[fallback_name]
-            model_type = type(fallback_model).__name__
-            if model_type in ('GPTAPIModel', 'GeminiAPIModel') and fallback_name != role:
-                logger.warning(f"Using API model '{fallback_name}' as last-resort fallback for role '{role}'")
-                self._notify_oracle_fallback(fallback_name, role, "No local models available")
-            return fallback_model
+            return next(iter(self.models.values()))
         return None
 
     def list_models(self):
@@ -1032,6 +1015,8 @@ class ModelPool:
 
         If lazy_load=True (default), will attempt to load the model on-demand if
         it's not already in the pool.
+
+        For prime roles, implements a fallback chain: gpu_prime -> groq_fallback -> oracle_openai
         """
         name = self._resolve_model_name_for_role(role)
 
@@ -1039,6 +1024,24 @@ class ModelPool:
         if not name and lazy_load:
             if self.ensure_model_loaded(role):
                 name = self._resolve_model_name_for_role(role)
+
+        # FALLBACK CHAIN: If primary model unavailable for prime roles, try fallbacks
+        if not name or name not in self.models:
+            if role in ('prime', 'gpu_prime', 'cpu_prime'):
+                fallback_chain = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
+                for fallback in fallback_chain:
+                    if fallback in self.models:
+                        logger.warning(f"🔄 Using {fallback} as fallback for {role}")
+                        self.set_status(fallback, "busy")
+                        return self.models[fallback]
+                    # Try lazy loading the fallback
+                    if self.ensure_model_loaded(fallback):
+                        if fallback in self.models:
+                            logger.warning(f"🔄 Loaded {fallback} as fallback for {role}")
+                            self.set_status(fallback, "busy")
+                            return self.models[fallback]
+                logger.error(f"No fallback available for {role}")
+                return None
 
         if not name:
             logger.error("ModelPool.acquire_model_for_role: no model resolved for role '%s'", role)
@@ -1138,172 +1141,3 @@ class ModelPool:
             logger.info("ModelPool.shutdown: complete")
         except Exception:
             logger.debug("ModelPool.shutdown: unexpected error", exc_info=True)
-
-    def release_gpu(self) -> dict:
-        """
-        Release GPU resources by shutting down vLLM/GPU-backed models.
-
-        This allows external processes (e.g., candidate testing) to claim the GPU.
-        The service continues running but will use CPU/API fallbacks until
-        reclaim_gpu() is called.
-
-        Returns:
-            dict with 'success', 'released_models', and 'message' keys
-        """
-        released = []
-        errors = []
-
-        # Identify GPU-backed models to release
-        gpu_model_names = ['gpu_prime', 'prime']  # prime may be an alias to gpu_prime
-
-        for name in list(self.models.keys()):
-            model = self.models.get(name)
-            if model is None:
-                continue
-
-            # Check if this is a vLLM model or has GPU resources
-            is_gpu_model = (
-                name in gpu_model_names or
-                (hasattr(model, 'llm') and model.llm is not None) or  # vLLM indicator
-                (hasattr(model, '__class__') and 'VLLM' in model.__class__.__name__)
-            )
-
-            if is_gpu_model:
-                try:
-                    logger.info(f"🔻 Releasing GPU model: {name}")
-                    if hasattr(model, "shutdown") and callable(model.shutdown):
-                        model.shutdown()
-                    elif hasattr(model, "close") and callable(model.close):
-                        model.close()
-                    elif hasattr(model, "llm") and model.llm is not None:
-                        if hasattr(model.llm, "shutdown"):
-                            model.llm.shutdown()
-                        model.llm = None
-
-                    # Remove from pool
-                    del self.models[name]
-                    if name in self.model_status:
-                        del self.model_status[name]
-                    released.append(name)
-                    logger.info(f"✅ Released GPU model: {name}")
-                except Exception as e:
-                    errors.append(f"{name}: {str(e)}")
-                    logger.error(f"❌ Failed to release {name}: {e}", exc_info=True)
-
-        # Force garbage collection to free CUDA memory
-        try:
-            import gc
-            gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    logger.info("🧹 CUDA cache cleared")
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-        # Store state for potential reclaim
-        self._gpu_released = True
-        self._released_model_names = released
-
-        success = len(errors) == 0
-        return {
-            "success": success,
-            "released_models": released,
-            "errors": errors if errors else None,
-            "message": f"Released {len(released)} GPU model(s)" if success else f"Released {len(released)} with {len(errors)} error(s)"
-        }
-
-    def reclaim_gpu(self) -> dict:
-        """
-        Reclaim GPU resources by reloading vLLM/GPU-backed models.
-
-        Call this after candidate testing is complete to restore GPU inference.
-
-        Returns:
-            dict with 'success', 'loaded_models', and 'message' keys
-        """
-        loaded = []
-        errors = []
-
-        # Check if we have record of what was released
-        released_names = getattr(self, '_released_model_names', None)
-        if not released_names:
-            # Try to reload gpu_prime by default
-            released_names = ['gpu_prime']
-
-        for name in released_names:
-            # Skip 'prime' if it was just an alias
-            if name == 'prime' and 'gpu_prime' in released_names:
-                continue
-
-            try:
-                logger.info(f"🔼 Reclaiming GPU model: {name}")
-                if self._load_model_entry(name, use_oracle=False, force=True):
-                    loaded.append(name)
-                    logger.info(f"✅ Reclaimed GPU model: {name}")
-                else:
-                    errors.append(f"{name}: failed to load")
-            except Exception as e:
-                errors.append(f"{name}: {str(e)}")
-                logger.error(f"❌ Failed to reclaim {name}: {e}", exc_info=True)
-
-        # Re-promote prime aliases
-        self._promote_prime_aliases()
-
-        # Clear release state
-        self._gpu_released = False
-        self._released_model_names = []
-
-        success = len(loaded) > 0 and len(errors) == 0
-        return {
-            "success": success,
-            "loaded_models": loaded,
-            "errors": errors if errors else None,
-            "message": f"Reclaimed {len(loaded)} GPU model(s)" if success else f"Loaded {len(loaded)} with {len(errors)} error(s)"
-        }
-
-    def get_gpu_status(self) -> dict:
-        """
-        Get current GPU status including loaded models and memory usage.
-
-        Returns:
-            dict with GPU state information
-        """
-        status = {
-            "gpu_released": getattr(self, '_gpu_released', False),
-            "gpu_models_loaded": [],
-            "all_models_loaded": list(self.models.keys()),
-            "model_status": dict(self.model_status),
-            "gpu_info": None,
-        }
-
-        # Identify which loaded models are GPU-backed
-        for name, model in self.models.items():
-            is_gpu = (
-                (hasattr(model, 'llm') and model.llm is not None) or
-                (hasattr(model, '__class__') and 'VLLM' in model.__class__.__name__)
-            )
-            if is_gpu:
-                status["gpu_models_loaded"].append(name)
-
-        # Get GPU memory info
-        try:
-            gpu_info = _get_gpu_free_total_bytes()
-            if gpu_info and gpu_info[0] is not None:
-                free_gb = gpu_info[0] / (1024**3)
-                total_gb = gpu_info[1] / (1024**3) if gpu_info[1] else 0
-                used_gb = total_gb - free_gb if total_gb else 0
-                status["gpu_info"] = {
-                    "free_gb": round(free_gb, 2),
-                    "total_gb": round(total_gb, 2),
-                    "used_gb": round(used_gb, 2),
-                    "utilization_pct": round((used_gb / total_gb) * 100, 1) if total_gb > 0 else 0
-                }
-        except Exception as e:
-            status["gpu_info"] = {"error": str(e)}
-
-        return status

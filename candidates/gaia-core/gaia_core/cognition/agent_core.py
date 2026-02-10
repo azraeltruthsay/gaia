@@ -316,7 +316,7 @@ class AgentCore:
             msg_role = msg.get('role', 'unknown')
             msg_content = msg.get('content', '')
             relevant_history_snippet.append(
-                RelevantHistorySnippet(id=msg_id, role=msg_role, summary=strip_think_tags(msg_content[:100]))
+                RelevantHistorySnippet(id=msg_id, role=msg_role, summary=strip_think_tags(msg_content[:2000]))
             )
         if any(m.get('id') is None for m in history or []):
             self.logger.warning("AgentCore: Missing IDs found in history; temporary auto_ IDs assigned.")
@@ -550,6 +550,7 @@ class AgentCore:
         # Normalize metadata
         _metadata = metadata or {}
         import json
+        import os
         import sys
         from gaia_core.utils.prompt_builder import build_from_packet # Assumes this is updated for v0.3
 
@@ -605,7 +606,6 @@ class AgentCore:
 
         if not selected_model_name:
             # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
-            import os
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
             logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())}")
             if backend_env:
@@ -652,7 +652,6 @@ class AgentCore:
             logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
             logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
             # Try preferred backend first
-            import os
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
             candidates = []
             if backend_env:
@@ -1073,7 +1072,7 @@ class AgentCore:
         logger.info(f"[OBSERVER] Model statuses: {getattr(self.model_pool, 'model_status', {})}")
 
         # Check observer config for explicit model preference
-        observer_config = self.config.constants.get("MODELS", {}).get("observer", {})
+        observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
         observer_enabled = observer_config.get("enabled", False)
         use_gpu_prime_for_observer = observer_config.get("use_gpu_prime", False)
         logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_gpu_prime={use_gpu_prime_for_observer}")
@@ -1231,7 +1230,7 @@ class AgentCore:
                     lite_fallback_acquired = True
                     lite_fallback_used = True
                     lite_fallback_model_name = "lite"
-                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=observer, context={"packet": packet}, session_id=session_id)
+                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                     pieces = []
                     stream_generator = fallback_voice.stream_response()
                     for item in stream_generator:
@@ -1301,24 +1300,27 @@ class AgentCore:
             except Exception:
                 logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
             
-            packet.response.candidate = full_response
+            # Use the routed user-facing response for all persistence.
+            # full_response may be empty if the LLM stream yielded nothing,
+            # but user_facing_response always has content (route_output provides fallbacks).
+            packet.response.candidate = user_facing_response
             packet.response.confidence = 0.93 # Placeholder
-            self.ai_manager.status["last_response"] = full_response
-            self.session_manager.add_message(session_id, "assistant", strip_think_tags(full_response))
+            self.ai_manager.status["last_response"] = user_facing_response
+            self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
 
             if execution_results:
                 process_execution_results(execution_results, self.session_manager, session_id, packet)
 
                 messages = build_from_packet(packet, task_instruction_key="execution_feedback")
-                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=observer, context={"packet": packet}, session_id=session_id)
+                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                 stream_generator = voice.stream_response()
                 concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
                 yield {"type": "token", "value": concluding_response}
                 self.session_manager.add_message(session_id, "assistant", concluding_response)
 
-            log_chat_entry(user_input, full_response, source=source, session_id=session_id, metadata=_metadata)
-            log_chat_entry_structured(user_input, full_response, source=source, session_id=session_id, metadata=_metadata)
-            ts_write({"type":"turn_end","user":user_input,"assistant":full_response}, session_id, source=source, destination_context=_metadata)
+            log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            ts_write({"type":"turn_end","user":user_input,"assistant":user_facing_response}, session_id, source=source, destination_context=_metadata)
             self.session_manager.record_last_activity()
 
             # --- Loop Detection: Record output and check for loops ---
@@ -1832,21 +1834,18 @@ class AgentCore:
                     symbol=symbol,
                     title=title,
                     tags=tags,
-                    llm_model=selected_model # Use the currently selected model for potential refinement
+                    llm_model=None  # Model acquired separately if CodexWriter needs LLM refinement
                 )
 
                 if documented_path:
                     response_text = f"Acknowledged. I have documented '{title}' (Symbol: {symbol}) to {documented_path}."
                 else:
                     response_text = f"I encountered an issue while trying to document '{title}' (Symbol: {symbol})."
-                
-                yield {"type": "token", "value": response_text}
-                self.session_manager.add_message(session_id, "assistant", response_text)
-                return
+
+                return response_text
             except Exception as e:
                 self.logger.exception(f"Error processing document command: {e}")
-                yield {"type": "token", "value": f"I encountered an error while trying to document that information: {e}"}
-                return
+                return f"I encountered an error while trying to document that information: {e}"
 
         # Check if this is a recitation/long-form request that should use fragmentation
         fragmentation_enabled = os.getenv("GAIA_FRAGMENTATION", "true").lower() in ("1", "true", "yes")

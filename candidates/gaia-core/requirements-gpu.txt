@@ -1,9 +1,0 @@
-# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
-# Optional GPU dependencies for model inference
-#
-# Install with: pip install -r requirements.txt -r requirements-gpu.txt
-
--r requirements.txt
-
-vllm>=0.11.2
-torch>=2.3.0

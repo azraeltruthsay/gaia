@@ -36,10 +36,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Use candidate gaia-common for SOA-decoupled architecture
 COPY candidates/gaia-common/ /gaia-common/
 COPY candidates/gaia-mcp/ /app/gaia-mcp/
+COPY candidates/gaia-mcp/pyproject.toml /app/gaia-mcp/pyproject.toml
 ENV PYTHONPATH "${PYTHONPATH}:/gaia-common"
 
 RUN pip install -e /gaia-common/
-RUN pip install -e /app/gaia-mcp/
+RUN pip install -e /app/gaia-mcp/.[dev]
 
 
 # Set ownership

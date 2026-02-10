@@ -1,7 +1,8 @@
 # GAIA Service-Oriented Architecture - Master Composition
 #
 # Services:
-#   - gaia-core:  The Brain   - Cognitive loop and reasoning (GPU)
+#   - gaia-core:  The Brain   - Cognitive loop and reasoning (CPU, delegates to gaia-prime)
+#   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
 #   - gaia-mcp:   The Hands   - Sandboxed tool execution
@@ -34,8 +35,8 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-orchestrator:
     build:
-      context: ./gaia-orchestrator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./gaia-orchestrator/Dockerfile
     image: gaia-orchestrator:latest
     container_name: gaia-orchestrator
     hostname: gaia-orchestrator
@@ -60,6 +61,7 @@ services:
       - ORCHESTRATOR_WEB_URL=http://gaia-web:6414
       - ORCHESTRATOR_STUDY_URL=http://gaia-study:8766
       - ORCHESTRATOR_MCP_URL=http://gaia-mcp:8765
+      - ORCHESTRATOR_PRIME_URL=http://gaia-prime:7777
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
@@ -77,7 +79,64 @@ services:
       start_period: 10s
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-core: The Brain - Cognitive loop and reasoning
+  # gaia-prime: The Voice - Standalone vLLM inference server (GPU)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-prime:
+    build:
+      context: ./gaia-prime
+      dockerfile: Dockerfile
+    image: localhost:5000/gaia-prime:local
+    container_name: gaia-prime
+    hostname: gaia-prime
+    restart: unless-stopped
+
+    volumes:
+      - ./gaia-models:/models:ro
+      - ./gaia-models/lora_adapters:/models/lora_adapters:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_FLASH_ATTN_VERSION=2
+      - TORCH_CUDA_ARCH_LIST=12.0+PTX
+
+    ports:
+      - "7777:7777"
+
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model /models/Claude
+      --host 0.0.0.0
+      --port 7777
+      --gpu-memory-utilization 0.65
+      --max-model-len 8192
+      --max-num-seqs 4
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --enable-lora
+      --max-loras 4
+      --max-lora-rank 64
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+    networks:
+      - gaia-net
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core: The Brain - Cognitive loop and reasoning (CPU, delegates to gaia-prime)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-core:
     build:
@@ -113,22 +172,21 @@ services:
       # Service endpoints (configurable for candidate injection)
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
       - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
-      # GPU settings
-      - N_GPU_LAYERS=${N_GPU_LAYERS:-8}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-      - VLLM_DISABLE_CUSTOM_CUDA_MODULES=1
-      # GAIA_VLLM_SAFE_MODE=1 caps gpu_memory_utilization at 0.4 - disabled to allow full memory usage
-      - GAIA_VLLM_SAFE_MODE=0
+      # CPU-only mode — GPU inference offloaded to gaia-prime
+      - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
+      - GAIA_FORCE_CPU=1
+      - N_GPU_LAYERS=0
+      - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
+      # Remote vLLM inference via gaia-prime
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Claude}
+      # Groq API fallback (free tier)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
       # Model loading - disabled by default, models load on first use
       - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
-      - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
-      # Force spawn for vLLM to avoid CUDA fork issues
-      - GAIA_VLLM_WORKER_METHOD=spawn
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # Segfault workaround for vLLM/torch.compile
-      - TORCH_COMPILE_DISABLE=1
 
     ports:
       - "6415:6415"
@@ -139,14 +197,8 @@ services:
     depends_on:
       gaia-mcp:
         condition: service_healthy
-
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      gaia-prime:
+        condition: service_healthy
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6415/health"]
@@ -181,6 +233,7 @@ services:
       - ./gaia-web/static:/app/static:ro
 
     environment:
+      - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
       # Service endpoints (configurable for candidate injection)

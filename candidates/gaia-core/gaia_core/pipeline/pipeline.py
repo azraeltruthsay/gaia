@@ -94,7 +94,7 @@ def gaia_pipeline(
         # TODO: [GAIA-REFACTOR] stream_observer.py module not yet migrated.
         # return stream_observer(buffer, ctx, lambda buf, ctx: "continue")
         return "continue"
-    observer_fn = observer_callback or default_observer
+    _observer_fn = observer_callback or default_observer  # noqa: F841 — reserved for future use
 
     if stream_output and stream_callback:
         # If streaming, monologue is handled by stream_callback

@@ -8,12 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY gaia-orchestrator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install shared library
+COPY gaia-common /gaia-common
+RUN pip install --no-cache-dir -e /gaia-common/
+
 # Copy application code
-COPY gaia_orchestrator/ ./gaia_orchestrator/
-COPY pyproject.toml .
+COPY gaia-orchestrator/gaia_orchestrator/ ./gaia_orchestrator/
+COPY gaia-orchestrator/pyproject.toml .
 
 # Install the package
 RUN pip install --no-cache-dir -e .

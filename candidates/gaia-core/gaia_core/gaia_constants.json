@@ -9,7 +9,7 @@
   "reflection_max_tokens": 2048,
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
-  "llm_backend": "lite",
+  "llm_backend": "gpu_prime",
   "max_tokens_lite": 16000,
   "MODEL_CONFIGS": {
 
@@ -23,7 +23,13 @@
       "path": "/models/Claude",
       "trust_remote_code": true,
       "template": "raw",
-      "type": "vllm"
+      "type": "vllm",
+      "lora_config": {
+        "enabled": true,
+        "adapter_dir": "/models/lora_adapters",
+        "max_loras": 4,
+        "max_lora_rank": 64
+      }
     },
     "lite": {
       "enabled": true,

@@ -1,33 +1,22 @@
 # gaia-core: The Brain - Cognitive loop and reasoning engine
-# GPU-enabled container for model inference
+# CPU-only container — GPU inference is offloaded to gaia-prime via PRIME_ENDPOINT
 
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS base
+FROM python:3.11-slim AS base
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install Python 3.11 and system dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-dev \
-    python3.11-venv \
-    python3-pip \
     git \
     curl \
-    libxcb1 \
-    libx11-6 \
-    libgl1-mesa-glx \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
 # Upgrade pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 WORKDIR /app
 
@@ -37,14 +26,20 @@ WORKDIR /app
 
 # Copy requirements first for better caching
 COPY gaia-core/requirements.txt .
-COPY gaia-core/requirements-gpu.txt .
 
 # Copy gaia-common source code so it's available to be installed by requirements.txt
 COPY gaia-common /gaia-common
 
-# Install Python dependencies, including GPU dependencies
-# This now also installs gaia-common from the path specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-gpu.txt
+# Install Python dependencies
+# GPU inference is handled by gaia-prime — no GPU packages needed here
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Install development dependencies for validation (pytest, ruff, mypy)
+# ═══════════════════════════════════════════════════════════════════════════
+COPY gaia-core/pyproject.toml .
+COPY gaia-core/README.md .
+RUN pip install -e ".[dev]"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Copy service code

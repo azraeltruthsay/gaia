@@ -28,15 +28,16 @@ class DockerManager:
     LIVE_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-study"]
     CANDIDATE_SERVICES = ["gaia-core-candidate", "gaia-web-candidate", "gaia-mcp-candidate", "gaia-study-candidate"]
 
+    # Internal container ports (used for health checks over Docker network)
     SERVICE_PORTS = {
         "gaia-core": 6415,
         "gaia-web": 6414,
         "gaia-mcp": 8765,
         "gaia-study": 8766,
-        "gaia-core-candidate": 6416,
-        "gaia-web-candidate": 6417,
-        "gaia-mcp-candidate": 8767,
-        "gaia-study-candidate": 8768,
+        "gaia-core-candidate": 6415,
+        "gaia-web-candidate": 6414,
+        "gaia-mcp-candidate": 8765,
+        "gaia-study-candidate": 8766,
     }
 
     def __init__(self, state_manager: StateManager):
@@ -79,10 +80,10 @@ class DockerManager:
             return ContainerState.UNKNOWN
 
     async def _check_service_health(self, container_name: str, port: int) -> bool:
-        """Check if a service is healthy via its health endpoint."""
+        """Check if a service is healthy via its health endpoint over Docker network."""
         import httpx
 
-        url = f"http://localhost:{port}/health"
+        url = f"http://{container_name}:{port}/health"
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(url)
@@ -242,7 +243,7 @@ class DockerManager:
             endpoint_map = {
                 "mcp": ("MCP_ENDPOINT", f"http://gaia-mcp-candidate:8765/jsonrpc", "gaia-core"),
                 "study": ("STUDY_ENDPOINT", f"http://gaia-study-candidate:8766", "gaia-core"),
-                "core": ("CORE_ENDPOINT", f"http://gaia-core-candidate:6416", "gaia-web"),
+                "core": ("CORE_ENDPOINT", f"http://gaia-core-candidate:6415", "gaia-web"),
             }
 
             if service == "web":

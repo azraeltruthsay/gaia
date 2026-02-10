@@ -5,10 +5,9 @@ This module provides automated task completion detection for GAIA's self-develop
 roadmap. Each task type has specific verification logic.
 """
 
-import os
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Callable
 from gaia_core.memory.dev_matrix import GAIADevMatrix
 
 logger = logging.getLogger("GAIA.DevMatrixAnalyzer")

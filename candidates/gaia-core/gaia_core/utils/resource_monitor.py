@@ -7,7 +7,7 @@ try:
     import pynvml
     pynvml.nvmlInit()
     HAS_NVML = True
-except (ImportError, pynvml.NVMLError):
+except Exception:
     HAS_NVML = False
 
 logger = logging.getLogger(__name__)

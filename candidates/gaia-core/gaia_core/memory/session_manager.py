@@ -88,6 +88,18 @@ class SessionManager:
                 logger.error(f"❌ Could not load state file {STATE_FILE}. Starting fresh. Error: {e}")
         return {}
 
+    @staticmethod
+    def _sanitize_for_json(obj):
+        """Recursively convert non-serializable objects to strings."""
+        if isinstance(obj, dict):
+            return {k: SessionManager._sanitize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [SessionManager._sanitize_for_json(v) for v in obj]
+        if isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        # Generators, objects, etc. — force to string
+        return str(obj)
+
     def _save_state(self):
         """Saves the current state of all sessions to the file in a thread-safe manner."""
         with _lock:
@@ -97,6 +109,7 @@ class SessionManager:
                 with open(STATE_FILE, 'w', encoding='utf-8') as f:
                     # Serialize all session objects into a dictionary before saving
                     data_to_save = {sid: session.to_dict() for sid, session in self.sessions.items()}
+                    data_to_save = self._sanitize_for_json(data_to_save)
                     json.dump(data_to_save, f, indent=2)
                     logger.debug(f"💾 Session state saved to {STATE_FILE}")
             except IOError as e:

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 from typing import Tuple, Optional
 
@@ -108,7 +109,7 @@ def convert_to_gguf(model_path: str, output_path: str):
     """Converts a Hugging Face model to GGUF format."""
     try:
         # Prefer MCP execution so conversions can be audited / sandboxed.
-        command = f"python -m llama_cpp.convert --model_dir {pipes.quote(model_path)} --outfile {pipes.quote(output_path)} --outtype q4_k_m"
+        command = f"python -m llama_cpp.convert --model_dir {shlex.quote(model_path)} --outfile {shlex.quote(output_path)} --outtype q4_k_m"
         try:
             r = mcp_ai_execute(command, timeout=600, shell=True, dry_run=False)
             if not r.get("ok"):

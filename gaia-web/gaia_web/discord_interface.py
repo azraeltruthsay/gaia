@@ -7,7 +7,6 @@ for processing, and responses are routed back to Discord.
 """
 
 import os
-import re
 import uuid
 import asyncio
 import logging
@@ -32,77 +31,6 @@ logger = logging.getLogger("GAIA.Web.Discord")
 _bot = None
 _bot_thread: Optional[threading.Thread] = None
 _message_handler: Optional[Callable] = None
-
-
-def _strip_think_tags(text: str) -> str:
-    """
-    Strip <think>...</think>, <thinking>...</thinking>, and other reflection tag
-    variants from LLM output before sending to Discord.
-
-    Mirrors the robust implementation in gaia-core's output_router.py but lives
-    here as a safety net — the last stop before messages reach Discord.
-    """
-    if not text:
-        return text
-
-    result = text
-
-    # Closed <think>/<thinking> blocks
-    result = re.sub(r'<(?:think|thinking)>.*?</(?:think|thinking)>\s*', '', result, flags=re.DOTALL)
-
-    # Unclosed <think>/<thinking> tags (model started thinking but never closed)
-    result = re.sub(r'<(?:think|thinking)>.*$', '', result, flags=re.DOTALL)
-
-    # Truncated/malformed tags like </think or <thinking attr="">
-    result = re.sub(r'</?(?:think|thinking)[^>]*>', '', result)
-
-    # Other common reflection tags that shouldn't be user-facing
-    for tag in ('reflection', 'reasoning', 'internal', 'scratchpad', 'planning', 'analysis'):
-        result = re.sub(rf'<{tag}>.*?</{tag}>\s*', '', result, flags=re.DOTALL | re.IGNORECASE)
-        result = re.sub(rf'<{tag}>.*$', '', result, flags=re.DOTALL | re.IGNORECASE)
-        result = re.sub(rf'</?{tag}[^>]*>', '', result, flags=re.IGNORECASE)
-
-    # Qwen/DeepSeek-style: <|start_thinking|>...<|end_thinking|>
-    result = re.sub(r'<\|start_thinking\|>.*?<\|end_thinking\|>\s*', '', result, flags=re.DOTALL)
-    result = re.sub(r'<\|start_thinking\|>.*$', '', result, flags=re.DOTALL)
-    result = re.sub(r'<\|(?:start_thinking|end_thinking)\|>', '', result)
-
-    return result.strip()
-
-
-def _build_status_footer(packet: 'CognitionPacket') -> str:
-    """
-    Build a compact Discord status footer from a completed CognitionPacket.
-
-    Shows model name, observer activity, and deployment mode.
-    """
-    parts = []
-
-    # Model name
-    model_name = "unknown"
-    try:
-        model_name = packet.header.model.name or "unknown"
-    except (AttributeError, TypeError):
-        pass
-    parts.append(f"**Model**: {model_name}")
-
-    # Observer trace
-    observer_summary = "none"
-    try:
-        traces = packet.status.observer_trace
-        if traces:
-            observer_summary = "; ".join(traces[-3:])  # last 3 entries max
-            if len(traces) > 3:
-                observer_summary = f"...{observer_summary}"
-    except (AttributeError, TypeError):
-        pass
-    parts.append(f"**Observer**: {observer_summary}")
-
-    # Mode: candidate vs live (check env var, default to live)
-    mode = os.environ.get("GAIA_MODE", "live")
-    parts.append(f"**Mode**: {mode}")
-
-    return "\n---\n> " + " | ".join(parts)
 
 
 class DiscordInterface:
@@ -279,14 +207,14 @@ class DiscordInterface:
         packet.compute_hashes() # Compute hashes for integrity
 
         try:
-            async with httpx.AsyncClient(timeout=600.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     f"{self.core_endpoint}/process_packet", # New endpoint name
                     json=packet.to_serializable_dict(), # Send as serializable dict
                     headers={"Content-Type": "application/json"}
                 )
                 response.raise_for_status()
-                
+
                 # Expect a full CognitionPacket back
                 completed_packet_dict = response.json()
                 completed_packet = CognitionPacket.from_dict(completed_packet_dict) # Deserialize back to object
@@ -294,14 +222,6 @@ class DiscordInterface:
                 gaia_response_text = completed_packet.response.candidate # Extract LLM response
                 if not gaia_response_text:
                     gaia_response_text = "GAIA processed your request but did not generate a text response."
-
-                # Strip think tags that may have leaked through from gaia-core
-                gaia_response_text = _strip_think_tags(gaia_response_text)
-
-                # Build and append status footer
-                footer = _build_status_footer(completed_packet)
-                if footer:
-                    gaia_response_text = gaia_response_text + footer
 
                 # Send response back to Discord
                 await self._send_response(message_obj, gaia_response_text, is_dm)
@@ -383,7 +303,7 @@ async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Op
                     try:
                         reply_message = await channel.fetch_message(int(reply_to_message_id))
                         await reply_message.reply(msg)
-                    except discord.NotFound:
+                    except Exception as _discord_err:  # discord.NotFound or other
                         await channel.send(f"Reply to message {reply_to_message_id} failed: message not found.\n{msg}")
                     except Exception as e:
                         logger.warning(f"Failed to reply to message {reply_to_message_id}: {e}. Sending as regular message.")

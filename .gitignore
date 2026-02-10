@@ -9,6 +9,9 @@ google-cloud-sdk/
 artifacts/
 GAIA_Condensed_flat/
 
+# --- Backup directories (from promote_candidate.sh) ---
+*.bak/
+
 # --- Virtual environments ---
 .venv/
 venv_notebooklm/
@@ -34,6 +37,7 @@ inspect
 sys
 logging
 *.tar.gz
+*.tar
 
 # --- Generated output ---
 gaia_tree.txt
@@ -54,7 +58,6 @@ create_flat_representation.sh
 flatten_soa.sh
 interactive_gaia_start.sh
 run_dnd_test.sh
-test_candidate.sh
 test_gaia_core_imports.sh
 prompt
 recall
@@ -64,10 +67,23 @@ knowledge/dnd_campaign/
 knowledge/projects/dnd-campaign/
 knowledge/logs/
 
+# --- Runtime / session data ---
+**/sessions.json
+app/shared/
+**/last_activity.timestamp
+**/final_prompt_for_review.json
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
 # --- Python ---
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 
 # --- Node ---
 node_modules/

@@ -37,19 +37,47 @@ COPY gaia-study/requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install gaia-common with vector dependencies from mounted volume
-RUN --mount=type=bind,source=./gaia-common,target=/gaia-common \
-    pip install --no-cache-dir "/gaia-common[vector]"
 
-# Optional: Install training dependencies (uncomment for LoRA fine-tuning)
-# COPY requirements-training.txt .
-# RUN pip install --no-cache-dir -r requirements-training.txt
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Copy service code
-# ═══════════════════════════════════════════════════════════════════════════
+# Install gaia-common and gaia-study
 
-COPY gaia-study/gaia_study/ ./gaia_study/
+
+
+COPY gaia-common/ /gaia-common/
+
+
+
+COPY gaia-study/ /app/gaia-study/
+
+
+
+COPY gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
+
+
+
+
+
+
+
+ENV PYTHONPATH "${PYTHONPATH}:/gaia-common:/app"
+
+
+
+
+
+
+
+RUN pip install -e "/gaia-common[vector]"
+
+
+
+RUN pip install -e /app/gaia-study/.[dev]
+
+
+
+
+
+
 
 # Expose service port
 EXPOSE 8766

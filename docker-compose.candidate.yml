@@ -69,18 +69,19 @@ services:
       # Default: talk to candidates. Override with live hostnames for injection.
       - MCP_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       - STUDY_ENDPOINT=${CANDIDATE_STUDY_ENDPOINT:-http://gaia-study-candidate:8766}
-      # GPU settings
-      - GAIA_FORCE_CPU=${GAIA_CANDIDATE_CPU:-1}
-      - N_GPU_LAYERS=${GAIA_CANDIDATE_GPU_LAYERS:-0}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-      - GAIA_ALLOW_PRIME_LOAD=${GAIA_CANDIDATE_GPU:-0}
+      # CPU-only mode — GPU inference offloaded to gaia-prime-candidate
+      - GAIA_BACKEND=${GAIA_CANDIDATE_BACKEND:-gpu_prime}
+      - GAIA_FORCE_CPU=1
+      - N_GPU_LAYERS=0
+      - GAIA_ALLOW_PRIME_LOAD=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - GAIA_VLLM_WORKER_METHOD=spawn
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
-      - TORCH_COMPILE_DISABLE=1
+      - OBSERVER_MODE=warn
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      # Remote vLLM inference via gaia-prime-candidate
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Claude}
 
     ports:
       - "6416:6415"
@@ -100,14 +101,6 @@ services:
       - full
       - core
 
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-web-candidate: The Face - UI and API gateway
   # ═══════════════════════════════════════════════════════════════════════════
@@ -126,6 +119,10 @@ services:
       - ./knowledge:/knowledge:ro
       - ./candidates/gaia-web/static:/app/static:ro
 
+    env_file:
+      - path: .env.discord
+        required: false
+
     environment:
       - PYTHONPATH=/app:/app/gaia-common
       - GAIA_SERVICE=web
@@ -136,9 +133,10 @@ services:
       - HOST=0.0.0.0
       - PORT=6414
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - UVICORN_TIMEOUT=900
       # Discord integration (Unified Interface Gateway)
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
-      - ENABLE_DISCORD=${ENABLE_DISCORD:-0}
+      # DISCORD_BOT_TOKEN loaded from .env.discord via env_file above
+      - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
 
     ports:
       - "6417:6414"
@@ -176,6 +174,7 @@ services:
       - ./knowledge:/knowledge:ro
       - ./gaia-models:/models:ro
       - gaia-candidate-sandbox:/sandbox:rw
+      - gaia-candidate-shared:/shared:rw
 
     environment:
       - PYTHONPATH=/app:/app/gaia-common
@@ -275,13 +274,77 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-prime-candidate: The Voice - Standalone vLLM inference server
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-prime-candidate:
+    build:
+      context: ./candidates/gaia-prime
+      dockerfile: Dockerfile
+    image: localhost:5000/gaia-prime-candidate:local
+    container_name: gaia-prime-candidate
+    hostname: gaia-prime-candidate
+    restart: "no"
+
+    volumes:
+      - ./gaia-models:/models:ro
+      - ./gaia-models/lora_adapters:/models/lora_adapters:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_FLASH_ATTN_VERSION=2
+      - TORCH_CUDA_ARCH_LIST=12.0+PTX
+
+    ports:
+      - "7778:7777"
+
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model /models/Claude
+      --host 0.0.0.0
+      --port 7777
+      --gpu-memory-utilization 0.65
+      --max-model-len 8192
+      --max-num-seqs 4
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --enable-lora
+      --max-loras 4
+      --max-lora-rank 64
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+    networks:
+      - gaia-net
+
+    profiles:
+      - full
+      - prime
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 # ═══════════════════════════════════════════════════════════════════════════
-# Networks - Join the LIVE network for hybrid testing
+# Networks - Shared with live stack (Docker reuses if already exists)
 # ═══════════════════════════════════════════════════════════════════════════
 networks:
   gaia-net:
-    external: true
     name: gaia-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Volumes - Separate volumes for candidate isolation

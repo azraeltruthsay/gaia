@@ -5,7 +5,8 @@ matches the shape expected by `ConversationSummarizer.generate_summary(..., pack
 This avoids needing to construct the full dataclass and keeps prompts small.
 """
 from __future__ import annotations
-import os, json
+import os
+import json
 from typing import List, Dict, Any, Optional
 from gaia_core.config import Config as GAIAConfig
 
@@ -86,6 +87,6 @@ def build_packet_snapshot(session_id: str, persona_id: str, original_prompt: str
     if history:
         # collapse last up to 6 messages as a simple recent_history field
         recent = history[-6:]
-        packet['context']['relevant_history_snippet'] = [{'id': str(i), 'role': m.get('role','user'), 'summary': (m.get('content') or '')[:300]} for i, m in enumerate(recent)]
+        packet['context']['relevant_history_snippet'] = [{'id': str(i), 'role': m.get('role','user'), 'summary': (m.get('content') or '')[:2000]} for i, m in enumerate(recent)]
 
     return packet

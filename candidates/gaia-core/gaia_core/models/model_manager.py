@@ -83,32 +83,6 @@ class ModelManager:
                 self._model_pool = None
         return self._model_pool
 
-        from gaia_core.models.model_pool import get_model_pool
-        child_pool = get_model_pool()
-        try:
-            # enable_prime_load may be a shim; ignore if unavailable
-            if child_pool is not None:
-                try:
-                    child_pool.enable_prime_load()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        results = {"ok": True}
-        try:
-            if child_pool is not None:
-                ok = child_pool.load_prime_only(force=force_flag)
-            else:
-                ok = False
-        except TypeError:
-            # older signature may require positional True
-            try:
-                ok = child_pool.load_prime_only(True) if child_pool is not None else False
-            except Exception:
-                ok = False
-        results["loaded"] = bool(ok)
-
     def ensure_prime_loaded(self, force: bool = False, timeout: int = 120) -> Dict[str, Any]:
         """Ensure 'prime' (GPU-backed) model is resident.
 

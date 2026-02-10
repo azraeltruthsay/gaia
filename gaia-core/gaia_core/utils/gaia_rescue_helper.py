@@ -563,7 +563,8 @@ class GAIARescueHelper:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            start = max(1, int(start)); end = min(len(lines), int(end))
+            start = max(1, int(start))
+            end = min(len(lines), int(end))
             snippet = "".join(f"{i+1:04d}: {lines[i]}" for i in range(start - 1, end))
             return {"kind": "span", "path": path, "start": start, "end": end, "content": snippet}
         except Exception as e:
@@ -573,10 +574,11 @@ class GAIARescueHelper:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            idx = next((i for i, l in enumerate(lines) if str(symbol) in l), -1)
+            idx = next((i for i, line in enumerate(lines) if str(symbol) in line), -1)
             if idx < 0:
                 return {"kind": "symbol", "path": path, "symbol": symbol, "error": "not found"}
-            lo = max(0, idx - 5); hi = min(len(lines), idx + 20)
+            lo = max(0, idx - 5)
+            hi = min(len(lines), idx + 20)
             snippet = "".join(f"{i+1:04d}: {lines[i]}" for i in range(lo, hi))
             return {"kind": "symbol", "path": path, "symbol": symbol, "content": snippet}
         except Exception as e:

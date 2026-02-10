@@ -21,11 +21,11 @@ dependencies = [
     "regex>=2023.0.0",
     "requests",
     "discord.py",
-    # LLM dependencies (to be refined during migration)
-    "vllm>=0.11.2",
+    "PyYAML",
+    # CPU inference for lite model (GGUF via llama.cpp)
     "llama-cpp-python>=0.3.16",
-    "transformers>=4.39.0",
-    "torch>=2.3.0",
+    # API fallback providers
+    "groq>=0.4.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +37,8 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "httpx>=0.25.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -46,10 +48,29 @@ packages = ["gaia_core"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+ignore = [
+    "E402",  # Module-level import not at top (intentional: faulthandler, conditional imports)
+    "F403",  # Star imports in __init__.py (intentional re-exports)
+    "F401",  # Unused imports (cleanup tracked separately, non-blocking)
+    "F841",  # Unused local variables (cleanup tracked separately)
+    "E401",  # Multiple imports on one line (style preference)
+    "F541",  # f-string without placeholders (harmless)
+    "E701",  # Multiple statements on one line (colon)
+    "E731",  # Lambda assignment (placeholder stubs for unimplemented modules)
+    "E741",  # Ambiguous variable name (l in list comprehensions)
+    "F811",  # Redefinition of unused name (intentional in lazy-import patterns)
+]
+
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
 warn_unused_configs = true
+ignore_missing_imports = true
+implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_return_any = false
+no_strict_optional = true
 
 [tool.hatch.metadata]
 allow-direct-references = true

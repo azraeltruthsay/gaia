@@ -329,9 +329,11 @@ class VLLMChatModel:
 		stop: Optional[Iterable[str]] = None,
 		**kwargs,
 	):
-		# prompt = self._messages_to_prompt(messages)
-		# Just use the last user message for now
-		prompt = messages[-1]["content"]
+		try:
+			prompt = self._messages_to_prompt(messages)
+		except Exception as e:
+			logger.warning("VLLMChatModel.create_chat_completion: _messages_to_prompt failed (%s), falling back to last message", e)
+			prompt = messages[-1]["content"]
 
 		# Detect long-form content requests for better generation params
 		longform = False

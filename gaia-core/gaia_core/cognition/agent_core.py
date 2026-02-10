@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from gaia_core.memory.semantic_codex import SemanticCodex
+from gaia_core.memory.codex_writer import CodexWriter
 from typing import Generator, Dict, Any, List, Optional
 
 from gaia_core.cognition.external_voice import ExternalVoice
@@ -177,6 +178,10 @@ class AgentCore:
         except Exception:
             # Fallback to the module-level logger
             self.logger = logger
+        
+        # Initialize SemanticCodex and CodexWriter
+        self.semantic_codex = SemanticCodex.instance(self.config)
+        self.codex_writer = CodexWriter(self.config, self.semantic_codex)
 
     def _build_output_routing(self, source: str, destination: str, metadata: dict) -> OutputRouting:
         """Build OutputRouting from source/destination/metadata.
@@ -311,7 +316,7 @@ class AgentCore:
             msg_role = msg.get('role', 'unknown')
             msg_content = msg.get('content', '')
             relevant_history_snippet.append(
-                RelevantHistorySnippet(id=msg_id, role=msg_role, summary=strip_think_tags(msg_content[:100]))
+                RelevantHistorySnippet(id=msg_id, role=msg_role, summary=strip_think_tags(msg_content[:2000]))
             )
         if any(m.get('id') is None for m in history or []):
             self.logger.warning("AgentCore: Missing IDs found in history; temporary auto_ IDs assigned.")
@@ -545,6 +550,7 @@ class AgentCore:
         # Normalize metadata
         _metadata = metadata or {}
         import json
+        import os
         import sys
         from gaia_core.utils.prompt_builder import build_from_packet # Assumes this is updated for v0.3
 
@@ -600,7 +606,6 @@ class AgentCore:
 
         if not selected_model_name:
             # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
-            import os
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
             logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())}")
             if backend_env:
@@ -647,7 +652,6 @@ class AgentCore:
             logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
             logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
             # Try preferred backend first
-            import os
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
             candidates = []
             if backend_env:
@@ -1068,7 +1072,7 @@ class AgentCore:
         logger.info(f"[OBSERVER] Model statuses: {getattr(self.model_pool, 'model_status', {})}")
 
         # Check observer config for explicit model preference
-        observer_config = self.config.constants.get("MODELS", {}).get("observer", {})
+        observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
         observer_enabled = observer_config.get("enabled", False)
         use_gpu_prime_for_observer = observer_config.get("use_gpu_prime", False)
         logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_gpu_prime={use_gpu_prime_for_observer}")
@@ -1226,7 +1230,7 @@ class AgentCore:
                     lite_fallback_acquired = True
                     lite_fallback_used = True
                     lite_fallback_model_name = "lite"
-                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=observer, context={"packet": packet}, session_id=session_id)
+                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                     pieces = []
                     stream_generator = fallback_voice.stream_response()
                     for item in stream_generator:
@@ -1296,24 +1300,27 @@ class AgentCore:
             except Exception:
                 logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
             
-            packet.response.candidate = full_response
+            # Use the routed user-facing response for all persistence.
+            # full_response may be empty if the LLM stream yielded nothing,
+            # but user_facing_response always has content (route_output provides fallbacks).
+            packet.response.candidate = user_facing_response
             packet.response.confidence = 0.93 # Placeholder
-            self.ai_manager.status["last_response"] = full_response
-            self.session_manager.add_message(session_id, "assistant", strip_think_tags(full_response))
+            self.ai_manager.status["last_response"] = user_facing_response
+            self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
 
             if execution_results:
                 process_execution_results(execution_results, self.session_manager, session_id, packet)
 
                 messages = build_from_packet(packet, task_instruction_key="execution_feedback")
-                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=observer, context={"packet": packet}, session_id=session_id)
+                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                 stream_generator = voice.stream_response()
                 concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
                 yield {"type": "token", "value": concluding_response}
                 self.session_manager.add_message(session_id, "assistant", concluding_response)
 
-            log_chat_entry(user_input, full_response, source=source, session_id=session_id, metadata=_metadata)
-            log_chat_entry_structured(user_input, full_response, source=source, session_id=session_id, metadata=_metadata)
-            ts_write({"type":"turn_end","user":user_input,"assistant":full_response}, session_id, source=source, destination_context=_metadata)
+            log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            ts_write({"type":"turn_end","user":user_input,"assistant":user_facing_response}, session_id, source=source, destination_context=_metadata)
             self.session_manager.record_last_activity()
 
             # --- Loop Detection: Record output and check for loops ---
@@ -1805,6 +1812,41 @@ class AgentCore:
                 self.logger.exception("read_file MCP call failed")
                 return f"I encountered an error while reading that file: {exc}"
 
+        # Custom command to trigger documentation
+        document_command_match = re.match(
+            r'GAIA, DOCUMENT "(?P<title>[^"]+)" AS "(?P<symbol>[^"]+)" ABOUT "(?P<content>.+)"',
+            user_input,
+            re.IGNORECASE
+        )
+        if document_command_match:
+            try:
+                title = document_command_match.group("title")
+                symbol = document_command_match.group("symbol").upper().replace(" ", "_") # Normalize symbol
+                content_to_document = document_command_match.group("content")
+                tags = ["user-generated", "documentation", symbol.lower()] # Default tags
+
+                self.logger.info(f"Document command detected: title='{title}', symbol='{symbol}'")
+                
+                # Call the CodexWriter to document the information
+                documented_path = self.codex_writer.document_information(
+                    packet=packet,
+                    info_to_document=content_to_document,
+                    symbol=symbol,
+                    title=title,
+                    tags=tags,
+                    llm_model=None  # Model acquired separately if CodexWriter needs LLM refinement
+                )
+
+                if documented_path:
+                    response_text = f"Acknowledged. I have documented '{title}' (Symbol: {symbol}) to {documented_path}."
+                else:
+                    response_text = f"I encountered an issue while trying to document '{title}' (Symbol: {symbol})."
+
+                return response_text
+            except Exception as e:
+                self.logger.exception(f"Error processing document command: {e}")
+                return f"I encountered an error while trying to document that information: {e}"
+
         # Check if this is a recitation/long-form request that should use fragmentation
         fragmentation_enabled = os.getenv("GAIA_FRAGMENTATION", "true").lower() in ("1", "true", "yes")
 
@@ -2003,11 +2045,12 @@ Here is the complete, authoritative content of {doc_title}:
 USER'S REQUEST: {user_input}
 
 INSTRUCTIONS:
-1. Present this document to the user VERBATIM — reproduce the full text exactly as shown above
-2. You may add a single brief sentence before the document acknowledging their request
-3. Do NOT summarize, paraphrase, abbreviate, or skip any sections
-4. Do NOT fabricate or add content that isn't in the document above
-5. Preserve the original markdown formatting, headings, and structure exactly
+1. Present this document to the user as requested
+2. You may add a brief introduction acknowledging their request
+3. Present the content faithfully - this is YOUR constitution/document, speak it with conviction
+4. You may format it nicely for readability (preserve markdown structure)
+5. If the document is very long, you may summarize sections if appropriate, but prefer completeness
+6. Do NOT fabricate or add content that isn't in the document above
 
 Present {doc_title}:"""
 
@@ -2031,8 +2074,8 @@ Present {doc_title}:"""
             getattr(self.config, 'MAX_ALLOWED_RESPONSE_TOKENS', None) or
             self.config.constants.get("MAX_ALLOWED_RESPONSE_TOKENS", 1000)
         )
-        # Allow generous limit for verbatim document recitation
-        recitation_max_tokens = max(4096, len(doc_content) // 2)
+        # Allow 3x normal limit for document recitation
+        recitation_max_tokens = min(self.config.max_tokens * 3, max_resp_tokens * 3, 4096)
 
         try:
             res = self.model_pool.forward_to_model(

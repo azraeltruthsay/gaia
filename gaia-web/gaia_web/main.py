@@ -32,7 +32,7 @@ except ImportError:
     pass  # gaia_common not available
 
 # Configuration from environment
-CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
+CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
 
@@ -145,7 +145,7 @@ async def process_user_input(user_input: str):
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
-            
+
             completed_packet_dict = response.json()
             completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
@@ -194,7 +194,7 @@ async def output_router(packet: Dict[str, Any]):
 
             success = False
             # Check metadata for is_dm and use_id, as send_to_user is specific
-            if primary_destination.user_id and primary_destination.metadata.get("is_dm"): 
+            if primary_destination.user_id and primary_destination.metadata.get("is_dm"):
                 success = await send_to_user(primary_destination.user_id, content)
             elif primary_destination.channel_id:
                 success = await send_to_channel(primary_destination.channel_id, content, primary_destination.reply_to_message_id)

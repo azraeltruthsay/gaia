@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import json
 import os
 import logging
@@ -21,9 +21,12 @@ class Config:
     MODELS_DIR: str = "/models"
     MODEL_DIR: str = "/models"  # Alias for MODELS_DIR (legacy compatibility)
     KNOWLEDGE_DIR: str = "/knowledge"
+    KNOWLEDGE_CODEX_DIR: str = "/knowledge"
     SYSTEM_REF_DIR: str = "/knowledge/system_reference"
     PERSONAS_DIR: str = "/knowledge/personas"
     LOGS_DIR: str = "/logs"
+    HISTORY_DIR: str = field(default_factory=lambda: os.getenv("HISTORY_DIR", "/shared/history"))
+    LORA_ADAPTERS_DIR: str = "/models/lora_adapters"
     SHARED_DIR: str = field(default_factory=lambda: os.getenv("SHARED_DIR", "/shared"))
     EMBEDDING_MODEL_PATH: Optional[str] = None
     identity_file_path: str = "/knowledge/system_reference/core_identity.json"
@@ -31,6 +34,7 @@ class Config:
     cheat_sheet_path: Path = Path("/knowledge/system_reference/cheat_sheet.json")
     cheat_sheet: dict = field(default_factory=dict)
     CODEX_FILE_EXTS: Tuple[str, ...] = field(default_factory=lambda: (".yaml", ".yml", ".json", ".md"))
+    CODEX_ALLOW_HOT_RELOAD: bool = True
 
     # LLM backend settings
     llm_backend: str = "vllm"
@@ -38,8 +42,12 @@ class Config:
     temperature: float = 0.7
     top_p: float = 0.95
     max_tokens: int = 4096
+    MAX_TOKENS: int = 4096
     max_tokens_lite: int = 16000
     RESPONSE_BUFFER: int = 768
+
+    # Feature flags
+    use_oracle: bool = False
 
     # Tool and primitive settings
     primitives: list[str] = field(default_factory=lambda: ["read", "write", "vector_query", "shell"])

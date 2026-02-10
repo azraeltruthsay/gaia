@@ -75,7 +75,7 @@ class BackgroundProcessor:
 
                     # Initiative prompt check using config-based pathing
                     idle_minutes = self.idle_monitor.get_idle_minutes()
-                    gil_check_and_generate(user_idle_minutes=idle_minutes, config=self.config)
+                    initiative_message = gil_check_and_generate(user_idle_minutes=idle_minutes, config=self.config)
                     if initiative_message and self.conversation_manager:
                         self.conversation_manager.post_ai_message(initiative_message)
 

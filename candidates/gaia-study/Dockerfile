@@ -40,15 +40,42 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 
 # Use candidate versions for SOA-decoupled architecture
+
+
+
 COPY candidates/gaia-common/ /gaia-common/
+
+
+
 COPY candidates/gaia-study/ /app/gaia-study/
+
+
+
+COPY candidates/gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
+
+
+
+
+
+
 
 ENV PYTHONPATH "${PYTHONPATH}:/gaia-common:/app"
 
-RUN pip install -e "/gaia-common[vector]"
-RUN pip install -e /app/gaia-study/
+
+
+
+
+
 
 RUN pip install -e "/gaia-common[vector]"
+
+
+
+RUN pip install -e /app/gaia-study/.[dev]
+
+
+
+
 
 
 

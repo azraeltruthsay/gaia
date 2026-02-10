@@ -4,16 +4,15 @@ GAIA Core Manager
 - Integrates all mature config, persona, and logging features.
 """
 import logging
-import os
 from .primitives import read, vector_query, shell
 from gaia_core.config import Config
 # TODO: [GAIA-REFACTOR] intent_detection.py module not yet migrated.
 # from app.cognition.nlu.intent_detection import detect_intent
 # Only import AgentCore inside functions that actually use it, not at the top level
-from gaia_core.cognition.self_reflection import run_self_reflection  # Model-powered reflection
-
-from gaia_core.behavior.persona_manager import load_persona
-from gaia_core.utils.prompt_builder import build_prompt  # TOUCHPOINT: robust, persona/context aware
+# TODO: [GAIA-REFACTOR] These imports are used in planned pipeline stages
+# from gaia_core.cognition.self_reflection import run_self_reflection
+# from gaia_core.behavior.persona_manager import load_persona
+# from gaia_core.utils.prompt_builder import build_prompt
 # TODO: [GAIA-REFACTOR] stream_bus.py module not yet migrated.
 # from app.utils.stream_bus import publish_stream  # Streaming, observer support
 # TODO: [GAIA-REFACTOR] stream_observer.py module not yet migrated.

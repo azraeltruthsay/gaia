@@ -510,8 +510,8 @@ class StreamObserver:
 
         # Check for leaked meta-content tags
         meta_patterns = [
-            (r'<think(?:ing)?>', "Leaked <think> tag in response"),
-            (r'</think(?:ing)?>', "Leaked </think> tag in response"),
+#            (r'<think(?:ing)?>', "Leaked <think> tag in response"),
+#            (r'</think(?:ing)?>', "Leaked </think> tag in response"),
             (r'<reflection>', "Leaked <reflection> tag in response"),
             (r'<reasoning>', "Leaked <reasoning> tag in response"),
             (r'<internal>', "Leaked <internal> tag in response"),
@@ -544,7 +544,7 @@ class StreamObserver:
             if re.match(pattern, response.strip(), re.IGNORECASE):
                 # Only flag if the response is short (likely incomplete/raw thinking)
                 if len(response) < 200:
-                    logger.info(f"Response may contain raw thinking (starts with internal pattern)")
+                    logger.info("Response may contain raw thinking (starts with internal pattern)")
                     return Interrupt(
                         level="INFO",
                         reason="Response may contain unprocessed internal reasoning",

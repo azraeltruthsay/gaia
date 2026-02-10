@@ -5,7 +5,7 @@
     "?",
     "\n"
   ],
-  "MAX_ALLOWED_RESPONSE_TOKENS": 4096,
+  "MAX_ALLOWED_RESPONSE_TOKENS": 2048,
   "reflection_max_tokens": 2048,
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
@@ -23,7 +23,13 @@
       "path": "/models/Claude",
       "trust_remote_code": true,
       "template": "raw",
-      "type": "vllm"
+      "type": "vllm",
+      "lora_config": {
+        "enabled": true,
+        "adapter_dir": "/models/lora_adapters",
+        "max_loras": 4,
+        "max_lora_rank": 64
+      }
     },
     "lite": {
       "enabled": true,
@@ -48,6 +54,12 @@
       "model": "gpt-4o-mini",
       "provider": "openai",
       "type": "api"
+    },
+    "groq_fallback": {
+      "enabled": true,
+      "model": "llama-3.3-70b-versatile",
+      "type": "groq",
+      "description": "Free Groq API fallback for when GPU unavailable"
     },
     "prime": {
       "enabled": true,
@@ -132,10 +144,6 @@
   ],
   "temperature": 0.7,
   "top_p": 0.95,
-  "repetition_penalty": 1.15,
-  "longform_repetition_penalty": 1.25,
-  "longform_presence_penalty": 0.8,
-  "longform_max_tokens": 4096,
   "INTEGRATIONS": {
     "discord": {
       "enabled": true,
@@ -163,7 +171,7 @@
     "REVIEW_TEMPERATURE": 0.3,
     "CONFIDENCE_THRESHOLD": 0.7,
     "MAX_REINJECTIONS": 3,
-    "ALLOW_WRITE_TOOLS": true,
+    "ALLOW_WRITE_TOOLS": false,
     "ALLOW_EXECUTE_TOOLS": false
   },
   "LOOP_DETECTION_ENABLED": true,

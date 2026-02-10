@@ -10,14 +10,12 @@ import os
 from typing import List, Dict
 
 # [GCP v0.3] Import the new packet structure
-from gaia_common.protocols.cognition_packet import CognitionPacket, DataField, Persona, SystemTask
-from gaia_core.config import Config, get_config
+from gaia_common.protocols.cognition_packet import CognitionPacket
+from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
 from gaia_core.utils.packet_templates import render_gaia_packet_template
 from gaia_core.utils import gaia_rescue_helper
 from gaia_core.utils.world_state import format_world_state_snapshot
-from gaia_core.cognition.packet_utils import upgrade_v2_to_v3_packet
-from gaia_core.cognition.packet_upgrade import upgrade_packet as ensure_packet_fields
 
 logger = logging.getLogger("GAIA.PromptBuilder")
 
@@ -76,13 +74,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
                 continue
             if k == 'immutable_identity':
                 processed_data_field_keys.add(k) # Mark as processed
-                if v: identity_block_lines.append(f"Identity: {v}")
+                if v:
+                    identity_block_lines.append(f"Identity: {v}")
             elif k in ('immutable_identity_intro', 'immutable_identity_excerpt'):
                 processed_data_field_keys.add(k) # Mark as processed
-                if v: identity_block_lines.append(f"Identity Description: {str(v)[:300]}")
+                if v:
+                    identity_block_lines.append(f"Identity Description: {str(v)[:300]}")
             elif k == 'identity_summary' and not compact_mode:
                 processed_data_field_keys.add(k) # Mark as processed
-                if v: identity_info_lines.append(f"INFO • Identity Summary: {str(v)[:300]}")
+                if v:
+                    identity_info_lines.append(f"INFO • Identity Summary: {str(v)[:300]}")
             elif k == 'mcp_capabilities':
                 # Always capture MCP affordances; compact mode only surfaces a one-liner.
                 summary_val = str(v)
@@ -113,9 +114,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
             persona_identity = None
         if not persona_identity:
             # fallback: try to extract from the identity_block_lines
-            for l in identity_block_lines:
-                if l.startswith("Identity:"):
-                    persona_identity = l.split("Identity:", 1)[1].strip()
+            for line in identity_block_lines:
+                if line.startswith("Identity:"):
+                    persona_identity = line.split("Identity:", 1)[1].strip()
                     break
 
         must_directive_content = ""
@@ -350,7 +351,7 @@ DO NOT invent facts, statistics, dates, names, or other specific details. Episte
         logger.debug("PromptBuilder: failed to inject loop recovery context", exc_info=True)
 
     system_prompt = {"role": "system", "content": "\n\n".join(system_content_parts).strip()}
-    logger.info(f"--- FINAL SYSTEM PROMPT ---")
+    logger.info("--- FINAL SYSTEM PROMPT ---")
     logger.info(system_prompt)
     # Log prompt assembly at INFO without content; include metrics at DEBUG.
     try:

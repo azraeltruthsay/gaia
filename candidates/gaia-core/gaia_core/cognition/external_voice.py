@@ -89,8 +89,8 @@ class ExternalVoice:
         self.source = source
         self.observer = observer
 
-        self.logical_stop_punct = self.config.LOGICAL_STOP_PUNCTUATION
-        self.observer_threshold = self.config.OBSERVER_TOKEN_THRESHOLD
+        self.logical_stop_punct = getattr(self.config, 'LOGICAL_STOP_PUNCTUATION', None) or self.config.constants.get("LOGICAL_STOP_PUNCTUATION", [".", "!", "?", "\n"])
+        self.observer_threshold = getattr(self.config, 'OBSERVER_TOKEN_THRESHOLD', None) or self.config.constants.get("OBSERVER_TOKEN_THRESHOLD", 1000)
         # rate-limits for observer calls (seconds) and max calls per stream
         try:
             # Prefer environment overrides for rapid experimentation in rescue runs

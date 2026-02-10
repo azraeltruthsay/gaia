@@ -303,7 +303,7 @@ async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Op
                     try:
                         reply_message = await channel.fetch_message(int(reply_to_message_id))
                         await reply_message.reply(msg)
-                    except discord.NotFound:
+                    except Exception as _discord_err:  # discord.NotFound or other
                         await channel.send(f"Reply to message {reply_to_message_id} failed: message not found.\n{msg}")
                     except Exception as e:
                         logger.warning(f"Failed to reply to message {reply_to_message_id}: {e}. Sending as regular message.")

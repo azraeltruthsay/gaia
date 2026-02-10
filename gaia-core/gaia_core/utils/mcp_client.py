@@ -7,9 +7,8 @@ to the MCP-lite server.
 """
 
 import logging
-import requests
-import json
 import os
+import requests
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -47,7 +46,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
         logger.error(f"[{datetime.utcnow().isoformat()}] call_jsonrpc failed: {e}")
         try:
             logger.error(f"[{datetime.utcnow().isoformat()}] full error response: {r.json()}")
-        except:
+        except Exception:
             pass
         return {"ok": False, "error": str(e)}
 

@@ -3,8 +3,7 @@ from typing import List, Dict, Any
 
 @dataclass
 class GaiaConstants:
-    LOGICAL_STOP_PUNCTUATION: List[str] = field(default_factory=lambda: [".", "!", "?", "
-"])
+    LOGICAL_STOP_PUNCTUATION: List[str] = field(default_factory=lambda: [".", "!", "?", "\n"])
     MAX_ALLOWED_RESPONSE_TOKENS: int = 2048
     RESPONSE_BUFFER: int = 768
 

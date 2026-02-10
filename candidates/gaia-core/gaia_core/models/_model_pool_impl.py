@@ -52,6 +52,12 @@ try:
     VLLMChatModel = _VLLMChatModel
 except Exception:
     VLLMChatModel = None
+VLLMRemoteModel = None
+try:
+    from .vllm_remote_model import VLLMRemoteModel as _VLLMRemoteModel
+    VLLMRemoteModel = _VLLMRemoteModel
+except Exception:
+    VLLMRemoteModel = None
 try:
     from .groq_model import GroqAPIModel as _GroqAPIModel
     GroqAPIModel = _GroqAPIModel
@@ -476,6 +482,22 @@ class ModelPool:
                     "model": observer_hf,
                     "enabled": True,
                 }
+
+            # Remote vLLM inference via PRIME_ENDPOINT — switches gpu_prime to
+            # a remote HTTP backend so gaia-core doesn't need local GPU access.
+            prime_endpoint = os.getenv("PRIME_ENDPOINT")
+            if prime_endpoint:
+                self.config.MODEL_CONFIGS["gpu_prime"] = {
+                    "type": "vllm_remote",
+                    "endpoint": prime_endpoint,
+                    "path": os.getenv("PRIME_MODEL", "/models/Claude"),
+                    "enabled": True,
+                    "lora_config": self.config.constants.get("LORA_CONFIG", {}),
+                }
+                self.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True}
+                if "cpu_prime" in self.config.MODEL_CONFIGS:
+                    self.config.MODEL_CONFIGS["cpu_prime"]["enabled"] = False
+                logger.info("PRIME_ENDPOINT set: gpu_prime -> vllm_remote @ %s", prime_endpoint)
         except Exception:
             logger.exception("Failed to apply GAIA_* model overrides")
 
@@ -625,6 +647,12 @@ class ModelPool:
                 logger.info(f"🔹 Loading vLLM model {model_name}")
                 gpu_info = _get_gpu_free_total_bytes()
                 self.models[model_name] = VLLMChatModel(model_config, self.config, gpu_info=gpu_info)
+            elif model_type == 'vllm_remote':
+                if VLLMRemoteModel is None:
+                    logger.warning("VLLMRemoteModel unavailable (import failed)")
+                    return False
+                logger.info(f"🔹 Loading vLLM remote model {model_name}")
+                self.models[model_name] = VLLMRemoteModel(model_config, self.config)
             elif model_type == 'groq':
                 if GroqAPIModel is None:
                     logger.warning("GroqAPIModel unavailable (groq package not installed)")

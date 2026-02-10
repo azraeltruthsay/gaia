@@ -9,8 +9,7 @@ Handles:
 """
 import logging
 import re
-import sys
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 # [GCP v0.3] Import new packet structure and safety gate
 from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
@@ -71,14 +70,6 @@ def _strip_think_tags_robust(text: str) -> str:
         # Malformed tags
         result = re.sub(rf'</?{tag}[^>]*>', '', result, flags=re.IGNORECASE)
 
-    # Handle Qwen/DeepSeek-style thinking tags: <|start_thinking|>...<|end_thinking|>
-    # These use pipe delimiters instead of angle brackets
-    result = re.sub(r'<\|start_thinking\|>.*?<\|end_thinking\|>\s*', '', result, flags=re.DOTALL)
-    # Unclosed Qwen-style thinking tags
-    result = re.sub(r'<\|start_thinking\|>.*$', '', result, flags=re.DOTALL)
-    # Orphaned/malformed Qwen-style tags
-    result = re.sub(r'<\|(?:start_thinking|end_thinking)\|>', '', result)
-
     # If we're left with just whitespace, return empty
     return result.strip()
 
@@ -118,7 +109,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     if packet.status.state == PacketState.ABORTED:
         logger.warning(f"Routing aborted; packet state is {packet.status.state}. Reason: {packet.status.next_steps}")
         return {
-            "response_to_user": f"My apologies, but I cannot proceed. The current operation was aborted.",
+            "response_to_user": "My apologies, but I cannot proceed. The current operation was aborted.",
             "execution_results": []
         }
 

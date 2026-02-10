@@ -33,7 +33,7 @@ class OrchestratorConfig(BaseSettings):
         description="gaia-core endpoint"
     )
     core_candidate_url: str = Field(
-        default="http://gaia-core-candidate:6416",
+        default="http://gaia-core-candidate:6415",
         description="gaia-core-candidate endpoint"
     )
     web_url: str = Field(
@@ -47,6 +47,24 @@ class OrchestratorConfig(BaseSettings):
     mcp_url: str = Field(
         default="http://gaia-mcp:8765",
         description="gaia-mcp endpoint"
+    )
+    prime_url: str = Field(
+        default="http://gaia-prime:7777",
+        description="gaia-prime inference server endpoint"
+    )
+    prime_candidate_url: str = Field(
+        default="http://gaia-prime-candidate:7777",
+        description="gaia-prime-candidate inference server endpoint"
+    )
+
+    # GPU VRAM quotas (v0.3 Sovereign Sensory Architecture)
+    gpu_prime_vram_quota: float = Field(
+        default=0.65,
+        description="VRAM fraction reserved for gaia-prime"
+    )
+    gpu_audio_vram_quota: float = Field(
+        default=0.35,
+        description="VRAM fraction reserved for gaia-audio"
     )
 
     # Docker settings

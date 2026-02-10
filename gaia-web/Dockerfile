@@ -29,8 +29,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy and install gaia-common and gaia-web in editable mode
 COPY gaia-common/ /app/gaia-common/
 COPY gaia-web/ /app/gaia-web/
+COPY gaia-web/pyproject.toml /app/gaia-web/pyproject.toml
 RUN pip install -e /app/gaia-common/
-RUN pip install -e /app/gaia-web/
+RUN pip install -e /app/gaia-web/.[dev]
 
 # Expose service port
 EXPOSE 6414
@@ -39,7 +40,7 @@ EXPOSE 6414
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:6414/health || exit 1
 
-ENV PYTHONPATH "${PYTHONPATH}:/app:/gaia-common"
+ENV PYTHONPATH "${PYTHONPATH}:/app"
 
 # Run the service
 CMD ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414"]

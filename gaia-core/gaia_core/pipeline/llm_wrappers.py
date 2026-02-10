@@ -1,5 +1,6 @@
 """Thin wrappers that add debug logging around llama-cpp calls."""
-import logging, time
+import logging
+import time
 logger = logging.getLogger("GAIA.LLM")
 
 def safe_generate(llm, *args, **kwargs):

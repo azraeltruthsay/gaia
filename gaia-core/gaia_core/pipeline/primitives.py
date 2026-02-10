@@ -4,7 +4,6 @@ GAIA Primitives (pillar-compliant, robust)
 """
 
 import logging
-import os
 import subprocess
 from pathlib import Path
 # TODO: [GAIA-REFACTOR] vector_indexer.py module not yet migrated.

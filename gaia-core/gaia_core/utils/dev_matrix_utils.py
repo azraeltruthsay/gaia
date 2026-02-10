@@ -8,7 +8,7 @@ import json
 import os
 import difflib
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 from datetime import datetime
 
 DEV_MATRIX_PATH = Path(os.environ.get("DEV_MATRIX_PATH", "app/shared/dev_matrix.json")).resolve()

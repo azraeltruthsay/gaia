@@ -1,0 +1,302 @@
+"""
+Remote vLLM model backend for GAIA.
+
+HTTP client for a standalone vLLM OpenAI-compatible API server (gaia-prime).
+Replaces in-process VLLMChatModel when PRIME_ENDPOINT is set, allowing
+gaia-core to offload GPU inference to a separate container.
+
+Environment:
+    PRIME_ENDPOINT: Base URL of the vLLM server (e.g. http://gaia-prime-candidate:7777)
+    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Claude)
+"""
+
+import logging
+import os
+import time
+from typing import Any, Dict, Generator, List, Optional
+
+import requests
+
+logger = logging.getLogger("GAIA.VLLMRemote")
+
+
+class VLLMRemoteModel:
+    """
+    HTTP client for a remote vLLM OpenAI-compatible API server.
+
+    Provides the same public interface as VLLMChatModel (create_completion,
+    create_chat_completion, shutdown) so it can be used as a drop-in
+    replacement in the model pool.
+    """
+
+    def __init__(self, model_config: dict, global_config=None, **kwargs):
+        # Resolve endpoint: config dict → env var → default
+        self.endpoint = (
+            model_config.get("endpoint")
+            or os.getenv("PRIME_ENDPOINT")
+            or "http://gaia-prime-candidate:7777"
+        )
+        self.endpoint = self.endpoint.rstrip("/")
+
+        # Model name as registered by vLLM (appears in /v1/models)
+        self.model_name = (
+            model_config.get("path")
+            or model_config.get("model")
+            or os.getenv("PRIME_MODEL", "/models/Claude")
+        )
+
+        self.timeout = int(model_config.get("timeout", 120))
+
+        # LoRA support
+        self._lora_config = model_config.get("lora_config") or {}
+        self._active_adapter: Optional[str] = None
+
+        # Stats
+        self._request_count = 0
+        self._total_tokens = 0
+
+        # Session for connection pooling
+        self._session = requests.Session()
+
+        logger.info(
+            "VLLMRemoteModel initialised: endpoint=%s model=%s",
+            self.endpoint,
+            self.model_name,
+        )
+
+    # ── Public interface (matches VLLMChatModel) ─────────────────────────────
+
+    def create_completion(
+        self,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        stop: Optional[List[str]] = None,
+        stream: bool = False,
+        **kwargs,
+    ) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]:
+        """Text completion via POST /v1/completions."""
+        self._request_count += 1
+        payload = {
+            "model": self._resolve_model_field(),
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+        if stop:
+            payload["stop"] = stop
+
+        if stream:
+            return self._stream_completions(payload)
+
+        start = time.time()
+        resp = self._post("/v1/completions", payload)
+        duration = time.time() - start
+
+        text = resp["choices"][0].get("text", "")
+        self._log_usage(resp, duration)
+
+        return {
+            "choices": [{"text": text}],
+        }
+
+    def create_chat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        stream: bool = False,
+        **kwargs,
+    ) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]:
+        """Chat completion via POST /v1/chat/completions."""
+        self._request_count += 1
+        clean_messages = self._sanitize_messages(messages)
+
+        payload = {
+            "model": self._resolve_model_field(),
+            "messages": clean_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+
+        if stream:
+            return self._stream_chat(payload)
+
+        start = time.time()
+        resp = self._post("/v1/chat/completions", payload)
+        duration = time.time() - start
+
+        content = resp["choices"][0]["message"]["content"]
+        self._log_usage(resp, duration)
+
+        return {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                },
+                "finish_reason": resp["choices"][0].get("finish_reason", "stop"),
+            }],
+            "model": self.model_name,
+            "provider": "vllm_remote",
+        }
+
+    # ── LoRA adapter support ─────────────────────────────────────────────────
+
+    def set_active_adapter(self, adapter_name: Optional[str]):
+        """Select a LoRA adapter by name. Pass None to use the base model."""
+        self._active_adapter = adapter_name
+        logger.info("VLLMRemoteModel: active adapter set to %s", adapter_name)
+
+    def create_chat_completion_with_adapter(
+        self,
+        adapter_name: str,
+        messages: List[Dict[str, Any]],
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """One-shot chat completion using a specific LoRA adapter."""
+        prev = self._active_adapter
+        try:
+            self.set_active_adapter(adapter_name)
+            return self.create_chat_completion(messages=messages, **kwargs)
+        finally:
+            self._active_adapter = prev
+
+    # ── Health / lifecycle ───────────────────────────────────────────────────
+
+    def health_check(self) -> bool:
+        """Return True if the remote vLLM server is reachable."""
+        try:
+            r = self._session.get(
+                f"{self.endpoint}/health", timeout=10
+            )
+            return r.status_code == 200
+        except Exception as exc:
+            logger.warning("VLLMRemoteModel health_check failed: %s", exc)
+            return False
+
+    def shutdown(self):
+        """No-op — server lifecycle is managed externally (Docker)."""
+        try:
+            self._session.close()
+        except Exception:
+            pass
+
+    # ── Internals ────────────────────────────────────────────────────────────
+
+    def _resolve_model_field(self) -> str:
+        """Return the model field for the request.
+
+        When a LoRA adapter is active, vLLM expects the adapter name in the
+        ``model`` field of the request payload.
+        """
+        if self._active_adapter:
+            return self._active_adapter
+        return self.model_name
+
+    def _post(self, path: str, payload: dict) -> dict:
+        url = f"{self.endpoint}{path}"
+        try:
+            r = self._session.post(url, json=payload, timeout=self.timeout)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.ConnectionError as exc:
+            raise RuntimeError(
+                f"Cannot reach vLLM server at {url}. Is gaia-prime running?"
+            ) from exc
+        except requests.exceptions.HTTPError as exc:
+            logger.error("vLLM HTTP error %s: %s", r.status_code, r.text[:500])
+            raise RuntimeError(f"vLLM request failed ({r.status_code})") from exc
+
+    def _stream_completions(self, payload: dict) -> Generator[Dict[str, Any], None, None]:
+        payload["stream"] = True
+        url = f"{self.endpoint}/v1/completions"
+        with self._session.post(url, json=payload, timeout=self.timeout, stream=True) as r:
+            r.raise_for_status()
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data: "):
+                    continue
+                data = line[len("data: "):]
+                if data.strip() == "[DONE]":
+                    break
+                import json
+                chunk = json.loads(data)
+                text = chunk["choices"][0].get("text", "")
+                if text:
+                    yield {"choices": [{"text": text}]}
+
+    def _stream_chat(self, payload: dict) -> Generator[Dict[str, Any], None, None]:
+        payload["stream"] = True
+        url = f"{self.endpoint}/v1/chat/completions"
+        content_buffer: list[str] = []
+        with self._session.post(url, json=payload, timeout=self.timeout, stream=True) as r:
+            r.raise_for_status()
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data: "):
+                    continue
+                data = line[len("data: "):]
+                if data.strip() == "[DONE]":
+                    break
+                import json
+                chunk = json.loads(data)
+                delta = chunk["choices"][0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    content_buffer.append(content)
+                    yield {
+                        "choices": [{
+                            "delta": {"content": content},
+                            "finish_reason": None,
+                        }]
+                    }
+
+        full_content = "".join(content_buffer)
+        yield {
+            "choices": [{
+                "message": {"role": "assistant", "content": full_content},
+                "finish_reason": "stop",
+            }],
+            "provider": "vllm_remote",
+        }
+
+    @staticmethod
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Normalise messages for the OpenAI-compatible API."""
+        clean = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role not in ("system", "user", "assistant"):
+                role = "user"
+            if content is None:
+                content = ""
+            elif not isinstance(content, str):
+                content = str(content)
+            if not content.strip() and role != "system":
+                continue
+            clean.append({"role": role, "content": content})
+        if not any(m["role"] == "user" for m in clean):
+            clean.append({"role": "user", "content": "(continue)"})
+        return clean
+
+    def _log_usage(self, resp: dict, duration: float):
+        try:
+            usage = resp.get("usage", {})
+            total = usage.get("total_tokens", 0)
+            self._total_tokens += total
+            logger.info(
+                "VLLMRemote [%s] - Prompt: %s, Completion: %s, Total: %s, "
+                "Duration: %.2fs, Session total: %s tokens",
+                self.model_name,
+                usage.get("prompt_tokens", "?"),
+                usage.get("completion_tokens", "?"),
+                total,
+                duration,
+                self._total_tokens,
+            )
+        except Exception as e:
+            logger.debug("Could not log vLLM remote usage: %s", e)

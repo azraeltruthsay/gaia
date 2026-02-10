@@ -34,8 +34,6 @@ typing-inspection==0.4.2
 urllib3==2.6.3
 uvicorn==0.40.0
 yarl==1.22.0
-vllm>=0.11.2
+numpy>=1.24.0
+tiktoken>=0.5.0
 llama-cpp-python>=0.3.16
-transformers>=4.30.0
-torch>=2.3.0
-sentence-transformers>=2.2.0

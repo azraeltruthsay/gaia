@@ -29,6 +29,60 @@ class UTCFormatter(logging.Formatter):
         return dt.isoformat()
 
 
+class HealthCheckFilter(logging.Filter):
+    """
+    Filter that suppresses health check access log spam.
+
+    Uvicorn logs every HTTP request at INFO level, including repeated
+    /health endpoint calls. This filter drops those log records to keep
+    logs clean while preserving all other access logs.
+    """
+
+    def __init__(self, endpoints: Optional[List[str]] = None):
+        """
+        Args:
+            endpoints: List of endpoint paths to filter out.
+                       Defaults to ["/health", "/healthz", "/ready", "/readiness", "/live", "/liveness"].
+        """
+        super().__init__()
+        self.endpoints = endpoints or [
+            "/health",
+            "/healthz",
+            "/ready",
+            "/readiness",
+            "/live",
+            "/liveness",
+        ]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check if this is a uvicorn access log for a health endpoint
+        message = record.getMessage()
+        for endpoint in self.endpoints:
+            # Uvicorn access log format: '127.0.0.1:port - "GET /health HTTP/1.1" 200 OK'
+            if f'"{endpoint} ' in message or f'" {endpoint} ' in message or f'GET {endpoint} ' in message:
+                return False
+        return True
+
+
+def install_health_check_filter(endpoints: Optional[List[str]] = None) -> None:
+    """
+    Install the health check filter on uvicorn's access logger.
+
+    Call this at application startup to suppress health check log spam.
+
+    Args:
+        endpoints: Optional list of endpoints to filter. Uses defaults if not provided.
+    """
+    health_filter = HealthCheckFilter(endpoints)
+
+    # Apply to uvicorn's access logger
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.addFilter(health_filter)
+
+    # Also apply to root logger in case access logs go there
+    logging.getLogger().addFilter(health_filter)
+
+
 def setup_logging(
     log_dir: Optional[str] = None,
     level: int = logging.INFO,
@@ -106,4 +160,4 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-__all__ = ["setup_logging", "get_logger", "UTCFormatter"]
+__all__ = ["setup_logging", "get_logger", "UTCFormatter", "HealthCheckFilter", "install_health_check_filter"]

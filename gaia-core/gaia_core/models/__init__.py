@@ -5,6 +5,7 @@ This package provides:
 - model_pool: Unified model pool interface (Prime/Lite/Embedding)
 - model_manager: Model lifecycle management
 - vllm_model: vLLM backend for GPU inference
+- vllm_remote_model: Remote vLLM backend over HTTP (gaia-prime)
 - hf_model: HuggingFace Transformers backend
 - gemini_model: Google Gemini API backend
 - oracle_model: External API oracle backend
@@ -20,6 +21,7 @@ __all__ = [
     "model_pool",
     "model_manager",
     "vllm_model",
+    "vllm_remote_model",
     "hf_model",
     "gemini_model",
     "oracle_model",

@@ -1,4 +1,5 @@
-import faulthandler, os
+import faulthandler
+import os
 import multiprocessing
 import sys
 
@@ -81,7 +82,6 @@ import importlib
 import logging
 import subprocess
 import time
-import sys
 import threading
 from datetime import datetime
 from gaia_core.cognition.self_review_worker import run_review_with_prompt
@@ -101,7 +101,8 @@ from gaia_core.ethics.ethical_sentinel import EthicalSentinel
 from gaia_core.utils import gaia_rescue_helper as helper
 from gaia_core.memory.session_manager import SessionManager
 from gaia_core.models.model_manager import get_manager
-import json, logging as _logging
+import json
+import logging as _logging
 _startup_logger = _logging.getLogger("GAIA.Rescue.startup")
 # Immediate startup diagnostic: optionally attempt to load critical models.
 #
@@ -137,8 +138,6 @@ from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
 #     get_base_model_name,
 # )
 from gaia_core.utils import mcp_client
-import json
-
 from gaia_core.memory.semantic_codex import SemanticCodex
 faulthandler.enable()  # dumps C‑level traceback on seg‑fault
 
@@ -646,7 +645,7 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str) -> None:
         except (KeyboardInterrupt, EOFError):
             print("\n👋 Exiting chat mode.")
             break
-        except Exception:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover
             logger.exception("Chat loop error: %s", exc)
             print(f"\n❌ Error: {exc}")
 
@@ -689,7 +688,7 @@ def start_discord_listener(ai: MinimalAIManager = None, session_id_prefix: str =
         if ai is None:
             ai = MinimalAIManager()
 
-        agent_core = AgentCore(ai, ethical_sentinel=ai.ethical_sentinel)
+        AgentCore(ai, ethical_sentinel=ai.ethical_sentinel)  # registers singleton
 
         # Create Discord connector
         config = DiscordConfig.from_env()
@@ -1336,7 +1335,7 @@ def main():
         expiry = None
         if isinstance(result, (list, tuple)):
             if len(result) >= 2:
-                approval_id, diff = result[0], result[1]
+                approval_id, _diff = result[0], result[1]
             if len(result) >= 3:
                 proposal = result[2]
             if len(result) >= 4:
@@ -1345,7 +1344,7 @@ def main():
                 expiry = result[4]
         elif isinstance(result, dict):
             approval_id = result.get("action_id")
-            diff = result.get("diff") or result.get("proposal")
+            _diff = result.get("diff") or result.get("proposal")  # noqa: F841
             proposal = result.get("proposal")
             created_at = result.get("created_at")
             expiry = result.get("expiry")

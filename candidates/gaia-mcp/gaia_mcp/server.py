@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 from gaia_common.config import Config
 from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
+from gaia_common.utils.safe_execution import run_shell_safe
 from gaia_common.utils.tools_registry import TOOLS
 from gaia_common.utils.vector_indexer import VectorIndexer
 from gaia_common.utils.world_state import world_state_detail
@@ -330,6 +331,8 @@ def _read_file_impl(params: dict):
     except Exception:
         text = data.decode("latin-1", errors="replace")
     return {"ok": True, "path": str(p), "bytes": len(data), "content": text}
+
+VECTOR_INDEX_PATH = Path("/knowledge/vector_store/index.json")
 
 def _memory_status_impl(params: dict):
     """Summarize vector index status."""

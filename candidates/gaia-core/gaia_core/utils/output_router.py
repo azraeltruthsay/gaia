@@ -9,8 +9,7 @@ Handles:
 """
 import logging
 import re
-import sys
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 # [GCP v0.3] Import new packet structure and safety gate
 from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
@@ -110,7 +109,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     if packet.status.state == PacketState.ABORTED:
         logger.warning(f"Routing aborted; packet state is {packet.status.state}. Reason: {packet.status.next_steps}")
         return {
-            "response_to_user": f"My apologies, but I cannot proceed. The current operation was aborted.",
+            "response_to_user": "My apologies, but I cannot proceed. The current operation was aborted.",
             "execution_results": []
         }
 
