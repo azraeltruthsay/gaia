@@ -34,7 +34,7 @@ _CANDIDATES = os.path.dirname(_CORE_ROOT)            # candidates/
 sys.path.insert(0, _CORE_ROOT)
 sys.path.insert(0, os.path.join(_CANDIDATES, "gaia-common"))
 
-from gaia_core.cognition.cognition_packet import (
+from gaia_common.protocols.cognition_packet import (
     CognitionPacket,
     Header, Persona, PersonaRole, Routing, TargetEngine, Model,
     Intent, SystemTask,

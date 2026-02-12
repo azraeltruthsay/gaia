@@ -119,7 +119,6 @@ class OutputRouting:
     suppress_echo: bool = False                          # Don't echo to origin
     addressed_to_gaia: bool = True                       # Was GAIA explicitly addressed?
     source_destination: Optional[OutputDestination] = None  # Where the input came from
-    status_flags: List[str] = field(default_factory=list) # New field
 
 @dataclass_json
 @dataclass
@@ -400,6 +399,35 @@ class Governance:
     audit: Audit = field(default_factory=Audit)
     privacy: Privacy = field(default_factory=Privacy)
 
+# --- Loop Detection State ---
+@dataclass_json
+@dataclass
+class LoopAttempt:
+    """Record of a previous loop recovery attempt."""
+    approach_summary: str
+    failed_at: str
+
+@dataclass_json
+@dataclass
+class LoopState:
+    """Tracks loop detection and recovery state within a cognition packet.
+
+    Captures information about detected loops for context preservation
+    across resets and for injection into recovery prompts.
+    """
+    detected_at: Optional[str] = None
+    loop_type: Optional[str] = None
+    pattern: Optional[str] = None
+    pattern_hash: Optional[str] = None
+    reset_count: int = 0
+    confidence: float = 0.0
+    previous_attempts: List[LoopAttempt] = field(default_factory=list)
+    recovery_context: Optional[str] = None
+    triggered_by: List[str] = field(default_factory=list)
+    in_recovery: bool = False
+    warned: bool = False
+    override_active: bool = False
+
 # --- Council & Metrics & Status ---
 @dataclass_json
 @dataclass
@@ -441,6 +469,7 @@ class Metrics:
     cost_estimate: Optional[float] = None
     errors: List[str] = field(default_factory=list)
     resources: Optional[SystemResources] = None
+    semantic_probe: Optional[Dict[str, Any]] = None
 
 
 @dataclass_json
@@ -468,6 +497,7 @@ class CognitionPacket:
     schema_id: Optional[str] = None
     council: Optional[Council] = None
     tool_routing: Optional[ToolRoutingState] = None  # GCP Tool Routing System state
+    loop_state: Optional[LoopState] = None            # Loop detection and recovery state
 
     def to_json(self, **kwargs) -> str:
         """Serializes the packet to a JSON string with sorted keys for stability."""
@@ -513,6 +543,11 @@ class CognitionPacket:
             return obj
 
         return _normalize(self.to_dict())
+
+    def validate(self, schema: Dict):
+        """Validates the packet against the formal JSON schema."""
+        from jsonschema import validate
+        validate(instance=self.to_dict(), schema=schema)
 
     def check_token_budget(self) -> bool:
         """Checks if projected tokens are within the model's response buffer."""
@@ -579,4 +614,7 @@ __all__ = [
     "SystemResources",
     "Metrics",
     "Status",
+    # Loop Detection
+    "LoopAttempt",
+    "LoopState",
 ]

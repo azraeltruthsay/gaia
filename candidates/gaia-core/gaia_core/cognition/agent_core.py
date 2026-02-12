@@ -1754,7 +1754,7 @@ class AgentCore:
 
                     if loop_result and loop_result.is_loop:
                         # Update packet with loop state
-                        from gaia_core.cognition.cognition_packet import LoopState, LoopAttempt
+                        from gaia_common.protocols.cognition_packet import LoopState, LoopAttempt
                         packet.loop_state = LoopState(
                             detected_at=loop_result.evidence.get("detected_at", ""),
                             loop_type=loop_result.primary_category.value,

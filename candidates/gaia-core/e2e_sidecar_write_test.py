@@ -43,7 +43,7 @@ def main() -> int:
     print("\n--- Imports ---")
     try:
         from gaia_core.utils import mcp_client
-        from gaia_core.cognition.cognition_packet import SidecarAction
+        from gaia_common.protocols.cognition_packet import SidecarAction
         from gaia_core.config import Config
         check("Imports", True)
     except Exception as e:

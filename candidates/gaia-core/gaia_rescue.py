@@ -93,7 +93,7 @@ from gaia_core.behavior.persona_manager import PersonaManager
 from gaia_core.cognition.agent_core import AgentCore
 from gaia_core.utils.output_router import _strip_think_tags_robust as strip_think_tags
 from gaia_core.cognition import topic_manager
-from gaia_core.cognition.cognition_packet import CognitionPacket
+from gaia_common.protocols.cognition_packet import CognitionPacket
 from gaia_core.config import Config
 from gaia_common.utils.logging_setup import setup_logging
 from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian

@@ -63,6 +63,9 @@ from .cognition_packet import (
     SystemResources,
     Metrics,
     Status,
+    # Loop Detection
+    LoopAttempt,
+    LoopState,
 )
 
 __all__ = [
@@ -122,4 +125,7 @@ __all__ = [
     "SystemResources",
     "Metrics",
     "Status",
+    # Loop Detection
+    "LoopAttempt",
+    "LoopState",
 ]
