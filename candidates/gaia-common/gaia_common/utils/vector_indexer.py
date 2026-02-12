@@ -108,9 +108,13 @@ def _get_config():
             from gaia_core.config import Config as _Config
             Config = _Config
         except ImportError:
-            # Fallback for standalone use
-            class Config:
-                pass
+            try:
+                from gaia_common.config import Config as _Config
+                Config = _Config
+            except ImportError:
+                # Fallback for standalone use
+                class Config:
+                    pass
     return Config()
 
 

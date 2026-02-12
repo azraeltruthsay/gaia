@@ -97,3 +97,139 @@ All mirrored to `candidates/` counterparts.
 3. **EXECUTE path**: If LLM emits `EXECUTE: write_file {"path":..., "content":...}`, verify the safety gate allows non-sensitive tools and routes sensitive ones to approval
 4. **Regression**: Ask GAIA a normal question (no tools) — should work unchanged
 5. **Safety**: Confirm `EXECUTE: run_shell rm -rf /` still gets blocked (sensitive tool → approval required)
+
+---
+
+# Dev Journal Entry: 2026-02-10 — Pre-Cognition Semantic Probe (Concept)
+
+**Date:** 2026-02-10 (evening)
+**Author:** Azrael + Claude Code (Opus 4.6) via Happy
+**Status:** Design complete, implementation pending
+
+## Origin
+
+Azrael's observation: for D&D lore, GAIA should naturally vector-lookup any odd words or phrases from the prompt *before* deciding what to do. If "Rogue's End" is in the vector store but not in the hardcoded keyword list, GAIA currently misses it. The insight: **this concept works for everything, not just D&D.**
+
+## Problem Statement
+
+GAIA's current pipeline has a sequencing problem:
+
+1. **Persona/KB selection** happens via keyword matching (`PERSONA_KEYWORDS` dict)
+2. **Intent detection** runs without knowledge of what's in the vector store
+3. **RAG retrieval** only fires *if* step 1 already identified a knowledge base
+
+This means:
+- New entities added to the vector store (via ingestion) aren't discoverable unless someone also adds them to the keyword list
+- Intent detection can't factor in domain context ("this mentions 3 D&D entities" is a strong signal)
+- The system is brittle — keyword lists must be maintained manually
+
+## Proposed Solution: Semantic Probe
+
+A new pre-cognition step that runs **before** persona selection and intent detection:
+
+1. **Extract interesting phrases** from user input (capitalized sequences, quoted strings, rare words) — pure regex, no model call, < 5ms
+2. **Probe all vector collections** with extracted phrases — batch embed via MiniLM, cosine similarity search, < 100ms total
+3. **Inject results** into the cognition packet as `semantic_probe_result` DataField
+4. **Downstream systems** (persona selection, intent detection, RAG, prompt builder) consume probe results as enrichment
+
+### Key Design Decisions
+
+- **Probe runs on every turn** (with short-circuit for trivial inputs like "exit", "help")
+- **All collections are probed**, not just the currently-active one — the probe *discovers* relevance
+- **Phrase extraction is heuristic, not model-based** — must be fast enough to not add perceptible latency
+- **Probe is additive** — it enriches context but doesn't override explicit user intent
+- **Similarity threshold of 0.40** — below this, hits are noise
+
+### What This Unlocks
+
+1. **Self-maintaining domain routing** — as documents are ingested, they become discoverable automatically
+2. **Cross-domain awareness** — a message that references both D&D lore and system config gets context from both
+3. **Intent enrichment** — "user references 3 D&D entities" is a strong signal for intent classification
+4. **RAG dedup** — probe hits can seed the RAG step, avoiding redundant queries
+
+## Architectural Fit
+
+This slots in cleanly because:
+- `VectorIndexer` already supports multi-collection querying (singleton per KB)
+- `DataField` injection is the standard packet enrichment pattern
+- `prompt_builder.py` already iterates data_fields and formats them
+- The probe's output format matches the existing `retrieved_documents` pattern
+
+## Implementation Plan
+
+See detailed plan: `/gaia/GAIA_Project/knowledge/Dev_Notebook/2026-02-10_semantic_probe_plan.md`
+
+**Phases:**
+1. Core probe engine (`semantic_probe.py`) — phrase extraction + multi-collection search
+2. Packet integration — wire into `agent_core.run_turn()`, add DataField
+3. Persona & intent enhancement — use probe results to inform routing
+4. RAG dedup — avoid re-querying what the probe already found
+5. Observability — logging, metrics, threshold tuning
+
+## Response Header Feature
+
+Also added in this session: a status header prepended to user-facing responses showing model name, packet state, and observer activity. Format:
+
+```
+[Model: Thinker (GPU) | State: processing | Observer: streaming]
+```
+
+Implemented in `agent_core.py` via `_build_response_header()` method, injected at both the slim-prompt and normal response yield points. Header is yielded but not persisted to session history (doesn't pollute context).
+
+## Implementation Progress
+
+### Phase 1: Core Probe Engine (Complete)
+- **Created:** `candidates/gaia-core/gaia_core/cognition/semantic_probe.py` (~340 lines)
+  - `extract_candidate_phrases()` — regex/heuristic phrase extraction (quoted strings, proper nouns, D&D notation, rare words)
+  - `ProbeHit`, `SemanticProbeResult`, `SessionProbeCache` — data structures
+  - `probe_collections()` — multi-collection vector search with session caching
+  - `run_semantic_probe()` — top-level orchestrator with short-circuit rules
+  - Tested: 14 diverse inputs, all extracting correctly
+
+### Phase 2: Packet Integration (Complete)
+- **Modified:** `candidates/gaia-core/gaia_core/behavior/persona_switcher.py`
+  - Added `get_persona_for_knowledge_base(kb_name)` — reverse lookup (KB → persona)
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/agent_core.py`
+  - Probe runs before persona selection in `run_turn()` (~line 635)
+  - Probe-driven persona/KB selection with keyword fallback (~line 668)
+  - Probe result injected as `semantic_probe_result` DataField (~line 852)
+  - Thoughtstream event logged for probe results
+- **Modified:** `candidates/gaia-core/gaia_core/utils/prompt_builder.py`
+  - Extracts `semantic_probe_result` DataField and formats as tier 6.5
+  - Primary + supplemental collection hierarchy in prompt
+
+### Phase 3: Intent Enrichment (Complete)
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/nlu/intent_detection.py`
+  - Added `probe_context` parameter to `detect_intent()` and `model_intent_detection()`
+  - Probe context injected as a `Context:` line in the LLM intent prompt
+  - Example: `Context: User references dnd_campaign entities (Rogue's End, Tower Faction)`
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/agent_core.py`
+  - Formats probe hits into a short context string before calling `detect_intent()`
+  - Lists primary collection and top matched entity names
+
+### Phase 4: RAG Dedup (Complete)
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/agent_core.py`
+  - When probe found >= 2 hits from the same collection RAG would query, probe chunks are converted to `retrieved_documents` format and injected directly — the MCP `embedding_query` call is skipped
+  - Deduplicates by filename to avoid repeat chunks from the same source doc
+  - When probe found < 2 hits (or none from that collection), RAG runs as normal
+  - Tags seed docs with `"source": "semantic_probe"` for observability
+
+### Phase 5: Observability (Complete)
+- **`semantic_probe.py` — `to_metrics_dict()`:** Compact metrics summary on every `SemanticProbeResult` — includes phrases extracted/matched, similarity stats (avg/max/min), timing, cache hits, threshold used
+- **`semantic_probe.py` — `ProbeSessionStats`:** Cumulative per-session tracker recording total probes, hit rate, avg probe time, cache utilization, collections seen. Logs a summary every 10 probes
+- **`semantic_probe.py` — `get_session_probe_stats()`:** Public accessor for session stats (used by agent_core)
+- **`semantic_probe.py` — Config-driven thresholds:** All constants (`SIMILARITY_THRESHOLD`, `_MAX_PHRASES`, `_MIN_PHRASE_LEN`, `_MIN_WORDS`, `_CACHE_MAX_AGE`, `top_k_per_phrase`) now read from `SEMANTIC_PROBE` section of `gaia_constants.json` with hardcoded fallbacks
+- **`cognition_packet.py` — `Metrics.semantic_probe`:** New optional `Dict[str, Any]` field on the `Metrics` dataclass, populated with `to_metrics_dict()` output
+- **`agent_core.py` — Enhanced thoughtstream events:** `semantic_probe` event now includes full `metrics` dict and per-hit details (phrase, collection, similarity, filename). Both hit and no-hit cases emit an event. `turn_end` event includes cumulative `probe_session_stats`
+- **`gaia_constants.json` — `SEMANTIC_PROBE` config:** New config section with all tunable thresholds (`similarity_threshold`, `max_phrases`, `min_phrase_len`, `min_words_to_probe`, `cache_max_age_turns`, `top_k_per_phrase`)
+
+## Files Created/Modified This Session
+
+- **Created:** `knowledge/Dev_Notebook/2026-02-10_semantic_probe_plan.md` — full design doc
+- **Created:** `candidates/gaia-core/gaia_core/cognition/semantic_probe.py` — probe engine
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/agent_core.py` — response header + probe wiring + observability
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/cognition_packet.py` — `Metrics.semantic_probe` field
+- **Modified:** `candidates/gaia-core/gaia_core/behavior/persona_switcher.py` — reverse KB→persona lookup
+- **Modified:** `candidates/gaia-core/gaia_core/utils/prompt_builder.py` — probe result formatting
+- **Modified:** `candidates/gaia-core/gaia_core/cognition/nlu/intent_detection.py` — probe context in intent prompt
+- **Modified:** `candidates/gaia-common/gaia_common/constants/gaia_constants.json` — `SEMANTIC_PROBE` config section

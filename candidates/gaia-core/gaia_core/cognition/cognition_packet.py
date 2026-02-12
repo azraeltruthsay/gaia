@@ -470,6 +470,7 @@ class Metrics:
     cost_estimate: Optional[float] = None
     errors: List[str] = field(default_factory=list)
     resources: Optional[SystemResources] = None
+    semantic_probe: Optional[Dict[str, Any]] = None
 
 
 @dataclass_json

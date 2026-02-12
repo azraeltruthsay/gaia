@@ -68,6 +68,7 @@ services:
       # Service endpoints - configurable for injection vs parallel modes
       # Default: talk to candidates. Override with live hostnames for injection.
       - MCP_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
+      - MCP_LITE_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       - STUDY_ENDPOINT=${CANDIDATE_STUDY_ENDPOINT:-http://gaia-study-candidate:8766}
       # CPU-only mode — GPU inference offloaded to gaia-prime-candidate
       - GAIA_BACKEND=${GAIA_CANDIDATE_BACKEND:-gpu_prime}
@@ -171,7 +172,7 @@ services:
     volumes:
       - ./candidates/gaia-mcp:/app:rw
       - ./candidates/gaia-common:/app/gaia-common:ro
-      - ./knowledge:/knowledge:ro
+      - ./knowledge:/knowledge:rw
       - ./gaia-models:/models:ro
       - gaia-candidate-sandbox:/sandbox:rw
       - gaia-candidate-shared:/shared:rw
@@ -275,6 +276,62 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-orchestrator-candidate: The Conductor - GPU & container coordination
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-orchestrator-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-orchestrator/Dockerfile
+    image: localhost:5000/gaia-orchestrator-candidate:local
+    container_name: gaia-orchestrator-candidate
+    hostname: gaia-orchestrator-candidate
+    restart: "no"
+
+    volumes:
+      - ./candidates/gaia-orchestrator:/app:rw
+      - ./candidates/gaia-common:/app/gaia-common:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - .:/gaia/GAIA_Project:ro
+      - gaia-candidate-shared:/shared:rw
+
+    environment:
+      - PYTHONPATH=/app:/app/gaia-common
+      - GAIA_SERVICE=orchestrator
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Service settings
+      - ORCHESTRATOR_HOST=0.0.0.0
+      - ORCHESTRATOR_PORT=6410
+      - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
+      # Compose file references (inside container)
+      - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
+      - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
+      # Service endpoints - defaults point at candidates for full parallel mode
+      - ORCHESTRATOR_CORE_URL=${CANDIDATE_CORE_ENDPOINT:-http://gaia-core-candidate:6415}
+      - ORCHESTRATOR_WEB_URL=${CANDIDATE_WEB_ENDPOINT:-http://gaia-web-candidate:6414}
+      - ORCHESTRATOR_STUDY_URL=${CANDIDATE_STUDY_ENDPOINT:-http://gaia-study-candidate:8766}
+      - ORCHESTRATOR_MCP_URL=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765}
+      - ORCHESTRATOR_PRIME_URL=${CANDIDATE_PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "6411:6410"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6410/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command: ["python", "-m", "uvicorn", "gaia_orchestrator.main:app", "--host", "0.0.0.0", "--port", "6410"]
+
+    networks:
+      - gaia-net
+
+    profiles:
+      - full
+      - orchestrator
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # gaia-prime-candidate: The Voice - Standalone vLLM inference server
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime-candidate:
@@ -287,13 +344,15 @@ services:
     restart: "no"
 
     volumes:
-      - ./gaia-models:/models:ro
-      - ./gaia-models/lora_adapters:/models/lora_adapters:ro
+      - /mnt/gaia_warm_pool/Claude:/models/Claude:ro
+      - /mnt/gaia_warm_pool/lora_adapters:/models/lora_adapters:ro
 
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_FLASH_ATTN_VERSION=2
       - TORCH_CUDA_ARCH_LIST=12.0+PTX
+      # Required for vLLM sleep mode (/sleep and /wake_up endpoints)
+      - VLLM_SERVER_DEV_MODE=1
 
     ports:
       - "7778:7777"
@@ -303,7 +362,7 @@ services:
       --model /models/Claude
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.65
+      --gpu-memory-utilization 0.70
       --max-model-len 8192
       --max-num-seqs 4
       --trust-remote-code
@@ -312,13 +371,18 @@ services:
       --enable-lora
       --max-loras 4
       --max-lora-rank 64
+      --enable-sleep-mode
+      --enable-prefix-caching
+      --kv-offloading-backend native
+      --kv-offloading-size 8
+      --disable-hybrid-kv-cache-manager
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
-      interval: 30s
+      interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      start_period: 50s
 
     networks:
       - gaia-net

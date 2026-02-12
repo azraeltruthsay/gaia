@@ -40,6 +40,27 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.utcnow().isoformat()}
     try:
         r = requests.post(ep, json=payload, timeout=timeout)
+        if r.status_code == 403:
+            # Sensitive tool — route through approval flow with auto-pending
+            logger.info(f"call_jsonrpc: '{method}' requires approval (403). Requesting auto-approval.")
+            approval_result = request_approval_via_mcp(
+                method=method,
+                params={**(params or {}), "_allow_pending": True}
+            )
+            if approval_result.get("ok"):
+                # Auto-approved (MCP_BYPASS=true) — result is in the response
+                return {"ok": True, "response": approval_result.get("result", approval_result)}
+            elif approval_result.get("action_id"):
+                # Pending approval — return info so caller can handle it
+                return {
+                    "ok": False,
+                    "pending_approval": True,
+                    "action_id": approval_result.get("action_id"),
+                    "challenge": approval_result.get("challenge"),
+                    "error": f"'{method}' requires approval. Challenge: {approval_result.get('challenge')}"
+                }
+            else:
+                return {"ok": False, "error": f"Approval request failed: {approval_result.get('error', 'unknown')}"}
         r.raise_for_status()
         return {"ok": True, "response": r.json()}
     except Exception as e:

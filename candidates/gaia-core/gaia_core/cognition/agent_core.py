@@ -28,9 +28,12 @@ _config = get_config()
 constants = getattr(_config, 'constants', {})
 from gaia_common.utils.thoughtstream import write as ts_write
 # Persona switcher for dynamic persona/knowledge-base selection
-from gaia_core.behavior.persona_switcher import get_persona_for_request
+from gaia_core.behavior.persona_switcher import get_persona_for_request, get_persona_for_knowledge_base
+# Pre-cognition semantic probe (vector lookup before intent detection)
+from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_probe_stats
 from gaia_core.cognition.cognitive_dispatcher import process_execution_results
 from gaia_core.cognition.knowledge_enhancer import enhance_packet
+from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
@@ -629,8 +632,64 @@ class AgentCore:
             except Exception:
                 logger.debug("Failed to get loop recovery context", exc_info=True)
 
-        # Determine persona and knowledge base for this turn
-        persona_name, knowledge_base_name = get_persona_for_request(user_input)
+        # --- Semantic Probe: pre-cognition vector lookup ---
+        # Runs BEFORE persona selection. Extracts interesting phrases from
+        # user input, probes all vector collections, and uses hits to drive
+        # persona/KB selection (context-driven rather than keyword-gated).
+        probe_result = None
+        try:
+            kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
+            probe_result = run_semantic_probe(
+                user_input=user_input,
+                knowledge_bases=kb_config,
+                session_id=session_id,
+            )
+            if probe_result and probe_result.has_hits:
+                logger.info(
+                    "SemanticProbe: %d hits, primary=%s, supplemental=%s (%.1fms)",
+                    len(probe_result.hits),
+                    probe_result.primary_collection,
+                    probe_result.supplemental_collections,
+                    probe_result.probe_time_ms,
+                )
+                ts_write({
+                    "type": "semantic_probe",
+                    "metrics": probe_result.to_metrics_dict(),
+                    "phrases": probe_result.phrases_tested,
+                    "hit_details": [
+                        {"phrase": h.phrase, "collection": h.collection,
+                         "similarity": round(h.similarity, 4), "filename": h.filename}
+                        for h in probe_result.hits
+                    ],
+                }, session_id, source=source, destination_context=_metadata)
+            else:
+                ts_write({
+                    "type": "semantic_probe",
+                    "metrics": probe_result.to_metrics_dict() if probe_result else {"skipped": True},
+                }, session_id, source=source, destination_context=_metadata)
+                logger.debug("SemanticProbe: no hits")
+        except Exception:
+            logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
+
+        # --- Persona & KB selection (probe-driven with keyword fallback) ---
+        if probe_result and probe_result.primary_collection:
+            # Probe found a dominant domain — adopt that persona
+            knowledge_base_name = probe_result.primary_collection
+            persona_name = get_persona_for_knowledge_base(knowledge_base_name)
+            if not persona_name:
+                # KB exists but no persona mapped to it — use default persona with the KB
+                persona_name = "dev"
+            logger.info(
+                "Persona selection (probe-driven): persona=%s, kb=%s",
+                persona_name, knowledge_base_name,
+            )
+        else:
+            # No probe hits — fall back to keyword matching
+            persona_name, knowledge_base_name = get_persona_for_request(user_input)
+            logger.info(
+                "Persona selection (keyword fallback): persona=%s, kb=%s",
+                persona_name, knowledge_base_name,
+            )
 
         # Load the selected persona
         self.ai_manager.initialize(persona_name)
@@ -792,55 +851,102 @@ class AgentCore:
         )
         self.session_manager.add_message(session_id, "user", user_input)
 
+        # Inject semantic probe result into packet (if probe found hits)
+        if probe_result and probe_result.has_hits:
+            packet.content.data_fields.append(DataField(
+                key='semantic_probe_result',
+                value=probe_result.to_dict(),
+                type='json',
+                source='semantic_probe',
+            ))
+
+        # Attach probe metrics to packet.metrics for observability
+        if probe_result:
+            packet.metrics.semantic_probe = probe_result.to_metrics_dict()
+
         if knowledge_base_name:
             packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
         
         # Enhance the packet with knowledge from the knowledge base
         packet = enhance_packet(packet)
 
-        # RAG: Retrieve documents from vector store if a knowledge base is specified
+        # RAG: Retrieve documents from vector store if a knowledge base is specified.
+        # Phase 4 dedup: if the semantic probe already found strong hits from the
+        # same collection, use those as seed context and skip the redundant MCP query.
         try:
             from gaia_core.utils import mcp_client
-            
+
             # Extract knowledge_base_name from the packet's data_fields
             knowledge_base_name = None
             for field in packet.content.data_fields:
                 if field.key == 'knowledge_base_name':
                     knowledge_base_name = field.value
                     break
-            
+
             if knowledge_base_name:
-                self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
-                retrieved_docs = mcp_client.embedding_query(
-                    packet.content.original_prompt, 
-                    top_k=3, 
-                    knowledge_base_name=knowledge_base_name
-                )
-                if retrieved_docs and retrieved_docs.get("ok"):
-                    docs = retrieved_docs.get("results", [])  # Fixed: was "response", should be "results"
-                    if docs:
-                        packet.content.data_fields.append(DataField(key='retrieved_documents', value=docs, type='list'))
-                        self.logger.info(f"Retrieved {len(docs)} documents from '{knowledge_base_name}'.")
+                # Check if the probe already provided hits from this collection
+                probe_seeded = False
+                if probe_result and probe_result.has_hits:
+                    probe_hits_for_kb = [
+                        h for h in probe_result.hits
+                        if h.collection == knowledge_base_name
+                    ]
+                    if len(probe_hits_for_kb) >= 2:
+                        # Probe found multiple strong hits — use them as seed,
+                        # skip the full-prompt RAG query (which would largely overlap)
+                        seed_docs = []
+                        seen_files = set()
+                        for h in probe_hits_for_kb:
+                            # Dedup by filename to avoid repeat chunks from the same doc
+                            if h.filename not in seen_files:
+                                seen_files.add(h.filename)
+                                seed_docs.append({
+                                    "text": h.chunk_text,
+                                    "filename": h.filename,
+                                    "score": h.similarity,
+                                    "source": "semantic_probe",
+                                })
+                        if seed_docs:
+                            packet.content.data_fields.append(
+                                DataField(key='retrieved_documents', value=seed_docs, type='list')
+                            )
+                            self.logger.info(
+                                f"RAG dedup: using {len(seed_docs)} probe hits as seed context "
+                                f"for '{knowledge_base_name}' (skipped MCP query)"
+                            )
+                            probe_seeded = True
+
+                if not probe_seeded:
+                    # No probe seed — run the standard RAG query
+                    self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
+                    retrieved_docs = mcp_client.embedding_query(
+                        packet.content.original_prompt,
+                        top_k=3,
+                        knowledge_base_name=knowledge_base_name
+                    )
+                    if retrieved_docs and retrieved_docs.get("ok"):
+                        docs = retrieved_docs.get("results", [])
+                        if docs:
+                            packet.content.data_fields.append(DataField(key='retrieved_documents', value=docs, type='list'))
+                            self.logger.info(f"Retrieved {len(docs)} documents from '{knowledge_base_name}'.")
+                        else:
+                            packet.content.data_fields.append(DataField(
+                                key='rag_no_results',
+                                value=True,
+                                type='bool'
+                            ))
+                            self.logger.warning(f"RAG query returned no documents from '{knowledge_base_name}' - epistemic uncertainty flagged.")
                     else:
-                        # No documents found - signal epistemic uncertainty
+                        error_msg = retrieved_docs.get("error", "Unknown error") if retrieved_docs else "No response"
+                        self.logger.warning(f"RAG query failed for '{knowledge_base_name}': {error_msg}")
                         packet.content.data_fields.append(DataField(
                             key='rag_no_results',
                             value=True,
                             type='bool'
                         ))
-                        self.logger.warning(f"RAG query returned no documents from '{knowledge_base_name}' - epistemic uncertainty flagged.")
-                else:
-                    # RAG query failed
-                    error_msg = retrieved_docs.get("error", "Unknown error") if retrieved_docs else "No response"
-                    self.logger.warning(f"RAG query failed for '{knowledge_base_name}': {error_msg}")
-                    packet.content.data_fields.append(DataField(
-                        key='rag_no_results',
-                        value=True,
-                        type='bool'
-                    ))
             else:
                 self.logger.info("No knowledge_base_name specified in the packet; skipping RAG query.")
-                
+
         except Exception as e:
             self.logger.error(f"Failed to retrieve documents from vector store: {e}")
 
@@ -848,7 +954,102 @@ class AgentCore:
         if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
             packet = self._knowledge_acquisition_workflow(packet)
 
+        # ── Knowledge Ingestion Pipeline ──────────────────────────────
+        # Check for explicit save commands or auto-detected knowledge dumps
+        # before intent detection so we can short-circuit or tag the packet.
+        if knowledge_base_name:
+            # 1. Explicit save: "save this about X", "remember this", legacy DOCUMENT
+            save_result = run_explicit_save(user_input, knowledge_base_name)
+            if save_result:
+                if save_result.get("action") == "dedup_blocked":
+                    existing = save_result["existing_doc"]
+                    yield {"type": "token", "value": (
+                        f"I found an existing document that closely matches this information "
+                        f"(similarity: {existing['similarity']:.0%}): **{existing['title']}**. "
+                        f"No duplicate was created. If this is genuinely new information, "
+                        f"please rephrase or add distinguishing details."
+                    )}
+                    return
+                elif save_result.get("ok"):
+                    yield {"type": "token", "value": (
+                        f"Acknowledged. I've documented '{save_result['subject']}' "
+                        f"to `{save_result['path']}`."
+                    )}
+                    if save_result.get("embed_ok"):
+                        yield {"type": "token", "value": " It's now indexed for future retrieval."}
+                    return
+                else:
+                    yield {"type": "token", "value": (
+                        f"I tried to save that information but encountered an issue: "
+                        f"{save_result.get('error', 'unknown error')}. "
+                        f"The MCP write_file tool may require approval."
+                    )}
+                    return
 
+            # 2. Auto-detect: long D&D info dump → offer to save (don't write yet)
+            auto_classification = run_auto_detect(user_input, knowledge_base_name)
+            if auto_classification:
+                packet.content.data_fields.append(DataField(
+                    key='knowledge_ingestion_offer',
+                    value=auto_classification,
+                    type='json',
+                ))
+                self.logger.info(
+                    f"Knowledge ingestion offer tagged: category={auto_classification['category']}"
+                )
+
+            # 3. Knowledge update detect: short casual updates to existing entities
+            if not auto_classification:
+                update_info = run_update_detect(user_input, knowledge_base_name)
+                if update_info:
+                    existing_doc = update_info.get("existing_doc")
+                    if existing_doc:
+                        # Ensure entity doc is in retrieved_documents
+                        already_in = False
+                        for df in packet.content.data_fields:
+                            if df.key == 'retrieved_documents':
+                                for d in (df.value or []):
+                                    if d.get("source") == existing_doc.get("source"):
+                                        already_in = True
+                                if not already_in:
+                                    df.value.append(existing_doc)
+                                break
+                        else:
+                            if not already_in:
+                                packet.content.data_fields.append(
+                                    DataField(key='retrieved_documents', value=[existing_doc], type='list'))
+
+                    # Tag packet + inject system_hint directly
+                    packet.content.data_fields.append(
+                        DataField(key='knowledge_update_detected', value=update_info, type='json'))
+
+                    entity = update_info["entity"]
+                    signal = update_info["update_signal"]
+                    has_doc = existing_doc is not None
+                    hint = (
+                        f"The user indicated that '{entity}' has been updated: {signal}. "
+                        + (
+                            "An existing document for this entity is in the Retrieved Documents above. "
+                            "Your task:\n"
+                            "1. Acknowledge the update conversationally.\n"
+                            "2. Examine the existing document to identify affected fields.\n"
+                            "3. Use D&D 5e knowledge to reason about cascading changes "
+                            "(HP, spell slots, features, proficiency, ability scores, etc.).\n"
+                            "4. Ask targeted follow-up questions about anything ambiguous.\n"
+                            "5. Offer to update the documentation with confirmed changes.\n"
+                            "Do NOT write the update yet — gather information first."
+                            if has_doc else
+                            "No existing document found. Acknowledge, ask questions, "
+                            "and offer to create documentation for this entity."
+                        )
+                    )
+                    packet.content.data_fields.append(
+                        DataField(key='system_hint', value=hint, type='string'))
+
+                    self.logger.info(
+                        f"Knowledge update tagged + hint injected: entity={entity}"
+                    )
+        # ── End Knowledge Ingestion Pipeline ──────────────────────────
 
         # Compatibility shims removed: callers should use the v0.3 packet
         # contract (header.persona, context.cheatsheets, content.original_prompt,
@@ -869,6 +1070,17 @@ class AgentCore:
             lite_llm = None
         prime_llm = None  # do not use prime for intent detection
         fallback_llm = lite_llm or selected_model
+
+        # Build a short probe context hint for the intent detector
+        _probe_context = ""
+        if probe_result and probe_result.has_hits:
+            matched_phrases = [h.phrase for h in probe_result.hits[:5]]
+            unique_phrases = list(dict.fromkeys(matched_phrases))  # dedup preserving order
+            _probe_context = (
+                f"User references {probe_result.primary_collection} entities "
+                f"({', '.join(unique_phrases)})"
+            )
+
         plan = None
         try:
             plan = detect_intent(
@@ -877,6 +1089,7 @@ class AgentCore:
                 lite_llm=lite_llm,
                 full_llm=prime_llm,
                 fallback_llm=fallback_llm,
+                probe_context=_probe_context,
             )
         finally:
             # Use role-aware release via ModelPool API; let exceptions be logged but
@@ -934,7 +1147,8 @@ class AgentCore:
         # planning/reflector stack. Uses minimal identity + MCP summary + user input.
         if self._should_use_slim_prompt(plan, user_input):
             text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
-            yield {"type": "token", "value": text}
+            _header = self._build_response_header(selected_model_name, packet, None, None, None)
+            yield {"type": "token", "value": _header + text}
             self.session_manager.add_message(session_id, "assistant", text)
             return
 
@@ -1335,7 +1549,8 @@ class AgentCore:
             packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
 
             logger.debug(f"User-facing response after routing: {user_facing_response}")
-            yield {"type": "token", "value": user_facing_response}
+            _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
+            yield {"type": "token", "value": _header + user_facing_response}
             logger.debug(f"Yielded to user: {user_facing_response}")
 
             # If the response came from the Oracle path, persist it as a learned fact
@@ -1367,7 +1582,11 @@ class AgentCore:
 
             log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
             log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
-            ts_write({"type":"turn_end","user":user_input,"assistant":user_facing_response}, session_id, source=source, destination_context=_metadata)
+            turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
+            probe_stats = get_session_probe_stats(session_id)
+            if probe_stats:
+                turn_end_event["probe_session_stats"] = probe_stats
+            ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
             self.session_manager.record_last_activity()
 
             # --- Loop Detection: Record output and check for loops ---
@@ -1582,6 +1801,48 @@ class AgentCore:
         if not result:
             return text
         return " ".join(result)
+
+    def _build_response_header(
+        self,
+        model_name: str,
+        packet,
+        observer_instance,
+        active_stream_observer,
+        post_run_observer,
+    ) -> str:
+        """
+        Build a concise status header prepended to user-facing responses.
+        Shows model, packet state, and observer activity at a glance.
+        """
+        # Model display name
+        model_display = model_name or "unknown"
+        # Friendly aliases
+        model_aliases = {
+            "gpu_prime": "Thinker (GPU)",
+            "cpu_prime": "Thinker (CPU)",
+            "prime": "Thinker",
+            "lite": "Operator",
+            "oracle": "Oracle",
+        }
+        model_label = model_aliases.get(model_display, model_display)
+
+        # Packet state
+        try:
+            state_val = packet.status.state.value if packet and packet.status else "unknown"
+        except Exception:
+            state_val = "unknown"
+
+        # Observer status
+        if observer_instance is None:
+            obs_status = "disabled"
+        elif active_stream_observer is not None:
+            obs_status = "streaming"
+        elif post_run_observer is not None:
+            obs_status = "post-stream"
+        else:
+            obs_status = "idle"
+
+        return f"[Model: {model_label} | State: {state_val} | Observer: {obs_status}]\n\n"
 
     def _should_escalate_to_thinker(self, text: str) -> bool:
         """
@@ -1860,28 +2121,28 @@ class AgentCore:
                 return f"I encountered an error while reading that file: {exc}"
 
         # Custom command to trigger documentation
-        document_command_match = re.match(
-            r'GAIA, DOCUMENT "(?P<title>[^"]+)" AS "(?P<symbol>[^"]+)" ABOUT "(?P<content>.+)"',
-            user_input,
-            re.IGNORECASE
-        )
-        if document_command_match:
+        # Handled by the Knowledge Ingestion Pipeline in run_turn() (Location A).
+        # The legacy DOCUMENT format is now detected by knowledge_ingestion.detect_save_command()
+        # alongside natural-language save commands ("save this about X", etc.).
+        # This block is kept as a fallback for non-knowledge-base contexts.
+        from gaia_core.cognition.knowledge_ingestion import detect_save_command
+        save_cmd = detect_save_command(user_input)
+        if save_cmd:
             try:
-                title = document_command_match.group("title")
-                symbol = document_command_match.group("symbol").upper().replace(" ", "_") # Normalize symbol
-                content_to_document = document_command_match.group("content")
-                tags = ["user-generated", "documentation", symbol.lower()] # Default tags
+                title = save_cmd["subject"]
+                symbol = save_cmd.get("symbol", title.upper().replace(" ", "_"))
+                content_to_document = save_cmd["raw_content"]
+                tags = ["user-generated", "documentation", symbol.lower()]
 
-                self.logger.info(f"Document command detected: title='{title}', symbol='{symbol}'")
-                
-                # Call the CodexWriter to document the information
+                self.logger.info(f"Document command detected (ingestion pipeline): title='{title}', symbol='{symbol}'")
+
                 documented_path = self.codex_writer.document_information(
                     packet=packet,
                     info_to_document=content_to_document,
                     symbol=symbol,
                     title=title,
                     tags=tags,
-                    llm_model=None  # Model acquired separately if CodexWriter needs LLM refinement
+                    llm_model=None,
                 )
 
                 if documented_path:

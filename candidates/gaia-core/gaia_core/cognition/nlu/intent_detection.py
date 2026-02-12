@@ -359,10 +359,14 @@ def _fast_track_intent_detection(text: str) -> Optional[str]:
 
     return None
 
-def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None):
+def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context=""):
     """
     Uses an LLM (Lite if present, else Prime) to detect intent for natural language input.
     Output should always be one of: read_file, write_file, mark_task_complete, reflect, seed, shell, list_tools, list_tree, tool_routing, other.
+
+    Args:
+        probe_context: Optional domain hint from semantic probe (e.g.
+            "Domain context: user references dnd_campaign entities (Rogue's End, Tower Faction)")
     """
     # Fast-track conversational intents
     fast_track_intent = _fast_track_intent_detection(text)
@@ -460,6 +464,11 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         if intent_guess in {"read_file", "write_file"} and not _mentions_file_like_action(text):
             return "other"
         return intent_guess
+    # Build context line from semantic probe (if available)
+    context_line = ""
+    if probe_context:
+        context_line = f"Context: {probe_context}\n"
+
     prompt = (
         "You are an intent detector for GAIA. Return exactly one intent from:\n"
         "read_file, write_file, mark_task_complete, reflect, seed, shell, list_tools, list_tree, list_files, "
@@ -470,6 +479,7 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         "feedback (the user is providing feedback on GAIA's performance), "
         "chat (a general conversational intent), "
         "other.\n"
+        f"{context_line}"
         f"User: {text}\nIntent:"
     )
     messages = [
@@ -540,10 +550,13 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
     return intent
 
 # ---- Unified entrypoint ----
-def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None) -> Plan:
+def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="") -> Plan:
     """
     Detects intent using reflex path, else LLM.
     Returns a Plan object.
+
+    Args:
+        probe_context: Optional domain hint from semantic probe for LLM-based classification.
     """
     try:
         logger.info("Intent detection: start")
@@ -554,7 +567,7 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None)
     intent_str = fast_intent_check(text)
     if not intent_str:
         # 2. LLM path
-        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm)
+        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context)
     
     read_only_intents = {"read_file", "explain_file", "explain_symbol"}
     plan = Plan(intent=intent_str, read_only=intent_str in read_only_intents)
