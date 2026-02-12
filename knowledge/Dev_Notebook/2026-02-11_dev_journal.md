@@ -260,3 +260,85 @@ This commit bundled several improvements that were not individually journaled:
 **Author:** Claude Code (Opus 4.6) via Happy
 
 Documentation-only commit updating all architectural blueprints in `knowledge/blueprints/` to reflect v0.3 architecture accurately. No code changes.
+
+---
+
+# Dev Journal Entry: 2026-02-11 — CognitionPacket Consolidation & Dead Pipeline Cleanup (`39e228b`)
+
+**Date:** 2026-02-11 (late session)
+**Author:** Claude Code (Opus 4.6) via Happy
+
+## Context
+
+Over the course of v0.2→v0.3 development, the `CognitionPacket` dataclass diverged: `gaia-common/` held the canonical protocol definition, while `gaia-core/` accumulated a local copy with additional fields (`LoopAttempt`, `LoopState`, `loop_state`, `semantic_probe`, `validate()`) that were never upstreamed. Separately, the `gaia-core/pipeline/` module (7 files, ~525 lines) was entirely dead code — no file outside the module imported from it. This session consolidated and cleaned up both issues.
+
+## What Changed
+
+### 1. CognitionPacket Consolidation (gaia-common ← gaia-core)
+
+The local `gaia-core/gaia_core/cognition/cognition_packet.py` (558 lines) contained additions that the canonical `gaia-common` version lacked. Rather than maintaining two diverged copies, all unique additions were merged into the canonical `gaia-common` version:
+
+| Addition | Description |
+|----------|-------------|
+| `LoopAttempt` dataclass | Record of a previous loop recovery attempt (approach summary + failure point) |
+| `LoopState` dataclass | Full loop detection state: type, pattern, hash, reset count, confidence, recovery context, previous attempts |
+| `CognitionPacket.loop_state` field | `Optional[LoopState]` on the main packet |
+| `Metrics.semantic_probe` field | `Optional[Dict[str, Any]]` for semantic probe results |
+| `CognitionPacket.validate()` method | JSON schema validation via `jsonschema` library |
+
+**Removed:** `OutputRouting.status_flags: List[str]` — unused field that was never populated or read.
+
+**Exports updated:** `LoopAttempt` and `LoopState` added to both `cognition_packet.__all__` and `protocols.__init__.__all__`.
+
+### 2. Import Rewiring (4 files)
+
+All files that imported from the local gaia-core copy were updated to import from the canonical gaia-common path:
+
+| File | Old Import | New Import |
+|------|-----------|------------|
+| `gaia_core/cognition/agent_core.py` | `from gaia_core.cognition.cognition_packet import ...` | `from gaia_common.protocols.cognition_packet import ...` |
+| `e2e_sidecar_write_test.py` | same | same |
+| `gaia_rescue.py` | same | same |
+| `scripts/test_prime_cogpacket.py` | same | same |
+
+### 3. Dead Code Deletion
+
+**`gaia-core/gaia_core/cognition/cognition_packet.py`** — Deleted (both `candidates/` and `gaia-core/`). 558 lines removed per copy. The canonical version in `gaia-common` is now the single source of truth.
+
+**`gaia-core/gaia_core/pipeline/`** — Entire module deleted (both `candidates/` and `gaia-core/`). 7 files, ~525 lines:
+
+| File | Lines | Purpose (historical) |
+|------|-------|---------------------|
+| `__init__.py` | 4 | Module init |
+| `bootstrap.py` | 47 | Pipeline initialization |
+| `llm_wrappers.py` | 23 | LLM call abstractions |
+| `manager.py` | 248 | Pipeline orchestration |
+| `minimal_bootstrap.py` | 15 | Minimal init variant |
+| `pipeline.py` | 113 | Core pipeline logic |
+| `primitives.py` | 75 | Pipeline data types |
+
+This module was an early v0.1 pipeline architecture that was fully superseded by the `agent_core.py` cognition loop. No file outside `pipeline/` imported from it.
+
+## Impact Summary
+
+| Metric | Value |
+|--------|-------|
+| Files modified | 8 (4 candidate + 4 live, mirrored) |
+| Files deleted | 16 (8 candidate + 8 live, mirrored) |
+| Lines removed | ~2,175 |
+| Lines added | ~97 (consolidated into gaia-common) |
+| Net reduction | **~2,078 lines** |
+
+## Design Decisions
+
+1. **Merge up, not down** — Moved additions into `gaia-common` (the shared protocol library) rather than keeping them local in `gaia-core`. This follows the established pattern: protocol definitions belong in `gaia-common`, consumers import from there.
+
+2. **Deleted rather than deprecated** — The pipeline module had zero external imports. No compatibility shim or deprecation warning was needed.
+
+3. **Mirrored across candidate + live** — Both `candidates/` and live (`gaia-core/`, `gaia-common/`) trees received identical changes to keep them in sync.
+
+## Verification
+
+- Confirmed no remaining imports of `gaia_core.cognition.cognition_packet` or `gaia_core.pipeline` exist in the codebase
+- All rewired imports point to `gaia_common.protocols.cognition_packet`
+- `LoopAttempt`, `LoopState` properly exported from `gaia_common.protocols`
