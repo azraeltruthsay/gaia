@@ -213,7 +213,7 @@ def _ai_write_impl(params: dict) -> dict:
 
 def _list_dir_impl(params: dict):
     """List a directory (shallow, non-recursive)."""
-    path = params.get("path") or "/gaia-assistant"
+    path = params.get("path") or "/knowledge"
     p = Path(path).resolve()
     if not p.is_dir():
         raise ValueError(f"{p} is not a directory")
@@ -223,14 +223,14 @@ def _list_dir_impl(params: dict):
 
 def _list_files_impl(params: dict):
     """Recursively list files under a given path."""
-    root = params.get("path") or "/gaia-assistant"
+    root = params.get("path") or "/knowledge"
     max_depth = int(params.get("max_depth", 3))
     max_entries = int(params.get("max_entries", 1000))
     max_depth = max(1, min(max_depth, 8))
     max_entries = max(1, min(max_entries, 5000))
 
     root_path = Path(root).resolve()
-    allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve(), Path("/models").resolve()]
     if not any(str(root_path).startswith(str(a)) for a in allow_roots):
         raise ValueError("Path not allowed")
     if not root_path.exists() or not root_path.is_dir():
@@ -263,15 +263,14 @@ def _list_files_impl(params: dict):
 
 def _list_tree_impl(params: dict):
     """Produce a bounded directory tree with depth/entry limits."""
-    root = params.get("path") or "/gaia-assistant"
+    root = params.get("path") or "/knowledge"
     max_depth = int(params.get("max_depth", 3))
     max_entries = int(params.get("max_entries", 200))
     max_depth = max(1, min(max_depth, 6))
     max_entries = max(10, min(max_entries, 1000))
 
     root_path = Path(root).resolve()
-    # Hard allowlist: keep under /gaia-assistant or /models by default
-    allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve(), Path("/models").resolve()]
     if not any(str(root_path).startswith(str(a)) for a in allow_roots):
         raise ValueError("Path not allowed")
     if not root_path.exists() or not root_path.is_dir():
@@ -320,7 +319,6 @@ def _read_file_impl(params: dict):
     allow_roots = [
         Path("/knowledge").resolve(),
         Path("/sandbox").resolve(),
-        Path("/gaia-assistant").resolve(),
         Path("/models").resolve(),
     ]
     if not any(str(p).startswith(str(a)) for a in allow_roots):
@@ -414,13 +412,13 @@ def _find_files_impl(params: dict):
     query = (params.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
-    root = Path(params.get("root") or "/gaia-assistant").resolve()
+    root = Path(params.get("root") or "/knowledge").resolve()
     max_depth = int(params.get("max_depth", 5))
     max_results = int(params.get("max_results", 50))
     max_depth = max(1, min(max_depth, 8))
     max_results = max(1, min(max_results, 200))
 
-    allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve(), Path("/models").resolve()]
     if not any(str(root).startswith(str(a)) for a in allow_roots):
         raise ValueError("Root not allowed")
     if not root.exists() or not root.is_dir():
@@ -858,6 +856,10 @@ async def approve_action(request: Request):
 
         return {"ok": True, "result": result, "approved_at": approved_at}
     except ValueError as e:
+        # Tool-level validation errors (path not allowed, missing params, etc.)
+        # Return as structured error, not 500 — the tool was approved but the
+        # params were invalid. This lets the caller distinguish between
+        # approval failures (403/404) and tool execution failures.
         return {"ok": False, "error": str(e), "approved_at": datetime.utcfromtimestamp(time.time()).isoformat()}
     except Exception as e:
         logging.getLogger("GAIA.MCPServer").error(f"Error executing approved action: {e}", exc_info=True)

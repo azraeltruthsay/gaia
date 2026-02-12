@@ -32,26 +32,26 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY gaia-study/requirements.txt .
+COPY candidates/gaia-study/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 
 
-# Install gaia-common and gaia-study
+# Use candidate versions for SOA-decoupled architecture
 
 
 
-COPY gaia-common/ /gaia-common/
+COPY candidates/gaia-common/ /gaia-common/
 
 
 
-COPY gaia-study/ /app/gaia-study/
+COPY candidates/gaia-study/ /app/gaia-study/
 
 
 
-COPY gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
+COPY candidates/gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
 
 
 

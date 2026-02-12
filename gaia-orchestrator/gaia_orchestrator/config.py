@@ -83,8 +83,10 @@ class OrchestratorConfig(BaseSettings):
 
     # GPU settings
     gpu_cleanup_threshold_mb: int = Field(
-        default=500,
-        description="VRAM usage (MB) below which GPU is considered released"
+        default=3000,
+        description="VRAM usage (MB) below which GPU is considered released. "
+                    "Set above desktop GUI baseline (~2.2GB on KDE/Wayland) "
+                    "so container stop is detected as cleanup complete."
     )
     gpu_cleanup_timeout_seconds: int = Field(
         default=30,
@@ -130,9 +132,18 @@ def get_config() -> OrchestratorConfig:
     """Get the singleton configuration instance."""
     global _config
     if _config is None:
-        # Load YAML config as defaults, then override with env vars
+        # Load YAML config as base defaults.
+        # Environment variables (ORCHESTRATOR_*) take precedence over YAML values.
+        # pydantic-settings resolves env vars automatically, but only when the
+        # field value isn't passed as a kwarg. So we must filter out any YAML
+        # keys that have a corresponding env var set.
         yaml_config = load_yaml_config()
-        _config = OrchestratorConfig(**yaml_config)
+        env_prefix = "ORCHESTRATOR_"
+        filtered = {
+            k: v for k, v in yaml_config.items()
+            if os.getenv(f"{env_prefix}{k.upper()}") is None
+        }
+        _config = OrchestratorConfig(**filtered)
     return _config
 
 

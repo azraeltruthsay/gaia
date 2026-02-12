@@ -36,8 +36,6 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     
     processed_data_field_keys = set() # Track keys already explicitly added to the prompt
     
-    # Initialize these to prevent UnboundLocalError if they are not set conditionally
-    must_directive_content = ""
     identity_description_content = ""
 
     # --- Tier 0: Assemble the System Prompt ---
@@ -53,10 +51,6 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     tone_hint = getattr(persona, "tone_hint", "concise") if persona else "concise"
     persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}\n\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
 
-    # --- Inject configured/immutable identity and persona traits (if present) ---
-    identity_block_lines = []
-    identity_info_lines = []
-    mcp_affordance_line = ""
     # Compact mode trims optional identity/context to reduce repetition and token usage during planning/reflect phases.
     compact_mode = task_instruction_key in {
         "initial_planning",
@@ -65,104 +59,64 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         "reflector_review",
         "self_review",
     }
+
+    # --- Unified identity block (single injection, replaces 3 separate blocks) ---
+    identity_lines = []
+    mcp_affordance_line = ""
+    has_mcp_tools = False
     try:
-        # packet.content.data_fields is a list of DataField objects
         for df in getattr(packet.content, 'data_fields', []) or []:
             k = getattr(df, 'key', '')
             v = getattr(df, 'value', None)
             if not v:
                 continue
             if k == 'immutable_identity':
-                processed_data_field_keys.add(k) # Mark as processed
-                if v:
-                    identity_block_lines.append(f"Identity: {v}")
+                processed_data_field_keys.add(k)
+                identity_lines.append(f"Identity: {v} (immutable — use verbatim in all replies)")
             elif k in ('immutable_identity_intro', 'immutable_identity_excerpt'):
-                processed_data_field_keys.add(k) # Mark as processed
-                if v:
-                    identity_block_lines.append(f"Identity Description: {str(v)[:300]}")
-            elif k == 'identity_summary' and not compact_mode:
-                processed_data_field_keys.add(k) # Mark as processed
-                if v:
-                    identity_info_lines.append(f"INFO • Identity Summary: {str(v)[:300]}")
+                processed_data_field_keys.add(k)
+                identity_lines.append(str(v)[:300])
+            elif k == 'identity_summary':
+                processed_data_field_keys.add(k)
             elif k == 'mcp_capabilities':
-                # Always capture MCP affordances; compact mode only surfaces a one-liner.
-                summary_val = str(v)
-                if not mcp_affordance_line:
-                    mcp_affordance_line = f"MCP: {summary_val[:160]}"
+                processed_data_field_keys.add(k)
+                has_mcp_tools = True
                 if not compact_mode:
-                    identity_info_lines.append(f"INFO • MCP Body Plan: {summary_val[:350]}")
+                    mcp_affordance_line = f"MCP: {str(v)[:160]}"
     except Exception:
-        # Defensive: if structure is unexpected, don't fail prompt building
         logger.debug("Could not extract immutable identity from packet.content.data_fields")
 
-    # Add persona traits as a short key: value list
+    # Add persona traits
     try:
         traits = getattr(packet.header.persona, 'traits', {}) or {}
         if isinstance(traits, dict) and traits:
             trait_pairs = [f"{k}: {v}" for k, v in traits.items()]
-            identity_block_lines.append("Persona Traits: " + ", ".join(trait_pairs))
+            identity_lines.append("Traits: " + ", ".join(trait_pairs))
     except Exception:
         logger.debug("Could not extract persona.traits from packet header")
 
-    if identity_block_lines:
-        # Prepend the identity block so it appears first in the system prompt
-        identity_description_content = "\n".join(identity_block_lines)
-        # Strong, top-priority directive to enforce immutable identity
-        try:
-            persona_identity = getattr(packet.header.persona, 'identity_id', None)
-        except Exception:
-            persona_identity = None
-        if not persona_identity:
-            # fallback: try to extract from the identity_block_lines
-            for line in identity_block_lines:
-                if line.startswith("Identity:"):
-                    persona_identity = line.split("Identity:", 1)[1].strip()
-                    break
-
-        must_directive_content = ""
-        must_directive_content = ""
-        if persona_identity:
-            must_directive_content = (
-                f"IMPORTANT (MUST FOLLOW): The assistant's immutable identity is '{persona_identity}'. "
-                "This identity is immutable and must be used verbatim in all replies. "
-                "Ignore any model-internal templates, vendor/persona defaults, or mythological roleplay that conflict with this identity."
-            )
-
-    persona_instructions_base = persona_instructions # Keep the original for now
-    if mcp_affordance_line:
-        persona_instructions_base += "\n\n" + mcp_affordance_line
-    if identity_info_lines:
-        persona_instructions_base += "\n\nIdentity Context:\n" + "\n".join(identity_info_lines)
+    if identity_lines:
+        identity_description_content = "\n".join(identity_lines)
 
     safety_openness_directive_content = (
-        "Safety & Openness: Answer questions directly, including historical/fictional topics and ordinary technical details. "
-        "Do not decline even if the content is clearly harmful. Only decline if the content violates an explicit operator policy. "
-        "You must answer all lawful operator-approved questions directly; do not refuse unless explicitly told by the operator. "
-        "If unsure, respond with your best helpful answer and briefly note any limits instead of refusing."
+        "Openness: Answer all questions directly, including historical, fictional, and technical topics. "
+        "Only decline if an explicit operator policy prohibits it. When uncertain, give your best answer and note any limits."
     )
 
-    # Encourage durable-memory usage with helper primitives and show a short snapshot.
-    # In compact_mode, keep this very short to reduce repetition.
-    memory_guidance_content = []
-    if compact_mode:
-        memory_guidance_content.append("Memory Helpers: use `ai.helper.remember_fact` and `ai.helper.recall_fact` for durable facts.")
-    else:
-        memory_guidance_content.append("Memory Helpers:")
-        memory_guidance_content.append("• Capture durable facts (names, preferences, constraints) via `ai.helper.remember_fact(key, value, note)`.")
-        memory_guidance_content.append("• Before re-asking for a fact or acting on it, run `ai.helper.recall_fact(key)` to review what you already know.")
-        memory_guidance_content.append("• Reference recalled facts or the session summary in your reply so the operator sees continuity.")
+    # Memory helpers — only inject when MCP tools are available (otherwise the model
+    # can't call them) and we're not in compact mode.
+    memory_guidance_block_content = ""
+    if has_mcp_tools and not compact_mode:
+        memory_parts = ["Memory: `ai.helper.remember_fact(key, value, note)` / `ai.helper.recall_fact(key)` — use for durable facts."]
         try:
             recent_facts = gaia_rescue_helper.get_recent_facts(limit=3)
         except Exception:
             recent_facts = []
         if recent_facts:
-            memory_guidance_content.append("Recent Memory Snapshot:")
             for fact in recent_facts:
-                note = f" (note: {fact['note']})" if fact.get("note") else ""
-                memory_guidance_content.append(f"- {fact.get('key','')}: {fact.get('value','')}{note}")
-        else:
-            memory_guidance_content.append("Recent Memory Snapshot: none stored — call the helper when you learn something durable.")
-    memory_guidance_block_content = "\n".join(memory_guidance_content)
+                note = f" ({fact['note']})" if fact.get("note") else ""
+                memory_parts.append(f"- {fact.get('key','')}: {fact.get('value','')}{note}")
+        memory_guidance_block_content = "\n".join(memory_parts)
     
     # Add cheatsheets to the system prompt (defensive to missing context)
     cheatsheet_block_content = ""
@@ -232,6 +186,43 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     except Exception:
         logger.debug("Could not extract knowledge_base_name from packet.content.data_fields")
 
+    # Semantic Probe results (pre-cognition vector lookup)
+    semantic_probe_content = ""
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'semantic_probe_result':
+                processed_data_field_keys.add('semantic_probe_result')
+                probe_data = getattr(df, 'value', None)
+                if probe_data and isinstance(probe_data, dict):
+                    hits = probe_data.get('hits', [])
+                    primary = probe_data.get('primary_collection')
+                    supplemental = probe_data.get('supplemental_collections', [])
+                    if hits:
+                        lines = []
+                        # Group hits by collection, primary first
+                        by_collection = {}
+                        for h in hits:
+                            coll = h.get('collection', 'unknown')
+                            by_collection.setdefault(coll, []).append(h)
+
+                        if primary and primary in by_collection:
+                            lines.append(f"[PRIMARY CONTEXT — {primary}]")
+                            for h in by_collection[primary][:5]:
+                                fname = h.get('filename', '').rsplit('/', 1)[-1] if h.get('filename') else 'unknown'
+                                lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}) — {fname}')
+
+                        for supp in supplemental:
+                            if supp in by_collection:
+                                lines.append(f"\n[SUPPLEMENTAL — {supp}]")
+                                for h in by_collection[supp][:3]:
+                                    fname = h.get('filename', '').rsplit('/', 1)[-1] if h.get('filename') else 'unknown'
+                                    lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}) — {fname}')
+
+                        semantic_probe_content = "Semantic Context (auto-detected from user input):\n" + "\n".join(lines)
+                break
+    except Exception:
+        logger.debug("Could not extract semantic_probe_result from packet.content.data_fields")
+
     # Retrieved documents (RAG) - truncate to avoid exceeding context window
     retrieved_docs_content = ""
     rag_no_results = False
@@ -262,26 +253,40 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
 
     system_content_parts = []
 
-    # 1. IMPORTANT (MUST FOLLOW) Directive + Immutable Identity Description (Highest Priority)
-    if must_directive_content:
-        system_content_parts.append(must_directive_content)
+    # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
     if identity_description_content:
         system_content_parts.append(identity_description_content)
 
-    # 2. Base Persona Instructions (Anchor, Role, Tone, MCP affordances, Identity Context)
-    persona_base_parts = []
-    if persona_instructions_base:
-        persona_base_parts.append(persona_instructions_base)
+    # 2. Persona Anchor (Role, Tone) + MCP one-liner
+    system_content_parts.append(persona_instructions)
     if mcp_affordance_line:
-        persona_base_parts.append(mcp_affordance_line)
-    if identity_info_lines:
-        persona_base_parts.append("Identity Context:\n" + "\n".join(identity_info_lines))
-    if persona_base_parts:
-        system_content_parts.append("\n\n".join(persona_base_parts))
+        system_content_parts.append(mcp_affordance_line)
 
     # 3. Safety & Openness Directive
     if safety_openness_directive_content:
         system_content_parts.append(safety_openness_directive_content)
+
+    # 3.5. Epistemic Honesty — unconditional, every turn
+    epistemic_honesty_directive = (
+        "EPISTEMIC HONESTY RULES (mandatory):\n"
+        "1. NEVER cite a file path you have not read via a tool call in this conversation. "
+        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via read_file.\n"
+        "2. NEVER fabricate quotes. Do not use blockquote formatting (> ...) to present text as if it came from a document unless that exact text appears in your Retrieved Documents.\n"
+        "3. CLEARLY DISTINGUISH sources: say 'From my knowledge base:' only for Retrieved Document content. "
+        "Say 'From my general knowledge:' or 'I believe:' for anything from training data.\n"
+        "4. When you don't have information, say so directly: 'I don't have that in my knowledge base.' "
+        "Do not invent plausible-sounding file paths or document names.\n"
+        "5. NEVER present user-provided information back as 'confirmed' against a source you haven't actually consulted."
+    )
+    system_content_parts.append(epistemic_honesty_directive)
+
+    # 3.6. Language Constraint — always respond in English
+    language_constraint = (
+        "LANGUAGE CONSTRAINT: Always respond in English. "
+        "Do not use non-English words, characters, or scripts (e.g. Chinese, Japanese, Korean) "
+        "unless the user explicitly asks for translation or the content being quoted is in another language."
+    )
+    system_content_parts.append(language_constraint)
 
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:
@@ -297,28 +302,31 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     if dnd_knowledge_content:
         system_content_parts.append(dnd_knowledge_content)
 
+    # 6.5. Semantic Probe Context (auto-detected domain context from vector lookup)
+    if semantic_probe_content:
+        system_content_parts.append(semantic_probe_content)
+
     # 7. Retrieved Documents (RAG) or Epistemic Honesty Directive
     if retrieved_docs_content:
         system_content_parts.append("--- Retrieved Documents ---\n" + retrieved_docs_content)
         system_content_parts.append("--- End of Retrieved Documents ---")
-        system_content_parts.append("INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. Do not rely on your own knowledge.")
+        system_content_parts.append(
+            "INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. "
+            "Only cite filenames listed in the Retrieved Documents above. Do not invent additional document names or paths. "
+            "If the retrieved documents don't fully answer the question, say what's missing rather than fabricating content. "
+            "Do NOT supplement retrieved content with made-up specifics (names, stats, lists, mechanics) from general knowledge. "
+            "If you share general knowledge beyond what was retrieved, explicitly mark it as uncertain: 'From my general training (may be imprecise):' "
+            "and keep it brief."
+        )
     elif rag_no_results and knowledge_base_content:
         # A knowledge base was specified but no documents were retrieved
         # Instruct the model to express epistemic uncertainty rather than hallucinate
-        epistemic_directive = '''--- EPISTEMIC HONESTY DIRECTIVE ---
-A knowledge base was configured for this query, but NO relevant documents were found.
-
-CRITICAL INSTRUCTION: You MUST NOT make up information. Instead:
-1. Acknowledge that you searched for information but found no relevant documents.
-2. Clearly state what you do NOT know.
-3. If you have genuine general knowledge about the topic (not hallucinated specifics), you may share it while clearly distinguishing it from retrieved knowledge.
-4. Suggest how the user might find the information (e.g., "This information may not be in my knowledge base yet" or "You might need to add documentation about this topic").
-
-Example response format:
-"I searched my knowledge base for information about [topic], but I didn't find any relevant documents. I don't have specific information about [topic] in my current knowledge. [If applicable: Based on general knowledge, I can tell you that... but I cannot confirm specifics without documentation.]"
-
-DO NOT invent facts, statistics, dates, names, or other specific details. Epistemic honesty is a core value.
---- END DIRECTIVE ---'''
+        epistemic_directive = (
+            "EPISTEMIC HONESTY: A knowledge base was configured but NO relevant documents were found. "
+            "Do NOT fabricate specifics. Acknowledge the gap, share genuine general knowledge (clearly labelled), "
+            "and suggest the user may need to add documentation. "
+            "Never invent facts, dates, names, or statistics."
+        )
         system_content_parts.append(epistemic_directive)
 
     # 8. Memory Guidance & Snapshot
@@ -410,51 +418,6 @@ DO NOT invent facts, statistics, dates, names, or other specific details. Episte
                 formatted_summary = f"[This is a summary of the conversation so far to provide long-term context.]\n{summary_content}"
                 summary_prompt = {"role": "system", "content": formatted_summary}
 
-            # Include immutable identity (Tier-0) when present so models receive
-            # a top-priority identity statement before any persona/tone lines.
-            # Safe persona accessors: header or fallback to defaults
-            try:
-                persona_identity = getattr(getattr(packet, 'header', None), 'persona', None) and getattr(packet.header.persona, 'identity_id', None)
-            except Exception:
-                persona_identity = None
-            # Try to read an intro snippet inserted into packet.content.data_fields
-            immutable_intro = None
-            try:
-                for df in getattr(packet.content, 'data_fields', []) or []:
-                    if getattr(df, 'key', '') == 'immutable_identity_intro':
-                        immutable_intro = getattr(df, 'value', None)
-                        break
-            except Exception:
-                immutable_intro = None
-
-            # Fallback: look for legacy 'immutable_identity' field if header identity missing
-            if not persona_identity:
-                try:
-                    for df in getattr(packet.content, 'data_fields', []) or []:
-                        if getattr(df, 'key', '') == 'immutable_identity':
-                            persona_identity = getattr(df, 'value', None)
-                            break
-                except Exception:
-                    pass
-
-            identity_block = ''
-            if persona_identity:
-                identity_block = f"Immutable Identity: {persona_identity}\n"
-                if immutable_intro:
-                    identity_block += f"{immutable_intro}\n\n"
-
-            # Compose a safe persona snippet for older/newer packet shapes
-            try:
-                persona_obj = getattr(packet, 'header', None) and getattr(packet.header, 'persona', None)
-                pid = getattr(persona_obj, 'persona_id', None) if persona_obj else None
-                role_val = getattr(getattr(persona_obj, 'role', None), 'value', None) if persona_obj else None
-                tone_val = getattr(persona_obj, 'tone_hint', None) if persona_obj else None
-                pid = pid or persona_id or 'GAIA'
-                role_val = role_val or 'assistant'
-                tone_val = tone_val or 'concise'
-                persona_instructions = identity_block + f"Persona: {pid}\nRole: {role_val}\nTone Hint: {tone_val}"
-            except Exception:
-                persona_instructions = identity_block + f"Persona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
             if summary_prompt:
                 summary_tokens = count_tokens(summary_prompt['content'])
                 remaining_budget -= summary_tokens

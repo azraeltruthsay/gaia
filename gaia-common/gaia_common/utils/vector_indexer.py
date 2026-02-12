@@ -108,9 +108,13 @@ def _get_config():
             from gaia_core.config import Config as _Config
             Config = _Config
         except ImportError:
-            # Fallback for standalone use
-            class Config:
-                pass
+            try:
+                from gaia_common.config import Config as _Config
+                Config = _Config
+            except ImportError:
+                # Fallback for standalone use
+                class Config:
+                    pass
     return Config()
 
 
@@ -163,7 +167,6 @@ class VectorIndexer:
         return cls._instances[knowledge_base_name]
 
     def load_vector_index(self) -> Dict[str, Any]:
-        logger.error("THIS IS A TEST LOG MESSAGE TO SEE IF THIS FUNCTION IS CALLED AT ALL")
         if self.index_path.exists():
             with open(self.index_path, "r", encoding="utf-8") as f:
                 data = json.load(f)

@@ -21,15 +21,15 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY gaia-web/requirements.txt .
+COPY candidates/gaia-web/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install gaia-common and gaia-web in editable mode
-COPY gaia-common/ /app/gaia-common/
-COPY gaia-web/ /app/gaia-web/
-COPY gaia-web/pyproject.toml /app/gaia-web/pyproject.toml
+COPY candidates/gaia-common/ /app/gaia-common/
+COPY candidates/gaia-web/ /app/gaia-web/
+COPY candidates/gaia-web/pyproject.toml /app/gaia-web/pyproject.toml
 RUN pip install -e /app/gaia-common/
 RUN pip install -e /app/gaia-web/.[dev]
 

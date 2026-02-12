@@ -74,6 +74,50 @@ def _strip_think_tags_robust(text: str) -> str:
     # If we're left with just whitespace, return empty
     return result.strip()
 
+# ── CJK / non-Latin post-processing ──────────────────────────────────
+# Unicode ranges for CJK ideographs, Hangul, Kana, and fullwidth forms
+# that the 3B model occasionally injects into English output.
+_CJK_STRAY_RE = re.compile(
+    r'[\u2E80-\u9FFF'           # CJK Radicals, Kangxi, CJK Unified Ideographs
+    r'\uF900-\uFAFF'            # CJK Compatibility Ideographs
+    r'\uFE30-\uFE4F'            # CJK Compatibility Forms
+    r'\uFF00-\uFFEF'            # Halfwidth and Fullwidth Forms
+    r'\U00020000-\U0002FA1F'    # CJK Unified Ideographs Extension B-F, Supplements
+    r'\u3040-\u309F'            # Hiragana
+    r'\u30A0-\u30FF'            # Katakana
+    r'\uAC00-\uD7AF'            # Hangul Syllables
+    r'\u1100-\u11FF'            # Hangul Jamo
+    r']+',
+)
+
+def _strip_stray_cjk(text: str) -> str:
+    """
+    Remove stray CJK / Kana / Hangul characters that leak from the model's
+    multilingual training data.  Only strips characters that appear *inline*
+    with Latin text — short runs (≤ 10 chars) adjacent to ASCII.  Longer CJK
+    runs (> 10 chars) are left intact since they may be intentional quoted
+    content or user-requested translations.
+    """
+    if not text:
+        return text
+
+    def _replace(m: re.Match) -> str:
+        span = m.group()
+        # Keep intentional blocks (e.g. user-requested translations)
+        if len(span) > 10:
+            return span
+        # Remove stray CJK and collapse extra spaces
+        return ''
+
+    cleaned = _CJK_STRAY_RE.sub(_replace, text)
+    # Collapse any resulting double-spaces from removal
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    original_len = len(text)
+    if len(cleaned) != original_len:
+        logger.info("Stripped stray CJK characters from response: %d -> %d chars", original_len, len(cleaned))
+    return cleaned
+
+
 # Lazy import to avoid circular dependencies
 _destination_registry = None
 
@@ -177,6 +221,10 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
                 response_to_user = "Based on my analysis: " + reasoning[:1500]
         if not response_to_user.strip():
             response_to_user = "I apologize, but I encountered an issue generating a response. Please try rephrasing your question."
+
+    # Strip stray CJK / non-Latin characters that leak from the 3B model's
+    # multilingual training data despite the English-only prompt constraint.
+    response_to_user = _strip_stray_cjk(response_to_user)
 
     # 4. Route to destinations via the spinal column
     destination_results = {}

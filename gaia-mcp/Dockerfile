@@ -27,16 +27,16 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY gaia-mcp/requirements.txt .
+COPY candidates/gaia-mcp/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install gaia-common and gaia-mcp in editable mode
-# Install gaia-common and gaia-mcp in editable mode
-COPY gaia-common/ /gaia-common/
-COPY gaia-mcp/ /app/gaia-mcp/
-COPY gaia-mcp/pyproject.toml /app/gaia-mcp/pyproject.toml
+# Use candidate gaia-common for SOA-decoupled architecture
+COPY candidates/gaia-common/ /gaia-common/
+COPY candidates/gaia-mcp/ /app/gaia-mcp/
+COPY candidates/gaia-mcp/pyproject.toml /app/gaia-mcp/pyproject.toml
 ENV PYTHONPATH "${PYTHONPATH}:/gaia-common"
 
 RUN pip install -e /gaia-common/

@@ -10,6 +10,7 @@ from gaia_core.config import Config, get_config
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer
 from gaia_core.memory.conversation.keywords import ConversationKeywordExtractor
 from gaia_core.memory.conversation.archiver import ConversationArchiver
+from gaia_core.utils.output_router import _strip_think_tags_robust
 
 logger = logging.getLogger("GAIA.SessionManager")
 
@@ -125,6 +126,13 @@ class SessionManager:
 
     def add_message(self, session_id: str, role: str, content: str):
         """Adds a message and checks if it's time to create a long-term memory."""
+        # Defense-in-depth: strip think/reasoning tags from assistant messages
+        # before persisting, so poisoned history can't confuse future model calls.
+        if role == "assistant":
+            content = _strip_think_tags_robust(content)
+            if not content.strip():
+                logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
+                return
         session = self.get_or_create_session(session_id)
         session.history.append({"role": role, "content": content})
         logger.debug(f"💬 Added '{role}' message to session '{session_id}'. History length: {len(session.history)}")

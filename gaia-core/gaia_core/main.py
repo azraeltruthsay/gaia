@@ -174,6 +174,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Register GPU management endpoints (used by orchestrator for sleep/wake handoff)
+from gaia_core.api.gpu_endpoints import router as gpu_router
+app.include_router(gpu_router)
+
 
 @app.get("/health")
 async def health_check():
@@ -198,6 +202,9 @@ async def root():
             "/": "This endpoint",
             "/process_packet": "Process a CognitionPacket through the cognitive loop",
             "/status": "Get cognitive system status",
+            "/gpu/status": "GPU state (active/sleeping)",
+            "/gpu/release": "Put gaia-prime to sleep, free GPU",
+            "/gpu/reclaim": "Wake gaia-prime, restore GPU inference",
         }
     }
 
@@ -301,6 +308,12 @@ async def process_packet(packet_data: Dict[str, Any]):
 
         # Combine all response pieces
         full_response = "".join(response_pieces)
+
+        # Strip <think>/<thinking> tags — the model's reasoning blocks must
+        # never reach the user.  The output_router handles this for the
+        # non-packet path, but /process_packet assembles tokens directly.
+        from gaia_core.utils.output_router import _strip_think_tags_robust
+        full_response = _strip_think_tags_robust(full_response)
 
         # Update the packet with the response
         packet.response.candidate = full_response

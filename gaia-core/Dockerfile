@@ -25,10 +25,10 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY gaia-core/requirements.txt .
+COPY candidates/gaia-core/requirements.txt .
 
 # Copy gaia-common source code so it's available to be installed by requirements.txt
-COPY gaia-common /gaia-common
+COPY candidates/gaia-common /gaia-common
 
 # Install Python dependencies
 # GPU inference is handled by gaia-prime — no GPU packages needed here
@@ -37,18 +37,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ═══════════════════════════════════════════════════════════════════════════
 # Install development dependencies for validation (pytest, ruff, mypy)
 # ═══════════════════════════════════════════════════════════════════════════
-COPY gaia-core/pyproject.toml .
-COPY gaia-core/README.md .
+COPY candidates/gaia-core/pyproject.toml .
+COPY candidates/gaia-core/README.md .
 RUN pip install -e ".[dev]"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Copy service code
 # ═══════════════════════════════════════════════════════════════════════════
 
-COPY gaia-core/gaia_core/ ./gaia_core/
-COPY gaia-core/gaia_rescue.py ./gaia_rescue.py
+COPY candidates/gaia-core/gaia_core/ ./gaia_core/
+COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
 # Copy constants file for model configuration
-COPY gaia-core/gaia_core/gaia_constants.json ./gaia_core/gaia_constants.json
+COPY candidates/gaia-core/gaia_core/gaia_constants.json ./gaia_core/gaia_constants.json
 
 # Expose service port
 EXPOSE 6415

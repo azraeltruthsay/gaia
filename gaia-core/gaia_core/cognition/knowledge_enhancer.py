@@ -67,6 +67,28 @@ def enhance_packet(packet: CognitionPacket):
 
                     logger.exception("Failed to query dnd knowledge base")
 
+        # Knowledge ingestion offer: when the ingestion pipeline detected a
+        # knowledge dump and tagged the packet, inject a system hint so GAIA
+        # proactively offers to save the information in her response.
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'knowledge_ingestion_offer':
+                classification = getattr(df, 'value', {})
+                category = classification.get('category', 'content')
+                title = classification.get('suggested_title', 'this information')
+                packet.content.data_fields.append(DataField(
+                    key='system_hint',
+                    value=(
+                        f"The user appears to have shared substantial D&D {category} content. "
+                        f"Proactively offer to save this as a document titled \"{title}\" "
+                        f"in the campaign knowledge base. Ask something like: "
+                        f"\"Would you like me to save this to your campaign documentation?\" "
+                        f"Only save if the user confirms."
+                    ),
+                    type='string',
+                ))
+                logger.info(f"Injected knowledge ingestion offer hint: category={category}")
+                break
+
     except Exception:
 
         logger.exception("Failed to enhance packet with knowledge")

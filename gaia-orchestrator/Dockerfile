@@ -2,22 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for Docker SDK and GPU monitoring
+# Install system dependencies for Docker SDK and health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY gaia-orchestrator/requirements.txt .
+COPY candidates/gaia-orchestrator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install shared library
-COPY gaia-common /gaia-common
+# Install shared library (candidate version)
+COPY candidates/gaia-common /gaia-common
 RUN pip install --no-cache-dir -e /gaia-common/
 
 # Copy application code
-COPY gaia-orchestrator/gaia_orchestrator/ ./gaia_orchestrator/
-COPY gaia-orchestrator/pyproject.toml .
+COPY candidates/gaia-orchestrator/gaia_orchestrator/ ./gaia_orchestrator/
+COPY candidates/gaia-orchestrator/config/ ./config/
+COPY candidates/gaia-orchestrator/pyproject.toml .
 
 # Install the package
 RUN pip install --no-cache-dir -e .

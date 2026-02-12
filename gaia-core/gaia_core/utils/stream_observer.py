@@ -166,6 +166,46 @@ class StreamObserver:
                 except Exception as e:
                     logger.debug(f"StreamObserver: failed to append path validation to packet reflection log: {e}", exc_info=True)
 
+            # Epistemic guardrail: detect fabricated knowledge-base citations
+            fabricated_paths = [
+                r for r in path_validation_results
+                if not r["exists"] and (
+                    "knowledge/" in r["reference"] or
+                    r["reference"].endswith(".md") or
+                    r["reference"].endswith(".json") or
+                    r["reference"].endswith(".txt")
+                )
+            ]
+
+            if fabricated_paths:
+                fabricated_names = [r["reference"] for r in fabricated_paths]
+                reason = f"Response cites {len(fabricated_paths)} nonexistent file(s): {', '.join(fabricated_names[:3])}"
+                logger.warning(f"StreamObserver: EPISTEMIC VIOLATION — {reason}")
+
+                return Interrupt(level="CAUTION", reason=reason,
+                                 suggestion="Only cite files from Retrieved Documents or verified via read_file.")
+
+        # Cross-reference cited filenames against actually-retrieved documents
+        citation_check = self._verify_citations_against_rag(output, packet)
+        if citation_check["has_violations"]:
+            unverified = citation_check["unverified"]
+            reason = f"Response cites {len(unverified)} file(s) not in Retrieved Documents: {', '.join(unverified[:3])}"
+            logger.warning(f"StreamObserver: CITATION MISMATCH — {reason}")
+            try:
+                log_entry = ReflectionLog(
+                    step="observer_citation_verification",
+                    summary=f"Verified: {citation_check['verified']}, Unverified: {unverified}"
+                )
+                if hasattr(packet.reasoning, 'reflection_log'):
+                    packet.reasoning.reflection_log.append(log_entry)
+                else:
+                    packet.reasoning.reflection_log = [log_entry]
+            except Exception:
+                logger.debug("StreamObserver: failed to append citation verification to reflection log", exc_info=True)
+
+            return Interrupt(level="CAUTION", reason=reason,
+                             suggestion="Only cite files from Retrieved Documents or verified via read_file.")
+
         # identity may be on older packets as packet.identity (dict), or on v0.3 packets in header.persona
         identity_text = ""
         try:
@@ -552,6 +592,53 @@ class StreamObserver:
                     )
 
         return None
+
+    def _verify_citations_against_rag(self, output: str, packet) -> Dict:
+        """
+        Cross-reference filenames cited in the response against actually-retrieved documents.
+        Returns dict with 'cited', 'verified', 'unverified' lists and 'has_violations' flag.
+        """
+        # Extract filenames from response (patterns like filename.md, path/to/file.json)
+        cited_files = set(re.findall(
+            r'(?:^|[\s(`\'"])([a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*\.[a-zA-Z]{2,5})(?:[\s)\'"`,.]|$)',
+            output
+        ))
+
+        # Get actually-retrieved filenames from packet
+        retrieved_filenames = set()
+        try:
+            for df in getattr(packet.content, 'data_fields', []) or []:
+                if getattr(df, 'key', '') == 'retrieved_documents':
+                    for doc in (getattr(df, 'value', []) or []):
+                        fname = doc.get('filename', '')
+                        if fname:
+                            retrieved_filenames.add(fname)
+                            # Also add just the basename
+                            retrieved_filenames.add(fname.rsplit('/', 1)[-1])
+        except Exception:
+            pass
+
+        if not cited_files or not retrieved_filenames:
+            # No citations to verify or no RAG docs to check against
+            return {'cited': list(cited_files), 'verified': [], 'unverified': [], 'has_violations': False}
+
+        # Classify
+        verified = cited_files & retrieved_filenames
+        unverified = cited_files - retrieved_filenames
+
+        # Filter out common false positives (code files, config refs, generic extensions)
+        noise = {f for f in unverified
+                 if f.startswith('gaia_') or f.startswith('app/')
+                 or f.endswith('.py') or f.endswith('.js') or f.endswith('.css')
+                 or '.' not in f}
+        unverified -= noise
+
+        return {
+            'cited': list(cited_files),
+            'verified': list(verified),
+            'unverified': list(unverified),
+            'has_violations': len(unverified) > 0
+        }
 
     def _validate_code_paths(self, text_content: str) -> List[Dict]:
         """

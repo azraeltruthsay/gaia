@@ -34,8 +34,8 @@
     },
     "observer": {
       "enabled": true,
-      "use_gpu_prime": true,
-      "type": "vllm"
+      "use_lite": true,
+      "type": "local"
     },
     "oracle_gemini": {
       "enabled": false,
@@ -233,5 +233,21 @@
       "doc_dir": "system_reference",
       "vector_store_dir": "vectordb/system"
     }
+  },
+  "SEMANTIC_PROBE": {
+    "similarity_threshold": 0.40,
+    "max_phrases": 8,
+    "min_phrase_len": 3,
+    "min_words_to_probe": 3,
+    "cache_max_age_turns": 10,
+    "top_k_per_phrase": 3
+  },
+  "EPISTEMIC_GUARDRAILS": {
+    "enabled": true,
+    "pre_generation_gate": true,
+    "confidence_threshold": 0.5,
+    "annotate_unverified_citations": true,
+    "max_unverified_citations_before_warning": 1,
+    "observer_action_on_fabrication": "caution"
   }
 }

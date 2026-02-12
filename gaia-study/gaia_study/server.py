@@ -227,6 +227,92 @@ def create_app() -> FastAPI:
         }
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # GPU Handoff Endpoints (called by gaia-orchestrator)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # Track GPU availability for training
+    _gpu_available = {"available": False, "received_at": None}
+
+    @app.post("/study/gpu-ready")
+    async def gpu_ready(background_tasks: BackgroundTasks):
+        """
+        Signal from orchestrator that the GPU is now available for training.
+
+        If a training session is queued, it will be started automatically.
+        Otherwise, gaia-study acknowledges GPU availability for future use.
+        """
+        import time
+
+        _gpu_available["available"] = True
+        _gpu_available["received_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+        )
+        logger.info("GPU ready signal received from orchestrator")
+
+        manager = get_study_manager()
+        status = manager.get_status()
+
+        if status["state"] in ("idle", "complete", "failed"):
+            logger.info("GPU ready: no queued training, standing by")
+            return {
+                "ok": True,
+                "message": "GPU acknowledged, no training queued",
+                "gpu_available": True,
+            }
+        else:
+            logger.info(f"GPU ready: training state is '{status['state']}', may proceed")
+            return {
+                "ok": True,
+                "message": f"GPU acknowledged, training state: {status['state']}",
+                "gpu_available": True,
+            }
+
+    @app.post("/study/gpu-release")
+    async def gpu_release():
+        """
+        Request from orchestrator to release the GPU.
+
+        Cancels any in-progress training, cleans up CUDA resources,
+        and acknowledges the release.
+        """
+        import gc
+        import time
+
+        logger.info("GPU release request received from orchestrator")
+
+        # Cancel any in-progress training
+        manager = get_study_manager()
+        status = manager.get_status()
+
+        if status["state"] not in ("idle", "complete", "failed"):
+            logger.info(f"Cancelling in-progress training (state: {status['state']})")
+            manager.cancel_training()
+
+        # Clean up CUDA resources
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+                allocated = torch.cuda.memory_allocated() / 1e9
+                logger.info(f"CUDA cache cleared. VRAM allocated: {allocated:.2f} GB")
+        except ImportError:
+            logger.debug("torch not available for CUDA cleanup")
+        except Exception as e:
+            logger.warning(f"CUDA cleanup error: {e}")
+
+        _gpu_available["available"] = False
+        _gpu_available["released_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+        )
+
+        return {
+            "ok": True,
+            "message": "GPU released, CUDA resources cleaned up",
+            "gpu_available": False,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # Study Mode / LoRA Adapter Endpoints
     # ═══════════════════════════════════════════════════════════════════════════
 

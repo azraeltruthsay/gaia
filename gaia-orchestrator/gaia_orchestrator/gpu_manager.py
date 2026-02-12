@@ -2,7 +2,14 @@
 GPU management for GAIA Orchestrator.
 
 Monitors GPU state via pynvml and coordinates GPU ownership
-between services.
+between services. Uses Docker container stop/start for VRAM
+release/reclaim since vLLM sleep mode cannot offload weights
+with --enforce-eager on Blackwell (sm_120).
+
+Model weights are served from a tmpfs warm pool (/mnt/gaia_warm_pool)
+seeded at boot by systemd, so cold starts load from RAM (~37s)
+rather than NVMe (~41s). KV cache blocks evicted from GPU are
+offloaded to an 8GB CPU RAM buffer (--kv-offloading-backend native).
 """
 
 import asyncio
@@ -23,14 +30,25 @@ except ImportError:
     PYNVML_AVAILABLE = False
     logger.warning("pynvml not available - GPU monitoring will be limited")
 
+# Try to import docker SDK
+try:
+    import docker
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_AVAILABLE = False
+    logger.warning("docker SDK not available - container management will be limited")
+
 
 class GPUManager:
     """Manages GPU resources and monitors VRAM usage."""
+
+    PRIME_CONTAINER_NAME = "gaia-prime-candidate"
 
     def __init__(self, state_manager: StateManager):
         self.state_manager = state_manager
         self.config = get_config()
         self._nvml_initialized = False
+        self._docker_client: Optional["docker.DockerClient"] = None
 
     def _ensure_nvml(self) -> bool:
         """Ensure NVML is initialized."""
@@ -84,6 +102,11 @@ class GPUManager:
         """
         Wait for GPU memory to be released.
 
+        If NVML is available, polls VRAM usage until it drops below threshold.
+        If NVML is not available (orchestrator doesn't have NVIDIA runtime),
+        falls back to checking whether the prime container is stopped — if the
+        container is not running, VRAM is guaranteed released.
+
         Args:
             timeout: Max seconds to wait. Uses config default if None.
 
@@ -94,8 +117,26 @@ class GPUManager:
             timeout = self.config.gpu_cleanup_timeout_seconds
 
         poll_interval = self.config.gpu_cleanup_poll_interval
-        elapsed = 0.0
 
+        # Fast path: if NVML is not available, check container status instead
+        if not self._ensure_nvml():
+            logger.info("NVML not available — checking container status for GPU cleanup")
+            try:
+                client = self._get_docker_client()
+                container = client.containers.get(self.PRIME_CONTAINER_NAME)
+                container.reload()  # refresh status
+                if container.status != "running":
+                    logger.info(f"Prime container is '{container.status}' — GPU cleanup confirmed")
+                    return True
+                else:
+                    logger.warning("Prime container still running but NVML unavailable — cannot verify VRAM")
+                    return False
+            except Exception as e:
+                logger.error(f"Cannot verify GPU cleanup (no NVML, Docker check failed): {e}")
+                return False
+
+        # NVML available — poll VRAM usage
+        elapsed = 0.0
         logger.info(f"Waiting for GPU cleanup (threshold: {self.config.gpu_cleanup_threshold_mb}MB)...")
 
         while elapsed < timeout:
@@ -106,7 +147,6 @@ class GPUManager:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-            # Log progress
             mem_info = await self.get_memory_info()
             if mem_info:
                 logger.debug(f"GPU memory: {mem_info.used_mb}MB used, waiting...")
@@ -114,23 +154,113 @@ class GPUManager:
         logger.warning(f"GPU cleanup timeout after {timeout}s")
         return False
 
+    def _get_docker_client(self) -> "docker.DockerClient":
+        """Get or create Docker client (lazy init)."""
+        if self._docker_client is None:
+            if not DOCKER_AVAILABLE:
+                raise RuntimeError("docker SDK not installed")
+            self._docker_client = docker.from_env()
+        return self._docker_client
+
+    async def stop_prime_container(self) -> bool:
+        """
+        Stop the gaia-prime container to fully release VRAM.
+
+        This is used instead of vLLM sleep mode because --enforce-eager
+        (required for Blackwell sm_120) prevents CuMemAllocator from
+        tracking weight tensors, so sleep only frees KV cache (~1.7GB)
+        rather than the full ~10.5GB.
+
+        Container stop releases all VRAM in ~2-3 seconds.
+        The 8GB CPU KV offload buffer is also freed with the container.
+        """
+        try:
+            client = self._get_docker_client()
+            container = client.containers.get(self.PRIME_CONTAINER_NAME)
+
+            if container.status != "running":
+                logger.info(f"Prime container already stopped (status: {container.status})")
+                return True
+
+            logger.info(f"Stopping prime container '{self.PRIME_CONTAINER_NAME}'...")
+            await asyncio.to_thread(container.stop, timeout=30)
+            logger.info("Prime container stopped — VRAM released")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to stop prime container: {e}")
+            return False
+
+    async def start_prime_container(self) -> bool:
+        """
+        Start the gaia-prime container and wait for it to become healthy.
+
+        Cold start takes ~37s from tmpfs warm pool (was ~41s from NVMe).
+        """
+        try:
+            client = self._get_docker_client()
+            container = client.containers.get(self.PRIME_CONTAINER_NAME)
+
+            if container.status == "running":
+                logger.info("Prime container already running")
+                return True
+
+            logger.info(f"Starting prime container '{self.PRIME_CONTAINER_NAME}'...")
+            await asyncio.to_thread(container.start)
+
+            # Wait for healthy (model loaded, serving)
+            prime_url = getattr(self.config, "prime_url",
+                                "http://gaia-prime-candidate:7777")
+            logger.info(f"Waiting for prime to become healthy at {prime_url}...")
+
+            import httpx
+            max_wait = 120  # seconds
+            poll_interval = 3.0
+            elapsed = 0.0
+
+            while elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                try:
+                    async with httpx.AsyncClient(timeout=5) as hc:
+                        resp = await hc.get(f"{prime_url}/health")
+                        if resp.status_code == 200:
+                            logger.info(f"Prime healthy after {elapsed:.0f}s")
+                            return True
+                except Exception:
+                    pass
+                if elapsed % 15 == 0:
+                    logger.debug(f"Still waiting for prime... ({elapsed:.0f}s)")
+
+            logger.error(f"Prime did not become healthy after {max_wait}s")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to start prime container: {e}")
+            return False
+
     async def request_release_from_core(self) -> bool:
         """
-        Request gaia-core to release GPU resources.
-
-        Calls the /gpu/release endpoint on gaia-core.
+        Release GPU: stop the prime container, then tell gaia-core
+        to demote gpu_prime from its model pool.
         """
         import httpx
 
+        # Step 1: Stop the prime container (frees all VRAM)
+        if not await self.stop_prime_container():
+            logger.error("Failed to stop prime container — aborting release")
+            return False
+
+        # Step 2: Tell core to update its model pool (demote gpu_prime)
         url = f"{self.config.core_url}/gpu/release"
-        logger.info(f"Requesting GPU release from Core: {url}")
+        logger.info(f"Requesting model pool update from Core: {url}")
 
         try:
             async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
                 response = await client.post(url)
 
                 if response.status_code == 200:
-                    logger.info("Core acknowledged GPU release request")
+                    logger.info("Core acknowledged GPU release — fallback chain active")
                     return True
                 else:
                     logger.error(f"Core GPU release failed: {response.status_code} {response.text}")
@@ -142,21 +272,26 @@ class GPUManager:
 
     async def request_reclaim_by_core(self) -> bool:
         """
-        Request gaia-core to reclaim GPU resources.
-
-        Calls the /gpu/reclaim endpoint on gaia-core.
+        Reclaim GPU: start the prime container, wait for healthy,
+        then tell gaia-core to restore gpu_prime in its model pool.
         """
         import httpx
 
+        # Step 1: Start the prime container (loads model into VRAM)
+        if not await self.start_prime_container():
+            logger.error("Failed to start prime container — aborting reclaim")
+            return False
+
+        # Step 2: Tell core to restore gpu_prime in model pool
         url = f"{self.config.core_url}/gpu/reclaim"
-        logger.info(f"Requesting GPU reclaim by Core: {url}")
+        logger.info(f"Requesting model pool restore from Core: {url}")
 
         try:
             async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
                 response = await client.post(url)
 
                 if response.status_code == 200:
-                    logger.info("Core acknowledged GPU reclaim request")
+                    logger.info("Core acknowledged GPU reclaim — prime inference restored")
                     return True
                 else:
                     logger.error(f"Core GPU reclaim failed: {response.status_code} {response.text}")

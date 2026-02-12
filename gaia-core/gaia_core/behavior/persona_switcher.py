@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import unicodedata
+from pathlib import Path
 from typing import Tuple, Optional
 
 logger = logging.getLogger("GAIA.PersonaSwitcher")
@@ -73,6 +74,38 @@ def get_knowledge_base_for_persona(persona_name: str) -> Optional[str]:
         if kb_name:
             logger.debug(f"Persona '{persona_name}' uses knowledge base: {kb_name}")
             return kb_name
+    return None
+
+
+def get_persona_for_knowledge_base(kb_name: str) -> Optional[str]:
+    """
+    Reverse lookup: given a knowledge base name, find the persona that uses it.
+
+    Searches all persona config files for one whose knowledge_base_name matches.
+    Returns the persona name, or None if no match found.
+    """
+    # Check configured personas first (fast path)
+    for persona_name in PERSONA_KEYWORDS:
+        persona_kb = get_knowledge_base_for_persona(persona_name)
+        if persona_kb and persona_kb == kb_name:
+            logger.debug(f"Reverse lookup: KB '{kb_name}' → persona '{persona_name}'")
+            return persona_name
+
+    # Scan persona directory for any persona with this KB
+    try:
+        personas_path = Path(PERSONAS_DIR)
+        if personas_path.is_dir():
+            for entry in personas_path.iterdir():
+                name = entry.stem if entry.is_file() else entry.name
+                if name in PERSONA_KEYWORDS:
+                    continue  # Already checked above
+                persona_kb = get_knowledge_base_for_persona(name)
+                if persona_kb and persona_kb == kb_name:
+                    logger.debug(f"Reverse lookup (scan): KB '{kb_name}' → persona '{name}'")
+                    return name
+    except Exception as e:
+        logger.debug(f"Reverse lookup scan failed: {e}")
+
     return None
 
 

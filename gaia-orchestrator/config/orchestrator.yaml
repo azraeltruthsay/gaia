@@ -1,5 +1,6 @@
 # GAIA Orchestrator Configuration
 # Override these values with environment variables prefixed with ORCHESTRATOR_
+# e.g. ORCHESTRATOR_CORE_URL=http://gaia-core-candidate:6415
 
 # Service settings
 host: "0.0.0.0"
@@ -11,11 +12,15 @@ state_dir: "/shared/orchestrator"
 state_file: "state.json"
 
 # Service endpoints (inside Docker network)
+# These are live-stack defaults. The candidate compose file overrides them
+# via ORCHESTRATOR_* env vars (which take precedence over this file).
 core_url: "http://gaia-core:6415"
-core_candidate_url: "http://gaia-core-candidate:6416"
+core_candidate_url: "http://gaia-core-candidate:6415"
 web_url: "http://gaia-web:6414"
 study_url: "http://gaia-study:8766"
 mcp_url: "http://gaia-mcp:8765"
+prime_url: "http://gaia-prime:7777"
+prime_candidate_url: "http://gaia-prime-candidate:7777"
 
 # Docker settings
 docker_socket: "/var/run/docker.sock"
@@ -23,8 +28,10 @@ compose_file_live: "/gaia/GAIA_Project/docker-compose.yml"
 compose_file_candidate: "/gaia/GAIA_Project/docker-compose.candidate.yml"
 
 # GPU settings
-# VRAM usage below this threshold (MB) = GPU is considered free
-gpu_cleanup_threshold_mb: 500
+# VRAM usage below this threshold (MB) = GPU is considered free.
+# Set above desktop GUI baseline (~2.2GB on KDE/Wayland) so that
+# container stop is detected as cleanup complete.
+gpu_cleanup_threshold_mb: 3000
 # Max time to wait for CUDA to release memory
 gpu_cleanup_timeout_seconds: 30
 # How often to poll VRAM during cleanup

@@ -195,10 +195,26 @@ def packet_to_template_dict(packet: CognitionPacket, processed_data_field_keys: 
 	return template
 
 
-def render_gaia_packet_template(packet: CognitionPacket, indent: str = "  ", processed_data_field_keys: Optional[set] = None) -> str:
-	"""Render the packet template dict into a human-readable block."""
+_DEFAULT_SECTIONS = ("intent", "reasoning", "content")
+_ALL_SECTIONS = ("header", "routing", "model", "context", "intent", "content", "reasoning", "governance", "metrics", "status")
+
+
+def render_gaia_packet_template(
+	packet: CognitionPacket,
+	indent: str = "  ",
+	processed_data_field_keys: Optional[set] = None,
+	sections: Optional[tuple] = None,
+) -> str:
+	"""Render the packet template dict into a human-readable block.
+
+	Args:
+		sections: Which packet sections to include. Defaults to intent +
+			reasoning + content to keep prompts lean. Pass ``_ALL_SECTIONS``
+			for the full dump (debugging / logging).
+	"""
 	template = packet_to_template_dict(packet, processed_data_field_keys)
 	lines: List[str] = []
+	selected = sections if sections is not None else _DEFAULT_SECTIONS
 
 	def render_section(name: str, payload: Dict[str, Any]):
 		if not payload:
@@ -225,7 +241,7 @@ def render_gaia_packet_template(packet: CognitionPacket, indent: str = "  ", pro
 				lines.append(f"{indent}{key}: {_trim(value)}")
 		lines.append("")  # blank line between sections
 
-	for section in ("header", "routing", "model", "context", "intent", "content", "reasoning", "governance", "metrics", "status"):
+	for section in selected:
 		render_section(section.upper(), template.get(section, {}))
 
 	return "\n".join(line for line in lines if line.strip() or line == "")
