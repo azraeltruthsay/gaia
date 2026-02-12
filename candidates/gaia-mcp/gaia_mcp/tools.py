@@ -184,7 +184,7 @@ def _write_file_impl(params: dict) -> dict:
 
 def _list_dir_impl(params: dict):
     """List a directory (shallow, non-recursive)."""
-    path = params.get("path") or "/gaia-assistant"
+    path = params.get("path") or "/knowledge"
     p = Path(path).resolve()
     if not p.is_dir():
         raise ValueError(f"{p} is not a directory")
@@ -194,7 +194,7 @@ def _list_dir_impl(params: dict):
 
 def _list_files_impl(params: dict):
     """Recursively list files under a given path."""
-    root = params.get("path") or "/gaia-assistant"
+    root = params.get("path") or "/knowledge"
     max_depth = int(params.get("max_depth", 3))
     max_entries = int(params.get("max_entries", 1000))
     max_depth = max(1, min(max_depth, 8))
@@ -235,7 +235,7 @@ def _list_files_impl(params: dict):
 
 def _list_tree_impl(params: dict):
     """Produce a bounded directory tree with depth/entry limits."""
-    root = params.get("path") or "/gaia-assistant"
+    root = params.get("path") or "/knowledge"
     max_depth = int(params.get("max_depth", 3))
     max_entries = int(params.get("max_entries", 200))
     max_depth = max(1, min(max_depth, 6))
