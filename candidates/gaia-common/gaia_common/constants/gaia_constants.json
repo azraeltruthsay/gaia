@@ -241,5 +241,13 @@
     "min_words_to_probe": 3,
     "cache_max_age_turns": 10,
     "top_k_per_phrase": 3
+  },
+  "EPISTEMIC_GUARDRAILS": {
+    "enabled": true,
+    "pre_generation_gate": true,
+    "confidence_threshold": 0.5,
+    "annotate_unverified_citations": true,
+    "max_unverified_citations_before_warning": 1,
+    "observer_action_on_fabrication": "caution"
   }
 }

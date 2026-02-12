@@ -266,6 +266,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     if safety_openness_directive_content:
         system_content_parts.append(safety_openness_directive_content)
 
+    # 3.5. Epistemic Honesty — unconditional, every turn
+    epistemic_honesty_directive = (
+        "EPISTEMIC HONESTY RULES (mandatory):\n"
+        "1. NEVER cite a file path you have not read via a tool call in this conversation. "
+        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via read_file.\n"
+        "2. NEVER fabricate quotes. Do not use blockquote formatting (> ...) to present text as if it came from a document unless that exact text appears in your Retrieved Documents.\n"
+        "3. CLEARLY DISTINGUISH sources: say 'From my knowledge base:' only for Retrieved Document content. "
+        "Say 'From my general knowledge:' or 'I believe:' for anything from training data.\n"
+        "4. When you don't have information, say so directly: 'I don't have that in my knowledge base.' "
+        "Do not invent plausible-sounding file paths or document names.\n"
+        "5. NEVER present user-provided information back as 'confirmed' against a source you haven't actually consulted."
+    )
+    system_content_parts.append(epistemic_honesty_directive)
+
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)
@@ -288,7 +302,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     if retrieved_docs_content:
         system_content_parts.append("--- Retrieved Documents ---\n" + retrieved_docs_content)
         system_content_parts.append("--- End of Retrieved Documents ---")
-        system_content_parts.append("INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. Do not rely on your own knowledge.")
+        system_content_parts.append(
+            "INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. "
+            "Only cite filenames listed in the Retrieved Documents above. Do not invent additional document names or paths. "
+            "If the retrieved documents don't fully answer the question, say what's missing rather than fabricating content."
+        )
     elif rag_no_results and knowledge_base_content:
         # A knowledge base was specified but no documents were retrieved
         # Instruct the model to express epistemic uncertainty rather than hallucinate

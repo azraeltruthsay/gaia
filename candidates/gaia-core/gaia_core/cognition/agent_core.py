@@ -954,6 +954,37 @@ class AgentCore:
         if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
             packet = self._knowledge_acquisition_workflow(packet)
 
+        # Epistemic gate: if RAG found nothing for a domain-specific query,
+        # check confidence before generating (prevents fabrication)
+        rag_no_results_flag = any(
+            getattr(df, 'key', '') == 'rag_no_results' and getattr(df, 'value', False)
+            for df in getattr(packet.content, 'data_fields', []) or []
+        )
+        kb_active = bool(knowledge_base_name)
+
+        if rag_no_results_flag and kb_active:
+            eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
+            if eg_config.get("pre_generation_gate", True):
+                self.logger.info("Epistemic gate: RAG returned no results for domain query — checking confidence")
+                try:
+                    conf_result = self.assess_task_confidence(
+                        "domain_query", user_input, selected_model_name, session_id
+                    )
+                    conf_threshold = eg_config.get("confidence_threshold", 0.5)
+                    conf_score = conf_result.get("confidence_score", 1.0)
+                    if conf_score < conf_threshold:
+                        alt = conf_result.get("alternative_offer", "I can try to answer from general knowledge, but I may not be accurate.")
+                        honest_response = (
+                            f"I don't have specific information about that in my knowledge base. "
+                            f"{alt}"
+                        )
+                        _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                        yield {"type": "token", "value": _header + honest_response}
+                        self.session_manager.add_message(session_id, "assistant", honest_response)
+                        return
+                except Exception:
+                    self.logger.debug("Epistemic gate confidence check failed; proceeding with generation", exc_info=True)
+
         # ── Knowledge Ingestion Pipeline ──────────────────────────────
         # Check for explicit save commands or auto-detected knowledge dumps
         # before intent detection so we can short-circuit or tag the packet.
@@ -1549,8 +1580,32 @@ class AgentCore:
             packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
 
             logger.debug(f"User-facing response after routing: {user_facing_response}")
+
+            # Epistemic citation check — warn user if fabricated citations detected
+            epistemic_warning = ""
+            try:
+                eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
+                if eg_config.get("annotate_unverified_citations", True):
+                    max_before_warn = eg_config.get("max_unverified_citations_before_warning", 1)
+                    reflection_logs = getattr(packet.reasoning, 'reflection_log', []) or []
+                    for log_entry in reflection_logs:
+                        step = getattr(log_entry, 'step', '') if hasattr(log_entry, 'step') else log_entry.get('step', '')
+                        summary = getattr(log_entry, 'summary', '') if hasattr(log_entry, 'summary') else log_entry.get('summary', '')
+                        if step in ('observer_path_validation', 'observer_citation_verification'):
+                            warning_count = summary.count('does not exist') + summary.count('Unverified')
+                            if warning_count >= max_before_warn:
+                                epistemic_warning = (
+                                    f"\n\n---\n*[Observer: Some file references in this response "
+                                    f"could not be verified against the knowledge base. "
+                                    f"Information may be from general knowledge rather than "
+                                    f"retrieved documents.]*\n---\n"
+                                )
+                                break
+            except Exception:
+                logger.debug("Epistemic citation check failed", exc_info=True)
+
             _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
-            yield {"type": "token", "value": _header + user_facing_response}
+            yield {"type": "token", "value": _header + user_facing_response + epistemic_warning}
             logger.debug(f"Yielded to user: {user_facing_response}")
 
             # If the response came from the Oracle path, persist it as a learned fact
