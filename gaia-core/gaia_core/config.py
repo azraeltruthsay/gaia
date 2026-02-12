@@ -74,8 +74,11 @@ class Config:
         """
         # Try multiple paths — prefer the canonical gaia-common location
         possible_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
+            # Live container: gaia-common mounted at /gaia-common
+            "/gaia-common/gaia_common/constants/gaia_constants.json",
+            # Candidate container: gaia-common mounted at /app/gaia-common
             "/app/gaia-common/gaia_common/constants/gaia_constants.json",
+            os.path.join(os.path.dirname(__file__), "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
             "/app/gaia_common/constants/gaia_constants.json",
             os.path.join(os.path.dirname(__file__), "gaia_constants.json"),
             "/app/gaia_core/gaia_constants.json",
