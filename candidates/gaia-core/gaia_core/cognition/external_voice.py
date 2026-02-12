@@ -248,7 +248,11 @@ class ExternalVoice:
                 if not token:
                     continue
 
-                token = self._apply_stream_spacing(token, last_visible_char)
+                # NOTE: _apply_stream_spacing removed — vLLM and llama_cpp
+                # streaming APIs return properly-spaced text deltas (OpenAI
+                # compatible format) that should be concatenated directly.
+                # The old spacing logic incorrectly inserted spaces between
+                # BPE subtokens, producing artifacts like "He im ric".
                 last_visible_char = self._get_last_visible_char(token) or last_visible_char
 
                 buffer.append(token)
