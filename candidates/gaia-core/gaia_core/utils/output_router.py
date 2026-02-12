@@ -162,10 +162,21 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     if len(response_to_user) != original_len:
         logger.info(f"Stripped think tags from response: {original_len} -> {len(response_to_user)} chars")
 
-    # If stripping left us with nothing, provide a fallback
+    # If stripping left us with nothing, try to extract reasoning as a fallback
     if not response_to_user.strip():
         logger.warning("Response was empty after stripping think tags - model may have generated only reasoning")
-        response_to_user = "I apologize, but I encountered an issue generating a response. Please try rephrasing your question."
+        # Attempt to salvage the reasoning content from the original response
+        think_match = re.search(
+            r'<(?:think|thinking)>(.*?)</(?:think|thinking)>',
+            response_text, re.DOTALL,
+        )
+        if think_match:
+            reasoning = think_match.group(1).strip()
+            if reasoning:
+                logger.info(f"Salvaging {len(reasoning)} chars of reasoning as response fallback")
+                response_to_user = "Based on my analysis: " + reasoning[:1500]
+        if not response_to_user.strip():
+            response_to_user = "I apologize, but I encountered an issue generating a response. Please try rephrasing your question."
 
     # 4. Route to destinations via the spinal column
     destination_results = {}

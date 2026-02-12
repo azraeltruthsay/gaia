@@ -1565,6 +1565,86 @@ class AgentCore:
             full_response = self._suppress_repetition(full_response)
             logger.info(f"Full LLM response before routing: {full_response}")
 
+            # ── Think-tag-only recovery ──────────────────────────────────
+            # If the model generated only <think> reasoning without any
+            # visible response, retry once with an explicit instruction.
+            stripped_check = strip_think_tags(full_response).strip()
+            if full_response.strip() and not stripped_check:
+                logger.warning(
+                    "AgentCore: Response was think-tags only (%d chars). "
+                    "Retrying with explicit no-thinking instruction.",
+                    len(full_response),
+                )
+                # Extract the reasoning so we can give it context on retry
+                import re as _re
+                _think_match = _re.search(
+                    r'<(?:think|thinking)>(.*?)</(?:think|thinking)>',
+                    full_response, _re.DOTALL,
+                )
+                reasoning_summary = ""
+                if _think_match:
+                    reasoning_summary = _think_match.group(1).strip()[:500]
+
+                # Build a retry message list: append an instruction to
+                # produce a direct answer without think tags.
+                retry_instruction = (
+                    "Your previous response contained only internal reasoning "
+                    "without a visible answer. Please respond directly to the "
+                    "user's last message. Do NOT use <think> tags. "
+                    "Provide a concise, helpful answer."
+                )
+                if reasoning_summary:
+                    retry_instruction += (
+                        f"\n\nYour reasoning was: {reasoning_summary}\n\n"
+                        "Now turn that reasoning into a direct response."
+                    )
+                retry_messages = list(final_messages)
+                retry_messages.append({"role": "user", "content": retry_instruction})
+
+                try:
+                    retry_result = self.model_pool.forward_to_model(
+                        selected_model_name,
+                        messages=retry_messages,
+                        max_tokens=self.config.max_tokens,
+                        temperature=max(self.config.temperature - 0.1, 0.1),
+                        top_p=self.config.top_p,
+                    )
+                    # Extract text from the retry result
+                    retry_text = ""
+                    if isinstance(retry_result, dict):
+                        choices = retry_result.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            retry_text = msg.get("content", "")
+                            if not retry_text:
+                                retry_text = choices[0].get("text", "")
+                    retry_text = strip_think_tags(retry_text).strip()
+                    if retry_text:
+                        logger.info(
+                            "AgentCore: Think-tag retry succeeded (%d chars)",
+                            len(retry_text),
+                        )
+                        full_response = retry_text
+                    else:
+                        logger.warning(
+                            "AgentCore: Think-tag retry also empty; "
+                            "using reasoning as fallback."
+                        )
+                        if reasoning_summary:
+                            full_response = (
+                                "Based on my analysis: " + reasoning_summary
+                            )
+                except Exception:
+                    logger.exception(
+                        "AgentCore: Think-tag retry failed; "
+                        "using reasoning as fallback."
+                    )
+                    if reasoning_summary:
+                        full_response = (
+                            "Based on my analysis: " + reasoning_summary
+                        )
+            # ── End think-tag recovery ────────────────────────────────────
+
             if post_run_observer and not disable_observer:
                 try:
                     review = post_run_observer.observe(packet, full_response)
