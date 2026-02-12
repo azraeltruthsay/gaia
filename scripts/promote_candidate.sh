@@ -10,8 +10,9 @@
 #   gaia-prime  - vLLM inference server (live:7777, candidate:7778)
 #   gaia-mcp    - MCP sidecar tools (live:8765, candidate:8767)
 #   gaia-study  - Study/learning service (live:8766, candidate:8768)
-#   gaia-web    - Web console (live:6414, no candidate container)
-#   gaia-common - Shared library (no container, just files)
+#   gaia-web          - Web console (live:6414, no candidate container)
+#   gaia-orchestrator - GPU/container coordinator (live:6410, candidate:6411)
+#   gaia-common       - Shared library (no container, just files)
 #
 # Options:
 #   --test       Run health check on candidate before promoting
@@ -98,6 +99,7 @@ declare -A SERVICE_CONFIG=(
     ["gaia-mcp"]="8765:8767:yes"
     ["gaia-study"]="8766:8768:yes"
     ["gaia-web"]="6414::yes"
+    ["gaia-orchestrator"]="6410:6411:yes"
     ["gaia-common"]=":::no"
 )
 
@@ -130,8 +132,9 @@ for arg in "$@"; do
             echo "  gaia-prime  - vLLM inference server (live:7777, candidate:7778)"
             echo "  gaia-mcp    - MCP sidecar tools (live:8765, candidate:8767)"
             echo "  gaia-study  - Study/learning service (live:8766, candidate:8768)"
-            echo "  gaia-web    - Web console (live:6414)"
-            echo "  gaia-common - Shared library (no container)"
+            echo "  gaia-web          - Web console (live:6414)"
+            echo "  gaia-orchestrator - GPU/container coordinator (live:6410, candidate:6411)"
+            echo "  gaia-common       - Shared library (no container)"
             echo ""
             echo "Options:"
             echo "  --test       Run health check on candidate before promoting"
@@ -163,7 +166,7 @@ done
 if [ -z "$SERVICE" ]; then
     echo "ERROR: No service specified"
     echo "Usage: $0 <service> [--test] [--no-restart] [--no-backup]"
-    echo "Services: gaia-core, gaia-prime, gaia-mcp, gaia-study, gaia-web, gaia-common"
+    echo "Services: gaia-core, gaia-prime, gaia-mcp, gaia-study, gaia-web, gaia-orchestrator, gaia-common"
     exit 1
 fi
 
@@ -190,7 +193,7 @@ if [ ! -d "$CANDIDATE_DIR" ]; then
 fi
 
 # List of Python services that should undergo full validation
-PYTHON_SERVICES=("gaia-core" "gaia-mcp" "gaia-study" "gaia-web" "gaia-common")
+PYTHON_SERVICES=("gaia-core" "gaia-mcp" "gaia-study" "gaia-web" "gaia-orchestrator" "gaia-common")
 
 # Optional: Run validation checks for Python services
 if [ "$DO_VALIDATE" = true ]; then
