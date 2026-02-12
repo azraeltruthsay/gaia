@@ -13,6 +13,8 @@ from typing import Generator, Dict, Any, List, Optional
 
 from gaia_core.cognition.external_voice import ExternalVoice
 from gaia_core.cognition.self_reflection import run_self_reflection, reflect_and_refine
+from gaia_core.cognition.cognitive_audit import run_cognitive_self_audit
+from gaia_core.cognition.history_review import review_history
 from gaia_core.utils.prompt_builder import build_from_packet
 from gaia_core.utils.output_router import route_output, _strip_think_tags_robust
 # TODO: [GAIA-REFACTOR] chat_logger.py module not yet migrated.
@@ -354,7 +356,7 @@ class AgentCore:
         try:
             tool_info = mcp_client.discover()
             if tool_info and tool_info.get("ok"):
-                available_tools = tool_info.get("tools", [])
+                available_tools = tool_info.get("methods", [])
         except Exception as e:
             self.logger.error(f"Failed to discover MCP tools: {e}")
 
@@ -845,6 +847,14 @@ class AgentCore:
 
         # 2. Create the initial v0.3 Cognition Packet
         history = self.session_manager.get_history(session_id).copy()
+
+        # Pre-injection history review: check for epistemic violations
+        try:
+            hr_cfg = self.config.constants.get("HISTORY_REVIEW", {})
+            history = review_history(history, config=hr_cfg, session_id=session_id)
+        except Exception:
+            logger.warning("AgentCore: history review failed, using raw history", exc_info=True)
+
         packet = self._create_initial_packet(
             user_input, session_id, history, selected_model_name,
             source=source, destination=destination, metadata=_metadata
@@ -1114,6 +1124,13 @@ class AgentCore:
                 f"({', '.join(unique_phrases)})"
             )
 
+        # Grab the embedding model for intent classification (non-blocking)
+        _embed_model = None
+        try:
+            _embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+        except Exception:
+            pass
+
         plan = None
         try:
             plan = detect_intent(
@@ -1123,6 +1140,7 @@ class AgentCore:
                 full_llm=prime_llm,
                 fallback_llm=fallback_llm,
                 probe_context=_probe_context,
+                embed_model=_embed_model,
             )
         finally:
             # Use role-aware release via ModelPool API; let exceptions be logged but
@@ -1267,6 +1285,24 @@ class AgentCore:
                 yield {"type": "token", "value": f"[plan-parse-error] {type(exc).__name__}: {exc}"} 
                 return
         packet.reasoning.reflection_log.append(ReflectionLog(step="initial_plan", summary=initial_plan_text, confidence=0.8)) # Placeholder confidence
+
+        # --- Cognitive Self-Audit ---
+        audit_cfg = self.config.constants.get("COGNITIVE_AUDIT", {})
+        is_slim_prompt = getattr(self.config, '_slim_prompt', False)
+        logger.warning("AgentCore: cognitive audit gate — enabled=%s, skip_for_slim=%s, is_slim=%s",
+                     audit_cfg.get("enabled", False), audit_cfg.get("skip_for_slim_prompt", True), is_slim_prompt)
+        if audit_cfg.get("enabled", False) and not (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt):
+            try:
+                logger.warning("AgentCore: running cognitive self-audit...")
+                run_cognitive_self_audit(
+                    packet=packet,
+                    plan_text=initial_plan_text,
+                    config=self.config,
+                    llm=selected_model,
+                )
+                logger.warning("AgentCore: cognitive self-audit completed successfully")
+            except Exception:
+                logger.warning("AgentCore: cognitive self-audit failed, continuing", exc_info=True)
 
         # pick a reflection model that's idle and not the selected model; prefer role resolution
         # Pick a reflection model that's idle and not the selected model.

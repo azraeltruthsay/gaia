@@ -269,8 +269,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     # 3.5. Epistemic Honesty — unconditional, every turn
     epistemic_honesty_directive = (
         "EPISTEMIC HONESTY RULES (mandatory):\n"
-        "1. NEVER cite a file path you have not read via a tool call in this conversation. "
-        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via read_file.\n"
+        "1. NEVER cite a file path you have not read via an EXECUTE: directive in this conversation. "
+        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via EXECUTE: read_file.\n"
         "2. NEVER fabricate quotes. Do not use blockquote formatting (> ...) to present text as if it came from a document unless that exact text appears in your Retrieved Documents.\n"
         "3. CLEARLY DISTINGUISH sources: say 'From my knowledge base:' only for Retrieved Document content. "
         "Say 'From my general knowledge:' or 'I believe:' for anything from training data.\n"
@@ -287,6 +287,29 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         "unless the user explicitly asks for translation or the content being quoted is in another language."
     )
     system_content_parts.append(language_constraint)
+
+    # 3.7. Tool Calling Convention — only when tools are visible
+    tool_calling_convention = ""
+    try:
+        if "MCP tools:" in (world_state_block_content or ""):
+            tool_calling_convention = (
+                "TOOL CALLING CONVENTION:\n"
+                "To use a tool, emit a directive on its own line in this exact format:\n"
+                "EXECUTE: tool_name {\"param\": \"value\"}\n"
+                "Examples:\n"
+                "  EXECUTE: read_file {\"path\": \"/knowledge/system_reference/core_identity.json\"}\n"
+                "  EXECUTE: web_search {\"query\": \"Gettysburg Address full text\"}\n"
+                "  EXECUTE: list_dir {\"path\": \"/knowledge\"}\n"
+                "NEVER fabricate tool results. NEVER write text like '[Tool call: ...]' or "
+                "pretend you already called a tool. Only use the EXECUTE: directive above. "
+                "If you need information from a file or the web, emit EXECUTE: and STOP — "
+                "the system will execute the tool and provide results in a follow-up."
+            )
+    except Exception:
+        tool_calling_convention = ""
+
+    if tool_calling_convention:
+        system_content_parts.append(tool_calling_convention)
 
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:

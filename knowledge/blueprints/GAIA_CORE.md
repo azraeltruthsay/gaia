@@ -43,12 +43,12 @@
 ```
 gaia_core/
 ├── main.py                        # FastAPI entry point, AIManagerShim, lifespan
-├── config.py                      # Config singleton, loads gaia_constants.json
-├── gaia_constants.json            # Master config (models, features, task instructions)
+├── config.py                      # Config singleton, loads gaia_constants.json from gaia-common
 ├── cognition/                     # Core reasoning pipeline
 │   ├── agent_core.py              # Main Reason-Act-Reflect loop
-│   ├── cognition_packet.py        # Local packet extensions (v0.3)
+│   ├── cognitive_audit.py         # Pre-reflection epistemic self-assessment
 │   ├── cognitive_dispatcher.py    # Dispatch tool/execution results
+│   ├── history_review.py          # Pre-injection history audit (anti-confabulation)
 │   ├── knowledge_enhancer.py      # Inject knowledge context
 │   ├── self_reflection.py         # Response quality review
 │   ├── self_review_worker.py      # Async quality assurance
@@ -97,13 +97,6 @@ gaia_core/
 │   ├── core_identity_guardian.py   # Identity integrity checks
 │   ├── ethical_sentinel.py        # Ethical decision-making
 │   └── consent_protocol.py        # Consent and approval tracking
-├── pipeline/                      # Cognitive pipeline orchestration
-│   ├── pipeline.py                # Main pipeline function
-│   ├── manager.py                 # Routing and context assembly
-│   ├── primitives.py              # Built-in functions (shell, read, write, vector_query)
-│   ├── llm_wrappers.py            # Backend interface wrappers
-│   ├── bootstrap.py               # Full initialization
-│   └── minimal_bootstrap.py       # Minimal startup
 ├── utils/                         # Utilities
 │   ├── prompt_builder.py          # Token-budget-aware prompt assembly
 │   ├── stream_observer.py         # Real-time output validation/interruption
@@ -129,17 +122,132 @@ gaia_core/
 
 The core reasoning loop in `AgentCore.run_turn()`:
 
-1. **Packet Reception** — FastAPI `/process_packet` endpoint
-2. **Session Context** — Load conversation history and persona
-3. **Intent Detection** — Determine user intent (`nlu/intent_detection.py`)
-4. **Primitive Routing** — Check for built-in functions (shell, read, vector_query)
-5. **Knowledge Enhancement** — Inject relevant context (`knowledge_enhancer.py`)
-6. **Prompt Assembly** — Build LLM prompt within token budget (`prompt_builder.py`)
-7. **Reasoning** — Call primary LLM backend (gpu_prime -> groq -> lite fallback)
-8. **Stream Observation** — Real-time output validation (`stream_observer.py`)
-9. **Tool Selection** — Route to MCP tools if needed (`tool_selector.py`)
-10. **Self-Reflection** — Review and refine response (`self_reflection.py`)
-11. **Output Routing** — Deliver to web, Discord, CLI, or API
+1. **Semantic Probe** — Pre-cognition vector lookup across all knowledge bases (`semantic_probe`)
+2. **Persona & KB Selection** — Probe results drive persona/knowledge base routing (replaces old persona-first flow)
+3. **Model Selection** — Multi-path selection with escalation and fallback (see flowchart below)
+4. **History Review** — Pre-injection audit strips fabricated citations from conversation history (`history_review.py`)
+5. **Packet Assembly** — Build CognitionPacket with history, context, constraints
+6. **Intent Detection** — Classify user intent via lite model (`nlu/intent_detection.py`)
+7. **Slim Prompt Fast Path** — Simple queries (recitation, tool calls) skip planning/reflection
+8. **Planning** — Generate execution plan for complex queries
+9. **Cognitive Self-Audit** — Epistemic assessment between planning and reflection (`cognitive_audit.py`)
+10. **Knowledge Enhancement** — Inject relevant context (`knowledge_enhancer.py`)
+11. **Prompt Assembly** — Build LLM prompt within token budget (`prompt_builder.py`)
+12. **Generation** — Stream from primary model with lite fallback on failure
+13. **Stream Observation** — Real-time output validation (`stream_observer.py`)
+14. **Tool Routing** — Route to MCP tools if needed (`tool_selector.py`)
+15. **Loop Detection** — Record tool calls and outputs, detect repetitive patterns (`loop_detector.py`)
+16. **Self-Reflection** — Review and refine response (`self_reflection.py`)
+17. **Output Routing** — Deliver to web, Discord, CLI, or API
+
+## Model Selection Flowchart
+
+The model selection logic in `run_turn()` follows a priority cascade:
+
+```
+                        ┌──────────────┐
+                        │  run_turn()  │
+                        └──────┬───────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │  1. Semantic Probe   │
+                    │  (vector lookup)     │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │  KB triggered?       │
+                    └────┬────────────┬───┘
+                    YES  │            │ NO
+             ┌───────────▼──┐        │
+             │ Prefer        │        │
+             │ gpu_prime     │        │
+             └───────┬───────┘        │
+                     └────────┬───────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  GAIA_BACKEND env?  │──── YES ──→ Use that backend
+                   └──────────┬──────────┘
+                         NO   │
+                   ┌──────────▼──────────┐
+                   │  GAIA_FORCE_THINKER │
+                   │  or "thinker:" tag? │──── YES ──→ gpu_prime → prime → cpu_prime
+                   └──────────┬──────────┘
+                         NO   │
+                   ┌──────────▼──────────┐
+                   │  "oracle" in text   │
+                   │  + use_oracle?      │──── YES ──→ oracle
+                   └──────────┬──────────┘
+                         NO   │
+                   ┌──────────▼──────────┐
+                   │  Default: lite      │
+                   │  (Operator model)   │
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  Model available?   │──── NO ──→ Lazy load, then
+                   └──────────┬──────────┘           fallback loop:
+                         YES  │                      lite → gpu_prime → prime
+                              │                      → cpu_prime → oracle
+                   ┌──────────▼──────────┐
+                   │  lite selected AND  │
+                   │  complex query?     │
+                   │  (>120 words, code, │──── YES ──→ Escalate to gpu_prime
+                   │   architecture...)  │
+                   └──────────┬──────────┘
+                         NO   │
+                   ┌──────────▼──────────┐
+                   │  Acquire model      │
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────────────┐
+                   │  If prime role unavailable:  │
+                   │  groq_fallback               │
+                   │    → oracle_openai           │
+                   │    → oracle_gemini           │
+                   └──────────┬──────────────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  Intent Detection   │
+                   │  (always uses lite) │
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  Slim prompt?       │──── YES ──→ Fast path (skip plan/reflect)
+                   └──────────┬──────────┘
+                         NO   │
+                   ┌──────────▼──────────┐
+                   │  Full pipeline      │
+                   │  (plan → audit →    │
+                   │   reflect → gen)    │
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  Stream fails?      │──── YES ──→ Fallback to lite
+                   └──────────┬──────────┘
+                         NO   │
+                              ▼
+                         Response
+```
+
+### Escalation Heuristics (`_should_escalate_to_thinker`)
+
+| Trigger | Action |
+|---------|--------|
+| Text > 120 words | Escalate to gpu_prime |
+| Contains code/debug/architecture/plan markers | Escalate to gpu_prime |
+| Contains recitation markers (quote, poem, lyrics) | Stay on lite |
+| `GAIA_FORCE_OPERATOR=1` | Never escalate |
+
+### Slim Prompt Triggers (`_should_use_slim_prompt`)
+
+| Condition | Result |
+|-----------|--------|
+| `GAIA_FORCE_FULL_PROMPT=1` | Always full |
+| `GAIA_FORCE_SLIM_PROMPT=1` | Always slim |
+| Intent = recitation, list_tools, list_tree, find_file, read_file | Slim |
+| Intent != "other" | Full (needs pipeline) |
+| Text > 120 words or contains complex markers | Full |
+| Otherwise | Slim |
 
 ## Inference Backends
 
@@ -165,20 +273,24 @@ The core reasoning loop in `AgentCore.run_turn()`:
 
 ## Configuration System
 
-**`config.py`**: Singleton `Config` dataclass. Loads from `gaia_constants.json`. Key attributes:
+**`config.py`**: Singleton `Config` dataclass. Loads from `gaia_constants.json` (canonical location: `gaia-common/gaia_common/constants/gaia_constants.json`). Key attributes:
 - `MODEL_CONFIGS`: Dict of backend configurations
 - `llm_backend`: Default backend selector (overridable via `GAIA_BACKEND`)
 - Token budgets: `full` (8192), `medium` (4096), `minimal` (2048)
 - Feature toggles, paths, model directories
 
-**`gaia_constants.json`** (480+ lines): Master runtime configuration including:
+**`gaia_constants.json`** (single source of truth in gaia-common, ~285 lines): Master runtime configuration including:
 - 8 model configurations (gpu_prime, lite, observer, oracle_gemini, oracle_openai, groq_fallback, prime)
-- Task instruction templates (6 types)
+- Task instruction templates (7 types, including `cognitive_self_audit`)
 - Observer settings (check_frequency, thresholds)
 - Loop detection config (tool_threshold: 3, output_threshold: 0.95)
 - Tool routing config (confidence_threshold: 0.7)
 - LoRA adapter config (3 tiers: global/user/session, max 4 adapters)
 - Fragmentation settings (continuation_threshold: 0.85, max 5 fragments)
+- Epistemic guardrails (confidence gating, citation annotation)
+- Cognitive audit config (enabled, max_tokens: 256, skip_for_slim)
+- History review config (violation_threshold: 2, max_messages: 20)
+- Semantic probe config (similarity_threshold: 0.40, top_k: 3)
 - Integration placeholders (Discord webhook/token loaded from env, not hardcoded)
 
 ## Memory Architecture

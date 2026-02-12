@@ -21,6 +21,7 @@ from gaia_common.utils.world_state import world_state_detail
 from gaia_common.utils.service_client import get_study_client
 
 from .approval import ApprovalStore
+from .web_tools import web_search, web_fetch
 
 logger = get_logger(__name__)
 
@@ -81,6 +82,9 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
         "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
+        # Web research tools
+        "web_search": lambda p: web_search(p),
+        "web_fetch": lambda p: web_fetch(p),
     }
 
     async_tool_map = {

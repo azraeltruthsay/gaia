@@ -3,7 +3,7 @@
 # promote_candidate.sh - Promote a GAIA service from candidate to live
 #
 # Usage:
-#   ./promote_candidate.sh <service> [--test] [--no-restart] [--no-backup]
+#   ./promote_candidate.sh <service> [--test] [--no-restart] [--no-backup] [--force]
 #
 # Services:
 #   gaia-core   - Main cognition engine (live:6415, candidate:6416)
@@ -109,6 +109,7 @@ DO_TEST=false
 DO_RESTART=true
 DO_BACKUP=true
 DO_VALIDATE=false # New validation flag
+DO_FORCE=false    # Override sync checks
 
 for arg in "$@"; do
     case $arg in
@@ -124,8 +125,11 @@ for arg in "$@"; do
         --validate) # New option for validation
             DO_VALIDATE=true
             ;;
+        --force)
+            DO_FORCE=true
+            ;;
         --help|-h)
-            echo "Usage: $0 <service> [--test] [--no-restart] [--no-backup] [--validate]"
+            echo "Usage: $0 <service> [--test] [--no-restart] [--no-backup] [--validate] [--force]"
             echo ""
             echo "Services:"
             echo "  gaia-core   - Main cognition engine (live:6415, candidate:6416)"
@@ -141,6 +145,12 @@ for arg in "$@"; do
             echo "  --no-restart Don't restart the live container after promotion"
             echo "  --no-backup  Don't create backup of current live"
             echo "  --validate   Run linting, type checking, and unit tests on candidate before promoting"
+            echo "  --force      Override blocking sync checks (use with caution)"
+            echo ""
+            echo "Before promoting a service, the script checks that gaia-common"
+            echo "shared protocols (especially CognitionPacket) and constants are"
+            echo "in sync between candidate and live. If they differ, promotion is"
+            echo "blocked unless --force is passed."
             echo ""
             echo "Examples:"
             echo "  $0 gaia-core --test --validate"
@@ -232,6 +242,82 @@ if [ "$DO_TEST" = true ] && [ -n "$CANDIDATE_PORT" ]; then
 elif [ "$DO_TEST" = true ]; then
     echo "Note: No candidate port configured for $SERVICE, skipping health check"
     echo ""
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sync validation: ensure shared dependencies match between candidate & live
+# ═══════════════════════════════════════════════════════════════════════════
+
+SYNC_FAILED=false
+
+# Check 1: gaia-common shared protocols (CognitionPacket is the critical one)
+if [ "$SERVICE" != "gaia-common" ]; then
+    CANDIDATE_COMMON="$GAIA_ROOT/candidates/gaia-common"
+    LIVE_COMMON="$GAIA_ROOT/gaia-common"
+
+    echo "Checking gaia-common sync between candidate and live..."
+
+    # Check cognition_packet.py — the most critical shared protocol
+    CP_CANDIDATE="$CANDIDATE_COMMON/gaia_common/protocols/cognition_packet.py"
+    CP_LIVE="$LIVE_COMMON/gaia_common/protocols/cognition_packet.py"
+
+    if [ -f "$CP_CANDIDATE" ] && [ -f "$CP_LIVE" ]; then
+        if ! diff -q "$CP_CANDIDATE" "$CP_LIVE" > /dev/null 2>&1; then
+            echo "✗ SYNC WARNING: cognition_packet.py differs between candidate and live gaia-common!"
+            echo "  Candidate: $CP_CANDIDATE"
+            echo "  Live:      $CP_LIVE"
+            diff --stat "$CP_CANDIDATE" "$CP_LIVE" 2>/dev/null || true
+            echo ""
+            echo "  Risk: Promoting $SERVICE with mismatched packet definitions may cause runtime errors."
+            echo "  Fix:  Run './promote_candidate.sh gaia-common' first, or sync manually."
+            SYNC_FAILED=true
+        else
+            echo "  ✓ cognition_packet.py in sync"
+        fi
+    fi
+
+    # Check gaia_constants.json — shared config
+    GC_CANDIDATE="$CANDIDATE_COMMON/gaia_common/constants/gaia_constants.json"
+    GC_LIVE="$LIVE_COMMON/gaia_common/constants/gaia_constants.json"
+
+    if [ -f "$GC_CANDIDATE" ] && [ -f "$GC_LIVE" ]; then
+        if ! diff -q "$GC_CANDIDATE" "$GC_LIVE" > /dev/null 2>&1; then
+            echo "  ⚠ gaia_constants.json differs between candidate and live gaia-common"
+            echo "    (Feature flags, model configs, or thresholds may be out of sync)"
+            # Constants mismatch is a warning, not a blocker — it won't crash
+        else
+            echo "  ✓ gaia_constants.json in sync"
+        fi
+    fi
+
+    # Check all shared protocol files
+    if [ -d "$CANDIDATE_COMMON/gaia_common/protocols" ] && [ -d "$LIVE_COMMON/gaia_common/protocols" ]; then
+        PROTO_DIFF=$(diff -rq "$CANDIDATE_COMMON/gaia_common/protocols/" "$LIVE_COMMON/gaia_common/protocols/" \
+            --exclude='__pycache__' --exclude='*.pyc' 2>/dev/null || true)
+        if [ -n "$PROTO_DIFF" ]; then
+            echo "  ⚠ Other protocol files differ:"
+            echo "$PROTO_DIFF" | sed 's/^/    /'
+        else
+            echo "  ✓ All protocol files in sync"
+        fi
+    fi
+
+    echo ""
+
+    if [ "$SYNC_FAILED" = true ]; then
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║  BLOCKING: Critical shared files are out of sync.          ║"
+        echo "║  Promote gaia-common first, or pass --force to override.   ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        if [ "$DO_FORCE" != true ]; then
+            echo ""
+            echo "Aborting. Use --force to override this check."
+            exit 1
+        else
+            echo "  --force specified, continuing despite sync mismatch..."
+        fi
+        echo ""
+    fi
 fi
 
 # Create backup

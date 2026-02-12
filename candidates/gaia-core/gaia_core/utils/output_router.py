@@ -320,6 +320,17 @@ def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket):
         clean_text = re.sub(r"^(THOUGHT_SEED:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
         packet.response.candidate = clean_text
 
+    # Strip fabricated tool-call syntax the model may produce
+    # instead of proper EXECUTE: directives
+    if packet.response.candidate:
+        packet.response.candidate = re.sub(
+            r'\[Tool call[:\s].*?\]', '', packet.response.candidate
+        ).strip()
+        # Also strip fake "Tool call completed" markers
+        packet.response.candidate = re.sub(
+            r'\[Tool call completed\..*?\]', '', packet.response.candidate
+        ).strip()
+
     # Extract EXECUTE directives and convert to SidecarActions.
     # Supports two formats:
     #   Structured: EXECUTE: write_file {"path": "/knowledge/doc.txt", "content": "..."}

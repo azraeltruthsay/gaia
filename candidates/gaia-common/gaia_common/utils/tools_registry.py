@@ -304,5 +304,29 @@ TOOLS = {
             },
             "required": ["knowledge_base_name", "file_path"]
         }
+    },
+    # --- Web Research Tools ---
+    "web_search": {
+        "description": "Search the web via DuckDuckGo and return results annotated with source trust tiers. Use for poems, facts, documentation, or any query that benefits from real web sources.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query."},
+                "content_type": {"type": "string", "description": "Optional hint: 'poem', 'facts', 'code', 'science', 'news'. Auto-adds site: filters for relevant domains."},
+                "domain_filter": {"type": "string", "description": "Optional: restrict results to a specific domain (e.g., 'wikipedia.org')."},
+                "max_results": {"type": "integer", "description": "Number of results to return (default 5, max 10)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "web_fetch": {
+        "description": "Fetch and extract text content from a URL. Only works for allowlisted domains (trusted and reliable sources). Use web_search first to find URLs.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch content from. Must be from a trusted or reliable domain."}
+            },
+            "required": ["url"]
+        }
     }
 }

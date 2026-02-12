@@ -151,6 +151,14 @@ def _capability_affordances(tools: List[str]) -> List[str]:
             "You can write files (with operator approval) to persist thoughts, notes, or outputs."
         )
 
+    # Web research capabilities
+    web_tools = [t for t in tools if any(w in t.lower() for w in ['web', 'search', 'fetch'])]
+    if web_tools:
+        affordances.append(
+            "You can search the web and fetch content from trusted sources "
+            "to find real, verifiable information (poems, facts, documentation)."
+        )
+
     return affordances
 
 

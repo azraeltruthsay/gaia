@@ -1,0 +1,149 @@
+{
+  "_comment": "Exemplar phrases for embedding-based intent classification. Each key is an intent label; each value is a list of representative user utterances. The embed classifier encodes these once at startup and classifies new queries via cosine similarity.",
+  "chat": [
+    "Hey, how are you doing?",
+    "What's up?",
+    "Tell me something interesting",
+    "What do you think about that?",
+    "How's your day going?",
+    "Let's just talk for a bit",
+    "I'm bored, chat with me",
+    "What's on your mind?",
+    "Good morning!",
+    "Thanks for that",
+    "That's cool",
+    "I appreciate your help",
+    "Can we just have a conversation?"
+  ],
+  "read_file": [
+    "Read the config file for me",
+    "Can you show me what's in the log file?",
+    "Open the readme and tell me what it says",
+    "Display the contents of session.json",
+    "What does the Dockerfile look like?",
+    "Show me the python script in cognition/",
+    "Read knowledge/blueprints/GAIA_CORE.md",
+    "Cat the yaml config",
+    "View the .env file",
+    "What's in that markdown file?"
+  ],
+  "write_file": [
+    "Write that to a file called notes.md",
+    "Save this conversation to a log",
+    "Create a new config file with those settings",
+    "Write the output to results.json",
+    "Save my notes to the knowledge directory",
+    "Update the file with the new content",
+    "Append this to the session log"
+  ],
+  "shell": [
+    "Run a shell command to check disk space",
+    "Execute ls in the home directory",
+    "What's the output of uname?",
+    "Run ps aux to see what's running",
+    "Check the system uptime",
+    "Execute the deploy script",
+    "Run docker ps"
+  ],
+  "find_file": [
+    "Where is the dev matrix file?",
+    "Find the configuration file",
+    "Can you locate the session history?",
+    "Search for files matching *.json in knowledge/",
+    "Where did we put the blueprint?",
+    "Find any markdown files about identity",
+    "Locate the constants file"
+  ],
+  "clarification": [
+    "What do you mean by that?",
+    "Can you explain that in simpler terms?",
+    "I don't understand, can you elaborate?",
+    "What exactly is a CognitionPacket?",
+    "Tell me more about how the pipeline works",
+    "Can you break that down for me?",
+    "In other words, what are you saying?",
+    "Could you rephrase that?"
+  ],
+  "correction": [
+    "That's not right, the file is actually in gaia-common",
+    "You're wrong about that",
+    "Actually, the correct answer is different",
+    "No, that's incorrect",
+    "I need to correct you on something",
+    "That's a mistake, it should be the other way",
+    "You got that wrong"
+  ],
+  "brainstorming": [
+    "Let's brainstorm some ideas for the new feature",
+    "What if we redesigned the pipeline?",
+    "How about we try a different approach?",
+    "I want to explore some possibilities",
+    "Ideas for improving response quality?",
+    "Let's think creatively about this problem",
+    "What are some alternative architectures we could use?",
+    "Help me think through the options"
+  ],
+  "feedback": [
+    "I have some feedback about your responses",
+    "Here's a suggestion for improvement",
+    "Your last answer could have been better because",
+    "I want to give you feedback on how that went",
+    "That response was really good, keep it up",
+    "One improvement idea: you could be more concise",
+    "The quality has been declining lately"
+  ],
+  "recitation": [
+    "Recite The Raven by Edgar Allan Poe",
+    "Can you perform the soliloquy from Hamlet?",
+    "Give me the full text of Ozymandias",
+    "Read aloud the GAIA Constitution",
+    "Recite Jabberwocky in its entirety",
+    "Perform the Declaration of Artisanal Intelligence",
+    "Tell me the poem Invictus word for word",
+    "Sing me the ballad of Casey at the Bat"
+  ],
+  "reflect": [
+    "Take a moment to reflect on your recent responses",
+    "What have you learned from our conversation?",
+    "Reflect on whether your approach was effective",
+    "How do you feel about the quality of your outputs?",
+    "Think about what you could do differently",
+    "Self-assess your performance today"
+  ],
+  "mark_task_complete": [
+    "Mark that task as done",
+    "That's complete, check it off",
+    "We finished that task",
+    "Done with that item",
+    "Task completed successfully",
+    "Mark it as finished"
+  ],
+  "list_tools": [
+    "What MCP tools do you have?",
+    "List all available tools",
+    "Show me your capabilities",
+    "What actions can you perform?",
+    "List your MCP actions",
+    "What tools are available?"
+  ],
+  "tool_routing": [
+    "Use the MCP tool to read that file",
+    "Call the diagnostics tool",
+    "Invoke the helper script",
+    "Run the file operation tool",
+    "Execute the read tool on that path",
+    "Use ai_read to check the document"
+  ],
+  "other": [
+    "Who forged Excalibur?",
+    "What's the capital of France?",
+    "Explain quantum entanglement",
+    "How does photosynthesis work?",
+    "What year did World War 2 end?",
+    "Tell me about the history of Rome",
+    "What's the meaning of life?",
+    "How do neural networks learn?",
+    "What is the speed of light?",
+    "Describe the water cycle"
+  ]
+}

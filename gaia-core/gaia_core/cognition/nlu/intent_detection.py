@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import sys
 from typing import Optional
 
+from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+
 logger = logging.getLogger("GAIA.IntentDetection")
 
 @dataclass
@@ -331,6 +333,137 @@ def _detect_tool_routing_request(text: str) -> bool:
     return False
 
 
+def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
+    """Multi-signal keyword classifier for intent detection.
+
+    Used when the LLM backend is llama_cpp (thinking models that burn tokens
+    on <think> preamble). Covers the same intent categories as the LLM prompt
+    but uses keyword/pattern matching instead.
+
+    Priority order (first match wins):
+      1. File operations (read_file, write_file) — with file-keyword guard
+      2. Shell commands (shell)
+      3. Task completion (mark_task_complete)
+      4. Tool listing (list_tools, list_tree, list_files)
+      5. Correction (correction) — user correcting GAIA
+      6. Clarification (clarification) — user asking for explanation
+      7. Brainstorming (brainstorming)
+      8. Feedback (feedback)
+      9. Chat (chat) — greetings and casual conversation
+     10. Fallback: "chat" for short messages, "other" otherwise
+    """
+    lowered = (text or "").lower().strip()
+    words = lowered.split()
+    first_word = words[0] if words else ""
+    word_count = len(words)
+
+    # --- File operations ---
+    if _mentions_file_like_action(text):
+        read_verbs = {"read", "open", "show", "view", "display", "cat", "print"}
+        write_verbs = {"write", "save", "create", "append", "update"}
+        if first_word in write_verbs or any(v in lowered for v in ["write to ", "save to ", "save as "]):
+            return "write_file"
+        if first_word in read_verbs or _detect_read_file_request(text):
+            return "read_file"
+
+    # --- Shell commands ---
+    shell_markers = ["run command", "execute command", "run script", "shell command",
+                     "run the command", "execute the command"]
+    if first_word in {"shell", "bash", "terminal"} or any(m in lowered for m in shell_markers):
+        return "shell"
+
+    # --- Task completion ---
+    if any(p in lowered for p in ["mark as done", "mark as complete", "task complete",
+                                   "mark complete", "mark done", "finished the task"]):
+        return "mark_task_complete"
+    if first_word in {"complete", "done", "finished"} and word_count <= 5:
+        return "mark_task_complete"
+
+    # --- Tool/file listing ---
+    if any(p in lowered for p in ["list tools", "list your tools", "what tools",
+                                   "available tools", "show tools", "mcp tools"]):
+        return "list_tools"
+    if any(p in lowered for p in ["list files", "list the files", "show files",
+                                   "what files"]):
+        return "list_files"
+    if any(p in lowered for p in ["list tree", "directory tree", "show tree",
+                                   "folder structure"]):
+        return "list_tree"
+
+    # --- Correction (user correcting GAIA) ---
+    correction_patterns = [
+        "you're wrong", "you are wrong", "that's wrong", "that is wrong",
+        "that's not right", "that's not correct", "that's incorrect",
+        "that is not right", "that is not correct", "that is incorrect",
+        "you're incorrect", "you are incorrect",
+        "you're mistaken", "you are mistaken",
+        "no, actually", "no that's not",
+        "you're confusing", "you are confusing",
+        "you're mixing", "you are mixing",
+        "stop hallucinating", "you're hallucinating", "you are hallucinating",
+    ]
+    if any(p in lowered for p in correction_patterns):
+        return "correction"
+    if first_word == "actually" and any(w in lowered for w in ["not", "wrong", "incorrect"]):
+        return "correction"
+
+    # --- Clarification (user asking GAIA to explain) ---
+    clarification_patterns = [
+        "what do you mean", "what does that mean", "can you explain",
+        "could you explain", "please explain", "explain what",
+        "explain that", "explain how", "explain why",
+        "tell me more", "elaborate", "in other words",
+        "what exactly", "i don't understand", "i don't get",
+        "what are you saying", "clarify",
+    ]
+    if any(p in lowered for p in clarification_patterns):
+        return "clarification"
+
+    # --- Brainstorming ---
+    brainstorm_patterns = [
+        "brainstorm", "ideas for", "let's think about",
+        "what if we", "how about we", "how could we",
+        "suggest some", "come up with", "help me think",
+        "creative ideas", "possibilities for",
+    ]
+    if any(p in lowered for p in brainstorm_patterns):
+        return "brainstorming"
+
+    # --- Feedback ---
+    feedback_patterns = [
+        "feedback", "suggestion for you", "you should",
+        "you could improve", "you need to", "my feedback",
+        "i think you should", "improvement",
+    ]
+    if any(p in lowered for p in feedback_patterns):
+        return "feedback"
+
+    # --- Chat (greetings and casual conversation) ---
+    chat_starters = {"hello", "hi", "hey", "howdy", "greetings", "yo",
+                     "good morning", "good evening", "good afternoon",
+                     "what's up", "sup", "hiya", "heya"}
+    if lowered in chat_starters or first_word in {"hello", "hi", "hey", "howdy", "yo"}:
+        return "chat"
+    # Short casual messages (<=6 words, no question complexity markers)
+    if word_count <= 6 and "?" not in lowered and first_word in {
+        "thanks", "thank", "cool", "nice", "great", "ok", "okay",
+        "sure", "yes", "no", "yeah", "yep", "nope", "alright",
+    }:
+        return "chat"
+    # Questions about GAIA itself → chat
+    if any(p in lowered for p in ["how are you", "who are you", "what are you",
+                                   "tell me about yourself", "introduce yourself"]):
+        return "chat"
+
+    # --- Fallback ---
+    # Short messages without complexity markers are likely casual chat
+    if word_count <= 4 and "?" not in lowered:
+        return "chat"
+
+    logger.debug("Keyword heuristic: no match, returning 'other'")
+    return "other"
+
+
 def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     Fast-track intent detection for common conversational patterns.
@@ -359,7 +492,7 @@ def _fast_track_intent_detection(text: str) -> Optional[str]:
 
     return None
 
-def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context=""):
+def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None):
     """
     Uses an LLM (Lite if present, else Prime) to detect intent for natural language input.
     Output should always be one of: read_file, write_file, mark_task_complete, reflect, seed, shell, list_tools, list_tree, tool_routing, other.
@@ -427,43 +560,36 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         return "find_file"
 
     # Defensive shortcut: if the selected model is backed by llama_cpp, avoid
-    # calling its create_chat_completion and use a lightweight heuristic.
+    # calling its create_chat_completion (thinking models burn tokens on
+    # <think> preamble).  Try embedding classification first, then fall back
+    # to keyword heuristics.
     if _is_llama_cpp_instance(model):
-        logger.warning("Detected llama_cpp backend for intent detection; using heuristic fallback.")
-        # Very small heuristic: map leading verb/keyword to intent when obvious.
-        first = (text or "").strip().split()
-        first_word = first[0].lower() if first else ""
-        mapping = {
-            "read": "read_file",
-            "open": "read_file",
-            "cat": "read_file",
-            "show": "read_file",
-            "write": "write_file",
-            "save": "write_file",
-            "complete": "mark_task_complete",
-            "done": "mark_task_complete",
-            "help": "other",  # reflex handles help; here treat safely
-            "exit": "other",
-            "quit": "other",
-            "shell": "shell",
-            # Recitation/fragmentation verbs (backup - NLU check above should catch most)
-            "recite": "recitation",
-            "perform": "recitation",
-            "declaim": "recitation",
-            "tell": "recitation",  # "tell me the raven"
-            "sing": "recitation",  # "sing me a song"
-            "clarify": "clarification",
-            "explain": "clarification",
-            "correct": "correction",
-            "actually": "correction",
-            "brainstorm": "brainstorming",
-            "feedback": "feedback",
-            "chat": "chat",
-        }
-        intent_guess = mapping.get(first_word, "other")
-        if intent_guess in {"read_file", "write_file"} and not _mentions_file_like_action(text):
-            return "other"
-        return intent_guess
+        # --- Embedding-based classification (preferred) ---
+        embed_intent_cfg = {}
+        try:
+            embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
+        except Exception:
+            pass
+        if embed_model is not None and embed_intent_cfg.get("enabled", True):
+            classifier = EmbedIntentClassifier.instance()
+            if not classifier.ready:
+                classifier.initialise(embed_model, config=embed_intent_cfg)
+            if classifier.ready:
+                threshold = embed_intent_cfg.get("confidence_threshold", 0.45)
+                intent, score = classifier.classify(text, confidence_threshold=threshold)
+                if intent != "other":
+                    # Apply the file-keyword guard for read/write intents
+                    if intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
+                        logger.info("Embed intent '%s' lacks file keywords; downgrading to 'other'.", intent)
+                        intent = "other"
+                    else:
+                        logger.info("Embed intent classification: %s (score=%.3f)", intent, score)
+                        return intent
+                # Embedding returned "other" — fall through to keyword heuristic
+                # which may still catch short chat patterns etc.
+
+        logger.info("llama_cpp backend: using keyword heuristic for intent.")
+        return _keyword_intent_classify(text, probe_context)
     # Build context line from semantic probe (if available)
     context_line = ""
     if probe_context:
@@ -550,13 +676,14 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
     return intent
 
 # ---- Unified entrypoint ----
-def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="") -> Plan:
+def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None) -> Plan:
     """
     Detects intent using reflex path, else LLM.
     Returns a Plan object.
 
     Args:
         probe_context: Optional domain hint from semantic probe for LLM-based classification.
+        embed_model: Optional SentenceTransformer for embedding-based classification.
     """
     try:
         logger.info("Intent detection: start")
@@ -566,8 +693,8 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
     # 1. Reflex check
     intent_str = fast_intent_check(text)
     if not intent_str:
-        # 2. LLM path
-        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context)
+        # 2. LLM path (with embedding fallback)
+        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model)
     
     read_only_intents = {"read_file", "explain_file", "explain_symbol"}
     plan = Plan(intent=intent_str, read_only=intent_str in read_only_intents)

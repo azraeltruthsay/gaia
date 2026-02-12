@@ -66,9 +66,17 @@ class Config:
         self.cheat_sheet = self._load_cheat_sheet()
 
     def _load_constants(self):
-        """Load configuration from gaia_constants.json."""
-        # Try multiple paths for the constants file
+        """Load configuration from gaia_constants.json.
+
+        Canonical location is gaia-common/constants/gaia_constants.json.
+        The gaia-common copy is checked first so that all services share
+        one source of truth for feature flags and system prompts.
+        """
+        # Try multiple paths — prefer the canonical gaia-common location
         possible_paths = [
+            os.path.join(os.path.dirname(__file__), "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
+            "/app/gaia-common/gaia_common/constants/gaia_constants.json",
+            "/app/gaia_common/constants/gaia_constants.json",
             os.path.join(os.path.dirname(__file__), "gaia_constants.json"),
             "/app/gaia_core/gaia_constants.json",
             "/app/gaia_constants.json",

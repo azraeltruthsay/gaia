@@ -47,8 +47,8 @@ RUN pip install -e ".[dev]"
 
 COPY candidates/gaia-core/gaia_core/ ./gaia_core/
 COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
-# Copy constants file for model configuration
-COPY candidates/gaia-core/gaia_core/gaia_constants.json ./gaia_core/gaia_constants.json
+# Copy canonical constants file from gaia-common (single source of truth)
+COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
 # Expose service port
 EXPOSE 6415
