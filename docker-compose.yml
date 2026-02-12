@@ -91,13 +91,15 @@ services:
     restart: unless-stopped
 
     volumes:
-      - ./gaia-models:/models:ro
-      - ./gaia-models/lora_adapters:/models/lora_adapters:ro
+      - /mnt/gaia_warm_pool/Claude:/models/Claude:ro
+      - /mnt/gaia_warm_pool/lora_adapters:/models/lora_adapters:ro
 
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_FLASH_ATTN_VERSION=2
       - TORCH_CUDA_ARCH_LIST=12.0+PTX
+      # Required for vLLM sleep mode (/sleep and /wake_up endpoints)
+      - VLLM_SERVER_DEV_MODE=1
 
     ports:
       - "7777:7777"
@@ -107,7 +109,7 @@ services:
       --model /models/Claude
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.65
+      --gpu-memory-utilization 0.70
       --max-model-len 8192
       --max-num-seqs 4
       --trust-remote-code
@@ -116,6 +118,11 @@ services:
       --enable-lora
       --max-loras 4
       --max-lora-rank 64
+      --enable-sleep-mode
+      --enable-prefix-caching
+      --kv-offloading-backend native
+      --kv-offloading-size 8
+      --disable-hybrid-kv-cache-manager
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]

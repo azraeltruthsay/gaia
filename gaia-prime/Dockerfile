@@ -65,6 +65,12 @@ RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project
     && cd /app \
     && rm -rf /tmp/vllm/.git
 
+# Fix numpy ABI mismatch: vLLM pulls numpy 2.x but torch in NGC 25.03 was
+# compiled against numpy 1.x. vLLM's logits processor calls .numpy() on
+# tensors which crashes at runtime. Must be done AFTER vLLM install since
+# vLLM's dependencies pull numpy 2.x and override any earlier pin.
+RUN pip install --no-cache-dir "numpy<2"
+
 # Expose service port
 EXPOSE 7777
 
@@ -72,7 +78,8 @@ EXPOSE 7777
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:7777/health || exit 1
 
-# Default command includes LoRA flags for adapter support.
+# Default command includes LoRA and sleep mode flags for adapter + GPU handoff support.
+# Sleep mode enables /sleep and /wake_up endpoints for VRAM↔RAM hot-swap.
 # Overridden by docker-compose.candidate.yml command in production.
 CMD ["python", "-m", "vllm.entrypoints.openai.api_server", \
      "--model", "/models/Claude", \
@@ -85,4 +92,5 @@ CMD ["python", "-m", "vllm.entrypoints.openai.api_server", \
      "--dtype", "auto", \
      "--enable-lora", \
      "--max-loras", "4", \
-     "--max-lora-rank", "64"]
+     "--max-lora-rank", "64", \
+     "--enable-sleep-mode"]
