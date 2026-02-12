@@ -280,6 +280,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     )
     system_content_parts.append(epistemic_honesty_directive)
 
+    # 3.6. Language Constraint — always respond in English
+    language_constraint = (
+        "LANGUAGE CONSTRAINT: Always respond in English. "
+        "Do not use non-English words, characters, or scripts (e.g. Chinese, Japanese, Korean) "
+        "unless the user explicitly asks for translation or the content being quoted is in another language."
+    )
+    system_content_parts.append(language_constraint)
+
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)
@@ -305,7 +313,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         system_content_parts.append(
             "INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. "
             "Only cite filenames listed in the Retrieved Documents above. Do not invent additional document names or paths. "
-            "If the retrieved documents don't fully answer the question, say what's missing rather than fabricating content."
+            "If the retrieved documents don't fully answer the question, say what's missing rather than fabricating content. "
+            "Do NOT supplement retrieved content with made-up specifics (names, stats, lists, mechanics) from general knowledge. "
+            "If you share general knowledge beyond what was retrieved, explicitly mark it as uncertain: 'From my general training (may be imprecise):' "
+            "and keep it brief."
         )
     elif rag_no_results and knowledge_base_content:
         # A knowledge base was specified but no documents were retrieved

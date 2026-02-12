@@ -1094,7 +1094,9 @@ class AgentCore:
         # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
         lite_llm = None
         try:
-            lite_llm = self.model_pool.models.get("lite")
+            # Lazy-load lite model on demand (GAIA_AUTOLOAD_MODELS may be 0)
+            if self.model_pool.ensure_model_loaded("lite"):
+                lite_llm = self.model_pool.models.get("lite")
             if lite_llm:
                 self.model_pool.set_status("lite", "busy")
         except Exception:
@@ -1366,28 +1368,30 @@ class AgentCore:
         # Check observer config for explicit model preference
         observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
         observer_enabled = observer_config.get("enabled", False)
-        use_gpu_prime_for_observer = observer_config.get("use_gpu_prime", False)
-        logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_gpu_prime={use_gpu_prime_for_observer}")
+        use_lite_for_observer = observer_config.get("use_lite", True)
+        logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_lite={use_lite_for_observer}")
 
         observer_model_name = None
-        try:
-            observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
-            logger.info(f"[OBSERVER] get_idle_model returned: '{observer_model_name}'")
-        except Exception as e:
-            logger.warning(f"[OBSERVER] get_idle_model failed: {e}")
 
-        # If no idle model found but observer is configured to use gpu_prime, try to load it
-        if observer_model_name is None and observer_enabled and use_gpu_prime_for_observer:
-            logger.info("[OBSERVER] No idle model found, attempting to load gpu_prime for observer role")
+        # Prefer Lite for observation — it's lighter and keeps Prime free for generation
+        if observer_enabled and use_lite_for_observer:
+            logger.info("[OBSERVER] Attempting to load lite model for observer role")
             try:
-                # Try to load gpu_prime on-demand via acquire_model_for_role
-                if self.model_pool.acquire_model_for_role("gpu_prime", lazy_load=True):
-                    observer_model_name = "gpu_prime"
-                    logger.info("[OBSERVER] Successfully loaded gpu_prime for observer role")
+                if self.model_pool.ensure_model_loaded("lite"):
+                    observer_model_name = "lite"
+                    logger.info("[OBSERVER] Successfully loaded lite for observer role")
                 else:
-                    logger.warning("[OBSERVER] Failed to load gpu_prime for observer role")
+                    logger.warning("[OBSERVER] Failed to load lite for observer role")
             except Exception as e:
-                logger.warning(f"[OBSERVER] Exception loading gpu_prime: {e}")
+                logger.warning(f"[OBSERVER] Exception loading lite: {e}")
+
+        # Fallback: try get_idle_model (excludes the responder)
+        if observer_model_name is None:
+            try:
+                observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
+                logger.info(f"[OBSERVER] get_idle_model returned: '{observer_model_name}'")
+            except Exception as e:
+                logger.warning(f"[OBSERVER] get_idle_model failed: {e}")
 
         # Final fallback: scan pool for any available model
         if observer_model_name is None:

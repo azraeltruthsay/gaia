@@ -34,8 +34,8 @@
     },
     "observer": {
       "enabled": true,
-      "use_gpu_prime": true,
-      "type": "vllm"
+      "use_lite": true,
+      "type": "local"
     },
     "oracle_gemini": {
       "enabled": false,

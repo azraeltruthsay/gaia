@@ -39,7 +39,7 @@ class Config:
     # LLM backend settings
     llm_backend: str = "vllm"
     n_gpu_layers: int = -1  # -1 means all layers on GPU
-    temperature: float = 0.7
+    temperature: float = 0.4
     top_p: float = 0.95
     max_tokens: int = 4096
     MAX_TOKENS: int = 4096
