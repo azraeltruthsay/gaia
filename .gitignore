@@ -19,6 +19,9 @@ venv_notebooklm/
 # --- Environment / secrets ---
 .env
 .env.*
+*.key
+*.ke
+*.pem
 
 # --- Logs ---
 logs/

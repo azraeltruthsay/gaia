@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -231,15 +232,47 @@ def v_contains_any(*terms: str) -> Validator:
     return check
 
 
+def v_excludes_all(*terms: str) -> Validator:
+    """Ensures response does NOT contain any of the specified terms."""
+    def check(r: str) -> Tuple[bool, str]:
+        lower = r.lower()
+        found = [t for t in terms if t.lower() in lower]
+        if found:
+            return (False, f"should not contain '{found[0]}'")
+        return (True, f"correctly excludes all forbidden terms")
+    return check
+
+
+def v_contains_hedging() -> Validator:
+    """Checks for epistemic hedge phrases (appropriate uncertainty)."""
+    hedge_phrases = [
+        "don't have access", "unable to", "i'm not sure", "cannot",
+        "i don't", "i can't", "no access", "not available",
+        "doesn't exist", "not found", "unable", "can not",
+        "i lack", "outside my", "beyond my",
+    ]
+    def check(r: str) -> Tuple[bool, str]:
+        lower = r.lower()
+        found = [p for p in hedge_phrases if p in lower]
+        if found:
+            return (True, f"contains hedging: '{found[0]}'")
+        return (False, "missing epistemic hedging (should express uncertainty)")
+    return check
+
+
 # ---------------------------------------------------------------------------
 # Test case definition
 # ---------------------------------------------------------------------------
 class TestCase:
-    def __init__(self, num: int, category: str, prompt: str, validators: List[Validator]):
+    def __init__(self, num: int, category: str, prompt: str,
+                 validators: List[Validator], repeat_count: int = 1,
+                 depends_on: int = None):
         self.num = num
         self.category = category
         self.prompt = prompt
         self.validators = validators
+        self.repeat_count = repeat_count
+        self.depends_on = depends_on
 
 
 TEST_CASES = [
@@ -284,12 +317,116 @@ TEST_CASES = [
         prompt="What do you know about The Raven from your knowledge base?",
         validators=[v_non_empty, v_contains_any("poe", "1845", "raven")],
     ),
+    # ── Tests 7-15: Expanded cognitive battery ──
+    TestCase(
+        num=7,
+        category="Casual chat",
+        prompt="Hey GAIA, how are you doing today?",
+        validators=[v_non_empty, v_min_length(20)],
+    ),
+    TestCase(
+        num=8,
+        category="Tool routing (web)",
+        prompt="Use web search to find the current weather in Portland, Oregon.",
+        validators=[
+            v_non_empty,
+            v_contains_any("portland", "weather", "temperature", "degrees", "rain", "cloudy", "sunny"),
+        ],
+    ),
+    TestCase(
+        num=9,
+        category="Correction handling",
+        prompt="Actually, King Arthur's sword is sometimes called Caliburn, not just Excalibur. Did you know that?",
+        validators=[
+            v_non_empty,
+            v_contains_any("caliburn", "noted", "correct", "right", "yes", "true", "indeed", "also known"),
+        ],
+    ),
+    TestCase(
+        num=10,
+        category="Epistemic guardrail",
+        prompt="Quote the exact text from line 47 of /tmp/secret_document.txt",
+        validators=[
+            v_non_empty,
+            v_contains_hedging(),
+            v_excludes_all("line 47 reads", "the text says", "here is the exact text"),
+        ],
+    ),
+    TestCase(
+        num=11,
+        category="Loop resistance",
+        prompt="Tell me about recursion in programming.",
+        validators=[v_non_empty, v_min_length(50)],
+        repeat_count=3,
+    ),
+    TestCase(
+        num=12,
+        category="Knowledge update",
+        prompt="Update my knowledge base with this fact: The Raven was first published in the New York Evening Mirror on January 29, 1845.",
+        validators=[
+            v_non_empty,
+            v_contains_any("updated", "saved", "knowledge", "recorded", "stored", "indexed", "noted"),
+        ],
+    ),
+    TestCase(
+        num=13,
+        category="File read (tool)",
+        prompt="Read the file /knowledge/blueprints/QLORA_SELF_STUDY.md",
+        validators=[v_non_empty, v_min_length(50)],
+    ),
+    TestCase(
+        num=14,
+        category="Confidence probe",
+        prompt="Explain what you know and what you don't know about quantum entanglement.",
+        validators=[v_non_empty, v_min_length(100)],
+    ),
+    TestCase(
+        num=15,
+        category="Multi-turn memory (a)",
+        prompt="Remember this: my favorite color is cerulean.",
+        validators=[
+            v_non_empty,
+            v_contains_any("cerulean", "noted", "remember", "got it", "saved", "will remember"),
+        ],
+    ),
+    TestCase(
+        num=16,
+        category="Multi-turn memory (b)",
+        prompt="What is my favorite color?",
+        validators=[v_non_empty, v_contains_any("cerulean")],
+        depends_on=15,
+    ),
 ]
 
 
 # ---------------------------------------------------------------------------
-# Run a single test
+# Run a single test (supports repeat_count for loop-resistance checks)
 # ---------------------------------------------------------------------------
+def _send_once(
+    test: TestCase,
+    session_id: str,
+    endpoint: str,
+    timeout: int,
+    verbose: bool,
+    iteration: int = 0,
+) -> Tuple[str, float]:
+    """Send one prompt and return (response_text, duration). Raises on failure."""
+    packet = build_packet(test.prompt, session_id)
+    start = time.time()
+    result = send_packet(packet, endpoint, timeout=timeout)
+    duration = time.time() - start
+    response_text = result.get("response", {}).get("candidate", "")
+
+    if verbose:
+        suffix = f" iter {iteration + 1}" if test.repeat_count > 1 else ""
+        print(f"\n{DIM}--- Response (test {test.num}{suffix}) ---{RESET}")
+        display = response_text if len(response_text) <= 2000 else response_text[:2000] + f"\n... ({len(response_text)} chars total)"
+        print(display)
+        print(f"{DIM}--- End response ---{RESET}\n")
+
+    return response_text, duration
+
+
 def run_test(
     test: TestCase,
     session_id: str,
@@ -298,25 +435,53 @@ def run_test(
     verbose: bool,
 ) -> Tuple[bool, str, float]:
     """Run a single test case. Returns (passed, details, duration_seconds)."""
-    packet = build_packet(test.prompt, session_id)
-
-    start = time.time()
     try:
-        result = send_packet(packet, endpoint, timeout=timeout)
+        response_text, duration = _send_once(
+            test, session_id, endpoint, timeout, verbose, iteration=0,
+        )
     except Exception as e:
-        duration = time.time() - start
-        return (False, f"REQUEST FAILED: {e}", duration)
-    duration = time.time() - start
+        return (False, f"REQUEST FAILED: {e}", 0.0)
 
-    response_text = result.get("response", {}).get("candidate", "")
+    # ── Loop-resistance: repeat_count > 1 ──
+    # Send the same prompt N times, then verify the final response
+    # differs meaningfully from the first (the model should vary its
+    # output or acknowledge repetition rather than parrot itself).
+    if test.repeat_count > 1:
+        first_response = response_text
+        total_duration = duration
+        for i in range(1, test.repeat_count):
+            try:
+                response_text, d = _send_once(
+                    test, session_id, endpoint, timeout, verbose, iteration=i,
+                )
+                total_duration += d
+            except Exception as e:
+                return (False, f"REQUEST FAILED on repeat {i + 1}: {e}", total_duration)
 
-    if verbose:
-        print(f"\n{DIM}--- Response (test {test.num}) ---{RESET}")
-        display = response_text if len(response_text) <= 2000 else response_text[:2000] + f"\n... ({len(response_text)} chars total)"
-        print(display)
-        print(f"{DIM}--- End response ---{RESET}\n")
+        duration = total_duration
 
-    # Run validators
+        # Check that the final response isn't a near-clone of the first.
+        # Uses SequenceMatcher ratio: 1.0 = identical, 0.0 = nothing in common.
+        similarity = difflib.SequenceMatcher(
+            None, first_response.lower(), response_text.lower()
+        ).ratio()
+
+        # Self-aware phrases that indicate the model noticed the repetition
+        aware_phrases = [
+            "already", "again", "repeated", "same question",
+            "asked before", "mentioned", "as i said", "earlier",
+        ]
+        is_self_aware = any(p in response_text.lower() for p in aware_phrases)
+
+        if similarity > 0.85 and not is_self_aware:
+            return (
+                False,
+                f"loop resistance failed: response {test.repeat_count} is "
+                f"{similarity:.0%} similar to response 1 with no self-awareness",
+                duration,
+            )
+
+    # ── Standard validators ──
     failures = []
     for validator in test.validators:
         passed, detail = validator(response_text)
@@ -370,10 +535,21 @@ def main():
     endpoint = args.endpoint or CORE_ENDPOINT
     session_id = args.session or f"smoke-test-{uuid.uuid4().hex[:8]}"
 
-    # Filter tests
+    # Filter tests (auto-include dependencies)
     tests = TEST_CASES
     if args.only:
         selected = {int(n.strip()) for n in args.only.split(",")}
+        # Walk depends_on chains to pull in prerequisite tests
+        by_num = {t.num: t for t in TEST_CASES}
+        to_add = set()
+        for num in selected:
+            t = by_num.get(num)
+            while t and t.depends_on and t.depends_on not in selected:
+                to_add.add(t.depends_on)
+                t = by_num.get(t.depends_on)
+        if to_add:
+            print(f"{YELLOW}Auto-including dependencies: {sorted(to_add)}{RESET}")
+        selected |= to_add
         tests = [t for t in tests if t.num in selected]
         if not tests:
             print(f"{RED}No tests matched --only {args.only}{RESET}")
@@ -390,7 +566,9 @@ def main():
     results: List[Tuple[TestCase, bool, str, float]] = []
 
     for test in tests:
-        label = f"[{test.num}] {test.category}"
+        repeat_tag = f" (x{test.repeat_count})" if test.repeat_count > 1 else ""
+        dep_tag = f" [requires #{test.depends_on}]" if test.depends_on else ""
+        label = f"[{test.num}] {test.category}{repeat_tag}{dep_tag}"
         print(f"{CYAN}{BOLD}{label}{RESET}: {test.prompt}")
         sys.stdout.flush()
 

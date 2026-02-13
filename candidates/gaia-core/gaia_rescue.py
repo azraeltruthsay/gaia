@@ -696,9 +696,11 @@ def start_discord_listener(ai: MinimalAIManager = None, session_id_prefix: str =
             logger.error("Cannot start Discord listener: DISCORD_BOT_TOKEN not set")
             return None
 
-        connector = DiscordConnector(config)
+        # Build sanitization callback from SessionManager
+        _session_mgr = getattr(ai, 'session_manager', None)
+        _sanitize_cb = _session_mgr.sanitize_sessions if _session_mgr else None
 
-        connector = DiscordConnector(config)
+        connector = DiscordConnector(config, sanitize_callback=_sanitize_cb)
 
         def handle_discord_message(content: str, author_id: str, metadata: dict):
             """Callback for incoming Discord messages (channels and DMs)."""

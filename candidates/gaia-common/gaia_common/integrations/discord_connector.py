@@ -28,13 +28,15 @@ class DiscordConnector(DestinationConnector):
     Supports both webhook output and (future) bot-based bidirectional communication.
     """
 
-    def __init__(self, config: Optional[DiscordConfig] = None):
+    def __init__(self, config: Optional[DiscordConfig] = None,
+                 sanitize_callback: Optional[Callable[[], Dict[str, Any]]] = None):
         super().__init__("discord", OutputDestination.DISCORD)
         self.config = config or DiscordConfig.from_env()
         self._webhook_sender: Optional[DiscordWebhookSender] = None
         self._bot_client = None  # Will hold discord.py client when available
         self._bot_thread: Optional[threading.Thread] = None
         self._message_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
+        self._sanitize_callback = sanitize_callback
 
         # Check if Discord integration is enabled
         if not self.config.enabled:
@@ -268,6 +270,14 @@ class DiscordConnector(DestinationConnector):
                     name="over the studio"
                 )
             )
+            # Run session sanitization on connect (sync callback in executor)
+            if self._sanitize_callback:
+                try:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, self._sanitize_callback)
+                    logger.info(f"Discord session sanitization complete: {result}")
+                except Exception as e:
+                    logger.warning(f"Session sanitization failed (non-fatal): {e}")
 
         @bot.event
         async def on_message(message):
