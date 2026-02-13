@@ -1,0 +1,14 @@
+{
+  "adapter_name": "json-architect",
+  "total_examples": 50,
+  "duration_seconds": 0.02,
+  "json_valid_rate": 1.0,
+  "schema_match_rate": 1.0,
+  "avg_value_accuracy": 1.0,
+  "composite_score": 1.0,
+  "category_scores": {
+    "null_selection": 1.0,
+    "confidence_assessment": 1.0,
+    "tool_review": 1.0
+  }
+}

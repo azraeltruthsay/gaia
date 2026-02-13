@@ -376,3 +376,103 @@ Successfully ran dry-run with all candidate services healthy:
 - **Stage 3** calls `smoke_test_cognitive.py` from Sprint 1 (16 tests)
 - **Stage 4** calls `promote_candidate.sh $service --test/--no-restart`
 - **Stage 6** calls `flatten_soa.sh` (existing SOA flattener)
+
+---
+
+# Sprint 4: QLoRA Validation Test Cycle
+
+**Date:** 2026-02-13 (continued)
+**Author:** Claude Code (Opus 4.6) via Happy
+
+## Deliverables
+
+### 1. `scripts/validate_qlora.sh` — QLoRA Validation Orchestrator
+
+A 7-stage pipeline called by `promote_pipeline.sh` Stage 7 (with `--qlora` flag), or standalone.
+
+#### Stages
+
+| Stage | Name | Description |
+|-------|------|-------------|
+| 1 | Blueprint Freshness Check | Scans blueprints for stale file references |
+| 2 | Curriculum Validation | Verifies training data (JSONL format, spec, metadata) |
+| 3 | GPU Handoff (Prime → Study) | Orchestrator transfers GPU via `/handoff/prime-to-study` |
+| 4 | QLoRA Training | POSTs to `/study/start`, polls `/study/status` until complete |
+| 5 | GPU Reclaim (Study → Prime) | Returns GPU to inference via `/handoff/study-to-prime` |
+| 6 | Adapter Validation | Runs `validate_adapter.py` on held-out validation set |
+| 7 | Report & Registration | Summary, writes `last_validation.json` if passed |
+
+#### Options
+
+- `--adapter <name>` — Target adapter (default: json-architect)
+- `--dry-run` — Parse, check files, validate data without GPU/training
+- `--skip-training` — Skip stages 3-5, validate existing adapter only
+- `--skip-blueprints` — Skip blueprint freshness check
+- `--baseline` — Also score base model for comparison
+- `--threshold <f>` — Minimum composite score (default: 0.6)
+- `--verbose` — Show detailed output including stale references
+
+### 2. `candidates/gaia-study/scripts/validate_adapter.py` — Adapter Scoring Script
+
+Python script that scores a trained adapter against held-out validation examples.
+
+#### Scoring Dimensions
+
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| JSON validity | 40% | Is the output parseable JSON? |
+| Schema match | 30% | Does the JSON have required keys? |
+| Value accuracy | 30% | Are key field values correct (selected_tool, params, confidence)? |
+
+#### Per-Category Scoring
+
+Detects example category from instruction text:
+- `tool_selection` — Checks selected_tool, params key overlap, confidence range
+- `tool_review` — Checks approved boolean, confidence range
+- `confidence_assessment` — Checks confidence calibration (tight tolerance)
+- `null_selection` — Checks selected_tool == null, confidence range
+
+#### Features
+
+- `--baseline` mode: Also runs against base model for delta comparison
+- `--json-report <path>`: Machine-readable JSON report
+- `--dry-run`: Parses validation data without calling model (dry-run score = 1.0)
+- Extracts JSON from markdown code fences (common model behavior)
+- Progress indicator every 10 examples
+
+## Dry-Run Verification
+
+```
+$ ./scripts/validate_qlora.sh --dry-run --verbose
+
+Stage 1: Blueprint Freshness Check ✓ (10 blueprints, 1 ref, 0 stale)
+Stage 2: Curriculum Validation ✓ (850 train + 150 val examples)
+Stage 3-5: Skipped (dry-run)
+Stage 6: Adapter Validation ✓ (50/50, score=1.000, threshold=0.6)
+Stage 7: Report ✓
+
+RESULT: PASS
+```
+
+## Integration
+
+- Pipeline hook already exists in `promote_pipeline.sh` Stage 7:
+  ```bash
+  QLORA_SCRIPT="$SCRIPTS_DIR/validate_qlora.sh"
+  if [ -x "$QLORA_SCRIPT" ]; then
+      "$QLORA_SCRIPT" 2>&1
+  ```
+- Full pipeline QLoRA run: `./scripts/promote_pipeline.sh --qlora`
+- Standalone dry-run: `./scripts/validate_qlora.sh --dry-run`
+- Standalone with existing adapter: `./scripts/validate_qlora.sh --skip-training`
+
+## All 4 Sprints Complete
+
+| Sprint | Deliverable | Status |
+|--------|-------------|--------|
+| 1 | Expanded smoke tests (6→16) | **Complete** (cd32d06) |
+| 2 | Discord session sanitization | **Complete** (cd32d06) |
+| 3 | Master promotion pipeline | **Complete** (7250e6e) |
+| 4 | QLoRA validation test cycle | **Complete** (this commit) |
+
+The promotion pipeline plan (`zippy-sprouting-scroll.md`) is fully implemented.
