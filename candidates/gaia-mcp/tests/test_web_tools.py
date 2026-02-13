@@ -220,10 +220,10 @@ class TestWebFetch:
         assert result["trust_tier"] == "unknown"
         assert "allowlist" in result["error"]
 
-    @patch("gaia_mcp.web_tools.requests")
+    @patch("requests.get")
     @patch("gaia_mcp.web_tools._extract_content")
     @patch("gaia_mcp.web_tools._get_config")
-    def test_successful_fetch(self, mock_config, mock_extract, mock_requests):
+    def test_successful_fetch(self, mock_config, mock_extract, mock_get):
         trust = SourceTrustConfig()
         search_lim = _RateLimiter(max_calls=100, window_seconds=3600)
         fetch_lim = _RateLimiter(max_calls=100, window_seconds=3600)
@@ -232,7 +232,7 @@ class TestWebFetch:
         mock_resp = MagicMock()
         mock_resp.content = b"<html><title>Test</title><body>Hello world</body></html>"
         mock_resp.headers = {"Content-Type": "text/html"}
-        mock_requests.get.return_value = mock_resp
+        mock_get.return_value = mock_resp
 
         mock_extract.return_value = ("Test", "Hello world")
 
