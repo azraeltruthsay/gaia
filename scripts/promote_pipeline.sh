@@ -319,50 +319,74 @@ else
 
         log "  Validating ${BOLD}$svc${RESET}..."
 
-        # Run promote_candidate.sh with --validate flag (handles Docker build + ruff/mypy/pytest)
-        set +e
-        validate_output=$("$PROMOTE_SCRIPT" "$svc" --validate 2>&1)
-        validate_exit=$?
-        set -e
+        # Run Docker-based validation directly (ruff + mypy + pytest)
+        # We don't use promote_candidate.sh --validate because it also
+        # runs the full promotion flow (rsync + restart) after validation.
+        image_name="gaia-validate-${svc}:$(date +%s)"
+        build_context="$GAIA_ROOT"
 
-        # Parse results from output
         ruff_status="?"
         mypy_status="?"
         pytest_status="?"
 
-        if echo "$validate_output" | grep -q "✓ Ruff check passed"; then
-            ruff_status="pass"
-        elif echo "$validate_output" | grep -q "✗ Ruff check failed"; then
-            ruff_status="FAIL"
+        # Build image
+        set +e
+        build_output=$(docker build -t "$image_name" -f "$dockerfile" "$build_context" 2>&1)
+        build_exit=$?
+        set -e
+
+        if [ $build_exit -ne 0 ]; then
+            log "    ${RED}✗${RESET} $svc — Docker build failed"
+            echo "$build_output" | tail -10 | while read -r line; do log "      $line"; done
+            VALIDATION_RESULTS+=("$svc|build-fail|?|?")
             validate_ok=false
+            docker rmi "$image_name" > /dev/null 2>&1 || true
+            continue
         fi
 
-        if echo "$validate_output" | grep -q "✓ MyPy check passed"; then
-            mypy_status="pass"
-        elif echo "$validate_output" | grep -q "⚠ MyPy found issues"; then
-            mypy_status="warn"
-        fi
+        # Ruff
+        set +e
+        docker run --rm "$image_name" python -m ruff check /app > /dev/null 2>&1
+        ruff_exit=$?
+        set -e
+        if [ $ruff_exit -eq 0 ]; then ruff_status="pass"; else ruff_status="FAIL"; validate_ok=false; fi
 
-        if echo "$validate_output" | grep -q "✓ Pytest passed"; then
+        # MyPy (non-blocking)
+        set +e
+        docker run --rm "$image_name" python -m mypy /app > /dev/null 2>&1
+        mypy_exit=$?
+        set -e
+        if [ $mypy_exit -eq 0 ]; then mypy_status="pass"; else mypy_status="warn"; fi
+
+        # Pytest
+        set +e
+        pytest_output=$(docker run --rm "$image_name" python -m pytest /app --import-mode=importlib --no-header -q 2>&1)
+        pytest_exit=$?
+        set -e
+        if [ $pytest_exit -eq 0 ]; then
             pytest_status="pass"
-        elif echo "$validate_output" | grep -q "⚠ No tests found"; then
+        elif [ $pytest_exit -eq 5 ]; then
             pytest_status="none"
-        elif echo "$validate_output" | grep -q "✗ Pytest failed"; then
+        else
             pytest_status="FAIL"
             validate_ok=false
         fi
 
+        # Cleanup image
+        docker rmi "$image_name" > /dev/null 2>&1 || true
+
         VALIDATION_RESULTS+=("$svc|$ruff_status|$mypy_status|$pytest_status")
 
         # Status icon
-        if [ $validate_exit -eq 0 ]; then
+        if [ "$ruff_status" != "FAIL" ] && [ "$pytest_status" != "FAIL" ]; then
             log "    ${GREEN}✓${RESET} $svc — ruff:$ruff_status mypy:$mypy_status pytest:$pytest_status"
         else
             log "    ${RED}✗${RESET} $svc — ruff:$ruff_status mypy:$mypy_status pytest:$pytest_status"
-            # Log detail on failure
-            echo "$validate_output" | tail -20 | while read -r line; do
-                log "      $line"
-            done
+            if [ "$pytest_status" = "FAIL" ]; then
+                echo "$pytest_output" | tail -15 | while read -r line; do
+                    log "      $line"
+                done
+            fi
         fi
     done
 
