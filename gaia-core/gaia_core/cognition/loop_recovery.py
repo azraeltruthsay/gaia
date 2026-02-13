@@ -12,6 +12,7 @@ Design: 2026-02-04 (see Dev_Notebook/2026-02-04_loop_detection_reset_system.md)
 
 from __future__ import annotations
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable
@@ -478,13 +479,115 @@ class LoopDetectorObserver:
     Observer adapter for integration with ExternalVoice streaming.
 
     Monitors token stream for loop patterns and can interrupt generation.
+    Also detects think-tag-only output: when the model generates large amounts
+    of <think>/<thinking> content without producing any visible text, the
+    observer issues a BLOCK interrupt to stop wasting GPU time.
     """
 
-    def __init__(self, manager: Optional[LoopRecoveryManager] = None):
+    # Think-tag detection regex — matches open/close tags for think, thinking,
+    # reflection, reasoning, internal, scratchpad, planning, analysis
+    _THINK_OPEN_RE = re.compile(
+        r'<(think|thinking|reflection|reasoning|internal|scratchpad|planning|analysis)>',
+        re.IGNORECASE
+    )
+    _THINK_CLOSE_RE = re.compile(
+        r'</(think|thinking|reflection|reasoning|internal|scratchpad|planning|analysis)>',
+        re.IGNORECASE
+    )
+
+    def __init__(self, manager: Optional[LoopRecoveryManager] = None,
+                 think_tag_char_threshold: int = 500,
+                 think_tag_ratio_threshold: float = 0.90):
         self.manager = manager or get_recovery_manager()
         self._token_buffer = ""
         self._last_check_len = 0
         self._check_interval = 100  # Check every N characters
+
+        # Think-tag circuit breaker config
+        self._think_tag_char_threshold = think_tag_char_threshold
+        self._think_tag_ratio_threshold = think_tag_ratio_threshold
+        self._think_tag_triggered = False
+
+        # Phrase loop warn-first tracking
+        self._phrase_warned = False
+
+    def _check_think_tag_ratio(self) -> Optional[LoopInterrupt]:
+        """
+        Check if the buffer is predominantly think-tag content with
+        no visible user-facing text.
+
+        Returns a BLOCK LoopInterrupt if the model is stuck in think tags,
+        None otherwise.
+        """
+        buf = self._token_buffer
+        buf_len = len(buf)
+
+        # Don't check until we have enough content
+        if buf_len < self._think_tag_char_threshold:
+            return None
+
+        # Already triggered — don't re-fire
+        if self._think_tag_triggered:
+            return None
+
+        # Calculate how many characters are inside think-like tags.
+        # Walk through the buffer tracking open/close tag state.
+        visible_chars = 0
+        think_chars = 0
+        depth = 0  # nesting depth inside think tags
+        i = 0
+        while i < buf_len:
+            # Check for opening tag
+            open_match = self._THINK_OPEN_RE.match(buf, i)
+            if open_match:
+                depth += 1
+                i = open_match.end()
+                continue
+
+            # Check for closing tag
+            close_match = self._THINK_CLOSE_RE.match(buf, i)
+            if close_match:
+                depth = max(0, depth - 1)
+                i = close_match.end()
+                continue
+
+            # Regular character
+            if depth > 0:
+                think_chars += 1
+            else:
+                # Only count non-whitespace as "visible"
+                if not buf[i].isspace():
+                    visible_chars += 1
+            i += 1
+
+        total_content = think_chars + visible_chars
+        if total_content == 0:
+            return None
+
+        think_ratio = think_chars / total_content
+
+        if think_ratio >= self._think_tag_ratio_threshold and visible_chars < 20:
+            # Model is stuck in think tags — interrupt
+            self._think_tag_triggered = True
+            logger.warning(
+                "Think-tag circuit breaker: %d chars in think tags, "
+                "%d visible chars (ratio: %.2f). Interrupting.",
+                think_chars, visible_chars, think_ratio
+            )
+            return LoopInterrupt(
+                level="BLOCK",
+                reason=(
+                    f"Think-tag loop: {think_chars} chars of internal reasoning "
+                    f"with only {visible_chars} chars of visible output"
+                ),
+                suggestion=(
+                    "The model is generating only internal reasoning without "
+                    "producing a visible response. Retrying with explicit "
+                    "no-thinking instruction."
+                ),
+            )
+
+        return None
 
     def on_token(self, token: str) -> Optional[LoopInterrupt]:
         """
@@ -500,19 +603,32 @@ class LoopDetectorObserver:
 
         self._last_check_len = len(self._token_buffer)
 
+        # --- Think-tag circuit breaker (checked before general loop detection) ---
+        think_interrupt = self._check_think_tag_ratio()
+        if think_interrupt:
+            return think_interrupt
+
         # Check for token-level patterns
         detection = self.manager.add_tokens(token)
 
         if detection and detection.triggered:
-            # Token-level loop detected during streaming
+            # Phrase loops get warn-first treatment (poetry, lyrics, lists
+            # have legitimate repetition); other token loops block immediately
+            is_phrase = detection.category == LoopCategory.PHRASE_LOOP
+            warn_first = is_phrase and not self._phrase_warned
+
             result = AggregatedResult(
                 is_loop=True,
                 confidence=detection.confidence,
                 primary_category=detection.category,
                 pattern=detection.pattern,
                 triggered_by=["token"],
-                should_warn=False  # Token loops should block immediately
+                should_warn=warn_first
             )
+
+            if warn_first:
+                self._phrase_warned = True
+                return LoopInterrupt.from_detection(result, is_warn=True)
 
             return LoopInterrupt.from_detection(result, is_warn=False)
 
@@ -522,6 +638,8 @@ class LoopDetectorObserver:
         """Reset the observer state."""
         self._token_buffer = ""
         self._last_check_len = 0
+        self._think_tag_triggered = False
+        self._phrase_warned = False
 
 
 # Global instance

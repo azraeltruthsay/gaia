@@ -790,7 +790,7 @@ class TokenPatternDetector:
 
     def _detect_phrase_repetition(self) -> DetectionResult:
         """Detect exact phrase repeated 3+ times."""
-        min_phrase = 15
+        min_phrase = 30
         max_phrase = 150
 
         # Scan for repeating phrases

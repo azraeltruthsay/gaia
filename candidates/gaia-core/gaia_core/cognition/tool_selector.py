@@ -22,64 +22,137 @@ from gaia_common.protocols.cognition_packet import (
 
 logger = logging.getLogger("GAIA.ToolSelector")
 
+# ── Guided decoding JSON schemas ─────────────────────────────────────────
+# These are passed to vLLM's guided_json parameter to guarantee structurally
+# valid JSON output from the model.  The schemas are intentionally kept flat
+# (no $ref, no oneOf) because xgrammar works best with simple schemas.
 
-# Tool definitions with descriptions for selection prompt
-AVAILABLE_TOOLS = {
+_TOOL_REVIEW_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "approved": {"type": "boolean"},
+        "confidence": {"type": "number"},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["approved", "confidence", "reasoning"],
+}
+
+_TOOL_SELECT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "selected_tool": {"type": ["string", "null"]},
+        "params": {"type": "object"},
+        "reasoning": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+    "required": ["selected_tool", "reasoning", "confidence"],
+}
+
+
+def _structured_json_kwargs(model: Any, schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the kwargs needed to enable structured JSON output for *model*.
+
+    Supports two backends:
+      - VLLMRemoteModel → ``guided_json=<schema>``
+      - llama_cpp Llama → ``response_format={"type": "json_object", "schema": <schema>}``
+
+    Returns an empty dict if the model type is unrecognised (graceful no-op).
+    """
+    model_type = type(model).__name__
+    if model_type == "VLLMRemoteModel":
+        return {"guided_json": schema}
+    if model_type == "Llama":
+        return {"response_format": {"type": "json_object", "schema": schema}}
+    return {}
+
+
+# ── Tool catalog ─────────────────────────────────────────────────────────
+# Auto-generated from gaia_common.utils.tools_registry.TOOLS (the single
+# source of truth for MCP tool schemas).  Internal tools that are handled
+# directly by _execute_mcp_tool (not dispatched via JSON-RPC) are added
+# separately below.
+#
+# The flat format expected by _build_tool_catalog():
+#   { "tool_name": { "description": str, "params": [str, ...],
+#                     "param_descriptions": {str: str}, "requires_approval": bool } }
+
+from gaia_common.utils.tools_registry import TOOLS as _REGISTRY_TOOLS
+
+# Tools requiring approval (mirrors gaia-mcp SENSITIVE_TOOLS)
+_SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index"}
+
+
+def _registry_to_catalog(registry: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert tools_registry.TOOLS schema format into the flat format
+    used by the tool selector prompt."""
+    catalog: Dict[str, Any] = {}
+    for name, schema in registry.items():
+        params_schema = schema.get("params", {})
+        props = params_schema.get("properties", {}) if isinstance(params_schema, dict) else {}
+        catalog[name] = {
+            "description": schema.get("description", ""),
+            "params": list(props.keys()),
+            "param_descriptions": {
+                k: v.get("description", "") for k, v in props.items()
+            },
+            "requires_approval": name in _SENSITIVE_TOOLS,
+        }
+    return catalog
+
+
+# Internal tools not in tools_registry (handled directly by _execute_mcp_tool)
+_INTERNAL_TOOLS: Dict[str, Any] = {
     "ai.read": {
         "description": "Read a file from the filesystem",
         "params": ["path"],
-        "param_descriptions": {
-            "path": "Absolute path to the file to read"
-        },
-        "examples": [
-            {"path": "/gaia-assistant/knowledge/system_reference/dev_matrix.json"},
-            {"path": "/gaia-assistant/docs/gaia_core_blueprint.md"}
-        ],
-        "requires_approval": False
+        "param_descriptions": {"path": "Absolute path to the file to read"},
+        "requires_approval": False,
     },
     "ai.write": {
         "description": "Write content to a file on the filesystem",
         "params": ["path", "content"],
         "param_descriptions": {
             "path": "Absolute path to the file to write",
-            "content": "Content to write to the file"
+            "content": "Content to write to the file",
         },
-        "requires_approval": True
+        "requires_approval": True,
     },
     "ai.execute": {
         "description": "Execute a shell command",
         "params": ["command"],
-        "param_descriptions": {
-            "command": "Shell command to execute"
-        },
-        "requires_approval": True
+        "param_descriptions": {"command": "Shell command to execute"},
+        "requires_approval": True,
     },
     "embedding.query": {
         "description": "Query the vector database for semantic search",
         "params": ["query", "top_k"],
         "param_descriptions": {
             "query": "Search query text",
-            "top_k": "Number of results to return (default: 5)"
+            "top_k": "Number of results to return (default: 5)",
         },
-        "requires_approval": False
+        "requires_approval": False,
     },
-    "write_file": {
-        "description": "Write content to a file via MCP (restricted to /knowledge and /sandbox)",
-        "params": ["path", "content"],
-        "param_descriptions": {
-            "path": "Absolute path to write (must be under /knowledge or /sandbox)",
-            "content": "Content to write to the file"
-        },
-        "requires_approval": True
-    },
-    "read_file": {
-        "description": "Read a file via MCP (restricted to /knowledge, /gaia-common, /sandbox)",
-        "params": ["path"],
-        "param_descriptions": {
-            "path": "Absolute path to the file to read"
-        },
-        "requires_approval": False
-    },
+}
+
+# Merged catalog: registry tools + internal tools (internal wins on collision)
+AVAILABLE_TOOLS: Dict[str, Any] = {**_registry_to_catalog(_REGISTRY_TOOLS), **_INTERNAL_TOOLS}
+
+# Tools to show in the LLM selection prompt.  The full AVAILABLE_TOOLS
+# catalog has 30+ entries — dumping all of them overwhelms a 3B model.
+# This allowlist keeps the prompt focused on tools a user request would
+# actually need.  Everything else still works via the JSON-RPC fallback
+# if selected by name.
+_PROMPT_TOOLS = {
+    # File operations
+    "read_file", "write_file", "ai.read", "ai.write",
+    # Shell
+    "run_shell", "ai.execute",
+    # Search & knowledge
+    "web_search", "web_fetch", "embedding.query",
+    "memory_query", "find_files", "find_relevant_documents",
+    "query_knowledge", "add_document",
+    # Directory listing
+    "list_dir", "list_tree",
 }
 
 
@@ -185,12 +258,17 @@ If NO tool is appropriate, respond with:
 
     try:
         # Use low temperature for deterministic selection
+        extra_kwargs = _structured_json_kwargs(model, _TOOL_SELECT_SCHEMA)
+        if extra_kwargs:
+            logger.debug("Tool selector: using structured JSON decoding (%s)", type(model).__name__)
+
         result = model.create_chat_completion(
             messages=messages,
             temperature=temperature,
             max_tokens=500,
             top_p=0.9,
-            stream=False
+            stream=False,
+            **extra_kwargs,
         )
 
         # Extract response content
@@ -279,11 +357,16 @@ Respond with JSON:
     ]
 
     try:
+        extra_kwargs = _structured_json_kwargs(model, _TOOL_REVIEW_SCHEMA)
+        if extra_kwargs:
+            logger.debug("Tool review: using structured JSON decoding (%s)", type(model).__name__)
+
         result = model.create_chat_completion(
             messages=messages,
             temperature=temperature,
             max_tokens=200,
-            stream=False
+            stream=False,
+            **extra_kwargs,
         )
 
         content = _extract_content(result)
@@ -300,16 +383,27 @@ Respond with JSON:
         return confidence, reasoning
 
     except Exception as e:
-        logger.error(f"Review failed: {e}")
-        return 0.0, f"Review failed: {e}"
+        # Review model failed (often JSON parse errors from small models).
+        # Fall back to the original selection confidence instead of returning 0.0,
+        # which would block ALL tool usage when the review model can't produce JSON.
+        fallback = selected_tool.selection_confidence
+        logger.warning(f"Review failed ({e}); using selection confidence {fallback:.2f} as fallback")
+        return fallback, f"Review failed: {e}; using selection confidence"
 
 
 def _build_tool_catalog() -> str:
-    """Build a formatted catalog of available tools for the selection prompt."""
+    """Build a formatted catalog of available tools for the selection prompt.
+
+    Only includes tools in ``_PROMPT_TOOLS`` to keep the prompt compact
+    enough for small models.
+    """
     lines = []
     for tool_name, info in AVAILABLE_TOOLS.items():
+        if tool_name not in _PROMPT_TOOLS:
+            continue
         lines.append(f"- {tool_name}: {info['description']}")
-        lines.append(f"  Parameters: {', '.join(info['params'])}")
+        if info['params']:
+            lines.append(f"  Parameters: {', '.join(info['params'])}")
         if info.get("requires_approval"):
             lines.append(f"  Note: Requires user approval")
     return "\n".join(lines)

@@ -4,5 +4,11 @@
     "persona": "default",
     "history": [],
     "created_at": "2026-02-12T04:14:51.378174"
+  },
+  "web_ui_session": {
+    "session_id": "web_ui_session",
+    "persona": "default",
+    "history": [],
+    "created_at": "2026-02-13T06:26:52.860099"
   }
 }

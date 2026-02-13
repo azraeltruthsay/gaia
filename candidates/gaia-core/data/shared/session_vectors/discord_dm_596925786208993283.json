@@ -1,1 +1,8 @@
-{"session_id": "discord_dm_596925786208993283", "last_topic_turn_idx": -1, "turns": [], "turn_embeddings": [], "topics": [], "topic_embeddings": []}
+{
+  "session_id": "discord_dm_596925786208993283",
+  "last_topic_turn_idx": -1,
+  "turns": [],
+  "turn_embeddings": [],
+  "topics": [],
+  "topic_embeddings": []
+}
