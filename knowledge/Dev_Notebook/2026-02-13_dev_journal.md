@@ -305,7 +305,74 @@ Returns `{"sessions_purged": N, "vectors_purged": N, "smoke_purged": N}` for log
 
 ## Promotion Pipeline Status
 
-Per plan `zippy-sprouting-scroll.md`, Sprint 1 (smoke tests) and Sprint 2 (session sanitization) are complete. Remaining sprints:
+Per plan `zippy-sprouting-scroll.md`, Sprints 1-3 are complete. Remaining:
 
-- **Sprint 3**: Prometheus metrics + `/healthz` endpoint
-- **Sprint 4**: `promote_candidate.sh` v2 with rollback + blue-green cutover
+- **Sprint 4**: QLoRA validation test cycle (`validate_qlora.sh`)
+
+---
+
+# Sprint 3: Master Promotion Pipeline Script
+
+**Date:** 2026-02-13 (continued)
+**Author:** Claude Code (Opus 4.6) via Happy
+**Commit:** (this entry)
+
+## Deliverable
+
+**File:** `scripts/promote_pipeline.sh`
+
+A 7-stage fail-fast master shell script that orchestrates the full candidate-to-live promotion workflow.
+
+## Pipeline Stages
+
+| Stage | Name | Fail Behavior |
+|-------|------|--------------|
+| 1 | Pre-flight Checks | Abort if any candidate service unreachable |
+| 2 | Validation (ruff/mypy/pytest) | Abort on lint or test failure |
+| 3 | Cognitive Smoke Tests (16 tests) | Abort if any test fails |
+| 4 | Promote Services (dependency order) | Abort + warn about manual rollback |
+| 5 | Post-Promotion Verification | Warning only (already promoted) |
+| 6 | Dev Journal + Flatten + Commit | Always runs |
+| 7 | QLoRA Validation | Optional (--qlora flag) |
+
+## Key Features
+
+- **Dependency-ordered promotion**: gaia-common (no restart) → gaia-mcp → gaia-core → gaia-study
+- **Dry-run mode**: `--dry-run` exercises all validation without promoting
+- **Service-selective**: `--services gaia-core` promotes individual services
+- **Skip flags**: `--skip-validate`, `--skip-smoke`, `--skip-flatten` for targeted runs
+- **Auto journal**: Generates `{DATE}_promotion_journal.md` with stage results and validation table
+- **Logged**: Appends to `logs/promote_pipeline.log` with timestamps
+- **Summary**: Color-coded final report with pass/fail/skip/warn per stage
+
+## Usage Examples
+
+```bash
+# Full pipeline
+./scripts/promote_pipeline.sh
+
+# Validate only (no promotion)
+./scripts/promote_pipeline.sh --dry-run
+
+# Quick: just promote gaia-core, skip validation
+./scripts/promote_pipeline.sh --services gaia-core --skip-validate
+
+# Full pipeline + QLoRA validation
+./scripts/promote_pipeline.sh --qlora
+```
+
+## Dry-Run Verification
+
+Successfully ran dry-run with all candidate services healthy:
+- gaia-core-candidate (6416): healthy
+- gaia-mcp-candidate (8767): healthy
+- gaia-study-candidate (8768): healthy
+- CognitionPacket: in sync
+- All 7 stages exercised without errors
+
+## Integration Points
+
+- **Stage 2** calls `promote_candidate.sh $service --validate` (existing Docker-based validation)
+- **Stage 3** calls `smoke_test_cognitive.py` from Sprint 1 (16 tests)
+- **Stage 4** calls `promote_candidate.sh $service --test/--no-restart`
+- **Stage 6** calls `flatten_soa.sh` (existing SOA flattener)
