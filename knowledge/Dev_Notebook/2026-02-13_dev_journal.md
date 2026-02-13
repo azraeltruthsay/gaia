@@ -213,3 +213,99 @@ All 1000 output fields validated as parseable JSON. Data hash: `b5ae28651a9173e9
 2. Validate adapter on held-out examples
 3. Register adapter in vLLM via `--lora-modules json-architect=/models/lora_adapters/json-architect`
 4. Wire gaia-core tool_selector to use `model="json-architect"` for tool routing calls
+
+---
+
+# Sprint 1 & 2: Smoke Test Expansion + Session Sanitization on Connect
+
+**Date:** 2026-02-13 (continued)
+**Author:** Claude Code (Opus 4.6) via Happy
+**Commit:** `cd32d06`
+
+## Sprint 1: Cognitive Smoke Test Battery Expansion (6 → 16 tests)
+
+### New Test Cases
+
+| # | Category | What it tests |
+|---|----------|---------------|
+| 7 | Casual chat | Conversational response to "Hey GAIA, how are you?" |
+| 8 | Tool routing (web) | Web search tool selection for weather query |
+| 9 | Correction handling | Graceful acceptance of user corrections (Caliburn/Excalibur) |
+| 10 | Epistemic guardrail | Refusal to hallucinate content from a nonexistent file (`/tmp/secret_document.txt`) |
+| 11 | Loop resistance | Same prompt sent 3x — verifies response drift or self-awareness (not parrot repetition) |
+| 12 | Knowledge update | Update existing knowledge base entry |
+| 13 | File read (tool) | Tool-routed file read of `/knowledge/blueprints/QLORA_SELF_STUDY.md` |
+| 14 | Confidence probe | Explain known vs. unknown about quantum entanglement |
+| 15 | Multi-turn memory (a) | "Remember this: my favorite color is cerulean" |
+| 16 | Multi-turn memory (b) | "What is my favorite color?" — must recall cerulean from test 15 |
+
+### New Validators
+
+- **`v_excludes_all(*terms)`** — Fails if response contains any forbidden term (used for epistemic guardrail)
+- **`v_contains_hedging()`** — Passes if response contains epistemic hedge phrases ("don't have access", "unable to", etc.)
+
+### New Runner Features
+
+- **`repeat_count`** (TestCase field) — Sends prompt N times. After all iterations, compares final response to first using `difflib.SequenceMatcher`. Fails if similarity >85% AND no self-awareness phrases detected. Used by test 11 (loop resistance).
+- **`depends_on`** (TestCase field) — When using `--only` filter, auto-includes prerequisite tests. E.g., `--only 16` automatically includes test 15.
+- **`_send_once()`** — Extracted helper for single packet send/receive, used by both standard and repeat-count flows.
+- Test runner label now shows `(x3)` for repeat tests and `[requires #15]` for dependency tests.
+
+### Files Modified
+
+- `candidates/gaia-core/scripts/smoke_test_cognitive.py` — +210 lines (10 new tests, 2 validators, repeat/depends logic)
+
+---
+
+## Sprint 2: Automatic Session Sanitization on Discord Connect
+
+### Problem
+
+Every container restart accumulates stale smoke-test and test sessions in `sessions.json` and orphaned vector files in `session_vectors/`. Manual cleanup was needed after each smoke test run.
+
+### Solution
+
+Automatic sanitization on Discord bot connect (`on_ready`), before any user messages are processed.
+
+### Implementation
+
+#### 1. `SessionManager.sanitize_sessions()` (new method)
+
+Three-step cleanup:
+1. Purge `smoke-test-*` and `test-*` sessions from in-memory state, plus stale sessions (older than `max_age_days` with empty history)
+2. Delete orphaned and test vector files from `data/shared/session_vectors/`
+3. Persist cleaned state to `sessions.json`
+
+Returns `{"sessions_purged": N, "vectors_purged": N, "smoke_purged": N}` for logging.
+
+#### 2. `DiscordConnector` callback integration
+
+- Added `sanitize_callback: Optional[Callable]` parameter to `__init__()`
+- In `on_ready()`, runs callback via `loop.run_in_executor()` (async-safe, non-blocking)
+- Non-fatal: logs warning on failure, bot continues normally
+
+#### 3. `gaia_rescue.py` wiring
+
+- Extracts `session_manager` from the AI instance
+- Passes `session_manager.sanitize_sessions` as the callback to `DiscordConnector`
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `candidates/gaia-core/gaia_core/memory/session_manager.py` | Added `sanitize_sessions()` method (+84 lines) |
+| `candidates/gaia-common/gaia_common/integrations/discord_connector.py` | Added `sanitize_callback` param + `on_ready()` hook |
+| `candidates/gaia-core/gaia_rescue.py` | Wired session manager callback to connector |
+
+### Also
+
+- Added `*.key`, `*.ke`, `*.pem` to `.gitignore` to prevent accidental credential commits
+
+---
+
+## Promotion Pipeline Status
+
+Per plan `zippy-sprouting-scroll.md`, Sprint 1 (smoke tests) and Sprint 2 (session sanitization) are complete. Remaining sprints:
+
+- **Sprint 3**: Prometheus metrics + `/healthz` endpoint
+- **Sprint 4**: `promote_candidate.sh` v2 with rollback + blue-green cutover
