@@ -1,0 +1,79 @@
+{
+  "adapter_name": "json-architect",
+  "version": "1.0.0",
+  "display_name": "JSON Architect",
+  "description": "Structured JSON output for tool selection, confidence review, and internal pipeline steps requiring machine-parseable output.",
+  "tier": 1,
+  "pillar": "cognition",
+  "priority": "high",
+
+  "training_config": {
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "learning_rate": 2e-4,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "gradient_checkpointing": true,
+    "max_steps": 200,
+    "warmup_steps": 20,
+    "max_seq_length": 1024,
+    "load_in_4bit": true,
+    "bnb_4bit_compute_dtype": "bfloat16",
+    "bnb_4bit_quant_type": "nf4"
+  },
+
+  "data_sources": {
+    "tool_selection": {
+      "description": "Synthetic tool selection examples generated from AVAILABLE_TOOLS registry",
+      "target_samples": 500
+    },
+    "tool_review": {
+      "description": "Synthetic tool review/approval examples",
+      "target_samples": 200
+    },
+    "confidence_assessment": {
+      "description": "Confidence scoring for various pipeline stages",
+      "target_samples": 150
+    },
+    "null_selection": {
+      "description": "Cases where no tool is appropriate (general knowledge, chat, etc.)",
+      "target_samples": 150
+    }
+  },
+
+  "total_target_samples": 1000,
+  "train_split": 0.85,
+  "validation_split": 0.15,
+
+  "activation_triggers": [
+    "tool_selection",
+    "tool_review",
+    "confidence_assessment",
+    "json_output",
+    "structured_output"
+  ],
+
+  "output_schemas": {
+    "tool_selection": {
+      "type": "object",
+      "properties": {
+        "selected_tool": {"type": ["string", "null"]},
+        "params": {"type": "object"},
+        "reasoning": {"type": "string"},
+        "confidence": {"type": "number"}
+      },
+      "required": ["selected_tool", "reasoning", "confidence"]
+    },
+    "tool_review": {
+      "type": "object",
+      "properties": {
+        "approved": {"type": "boolean"},
+        "confidence": {"type": "number"},
+        "reasoning": {"type": "string"}
+      },
+      "required": ["approved", "confidence", "reasoning"]
+    }
+  }
+}

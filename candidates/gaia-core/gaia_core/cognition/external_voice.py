@@ -118,7 +118,12 @@ class ExternalVoice:
             try:
                 loop_enabled = self.config.constants.get("LOOP_DETECTION_ENABLED", True)
                 if loop_enabled:
-                    self._loop_detector_observer = LoopDetectorObserver()
+                    # Think-tag circuit breaker thresholds from constants
+                    think_cfg = self.config.constants.get("THINK_TAG_CIRCUIT_BREAKER", {})
+                    self._loop_detector_observer = LoopDetectorObserver(
+                        think_tag_char_threshold=int(think_cfg.get("char_threshold", 500)),
+                        think_tag_ratio_threshold=float(think_cfg.get("ratio_threshold", 0.90)),
+                    )
             except Exception:
                 logger.debug("ExternalVoice: failed to initialize loop detector observer", exc_info=True)
 
@@ -279,8 +284,10 @@ class ExternalVoice:
                     try:
                         loop_interrupt = self._loop_detector_observer.on_token(token)
                         if loop_interrupt and loop_interrupt.level == "BLOCK":
-                            # Token-level loop detected (e.g., "the the the the")
-                            logger.warning(f"ExternalVoice: loop detector interrupted stream: {loop_interrupt.reason}")
+                            # Distinguish think-tag loops from general token loops
+                            is_think_tag = "Think-tag" in loop_interrupt.reason
+                            interrupt_type = "think_tag_loop" if is_think_tag else "loop_detection"
+                            logger.warning(f"ExternalVoice: loop detector interrupted stream ({interrupt_type}): {loop_interrupt.reason}")
                             packet: CognitionPacket = self.context.get("packet")
                             if packet:
                                 try:
@@ -292,7 +299,7 @@ class ExternalVoice:
                             yield {"event": "interruption", "data": {
                                 "reason": f"Loop detected: {loop_interrupt.reason}",
                                 "suggestion": loop_interrupt.suggestion,
-                                "type": "loop_detection"
+                                "type": interrupt_type
                             }}
                             break
                     except Exception:

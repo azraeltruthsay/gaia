@@ -132,7 +132,16 @@
     "Invoke the helper script",
     "Run the file operation tool",
     "Execute the read tool on that path",
-    "Use ai_read to check the document"
+    "Use ai_read to check the document",
+    "Use web search to find the latest news",
+    "Search the web for that information",
+    "Look up the answer online",
+    "Can you search the internet for that?",
+    "Google the current weather forecast",
+    "Save this to my knowledge base",
+    "Store this information in the knowledge base",
+    "Add this to my knowledge base for future reference",
+    "Remember this fact in my knowledge base"
   ],
   "other": [
     "Who forged Excalibur?",

@@ -7,7 +7,7 @@ gaia-core to offload GPU inference to a separate container.
 
 Environment:
     PRIME_ENDPOINT: Base URL of the vLLM server (e.g. http://gaia-prime-candidate:7777)
-    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Claude)
+    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3-4B-Instruct-2507-heretic)
 """
 
 import logging
@@ -42,7 +42,7 @@ class VLLMRemoteModel:
         self.model_name = (
             model_config.get("path")
             or model_config.get("model")
-            or os.getenv("PRIME_MODEL", "/models/Claude")
+            or os.getenv("PRIME_MODEL", "/models/Qwen3-4B-Instruct-2507-heretic")
         )
 
         self.timeout = int(model_config.get("timeout", 120))
@@ -102,6 +102,13 @@ class VLLMRemoteModel:
             "choices": [{"text": text}],
         }
 
+    # vLLM-specific keys that are forwarded from kwargs into the API payload.
+    _VLLM_EXTRA_KEYS = frozenset({
+        "guided_json", "guided_regex", "guided_choice",
+        "guided_grammar", "guided_decoding_backend",
+        "response_format", "stop", "chat_template_kwargs",
+    })
+
     def create_chat_completion(
         self,
         messages: List[Dict[str, Any]],
@@ -111,7 +118,16 @@ class VLLMRemoteModel:
         stream: bool = False,
         **kwargs,
     ) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]:
-        """Chat completion via POST /v1/chat/completions."""
+        """Chat completion via POST /v1/chat/completions.
+
+        Extra kwargs matching ``_VLLM_EXTRA_KEYS`` are forwarded into the
+        request payload, enabling vLLM features like guided decoding::
+
+            model.create_chat_completion(
+                messages=msgs,
+                guided_json={"type": "object", ...},
+            )
+        """
         self._request_count += 1
         clean_messages = self._sanitize_messages(messages)
 
@@ -122,6 +138,16 @@ class VLLMRemoteModel:
             "temperature": temperature,
             "top_p": top_p,
         }
+
+        # Forward vLLM-specific params (guided decoding, stop, etc.)
+        for key in self._VLLM_EXTRA_KEYS:
+            if key in kwargs:
+                payload[key] = kwargs[key]
+
+        # Disable Qwen3 thinking mode by default to avoid <think> tag bloat.
+        # Callers can override by passing chat_template_kwargs explicitly.
+        if "chat_template_kwargs" not in payload:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         if stream:
             return self._stream_chat(payload)

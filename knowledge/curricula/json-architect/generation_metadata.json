@@ -1,0 +1,15 @@
+{
+  "adapter_name": "json-architect",
+  "generated_at": "2026-02-13",
+  "seed": 42,
+  "total_pairs": 1000,
+  "train_pairs": 850,
+  "validation_pairs": 150,
+  "categories": {
+    "tool_selection": 165,
+    "null_selection": 87,
+    "tool_review": 76,
+    "confidence_assessment": 28
+  },
+  "data_hash": "b5ae28651a9173e9"
+}

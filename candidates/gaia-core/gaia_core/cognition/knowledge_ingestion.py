@@ -23,12 +23,17 @@ logger = logging.getLogger("GAIA.KnowledgeIngestion")
 _SAVE_PATTERNS = [
     # Natural language: "save this about X", "remember this about X", "document this about X"
     re.compile(
-        r"(?:save|remember|document|record|store|log)\s+this\s+(?:info(?:rmation)?\s+)?about\s+(?P<subject>.+?)(?:\s*:\s*(?P<content>.+))?$",
+        r"(?:save|remember|document|record|store|log)\s+(?:this|the\s+following)\s+(?:info(?:rmation)?\s+)?about\s+(?P<subject>.+?)(?:\s*:\s*(?P<content>.+))?$",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # "save the following to my knowledge base: <content>"
+    re.compile(
+        r"(?:save|remember|document|record|store|log|add)\s+(?:the\s+following|this)\s+to\s+(?:my\s+)?knowledge\s*base\s*:\s*(?P<content>.+)",
         re.IGNORECASE | re.DOTALL,
     ),
     # Natural language without explicit subject: "save this", "remember this"
     re.compile(
-        r"(?:save|remember|document|record|store|log)\s+this\s*(?::\s*(?P<content>.+))?$",
+        r"(?:save|remember|document|record|store|log)\s+(?:this|the\s+following)\s*(?::\s*(?P<content>.+))?$",
         re.IGNORECASE | re.DOTALL,
     ),
     # Legacy DOCUMENT format

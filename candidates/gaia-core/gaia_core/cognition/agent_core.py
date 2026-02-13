@@ -100,7 +100,7 @@ def _format_retrieved_session_context(results: dict) -> str:
 # Keywords are checked case-insensitively against the user's request
 RECITABLE_DOCUMENTS = {
     "constitution": {
-        "keywords": ["constitution", "gaia constitution", "the constitution"],
+        "keywords": ["gaia constitution", "gaia's constitution", "your constitution"],
         "path": "knowledge/system_reference/core_documents/gaia_constitution.md",
         "title": "The GAIA Constitution",
     },
@@ -110,7 +110,7 @@ RECITABLE_DOCUMENTS = {
         "title": "The Layered Identity Model",
     },
     "declaration": {
-        "keywords": ["declaration", "artisanal intelligence declaration", "declaration of artisanal"],
+        "keywords": ["declaration of artisanal", "artisanal intelligence declaration", "artisanal declaration", "gaia declaration"],
         "path": "knowledge/system_reference/core_documents/declaration_of_artisanal_intelligence.md",
         "title": "The Declaration of Artisanal Intelligence",
     },
@@ -998,6 +998,13 @@ class AgentCore:
         # ── Knowledge Ingestion Pipeline ──────────────────────────────
         # Check for explicit save commands or auto-detected knowledge dumps
         # before intent detection so we can short-circuit or tag the packet.
+        # If no KB was selected but the user explicitly asked to save, use a
+        # default knowledge base so the save pipeline still fires.
+        if not knowledge_base_name:
+            from gaia_core.cognition.knowledge_ingestion import detect_save_command
+            if detect_save_command(user_input):
+                knowledge_base_name = "general"
+                logger.info("No KB selected but explicit save command detected; using default KB 'general'")
         if knowledge_base_name:
             # 1. Explicit save: "save this about X", "remember this", legacy DOCUMENT
             save_result = run_explicit_save(user_input, knowledge_base_name)
@@ -1196,12 +1203,33 @@ class AgentCore:
 
         # Fast-path slim prompt: low-complexity intents (incl. list_tools) avoid the heavy
         # planning/reflector stack. Uses minimal identity + MCP summary + user input.
-        if self._should_use_slim_prompt(plan, user_input):
+        # Skip slim prompt when tool routing already executed — tool results need the
+        # full ExternalVoice pipeline to be properly incorporated into the response.
+        tool_already_executed = (
+            packet.tool_routing
+            and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
+        )
+        if not tool_already_executed and self._should_use_slim_prompt(plan, user_input):
             text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
-            _header = self._build_response_header(selected_model_name, packet, None, None, None)
-            yield {"type": "token", "value": _header + text}
-            self.session_manager.add_message(session_id, "assistant", text)
-            return
+            if text is not None:
+                _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                yield {"type": "token", "value": _header + text}
+                self.session_manager.add_message(session_id, "assistant", text)
+                return
+            # _run_slim_prompt returned None — slim path declined (e.g. low
+            # confidence recitation).  Attempt tool routing (web_search) to
+            # gather real content before falling through to ExternalVoice.
+            if not (packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED):
+                logger.info("Slim prompt declined — attempting tool routing for web_search")
+                packet = self._run_tool_routing_loop(
+                    packet=packet,
+                    user_input=user_input,
+                    session_id=session_id,
+                    source=source,
+                    metadata=_metadata
+                )
+                if packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED:
+                    logger.info("Tool routing succeeded after slim prompt decline — continuing with enhanced context")
 
         # 4. Initial Planning & Reflection
         if plan.intent:
@@ -1519,9 +1547,11 @@ class AgentCore:
                             if isinstance(reason_data, dict):
                                 reason = reason_data.get("reason") or reason_data.get("reason", "observer interruption")
                                 suggestion = reason_data.get("suggestion")
+                                interrupt_type = reason_data.get("type", "")
                             else:
                                 reason = reason_data
                                 suggestion = None
+                                interrupt_type = ""
 
                             logger.warning(f"AgentCore: Observer interruption during stream: {reason}")
                             # record in packet status if available
@@ -1530,6 +1560,14 @@ class AgentCore:
                                 packet.status.next_steps.append(f"Observer interruption: {reason}")
                             except Exception:
                                 logger.debug("AgentCore: failed to update packet status with observer interruption")
+
+                            # Think-tag loops: don't surface to user — let the
+                            # existing think-tag-only recovery at post-stream
+                            # handle the retry silently.
+                            if interrupt_type == "think_tag_loop":
+                                logger.info("AgentCore: Think-tag circuit breaker fired; will retry with no-thinking instruction")
+                                break
+
                             # surface a user-facing notification; include suggestion when present
                             user_msg = f"--- Stream interrupted by observer: {reason} ---"
                             if suggestion:
@@ -1611,6 +1649,23 @@ class AgentCore:
                     "Retrying with explicit no-thinking instruction.",
                     len(full_response),
                 )
+
+                # Reset packet state — the circuit breaker set it to ABORTED
+                # to stop the first generation, but the retry deserves a
+                # clean slate so route_output doesn't reject the result.
+                if packet.status.state == PacketState.ABORTED:
+                    logger.info("AgentCore: Resetting packet state from ABORTED → PROCESSING for think-tag retry")
+                    packet.status.state = PacketState.PROCESSING
+                    # Clear stale abort traces so the post-stream observer
+                    # and output router see a clean packet.
+                    packet.status.next_steps = [
+                        s for s in packet.status.next_steps
+                        if "Loop detected" not in s and "Observer interruption" not in s
+                    ]
+                    packet.status.observer_trace = [
+                        s for s in packet.status.observer_trace
+                        if "LOOP_BLOCK" not in s and "STREAM_INTERRUPT" not in s
+                    ]
                 # Extract the reasoning so we can give it context on retry
                 import re as _re
                 _think_match = _re.search(
@@ -1627,7 +1682,9 @@ class AgentCore:
                     "Your previous response contained only internal reasoning "
                     "without a visible answer. Please respond directly to the "
                     "user's last message. Do NOT use <think> tags. "
-                    "Provide a concise, helpful answer."
+                    "Do NOT reference or cite any files or file paths. "
+                    "Do NOT invent sources. If you don't know something, "
+                    "say so honestly. Provide a concise, helpful answer."
                 )
                 if reasoning_summary:
                     retry_instruction += (
@@ -1689,6 +1746,26 @@ class AgentCore:
                         note += f" | Suggestion: {review.suggestion}"
                     logger.info("Post-stream observer review: %s", note)
                     yield {"type": "token", "value": f"\n\n{note}\n"}
+
+                    # Scrub confabulated file references from the response.
+                    # The observer catches fake paths at CAUTION level — strip
+                    # sentences that reference nonexistent files so the user
+                    # doesn't see hallucinated sources.
+                    if review.level == "CAUTION" and "nonexistent file" in review.reason:
+                        import re as _re_scrub
+                        # Extract the fake file names from the observer reason
+                        _fab_match = _re_scrub.search(r'nonexistent file\(s\): (.+)$', review.reason)
+                        if _fab_match:
+                            fake_names = [f.strip() for f in _fab_match.group(1).split(',')]
+                            for fake in fake_names:
+                                # Remove sentences/lines that reference the fake file
+                                escaped = _re_scrub.escape(fake)
+                                full_response = _re_scrub.sub(
+                                    r'[^\n.]*' + escaped + r'[^\n.]*[.\n]?',
+                                    '', full_response
+                                )
+                            full_response = full_response.strip()
+                            logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
 
@@ -1955,9 +2032,19 @@ class AgentCore:
         Collapse runaway repetition by limiting how many times a sentence-level fragment
         can appear in the final response. Keeps the earliest occurrences and drops
         subsequent duplicates beyond `max_repeat`.
+
+        Also detects whole-block duplication where the model outputs the same
+        response twice back-to-back (possibly without whitespace separating them).
         """
         if not text:
             return text
+
+        # --- Pass 0: Whole-block dedup ---
+        # If the second half of the text is a near-verbatim copy of the first
+        # half, keep only the first half.  This catches cases where the model
+        # regenerates the entire answer without any separator.
+        text = self._dedup_block(text)
+
         try:
             import regex as _re
             sentences = _re.split(r'(?<=[.!?])\s+', text)
@@ -1976,6 +2063,57 @@ class AgentCore:
         if not result:
             return text
         return " ".join(result)
+
+    @staticmethod
+    def _dedup_block(text: str, min_block: int = 120, similarity_threshold: float = 0.85) -> str:
+        """
+        Detect and remove whole-block duplication where the model outputs the
+        same response twice back-to-back.
+
+        Scans for a repeated substring of at least `min_block` characters.
+        If the text contains a block that appears twice (possibly glued together
+        without whitespace), the duplicate is removed.
+        """
+        if len(text) < min_block * 2:
+            return text
+
+        # Strategy: try to find the longest prefix of the text that also
+        # appears later.  Check from the midpoint outward.
+        half = len(text) // 2
+
+        # Try different split points around the midpoint
+        for offset in range(0, min(half, 200), 10):
+            for split_at in [half + offset, half - offset]:
+                if split_at < min_block or split_at >= len(text) - min_block:
+                    continue
+                first_half = text[:split_at].strip()
+                second_half = text[split_at:].strip()
+
+                # Quick length check — halves should be roughly the same size
+                if not second_half or not first_half:
+                    continue
+                len_ratio = len(second_half) / len(first_half)
+                if len_ratio < 0.7 or len_ratio > 1.3:
+                    continue
+
+                # Compare normalized versions
+                norm_first = first_half.lower().split()
+                norm_second = second_half.lower().split()
+                if not norm_first or not norm_second:
+                    continue
+
+                # Jaccard word-set similarity
+                set_first = set(norm_first)
+                set_second = set(norm_second)
+                intersection = len(set_first & set_second)
+                union = len(set_first | set_second)
+                similarity = intersection / union if union else 0
+
+                if similarity >= similarity_threshold:
+                    # Keep the first half (it's the original)
+                    return first_half
+
+        return text
 
     def _build_response_header(
         self,
@@ -2376,10 +2514,27 @@ class AgentCore:
                     )
                 except Exception as exc:
                     self.logger.exception("Document recitation failed, falling back to standard generation")
+                    # Fall through to web retrieval, then confidence-based approach
+
+            # No local document — try web retrieval for well-known texts
+            web_doc = self._web_retrieve_for_recitation(user_input, session_id)
+            if web_doc:
+                self.logger.info(f"Web retrieval found recitable content: {web_doc['title']}")
+                try:
+                    return self._run_with_document_recitation(
+                        user_input=user_input,
+                        document=web_doc,
+                        selected_model_name=selected_model_name,
+                        history=history or [],
+                        session_id=session_id,
+                        output_as_file=True,
+                    )
+                except Exception as exc:
+                    self.logger.exception("Web-retrieved document recitation failed, falling back")
                     # Fall through to confidence-based approach
 
-            # No known document found - use confidence-based approach
-            self.logger.info("No known document matched, assessing task confidence...")
+            # No document found (local or web) - use confidence-based approach
+            self.logger.info("No document found (local or web), assessing task confidence...")
 
             # Pre-task epistemic check: Does GAIA actually know this content?
             # Uses full GCP pipeline so GAIA has identity, world state, and tool awareness
@@ -2404,26 +2559,30 @@ class AgentCore:
             can_attempt = confidence_check.get("can_attempt", True)
 
             if not can_attempt or confidence_score < confidence_threshold:
-                self.logger.warning(f"Low confidence ({confidence_score}) - declining to attempt recitation")
-                alternative = confidence_check.get("alternative_offer", "")
-                if alternative:
-                    return f"I need to be honest with you: {confidence_check.get('reasoning', 'I am not confident I can accurately complete this task.')}\n\n{alternative}"
-                return f"I need to be honest: {confidence_check.get('reasoning', 'I do not have this content accurately memorized and would likely produce errors if I attempted it.')}"
-
-            # Proceed with fragmented generation if confidence is adequate
-            self.logger.info("Confidence adequate, proceeding with fragmented generation")
-            try:
-                return self._run_with_fragmentation(
-                    user_input=user_input,
-                    selected_model_name=selected_model_name,
-                    history=history or [],
-                    session_id=session_id,
-                    max_fragments=5,
-                    output_as_file=True,  # Long-form recitations go to file
+                self.logger.warning(
+                    f"Low confidence ({confidence_score}) for recitation — "
+                    "returning None to trigger full ExternalVoice pipeline"
                 )
-            except Exception as exc:
-                self.logger.exception("Fragmented generation failed, falling back to standard")
-                # Fall through to standard generation
+                # Return None to signal run_turn() that the slim path declined.
+                # run_turn() will then skip to the full ExternalVoice streaming
+                # pipeline which has tool selection (web_search, web_fetch),
+                # the streaming observer, and the think-tag circuit breaker.
+                return None
+            else:
+                # Proceed with fragmented generation only when confidence is adequate
+                self.logger.info("Confidence adequate, proceeding with fragmented generation")
+                try:
+                    return self._run_with_fragmentation(
+                        user_input=user_input,
+                        selected_model_name=selected_model_name,
+                        history=history or [],
+                        session_id=session_id,
+                        max_fragments=5,
+                        output_as_file=True,  # Long-form recitations go to file
+                    )
+                except Exception as exc:
+                    self.logger.exception("Fragmented generation failed, falling back to standard")
+                    # Fall through to standard generation
 
         # Otherwise, use the canonical GCP prompt builder (world state + identity).
         try:
@@ -2483,6 +2642,144 @@ class AgentCore:
         except Exception as exc:
             self.logger.exception("slim prompt call failed")
             return f"I encountered an error while answering: {exc}"
+
+    # ------------------------------------------------------------------
+    # Web-retrieval helpers for recitation (poem/speech/document lookup)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_recitation_search_query(user_input: str) -> str:
+        """Strip action verbs and qualifiers, append 'full text' for a search-friendly query."""
+        import re
+        q = user_input
+        # Remove common request preambles
+        q = re.sub(
+            r"(?i)^(please\s+)?(recite|read|share|give me|show me|write out|type out|present)\s+",
+            "",
+            q,
+        )
+        # Remove trailing qualifiers
+        q = re.sub(r"(?i)\s+(for me|please|if you (can|could|would))\.?$", "", q)
+        q = q.strip().rstrip(".")
+        if q:
+            q += " full text"
+        return q
+
+    def _validate_recitation_content(self, content: str, user_input: str) -> bool:
+        """Gate on length (200–100k chars) and minimal relevance to the request."""
+        if not content or len(content) < 200 or len(content) > 100_000:
+            return False
+        # Extract salient nouns from the user input for a rough relevance check
+        import re
+        words = re.findall(r"[A-Za-z]{3,}", user_input.lower())
+        stop = {"the", "and", "for", "please", "recite", "read", "share",
+                "give", "show", "write", "type", "first", "three", "stanzas",
+                "stanza", "full", "text", "from", "out", "with", "that", "this",
+                "can", "could", "would", "you", "your", "poem", "speech"}
+        keywords = [w for w in words if w not in stop]
+        if not keywords:
+            return True  # no keywords to check — accept on length alone
+        content_lower = content.lower()
+        hits = sum(1 for kw in keywords if kw in content_lower)
+        return hits >= 1  # at least one salient keyword present
+
+    def _web_retrieve_for_recitation(
+        self,
+        user_input: str,
+        session_id: str,
+    ) -> Optional[Dict[str, str]]:
+        """Search the web for a well-known text and return {title, content} or None.
+
+        Orchestrates: web_search → sort by trust tier → web_fetch top 3 → validate.
+        Every failure path returns None so the caller can fall through gracefully.
+        """
+        from gaia_core.utils import mcp_client
+
+        query = self._build_recitation_search_query(user_input)
+        if not query:
+            return None
+
+        # Determine content_type hint from the request
+        input_lower = user_input.lower()
+        if any(w in input_lower for w in ("poem", "stanza", "verse", "sonnet", "ode")):
+            content_type = "poem"
+        elif any(w in input_lower for w in ("speech", "address", "declaration")):
+            content_type = "facts"
+        else:
+            content_type = None
+
+        try:
+            # Try with content_type first (adds trusted-domain site: filters),
+            # then retry without if the site-filtered query returns nothing.
+            search_attempts = []
+            if content_type:
+                search_attempts.append({"query": query, "max_results": 5, "content_type": content_type})
+            search_attempts.append({"query": query, "max_results": 5})  # unfiltered fallback
+
+            results = []
+            for search_params in search_attempts:
+                self.logger.info(f"Web recitation search: {search_params}")
+                resp = mcp_client.call_jsonrpc("web_search", search_params)
+
+                if not resp.get("ok"):
+                    self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
+                    continue
+
+                # The MCP response wraps the actual result under "response"
+                payload = resp.get("response", resp)
+                if isinstance(payload, dict) and "result" in payload:
+                    payload = payload["result"]
+
+                results = payload.get("results", [])
+                if results:
+                    break  # got results, stop searching
+
+            if not results:
+                self.logger.info("web_search returned no results for recitation query")
+                return None
+
+            # Sort by trust tier: trusted > reliable > unknown
+            tier_priority = {"trusted": 0, "reliable": 1, "unknown": 2}
+            results.sort(key=lambda r: tier_priority.get(r.get("trust_tier", "unknown"), 2))
+
+            # Try fetching top 3 results
+            for result in results[:3]:
+                url = result.get("url", "")
+                if not url:
+                    continue
+                try:
+                    self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
+                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
+
+                    if not fetch_resp.get("ok"):
+                        continue
+
+                    fetch_payload = fetch_resp.get("response", fetch_resp)
+                    if isinstance(fetch_payload, dict) and "result" in fetch_payload:
+                        fetch_payload = fetch_payload["result"]
+
+                    content = fetch_payload.get("content", "")
+                    title = fetch_payload.get("title") or result.get("title", "Web Document")
+
+                    if self._validate_recitation_content(content, user_input):
+                        self.logger.info(
+                            f"Web recitation content validated: {title!r} ({len(content)} chars)"
+                        )
+                        return {"title": title, "content": content}
+                    else:
+                        self.logger.info(
+                            f"Web recitation content rejected: {title!r} ({len(content)} chars)"
+                        )
+                except Exception:
+                    self.logger.debug("web_fetch failed for %s", url, exc_info=True)
+                    continue
+
+            self.logger.info("No valid recitation content found from web search")
+            return None
+
+        except Exception:
+            self.logger.debug("_web_retrieve_for_recitation failed", exc_info=True)
+            return None
 
     def _run_with_document_recitation(
         self,
@@ -2572,6 +2869,13 @@ Present {doc_title}:"""
 
             # Strip any think tags from the response
             content = strip_think_tags(content)
+
+            # Scrub degenerate repetition patterns (e.g., "___" x1000)
+            # that the 3B model produces when it runs out of real content.
+            content = self._suppress_repetition(content)
+            # Also truncate runs of repeated short tokens (underscores, etc.)
+            content = re.sub(r'(\s*_{3}\s*){5,}', '\n\n[...]\n\n', content)
+            content = re.sub(r'(\*{2,}\s*_{2,}\s*\*{2,}\s*){3,}', '\n\n[...]\n\n', content)
 
             self.logger.info(f"Document recitation complete: {len(content)} chars")
 
@@ -4394,7 +4698,6 @@ Start your response with the first line of the file."""
         from gaia_core.cognition.tool_selector import (
             needs_tool_routing, select_tool, review_selection,
             initialize_tool_routing, inject_tool_result_into_packet,
-            AVAILABLE_TOOLS
         )
 
         _meta = metadata or {}
@@ -4749,7 +5052,21 @@ Start your response with the first line of the file."""
             "semantic search", "query "
         ]
 
-        for indicator in file_indicators + exec_indicators + search_indicators:
+        # Web research indicators
+        web_indicators = [
+            "web search", "search the web", "search online",
+            "search the internet", "look up online", "google ",
+        ]
+
+        # Knowledge save indicators
+        knowledge_save_indicators = [
+            "save to my knowledge", "save to knowledge",
+            "store in my knowledge", "store in knowledge",
+            "add to my knowledge", "add to knowledge",
+            "save the following to",
+        ]
+
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True

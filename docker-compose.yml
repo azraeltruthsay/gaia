@@ -91,8 +91,7 @@ services:
     restart: unless-stopped
 
     volumes:
-      - /mnt/gaia_warm_pool/Claude:/models/Claude:ro
-      - /mnt/gaia_warm_pool/lora_adapters:/models/lora_adapters:ro
+      - /mnt/gaia_warm_pool:/models:ro
 
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
@@ -106,7 +105,7 @@ services:
 
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model /models/Claude
+      --model ${PRIME_MODEL_PATH:-/models/Qwen3-4B-Instruct-2507-heretic}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.70
@@ -186,7 +185,7 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Claude}
+      - PRIME_MODEL=${PRIME_MODEL_PATH:-/models/Claude}
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
