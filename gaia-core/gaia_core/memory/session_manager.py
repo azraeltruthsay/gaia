@@ -1,9 +1,10 @@
 import os
+import glob
 import json
 import logging
 import threading
 from typing import List, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from gaia_core.config import Config, get_config
 
 # Import the specialist tools the manager will orchestrate
@@ -220,6 +221,87 @@ class SessionManager:
             self._save_state()
         else:
             logger.warning(f"Attempted to reset non-existent session: {session_id}")
+
+    def sanitize_sessions(
+        self,
+        vector_dir: str = "data/shared/session_vectors",
+        max_age_days: int = 7,
+        max_active_messages: int = 0,
+    ) -> Dict[str, int]:
+        """
+        Clean up stale, orphaned, and test session artifacts.
+
+        Called on startup (e.g. Discord on_ready) to keep session state lean.
+
+        Steps:
+          1. Remove smoke-test-* and test-* sessions from in-memory state
+          2. Delete orphaned vector files (no matching session in state)
+          3. Delete smoke-test-* and test-* vector files unconditionally
+          4. Optionally trim sessions older than max_age_days with empty history
+          5. Persist cleaned state
+
+        Args:
+            vector_dir: Path to session vector index files
+            max_age_days: Sessions older than this with empty history are removed
+            max_active_messages: If >0, sessions exceeding this trigger archival
+
+        Returns:
+            Dict with counts: sessions_purged, vectors_purged, smoke_purged
+        """
+        counts = {"sessions_purged": 0, "vectors_purged": 0, "smoke_purged": 0}
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+
+        # ── Step 1: Purge test/smoke sessions from in-memory state ──
+        to_remove = []
+        for sid in list(self.sessions.keys()):
+            if sid.startswith("smoke-test-") or sid.startswith("test-"):
+                to_remove.append(sid)
+            elif self.sessions[sid].created_at < cutoff and not self.sessions[sid].history:
+                # Old session with empty history — stale shell
+                to_remove.append(sid)
+
+        for sid in to_remove:
+            del self.sessions[sid]
+            counts["sessions_purged"] += 1
+            logger.info(f"Sanitize: removed session '{sid}'")
+
+        # ── Step 2: Clean vector files ──
+        if os.path.isdir(vector_dir):
+            active_sids = set(self.sessions.keys())
+            for vec_file in glob.glob(os.path.join(vector_dir, "*.json")):
+                basename = os.path.basename(vec_file)
+                vec_sid = basename.replace(".json", "")
+
+                is_smoke = vec_sid.startswith("smoke-test-")
+                is_test = vec_sid.startswith("test-")
+                is_orphan = vec_sid not in active_sids
+
+                if is_smoke or is_test:
+                    try:
+                        os.remove(vec_file)
+                        counts["smoke_purged"] += 1
+                        logger.info(f"Sanitize: deleted smoke/test vector {basename}")
+                    except OSError as e:
+                        logger.warning(f"Sanitize: could not delete {basename}: {e}")
+                elif is_orphan:
+                    try:
+                        os.remove(vec_file)
+                        counts["vectors_purged"] += 1
+                        logger.info(f"Sanitize: deleted orphaned vector {basename}")
+                    except OSError as e:
+                        logger.warning(f"Sanitize: could not delete {basename}: {e}")
+
+        # ── Step 3: Persist cleaned state ──
+        if counts["sessions_purged"] > 0:
+            self._save_state()
+
+        logger.info(
+            f"Session sanitization complete: "
+            f"{counts['sessions_purged']} sessions purged, "
+            f"{counts['vectors_purged']} orphaned vectors removed, "
+            f"{counts['smoke_purged']} smoke/test vectors removed"
+        )
+        return counts
 
     # MODIFICATION: Add a new method to record the last system activity
     def record_last_activity(self):

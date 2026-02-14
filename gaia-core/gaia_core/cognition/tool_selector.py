@@ -150,7 +150,7 @@ _PROMPT_TOOLS = {
     # Search & knowledge
     "web_search", "web_fetch", "embedding.query",
     "memory_query", "find_files", "find_relevant_documents",
-    "query_knowledge",
+    "query_knowledge", "add_document",
     # Directory listing
     "list_dir", "list_tree",
 }

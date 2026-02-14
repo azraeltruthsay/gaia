@@ -10,6 +10,7 @@ import os
 import logging
 import asyncio
 import threading
+import time
 from typing import Optional, Dict, Any, Generator, Callable, List
 
 from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender
@@ -37,6 +38,9 @@ class DiscordConnector(DestinationConnector):
         self._bot_thread: Optional[threading.Thread] = None
         self._message_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
         self._sanitize_callback = sanitize_callback
+        self._last_presence_update: float = 0
+        self._presence_min_interval: float = 12  # Discord allows ~5 updates/min
+        self._idle_status: str = "over the studio"
 
         # Check if Discord integration is enabled
         if not self.config.enabled:
@@ -231,6 +235,76 @@ class DiscordConnector(DestinationConnector):
         """Check if a session ID represents a DM conversation."""
         return session_id.startswith("discord_dm_")
 
+    def _detect_deployment_mode(self) -> str:
+        """Returns 'candidate' or 'live' based on container hostname."""
+        import socket
+        hostname = socket.gethostname()
+        return "candidate" if "candidate" in hostname else "live"
+
+    def _check_prime_available(self) -> bool:
+        """Quick health check on gaia-prime. Returns True if reachable."""
+        import requests
+        mode = self._detect_deployment_mode()
+        host = "gaia-prime-candidate" if mode == "candidate" else "gaia-prime"
+        try:
+            resp = requests.get(f"http://{host}:7777/health", timeout=2)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def _build_idle_status(self) -> str:
+        """Build idle status string reflecting deployment mode + prime availability."""
+        mode = self._detect_deployment_mode()
+        prime_ok = self._check_prime_available()
+
+        parts = ["over the studio"]
+        qualifiers = []
+        if mode == "candidate":
+            qualifiers.append("candidate")
+        if not prime_ok:
+            qualifiers.append("CPU-only")
+        if qualifiers:
+            parts.append(f"({', '.join(qualifiers)})")
+        return " ".join(parts)
+
+    def update_presence(self, activity_name: str) -> None:
+        """Thread-safe, rate-limited Discord presence update. Safe to call from any thread."""
+        if not self._bot_client or not hasattr(self._bot_client, 'loop'):
+            return
+        now = time.time()
+        if now - self._last_presence_update < self._presence_min_interval:
+            return
+        self._last_presence_update = now
+
+        import discord
+
+        async def _set():
+            try:
+                await self._bot_client.change_presence(
+                    status=discord.Status.online,
+                    activity=discord.Activity(
+                        type=discord.ActivityType.watching,
+                        name=activity_name
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Presence update failed: {e}")
+
+        try:
+            asyncio.run_coroutine_threadsafe(_set(), self._bot_client.loop)
+        except Exception:
+            pass
+
+    def set_active(self, status: str = "Thinking...") -> None:
+        """Set active cognitive status. Call from any thread."""
+        self.update_presence(status)
+
+    def set_idle(self) -> None:
+        """Reset to idle status. Bypasses rate limit so idle always takes effect."""
+        self._last_presence_update = 0  # force update
+        self._idle_status = self._build_idle_status()
+        self.update_presence(self._idle_status)
+
     def start_bot_listener(self) -> bool:
         """
         Start the Discord bot listener in a background thread.
@@ -262,14 +336,16 @@ class DiscordConnector(DestinationConnector):
         @bot.event
         async def on_ready():
             logger.info(f"Discord bot connected as {bot.user}")
-            # Set presence to show as online with a status
+            # Build dynamic idle status reflecting deployment mode + prime availability
+            self._idle_status = self._build_idle_status()
             await bot.change_presence(
                 status=discord.Status.online,
                 activity=discord.Activity(
                     type=discord.ActivityType.watching,
-                    name="over the studio"
+                    name=self._idle_status
                 )
             )
+            logger.info(f"Discord presence set to: Watching {self._idle_status}")
             # Run session sanitization on connect (sync callback in executor)
             if self._sanitize_callback:
                 try:
