@@ -1,7 +1,7 @@
 # Promotion Pipeline — 2026-02-13
 
-**Timestamp:** 2026-02-13T16:13:57
-**Duration:** 6m 50s
+**Timestamp:** 2026-02-13T17:36:05
+**Duration:** 8m 46s
 **Services:** gaia-common,gaia-mcp,gaia-core,gaia-study
 **Mode:** LIVE
 **Result:** PASS
