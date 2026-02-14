@@ -255,7 +255,19 @@ def web_search(params: dict) -> dict:
 
 def _ddg_search(query: str, max_results: int) -> List[dict]:
     """Search DuckDuckGo using the library, falling back to Instant Answer API."""
-    # Try duckduckgo_search library
+    # Try ddgs library first (renamed from duckduckgo_search)
+    try:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+        if results:
+            return results
+    except ImportError:
+        logger.info("ddgs library not available, trying duckduckgo_search fallback")
+    except Exception as e:
+        logger.warning("ddgs search failed: %s", e)
+
+    # Try legacy duckduckgo_search library
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:

@@ -710,6 +710,9 @@ def start_discord_listener(ai: MinimalAIManager = None, session_id_prefix: str =
 
             logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {metadata.get('author_name', author_id)}")
 
+            # Set active status while processing
+            connector.set_active("Thinking...")
+
             # Run AgentCore in a separate process to avoid blocking the Discord bot
             import concurrent.futures
 
@@ -766,7 +769,10 @@ def start_discord_listener(ai: MinimalAIManager = None, session_id_prefix: str =
                 logger.info(f"Discord: Sent response to {'DM' if is_dm else 'channel'}")
             except Exception:
                 logger.exception("Discord: Failed to send response")
-        
+            finally:
+                # Always reset to idle when done processing
+                connector.set_idle()
+
         # Register callback and start listener
         connector.set_message_callback(handle_discord_message)
 

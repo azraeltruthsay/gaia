@@ -447,12 +447,15 @@ else
         log "  Promoting ${BOLD}$svc${RESET}..."
 
         # gaia-common: no restart (others depend on it)
-        # Others: restart + test
+        # Others: restart + test (but only if the live container exists)
         promote_flags=""
         if [ "$svc" = "gaia-common" ]; then
             promote_flags="--no-restart"
-        else
+        elif docker inspect "$svc" > /dev/null 2>&1; then
             promote_flags="--test"
+        else
+            log "    ${DIM}(no live container '$svc' — skipping restart)${RESET}"
+            promote_flags="--no-restart"
         fi
 
         set +e
@@ -492,9 +495,15 @@ else
 
     # 5a. Health checks on live services
     log "  Health checks on live services..."
+    any_live_running=false
     for svc in "${SERVICE_LIST[@]}"; do
         port="${LIVE_PORTS[$svc]:-}"
         if [ -n "$port" ]; then
+            if ! docker inspect "$svc" > /dev/null 2>&1; then
+                log "    ${DIM}⊘${RESET} $svc — no live container"
+                continue
+            fi
+            any_live_running=true
             # Give services a moment to settle after restart
             sleep 2
             if check_health "$svc" "$port" 10; then
@@ -506,19 +515,23 @@ else
         fi
     done
 
-    # 5b. Quick smoke test subset against live
+    # 5b. Quick smoke test subset against live (only if live containers exist)
     log ""
-    log "  Quick smoke test (tests 1,2,7) against live (port 6415)..."
-    set +e
-    quick_smoke=$(python3 "$SMOKE_SCRIPT" --endpoint http://localhost:6415 --only 1,2,7 2>&1)
-    quick_exit=$?
-    set -e
+    if [ "$any_live_running" = true ]; then
+        log "  Quick smoke test (tests 1,2,7) against live (port 6415)..."
+        set +e
+        quick_smoke=$(python3 "$SMOKE_SCRIPT" --endpoint http://localhost:6415 --only 1,2,7 2>&1)
+        quick_exit=$?
+        set -e
 
-    if [ $quick_exit -eq 0 ]; then
-        log "    ${GREEN}✓${RESET} Quick smoke tests passed"
+        if [ $quick_exit -eq 0 ]; then
+            log "    ${GREEN}✓${RESET} Quick smoke tests passed"
+        else
+            log "    ${YELLOW}⚠${RESET} Quick smoke tests failed (non-blocking — already promoted)"
+            post_ok=false
+        fi
     else
-        log "    ${YELLOW}⚠${RESET} Quick smoke tests failed (non-blocking — already promoted)"
-        post_ok=false
+        log "  ${DIM}⊘${RESET} No live containers running — skipping post-promotion smoke test"
     fi
 
     if [ "$post_ok" = true ]; then

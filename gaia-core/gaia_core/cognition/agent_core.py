@@ -998,6 +998,13 @@ class AgentCore:
         # ── Knowledge Ingestion Pipeline ──────────────────────────────
         # Check for explicit save commands or auto-detected knowledge dumps
         # before intent detection so we can short-circuit or tag the packet.
+        # If no KB was selected but the user explicitly asked to save, use a
+        # default knowledge base so the save pipeline still fires.
+        if not knowledge_base_name:
+            from gaia_core.cognition.knowledge_ingestion import detect_save_command
+            if detect_save_command(user_input):
+                knowledge_base_name = "general"
+                logger.info("No KB selected but explicit save command detected; using default KB 'general'")
         if knowledge_base_name:
             # 1. Explicit save: "save this about X", "remember this", legacy DOCUMENT
             save_result = run_explicit_save(user_input, knowledge_base_name)
@@ -1196,7 +1203,13 @@ class AgentCore:
 
         # Fast-path slim prompt: low-complexity intents (incl. list_tools) avoid the heavy
         # planning/reflector stack. Uses minimal identity + MCP summary + user input.
-        if self._should_use_slim_prompt(plan, user_input):
+        # Skip slim prompt when tool routing already executed — tool results need the
+        # full ExternalVoice pipeline to be properly incorporated into the response.
+        tool_already_executed = (
+            packet.tool_routing
+            and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
+        )
+        if not tool_already_executed and self._should_use_slim_prompt(plan, user_input):
             text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
             if text is not None:
                 _header = self._build_response_header(selected_model_name, packet, None, None, None)
@@ -2501,10 +2514,27 @@ class AgentCore:
                     )
                 except Exception as exc:
                     self.logger.exception("Document recitation failed, falling back to standard generation")
+                    # Fall through to web retrieval, then confidence-based approach
+
+            # No local document — try web retrieval for well-known texts
+            web_doc = self._web_retrieve_for_recitation(user_input, session_id)
+            if web_doc:
+                self.logger.info(f"Web retrieval found recitable content: {web_doc['title']}")
+                try:
+                    return self._run_with_document_recitation(
+                        user_input=user_input,
+                        document=web_doc,
+                        selected_model_name=selected_model_name,
+                        history=history or [],
+                        session_id=session_id,
+                        output_as_file=True,
+                    )
+                except Exception as exc:
+                    self.logger.exception("Web-retrieved document recitation failed, falling back")
                     # Fall through to confidence-based approach
 
-            # No known document found - use confidence-based approach
-            self.logger.info("No known document matched, assessing task confidence...")
+            # No document found (local or web) - use confidence-based approach
+            self.logger.info("No document found (local or web), assessing task confidence...")
 
             # Pre-task epistemic check: Does GAIA actually know this content?
             # Uses full GCP pipeline so GAIA has identity, world state, and tool awareness
@@ -2612,6 +2642,144 @@ class AgentCore:
         except Exception as exc:
             self.logger.exception("slim prompt call failed")
             return f"I encountered an error while answering: {exc}"
+
+    # ------------------------------------------------------------------
+    # Web-retrieval helpers for recitation (poem/speech/document lookup)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_recitation_search_query(user_input: str) -> str:
+        """Strip action verbs and qualifiers, append 'full text' for a search-friendly query."""
+        import re
+        q = user_input
+        # Remove common request preambles
+        q = re.sub(
+            r"(?i)^(please\s+)?(recite|read|share|give me|show me|write out|type out|present)\s+",
+            "",
+            q,
+        )
+        # Remove trailing qualifiers
+        q = re.sub(r"(?i)\s+(for me|please|if you (can|could|would))\.?$", "", q)
+        q = q.strip().rstrip(".")
+        if q:
+            q += " full text"
+        return q
+
+    def _validate_recitation_content(self, content: str, user_input: str) -> bool:
+        """Gate on length (200–100k chars) and minimal relevance to the request."""
+        if not content or len(content) < 200 or len(content) > 100_000:
+            return False
+        # Extract salient nouns from the user input for a rough relevance check
+        import re
+        words = re.findall(r"[A-Za-z]{3,}", user_input.lower())
+        stop = {"the", "and", "for", "please", "recite", "read", "share",
+                "give", "show", "write", "type", "first", "three", "stanzas",
+                "stanza", "full", "text", "from", "out", "with", "that", "this",
+                "can", "could", "would", "you", "your", "poem", "speech"}
+        keywords = [w for w in words if w not in stop]
+        if not keywords:
+            return True  # no keywords to check — accept on length alone
+        content_lower = content.lower()
+        hits = sum(1 for kw in keywords if kw in content_lower)
+        return hits >= 1  # at least one salient keyword present
+
+    def _web_retrieve_for_recitation(
+        self,
+        user_input: str,
+        session_id: str,
+    ) -> Optional[Dict[str, str]]:
+        """Search the web for a well-known text and return {title, content} or None.
+
+        Orchestrates: web_search → sort by trust tier → web_fetch top 3 → validate.
+        Every failure path returns None so the caller can fall through gracefully.
+        """
+        from gaia_core.utils import mcp_client
+
+        query = self._build_recitation_search_query(user_input)
+        if not query:
+            return None
+
+        # Determine content_type hint from the request
+        input_lower = user_input.lower()
+        if any(w in input_lower for w in ("poem", "stanza", "verse", "sonnet", "ode")):
+            content_type = "poem"
+        elif any(w in input_lower for w in ("speech", "address", "declaration")):
+            content_type = "facts"
+        else:
+            content_type = None
+
+        try:
+            # Try with content_type first (adds trusted-domain site: filters),
+            # then retry without if the site-filtered query returns nothing.
+            search_attempts = []
+            if content_type:
+                search_attempts.append({"query": query, "max_results": 5, "content_type": content_type})
+            search_attempts.append({"query": query, "max_results": 5})  # unfiltered fallback
+
+            results = []
+            for search_params in search_attempts:
+                self.logger.info(f"Web recitation search: {search_params}")
+                resp = mcp_client.call_jsonrpc("web_search", search_params)
+
+                if not resp.get("ok"):
+                    self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
+                    continue
+
+                # The MCP response wraps the actual result under "response"
+                payload = resp.get("response", resp)
+                if isinstance(payload, dict) and "result" in payload:
+                    payload = payload["result"]
+
+                results = payload.get("results", [])
+                if results:
+                    break  # got results, stop searching
+
+            if not results:
+                self.logger.info("web_search returned no results for recitation query")
+                return None
+
+            # Sort by trust tier: trusted > reliable > unknown
+            tier_priority = {"trusted": 0, "reliable": 1, "unknown": 2}
+            results.sort(key=lambda r: tier_priority.get(r.get("trust_tier", "unknown"), 2))
+
+            # Try fetching top 3 results
+            for result in results[:3]:
+                url = result.get("url", "")
+                if not url:
+                    continue
+                try:
+                    self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
+                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
+
+                    if not fetch_resp.get("ok"):
+                        continue
+
+                    fetch_payload = fetch_resp.get("response", fetch_resp)
+                    if isinstance(fetch_payload, dict) and "result" in fetch_payload:
+                        fetch_payload = fetch_payload["result"]
+
+                    content = fetch_payload.get("content", "")
+                    title = fetch_payload.get("title") or result.get("title", "Web Document")
+
+                    if self._validate_recitation_content(content, user_input):
+                        self.logger.info(
+                            f"Web recitation content validated: {title!r} ({len(content)} chars)"
+                        )
+                        return {"title": title, "content": content}
+                    else:
+                        self.logger.info(
+                            f"Web recitation content rejected: {title!r} ({len(content)} chars)"
+                        )
+                except Exception:
+                    self.logger.debug("web_fetch failed for %s", url, exc_info=True)
+                    continue
+
+            self.logger.info("No valid recitation content found from web search")
+            return None
+
+        except Exception:
+            self.logger.debug("_web_retrieve_for_recitation failed", exc_info=True)
+            return None
 
     def _run_with_document_recitation(
         self,
@@ -4884,7 +5052,21 @@ Start your response with the first line of the file."""
             "semantic search", "query "
         ]
 
-        for indicator in file_indicators + exec_indicators + search_indicators:
+        # Web research indicators
+        web_indicators = [
+            "web search", "search the web", "search online",
+            "search the internet", "look up online", "google ",
+        ]
+
+        # Knowledge save indicators
+        knowledge_save_indicators = [
+            "save to my knowledge", "save to knowledge",
+            "store in my knowledge", "store in knowledge",
+            "add to my knowledge", "add to knowledge",
+            "save the following to",
+        ]
+
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True

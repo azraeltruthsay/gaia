@@ -20,7 +20,7 @@
       "max_num_prompt_tokens": 6144,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Qwen3-4B-Instruct-2507-heretic",
+      "path": "/models/Qwen3-8B-AWQ",
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm",

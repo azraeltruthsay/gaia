@@ -295,6 +295,28 @@ def _detect_tool_routing_request(text: str) -> bool:
         "call the tool",
     ]
 
+    # Web search / online research patterns
+    web_search_patterns = [
+        "web search",
+        "search the web",
+        "search online",
+        "search the internet",
+        "look up online",
+        "look it up online",
+        "use web search",
+        "google ",
+        "duckduckgo",
+    ]
+
+    # Knowledge save / store patterns (explicit tool-routing requests)
+    knowledge_save_patterns = [
+        r"save\s+(?:the\s+following|this)\s+to\s+(?:my\s+)?knowledge",
+        r"store\s+(?:the\s+following|this)\s+in\s+(?:my\s+)?knowledge",
+        r"add\s+(?:the\s+following|this)\s+to\s+(?:my\s+)?knowledge",
+        r"save\s+to\s+(?:my\s+)?knowledge\s*base",
+        r"remember\s+(?:the\s+following|this)\s+(?:for|in)",
+    ]
+
     # Strong file operation patterns (more specific than read_file intent)
     strong_file_patterns = [
         r"read\s+(?:the\s+)?(?:contents?\s+of\s+)?['\"]?/",  # read /path or read '/path'
@@ -316,6 +338,18 @@ def _detect_tool_routing_request(text: str) -> bool:
     for verb in tool_action_verbs:
         if verb in lowered:
             logger.debug(f"Tool routing detected: explicit verb '{verb}'")
+            return True
+
+    # Check web search patterns
+    for phrase in web_search_patterns:
+        if phrase in lowered:
+            logger.debug(f"Tool routing detected: web search phrase '{phrase}'")
+            return True
+
+    # Check knowledge save patterns
+    for pattern in knowledge_save_patterns:
+        if re.search(pattern, lowered):
+            logger.debug(f"Tool routing detected: knowledge save pattern")
             return True
 
     # Check strong file patterns
