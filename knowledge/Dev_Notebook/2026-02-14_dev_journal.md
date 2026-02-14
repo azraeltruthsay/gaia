@@ -124,17 +124,16 @@ Injected sleep restoration context at Tier 1 (between summary_prompt and session
 
 ---
 
-## What's Next (Phase 2)
+## What's Next (Phase 3)
 
-- **Sleep task scheduler** — execute maintenance tasks during sleep (conversation curation, vector store maintenance, thought seed reflection)
-- **Initiative engine** — port the archived GIL (GAIA Initiative Loop) from `archive/gaia-assistant-monolith/run_gil.py`
 - **LLM-generated checkpoints** — replace template with actual Prime meta-cognitive summary
 - **QLoRA dream mode** — integrate gaia-study QLoRA training as a sleep task
 - **Thought seed Observer integration** — add `THOUGHT_SEED` directive to Observer system prompt
+- **Vector store maintenance** — add as a sleep task for pruning/optimizing session vectors
 
 ---
 
-## Files Checklist
+## Files Checklist — Phase 1
 
 | Status | File | Action |
 |--------|------|--------|
@@ -151,3 +150,68 @@ Injected sleep restoration context at Tier 1 (between summary_prompt and session
 | MOD | `candidates/gaia-core/gaia_core/config.py` | SLEEP_* config fields |
 | MOD | `gaia-common/.../gaia_constants.json` | SLEEP_CYCLE section |
 | MOD | `candidates/gaia-core/gaia_core/utils/prompt_builder.py` | Sleep context injection |
+
+---
+
+## Phase 2 Implementation — Sleep Task System
+
+### New Files Created (4)
+
+#### 1. `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py`
+Central orchestrator for sleep-time autonomous maintenance tasks.
+
+- `SleepTask` dataclass: task_id, task_type, priority, interruptible, handler, last_run, run_count
+- `SleepTaskScheduler` class with priority + LRU scheduling
+- Three default tasks registered at init:
+  - P1: `conversation_curation` (60s, interruptible) — calls `ConversationCurator.curate()` on active sessions
+  - P1: `thought_seed_review` (120s, interruptible) — calls `review_and_process_seeds()` with CPU Lite model
+  - P2: `initiative_cycle` (180s, interruptible) — calls `InitiativeEngine.execute_turn()`
+- `get_next_task()` — priority-first, then least-recently-run (nulls-first)
+- `execute_task()` — runs handler in try/except, updates run metadata, never propagates
+- ~165 lines
+
+#### 2. `candidates/gaia-core/gaia_core/cognition/initiative_engine.py`
+Port of archived `run_gil.py` adapted for v0.3 microservice architecture.
+
+- `InitiativeEngine` class with `execute_turn()` method
+- Selects top-priority topic via `prioritize_topics()` from existing `topic_manager.py`
+- Builds self-prompt (ported from run_gil.py lines 74-85)
+- Runs through `AgentCore.run_turn()` with `GIL_SESSION_ID`
+- Returns `{"topic_id": ..., "status": "complete"|"error"}` or `None`
+- Graceful fallback when `agent_core` is None
+- ~90 lines
+
+#### 3. `candidates/gaia-core/gaia_core/cognition/tests/test_sleep_task_scheduler.py`
+13 unit tests covering registration, scheduling, execution, and status.
+
+#### 4. `candidates/gaia-core/gaia_core/cognition/tests/test_initiative_engine.py`
+8 unit tests covering no-topics, no-agent-core, successful turn, prompt construction, and error handling.
+
+### Existing Files Modified (2)
+
+#### 1. `candidates/gaia-core/gaia_core/cognition/sleep_cycle_loop.py`
+- Added `model_pool` and `agent_core` parameters to `__init__`
+- Created `SleepTaskScheduler` instance in constructor
+- Replaced `_handle_sleeping()` `pass` with task execution loop:
+  - Gets next task from scheduler
+  - Registers current_task on SleepWakeManager for interruptibility checks
+  - Updates Discord presence with task type
+  - Executes task, clears current_task, checks wake signal
+- Updated `_handle_finishing_task()` comment
+
+#### 2. `candidates/gaia-core/gaia_core/main.py`
+- Updated `SleepCycleLoop()` constructor in `lifespan()` to pass `model_pool` and `agent_core`
+- Safely handles case where `_ai_manager` is None
+
+### Test Results
+
+- **47/47** cognition tests pass (Phase 1: 26, Scheduler: 13, Initiative: 8) — 0.97s
+- **59/59** memory tests pass — zero regressions — 4.90s
+
+### Architecture Notes
+
+1. **Synchronous task execution** — all handlers are plain functions, matching the daemon thread model
+2. **CPU Lite for sleep tasks** — GPU may be stopped; thought seed review and initiative use `model_pool.get_model_for_role("lite")`
+3. **One task at a time, wake-check between** — worst-case wake latency = one task's duration
+4. **Reuse existing code** — `ConversationCurator`, `review_and_process_seeds()`, `prioritize_topics()`, `AgentCore.run_turn()` called directly
+5. **Initiative engine is a scheduler task** — not a standalone loop; idle check handled by the state machine

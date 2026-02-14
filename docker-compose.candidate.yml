@@ -51,7 +51,7 @@ services:
     volumes:
       - ./candidates/gaia-core:/app:rw
       - ./candidates/gaia-common:/app/gaia-common:ro
-      - ./knowledge:/knowledge:ro
+      - ./knowledge:/knowledge:rw
       - ./knowledge/vector_store:/vector_store:ro
       - ./gaia-models:/models:ro
       - gaia-candidate-shared:/shared:rw
