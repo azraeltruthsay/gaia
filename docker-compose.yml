@@ -159,8 +159,8 @@ services:
       - ./gaia-core:/app:rw
       # Shared library (development mode - mount for live reload)
       - ./gaia-common:/gaia-common:ro
-      # Knowledge base (read-only)
-      - ./knowledge:/knowledge:ro
+      # Knowledge base (read-write for conversation curator)
+      - ./knowledge:/knowledge:rw
       # Vector store (read-only - gaia-study is SOLE WRITER)
       - ./knowledge/vector_store:/vector_store:ro
       # Model files (read-only)

@@ -2,12 +2,13 @@
 #
 # promote_pipeline.sh — Master GAIA candidate-to-live promotion pipeline
 #
-# Orchestrates a 7-stage fail-fast promotion workflow:
+# Orchestrates an 8-stage fail-fast promotion workflow:
+#   0. Graceful live shutdown (default; skip with --keep-live)
 #   1. Pre-flight checks (health, sync, git state)
 #   2. Validation (ruff, mypy, pytest per service)
 #   3. Cognitive smoke tests (16-test battery against candidate)
 #   4. Service promotion (dependency-ordered, with backup)
-#   5. Post-promotion verification (live health + quick smoke)
+#   5. Post-promotion verification (restart live + health + quick smoke)
 #   6. Dev journal + flatten + commit
 #   7. QLoRA validation (optional, --qlora flag)
 #
@@ -20,6 +21,7 @@
 #   --skip-smoke     Skip cognitive smoke tests (Stage 3)
 #   --skip-flatten   Skip flatten_soa.sh after promotion
 #   --qlora          Run QLoRA validation cycle (Stage 7)
+#   --keep-live      Don't shut down live services before testing
 #   --no-push        Don't push to remote after commit
 #   --services LIST  Comma-separated services to promote
 #                    (default: gaia-common,gaia-mcp,gaia-core,gaia-study)
@@ -84,6 +86,7 @@ SKIP_SMOKE=false
 SKIP_FLATTEN=false
 DO_QLORA=false
 NO_PUSH=false
+KEEP_LIVE=false
 VERBOSE=""
 SERVICES="$DEFAULT_SERVICES"
 
@@ -95,6 +98,7 @@ for arg in "$@"; do
         --skip-flatten)  SKIP_FLATTEN=true ;;
         --qlora)         DO_QLORA=true ;;
         --no-push)       NO_PUSH=true ;;
+        --keep-live)     KEEP_LIVE=true ;;
         -v|--verbose)    VERBOSE="-v" ;;
         --services)      ;; # handled below
         --services=*)    SERVICES="${arg#*=}" ;;
@@ -175,6 +179,18 @@ check_health() {
     curl -sf --max-time "$timeout" "http://localhost:$port/health" > /dev/null 2>&1
 }
 
+# Track whether we shut down live (for safety trap and conditional logic)
+LIVE_STOPPED=false
+
+restart_live_if_down() {
+    if [ "$LIVE_STOPPED" = true ]; then
+        log "  ${YELLOW}Restarting live services...${RESET}"
+        cd "$GAIA_ROOT"
+        docker compose up -d 2>/dev/null || true
+        LIVE_STOPPED=false
+    fi
+}
+
 print_summary() {
     local elapsed=$(( $(date +%s) - PIPELINE_START ))
     local mins=$(( elapsed / 60 ))
@@ -210,6 +226,11 @@ print_summary() {
     echo ""
 }
 
+cleanup_on_failure() {
+    log "${RED}${BOLD}  Pipeline interrupted — checking live service state...${RESET}"
+    restart_live_if_down
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Initialize log
 # ═══════════════════════════════════════════════════════════════════════════
@@ -222,7 +243,64 @@ log "${BOLD}=== GAIA Candidate Promotion Pipeline ===${RESET}"
 log "  Date:      $TIMESTAMP"
 log "  Services:  $SERVICES"
 log "  Mode:      $([ "$DRY_RUN" = true ] && echo 'DRY RUN' || echo 'LIVE PROMOTION')"
-log "  Options:   validate=$([ "$SKIP_VALIDATE" = true ] && echo 'skip' || echo 'yes') smoke=$([ "$SKIP_SMOKE" = true ] && echo 'skip' || echo 'yes') flatten=$([ "$SKIP_FLATTEN" = true ] && echo 'skip' || echo 'yes') qlora=$([ "$DO_QLORA" = true ] && echo 'yes' || echo 'no')"
+log "  Options:   validate=$([ "$SKIP_VALIDATE" = true ] && echo 'skip' || echo 'yes') smoke=$([ "$SKIP_SMOKE" = true ] && echo 'skip' || echo 'yes') flatten=$([ "$SKIP_FLATTEN" = true ] && echo 'skip' || echo 'yes') qlora=$([ "$DO_QLORA" = true ] && echo 'yes' || echo 'no') keep-live=$([ "$KEEP_LIVE" = true ] && echo 'yes' || echo 'no')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Stage 0: Graceful Live Shutdown
+# ═══════════════════════════════════════════════════════════════════════════
+
+stage_header 0 "Graceful Live Shutdown"
+
+if [ "$KEEP_LIVE" = true ]; then
+    stage_skip "Graceful Live Shutdown (--keep-live)"
+elif [ "$DRY_RUN" = true ]; then
+    log "  ${DIM}Would shut down live services (dry-run)${RESET}"
+    stage_skip "Graceful Live Shutdown (dry-run)"
+else
+    # 0a. Verify candidate stack is healthy BEFORE shutting down live
+    log "  Verifying candidate stack is healthy before shutting down live..."
+    candidate_ok=true
+    for svc in "${SERVICE_LIST[@]}"; do
+        port="${CANDIDATE_PORTS[$svc]:-}"
+        if [ -n "$port" ]; then
+            if check_health "$svc" "$port"; then
+                log "    ${GREEN}✓${RESET} $svc-candidate healthy (port $port)"
+            else
+                log "    ${RED}✗${RESET} $svc-candidate unreachable (port $port)"
+                candidate_ok=false
+            fi
+        fi
+    done
+
+    if [ "$candidate_ok" = false ]; then
+        stage_fail "Graceful Live Shutdown" "Candidate stack not healthy — refusing to shut down live"
+    fi
+
+    # 0b. Shut down live services (20s grace for in-flight requests)
+    log "  Shutting down live services (20s grace period)..."
+    cd "$GAIA_ROOT"
+    set +e
+    docker compose -t 20 down 2>&1 | while read -r line; do log "    $line"; done
+    down_exit=${PIPESTATUS[0]}
+    set -e
+
+    if [ $down_exit -ne 0 ]; then
+        stage_fail "Graceful Live Shutdown" "docker compose down failed (exit $down_exit)"
+    fi
+
+    # 0c. Verify all live containers are actually stopped
+    live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
+    if [ "$live_remaining" -gt 0 ]; then
+        log "  ${YELLOW}⚠${RESET} $live_remaining live containers still running"
+        stage_fail "Graceful Live Shutdown" "Live containers did not stop cleanly"
+    fi
+
+    LIVE_STOPPED=true
+    # Register safety trap now that live is actually down
+    trap cleanup_on_failure EXIT INT TERM
+    log "  ${GREEN}✓${RESET} Live services stopped — safety trap armed"
+    stage_pass "Graceful Live Shutdown"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Stage 1: Pre-flight Checks
@@ -447,9 +525,12 @@ else
         log "  Promoting ${BOLD}$svc${RESET}..."
 
         # gaia-common: no restart (others depend on it)
+        # Live stopped: always --no-restart (containers don't exist)
         # Others: restart + test (but only if the live container exists)
         promote_flags=""
         if [ "$svc" = "gaia-common" ]; then
+            promote_flags="--no-restart"
+        elif [ "$LIVE_STOPPED" = true ]; then
             promote_flags="--no-restart"
         elif docker inspect "$svc" > /dev/null 2>&1; then
             promote_flags="--test"
@@ -493,7 +574,51 @@ if [ "$DRY_RUN" = true ]; then
 else
     post_ok=true
 
-    # 5a. Health checks on live services
+    # 5a. Restart live services if we shut them down in Stage 0
+    if [ "$LIVE_STOPPED" = true ]; then
+        log "  Restarting live services after promotion..."
+        cd "$GAIA_ROOT"
+        docker compose up -d 2>&1 | while read -r line; do log "    $line"; done
+
+        # Poll for health every 10s, max 180s (covers gaia-prime's 120s start_period)
+        log "  Waiting for live services to become healthy (max 180s)..."
+        max_wait=180
+        waited=0
+        all_healthy=false
+        while [ $waited -lt $max_wait ]; do
+            sleep 10
+            waited=$((waited + 10))
+            healthy_count=0
+            total_count=0
+            for svc in "${SERVICE_LIST[@]}"; do
+                port="${LIVE_PORTS[$svc]:-}"
+                if [ -n "$port" ]; then
+                    total_count=$((total_count + 1))
+                    if check_health "$svc" "$port" 5; then
+                        healthy_count=$((healthy_count + 1))
+                    fi
+                fi
+            done
+            log "    ${DIM}[${waited}s] $healthy_count/$total_count services healthy${RESET}"
+            if [ "$healthy_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
+                all_healthy=true
+                break
+            fi
+        done
+
+        LIVE_STOPPED=false
+        # Clear the safety trap now that live is back up
+        trap - EXIT INT TERM
+
+        if [ "$all_healthy" = true ]; then
+            log "  ${GREEN}✓${RESET} Live services restarted and healthy (${waited}s)"
+        else
+            log "  ${RED}✗${RESET} Live services not fully healthy after ${max_wait}s"
+            post_ok=false
+        fi
+    fi
+
+    # 5b. Health checks on live services (individual)
     log "  Health checks on live services..."
     any_live_running=false
     for svc in "${SERVICE_LIST[@]}"; do
@@ -515,7 +640,7 @@ else
         fi
     done
 
-    # 5b. Quick smoke test subset against live (only if live containers exist)
+    # 5c. Quick smoke test subset against live (only if live containers exist)
     log ""
     if [ "$any_live_running" = true ]; then
         log "  Quick smoke test (tests 1,2,7) against live (port 6415)..."

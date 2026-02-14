@@ -75,6 +75,9 @@ knowledge/logs/
 app/shared/
 **/last_activity.timestamp
 **/final_prompt_for_review.json
+**/session_vectors/
+**/smoke-test-*.json
+**/test-sess.json
 
 # --- IDE ---
 .vscode/

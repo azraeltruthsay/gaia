@@ -172,7 +172,11 @@ async def lifespan(app: FastAPI):
         config = get_config()
         sleep_enabled = getattr(config, "SLEEP_ENABLED", True)
         if sleep_enabled:
-            _sleep_loop = SleepCycleLoop(config)
+            _sleep_loop = SleepCycleLoop(
+                config,
+                model_pool=_ai_manager.model_pool if _ai_manager else None,
+                agent_core=_agent_core,
+            )
             # Store manager on app.state so sleep_endpoints can access it
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
             _sleep_loop.start()

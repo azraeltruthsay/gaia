@@ -198,6 +198,14 @@ class SessionManager:
             except Exception:
                 logger.debug("Session vector index archive failed (non-fatal)", exc_info=True)
 
+            # 3.6 Curate notable conversations for knowledge examples
+            try:
+                from gaia_core.cognition.conversation_curator import ConversationCurator
+                curator = ConversationCurator()
+                curator.curate(session.session_id, session.history)
+            except Exception:
+                logger.debug("Conversation curation failed (non-fatal)", exc_info=True)
+
             # 4. Clear the active history to manage context size for the next turn
             session.history.clear()
             logger.info(f"✅ Active history for session '{session_id}' cleared after successful archiving.")

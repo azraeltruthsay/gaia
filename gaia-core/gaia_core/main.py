@@ -162,8 +162,36 @@ async def lifespan(app: FastAPI):
     success = initialize_cognitive_system()
     if not success:
         logger.error("Cognitive system failed to initialize - endpoints will return errors")
+
+    # Start sleep cycle loop
+    _sleep_loop = None
+    try:
+        from gaia_core.config import get_config
+        from gaia_core.cognition.sleep_cycle_loop import SleepCycleLoop
+
+        config = get_config()
+        sleep_enabled = getattr(config, "SLEEP_ENABLED", True)
+        if sleep_enabled:
+            _sleep_loop = SleepCycleLoop(
+                config,
+                model_pool=_ai_manager.model_pool if _ai_manager else None,
+                agent_core=_agent_core,
+            )
+            # Store manager on app.state so sleep_endpoints can access it
+            app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
+            _sleep_loop.start()
+            logger.info("Sleep cycle loop started")
+        else:
+            logger.info("Sleep cycle disabled (SLEEP_ENABLED=False)")
+    except Exception:
+        logger.warning("Failed to start sleep cycle loop", exc_info=True)
+
     yield
+
     # Shutdown
+    if _sleep_loop is not None:
+        _sleep_loop.stop()
+        logger.info("Sleep cycle loop stopped")
     logger.info("GAIA Core shutting down...")
 
 
@@ -177,6 +205,10 @@ app = FastAPI(
 # Register GPU management endpoints (used by orchestrator for sleep/wake handoff)
 from gaia_core.api.gpu_endpoints import router as gpu_router
 app.include_router(gpu_router)
+
+# Register sleep cycle endpoints
+from gaia_core.api.sleep_endpoints import router as sleep_router
+app.include_router(sleep_router)
 
 
 @app.get("/health")
@@ -205,6 +237,8 @@ async def root():
             "/gpu/status": "GPU state (active/sleeping)",
             "/gpu/release": "Put gaia-prime to sleep, free GPU",
             "/gpu/reclaim": "Wake gaia-prime, restore GPU inference",
+            "/sleep/status": "Sleep cycle state machine status",
+            "/sleep/wake": "Send wake signal (POST)",
         }
     }
 
