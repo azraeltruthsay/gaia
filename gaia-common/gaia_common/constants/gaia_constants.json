@@ -245,6 +245,16 @@
       "max_user_adapters": 10
     }
   },
+  "SLEEP_CYCLE": {
+    "enabled": true,
+    "idle_threshold_minutes": 5,
+    "checkpoint_dir": "/shared/sleep_state",
+    "enable_qlora": false,
+    "enable_dream": false,
+    "task_timeout_seconds": 600,
+    "poll_interval_seconds": 10,
+    "max_checkpoint_history": 10
+  },
   "KNOWLEDGE_BASES": {
     "dnd_campaign": {
       "doc_dir": "projects/dnd-campaign/core-documentation",
