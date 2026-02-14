@@ -11,7 +11,12 @@ import logging
 from app.utils.background.task_queue import TaskQueue
 from app.utils.background.background_tasks import BackgroundTask
 from app.utils.background.idle_monitor import IdleMonitor
-from app.cognition.initiative_handler import gil_check_and_generate
+
+# NOTE: The initiative_handler module was never migrated from the monolith.
+# The GIL (GAIA Initiative Loop) is being revived in gaia-core as
+# InitiativeEngine (see sleep cycle Phase 2).  This legacy processor
+# is not used in the v0.3 microservice architecture.
+_gil_check_and_generate = None  # Stub — previously: from app.cognition.initiative_handler import gil_check_and_generate
 
 logger = logging.getLogger("GAIA.BackgroundProcessor")
 
@@ -75,7 +80,7 @@ class BackgroundProcessor:
 
                     # Initiative prompt check using config-based pathing
                     idle_minutes = self.idle_monitor.get_idle_minutes()
-                    initiative_message = gil_check_and_generate(user_idle_minutes=idle_minutes, config=self.config)
+                    initiative_message = _gil_check_and_generate(user_idle_minutes=idle_minutes, config=self.config) if _gil_check_and_generate else None
                     if initiative_message and self.conversation_manager:
                         self.conversation_manager.post_ai_message(initiative_message)
 

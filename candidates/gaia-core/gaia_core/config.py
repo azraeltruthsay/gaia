@@ -49,6 +49,14 @@ class Config:
     # Feature flags
     use_oracle: bool = False
 
+    # Sleep cycle settings (loaded from gaia_constants.json SLEEP_CYCLE section)
+    SLEEP_ENABLED: bool = True
+    SLEEP_IDLE_THRESHOLD_MINUTES: int = 5
+    SLEEP_CHECKPOINT_DIR: str = "/shared/sleep_state"
+    SLEEP_ENABLE_QLORA: bool = False
+    SLEEP_ENABLE_DREAM: bool = False
+    SLEEP_TASK_TIMEOUT: int = 600
+
     # Tool and primitive settings
     primitives: list[str] = field(default_factory=lambda: ["read", "write", "vector_query", "shell"])
     SAFE_EXECUTE_FUNCTIONS: list[str] = field(default_factory=list)
@@ -110,6 +118,15 @@ class Config:
                         self.EMBEDDING_MODEL_PATH = data.get("model_paths", {}).get("Embedding", os.getenv("EMBEDDING_MODEL_PATH"))
                     if "CODEX_FILE_EXTS" in data:
                         self.CODEX_FILE_EXTS = tuple(data["CODEX_FILE_EXTS"])
+                    # Sleep cycle settings
+                    sleep_cfg = data.get("SLEEP_CYCLE", {})
+                    if sleep_cfg:
+                        self.SLEEP_ENABLED = sleep_cfg.get("enabled", self.SLEEP_ENABLED)
+                        self.SLEEP_IDLE_THRESHOLD_MINUTES = sleep_cfg.get("idle_threshold_minutes", self.SLEEP_IDLE_THRESHOLD_MINUTES)
+                        self.SLEEP_CHECKPOINT_DIR = sleep_cfg.get("checkpoint_dir", self.SLEEP_CHECKPOINT_DIR)
+                        self.SLEEP_ENABLE_QLORA = sleep_cfg.get("enable_qlora", self.SLEEP_ENABLE_QLORA)
+                        self.SLEEP_ENABLE_DREAM = sleep_cfg.get("enable_dream", self.SLEEP_ENABLE_DREAM)
+                        self.SLEEP_TASK_TIMEOUT = sleep_cfg.get("task_timeout_seconds", self.SLEEP_TASK_TIMEOUT)
                     logger.info(f"Loaded GAIA constants from {path}")
                     return
                 except Exception as e:

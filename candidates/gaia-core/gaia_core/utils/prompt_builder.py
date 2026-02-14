@@ -529,10 +529,33 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
                 break
         return normalized
 
+    # --- Sleep restoration context (Tier 1, between summary and RAG) ---
+    sleep_context_prompt = {}
+    try:
+        from gaia_core.cognition.sleep_wake_manager import SleepWakeManager
+        checkpoint_path = os.path.join(
+            getattr(config, "SLEEP_CHECKPOINT_DIR", "/shared/sleep_state"),
+            "prime.md",
+        )
+        if os.path.exists(checkpoint_path):
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                checkpoint_content = f.read().strip()
+            if checkpoint_content:
+                review_text = SleepWakeManager._format_checkpoint_as_review(checkpoint_content)
+                sleep_tokens = count_tokens(review_text)
+                if sleep_tokens <= remaining_budget:
+                    sleep_context_prompt = {"role": "system", "content": review_text}
+                    remaining_budget -= sleep_tokens
+                    logger.info("[v0.3] Sleep restoration context injected (%d tokens)", sleep_tokens)
+    except Exception:
+        logger.debug("Sleep restoration context not available", exc_info=True)
+
     # --- Assemble the final prompt in the correct order (with normalization) ---
     final_prompt = [system_prompt]
     if summary_prompt:
         final_prompt.append(summary_prompt)        # Tier 1
+    if sleep_context_prompt:
+        final_prompt.append(sleep_context_prompt)  # Tier 1 (sleep restoration)
     if session_rag_prompt:
         final_prompt.append(session_rag_prompt)     # Tier 1.5
 
