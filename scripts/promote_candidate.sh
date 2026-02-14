@@ -357,21 +357,27 @@ echo ""
 
 # Restart live container
 if [ "$DO_RESTART" = true ] && [ "$HAS_CONTAINER" = "yes" ]; then
-    echo "Restarting $SERVICE..."
-    docker restart "$SERVICE"
-    echo "✓ $SERVICE restarted"
-    echo ""
+    # Check if the live container actually exists before trying to restart
+    if docker inspect "$SERVICE" > /dev/null 2>&1; then
+        echo "Restarting $SERVICE..."
+        docker restart "$SERVICE"
+        echo "✓ $SERVICE restarted"
+        echo ""
 
-    # Wait and check health
-    if [ -n "$LIVE_PORT" ]; then
-        echo "Waiting for health check..."
-        sleep 5
-        if curl -s --fail "http://localhost:$LIVE_PORT/health" > /dev/null 2>&1; then
-            echo "✓ Live $SERVICE is healthy"
-        else
-            echo "⚠ Live health check failed - may still be starting up"
-            echo "  Check with: docker logs $SERVICE --tail 20"
+        # Wait and check health
+        if [ -n "$LIVE_PORT" ]; then
+            echo "Waiting for health check..."
+            sleep 5
+            if curl -s --fail "http://localhost:$LIVE_PORT/health" > /dev/null 2>&1; then
+                echo "✓ Live $SERVICE is healthy"
+            else
+                echo "⚠ Live health check failed - may still be starting up"
+                echo "  Check with: docker logs $SERVICE --tail 20"
+            fi
         fi
+    else
+        echo "Note: No live container '$SERVICE' found — files promoted, skipping restart"
+        echo "  Start it with: docker compose up -d $SERVICE"
     fi
 elif [ "$HAS_CONTAINER" = "no" ]; then
     echo "Note: $SERVICE has no container, skipping restart"
