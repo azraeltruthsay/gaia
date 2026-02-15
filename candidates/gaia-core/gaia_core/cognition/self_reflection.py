@@ -16,7 +16,7 @@ from gaia_core.utils.gaia_rescue_helper import sketch, show_sketchpad, clear_ske
 from gaia_common.utils.thoughtstream import write as ts_write
 
 # [GCP v0.3] Import the new packet structure
-from gaia_common.protocols.cognition_packet import CognitionPacket, Persona, PersonaRole, ReflectionLog
+from gaia_common.protocols.cognition_packet import CognitionPacket, DataField, Persona, PersonaRole, ReflectionLog
 from gaia_core.utils.prompt_builder import build_from_packet, count_tokens
 from gaia_core.utils.packet_builder import build_packet_snapshot
 
@@ -80,6 +80,12 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
         tone_hint="Analytical, critical, and focused on providing actionable feedback."
     )
     reflection_packet.content.original_prompt = output
+
+    # Inject active goal context so the reflector can assess goal alignment
+    if packet.goal_state and packet.goal_state.current_goal:
+        reflection_packet.content.data_fields.append(
+            DataField(key="active_goal", value=packet.goal_state.current_goal.description, type="string")
+        )
 
     messages = build_from_packet(reflection_packet, task_instruction_key="refinement")
 

@@ -327,6 +327,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     )
     system_content_parts.append(thought_seed_directive)
 
+    # 3.9. Goal Context — inform the model of the detected user goal
+    if packet.goal_state and packet.goal_state.current_goal:
+        goal = packet.goal_state.current_goal
+        goal_context = (
+            f"CURRENT USER GOAL: {goal.description} "
+            f"(confidence: {goal.confidence.value}, active for {packet.goal_state.turn_count} turns)\n"
+            "Keep your response aligned with this goal. "
+            "If the user's focus has clearly shifted, emit: GOAL_SHIFT: <new goal description>"
+        )
+        system_content_parts.append(goal_context)
+
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)

@@ -177,8 +177,9 @@ async def lifespan(app: FastAPI):
                 model_pool=_ai_manager.model_pool if _ai_manager else None,
                 agent_core=_agent_core,
             )
-            # Store manager on app.state so sleep_endpoints can access it
+            # Store manager and idle monitor on app.state for endpoint access
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
+            app.state.idle_monitor = _sleep_loop.idle_monitor
             _sleep_loop.start()
             logger.info("Sleep cycle loop started")
         else:
@@ -287,6 +288,11 @@ async def process_packet(packet_data: Dict[str, Any]):
     with the response populated.
     """
     global _agent_core, _ai_manager
+
+    # Mark system active for sleep cycle idle tracking
+    idle_monitor = getattr(app.state, "idle_monitor", None)
+    if idle_monitor:
+        idle_monitor.mark_active()
 
     if _agent_core is None or _ai_manager is None:
         raise HTTPException(

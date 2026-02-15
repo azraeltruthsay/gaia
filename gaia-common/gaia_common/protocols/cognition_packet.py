@@ -428,6 +428,31 @@ class LoopState:
     warned: bool = False
     override_active: bool = False
 
+# --- Goal Detection State ---
+class GoalConfidence(Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+@dataclass_json
+@dataclass
+class DetectedGoal:
+    """Represents a detected user goal that persists across turns."""
+    goal_id: str                    # e.g. "debug_server_issue"
+    description: str                # Human-readable goal summary
+    confidence: GoalConfidence
+    detected_at: str                # ISO timestamp
+    source: str                     # "fast_path", "session_carry", "llm"
+
+@dataclass_json
+@dataclass
+class GoalState:
+    """Tracks goal detection and carry state within a cognition packet."""
+    current_goal: Optional[DetectedGoal] = None
+    previous_goals: List[DetectedGoal] = field(default_factory=list)
+    turn_count: int = 0             # Turns since goal was set
+    goal_shifts: int = 0            # Number of shifts this session
+
 # --- Council & Metrics & Status ---
 @dataclass_json
 @dataclass
@@ -498,6 +523,7 @@ class CognitionPacket:
     council: Optional[Council] = None
     tool_routing: Optional[ToolRoutingState] = None  # GCP Tool Routing System state
     loop_state: Optional[LoopState] = None            # Loop detection and recovery state
+    goal_state: Optional[GoalState] = None            # Goal detection and carry state
 
     def to_json(self, **kwargs) -> str:
         """Serializes the packet to a JSON string with sorted keys for stability."""
@@ -617,4 +643,8 @@ __all__ = [
     # Loop Detection
     "LoopAttempt",
     "LoopState",
+    # Goal Detection
+    "GoalConfidence",
+    "DetectedGoal",
+    "GoalState",
 ]
