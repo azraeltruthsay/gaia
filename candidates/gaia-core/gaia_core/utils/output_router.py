@@ -194,6 +194,19 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         from gaia_core.cognition.thought_seed import save_thought_seed
         save_thought_seed(seed_text, packet, config)
 
+    # Handle GOAL_SHIFT directive — the model signals the user's goal has changed
+    goal_shift_match = re.search(r"GOAL_SHIFT:\s*(.*?)(?:\n|$)", response_text)
+    if goal_shift_match:
+        new_goal_desc = goal_shift_match.group(1).strip()
+        if new_goal_desc:
+            logger.info(f"Routing GOAL_SHIFT directive: {new_goal_desc[:80]}...")
+            try:
+                from gaia_core.cognition.goal_detector import GoalDetector
+                sm = getattr(ai_manager, "session_manager", None)
+                GoalDetector.handle_goal_shift(new_goal_desc, packet, sm, session_id)
+            except Exception:
+                logger.debug("GOAL_SHIFT handling failed (non-fatal)", exc_info=True)
+
     # Strip any <think> tags from the response before sending to user
     # This handles cases where the model's reasoning blocks weren't properly stripped
     original_len = len(response_to_user)
@@ -312,7 +325,7 @@ def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket):
         packet.response.candidate = response_match.group(1).strip()
     else:
         # If no explicit RESPONSE, use the whole text, minus directives.
-        clean_text = re.sub(r"^(THOUGHT_SEED:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
+        clean_text = re.sub(r"^(THOUGHT_SEED:|GOAL_SHIFT:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
         packet.response.candidate = clean_text
 
     # Strip fabricated tool-call syntax the model may produce

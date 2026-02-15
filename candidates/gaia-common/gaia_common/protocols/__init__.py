@@ -66,6 +66,10 @@ from .cognition_packet import (
     # Loop Detection
     LoopAttempt,
     LoopState,
+    # Goal Detection
+    GoalConfidence,
+    DetectedGoal,
+    GoalState,
 )
 
 __all__ = [
@@ -128,4 +132,8 @@ __all__ = [
     # Loop Detection
     "LoopAttempt",
     "LoopState",
+    # Goal Detection
+    "GoalConfidence",
+    "DetectedGoal",
+    "GoalState",
 ]

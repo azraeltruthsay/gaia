@@ -32,6 +32,7 @@ class Session:
         self.session_id: str = session_id
         self.persona: str = persona
         self.history: List[Dict] = []
+        self.meta: Dict = {}
         self.created_at: datetime = datetime.utcnow()
 
     def to_dict(self) -> Dict:
@@ -40,6 +41,7 @@ class Session:
             "session_id": self.session_id,
             "persona": self.persona,
             "history": self.history,
+            "meta": self.meta,
             "created_at": self.created_at.isoformat()
         }
 
@@ -48,6 +50,7 @@ class Session:
         """Deserializes a dictionary from the state file back into a Session object."""
         session = cls(session_id=data["session_id"], persona=data.get("persona", "default"))
         session.history = data.get("history", [])
+        session.meta = data.get("meta", {})
         try:
             # Handle ISO format strings for datetime objects
             session.created_at = datetime.fromisoformat(data.get("created_at", datetime.utcnow().isoformat()))
@@ -215,6 +218,17 @@ class SessionManager:
         finally:
             # Always save the state. This persists the cleared history.
             self._save_state()
+
+    def get_session_meta(self, session_id: str, key: str, default=None):
+        """Retrieve a metadata value from a session's meta dict."""
+        session = self.get_or_create_session(session_id)
+        return session.meta.get(key, default)
+
+    def set_session_meta(self, session_id: str, key: str, value):
+        """Store a metadata value in a session's meta dict and persist."""
+        session = self.get_or_create_session(session_id)
+        session.meta[key] = value
+        self._save_state()
 
     def get_history(self, session_id: str) -> List[Dict]:
         """Returns the full message history for a given session."""

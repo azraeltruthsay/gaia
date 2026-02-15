@@ -169,6 +169,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths

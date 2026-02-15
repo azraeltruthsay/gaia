@@ -7,7 +7,7 @@
 #   1. Pre-flight checks (health, sync, git state)
 #   2. Validation (ruff, mypy, pytest per service)
 #   3. Cognitive smoke tests (16-test battery against candidate)
-#   4. Service promotion (dependency-ordered, with backup)
+#   4. Service promotion (dependency-ordered, with backup + Docker rebuild)
 #   5. Post-promotion verification (restart live + health + quick smoke)
 #   6. Dev journal + flatten + commit
 #   7. QLoRA validation (optional, --qlora flag)
@@ -311,11 +311,15 @@ stage_header 1 "Pre-flight Checks"
 preflight_ok=true
 
 # 1a. Health-check candidate services
+#     When --skip-smoke is set, candidate containers aren't required
+#     (validation uses Docker builds, not running containers)
 for svc in "${SERVICE_LIST[@]}"; do
     port="${CANDIDATE_PORTS[$svc]:-}"
     if [ -n "$port" ]; then
         if check_health "$svc" "$port"; then
             log "  ${GREEN}✓${RESET} $svc-candidate healthy (port $port)"
+        elif [ "$SKIP_SMOKE" = true ]; then
+            log "  ${YELLOW}⚠${RESET} $svc-candidate unreachable (port $port) — non-blocking (smoke skipped)"
         else
             log "  ${RED}✗${RESET} $svc-candidate unreachable (port $port)"
             preflight_ok=false
@@ -526,12 +530,16 @@ else
 
         # gaia-common: no restart (others depend on it)
         # Live stopped: always --no-restart (containers don't exist)
+        # Keep-live + skip-smoke: no --test (candidate containers aren't running)
         # Others: restart + test (but only if the live container exists)
         promote_flags=""
         if [ "$svc" = "gaia-common" ]; then
             promote_flags="--no-restart"
         elif [ "$LIVE_STOPPED" = true ]; then
             promote_flags="--no-restart"
+        elif [ "$KEEP_LIVE" = true ] && [ "$SKIP_SMOKE" = true ]; then
+            # Hybrid mode: candidates not running, skip candidate health check
+            promote_flags=""
         elif docker inspect "$svc" > /dev/null 2>&1; then
             promote_flags="--test"
         else
@@ -560,6 +568,25 @@ else
         stage_pass "Promote Services"
     else
         stage_fail "Promote Services" "Service promotion failed — manual rollback may be needed"
+    fi
+
+    # ── 4b. Rebuild Docker images ────────────────────────────────────────
+    # Always rebuild after promotion so the pip-installed gaia-common
+    # inside container images stays in sync with the promoted source.
+    # Takes <60s total and prevents stale site-packages issues.
+    log ""
+    log "  Rebuilding Docker images (gaia-core, gaia-web, gaia-orchestrator)..."
+    cd "$GAIA_ROOT"
+    set +e
+    rebuild_output=$(docker compose build --no-cache gaia-core gaia-web gaia-orchestrator 2>&1)
+    rebuild_exit=$?
+    set -e
+
+    if [ $rebuild_exit -eq 0 ]; then
+        log "    ${GREEN}✓${RESET} Docker images rebuilt"
+    else
+        log "    ${YELLOW}⚠${RESET} Docker image rebuild failed (exit $rebuild_exit) — containers may use stale images"
+        echo "$rebuild_output" | tail -5 | while read -r line; do log "      $line"; done
     fi
 fi
 

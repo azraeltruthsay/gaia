@@ -155,12 +155,9 @@ class SleepTaskScheduler:
         session_manager = SessionManager(self.config)
 
         # Curate all active sessions that have enough messages
-        sessions = session_manager.list_sessions()
         curated = 0
-        for session_info in sessions:
-            sid = session_info if isinstance(session_info, str) else session_info.get("session_id", "")
-            session = session_manager.get_session(sid)
-            if session and hasattr(session, "history") and session.history:
+        for sid, session in session_manager.sessions.items():
+            if session.history:
                 if curator.curate(sid, session.history):
                     curated += 1
 

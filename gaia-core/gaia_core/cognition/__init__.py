@@ -19,6 +19,7 @@ This package provides:
 __all__ = [
     "agent_core",
     "cognitive_dispatcher",
+    "goal_detector",
     "knowledge_enhancer",
     "self_reflection",
     "tool_selector",
@@ -31,6 +32,7 @@ __all__ = [
 
 from . import agent_core
 from . import cognitive_dispatcher
+from . import goal_detector
 from . import knowledge_enhancer
 from . import self_reflection
 from . import tool_selector

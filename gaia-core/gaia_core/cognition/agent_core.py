@@ -1178,6 +1178,26 @@ class AgentCore:
         packet.content.data_fields.append(DataField(key='read_only_intent', value=plan.read_only, type='boolean'))
         ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
 
+        # 3a-bis. Goal Detection — identify overarching user goal
+        try:
+            from gaia_core.cognition.goal_detector import GoalDetector
+            goal_detector = GoalDetector(config=self.config)
+            packet.goal_state = goal_detector.detect(
+                packet=packet,
+                session_manager=self.session_manager,
+                session_id=session_id,
+                model_pool=self.model_pool,
+            )
+            if packet.goal_state and packet.goal_state.current_goal:
+                ts_write({
+                    "type": "goal_detect",
+                    "goal": packet.goal_state.current_goal.goal_id,
+                    "confidence": packet.goal_state.current_goal.confidence.value,
+                    "source": packet.goal_state.current_goal.source,
+                }, session_id, source=source, destination_context=_metadata)
+        except Exception:
+            logger.debug("Goal detection failed (non-fatal)", exc_info=True)
+
         # 3b. GCP Tool Routing System: Check if request needs MCP tools
         # This runs before the slim prompt path to properly route tool-related requests
         if self._should_use_tool_routing(plan, user_input):
