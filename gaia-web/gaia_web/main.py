@@ -163,6 +163,35 @@ async def process_user_input(user_input: str):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+@app.post("/presence")
+async def update_presence(body: Dict[str, Any]):
+    """Update Discord bot presence (status dot + activity text).
+
+    Called by gaia-core's SleepCycleLoop to show sleep/wake status.
+    Operates directly on the bot instance owned by discord_interface.
+    """
+    try:
+        from .discord_interface import _bot
+    except ImportError:
+        return JSONResponse(status_code=501, content={"ok": False, "error": "Discord module not available"})
+
+    if not _bot or not _bot.is_ready():
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Bot not connected"})
+
+    import discord
+
+    activity_name = body.get("activity", "over the studio")
+    status_str = body.get("status")  # "idle", "online", "dnd", or None
+    status_map = {"idle": discord.Status.idle, "online": discord.Status.online, "dnd": discord.Status.dnd}
+    effective_status = status_map.get(status_str, discord.Status.online)
+
+    await _bot.change_presence(
+        status=effective_status,
+        activity=discord.Activity(type=discord.ActivityType.watching, name=activity_name)
+    )
+    return {"ok": True}
+
+
 @app.post("/output_router")
 async def output_router(packet: Dict[str, Any]):
     """

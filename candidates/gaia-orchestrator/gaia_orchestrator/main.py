@@ -149,6 +149,10 @@ async def root():
                 "candidate_start": "POST /containers/candidate/start",
                 "swap": "POST /containers/swap",
             },
+            "sleep": {
+                "gpu_sleep": "POST /gpu/sleep",
+                "gpu_wake": "POST /gpu/wake",
+            },
             "handoff": {
                 "prime_to_study": "POST /handoff/prime-to-study",
                 "study_to_prime": "POST /handoff/study-to-prime",
@@ -464,6 +468,69 @@ async def get_handoff_status(handoff_id: str) -> HandoffStatus:
         raise HTTPException(status_code=404, detail=f"Handoff {handoff_id} not found")
 
     return handoff
+
+
+# =============================================================================
+# Sleep Cycle GPU Management
+# =============================================================================
+
+@app.post("/gpu/sleep")
+async def gpu_sleep():
+    """Release GPU for sleep — stop Prime container and free VRAM.
+
+    Called by gaia-core's SleepCycleLoop when entering SLEEPING state.
+    Reuses the existing GPUManager.request_release_from_core() which
+    stops the prime container and notifies core to demote gpu_prime.
+    """
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    try:
+        success = await _gpu_manager.request_release_from_core()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to release GPU for sleep")
+
+        if _state_manager:
+            await _state_manager.release_gpu()
+
+        logger.info("GPU released for sleep cycle")
+        return {"ok": True, "message": "GPU released for sleep"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error releasing GPU for sleep: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/gpu/wake")
+async def gpu_wake():
+    """Reclaim GPU after wake — start Prime container and restore model pool.
+
+    Called by gaia-core's SleepCycleLoop when entering WAKING state.
+    Reuses GPUManager.request_reclaim_by_core() which starts the prime
+    container, waits for health, and notifies core to restore gpu_prime.
+    """
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    try:
+        success = await _gpu_manager.request_reclaim_by_core()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to reclaim GPU on wake")
+
+        if _state_manager:
+            import uuid
+            await _state_manager.set_gpu_owner(
+                GPUOwner.CORE_CANDIDATE, str(uuid.uuid4()), "sleep_wake_reclaim"
+            )
+
+        logger.info("GPU reclaimed after wake cycle")
+        return {"ok": True, "message": "GPU reclaimed after wake"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error reclaiming GPU on wake: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================

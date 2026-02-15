@@ -16,12 +16,6 @@ from typing import Dict, Any, Optional
 from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
 from gaia_common.utils.packet_utils import is_execution_safe
 
-# TODO: [GAIA-REFACTOR] thought_seed.py module not yet migrated.
-# from gaia_core.cognition.thought_seed import save_thought_seed
-def save_thought_seed(*args, **kwargs):
-    """Placeholder until thought_seed module is migrated."""
-    pass
-
 from gaia_core.utils.mcp_client import dispatch_sidecar_actions
 
 logger = logging.getLogger("GAIA.OutputRouter")
@@ -197,6 +191,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     if thought_seed_match:
         seed_text = thought_seed_match.group(1).strip()
         logger.info(f"Routing THOUGHT_SEED directive: {seed_text[:80]}...")
+        from gaia_core.cognition.thought_seed import save_thought_seed
         save_thought_seed(seed_text, packet, config)
 
     # Strip any <think> tags from the response before sending to user
