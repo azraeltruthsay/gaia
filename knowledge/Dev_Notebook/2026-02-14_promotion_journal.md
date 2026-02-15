@@ -1,8 +1,8 @@
 # Promotion Pipeline — 2026-02-14
 
-**Timestamp:** 2026-02-14T14:03:14
-**Duration:** 9m 56s
-**Services:** gaia-common,gaia-mcp,gaia-core
+**Timestamp:** 2026-02-14T17:52:38
+**Duration:** 8m 7s
+**Services:** gaia-common,gaia-core
 **Mode:** LIVE
 **Result:** PASS
 
@@ -22,7 +22,6 @@
 | Service | Ruff | MyPy | Pytest |
 |---------|------|------|--------|
 | gaia-common | skip | skip | skip |
-| gaia-mcp | pass | warn | pass |
 | gaia-core | pass | warn | pass |
 
 ---
