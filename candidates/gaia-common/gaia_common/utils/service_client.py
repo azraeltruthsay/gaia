@@ -118,3 +118,8 @@ def get_core_client() -> ServiceClient:
 def get_mcp_client() -> ServiceClient:
     """Get a client for the gaia-mcp service."""
     return ServiceClient("gaia-mcp", default_port=8765, endpoint_env_var="MCP_ENDPOINT")
+
+
+def get_orchestrator_client() -> ServiceClient:
+    """Get a client for the gaia-orchestrator service."""
+    return ServiceClient("gaia-orchestrator", default_port=6410, endpoint_env_var="ORCHESTRATOR_ENDPOINT")

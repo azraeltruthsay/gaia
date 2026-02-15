@@ -280,7 +280,7 @@ else
     log "  Shutting down live services (20s grace period)..."
     cd "$GAIA_ROOT"
     set +e
-    docker compose -t 20 down 2>&1 | while read -r line; do log "    $line"; done
+    docker compose down -t 20 2>&1 | while read -r line; do log "    $line"; done
     down_exit=${PIPESTATUS[0]}
     set -e
 

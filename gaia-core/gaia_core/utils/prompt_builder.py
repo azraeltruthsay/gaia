@@ -311,6 +311,22 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     if tool_calling_convention:
         system_content_parts.append(tool_calling_convention)
 
+    # 3.8. Thought Seed directive — teach the model it can emit seeds
+    thought_seed_directive = (
+        "THOUGHT SEED DIRECTIVE:\n"
+        "When you notice a valuable insight, learning opportunity, or novel connection "
+        "during your response, you may emit a thought seed for later review:\n"
+        "THOUGHT_SEED: <brief description of the insight>\n"
+        "Use this sparingly (0-1 per response) for:\n"
+        "- Knowledge gaps you want to research later\n"
+        "- Novel problem-solving patterns worth remembering\n"
+        "- Connections between topics that could deepen understanding\n"
+        "- User preferences or interaction patterns to internalize\n"
+        "Seeds are reviewed during sleep cycles and may inform future learning. "
+        "Do NOT use THOUGHT_SEED for routine observations."
+    )
+    system_content_parts.append(thought_seed_directive)
+
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)

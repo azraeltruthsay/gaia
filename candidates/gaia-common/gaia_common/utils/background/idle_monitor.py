@@ -7,8 +7,8 @@ Handles idle time and overnight period detection for GAIA background processing.
 import time
 import logging
 from pathlib import Path
-from app.commands.self_analysis_trigger import run_self_analysis
-from app.status_tracker import get_idle_duration
+# Legacy app.* imports deferred to idle_check() to avoid import errors
+# in microservice context where app.commands doesn't exist
 
 logger = logging.getLogger("GAIA.IdleMonitor")
 
@@ -26,6 +26,10 @@ class IdleMonitor:
         """Update the last active time to now."""
         self.last_active_time = time.time()
         logger.debug("⏱️ GAIA marked as active.")
+
+    def get_idle_minutes(self) -> float:
+        """Return how long the system has been idle, in minutes."""
+        return (time.time() - self.last_active_time) / 60.0
 
     def is_system_idle(self) -> bool:
         """
@@ -45,6 +49,8 @@ class IdleMonitor:
         """
         Run background task if idle long enough and summary not present.
         """
+        from app.commands.self_analysis_trigger import run_self_analysis
+        from app.status_tracker import get_idle_duration
         idle_time = get_idle_duration()
         if idle_time > self.idle_threshold and not summary_exists():
             logger.info("🤖 Initiating self-analysis during idle period.")

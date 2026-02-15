@@ -267,8 +267,14 @@ class DiscordConnector(DestinationConnector):
             parts.append(f"({', '.join(qualifiers)})")
         return " ".join(parts)
 
-    def update_presence(self, activity_name: str) -> None:
-        """Thread-safe, rate-limited Discord presence update. Safe to call from any thread."""
+    def update_presence(self, activity_name: str, status_override: Optional[str] = None) -> None:
+        """Thread-safe, rate-limited Discord presence update. Safe to call from any thread.
+
+        Args:
+            activity_name: Activity text shown under the bot's name.
+            status_override: Optional status color — "idle" (yellow), "dnd" (red),
+                or "online" (green).  None defaults to online.
+        """
         if not self._bot_client or not hasattr(self._bot_client, 'loop'):
             return
         now = time.time()
@@ -278,10 +284,13 @@ class DiscordConnector(DestinationConnector):
 
         import discord
 
+        status_map = {"idle": discord.Status.idle, "online": discord.Status.online, "dnd": discord.Status.dnd}
+        effective_status = status_map.get(status_override, discord.Status.online)
+
         async def _set():
             try:
                 await self._bot_client.change_presence(
-                    status=discord.Status.online,
+                    status=effective_status,
                     activity=discord.Activity(
                         type=discord.ActivityType.watching,
                         name=activity_name
