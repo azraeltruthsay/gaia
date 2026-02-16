@@ -1,8 +1,8 @@
 # Promotion Pipeline — 2026-02-15
 
-**Timestamp:** 2026-02-15T16:38:48
-**Duration:** 5m 6s
-**Services:** gaia-core
+**Timestamp:** 2026-02-15T22:05:10
+**Duration:** 6m 12s
+**Services:** gaia-core,gaia-web
 **Mode:** LIVE
 **Result:** PASS
 
@@ -22,6 +22,7 @@
 | Service | Ruff | MyPy | Pytest |
 |---------|------|------|--------|
 | gaia-core | pass | warn | pass |
+| gaia-web | pass | warn | pass |
 
 ---
 
