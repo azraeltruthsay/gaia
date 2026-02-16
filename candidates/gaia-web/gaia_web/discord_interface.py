@@ -141,6 +141,20 @@ class DiscordInterface:
         """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket."""
         logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {author_name}")
 
+        # Check if GAIA is in a state that warrants a canned response
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                check = await client.get(f"{self.core_endpoint}/sleep/distracted-check")
+                if check.status_code == 200:
+                    data = check.json()
+                    canned = data.get("canned_response")
+                    if canned:
+                        logger.info("Discord: Canned response for state=%s", data.get("state"))
+                        await self._send_response(message_obj, canned, is_dm)
+                        return
+        except Exception:
+            logger.debug("Distracted-check failed — proceeding normally", exc_info=True)
+
         packet_id = str(uuid.uuid4())
         session_id = f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}"
         current_time = datetime.now().isoformat()
