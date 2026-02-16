@@ -1,10 +1,25 @@
-# GAIA Sleep Cycle System - Implementation Plan
+# GAIA Sleep Cycle System - Blueprint
 
-**Date:** 2026-02-14  
+**Date:** 2026-02-14 (original), 2026-02-15 (7-state refactor)
 **Author:** Claude Sonnet 4.5 / Seumas
-**Reviewed by:** Claude Opus 4.6 (2026-02-14)
-**Status:** Revised — Awaiting Approval
-**Target System:** gaia-host (RTX 5080 16GB / Ryzen 9 / 32GB RAM)  
+**Reviewed by:** Claude Opus 4.6 (2026-02-14, 2026-02-15)
+**Status:** Implemented — Current
+**Target System:** gaia-host (RTX 5080 16GB / Ryzen 9 / 32GB RAM)
+
+---
+
+## Review Notes (2026-02-15, Opus 4.6 — 7-State Refactor)
+
+Blueprint updated to reflect implemented 7-state sleep machine:
+
+1. **Renamed states** — AWAKE→ACTIVE, SLEEPING→ASLEEP throughout.
+2. **Internal transient phases** — FINISHING_TASK and WAKING moved to `_TransientPhase` internal enum (not public states). They are sub-phases of the ASLEEP state.
+3. **Added DREAMING state** — GPU handed to Study for training. Orchestrator triggers via POST /sleep/study-handoff. Canned response sent to users.
+4. **Added DISTRACTED state** — CPU or GPU >25% sustained for 5s. Canned response sent. Rechecks every 5 min or on message arrival.
+5. **Added OFFLINE state** — Graceful shutdown via POST /sleep/shutdown. Discord goes invisible.
+6. **Resource monitoring** — psutil CPU monitoring added alongside NVML GPU. Sustained load tracking triggers DISTRACTED.
+7. **Canned responses** — CANNED_DREAMING and CANNED_DISTRACTED constants. gaia-web checks GET /sleep/distracted-check before forwarding messages.
+8. **Discord presence** — ACTIVE=online, DROWSY=online, ASLEEP=idle, DREAMING=dnd, DISTRACTED=dnd, OFFLINE=invisible.
 
 ---
 
@@ -55,41 +70,51 @@ Transform GAIA's idle time into productive autonomous operation through a biolog
 
 ## Architecture Overview
 
-### State Machine
+### State Machine (6 public states + 2 internal phases)
 
 ```
+Public States (GaiaState enum):
+
               ┌──────────┐
-              │  AWAKE   │  Normal operation: process messages, stream responses
-              └────┬─────┘
+              │  ACTIVE  │  Normal operation: process messages, stream responses
+              └────┬─────┘  Discord: online, "watching over the studio"
                    │ idle > 5 min AND no active stream
                    ▼
               ┌──────────┐
               │  DROWSY  │  Prime writes prime.md checkpoint (own cognitive state)
-              └────┬─────┘  Discord: "Drifting off..."
-                   │        If message arrives here → cancel, return to AWAKE
+              └────┬─────┘  Discord: online, "drifting off..."
+                   │        If message arrives here → cancel, return to ACTIVE
                    │ checkpoint written
                    ▼
-              ┌──────────┐
-              │ SLEEPING │  Execute sleep tasks (housekeeping → reflection → study)
-              └────┬─────┘  Discord: "Sleeping"
+              ┌──────────┐          ┌───────────┐
+              │  ASLEEP  │─────────►│ DREAMING  │  GPU handed to Study
+              └────┬─────┘ study    └─────┬─────┘  Discord: dnd, "studying..."
+                   │       handoff        │        Canned response only
+                   │                      │ study complete
+                   │◄─────────────────────┘
                    │
-                   │ message queued → wake signal
+                   │ CPU/GPU >25% for 5s
                    ▼
-              ┌──────────────┐
-              │ FINISHING    │  If current task is non-interruptible, wait for it
-              │ TASK         │  If interruptible → skip straight to WAKING
-              └────┬─────────┘
-                   │ task done or interrupted
-                   ▼
+              ┌────────────┐
+              │ DISTRACTED │  System under sustained load
+              └────┬───────┘  Discord: dnd, "occupied..."
+                   │          Canned response only
+                   │ load drops on recheck (every 5 min)
+                   │
+                   ▼ (returns to ASLEEP)
+
+Internal Phases (inside ASLEEP, not public):
+
+  ASLEEP + wake signal:
+    → _FINISHING_TASK (if non-interruptible task running)
+    → _WAKING (parallel: CPU Lite handles first msg, Prime boots in background)
+    → ACTIVE (context restored from prime.md)
+
+Shutdown (from ANY state):
+
               ┌──────────┐
-              │  WAKING  │  Boot Prime in background, CPU Lite handles first message
-              └────┬─────┘  Load prime.md as REVIEW context (not prompt)
-                   │        Discord: "Waking up..."
-                   │ Prime ready + context restored
-                   ▼
-              ┌──────────┐
-              │  AWAKE   │  Process remaining queued messages with restored context
-              └──────────┘  Discord: "Watching over the studio"
+              │ OFFLINE  │  Graceful shutdown, Discord: invisible
+              └──────────┘  Triggered by POST /sleep/shutdown or app shutdown
 ```
 
 ### Component Interactions
@@ -115,7 +140,7 @@ Transform GAIA's idle time into productive autonomous operation through a biolog
 │           │                                                 │
 │  ┌────────▼──────────┐                                     │
 │  │ SleepWakeManager  │  initiate_drowsy()                  │
-│  │ (5-state machine) │  receive_wake_signal()              │
+│  │ (6-state+2-phase) │  receive_wake_signal()              │
 │  └────────┬─────────┘  complete_wake()                     │
 │           │                                                 │
 │  ┌────────▼──────────┐      ┌──────────────────┐          │
@@ -144,7 +169,7 @@ Idle Monitor detects 5min inactivity
        ↓
 SleepWakeManager.should_transition_to_drowsy() → true
        ↓
-Enter DROWSY state — Discord: "Drifting off..."
+Enter DROWSY state — Discord: online, "drifting off..."
        ↓
    ┌──────────────────────────────────────────┐
    │ 1. Wait for any streaming to finish      │
@@ -156,32 +181,42 @@ Enter DROWSY state — Discord: "Drifting off..."
    │ 6. Archive to prime_history/             │
    │                                          │
    │ ⚡ If message arrives during DROWSY:     │
-   │    Cancel checkpoint, return to AWAKE    │
+   │    Cancel checkpoint, return to ACTIVE   │
    └──────────────────────────────────────────┘
        ↓ checkpoint complete
-Enter SLEEPING state — Discord: "Sleeping"
+Enter ASLEEP state — Discord: idle, "sleeping..."
        ↓
 SleepTaskScheduler.get_next_task()
        ↓
-Execute: session_sanitization → conversation_curation →
-         thought_seed_hydration → vector_reflection →
-         GIL topic processing → (GPU tasks if available)
+Execute: conversation_curation → thought_seed_review →
+         initiative_cycle → blueprint_validation →
+         (GPU tasks if available)
        ↓
    ┌──────────────────────────────────────────┐
-   │ MESSAGE ARRIVES                          │
-   │ → gaia-web queues it                     │
-   │ → sends POST /sleep/wake to gaia-core   │
+   │ DURING ASLEEP, three things can happen:  │
+   │                                          │
+   │ A. MESSAGE ARRIVES:                      │
+   │    → gaia-web checks /distracted-check   │
+   │    → sends POST /sleep/wake to gaia-core │
+   │                                          │
+   │ B. STUDY HANDOFF (orchestrator):         │
+   │    → POST /sleep/study-handoff           │
+   │    → enters DREAMING (dnd, canned resp)  │
+   │                                          │
+   │ C. SUSTAINED LOAD (>25% for 5s):         │
+   │    → enters DISTRACTED (dnd, canned resp)│
+   │    → rechecks every 5 min                │
    └──────────────────────────────────────────┘
-       ↓
+       ↓ wake signal received
 SleepWakeManager receives wake signal
        ↓
    ┌──────────────────────────────────────────┐
    │ 1. Check current task interruptibility   │
-   │ 2. If interruptible: stop, go to WAKING  │
-   │ 3. If not: set FINISHING_TASK, wait      │
+   │ 2. If interruptible: _WAKING phase      │
+   │ 3. If not: _FINISHING_TASK phase, wait   │
    └──────────────────────────────────────────┘
        ↓
-Enter WAKING state — Discord: "Waking up..."
+_WAKING phase — Discord: "waking up..."
        ↓
    ┌──────────────────────────────────────────┐
    │ PARALLEL WAKE STRATEGY:                  │
@@ -199,7 +234,7 @@ Enter WAKING state — Discord: "Waking up..."
    │  4. Mark Prime as available              │
    └──────────────────────────────────────────┘
        ↓ Prime ready
-Enter AWAKE state — Discord: "Watching over the studio"
+Enter ACTIVE state — Discord: online, "watching over the studio"
        ↓
 Process remaining queued messages via Prime with restored context
 ```
@@ -230,36 +265,57 @@ import logging
 logger = logging.getLogger("GAIA.SleepWake")
 
 class GaiaState(Enum):
-    AWAKE = "awake"
-    DROWSY = "drowsy"          # Checkpoint in progress — cancellable
-    SLEEPING = "sleeping"       # Executing sleep tasks
-    FINISHING_TASK = "finishing_task"  # Non-interruptible task completing
-    WAKING = "waking"           # Context restoration + Prime boot
+    OFFLINE = "offline"         # System shut down, Discord invisible
+    ACTIVE = "active"           # Normal operation (was AWAKE)
+    DROWSY = "drowsy"           # Checkpoint in progress — cancellable
+    ASLEEP = "asleep"           # Executing sleep tasks (was SLEEPING)
+    DREAMING = "dreaming"       # GPU handed to Study for training
+    DISTRACTED = "distracted"   # System under sustained CPU/GPU load
+
+class _TransientPhase(Enum):
+    """Internal waking sub-phases — not visible in the public state enum."""
+    NONE = "none"
+    FINISHING_TASK = "finishing_task"
+    WAKING = "waking"
+
+# Canned responses for states that don't forward to the model
+CANNED_DREAMING = (
+    "I'm studying right now and can't chat — "
+    "I'll be back once my training session wraps up!"
+)
+CANNED_DISTRACTED = (
+    "I'm a little occupied at the moment — "
+    "give me a few minutes and I'll get back to you!"
+)
 
 class SleepWakeManager:
     """
     Manages GAIA's sleep/wake state transitions with cognitive continuity.
 
-    State flow: AWAKE → DROWSY → SLEEPING → FINISHING_TASK/WAKING → AWAKE
+    6 public states + 2 internal transient phases:
+        OFFLINE → ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED
+        Internal phases: _FINISHING_TASK, _WAKING (sub-states of ASLEEP)
 
     Key design decisions:
     - DROWSY is cancellable: if a message arrives during checkpoint writing,
-      we abort and return to AWAKE immediately.
+      we abort and return to ACTIVE immediately.
     - WAKING uses parallel strategy: CPU Lite handles the first queued message
       while Prime boots in the background (~37-60s from tmpfs).
-    - prime.md checkpoint is the KV cache replacement: we can't serialize vLLM's
-      KV cache across container restarts, so Prime writes its own cognitive state
-      in natural language before sleeping.
+    - prime.md checkpoint is the KV cache replacement.
+    - DREAMING = GPU handed to Study (training); canned response only.
+    - DISTRACTED = CPU or GPU under sustained load (>25% for 5s); canned response.
     """
 
     def __init__(self, config):
         self.config = config
-        self.state = GaiaState.AWAKE
+        self.state = GaiaState.ACTIVE
+        self._phase = _TransientPhase.NONE
         self.current_task = None
         self.wake_signal_pending = False
-        self.prime_available = False  # Tracks whether gaia-prime container is up
+        self.prime_available = False
         self.checkpoint_manager = PrimeCheckpointManager(config)
-        self.last_state_change = datetime.utcnow()
+        self.last_state_change = datetime.now(timezone.utc)
+        self.dreaming_handoff_id = None
 
         logger.info("SleepWakeManager initialized")
 
@@ -271,11 +327,11 @@ class SleepWakeManager:
         Decides if GAIA should begin the sleep transition.
 
         Rules:
-        - Must be AWAKE
+        - Must be ACTIVE
         - Idle > configured threshold (default 5 minutes)
         - No active streaming response
         """
-        if self.state != GaiaState.AWAKE:
+        if self.state != GaiaState.ACTIVE:
             return False
 
         threshold = getattr(self.config, 'SLEEP_IDLE_THRESHOLD_MINUTES', 5)
@@ -283,14 +339,14 @@ class SleepWakeManager:
 
     def initiate_drowsy(self, current_packet=None) -> bool:
         """
-        Transition from AWAKE to DROWSY.
+        Transition from ACTIVE to DROWSY.
 
         In DROWSY state, Prime writes its cognitive checkpoint.
-        This is cancellable — if a message arrives, we abort and return to AWAKE.
+        This is cancellable — if a message arrives, we abort and return to ACTIVE.
 
         Returns: True if entered DROWSY, False if failed
         """
-        if self.state != GaiaState.AWAKE:
+        if self.state != GaiaState.ACTIVE:
             logger.warning(f"Cannot enter DROWSY from state: {self.state}")
             return False
 
@@ -306,20 +362,20 @@ class SleepWakeManager:
             # Check if we were interrupted during checkpoint
             if self.wake_signal_pending:
                 logger.info("Message arrived during DROWSY — cancelling sleep")
-                self.state = GaiaState.AWAKE
+                self.state = GaiaState.ACTIVE
                 self.wake_signal_pending = False
                 self.last_state_change = datetime.utcnow()
                 return False
 
             # Checkpoint complete — enter SLEEPING
-            self.state = GaiaState.SLEEPING
+            self.state = GaiaState.ASLEEP
             self.last_state_change = datetime.utcnow()
-            logger.info(f"Checkpoint written: {checkpoint_path} — entering SLEEPING")
+            logger.info(f"Checkpoint written: {checkpoint_path} — entering ASLEEP")
             return True
 
         except Exception as e:
             logger.error(f"Checkpoint failed: {e}", exc_info=True)
-            self.state = GaiaState.AWAKE  # Fail safe: stay awake
+            self.state = GaiaState.ACTIVE  # Fail safe: stay active
             self.last_state_change = datetime.utcnow()
             return False
 
@@ -330,28 +386,28 @@ class SleepWakeManager:
         self.wake_signal_pending = True
 
         if self.state == GaiaState.DROWSY:
-            # Cancel checkpoint and return to AWAKE (handled in initiate_drowsy)
+            # Cancel checkpoint and return to ACTIVE (handled in initiate_drowsy)
             logger.info("Wake signal during DROWSY — will cancel checkpoint")
 
-        elif self.state == GaiaState.SLEEPING:
-            logger.info("Wake signal during SLEEPING")
+        elif self.state == GaiaState.ASLEEP:
+            logger.info("Wake signal during ASLEEP")
             if self.current_task and not self.current_task.get("interruptible", True):
                 logger.info(f"Non-interruptible task running: {self.current_task.get('task_id')}")
-                self.state = GaiaState.FINISHING_TASK
+                self.state = _TransientPhase.FINISHING_TASK
             else:
                 self.transition_to_waking()
 
-        elif self.state == GaiaState.AWAKE:
+        elif self.state == GaiaState.ACTIVE:
             logger.debug("Wake signal received but already awake")
             self.wake_signal_pending = False
 
     def transition_to_waking(self):
         """Move to WAKING state. Begins parallel wake strategy."""
-        if self.state not in (GaiaState.SLEEPING, GaiaState.FINISHING_TASK):
+        if self.state not in (GaiaState.ASLEEP, _TransientPhase.FINISHING_TASK):
             logger.warning(f"Cannot wake from state: {self.state}")
             return
 
-        self.state = GaiaState.WAKING
+        self.state = _TransientPhase.WAKING
         self.last_state_change = datetime.utcnow()
         logger.info("Entering WAKING state — starting parallel wake")
 
@@ -368,7 +424,7 @@ class SleepWakeManager:
             "timestamp": str
         }
         """
-        if self.state != GaiaState.WAKING:
+        if self.state != _TransientPhase.WAKING:
             logger.warning(f"Cannot complete wake from state: {self.state}")
             return {"checkpoint_loaded": False}
 
@@ -376,7 +432,7 @@ class SleepWakeManager:
             checkpoint = self.checkpoint_manager.load_latest()
             review_context = self._format_checkpoint_as_review(checkpoint)
 
-            self.state = GaiaState.AWAKE
+            self.state = GaiaState.ACTIVE
             self.wake_signal_pending = False
             self.prime_available = True
             self.last_state_change = datetime.utcnow()
@@ -390,7 +446,7 @@ class SleepWakeManager:
 
         except Exception as e:
             logger.error(f"Wake completion failed: {e}", exc_info=True)
-            self.state = GaiaState.AWAKE
+            self.state = GaiaState.ACTIVE
             self.wake_signal_pending = False
             return {"checkpoint_loaded": False, "error": str(e)}
 
@@ -887,6 +943,45 @@ from gaia_core.api.sleep_endpoints import router as sleep_router
 app.include_router(sleep_router)
 ```
 
+#### Additional Endpoints (7-State Refactor)
+
+**`POST /sleep/study-handoff`** — Orchestrator notifies core that GPU ownership is changing for Study training.
+
+```python
+@router.post("/study-handoff")
+async def study_handoff(request: Request):
+    body = await request.json()
+    direction = body.get("direction")    # "prime_to_study" or "study_to_prime"
+    handoff_id = body.get("handoff_id")
+    manager = request.app.state.sleep_wake_manager
+    if direction == "prime_to_study":
+        manager.enter_dreaming(handoff_id)
+    elif direction == "study_to_prime":
+        manager.exit_dreaming(handoff_id)
+    return {"state": manager.get_state().value}
+```
+
+**`GET /sleep/distracted-check`** — gaia-web calls this before forwarding every message. If GAIA is DREAMING or DISTRACTED, a canned response is returned instead of invoking the LLM.
+
+```python
+@router.get("/distracted-check")
+async def distracted_check(request: Request):
+    manager = request.app.state.sleep_wake_manager
+    state = manager.get_state()
+    canned = manager.get_canned_response()
+    return {"state": state.value, "canned_response": canned}
+```
+
+**`POST /sleep/shutdown`** — Triggers graceful OFFLINE transition. The sleep cycle loop sets state to OFFLINE, updates Discord to invisible, then shuts down.
+
+```python
+@router.post("/shutdown")
+async def shutdown(request: Request):
+    loop = request.app.state.sleep_cycle_loop
+    loop.initiate_shutdown()
+    return {"state": "offline", "message": "Shutdown initiated"}
+```
+
 ### 1.4 Sleep Cycle Loop (in gaia-core, NOT gaia-common)
 
 > **Critical architecture decision:** The existing `processor.py` in gaia-common
@@ -949,7 +1044,7 @@ class SleepCycleLoop:
                 idle_minutes = self.idle_monitor.get_idle_minutes()
                 state = self.sleep_wake_manager.get_state()
 
-                if state == GaiaState.AWAKE:
+                if state == GaiaState.ACTIVE:
                     if self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes):
                         logger.info(f"Idle for {idle_minutes:.1f}min — entering DROWSY")
                         self._update_presence("Drifting off...")
@@ -959,12 +1054,12 @@ class SleepCycleLoop:
                         else:
                             self._update_presence(None)  # Reset to idle
 
-                elif state == GaiaState.SLEEPING:
+                elif state == GaiaState.ASLEEP:
                     # Phase 2 will add task execution here
                     # For now, just poll for wake signal
                     pass
 
-                elif state == GaiaState.WAKING:
+                elif state == _TransientPhase.WAKING:
                     restored = self.sleep_wake_manager.complete_wake()
                     if restored.get("checkpoint_loaded"):
                         logger.info("Context restored from checkpoint")
@@ -1024,12 +1119,21 @@ async def lifespan(app):
 > provides `update_presence(activity_name)` and `set_idle()` with thread-safe,
 > rate-limited (12s interval) Discord presence updates. The sleep cycle loop
 > calls these directly via the injected `discord_connector` reference.
->
-> Status strings used by sleep cycle:
-> - DROWSY: `"Drifting off..."` (via `update_presence`)
-> - SLEEPING: `"Sleeping"` (via `update_presence`)
-> - WAKING: `"Waking up..."` (via `update_presence`)
-> - AWAKE: Dynamic idle status (via `set_idle()` which auto-detects deployment mode + prime availability)
+
+#### Discord Presence Table
+
+| GaiaState | Discord Status | Activity Text | Notes |
+|-----------|---------------|---------------|-------|
+| ACTIVE | `online` | `"watching over the studio"` | Dynamic via `set_idle()` |
+| DROWSY | `online` | `"drifting off..."` | Checkpoint writing in progress |
+| ASLEEP | `idle` | `"sleeping..."` | Running sleep tasks |
+| DREAMING | `dnd` | `"studying..."` | GPU handed to Study for training |
+| DISTRACTED | `dnd` | `"occupied..."` | Sustained CPU/GPU load detected |
+| OFFLINE | `invisible` | *(none)* | Graceful shutdown, `activity=None` |
+
+> **Implementation:** `gaia-web/gaia_web/main.py` maps status strings. The
+> `status_map` includes `"invisible": discord.Status.invisible`. When status
+> is invisible, activity is set to `None` (no activity text shown).
 
 ### Phase 1 Testing Strategy
 
@@ -1045,7 +1149,7 @@ from unittest.mock import MagicMock
 def test_initial_state_is_awake():
     config = MagicMock()
     manager = SleepWakeManager(config)
-    assert manager.get_state() == GaiaState.AWAKE
+    assert manager.get_state() == GaiaState.ACTIVE
 
 def test_should_not_drowsy_when_not_idle():
     config = MagicMock()
@@ -1061,7 +1165,7 @@ def test_drowsy_transitions_to_sleeping():
     config = MagicMock()
     manager = SleepWakeManager(config)
     manager.initiate_drowsy()
-    assert manager.get_state() == GaiaState.SLEEPING
+    assert manager.get_state() == GaiaState.ASLEEP
 
 def test_wake_during_drowsy_cancels_sleep():
     config = MagicMock()
@@ -1074,25 +1178,25 @@ def test_wake_during_drowsy_cancels_sleep():
 def test_wake_signal_during_sleep():
     config = MagicMock()
     manager = SleepWakeManager(config)
-    manager.state = GaiaState.SLEEPING
+    manager.state = GaiaState.ASLEEP
     manager.current_task = None  # No task running
     manager.receive_wake_signal()
-    assert manager.get_state() == GaiaState.WAKING
+    assert manager.get_state() == _TransientPhase.WAKING
 
 def test_wake_signal_during_non_interruptible_task():
     config = MagicMock()
     manager = SleepWakeManager(config)
-    manager.state = GaiaState.SLEEPING
+    manager.state = GaiaState.ASLEEP
     manager.current_task = {"task_id": "qlora_training", "interruptible": False}
     manager.receive_wake_signal()
-    assert manager.get_state() == GaiaState.FINISHING_TASK
+    assert manager.get_state() == _TransientPhase.FINISHING_TASK
 
 def test_complete_wake_returns_to_awake():
     config = MagicMock()
     manager = SleepWakeManager(config)
-    manager.state = GaiaState.WAKING
+    manager.state = _TransientPhase.WAKING
     result = manager.complete_wake()
-    assert manager.get_state() == GaiaState.AWAKE
+    assert manager.get_state() == GaiaState.ACTIVE
     assert "checkpoint_loaded" in result
 ```
 
@@ -1106,29 +1210,29 @@ def test_complete_wake_returns_to_awake():
 @pytest.mark.asyncio
 async def test_full_sleep_wake_cycle():
     """
-    Test: AWAKE → DROWSY → SLEEPING → WAKING → AWAKE
+    Test: ACTIVE → DROWSY → ASLEEP → _WAKING → ACTIVE
     """
     config = load_test_config()
     manager = SleepWakeManager(config)
 
     # Go idle → DROWSY → SLEEPING
     assert manager.should_transition_to_drowsy(idle_minutes=6.0)
-    assert manager.initiate_drowsy()  # Writes checkpoint, transitions to SLEEPING
-    assert manager.get_state() == GaiaState.SLEEPING
+    assert manager.initiate_drowsy()  # Writes checkpoint, transitions to ASLEEP
+    assert manager.get_state() == GaiaState.ASLEEP
 
     # Message arrives → WAKING
     manager.receive_wake_signal()
-    assert manager.get_state() == GaiaState.WAKING
+    assert manager.get_state() == _TransientPhase.WAKING
 
-    # Complete wake → AWAKE
+    # Complete wake → ACTIVE
     result = manager.complete_wake()
     assert result["checkpoint_loaded"]
-    assert manager.get_state() == GaiaState.AWAKE
+    assert manager.get_state() == GaiaState.ACTIVE
 
 @pytest.mark.asyncio
 async def test_drowsy_cancellation():
     """
-    Test: AWAKE → DROWSY → (message arrives) → AWAKE (sleep cancelled)
+    Test: ACTIVE → DROWSY → (message arrives) → ACTIVE (sleep cancelled)
     """
     config = load_test_config()
     manager = SleepWakeManager(config)
@@ -1137,7 +1241,7 @@ async def test_drowsy_cancellation():
     manager.wake_signal_pending = True  # Set before initiate_drowsy
     result = manager.initiate_drowsy()
     assert not result  # Should return False (cancelled)
-    assert manager.get_state() == GaiaState.AWAKE
+    assert manager.get_state() == GaiaState.ACTIVE
 ```
 
 **Test Scenario 2: Checkpoint Persistence**
@@ -1164,7 +1268,7 @@ async def test_checkpoint_persists_across_restart():
 
 ### Phase 1 Success Criteria
 
-- [ ] State machine transitions correctly (AWAKE → DROWSY → SLEEPING → WAKING → AWAKE)
+- [ ] State machine transitions correctly (ACTIVE → DROWSY → ASLEEP → _WAKING → ACTIVE)
 - [ ] DROWSY state cancels cleanly if message arrives during checkpoint writing
 - [ ] Idle detection triggers DROWSY after 5 minutes
 - [ ] Prime generates cognitive checkpoint (prime.md) during DROWSY
@@ -1495,7 +1599,7 @@ Based on this, what is my next logical action?"""
 ```python
 # In the SLEEPING state handler, add task execution:
 
-elif state == GaiaState.SLEEPING:
+elif state == GaiaState.ASLEEP:
     task = self.task_scheduler.get_next_task()
     if task:
         self.sleep_wake_manager.current_task = {
@@ -1651,7 +1755,7 @@ async def test_thought_seed_hydration_during_sleep():
     # Create unreviewed seeds
     create_test_seed()
     
-    # Enter sleep (AWAKE → DROWSY → SLEEPING)
+    # Enter sleep (ACTIVE → DROWSY → ASLEEP)
     manager.initiate_drowsy()
     
     # Execute task
@@ -2102,7 +2206,7 @@ logger.info("🔄 TASK_EXECUTION", extra={
 ### Dashboard
 
 Create monitoring dashboard showing:
-- Current state (AWAKE/SLEEPING/WAKING)
+- Current state (ACTIVE/ASLEEP/DREAMING/DISTRACTED/OFFLINE)
 - Sleep cycle timeline
 - Task execution history
 - Checkpoint health
@@ -2149,7 +2253,7 @@ Create monitoring dashboard showing:
 - [ ] `knowledge/system_reference/topic_cache.json` (seed with empty topic list)
 
 **Modified Files:**
-- [ ] `candidates/gaia-core/gaia_core/cognition/sleep_cycle_loop.py` (add task execution in SLEEPING state)
+- [ ] `candidates/gaia-core/gaia_core/cognition/sleep_cycle_loop.py` (add task execution in ASLEEP state)
 - [ ] Observer system prompt (add THOUGHT_SEED: directive instructions)
 
 ### Phase 3
@@ -2219,6 +2323,101 @@ No new dependencies required:
 
 ---
 
+## 7-State Refactor: New States & Protocols
+
+### DREAMING State & Study Handoff Protocol
+
+**Purpose:** Allow the GPU to be temporarily handed to the Study model for QLoRA training while GAIA is asleep. During DREAMING, GAIA cannot process messages via the LLM — a canned response is returned instead.
+
+**Trigger:** The orchestrator's `handoff_manager.py` calls `POST /sleep/study-handoff` with `{"direction": "prime_to_study", "handoff_id": "<uuid>"}` after GPU reservation succeeds.
+
+**State flow:**
+```
+ASLEEP → enter_dreaming(handoff_id) → DREAMING
+DREAMING → exit_dreaming(handoff_id) → ASLEEP
+```
+
+**Behavior during DREAMING:**
+- `get_canned_response()` returns `CANNED_DREAMING` ("I'm deep in study right now — absorbing new patterns. I'll be back soon!")
+- Discord presence: `dnd`, activity `"studying..."`
+- Sleep tasks are paused (GPU unavailable)
+- If a wake signal arrives, it is queued but GAIA does not wake until DREAMING ends
+- `handoff_id` must match on exit to prevent mismatched handoff
+
+**Files:** `sleep_wake_manager.py` (`enter_dreaming()`, `exit_dreaming()`), `sleep_endpoints.py` (`/study-handoff`), `handoff_manager.py` (`_notify_study_handoff()`)
+
+### DISTRACTED State & Resource Monitoring
+
+**Purpose:** Detect when external processes (games, compilation, rendering) are consuming significant GPU/CPU and avoid generating slow or degraded responses.
+
+**Detection:** `ResourceMonitor` (singleton, `resource_monitor.py`) polls every 5 seconds:
+- **GPU:** `pynvml` — `nvmlDeviceGetUtilizationRates()` for GPU utilization %
+- **CPU:** `psutil` — `psutil.cpu_percent(interval=None)` for CPU utilization %
+- **Threshold:** If either metric exceeds **25%** sustained for **5 consecutive seconds**, `_distracted` flag is set
+
+**State flow:**
+```
+ANY_STATE → (sustained load detected by monitor) → DISTRACTED
+DISTRACTED → (check_and_clear_distracted: 3 samples over 3s all below 25%) → previous state
+```
+
+**Behavior during DISTRACTED:**
+- `get_canned_response()` returns `CANNED_DISTRACTED` ("I'm a bit occupied right now — the system is under heavy load. I'll respond properly once things settle down!")
+- Discord presence: `dnd`, activity `"occupied..."`
+- gaia-web calls `GET /sleep/distracted-check` before every message forward — if canned_response is non-null, sends that instead of forwarding
+- Re-check happens: (a) every 5 minutes via sleep cycle loop, or (b) on each incoming message via the distracted-check endpoint
+
+**Clearing:** `check_and_clear_distracted()` takes 3 samples over 3 seconds. If all are below the 25% threshold, the distracted flag is cleared and the previous state resumes.
+
+**Files:** `resource_monitor.py` (detection), `sleep_wake_manager.py` (state transitions), `discord_interface.py` (message gate), `sleep_endpoints.py` (`/distracted-check`)
+
+### OFFLINE State & Graceful Shutdown
+
+**Purpose:** Allow a clean shutdown sequence that properly transitions Discord presence and persists state before the process exits.
+
+**Trigger:** `POST /sleep/shutdown` or `sleep_cycle_loop.initiate_shutdown()` called from the FastAPI shutdown handler.
+
+**State flow:**
+```
+ANY_STATE → initiate_shutdown() → OFFLINE
+OFFLINE → (process exits)
+```
+
+**Behavior during OFFLINE:**
+- Discord presence: `invisible` (completely hidden), no activity text
+- Sleep cycle loop breaks its main loop
+- No further messages are processed
+- State is persisted to checkpoint if currently ASLEEP
+
+**Files:** `sleep_wake_manager.py` (`initiate_shutdown()`), `sleep_cycle_loop.py` (`initiate_shutdown()`), `sleep_endpoints.py` (`/shutdown`), `main.py` (FastAPI shutdown event)
+
+### Canned Response System
+
+**Purpose:** When GAIA cannot process messages through the LLM (DREAMING or DISTRACTED), pre-written responses are sent so users know GAIA is alive but temporarily unavailable.
+
+**Constants** (in `sleep_wake_manager.py`):
+```python
+CANNED_DREAMING = (
+    "I'm deep in study right now — absorbing new patterns. "
+    "I'll be back soon!"
+)
+CANNED_DISTRACTED = (
+    "I'm a bit occupied right now — the system is under heavy load. "
+    "I'll respond properly once things settle down!"
+)
+```
+
+**Flow:**
+1. User sends message to Discord
+2. `discord_interface.py` calls `GET /sleep/distracted-check` on gaia-core
+3. gaia-core returns `{"state": "dreaming", "canned_response": "I'm deep in study..."}`
+4. gaia-web sends the canned response directly to the Discord channel
+5. Message is NOT forwarded to the LLM
+
+**Method:** `SleepWakeManager.get_canned_response()` returns the appropriate string if the current state is DREAMING or DISTRACTED, otherwise returns `None`.
+
+---
+
 ## Appendices
 
 ### A. State Transition Diagram (Detailed)
@@ -2227,16 +2426,16 @@ No new dependencies required:
 ┌─────────────────────────────────────────────────────────────┐
 │               GAIA Sleep Cycle State Machine                │
 │                                                             │
-│  5 states: AWAKE → DROWSY → SLEEPING → FINISHING → WAKING  │
+│  6 states + 2 phases: ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED / OFFLINE  │
 └─────────────────────────────────────────────────────────────┘
 
     ┌──────────────────────────────────────────────────────┐
-    │                    AWAKE                              │
+    │                    ACTIVE                             │
     │  • Process messages immediately via Prime or Lite    │
     │  • Stream responses                                  │
     │  • Update session history                            │
     │  • IdleMonitor tracks last activity                  │
-    │  • Discord: "Watching over the studio"               │
+    │  • Discord: online, "watching over the studio"       │
     └────────────┬─────────────────────────────────────────┘
                  │
                  │ idle > 5min AND no active stream
@@ -2253,7 +2452,7 @@ No new dependencies required:
     │  6. Archive to prime_history/TIMESTAMP.md            │
     │                                                      │
     │  ⚡ CANCELLABLE: If message arrives during DROWSY,   │
-    │     abort checkpoint and return to AWAKE immediately  │
+    │     abort checkpoint and return to ACTIVE immediately  │
     └────────────┬─────────────────────────────────────────┘
                  │
                  │ checkpoint complete
@@ -2321,11 +2520,11 @@ No new dependencies required:
                  │ Prime ready + first message handled
                  ▼
     ┌──────────────────────────────────────────────────────┐
-    │                    AWAKE                              │
+    │                    ACTIVE                             │
     │  • Process remaining queued messages via Prime       │
     │  • prime.md REVIEW context injected at Tier 1        │
     │  • Resume normal operation                           │
-    │  • Discord: "Watching over the studio"               │
+    │  • Discord: online, "watching over the studio"       │
     └──────────────────────────────────────────────────────┘
 ```
 
@@ -2341,7 +2540,7 @@ No new dependencies required:
 ## Active Context Summary
 We were discussing the GAIA sleep cycle implementation with Seumas.
 Key discussion points included:
-- State machine architecture (AWAKE/SLEEPING/WAKING)
+- State machine architecture (ACTIVE/ASLEEP/DREAMING/DISTRACTED/OFFLINE)
 - Prime checkpoint strategy (prime.md file)
 - KV cache persistence challenge
 - Integration with existing thought seed system
