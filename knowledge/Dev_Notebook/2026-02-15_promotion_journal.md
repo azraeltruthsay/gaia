@@ -1,8 +1,8 @@
 # Promotion Pipeline — 2026-02-15
 
-**Timestamp:** 2026-02-15T15:30:30
-**Duration:** 4m 56s
-**Services:** gaia-common,gaia-core
+**Timestamp:** 2026-02-15T16:00:56
+**Duration:** 4m 11s
+**Services:** gaia-orchestrator
 **Mode:** LIVE
 **Result:** PASS
 
@@ -12,17 +12,10 @@
 |-------|--------|
 | Graceful Live Shutdown (--keep-live) | SKIP |
 | Pre-flight Checks | PASS |
-| Validation | PASS |
+| Validation | SKIP |
 | Smoke Tests (Candidate) | SKIP |
 | Promote Services | PASS |
 | Post-Promotion Verification | PASS |
-
-## Validation
-
-| Service | Ruff | MyPy | Pytest |
-|---------|------|------|--------|
-| gaia-common | skip | skip | skip |
-| gaia-core | pass | warn | pass |
 
 ---
 
