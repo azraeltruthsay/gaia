@@ -47,6 +47,7 @@ services:
     container_name: gaia-core-candidate
     hostname: gaia-core-candidate
     restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
       - ./candidates/gaia-core:/app:rw
@@ -168,6 +169,7 @@ services:
     container_name: gaia-mcp-candidate
     hostname: gaia-mcp-candidate
     restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
       - ./candidates/gaia-mcp:/app:rw

@@ -153,6 +153,7 @@ services:
     container_name: gaia-core
     hostname: gaia-core
     restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
       # Source code (development mode)
@@ -285,6 +286,7 @@ services:
     container_name: gaia-study
     hostname: gaia-study
     restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
       # Source code (development mode)
@@ -347,6 +349,7 @@ services:
     container_name: gaia-mcp
     hostname: gaia-mcp
     restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
       # Source code (development mode)

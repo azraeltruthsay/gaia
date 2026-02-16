@@ -50,6 +50,9 @@ COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
 # Copy canonical constants file from gaia-common (single source of truth)
 COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
+# Create writable directories for non-root execution
+RUN mkdir -p /app/logs /app/.pytest_cache && chmod 777 /app/logs /app/.pytest_cache
+
 # Expose service port
 EXPOSE 6415
 
