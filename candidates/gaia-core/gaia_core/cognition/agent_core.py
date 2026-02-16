@@ -701,12 +701,16 @@ class AgentCore:
         # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
         # - "oracle" => External/cloud escalation
         selected_model_name = None
+        # Check if GPU is released for sleep — skip gpu_prime in all selection paths
+        _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
 
         # 1. Model Selection (Simplified)
         # NEW: User's suggestion - if a knowledge base is triggered, prefer the GPU model.
         if knowledge_base_name:
             logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
             for cand in ["gpu_prime", "prime"]:
+                if cand == "gpu_prime" and _gpu_sleeping:
+                    continue
                 if cand in self.config.MODEL_CONFIGS:
                     selected_model_name = cand
                     logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
@@ -715,10 +719,12 @@ class AgentCore:
         if not selected_model_name:
             # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-            logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())}")
+            logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())} gpu_sleeping={_gpu_sleeping}")
             if backend_env:
-                # Use the backend if it's been loaded (or will be loaded); otherwise fallback
-                if backend_env in self.model_pool.models:
+                # Skip gpu_prime when GPU is released for sleep
+                if backend_env == "gpu_prime" and _gpu_sleeping:
+                    logger.info(f"GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
+                elif backend_env in self.model_pool.models:
                     selected_model_name = backend_env
                 else:
                     logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
@@ -735,6 +741,8 @@ class AgentCore:
             elif wants_thinker:
                 # Prefer GPU prime, then prime, then cpu_prime
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                    if cand == "gpu_prime" and _gpu_sleeping:
+                        continue
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
@@ -762,12 +770,14 @@ class AgentCore:
             # Try preferred backend first
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
             candidates = []
-            if backend_env:
+            if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
                 candidates.append(backend_env)
             # Prefer Operator (lite) first, then Thinker tiers, then oracle/azrael
             candidates.extend(["lite", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
             found = None
             for cand in candidates:
+                if cand == "gpu_prime" and _gpu_sleeping:
+                    continue
                 logger.warning(f"[MODEL_SELECT DEBUG] checking candidate: {cand}")
                 # Try lazy loading for each candidate
                 if cand not in self.model_pool.models:
@@ -794,6 +804,8 @@ class AgentCore:
                 force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
                 if not force_operator and self._should_escalate_to_thinker(user_input):
                     for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                        if cand == "gpu_prime" and _gpu_sleeping:
+                            continue
                         # Try lazy loading for escalation candidates
                         if cand not in self.model_pool.models:
                             try:
@@ -2292,14 +2304,14 @@ class AgentCore:
                 ts_write({"type": "sketch", "intent": "find_file", "plan": [
                     "Plan: locate target file and summarize it",
                     "1) If an explicit path is provided, read it directly (if allowed).",
-                    "2) Otherwise search under /gaia-assistant (skip hidden/cache dirs).",
+                    "2) Otherwise search under /knowledge (skip hidden/cache dirs).",
                     "3) If exactly one match is found, read it and return a short preview.",
                     "4) If multiple matches are found, show a shortlist and await choice to read.",
                     "5) On failure/no match, prompt for a narrower path or filename."
                 ]}, session_id, source=source, destination_context=_meta)
                 ts_write({"type": "mcp_call", "intent": "find_file"}, session_id, source=source, destination_context=_meta)
                 raw = user_input or ""
-                allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+                allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve(), Path("/models").resolve()]
 
                 # Direct path extraction (if the user pasted a path)
                 path_hits = re.findall(r"/[A-Za-z0-9_./-]+", raw)
@@ -2337,7 +2349,7 @@ class AgentCore:
                     if isinstance(result, dict) and result.get("ok"):
                         matches = result.get("results") or []
                         if not matches:
-                            return "I searched for that filename but found no matches under /gaia-assistant."
+                            return "I searched for that filename but found no matches under /knowledge."
                         # If exactly one match, attempt to read and summarize it.
                         if len(matches) == 1:
                             path = matches[0]
@@ -2377,7 +2389,7 @@ class AgentCore:
                 ]}, session_id, source=source, destination_context=_meta)
                 ts_write({"type": "mcp_call", "intent": "read_file"}, session_id, source=source, destination_context=_meta)
                 raw = user_input or ""
-                allow_roots = [Path("/gaia-assistant").resolve(), Path("/models").resolve()]
+                allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve(), Path("/models").resolve()]
 
                 # Direct path extraction (if the user pasted a path)
                 path_hits = re.findall(r"/[A-Za-z0-9_./-]+", raw)
@@ -2638,8 +2650,11 @@ class AgentCore:
             try:
                 polish_flag = os.getenv("GAIA_THINKER_POLISH", "").lower() in ("1", "true", "yes")
                 if polish_flag and selected_model_name == "lite":
+                    _gpu_sleeping_polish = getattr(self.model_pool, '_gpu_released', False)
                     thinker_name = None
                     for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                        if cand == "gpu_prime" and _gpu_sleeping_polish:
+                            continue
                         if cand in self.model_pool.models:
                             thinker_name = cand
                             break
@@ -3374,7 +3389,7 @@ Assembled response:"""
     def _run_mcp_list_tree(self) -> str:
         """Call MCP sidecar to list a bounded directory tree with approval."""
         from gaia_core.utils import mcp_client
-        params = {"path": "/gaia-assistant", "max_depth": 2, "max_entries": 120, "_allow_pending": True}
+        params = {"path": "/knowledge", "max_depth": 2, "max_entries": 120, "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
         def _handle_tree_result(result_dict: dict) -> str:
@@ -3385,7 +3400,7 @@ Assembled response:"""
             # If the tree is long, persist it and return a short preview
             if len(tree) > 4000:
                 preview = "\n".join(tree.splitlines()[:20])
-                target_path = "/gaia-assistant/knowledge/system_reference/tree_latest.txt"
+                target_path = "/knowledge/system_reference/tree_latest.txt"
                 # Write via MCP so it is auditable/approved
                 write_req = mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True})
                 if write_req.get("ok") and write_req.get("action_id") and write_req.get("challenge"):
@@ -3453,7 +3468,7 @@ Assembled response:"""
     def _run_mcp_list_files(self) -> str:
         """Call MCP sidecar to list files in a directory with approval."""
         from gaia_core.utils import mcp_client
-        params = {"path": "/gaia-assistant", "_allow_pending": True}
+        params = {"path": "/knowledge", "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
         def _handle_list_result(result_dict: dict) -> str:
@@ -4065,7 +4080,7 @@ REASONING: [Brief explanation of your analysis]"""
         import subprocess
 
         results = []
-        app_dir = Path("/gaia-assistant/app") if Path("/gaia-assistant/app").exists() else Path.cwd() / "app"
+        app_dir = Path("/app") if Path("/app").exists() else Path.cwd() / "app"
 
         # Keywords derived from topic
         keywords = [w.lower() for w in topic.split() if len(w) > 2]

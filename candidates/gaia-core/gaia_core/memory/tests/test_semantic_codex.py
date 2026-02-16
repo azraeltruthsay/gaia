@@ -115,9 +115,9 @@ Body content.
     file_path = temp_knowledge_dir / "self_generated_docs" / "INVALID_YAML.md"
     file_path.write_text(md_content)
     
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         semantic_codex._load_one(file_path)
-        assert "Failed to parse YAML front matter" in caplog.text
+        assert "non-codex front matter" in caplog.text
     assert semantic_codex.get("INVALID_YAML") is None
 
 def test_load_one_json_still_works(semantic_codex, temp_knowledge_dir):

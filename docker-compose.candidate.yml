@@ -311,6 +311,7 @@ services:
       - ORCHESTRATOR_STUDY_URL=${CANDIDATE_STUDY_ENDPOINT:-http://gaia-study-candidate:8766}
       - ORCHESTRATOR_MCP_URL=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765}
       - ORCHESTRATOR_PRIME_URL=${CANDIDATE_PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
+      - PRIME_CONTAINER_NAME=gaia-prime-candidate
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
