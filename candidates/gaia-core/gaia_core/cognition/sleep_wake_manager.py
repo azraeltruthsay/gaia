@@ -1,15 +1,22 @@
 """
 GAIA Sleep/Wake State Machine.
 
-Manages five states:
-    AWAKE → DROWSY → SLEEPING → FINISHING_TASK/WAKING → AWAKE
+Manages six public states + two internal transient phases:
+
+Public states:
+    OFFLINE → ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED
+
+Internal phases (not in the public enum):
+    _FINISHING_TASK, _WAKING
 
 Design decisions:
 - DROWSY is cancellable: a message arriving during checkpoint writing
-  aborts the transition and returns to AWAKE.
-- WAKING uses a parallel strategy: CPU Lite handles the first queued
+  aborts the transition and returns to ACTIVE.
+- Waking uses a parallel strategy: CPU Lite handles the first queued
   message while Prime boots in the background (~37-60 s from tmpfs).
 - prime.md checkpoint is the KV cache replacement.
+- DREAMING = GPU handed off to Study (training); canned response only.
+- DISTRACTED = CPU or GPU under sustained load (>42% for 5 s); canned response.
 
 This module lives in gaia-core (not gaia-common) to avoid a circular
 dependency.  gaia-common provides low-level primitives (IdleMonitor,
@@ -29,11 +36,30 @@ logger = logging.getLogger("GAIA.SleepWake")
 
 
 class GaiaState(Enum):
-    AWAKE = "awake"
+    OFFLINE = "offline"
+    ACTIVE = "active"
     DROWSY = "drowsy"  # Checkpoint in progress — cancellable
-    SLEEPING = "sleeping"  # Executing sleep tasks
-    FINISHING_TASK = "finishing_task"  # Non-interruptible task completing
-    WAKING = "waking"  # Context restoration + Prime boot
+    ASLEEP = "asleep"  # GPU offloaded, running sleep tasks
+    DREAMING = "dreaming"  # GPU handed to Study for training
+    DISTRACTED = "distracted"  # System under sustained load
+
+
+class _TransientPhase(Enum):
+    """Internal waking sub-phases — not visible in the public state enum."""
+    NONE = "none"
+    FINISHING_TASK = "finishing_task"
+    WAKING = "waking"
+
+
+# Canned responses for states that don't forward to the model
+CANNED_DREAMING = (
+    "I'm studying right now and can't chat — "
+    "I'll be back once my training session wraps up!"
+)
+CANNED_DISTRACTED = (
+    "I'm a little occupied at the moment — "
+    "give me a few minutes and I'll get back to you!"
+)
 
 
 class SleepWakeManager:
@@ -41,12 +67,14 @@ class SleepWakeManager:
 
     def __init__(self, config) -> None:
         self.config = config
-        self.state = GaiaState.AWAKE
+        self.state = GaiaState.ACTIVE
+        self._phase = _TransientPhase.NONE
         self.current_task: Optional[Dict[str, Any]] = None
         self.wake_signal_pending = False
         self.prime_available = False
         self.checkpoint_manager = PrimeCheckpointManager(config)
         self.last_state_change = datetime.now(timezone.utc)
+        self.dreaming_handoff_id: Optional[str] = None
 
         logger.info("SleepWakeManager initialized")
 
@@ -59,7 +87,7 @@ class SleepWakeManager:
 
     def should_transition_to_drowsy(self, idle_minutes: float) -> bool:
         """Check whether we should begin the sleep transition."""
-        if self.state != GaiaState.AWAKE:
+        if self.state != GaiaState.ACTIVE:
             return False
         threshold = getattr(self.config, "SLEEP_IDLE_THRESHOLD_MINUTES", 5)
         return idle_minutes >= threshold
@@ -69,15 +97,15 @@ class SleepWakeManager:
     # ------------------------------------------------------------------
 
     def initiate_drowsy(self, current_packet=None) -> bool:
-        """Transition AWAKE → DROWSY → SLEEPING.
+        """Transition ACTIVE → DROWSY → ASLEEP.
 
         During DROWSY, Prime writes its cognitive checkpoint.
         If a wake signal arrives before the checkpoint completes,
-        the sleep is cancelled and we return to AWAKE.
+        the sleep is cancelled and we return to ACTIVE.
 
-        Returns True if we entered SLEEPING, False otherwise.
+        Returns True if we entered ASLEEP, False otherwise.
         """
-        if self.state != GaiaState.AWAKE:
+        if self.state != GaiaState.ACTIVE:
             logger.warning("Cannot enter DROWSY from state: %s", self.state)
             return False
 
@@ -92,20 +120,20 @@ class SleepWakeManager:
             # Check if we were interrupted during checkpoint write
             if self.wake_signal_pending:
                 logger.info("Message arrived during DROWSY — cancelling sleep")
-                self.state = GaiaState.AWAKE
+                self.state = GaiaState.ACTIVE
                 self.wake_signal_pending = False
                 self.last_state_change = datetime.now(timezone.utc)
                 return False
 
-            # Checkpoint complete — enter SLEEPING
-            self.state = GaiaState.SLEEPING
+            # Checkpoint complete — enter ASLEEP
+            self.state = GaiaState.ASLEEP
             self.last_state_change = datetime.now(timezone.utc)
-            logger.info("Checkpoint written — entering SLEEPING")
+            logger.info("Checkpoint written — entering ASLEEP")
             return True
 
         except Exception:
-            logger.error("Checkpoint failed — staying AWAKE", exc_info=True)
-            self.state = GaiaState.AWAKE
+            logger.error("Checkpoint failed — staying ACTIVE", exc_info=True)
+            self.state = GaiaState.ACTIVE
             self.last_state_change = datetime.now(timezone.utc)
             return False
 
@@ -117,43 +145,53 @@ class SleepWakeManager:
             # initiate_drowsy() will notice the flag and cancel
             logger.info("Wake signal during DROWSY — will cancel checkpoint")
 
-        elif self.state == GaiaState.SLEEPING:
-            logger.info("Wake signal during SLEEPING")
-            if self.current_task and not self.current_task.get("interruptible", True):
+        elif self.state == GaiaState.ASLEEP:
+            logger.info("Wake signal during ASLEEP")
+            if self._phase == _TransientPhase.FINISHING_TASK:
+                logger.info("Already FINISHING_TASK — wake deferred")
+            elif self.current_task and not self.current_task.get("interruptible", True):
                 task_id = self.current_task.get("task_id", "unknown")
                 logger.info("Non-interruptible task running: %s", task_id)
-                self.state = GaiaState.FINISHING_TASK
+                self._phase = _TransientPhase.FINISHING_TASK
             else:
                 self.transition_to_waking()
 
-        elif self.state == GaiaState.AWAKE:
-            logger.debug("Wake signal received but already AWAKE")
+        elif self.state == GaiaState.DREAMING:
+            logger.info("Wake signal during DREAMING — deferred until study completes")
+            # Don't transition — let exit_dreaming() handle it
+
+        elif self.state == GaiaState.DISTRACTED:
+            logger.info("Wake signal during DISTRACTED — noted, will check on recheck")
+
+        elif self.state == GaiaState.ACTIVE:
+            logger.debug("Wake signal received but already ACTIVE")
             self.wake_signal_pending = False
 
     def transition_to_waking(self) -> None:
-        """Move to WAKING state.  Begins parallel wake strategy."""
-        if self.state not in (GaiaState.SLEEPING, GaiaState.FINISHING_TASK):
+        """Move to internal WAKING phase. Begins parallel wake strategy."""
+        if self.state != GaiaState.ASLEEP:
             logger.warning("Cannot wake from state: %s", self.state)
             return
-        self.state = GaiaState.WAKING
+        self._phase = _TransientPhase.WAKING
         self.last_state_change = datetime.now(timezone.utc)
-        logger.info("Entering WAKING — starting parallel wake")
+        logger.info("Entering WAKING phase — starting parallel wake")
 
     def complete_wake(self) -> Dict[str, Any]:
-        """Finish waking: load checkpoint, format as REVIEW context, go AWAKE.
+        """Finish waking: load checkpoint, format as REVIEW context, go ACTIVE.
 
         Returns a dict with ``checkpoint_loaded``, ``context``, and
         ``timestamp`` keys.
         """
-        if self.state != GaiaState.WAKING:
-            logger.warning("Cannot complete wake from state: %s", self.state)
+        if self.state != GaiaState.ASLEEP or self._phase != _TransientPhase.WAKING:
+            logger.warning("Cannot complete wake from state: %s (phase: %s)", self.state, self._phase)
             return {"checkpoint_loaded": False}
 
         try:
             checkpoint = self.checkpoint_manager.load_latest()
             review_context = self._format_checkpoint_as_review(checkpoint)
 
-            self.state = GaiaState.AWAKE
+            self.state = GaiaState.ACTIVE
+            self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
             self.prime_available = True
             self.last_state_change = datetime.now(timezone.utc)
@@ -166,9 +204,82 @@ class SleepWakeManager:
             }
         except Exception:
             logger.error("Wake completion failed", exc_info=True)
-            self.state = GaiaState.AWAKE
+            self.state = GaiaState.ACTIVE
+            self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
             return {"checkpoint_loaded": False}
+
+    # ------------------------------------------------------------------
+    # DREAMING transitions (orchestrator-driven)
+    # ------------------------------------------------------------------
+
+    def enter_dreaming(self, handoff_id: str) -> bool:
+        """ASLEEP → DREAMING when orchestrator hands GPU to Study."""
+        if self.state != GaiaState.ASLEEP:
+            logger.warning("Cannot enter DREAMING from state: %s", self.state)
+            return False
+        self.state = GaiaState.DREAMING
+        self.dreaming_handoff_id = handoff_id
+        self.last_state_change = datetime.now(timezone.utc)
+        logger.info("Entering DREAMING (handoff %s)", handoff_id)
+        return True
+
+    def exit_dreaming(self) -> bool:
+        """DREAMING → ASLEEP when Study returns GPU to Prime."""
+        if self.state != GaiaState.DREAMING:
+            logger.warning("Cannot exit DREAMING from state: %s", self.state)
+            return False
+        self.state = GaiaState.ASLEEP
+        self.dreaming_handoff_id = None
+        self.last_state_change = datetime.now(timezone.utc)
+        logger.info("Exiting DREAMING — back to ASLEEP")
+
+        # If a wake signal arrived while dreaming, start waking now
+        if self.wake_signal_pending:
+            logger.info("Pending wake signal — transitioning to WAKING")
+            self.transition_to_waking()
+        return True
+
+    # ------------------------------------------------------------------
+    # DISTRACTED transitions (resource-driven)
+    # ------------------------------------------------------------------
+
+    def enter_distracted(self) -> bool:
+        """ASLEEP → DISTRACTED when sustained CPU/GPU load detected."""
+        if self.state != GaiaState.ASLEEP:
+            logger.warning("Cannot enter DISTRACTED from state: %s", self.state)
+            return False
+        self.state = GaiaState.DISTRACTED
+        self.last_state_change = datetime.now(timezone.utc)
+        logger.info("Entering DISTRACTED — system under load")
+        return True
+
+    def exit_distracted(self) -> bool:
+        """DISTRACTED → ASLEEP when load drops below threshold."""
+        if self.state != GaiaState.DISTRACTED:
+            logger.warning("Cannot exit DISTRACTED from state: %s", self.state)
+            return False
+        self.state = GaiaState.ASLEEP
+        self.last_state_change = datetime.now(timezone.utc)
+        logger.info("Exiting DISTRACTED — back to ASLEEP")
+
+        # If a wake signal arrived while distracted, start waking
+        if self.wake_signal_pending:
+            logger.info("Pending wake signal — transitioning to WAKING")
+            self.transition_to_waking()
+        return True
+
+    # ------------------------------------------------------------------
+    # OFFLINE transition
+    # ------------------------------------------------------------------
+
+    def initiate_offline(self) -> None:
+        """ANY → OFFLINE for graceful shutdown."""
+        prev = self.state
+        self.state = GaiaState.OFFLINE
+        self._phase = _TransientPhase.NONE
+        self.last_state_change = datetime.now(timezone.utc)
+        logger.info("Entering OFFLINE from %s", prev)
 
     # ------------------------------------------------------------------
     # Status / monitoring
@@ -176,14 +287,26 @@ class SleepWakeManager:
 
     def get_status(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc)
-        return {
+        status: Dict[str, Any] = {
             "state": self.state.value,
+            "phase": self._phase.value,
             "wake_signal_pending": self.wake_signal_pending,
             "prime_available": self.prime_available,
             "current_task": self.current_task.get("task_id") if self.current_task else None,
             "last_state_change": self.last_state_change.isoformat(),
             "seconds_in_state": (now - self.last_state_change).total_seconds(),
         }
+        if self.dreaming_handoff_id:
+            status["dreaming_handoff_id"] = self.dreaming_handoff_id
+        return status
+
+    def get_canned_response(self) -> Optional[str]:
+        """Return a canned response if the current state warrants one, else None."""
+        if self.state == GaiaState.DREAMING:
+            return CANNED_DREAMING
+        if self.state == GaiaState.DISTRACTED:
+            return CANNED_DISTRACTED
+        return None
 
     # ------------------------------------------------------------------
     # Private helpers

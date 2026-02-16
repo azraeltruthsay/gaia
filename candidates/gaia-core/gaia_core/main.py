@@ -177,9 +177,10 @@ async def lifespan(app: FastAPI):
                 model_pool=_ai_manager.model_pool if _ai_manager else None,
                 agent_core=_agent_core,
             )
-            # Store manager and idle monitor on app.state for endpoint access
+            # Store on app.state for endpoint access
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
             app.state.idle_monitor = _sleep_loop.idle_monitor
+            app.state.sleep_cycle_loop = _sleep_loop
             _sleep_loop.start()
             logger.info("Sleep cycle loop started")
         else:
@@ -191,8 +192,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     if _sleep_loop is not None:
-        _sleep_loop.stop()
-        logger.info("Sleep cycle loop stopped")
+        _sleep_loop.initiate_shutdown()
+        logger.info("Sleep cycle loop stopped (OFFLINE)")
     logger.info("GAIA Core shutting down...")
 
 
@@ -240,6 +241,9 @@ async def root():
             "/gpu/reclaim": "Wake gaia-prime, restore GPU inference",
             "/sleep/status": "Sleep cycle state machine status",
             "/sleep/wake": "Send wake signal (POST)",
+            "/sleep/study-handoff": "Study handoff notification (POST)",
+            "/sleep/distracted-check": "Check for canned response (GET)",
+            "/sleep/shutdown": "Graceful shutdown (POST)",
         }
     }
 

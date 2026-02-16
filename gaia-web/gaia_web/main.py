@@ -182,13 +182,21 @@ async def update_presence(body: Dict[str, Any]):
 
     activity_name = body.get("activity", "over the studio")
     status_str = body.get("status")  # "idle", "online", "dnd", or None
-    status_map = {"idle": discord.Status.idle, "online": discord.Status.online, "dnd": discord.Status.dnd}
+    status_map = {
+        "idle": discord.Status.idle,
+        "online": discord.Status.online,
+        "dnd": discord.Status.dnd,
+        "invisible": discord.Status.invisible,
+    }
     effective_status = status_map.get(status_str, discord.Status.online)
 
-    await _bot.change_presence(
-        status=effective_status,
-        activity=discord.Activity(type=discord.ActivityType.watching, name=activity_name)
-    )
+    if effective_status == discord.Status.invisible:
+        await _bot.change_presence(status=effective_status, activity=None)
+    else:
+        await _bot.change_presence(
+            status=effective_status,
+            activity=discord.Activity(type=discord.ActivityType.watching, name=activity_name)
+        )
     return {"ok": True}
 
 

@@ -17,7 +17,11 @@ from typing import Optional
 import httpx
 
 from gaia_common.utils.background.idle_monitor import IdleMonitor
-from gaia_core.cognition.sleep_wake_manager import GaiaState, SleepWakeManager
+from gaia_core.cognition.sleep_wake_manager import (
+    GaiaState,
+    SleepWakeManager,
+    _TransientPhase,
+)
 
 logger = logging.getLogger("GAIA.SleepCycle")
 
@@ -26,6 +30,7 @@ class SleepCycleLoop:
     """Background thread that monitors idle state and drives sleep/wake."""
 
     POLL_INTERVAL = 10  # seconds between idle checks
+    DISTRACTED_RECHECK_INTERVAL = 300  # 5 min between distracted rechecks
 
     def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None) -> None:
         self.config = config
@@ -36,6 +41,7 @@ class SleepCycleLoop:
         self.agent_core = agent_core
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._last_distracted_recheck = 0.0
 
         # Service URLs for SOA mode
         self._orchestrator_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
@@ -46,6 +52,14 @@ class SleepCycleLoop:
         self.sleep_task_scheduler = SleepTaskScheduler(
             config, model_pool=model_pool, agent_core=agent_core,
         )
+
+        # Resource monitor for distracted detection
+        self._resource_monitor = None
+        try:
+            from gaia_core.utils.resource_monitor import ResourceMonitor
+            self._resource_monitor = ResourceMonitor.get_instance()
+        except Exception:
+            logger.debug("ResourceMonitor not available — distracted detection disabled")
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -66,6 +80,12 @@ class SleepCycleLoop:
         self._thread = None
         logger.info("Sleep cycle loop stopped")
 
+    def initiate_shutdown(self) -> None:
+        """Graceful shutdown: transition to OFFLINE and stop the loop."""
+        self.sleep_wake_manager.initiate_offline()
+        self._update_presence(None, offline=True)
+        self.stop()
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -73,17 +93,22 @@ class SleepCycleLoop:
     def _run(self) -> None:
         while self._running:
             try:
-                idle_minutes = self.idle_monitor.get_idle_minutes()
                 state = self.sleep_wake_manager.get_state()
 
-                if state == GaiaState.AWAKE:
-                    self._handle_awake(idle_minutes)
-                elif state == GaiaState.SLEEPING:
-                    self._handle_sleeping()
-                elif state == GaiaState.FINISHING_TASK:
-                    self._handle_finishing_task()
-                elif state == GaiaState.WAKING:
-                    self._handle_waking()
+                # OFFLINE means we're done
+                if state == GaiaState.OFFLINE:
+                    break
+
+                idle_minutes = self.idle_monitor.get_idle_minutes()
+
+                if state == GaiaState.ACTIVE:
+                    self._handle_active(idle_minutes)
+                elif state == GaiaState.ASLEEP:
+                    self._handle_asleep()
+                elif state == GaiaState.DREAMING:
+                    self._handle_dreaming()
+                elif state == GaiaState.DISTRACTED:
+                    self._handle_distracted()
                 # DROWSY is handled inside initiate_drowsy() — we just wait
 
             except Exception:
@@ -97,20 +122,45 @@ class SleepCycleLoop:
     # Per-state handlers
     # ------------------------------------------------------------------
 
-    def _handle_awake(self, idle_minutes: float) -> None:
+    def _handle_active(self, idle_minutes: float) -> None:
         if self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes):
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
-            self._update_presence("Drifting off...")
+            self._update_presence("drifting off...")
 
             success = self.sleep_wake_manager.initiate_drowsy()
             if success:
                 self._release_gpu_for_sleep()
-                self._update_presence("dreaming...", sleeping=True)
+                self._update_presence("sleeping...", sleeping=True)
             else:
                 # Cancelled or failed — reset to normal idle status
                 self._update_presence(None)
 
-    def _handle_sleeping(self) -> None:
+    def _handle_asleep(self) -> None:
+        # Check transient phases first
+        phase = self.sleep_wake_manager._phase
+
+        if phase == _TransientPhase.FINISHING_TASK:
+            # When the current non-interruptible task finishes, transition to WAKING
+            if self.sleep_wake_manager.current_task is None:
+                self.sleep_wake_manager.transition_to_waking()
+            return
+
+        if phase == _TransientPhase.WAKING:
+            self._update_presence("waking up...")
+            self._reclaim_gpu_for_wake()
+            restored = self.sleep_wake_manager.complete_wake()
+            if restored.get("checkpoint_loaded"):
+                logger.info("Context restored from checkpoint")
+            self._update_presence(None)  # Reset to dynamic idle status
+            return
+
+        # Check for distracted state (sustained load)
+        if self._resource_monitor and self._resource_monitor.is_distracted():
+            self.sleep_wake_manager.enter_distracted()
+            self._update_presence("occupied...", status_override="dnd")
+            return
+
+        # Normal ASLEEP: run sleep tasks
         task = self.sleep_task_scheduler.get_next_task()
         if task is None:
             return
@@ -120,7 +170,7 @@ class SleepCycleLoop:
             "task_id": task.task_id,
             "interruptible": task.interruptible,
         }
-        self._update_presence(f"dreaming: {task.task_type}", sleeping=True)
+        self._update_presence(f"sleeping: {task.task_type}", sleeping=True)
 
         self.sleep_task_scheduler.execute_task(task)
 
@@ -130,19 +180,21 @@ class SleepCycleLoop:
         if self.sleep_wake_manager.wake_signal_pending:
             self.sleep_wake_manager.transition_to_waking()
 
-    def _handle_finishing_task(self) -> None:
-        # When the current non-interruptible task finishes (current_task is
-        # cleared by _handle_sleeping), transition to WAKING.
-        if self.sleep_wake_manager.current_task is None:
-            self.sleep_wake_manager.transition_to_waking()
+    def _handle_dreaming(self) -> None:
+        """DREAMING is driven by orchestrator API calls — nothing to do here."""
+        self._update_presence("studying...", status_override="dnd")
 
-    def _handle_waking(self) -> None:
-        self._update_presence("Waking up...")
-        self._reclaim_gpu_for_wake()
-        restored = self.sleep_wake_manager.complete_wake()
-        if restored.get("checkpoint_loaded"):
-            logger.info("Context restored from checkpoint")
-        self._update_presence(None)  # Reset to dynamic idle status
+    def _handle_distracted(self) -> None:
+        """Periodically recheck if system load has dropped."""
+        now = time.monotonic()
+        if now - self._last_distracted_recheck < self.DISTRACTED_RECHECK_INTERVAL:
+            return
+
+        self._last_distracted_recheck = now
+
+        if self._resource_monitor and self._resource_monitor.check_and_clear_distracted():
+            self.sleep_wake_manager.exit_distracted()
+            self._update_presence("sleeping...", sleeping=True)
 
     # ------------------------------------------------------------------
     # GPU release / reclaim via orchestrator
@@ -182,25 +234,42 @@ class SleepCycleLoop:
     # Discord presence helper
     # ------------------------------------------------------------------
 
-    def _update_presence(self, status_text: Optional[str], sleeping: bool = False) -> None:
-        """Update Discord presence.  *None* resets to the dynamic idle status.
+    def _update_presence(
+        self,
+        status_text: Optional[str],
+        sleeping: bool = False,
+        offline: bool = False,
+        status_override: Optional[str] = None,
+    ) -> None:
+        """Update Discord presence.
 
-        When *sleeping* is True, sets the Discord dot to yellow (idle).
+        *None* resets to the dynamic idle status.
+        *sleeping* sets the Discord dot to yellow (idle).
+        *offline* sets the Discord status to invisible.
+        *status_override* allows explicit status ("dnd", "idle", etc.).
         """
         if self.discord_connector:
             # In-process connector available (monolith / rescue mode)
-            if status_text is None:
+            if offline:
+                self.discord_connector.update_presence(None, status_override="invisible")
+            elif status_text is None:
                 self.discord_connector.set_idle()
             elif sleeping:
                 self.discord_connector.update_presence(status_text, status_override="idle")
+            elif status_override:
+                self.discord_connector.update_presence(status_text, status_override=status_override)
             else:
                 self.discord_connector.update_presence(status_text)
         else:
             # SOA mode: call gaia-web /presence endpoint
             try:
                 payload: dict = {"activity": status_text or "over the studio"}
-                if sleeping:
+                if offline:
+                    payload["status"] = "invisible"
+                elif sleeping:
                     payload["status"] = "idle"
+                elif status_override:
+                    payload["status"] = status_override
                 httpx.post(f"{self._web_url}/presence", json=payload, timeout=5.0)
             except Exception:
                 logger.debug("Presence update via gaia-web failed", exc_info=True)
