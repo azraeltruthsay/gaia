@@ -272,6 +272,8 @@ class ModelPool:
             self._prime_guard_override = os.getenv("GAIA_ALLOW_PRIME_LOAD", "0") == "1"
         except Exception:
             self._prime_guard_override = False
+        # GPU sleep flag: when True, gpu_prime must not be lazy-loaded or selected
+        self._gpu_released = False
 
     def register_dev_model(self, name: str):
         """
@@ -805,6 +807,11 @@ class ModelPool:
         This is the lazy loading mechanism - if GAIA_AUTOLOAD_MODELS=0, models won't load
         at startup but will load on-demand when first requested.
         """
+        # Block gpu_prime loading when GPU has been released for sleep
+        if name == "gpu_prime" and self._gpu_released and not force:
+            logger.info(f"[LAZY_LOAD] Blocked lazy-load of 'gpu_prime' — GPU is released for sleep")
+            return False
+
         logger.warning(f"[LAZY_LOAD] ensure_model_loaded called for '{name}', force={force}")
         logger.warning(f"[LAZY_LOAD] current pool keys: {list(self.models.keys())}")
         logger.warning(f"[LAZY_LOAD] MODEL_CONFIGS keys: {list(self.config.MODEL_CONFIGS.keys()) if hasattr(self.config, 'MODEL_CONFIGS') else 'NO MODEL_CONFIGS'}")

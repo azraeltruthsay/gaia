@@ -137,14 +137,15 @@ class SemanticCodex:
                             else:
                                 logger.warning(f"Markdown codex file {path} missing 'symbol' or 'body' in front matter.")
                         else:
-                            logger.warning(f"Markdown codex file {path} has empty or invalid YAML front matter.")
+                            logger.debug(f"Markdown codex file {path} has empty or invalid YAML front matter.")
 
                     except yaml.YAMLError as e:
-                        logger.warning(f"Failed to parse YAML front matter in {path}: {e}")
+                        logger.debug(f"Markdown file {path} has non-codex front matter, skipping")
                     except Exception as e:
                         logger.warning(f"Error processing Markdown codex file {path}: {e}")
-                # If not valid Markdown with front matter, or parsing failed, fall through to try as JSON/YAML
-                
+                # Markdown without valid codex front matter — skip (don't fall through to YAML parser)
+                return
+
             # Existing JSON/YAML parsing logic
             payload = None
             if path.suffix.lower() == ".json":
@@ -163,6 +164,8 @@ class SemanticCodex:
                 return
             entries = payload if isinstance(payload, list) else [payload]
             for obj in entries:
+                if not isinstance(obj, dict):
+                    continue
                 sym = obj.get("symbol")
                 body = obj.get("body")
                 if not sym or not body:

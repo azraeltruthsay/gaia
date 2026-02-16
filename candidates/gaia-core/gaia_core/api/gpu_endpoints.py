@@ -100,7 +100,8 @@ async def gpu_release(request: GPUReleaseRequest = GPUReleaseRequest()):
     internal model pool state — it does NOT stop the container.
     """
     if _gpu_state["status"] == "released":
-        return {"ok": True, "message": "Already released", "state": _gpu_state}
+        safe_state = {k: v for k, v in _gpu_state.items() if not k.startswith("_")}
+        return {"ok": True, "message": "Already released", "state": safe_state}
 
     if _gpu_state["status"] not in ("active", "error"):
         raise HTTPException(
@@ -113,6 +114,8 @@ async def gpu_release(request: GPUReleaseRequest = GPUReleaseRequest()):
     try:
         # Remove gpu_prime from the model pool so the fallback chain kicks in
         model_pool = _get_model_pool()
+        # Set the released flag FIRST to prevent lazy-loading from re-adding gpu_prime
+        model_pool._gpu_released = True
         if "gpu_prime" in model_pool.models:
             model_pool.set_status("gpu_prime", "stopped")
             _stashed_model = model_pool.models.pop("gpu_prime", None)
@@ -132,7 +135,8 @@ async def gpu_release(request: GPUReleaseRequest = GPUReleaseRequest()):
         _gpu_state["released_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         logger.info(f"GPU released. Reason: {request.reason or 'none'}. Fallback chain active.")
-        return {"ok": True, "message": "Model pool updated, fallback chain active", "state": _gpu_state.copy()}
+        safe_state = {k: v for k, v in _gpu_state.items() if not k.startswith("_")}
+        return {"ok": True, "message": "Model pool updated, fallback chain active", "state": safe_state}
 
     except Exception as e:
         _gpu_state["status"] = "error"
@@ -150,7 +154,8 @@ async def gpu_reclaim(request: GPUReclaimRequest = GPUReclaimRequest()):
     only restores the model pool state.
     """
     if _gpu_state["status"] == "active":
-        return {"ok": True, "message": "Already active", "state": _gpu_state}
+        safe_state = {k: v for k, v in _gpu_state.items() if not k.startswith("_")}
+        return {"ok": True, "message": "Already active", "state": safe_state}
 
     if _gpu_state["status"] not in ("released", "error"):
         raise HTTPException(
@@ -180,6 +185,8 @@ async def gpu_reclaim(request: GPUReclaimRequest = GPUReclaimRequest()):
 
         # Restore gpu_prime in the model pool
         model_pool = _get_model_pool()
+        # Clear the released flag so lazy-loading and model selection can use gpu_prime again
+        model_pool._gpu_released = False
         stashed = _gpu_state.pop("_stashed_model", None)
         stashed_status = _gpu_state.pop("_stashed_status", None)
 
@@ -198,7 +205,8 @@ async def gpu_reclaim(request: GPUReclaimRequest = GPUReclaimRequest()):
         _gpu_state["reclaimed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         logger.info("GPU reclaimed — prime inference restored")
-        return {"ok": True, "message": "GPU reclaimed, prime active", "state": _gpu_state.copy()}
+        safe_state = {k: v for k, v in _gpu_state.items() if not k.startswith("_")}
+        return {"ok": True, "message": "GPU reclaimed, prime active", "state": safe_state}
 
     except Exception as e:
         _gpu_state["status"] = "error"

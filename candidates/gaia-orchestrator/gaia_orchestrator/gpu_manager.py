@@ -14,6 +14,7 @@ offloaded to an 8GB CPU RAM buffer (--kv-offloading-backend native).
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from .config import get_config
@@ -42,7 +43,7 @@ except ImportError:
 class GPUManager:
     """Manages GPU resources and monitors VRAM usage."""
 
-    PRIME_CONTAINER_NAME = "gaia-prime-candidate"
+    PRIME_CONTAINER_NAME = os.environ.get("PRIME_CONTAINER_NAME", "gaia-prime")
 
     def __init__(self, state_manager: StateManager):
         self.state_manager = state_manager
@@ -210,7 +211,7 @@ class GPUManager:
 
             # Wait for healthy (model loaded, serving)
             prime_url = getattr(self.config, "prime_url",
-                                "http://gaia-prime-candidate:7777")
+                                "http://gaia-prime:7777")
             logger.info(f"Waiting for prime to become healthy at {prime_url}...")
 
             import httpx
