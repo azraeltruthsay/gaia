@@ -2,6 +2,7 @@
 
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,11 +45,11 @@ def bare_scheduler(config):
 
 class TestRegistration:
     def test_default_tasks_registered(self, scheduler):
-        assert len(scheduler._tasks) == 3
+        assert len(scheduler._tasks) == 4
 
     def test_default_task_ids(self, scheduler):
         ids = {t.task_id for t in scheduler._tasks}
-        assert ids == {"conversation_curation", "thought_seed_review", "initiative_cycle"}
+        assert ids == {"conversation_curation", "thought_seed_review", "initiative_cycle", "blueprint_validation"}
 
     def test_register_custom_task(self, bare_scheduler):
         task = SleepTask(
@@ -191,7 +192,7 @@ class TestStatus:
     def test_status_shape(self, scheduler):
         status = scheduler.get_status()
         assert isinstance(status, list)
-        assert len(status) == 3
+        assert len(status) == 4
 
         for entry in status:
             assert "task_id" in entry
@@ -215,3 +216,122 @@ class TestStatus:
         assert status[0]["run_count"] == 1
         assert status[0]["last_run"] is not None
         assert status[0]["last_error"] is None
+
+
+# ------------------------------------------------------------------
+# Blueprint Validation
+# ------------------------------------------------------------------
+
+
+class TestBlueprintValidation:
+    def test_task_registered(self, scheduler):
+        """blueprint_validation must be in the default task list."""
+        ids = {t.task_id for t in scheduler._tasks}
+        assert "blueprint_validation" in ids
+
+    def test_task_priority(self, scheduler):
+        task = next(t for t in scheduler._tasks if t.task_id == "blueprint_validation")
+        assert task.priority == 3
+
+    def test_extract_enums(self, tmp_path):
+        """Extract enum members from a source file."""
+        source = tmp_path / "states.py"
+        source.write_text(
+            "from enum import Enum\n\n"
+            "class GaiaState(str, Enum):\n"
+            "    ACTIVE = 'active'\n"
+            "    DROWSY = 'drowsy'\n"
+            "    ASLEEP = 'asleep'\n"
+        )
+        facts = SleepTaskScheduler._extract_facts(
+            ["states.py"], [tmp_path],
+        )
+        assert "GaiaState.ACTIVE" in facts["enums"]
+        assert "GaiaState.DROWSY" in facts["enums"]
+        assert "GaiaState.ASLEEP" in facts["enums"]
+
+    def test_extract_endpoints(self, tmp_path):
+        """Extract router endpoints from a source file."""
+        source = tmp_path / "endpoints.py"
+        source.write_text(
+            'from fastapi import APIRouter\n'
+            'router = APIRouter(prefix="/sleep")\n\n'
+            '@router.post("/wake")\n'
+            'async def wake(): pass\n\n'
+            '@router.get("/status")\n'
+            'async def status(): pass\n'
+        )
+        facts = SleepTaskScheduler._extract_facts(
+            ["endpoints.py"], [tmp_path],
+        )
+        assert "POST /wake" in facts["endpoints"]
+        assert "GET /status" in facts["endpoints"]
+
+    def test_extract_constants(self, tmp_path):
+        """Extract top-level UPPER_CASE constants."""
+        source = tmp_path / "consts.py"
+        source.write_text(
+            'CANNED_DREAMING = "I am studying"\n'
+            'CANNED_DISTRACTED = "I am busy"\n'
+            'some_var = 123\n'
+        )
+        facts = SleepTaskScheduler._extract_facts(
+            ["consts.py"], [tmp_path],
+        )
+        assert "CANNED_DREAMING" in facts["constants"]
+        assert "CANNED_DISTRACTED" in facts["constants"]
+        # lowercase should NOT be extracted
+        assert "some_var" not in facts["constants"]
+
+    def test_detects_stale_enum(self, tmp_path):
+        """A blueprint missing a known enum value should be flagged."""
+        # Source has ACTIVE, DROWSY, ASLEEP
+        source = tmp_path / "states.py"
+        source.write_text(
+            "from enum import Enum\n\n"
+            "class GaiaState(str, Enum):\n"
+            "    ACTIVE = 'active'\n"
+            "    DROWSY = 'drowsy'\n"
+            "    ASLEEP = 'asleep'\n"
+        )
+        # Blueprint only mentions ACTIVE — missing DROWSY and ASLEEP
+        bp_text = "# Blueprint\nGaiaState has ACTIVE state.\n"
+
+        facts = SleepTaskScheduler._extract_facts(["states.py"], [tmp_path])
+        missing = SleepTaskScheduler._check_facts(facts, bp_text)
+
+        assert any("DROWSY" in m for m in missing)
+        assert any("ASLEEP" in m for m in missing)
+        assert not any("ACTIVE" in m for m in missing)
+
+    def test_append_update_notes(self, tmp_path):
+        """_append_update_notes should add a timestamped section."""
+        bp_path = tmp_path / "TEST_BP.md"
+        bp_path.write_text("# Test Blueprint\n\nSome content.\n")
+
+        SleepTaskScheduler._append_update_notes(
+            bp_path,
+            bp_path.read_text(),
+            ["enum:GaiaState.MISSING", "constant:NEW_CONST"],
+        )
+
+        updated = bp_path.read_text()
+        assert "## Recent Implementation Updates" in updated
+        assert "`enum:GaiaState.MISSING`" in updated
+        assert "`constant:NEW_CONST`" in updated
+        assert "blueprint_validation sleep task" in updated
+
+    def test_no_false_positives_when_current(self, tmp_path):
+        """A blueprint mentioning all facts should produce no mismatches."""
+        source = tmp_path / "states.py"
+        source.write_text(
+            "from enum import Enum\n\n"
+            "class GaiaState(str, Enum):\n"
+            "    ACTIVE = 'active'\n"
+        )
+        bp_text = "# Blueprint\nThe GaiaState enum includes ACTIVE.\n"
+
+        facts = SleepTaskScheduler._extract_facts(["states.py"], [tmp_path])
+        missing = SleepTaskScheduler._check_facts(facts, bp_text)
+
+        assert missing == []
