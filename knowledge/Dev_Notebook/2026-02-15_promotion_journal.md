@@ -1,7 +1,7 @@
 # Promotion Pipeline — 2026-02-15
 
-**Timestamp:** 2026-02-15T16:25:26
-**Duration:** 5m 9s
+**Timestamp:** 2026-02-15T16:38:48
+**Duration:** 5m 6s
 **Services:** gaia-core
 **Mode:** LIVE
 **Result:** PASS
