@@ -8,9 +8,12 @@ Coordinates GPU handoff between services:
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Optional
+
+import httpx
 
 from .config import get_config
 from .state import StateManager
@@ -33,6 +36,7 @@ class HandoffManager:
         self.state_manager = state_manager
         self.gpu_manager = gpu_manager
         self.config = get_config()
+        self._core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
 
     async def _update_handoff_phase(
         self,
@@ -118,6 +122,9 @@ class HandoffManager:
 
             if self.gpu_manager:
                 await self.gpu_manager.signal_study_gpu_ready()
+
+            # Notify gaia-core sleep state machine
+            await self._notify_study_handoff("prime_to_study", handoff.handoff_id)
 
             # Complete
             handoff = await self._update_handoff_phase(handoff, HandoffPhase.COMPLETED, 100)
@@ -206,6 +213,9 @@ class HandoffManager:
             if self.gpu_manager:
                 await self.gpu_manager.request_reclaim_by_core()
 
+            # Notify gaia-core sleep state machine
+            await self._notify_study_handoff("study_to_prime", handoff.handoff_id)
+
             # Complete
             handoff = await self._update_handoff_phase(handoff, HandoffPhase.COMPLETED, 100)
             await self.state_manager.complete_handoff(handoff)
@@ -223,6 +233,21 @@ class HandoffManager:
             )
             await self.state_manager.complete_handoff(handoff)
             raise
+
+    async def _notify_study_handoff(self, direction: str, handoff_id: str) -> None:
+        """Notify gaia-core's sleep state machine about a study handoff."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{self._core_url}/sleep/study-handoff",
+                    json={"direction": direction, "handoff_id": handoff_id},
+                )
+                if resp.status_code == 200:
+                    logger.info("Notified gaia-core of %s handoff", direction)
+                else:
+                    logger.warning("gaia-core study-handoff returned %s", resp.status_code)
+        except Exception:
+            logger.warning("Failed to notify gaia-core of study handoff", exc_info=True)
 
     async def cancel_handoff(self, handoff_id: str) -> HandoffStatus:
         """Cancel an in-progress handoff."""
