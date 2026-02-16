@@ -6,6 +6,7 @@ Self Reflection Processor (model-powered, robust pipeline)
 """
 
 import logging
+import os
 import time
 import json
 import re
@@ -21,11 +22,10 @@ from gaia_core.utils.prompt_builder import build_from_packet, count_tokens
 from gaia_core.utils.packet_builder import build_packet_snapshot
 
 logger = logging.getLogger("GAIA.SelfReflection")
-# File logging setup for self-reflection module
-import os
-log_dir = os.path.join(os.getcwd(), "logs")
-os.makedirs(log_dir, exist_ok=True)
-file_handler = logging.FileHandler(os.path.join(log_dir, "self_reflection.log"), mode="a")
+# File logging setup — uses canonical LOGS_DIR from config
+_sr_cfg = Config()
+os.makedirs(_sr_cfg.LOGS_DIR, exist_ok=True)
+file_handler = logging.FileHandler(os.path.join(_sr_cfg.LOGS_DIR, "self_reflection.log"), mode="a")
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
 logger.addHandler(file_handler)

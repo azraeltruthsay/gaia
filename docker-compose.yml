@@ -166,6 +166,8 @@ services:
       - ./knowledge/vector_store:/vector_store:ro
       # Model files (read-only)
       - ./gaia-models:/models:ro
+      # Logs (consolidated service logs)
+      - ./logs:/logs:rw
       # Shared state
       - gaia-shared:/shared:rw
 

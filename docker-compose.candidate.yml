@@ -55,6 +55,7 @@ services:
       - ./knowledge:/knowledge:rw
       - ./knowledge/vector_store:/vector_store:ro
       - ./gaia-models:/models:ro
+      - ./logs:/logs:rw
       - gaia-candidate-shared:/shared:rw
 
     environment:
