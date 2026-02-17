@@ -15,6 +15,8 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+from gaia_web.queue.message_queue import MessageQueue
+
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
     OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
@@ -55,6 +57,15 @@ async def health_check():
     )
 
 
+@app.get("/queue/status")
+async def queue_status():
+    """Return current message queue status."""
+    mq: MessageQueue | None = getattr(app.state, "message_queue", None)
+    if mq is None:
+        return JSONResponse(status_code=503, content={"error": "MessageQueue not initialized"})
+    return await mq.get_queue_status()
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -63,6 +74,7 @@ async def root():
         "description": "GAIA Web Gateway Service",
         "endpoints": {
             "/health": "Health check",
+            "/queue/status": "Message queue status",
             "/": "This endpoint",
         }
     }
@@ -74,6 +86,33 @@ async def process_user_input(user_input: str):
     Process a user input string by converting it to a CognitionPacket
     and sending it to gaia-core for processing.
     """
+    # Sleep-aware: if GAIA is asleep, enqueue + wake + wait
+    mq: MessageQueue | None = getattr(app.state, "message_queue", None)
+    if mq is not None:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                check = await client.get(f"{CORE_ENDPOINT}/sleep/distracted-check")
+                if check.status_code == 200:
+                    data = check.json()
+                    if data.get("state") == "asleep":
+                        from gaia_web.queue.message_queue import QueuedMessage
+                        qm = QueuedMessage(
+                            message_id=str(uuid.uuid4()),
+                            content=user_input,
+                            source="web",
+                            session_id="web_ui_session",
+                        )
+                        await mq.enqueue(qm)
+                        woke = await mq.wait_for_active(timeout=120.0)
+                        await mq.dequeue()
+                        if not woke:
+                            return JSONResponse(
+                                status_code=503,
+                                content={"response": "I'm having trouble waking up right now. Please try again in a moment.", "packet_id": None},
+                            )
+        except Exception:
+            logger.debug("Sleep-check failed in /process_user_input — proceeding", exc_info=True)
+
     packet_id = str(uuid.uuid4())
     session_id = "web_ui_session" # Placeholder, can be dynamic
     current_time = datetime.now().isoformat()
@@ -276,12 +315,15 @@ async def output_router(packet: Dict[str, Any]):
 @app.on_event("startup")
 async def startup_event():
     """Start Discord bot on application startup if enabled."""
+    # Initialize message queue for sleep/wake cycle
+    app.state.message_queue = MessageQueue(core_url=CORE_ENDPOINT)
+
     print(f"[STARTUP] ENABLE_DISCORD={ENABLE_DISCORD}, TOKEN_SET={bool(DISCORD_BOT_TOKEN)}")
     if ENABLE_DISCORD and DISCORD_BOT_TOKEN:
         print("[STARTUP] Starting Discord bot...")
         try:
             from .discord_interface import start_discord_bot
-            result = start_discord_bot(DISCORD_BOT_TOKEN, CORE_ENDPOINT)
+            result = start_discord_bot(DISCORD_BOT_TOKEN, CORE_ENDPOINT, message_queue=app.state.message_queue)
             print(f"[STARTUP] Discord bot startup result: {result}")
         except Exception as e:
             print(f"[STARTUP] Failed to start Discord bot: {e}")
