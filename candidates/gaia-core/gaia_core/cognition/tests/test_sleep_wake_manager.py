@@ -4,10 +4,15 @@ Unit tests for the GAIA sleep/wake state machine.
 Tests the 6-state + 2-phase lifecycle:
     ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED / OFFLINE
     Internal phases: _FINISHING_TASK, _WAKING
+
+Also covers:
+- Checkpoint rotation order (rotate before create)
+- Post-wake consumed sentinel
+- LLM-generated checkpoint (Phase 2)
 """
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from gaia_core.cognition.sleep_wake_manager import (
@@ -121,6 +126,55 @@ class TestInitiateDrowsy:
         assert manager.get_state() == GaiaState.ACTIVE
         assert manager.wake_signal_pending is False
 
+    def test_rotation_before_create(self, manager):
+        """Rotation should happen BEFORE create so backups capture previous state."""
+        call_order = []
+        original_rotate = manager.checkpoint_manager.rotate_checkpoints
+        original_create = manager.checkpoint_manager.create_checkpoint
+
+        def track_rotate(*a, **kw):
+            call_order.append("rotate")
+            return original_rotate(*a, **kw)
+
+        def track_create(*a, **kw):
+            call_order.append("create")
+            return original_create(*a, **kw)
+
+        manager.checkpoint_manager.rotate_checkpoints = track_rotate
+        manager.checkpoint_manager.create_checkpoint = track_create
+        manager.initiate_drowsy()
+        assert call_order == ["rotate", "create"]
+
+    def test_previous_checkpoint_preserved_in_backup(self, manager, mock_config):
+        """When sleeping twice, the backup should contain the FIRST checkpoint."""
+        manager.initiate_drowsy()
+        checkpoint_dir = Path(mock_config.SHARED_DIR) / "sleep_state"
+        first_content = (checkpoint_dir / "prime.md").read_text(encoding="utf-8")
+
+        # Wake up
+        manager.receive_wake_signal()
+        manager.complete_wake()
+
+        # Sleep again
+        manager.initiate_drowsy()
+        backup_content = (checkpoint_dir / "prime_previous.md").read_text(encoding="utf-8")
+        assert backup_content == first_content
+
+    def test_consumed_sentinel_cleared_on_new_checkpoint(self, manager, mock_config):
+        """Creating a new checkpoint should clear the consumed sentinel."""
+        checkpoint_dir = Path(mock_config.SHARED_DIR) / "sleep_state"
+        sentinel = checkpoint_dir / ".prime_consumed"
+
+        # First sleep + wake (creates consumed sentinel)
+        manager.initiate_drowsy()
+        manager.receive_wake_signal()
+        manager.complete_wake()
+        assert sentinel.exists()
+
+        # Second sleep should clear the sentinel
+        manager.initiate_drowsy()
+        assert not sentinel.exists()
+
 
 # ── Wake signal handling ──────────────────────────────────────────────
 
@@ -190,6 +244,24 @@ class TestCompleteWake:
         result = manager.complete_wake()
         assert result["checkpoint_loaded"] is False
         assert manager.get_state() == GaiaState.ACTIVE
+
+    def test_complete_wake_marks_consumed(self, manager, mock_config):
+        """After wake, the consumed sentinel should exist."""
+        manager.initiate_drowsy()
+        manager.receive_wake_signal()
+        manager.complete_wake()
+
+        sentinel = Path(mock_config.SHARED_DIR) / "sleep_state" / ".prime_consumed"
+        assert sentinel.exists()
+
+    def test_complete_wake_no_consumed_when_no_checkpoint(self, manager, mock_config):
+        """If there's no checkpoint, no consumed sentinel should be created."""
+        manager.state = GaiaState.ASLEEP
+        manager._phase = _TransientPhase.WAKING
+        manager.complete_wake()
+
+        sentinel = Path(mock_config.SHARED_DIR) / "sleep_state" / ".prime_consumed"
+        assert not sentinel.exists()
 
 
 # ── Status ────────────────────────────────────────────────────────────
@@ -358,3 +430,84 @@ class TestOffline:
         manager.state = GaiaState.DISTRACTED
         manager.initiate_offline()
         assert manager.get_state() == GaiaState.OFFLINE
+
+
+# ── LLM-generated checkpoint (Phase 2) ──────────────────────────────
+
+class TestLLMCheckpoint:
+    def test_llm_checkpoint_with_model_pool(self, mock_config):
+        """When model_pool provides a lite model, checkpoint uses LLM generation."""
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": "I was thinking about artisanal AI..."}}]
+        }
+        mock_pool = MagicMock()
+        mock_pool.get_model_for_role.return_value = mock_llm
+
+        mgr = SleepWakeManager(mock_config, model_pool=mock_pool)
+        mgr.initiate_drowsy()
+
+        checkpoint_file = Path(mock_config.SHARED_DIR) / "sleep_state" / "prime.md"
+        content = checkpoint_file.read_text(encoding="utf-8")
+
+        assert "LLM introspection" in content
+        assert "artisanal AI" in content
+        mock_pool.get_model_for_role.assert_called_with("lite")
+        mock_llm.create_chat_completion.assert_called_once()
+
+    def test_llm_fallback_on_no_lite_model(self, mock_config):
+        """Falls back to template when lite model is None."""
+        mock_pool = MagicMock()
+        mock_pool.get_model_for_role.return_value = None
+
+        mgr = SleepWakeManager(mock_config, model_pool=mock_pool)
+        mgr.initiate_drowsy()
+
+        checkpoint_file = Path(mock_config.SHARED_DIR) / "sleep_state" / "prime.md"
+        content = checkpoint_file.read_text(encoding="utf-8")
+
+        assert "static template" in content
+
+    def test_llm_fallback_on_exception(self, mock_config):
+        """Falls back to template when LLM call raises."""
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.side_effect = RuntimeError("model crashed")
+        mock_pool = MagicMock()
+        mock_pool.get_model_for_role.return_value = mock_llm
+
+        mgr = SleepWakeManager(mock_config, model_pool=mock_pool)
+        result = mgr.initiate_drowsy()
+        assert result is True  # should still enter ASLEEP
+
+        checkpoint_file = Path(mock_config.SHARED_DIR) / "sleep_state" / "prime.md"
+        content = checkpoint_file.read_text(encoding="utf-8")
+        assert "static template" in content
+
+    def test_template_without_model_pool(self, manager, mock_config):
+        """Without model_pool, checkpoint uses static template."""
+        manager.initiate_drowsy()
+
+        checkpoint_file = Path(mock_config.SHARED_DIR) / "sleep_state" / "prime.md"
+        content = checkpoint_file.read_text(encoding="utf-8")
+        assert "static template" in content
+
+
+# ── Checkpoint consumed sentinel ─────────────────────────────────────
+
+class TestCheckpointConsumed:
+    def test_is_consumed_false_initially(self, manager):
+        assert manager.checkpoint_manager.is_consumed() is False
+
+    def test_mark_consumed_creates_sentinel(self, manager, mock_config):
+        manager.checkpoint_manager.mark_consumed()
+        sentinel = Path(mock_config.SHARED_DIR) / "sleep_state" / ".prime_consumed"
+        assert sentinel.exists()
+        assert manager.checkpoint_manager.is_consumed() is True
+
+    def test_create_checkpoint_clears_consumed(self, manager, mock_config):
+        """New checkpoint creation should clear consumed flag."""
+        manager.checkpoint_manager.mark_consumed()
+        assert manager.checkpoint_manager.is_consumed() is True
+
+        manager.checkpoint_manager.create_checkpoint()
+        assert manager.checkpoint_manager.is_consumed() is False

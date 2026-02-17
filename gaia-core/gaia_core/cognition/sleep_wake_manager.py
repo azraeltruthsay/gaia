@@ -65,13 +65,14 @@ CANNED_DISTRACTED = (
 class SleepWakeManager:
     """Manages GAIA's sleep/wake state transitions with cognitive continuity."""
 
-    def __init__(self, config) -> None:
+    def __init__(self, config, model_pool=None) -> None:
         self.config = config
         self.state = GaiaState.ACTIVE
         self._phase = _TransientPhase.NONE
         self.current_task: Optional[Dict[str, Any]] = None
         self.wake_signal_pending = False
         self.prime_available = False
+        self.model_pool = model_pool
         self.checkpoint_manager = PrimeCheckpointManager(config)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
@@ -114,8 +115,9 @@ class SleepWakeManager:
         logger.info("Entering DROWSY — writing checkpoint...")
 
         try:
-            self.checkpoint_manager.create_checkpoint(current_packet)
+            # Rotate FIRST so the backup captures the *previous* checkpoint
             self.checkpoint_manager.rotate_checkpoints()
+            self.checkpoint_manager.create_checkpoint(current_packet, model_pool=self.model_pool)
 
             # Check if we were interrupted during checkpoint write
             if self.wake_signal_pending:
@@ -189,6 +191,10 @@ class SleepWakeManager:
         try:
             checkpoint = self.checkpoint_manager.load_latest()
             review_context = self._format_checkpoint_as_review(checkpoint)
+
+            # Mark consumed so prompt_builder doesn't inject stale context
+            if checkpoint:
+                self.checkpoint_manager.mark_consumed()
 
             self.state = GaiaState.ACTIVE
             self._phase = _TransientPhase.NONE

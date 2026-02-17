@@ -557,14 +557,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         return normalized
 
     # --- Sleep restoration context (Tier 1, between summary and RAG) ---
+    # Only inject if the checkpoint hasn't been consumed yet (first prompt
+    # after wake).  The consumed sentinel is set by complete_wake() so
+    # subsequent prompts don't waste tokens on stale sleep context.
     sleep_context_prompt = {}
     try:
         from gaia_core.cognition.sleep_wake_manager import SleepWakeManager
-        checkpoint_path = os.path.join(
-            getattr(config, "SLEEP_CHECKPOINT_DIR", "/shared/sleep_state"),
-            "prime.md",
-        )
-        if os.path.exists(checkpoint_path):
+        checkpoint_dir = getattr(config, "SLEEP_CHECKPOINT_DIR", "/shared/sleep_state")
+        checkpoint_path = os.path.join(checkpoint_dir, "prime.md")
+        consumed_path = os.path.join(checkpoint_dir, ".prime_consumed")
+
+        if os.path.exists(checkpoint_path) and not os.path.exists(consumed_path):
             with open(checkpoint_path, "r", encoding="utf-8") as f:
                 checkpoint_content = f.read().strip()
             if checkpoint_content:
