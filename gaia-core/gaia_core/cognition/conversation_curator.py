@@ -38,6 +38,10 @@ _write_lock = threading.Lock()
 class ConversationCurator:
     """Evaluates archived conversations and appends notable ones to the examples file."""
 
+    # Class-level set of (session_id, msg_count) tuples already curated this process lifetime.
+    # Prevents duplicate appends when both SessionManager and SleepTaskScheduler call curate().
+    _curated_keys: set = set()
+
     def __init__(self, output_dir: Optional[str] = None):
         base = output_dir or os.getenv("KNOWLEDGE_DIR", "/knowledge")
         self.output_path = os.path.join(base, "conversation_examples.md")
@@ -49,12 +53,19 @@ class ConversationCurator:
             logger.debug(f"Curator: skipping test session '{session_id}'")
             return False
 
+        # Dedup: skip if we already curated this session at this message count
+        dedup_key = (session_id, len(messages))
+        if dedup_key in ConversationCurator._curated_keys:
+            logger.debug(f"Curator: already curated '{session_id}' at {len(messages)} msgs, skipping")
+            return False
+
         if not self.is_notable(messages):
             logger.debug(f"Curator: session '{session_id}' not notable, skipping")
             return False
 
         formatted = self._format_conversation(session_id, messages)
         self._append_to_file(formatted)
+        ConversationCurator._curated_keys.add(dedup_key)
         logger.info(f"Curator: appended notable conversation from '{session_id}'")
         return True
 
