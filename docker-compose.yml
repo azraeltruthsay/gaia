@@ -105,15 +105,14 @@ services:
 
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model ${PRIME_MODEL_PATH:-/models/Qwen3-8B-AWQ}
+      --model ${PRIME_MODEL_PATH:-/models/Qwen3-4B-Instruct-2507-heretic}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.70
       --max-model-len 8192
       --max-num-seqs 4
       --trust-remote-code
-      --dtype float16
-      --quantization awq
+      --dtype auto
       --enforce-eager
       --enable-lora
       --max-loras 4
@@ -190,7 +189,7 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-AWQ}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-4B-Instruct-2507-heretic}
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
@@ -301,6 +300,8 @@ services:
       - ./knowledge/vector_store:/vector_store:rw
       # Model files (WRITE for LoRA adapters)
       - ./gaia-models:/models:rw
+      # Logs (consolidated service logs)
+      - ./logs:/logs:rw
       # Shared state
       - gaia-shared:/shared:rw
 
@@ -312,6 +313,7 @@ services:
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
       - SHARED_DIR=/shared
+      - GAIA_LOG_DIR=/logs
       # GPU settings for embedding
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       # Embedding model
