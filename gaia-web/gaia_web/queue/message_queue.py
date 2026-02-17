@@ -36,7 +36,7 @@ class QueuedMessage:
 class MessageQueue:
     """Thread-safe async message queue for sleep/wake cycle."""
 
-    def __init__(self, core_url: str = "http://gaia-core-candidate:6416") -> None:
+    def __init__(self, core_url: str = "http://gaia-core:6415") -> None:
         self._queue: List[QueuedMessage] = []
         self._lock = asyncio.Lock()
         self._wake_signal_sent = False
@@ -84,6 +84,41 @@ class MessageQueue:
                 "wake_signal_sent": self._wake_signal_sent,
                 "oldest_message_age_seconds": oldest_age,
             }
+
+    async def wait_for_active(self, poll_interval: float = 5.0, timeout: float = 120.0) -> bool:
+        """Poll gaia-core /sleep/status until state is 'active' or timeout.
+
+        Returns True if core reached active state, False on timeout or
+        unresolvable states (offline, dreaming).
+        """
+        import httpx
+        import time
+
+        deadline = time.monotonic() + timeout
+        unresolvable = {"offline", "dreaming"}
+
+        while time.monotonic() < deadline:
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        f"{self._core_url}/sleep/status", timeout=5.0
+                    )
+                    if resp.status_code == 200:
+                        state = resp.json().get("state", "")
+                        if state == "active":
+                            logger.info("Core reached ACTIVE state")
+                            return True
+                        if state in unresolvable:
+                            logger.warning("Core in unresolvable state: %s", state)
+                            return False
+                        logger.debug("Core state: %s — waiting...", state)
+            except Exception:
+                logger.debug("Poll failed — retrying", exc_info=True)
+
+            await asyncio.sleep(poll_interval)
+
+        logger.warning("wait_for_active timed out after %.0fs", timeout)
+        return False
 
     async def _send_wake_signal(self) -> None:
         """POST to gaia-core /sleep/wake to trigger wakeup."""

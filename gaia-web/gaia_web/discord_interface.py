@@ -42,9 +42,10 @@ class DiscordInterface:
     - Converting between Discord events and CognitionPackets
     """
 
-    def __init__(self, bot_token: str, core_endpoint: str):
+    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None):
         self.bot_token = bot_token
         self.core_endpoint = core_endpoint
+        self.message_queue = message_queue
         self._bot = None
         self._loop = None
 
@@ -139,19 +140,56 @@ class DiscordInterface:
         """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket."""
         logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {author_name}")
 
-        # Check if GAIA is in a state that warrants a canned response
+        # Check if GAIA is in a state that warrants a canned response or sleep-wake
+        core_state = "active"
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 check = await client.get(f"{self.core_endpoint}/sleep/distracted-check")
                 if check.status_code == 200:
                     data = check.json()
+                    core_state = data.get("state", "active")
                     canned = data.get("canned_response")
                     if canned:
-                        logger.info("Discord: Canned response for state=%s", data.get("state"))
+                        logger.info("Discord: Canned response for state=%s", core_state)
                         await self._send_response(message_obj, canned, is_dm)
                         return
         except Exception:
             logger.debug("Distracted-check failed — proceeding normally", exc_info=True)
+
+        # Sleep-aware: enqueue, wake, wait, then process normally
+        if core_state == "asleep" and self.message_queue is not None:
+            from gaia_web.queue.message_queue import QueuedMessage
+
+            qm = QueuedMessage(
+                message_id=message_id,
+                content=content,
+                source="discord",
+                session_id=f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}",
+                metadata={"author_name": author_name, "is_dm": is_dm},
+            )
+            await self.message_queue.enqueue(qm)
+            logger.info("Discord: GAIA is asleep — queued message %s, waiting for wake", message_id)
+
+            # Show typing indicator while waiting for wake
+            try:
+                async with message_obj.channel.typing():
+                    woke = await self.message_queue.wait_for_active(timeout=120.0)
+            except Exception:
+                woke = await self.message_queue.wait_for_active(timeout=120.0)
+
+            await self.message_queue.dequeue()
+
+            if not woke:
+                logger.warning("Discord: Wake timed out for message %s", message_id)
+                await self._send_response(
+                    message_obj,
+                    "I'm having trouble waking up right now... give me another moment and try again.",
+                    is_dm,
+                )
+                return
+
+            logger.info("Discord: GAIA woke up — processing queued message %s", message_id)
+            # Fall through to normal packet construction below
 
         packet_id = str(uuid.uuid4())
         session_id = f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}"
@@ -365,13 +403,14 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return False
 
 
-def start_discord_bot(bot_token: str, core_endpoint: str) -> bool:
+def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None) -> bool:
     """
     Start the Discord bot in a background thread.
 
     Args:
         bot_token: Discord bot token
         core_endpoint: URL of gaia-core service (e.g., http://gaia-core:6415)
+        message_queue: Optional MessageQueue instance for sleep/wake queueing
 
     Returns:
         True if started successfully
@@ -380,7 +419,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str) -> bool:
         logger.error("Cannot start Discord bot: no token provided")
         return False
 
-    interface = DiscordInterface(bot_token, core_endpoint)
+    interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue)
 
     def run_bot():
         loop = asyncio.new_event_loop()

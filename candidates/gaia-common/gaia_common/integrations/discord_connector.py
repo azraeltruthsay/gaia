@@ -9,6 +9,7 @@ This module provides Discord integration as both:
 import os
 import logging
 import asyncio
+import concurrent.futures
 import threading
 import time
 from typing import Optional, Dict, Any, Generator, Callable, List
