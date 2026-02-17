@@ -85,7 +85,7 @@ class MessageQueue:
                 "oldest_message_age_seconds": oldest_age,
             }
 
-    async def wait_for_active(self, poll_interval: float = 5.0, timeout: float = 120.0) -> bool:
+    async def wait_for_active(self, poll_interval: float = 1.5, timeout: float = 120.0) -> bool:
         """Poll gaia-core /sleep/status until state is 'active' or timeout.
 
         Returns True if core reached active state, False on timeout or

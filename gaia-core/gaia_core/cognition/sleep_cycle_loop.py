@@ -29,7 +29,8 @@ logger = logging.getLogger("GAIA.SleepCycle")
 class SleepCycleLoop:
     """Background thread that monitors idle state and drives sleep/wake."""
 
-    POLL_INTERVAL = 10  # seconds between idle checks
+    POLL_INTERVAL_ACTIVE = 10  # seconds between idle checks when ACTIVE
+    POLL_INTERVAL_ASLEEP = 2   # seconds when ASLEEP — react fast to wake signals
     DISTRACTED_RECHECK_INTERVAL = 300  # 5 min between distracted rechecks
 
     def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None) -> None:
@@ -68,24 +69,10 @@ class SleepCycleLoop:
     def start(self) -> None:
         if self._thread is not None:
             return
-        self._probe_prime_on_boot()
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True, name="SleepCycleLoop")
         self._thread.start()
         logger.info("Sleep cycle loop started")
-
-    def _probe_prime_on_boot(self) -> None:
-        """Check if gaia-prime is already healthy on startup and set prime_available."""
-        prime_url = os.getenv("PRIME_ENDPOINT", "http://gaia-prime:7777")
-        try:
-            resp = httpx.get(f"{prime_url}/health", timeout=5.0)
-            if resp.status_code == 200:
-                self.sleep_wake_manager.prime_available = True
-                logger.info("Prime detected healthy on boot — prime_available=True")
-            else:
-                logger.info("Prime returned %s on boot — prime_available remains False", resp.status_code)
-        except Exception:
-            logger.info("Prime unreachable on boot — prime_available remains False")
 
     def stop(self) -> None:
         self._running = False
@@ -130,7 +117,11 @@ class SleepCycleLoop:
                 time.sleep(15)
                 continue
 
-            time.sleep(self.POLL_INTERVAL)
+            # Poll faster when asleep to react quickly to wake signals
+            if state in (GaiaState.ASLEEP, GaiaState.DISTRACTED):
+                time.sleep(self.POLL_INTERVAL_ASLEEP)
+            else:
+                time.sleep(self.POLL_INTERVAL_ACTIVE)
 
     # ------------------------------------------------------------------
     # Per-state handlers
