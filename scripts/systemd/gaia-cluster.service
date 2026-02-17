@@ -1,0 +1,23 @@
+[Unit]
+Description=GAIA Cluster — tmux sessions + Docker production stack
+After=gaia-warm-pool-seed.service docker.service network-online.target
+Requires=gaia-warm-pool-seed.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=azrael
+Group=azrael
+Environment=TERM=xterm-256color
+Environment=PATH=/home/azrael/.nvm/versions/node/v25.4.0/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/gaia/GAIA_Project
+
+ExecStart=/gaia/GAIA_Project/scripts/gaia-startup.sh
+ExecStop=/usr/bin/docker compose -f /gaia/GAIA_Project/docker-compose.yml down -t 20
+
+TimeoutStartSec=600
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
