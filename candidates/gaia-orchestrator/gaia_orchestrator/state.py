@@ -7,7 +7,7 @@ and state inspection.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 import asyncio
@@ -61,7 +61,7 @@ class StateManager:
 
     async def _save_state(self) -> None:
         """Save state to disk."""
-        self._state.last_updated = datetime.utcnow()
+        self._state.last_updated = datetime.now(timezone.utc)
         content = self._state.model_dump_json(indent=2)
 
         # Write atomically via temp file
@@ -108,7 +108,7 @@ class StateManager:
             state.gpu.owner = owner
             state.gpu.lease_id = lease_id
             state.gpu.reason = reason
-            state.gpu.acquired_at = datetime.utcnow()
+            state.gpu.acquired_at = datetime.now(timezone.utc)
 
     async def release_gpu(self) -> None:
         """Release GPU ownership."""
@@ -165,7 +165,7 @@ class StateManager:
     async def complete_handoff(self, handoff: HandoffStatus) -> None:
         """Complete handoff and move to history."""
         async with self.modify() as state:
-            handoff.completed_at = datetime.utcnow()
+            handoff.completed_at = datetime.now(timezone.utc)
             state.handoff_history.append(handoff)
             state.active_handoff = None
 

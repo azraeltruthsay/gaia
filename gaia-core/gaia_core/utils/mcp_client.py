@@ -9,7 +9,7 @@ to the MCP-lite server.
 import logging
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 from gaia_common.protocols.cognition_packet import CognitionPacket
@@ -37,7 +37,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
     ep = _normalize_endpoint(ep_raw)
     if not ep:
         return {"ok": False, "error": "MCP endpoint not configured"}
-    payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.utcnow().isoformat()}
+    payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.now(timezone.utc).isoformat()}
     try:
         r = requests.post(ep, json=payload, timeout=timeout)
         if r.status_code == 403:
@@ -64,9 +64,9 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
         r.raise_for_status()
         return {"ok": True, "response": r.json()}
     except Exception as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] call_jsonrpc failed: {e}")
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
         try:
-            logger.error(f"[{datetime.utcnow().isoformat()}] full error response: {r.json()}")
+            logger.error(f"[{datetime.now(timezone.utc).isoformat()}] full error response: {r.json()}")
         except Exception:
             pass
         return {"ok": False, "error": str(e)}
@@ -97,7 +97,7 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
         # Defensive: ensure params is a dict
         params: Dict[str, Any] = action.params or {}
         if not isinstance(params, dict):
-            logger.warning(f"[{datetime.utcnow().isoformat()}] action.params is not a dict, coercing to {{}} for request {request_id}")
+            logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] action.params is not a dict, coercing to {{}} for request {request_id}")
             params = {}
 
         # Allow optional model/token options to be passed without breaking older callers.
@@ -115,7 +115,7 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
             if isinstance(token_opts, dict):
                 rpc_params["token_options"] = token_opts
             else:
-                logger.warning(f"[{datetime.utcnow().isoformat()}] Ignoring non-dict token_options for request {request_id}")
+                logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] Ignoring non-dict token_options for request {request_id}")
 
         payload = {
             "jsonrpc": "2.0",
@@ -124,7 +124,7 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
             "id": request_id
         }
 
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] Dispatching action to MCP server: method={action.action_type} id={request_id} params_keys={list(rpc_params.keys())}")
 
         try:
@@ -153,7 +153,7 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
             results.append({"id": request_id, "dispatched_at": ts, "response": data})
         except requests.exceptions.RequestException as e:
             error_msg = f"Failed to dispatch action '{action.action_type}' to MCP server: {e}"
-            logger.error(f"[{datetime.utcnow().isoformat()}] {error_msg}")
+            logger.error(f"[{datetime.now(timezone.utc).isoformat()}] {error_msg}")
             results.append({
                 "jsonrpc": "2.0",
                 "error": {"code": -32000, "message": error_msg},
@@ -170,51 +170,63 @@ def ai_read(path: str) -> Dict:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             content = fh.read()
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] MCP.ai_read: read {path} ({len(content)} bytes)")
         return {"ok": True, "op": "ai.read", "path": path, "content": content, "read_at": ts}
     except Exception as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] MCP.ai_read failed for {path}: {e}")
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_read failed for {path}: {e}")
         return {"ok": False, "op": "ai.read", "path": path, "error": str(e)}
 
 
+_WRITABLE_DIRS = ("/sandbox/", "/shared/", "/knowledge/", "/tmp/", "/logs/")
+
 def ai_write(path: str, content: str) -> Dict:
-    """Write a file via the MCP abstraction. Returns a dict with ok and metadata."""
+    """Write a file via the MCP abstraction. Returns a dict with ok and metadata.
+
+    Security: Writes are restricted to allowed directories to prevent
+    arbitrary filesystem modification.
+    """
+    resolved = os.path.realpath(path)
+    if not any(resolved.startswith(d) for d in _WRITABLE_DIRS):
+        logger.warning(f"MCP.ai_write blocked: {path} resolves to {resolved} (outside allowed dirs)")
+        return {"ok": False, "op": "ai.write", "path": path, "error": f"Write blocked: path outside allowed directories"}
     try:
-        dirname = os.path.dirname(path)
+        dirname = os.path.dirname(resolved)
         if dirname:
             os.makedirs(dirname, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(resolved, "w", encoding="utf-8") as fh:
             fh.write(content)
-        ts = datetime.utcnow().isoformat()
-        logger.info(f"[{ts}] MCP.ai_write: wrote {path} ({len(content)} bytes)")
-        return {"ok": True, "op": "ai.write", "path": path, "bytes": len(content), "written_at": ts}
+        ts = datetime.now(timezone.utc).isoformat()
+        logger.info(f"[{ts}] MCP.ai_write: wrote {resolved} ({len(content)} bytes)")
+        return {"ok": True, "op": "ai.write", "path": resolved, "bytes": len(content), "written_at": ts}
     except Exception as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] MCP.ai_write failed for {path}: {e}")
-        return {"ok": False, "op": "ai.write", "path": path, "error": str(e)}
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_write failed for {resolved}: {e}")
+        return {"ok": False, "op": "ai.write", "path": resolved, "error": str(e)}
 
 
-def ai_execute(command: str, timeout: int = 30, shell: bool = True, dry_run: bool = False) -> Dict:
+def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bool = False) -> Dict:
     """Execute a shell command via MCP. Returns dict with stdout/stderr/returncode.
 
     Note: Use with caution. The MCP layer can enforce dry_run or safety checks at a later stage.
     """
     import subprocess
+    import shlex
 
     if dry_run:
-        logger.warning(f"[{datetime.utcnow().isoformat()}] MCP.ai_execute (dry_run): {command}")
+        logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_execute (dry_run): {command}")
         return {"ok": True, "op": "ai.execute", "command": command, "dry_run": True, "stdout": "", "stderr": ""}
 
     try:
-        res = subprocess.run(command, shell=shell, check=False, capture_output=True, text=True, timeout=timeout)
-        ts = datetime.utcnow().isoformat()
+        cmd = command if shell else shlex.split(command)
+        res = subprocess.run(cmd, shell=shell, check=False, capture_output=True, text=True, timeout=timeout)
+        ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] MCP.ai_execute: ran command (rc={res.returncode}) command={command}")
         return {"ok": True, "op": "ai.execute", "command": command, "returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "executed_at": ts}
     except subprocess.TimeoutExpired as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] MCP.ai_execute timeout: {e}")
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_execute timeout: {e}")
         return {"ok": False, "op": "ai.execute", "command": command, "error": "timeout", "detail": str(e)}
     except Exception as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] MCP.ai_execute failed: {e}")
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_execute failed: {e}")
         return {"ok": False, "op": "ai.execute", "command": command, "error": str(e)}
 
 
@@ -227,11 +239,11 @@ def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "syst
         from gaia_common.utils.vector_indexer import VectorIndexer
         vi = VectorIndexer.instance(knowledge_base_name)
         results = vi.query(query, top_k=top_k)
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] MCP.embedding_query: got {len(results)} results for query")
         return {"ok": True, "op": "embedding.query", "query": query, "results": results, "queried_at": ts}
     except Exception as e:
-        logger.error(f"[{datetime.utcnow().isoformat()}] MCP.embedding_query failed: {e}")
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.embedding_query failed: {e}")
         return {"ok": False, "op": "embedding.query", "query": query, "error": str(e)}
 
 

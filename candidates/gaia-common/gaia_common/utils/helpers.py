@@ -58,7 +58,7 @@ def get_timestamp(compact: bool = False, utc: bool = True) -> str:
     Returns:
         Timestamp string
     """
-    now = datetime.datetime.utcnow() if utc else datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc) if utc else datetime.datetime.now()
     return now.strftime("%Y%m%d_%H%M%S") if compact else now.isoformat()
 
 

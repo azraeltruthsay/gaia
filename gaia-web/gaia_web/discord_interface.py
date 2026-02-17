@@ -29,7 +29,6 @@ logger = logging.getLogger("GAIA.Web.Discord")
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
-_bot_thread: Optional[threading.Thread] = None
 _message_handler: Optional[Callable] = None
 
 
@@ -68,7 +67,6 @@ class DiscordInterface:
 
         @bot.event
         async def on_ready():
-            print(f"[DISCORD] Bot connected as {bot.user}", flush=True)
             logger.info(f"Discord bot connected as {bot.user}")
             await bot.change_presence(
                 status=discord.Status.online,
@@ -77,7 +75,7 @@ class DiscordInterface:
                     name="over the studio"
                 )
             )
-            print(f"[DISCORD] Presence set, bot is READY", flush=True)
+            logger.info("Discord bot presence set, bot is READY")
 
         @bot.event
         async def on_message(message):
@@ -94,7 +92,7 @@ class DiscordInterface:
                 addressed = message.content.lower().startswith(("@gaia", "gaia,", "gaia:"))
                 should_respond = mentioned or addressed
 
-            print(f"[DISCORD] Message received: is_dm={is_dm}, should_respond={should_respond}, content={message.content[:50]}", flush=True)
+            logger.debug(f"Discord message received: is_dm={is_dm}, should_respond={should_respond}, content={message.content[:50]}")
 
             if should_respond:
                 content = message.content
@@ -103,7 +101,7 @@ class DiscordInterface:
                 content = content.strip()
 
                 if content:
-                    print(f"[DISCORD] Processing message from {message.author.display_name}: {content[:50]}", flush=True)
+                    logger.info(f"Discord processing message from {message.author.display_name}: {content[:50]}")
                     await self._handle_message(
                         content=content,
                         channel_id=str(message.channel.id),
@@ -251,14 +249,14 @@ class DiscordInterface:
             logger.error(f"Discord: GAIA Core returned error: {e.response.status_code} - {e.response.text}")
             await self._send_response(
                 message_obj,
-                f"I encountered an error communicating with GAIA Core. Status: {e.response.status_code}\nDetails: {e.response.text}",
+                "I encountered an error communicating with my core systems. Please try again in a moment.",
                 is_dm
             )
         except Exception as e:
             logger.exception(f"Discord: An unexpected error occurred during packet processing: {e}")
             await self._send_response(
                 message_obj,
-                f"An unexpected error occurred: {e}. Please try again.",
+                "An unexpected error occurred. Please try again.",
                 is_dm
             )
 
@@ -317,8 +315,6 @@ async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Op
                     try:
                         reply_message = await channel.fetch_message(int(reply_to_message_id))
                         await reply_message.reply(msg)
-                    except Exception as _discord_err:  # discord.NotFound or other
-                        await channel.send(f"Reply to message {reply_to_message_id} failed: message not found.\n{msg}")
                     except Exception as e:
                         logger.warning(f"Failed to reply to message {reply_to_message_id}: {e}. Sending as regular message.")
                         await channel.send(msg)
@@ -380,8 +376,6 @@ def start_discord_bot(bot_token: str, core_endpoint: str) -> bool:
     Returns:
         True if started successfully
     """
-    global _bot_thread
-
     if not bot_token:
         logger.error("Cannot start Discord bot: no token provided")
         return False
@@ -398,8 +392,8 @@ def start_discord_bot(bot_token: str, core_endpoint: str) -> bool:
         finally:
             loop.close()
 
-    _bot_thread = threading.Thread(target=run_bot, daemon=True, name="discord-bot")
-    _bot_thread.start()
+    thread = threading.Thread(target=run_bot, daemon=True, name="discord-bot")
+    thread.start()
 
     logger.info("Discord bot started in background thread")
     return True

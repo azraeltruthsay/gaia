@@ -44,9 +44,9 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
         seed_obj = {
             "created": datetime.now(timezone.utc).isoformat(),
             "context": {
-                "prompt": packet.prompt,
-                "packet_id": packet.packet_id,
-                "persona": packet.persona,
+                "prompt": getattr(packet.intent, 'primary_goal', '') if hasattr(packet, 'intent') else '',
+                "packet_id": packet.header.packet_id if hasattr(packet, 'header') else 'unknown',
+                "persona": str(packet.header.persona.role) if hasattr(packet, 'header') and hasattr(packet.header, 'persona') else '',
             },
             "seed": seed_text.strip(),
             "reviewed": False,
@@ -56,7 +56,7 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
         with open(SEEDS_DIR / fname, "w", encoding="utf-8") as f:
             json.dump(seed_obj, f, indent=2)
         logger.info(f"🌱 Thought seed saved: {fname}")
-        ts_write({"type": "thought_seed_saved", "seed": seed_text.strip()}, packet.packet_id)
+        ts_write({"type": "thought_seed_saved", "seed": seed_text.strip()}, packet.header.packet_id if hasattr(packet, 'header') else 'unknown')
         return seed_obj
     except Exception as e:
         logger.error(f"❌ Error saving thought seed: {e}", exc_info=True)

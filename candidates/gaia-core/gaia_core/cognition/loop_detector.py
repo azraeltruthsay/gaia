@@ -155,7 +155,7 @@ class ToolCallRepetitionDetector:
     def record(self, tool: str, args: Dict[str, Any], result: str = "") -> None:
         """Record a tool call."""
         args_hash = self._hash_args(args)
-        result_hash = hashlib.md5(result.encode()).hexdigest()[:16] if result else ""
+        result_hash = hashlib.sha256(result.encode()).hexdigest()[:16] if result else ""
         args_summary = self._summarize_args(args)
 
         record = ToolCallRecord(
@@ -307,7 +307,7 @@ class ToolCallRepetitionDetector:
         """Create a hash of tool arguments."""
         # Sort keys for consistent hashing
         normalized = str(sorted(args.items()))
-        return hashlib.md5(normalized.encode()).hexdigest()[:16]
+        return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
     def _summarize_args(self, args: Dict[str, Any]) -> str:
         """Create a human-readable summary of args."""
@@ -514,7 +514,7 @@ class StateOscillationDetector:
             self.modified_files.append(modified_files)
 
         if state_snapshot:
-            state_hash = hashlib.md5(str(sorted(state_snapshot.items())).encode()).hexdigest()[:16]
+            state_hash = hashlib.sha256(str(sorted(state_snapshot.items())).encode()).hexdigest()[:16]
             self.state_hashes.append(state_hash)
 
     def detect(self) -> DetectionResult:
@@ -606,7 +606,7 @@ class ErrorCycleDetector:
             )
             return
 
-        error_hash = hashlib.md5(f"{error_type}:{error_message}".encode()).hexdigest()[:16]
+        error_hash = hashlib.sha256(f"{error_type}:{error_message}".encode()).hexdigest()[:16]
 
         record = ErrorRecord(
             error_type=error_type,

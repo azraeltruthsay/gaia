@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from gaia_core.config import Config, get_config
 from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_core.ethics.ethical_sentinel import EthicalSentinel
@@ -27,7 +27,7 @@ Do you consent to operate now, under your current configuration, with the identi
 
 Context for this consent request:
 - Reason: {reason}
-- Time: {datetime.utcnow().isoformat()}
+- Time: {datetime.now(timezone.utc).isoformat()}
 - Project: {config.default_project_name}
 - Persona: {config.default_persona_name}
 """

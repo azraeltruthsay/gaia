@@ -4,6 +4,7 @@ GAIA Orchestrator - FastAPI Application.
 Central coordination service for GPU resources and container lifecycle.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -50,6 +51,7 @@ _gpu_manager = None
 _docker_manager = None
 _handoff_manager = None
 _notification_manager = None
+_gpu_lock = asyncio.Lock()
 
 
 @asynccontextmanager
@@ -206,12 +208,8 @@ async def get_gpu_status() -> GPUStatus:
     return gpu_status
 
 
-@app.post("/gpu/acquire")
-async def acquire_gpu(request: GPUAcquireRequest) -> GPUAcquireResponse:
-    """Request GPU ownership."""
-    if _state_manager is None:
-        raise HTTPException(status_code=503, detail="State manager not initialized")
-
+async def _acquire_gpu_inner(request: GPUAcquireRequest) -> GPUAcquireResponse:
+    """Core GPU acquire logic (must be called under _gpu_lock)."""
     current = await _state_manager.get_gpu_status()
 
     # If already owned by someone else, queue the request
@@ -237,37 +235,48 @@ async def acquire_gpu(request: GPUAcquireRequest) -> GPUAcquireResponse:
     )
 
 
+@app.post("/gpu/acquire")
+async def acquire_gpu(request: GPUAcquireRequest) -> GPUAcquireResponse:
+    """Request GPU ownership."""
+    if _state_manager is None:
+        raise HTTPException(status_code=503, detail="State manager not initialized")
+
+    async with _gpu_lock:
+        return await _acquire_gpu_inner(request)
+
+
 @app.post("/gpu/release")
 async def release_gpu(lease_id: Optional[str] = None):
     """Release GPU ownership."""
     if _state_manager is None:
         raise HTTPException(status_code=503, detail="State manager not initialized")
 
-    current = await _state_manager.get_gpu_status()
+    async with _gpu_lock:
+        current = await _state_manager.get_gpu_status()
 
-    # Validate lease if provided
-    if lease_id and current.lease_id and lease_id != current.lease_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid lease ID - cannot release GPU owned by another process"
-        )
+        # Validate lease if provided
+        if lease_id and current.lease_id and lease_id != current.lease_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid lease ID - cannot release GPU owned by another process"
+            )
 
-    previous_owner = current.owner
-    await _state_manager.release_gpu()
+        previous_owner = current.owner
+        await _state_manager.release_gpu()
 
-    logger.info(f"GPU released by {previous_owner.value}")
+        logger.info(f"GPU released by {previous_owner.value}")
 
-    # Check if anyone is waiting in queue
-    if current.queue:
-        next_requester = current.queue[0]
-        await _state_manager.remove_from_gpu_queue(next_requester)
-        # Note: The waiting process should be polling /gpu/status or /gpu/wait
+        # Check if anyone is waiting in queue
+        if current.queue:
+            next_requester = current.queue[0]
+            await _state_manager.remove_from_gpu_queue(next_requester)
+            # Note: The waiting process should be polling /gpu/status or /gpu/wait
 
-    return {
-        "success": True,
-        "message": f"GPU released by {previous_owner.value}",
-        "queue_length": len(current.queue),
-    }
+        return {
+            "success": True,
+            "message": f"GPU released by {previous_owner.value}",
+            "queue_length": len(current.queue),
+        }
 
 
 @app.post("/gpu/wait")
@@ -286,8 +295,9 @@ async def wait_for_gpu(request: GPUAcquireRequest) -> GPUAcquireResponse:
         current = await _state_manager.get_gpu_status()
 
         if current.owner == GPUOwner.NONE:
-            # GPU is free, try to acquire
-            return await acquire_gpu(request)
+            # GPU is free, try to acquire under lock
+            async with _gpu_lock:
+                return await _acquire_gpu_inner(request)
 
         if current.owner == request.requester:
             # Already own it
@@ -521,7 +531,7 @@ async def gpu_wake():
         if _state_manager:
             import uuid
             await _state_manager.set_gpu_owner(
-                GPUOwner.CORE_CANDIDATE, str(uuid.uuid4()), "sleep_wake_reclaim"
+                GPUOwner.CORE, str(uuid.uuid4()), "sleep_wake_reclaim"
             )
 
         logger.info("GPU reclaimed after wake cycle")

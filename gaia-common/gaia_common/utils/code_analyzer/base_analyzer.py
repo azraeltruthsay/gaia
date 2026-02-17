@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 
 from app.config import Config
@@ -68,7 +68,7 @@ class CodeAnalyzer:
                     "docstrings": doc_info,
                     "structure": structure,
                     "summary": summary,
-                    "analyzed_at": datetime.utcnow().isoformat()
+                    "analyzed_at": datetime.now(timezone.utc).isoformat()
                 }
 
                 output_file = os.path.join(self.summary_output_path, file_path.replace("/", "__") + ".json")

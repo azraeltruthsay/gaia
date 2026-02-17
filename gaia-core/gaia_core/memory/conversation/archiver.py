@@ -8,7 +8,7 @@ Manages storage, file formatting, and retrieval operations.
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 from gaia_core.config import Config, get_config
 
@@ -31,7 +31,7 @@ class ConversationArchiver:
             archive = {
                 "session_id": session_id,
                 "persona": persona,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "summary": summary,
                 "keywords": keywords,
                 "messages": messages

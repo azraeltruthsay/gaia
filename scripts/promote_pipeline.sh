@@ -2,27 +2,31 @@
 #
 # promote_pipeline.sh — Master GAIA candidate-to-live promotion pipeline
 #
-# Orchestrates an 8-stage fail-fast promotion workflow:
-#   0. Graceful live shutdown (default; skip with --keep-live)
-#   1. Pre-flight checks (health, sync, git state)
-#   2. Validation (ruff, mypy, pytest per service)
-#   3. Cognitive smoke tests (16-test battery against candidate)
-#   4. Service promotion (dependency-ordered, with backup + Docker rebuild)
-#   5. Post-promotion verification (restart live + health + quick smoke)
-#   6. Dev journal + flatten + commit
-#   7. QLoRA validation (optional, --qlora flag)
+# Orchestrates a 9-stage fail-fast promotion workflow:
+#   0. GPU state normalization (query/handoff before shutdown)
+#   1. Graceful live shutdown (default; skip with --keep-live)
+#   2. Pre-flight checks (health, sync, git state)
+#   3. Validation (ruff, mypy, pytest per service)
+#   4. Cognitive smoke tests (16-test battery against candidate)
+#   5. Service promotion (dependency-ordered, with backup + Docker rebuild)
+#   6. Post-promotion verification (restart live + health + quick smoke)
+#   7. Dev journal + flatten + commit
+#   8. QLoRA validation (optional, --qlora flag)
 #
 # Usage:
 #   ./scripts/promote_pipeline.sh [options]
 #
 # Options:
 #   --dry-run        Run all validation without promoting
-#   --skip-validate  Skip lint/type/unit testing (Stage 2)
-#   --skip-smoke     Skip cognitive smoke tests (Stage 3)
+#   --skip-validate  Skip lint/type/unit testing (Stage 3)
+#   --skip-smoke     Skip cognitive smoke tests (Stage 4)
 #   --skip-flatten   Skip flatten_soa.sh after promotion
-#   --qlora          Run QLoRA validation cycle (Stage 7)
+#   --qlora          Run QLoRA validation cycle (Stage 8)
 #   --keep-live      Don't shut down live services before testing
 #   --no-push        Don't push to remote after commit
+#   --gpu-to-study   Hand GPU to study instead of prime after promotion
+#   --gpu-skip       Don't touch GPU state at all
+#   --gpu-timeout N  Seconds to wait for GPU handoff (default: 180)
 #   --services LIST  Comma-separated services to promote
 #                    (default: gaia-common,gaia-mcp,gaia-core,gaia-study)
 #   -v, --verbose    Pass -v to smoke test runner
@@ -51,6 +55,10 @@ TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
 
 # Default services in dependency order
 DEFAULT_SERVICES="gaia-common,gaia-mcp,gaia-core,gaia-study"
+
+# Orchestrator URLs (live and candidate)
+ORCH_LIVE_URL="http://localhost:6410"
+ORCH_CANDIDATE_URL="http://localhost:6411"
 
 # Port mappings: service -> candidate_port:live_port
 declare -A CANDIDATE_PORTS=(
@@ -87,6 +95,9 @@ SKIP_FLATTEN=false
 DO_QLORA=false
 NO_PUSH=false
 KEEP_LIVE=false
+GPU_TO_STUDY=false
+GPU_SKIP=false
+GPU_TIMEOUT=180
 VERBOSE=""
 SERVICES="$DEFAULT_SERVICES"
 
@@ -99,17 +110,23 @@ for arg in "$@"; do
         --qlora)         DO_QLORA=true ;;
         --no-push)       NO_PUSH=true ;;
         --keep-live)     KEEP_LIVE=true ;;
+        --gpu-to-study)  GPU_TO_STUDY=true ;;
+        --gpu-skip)      GPU_SKIP=true ;;
+        --gpu-timeout)   ;; # value handled below
+        --gpu-timeout=*) GPU_TIMEOUT="${arg#*=}" ;;
         -v|--verbose)    VERBOSE="-v" ;;
         --services)      ;; # handled below
         --services=*)    SERVICES="${arg#*=}" ;;
         -h|--help)
-            head -35 "$0" | tail -30
+            head -38 "$0" | tail -33
             exit 0
             ;;
         *)
-            # Handle --services VALUE (space-separated)
+            # Handle --services VALUE and --gpu-timeout VALUE (space-separated)
             if [ "${PREV_ARG:-}" = "--services" ]; then
                 SERVICES="$arg"
+            elif [ "${PREV_ARG:-}" = "--gpu-timeout" ]; then
+                GPU_TIMEOUT="$arg"
             else
                 echo -e "${RED}Unknown option: $arg${RESET}"
                 exit 1
@@ -231,6 +248,92 @@ cleanup_on_failure() {
     restart_live_if_down
 }
 
+# GPU orchestrator helpers
+_find_orchestrator() {
+    # Try live orchestrator first, fallback to candidate
+    if curl -sf --max-time 3 "$ORCH_LIVE_URL/health" > /dev/null 2>&1; then
+        echo "$ORCH_LIVE_URL"
+    elif curl -sf --max-time 3 "$ORCH_CANDIDATE_URL/health" > /dev/null 2>&1; then
+        echo "$ORCH_CANDIDATE_URL"
+    else
+        echo ""
+    fi
+}
+
+_get_gpu_owner() {
+    local orch_url=$1
+    curl -sf --max-time 5 "$orch_url/gpu/status" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('owner','unknown'))" 2>/dev/null || echo "unknown"
+}
+
+_do_gpu_handoff() {
+    local orch_url=$1
+    local direction=$2  # "prime-to-study" or "study-to-prime"
+    local timeout=$3
+
+    # Initiate handoff
+    set +e
+    local response
+    response=$(curl -sf --max-time 10 -X POST "$orch_url/handoff/$direction" \
+        -H "Content-Type: application/json" \
+        -d "{\"reason\": \"promotion_pipeline\", \"timeout_seconds\": $timeout}" 2>&1)
+    local exit_code=$?
+    set -e
+
+    if [ $exit_code -ne 0 ]; then
+        log "    ${RED}✗${RESET} Handoff request failed (curl exit $exit_code)"
+        return 1
+    fi
+
+    # Extract handoff_id
+    local handoff_id
+    handoff_id=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('handoff_id',''))" 2>/dev/null)
+
+    if [ -z "$handoff_id" ]; then
+        log "    ${RED}✗${RESET} No handoff_id in response"
+        return 1
+    fi
+
+    log "    Handoff initiated (id: ${handoff_id:0:8}...), polling for completion..."
+
+    # Poll for completion
+    local waited=0
+    local poll_interval=5
+    while [ $waited -lt "$timeout" ]; do
+        sleep $poll_interval
+        waited=$((waited + poll_interval))
+
+        local phase
+        phase=$(curl -sf --max-time 5 "$orch_url/handoff/$handoff_id/status" 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('phase','unknown'))" 2>/dev/null || echo "unknown")
+
+        case "$phase" in
+            completed)
+                log "    ${GREEN}✓${RESET} Handoff completed (${waited}s)"
+                return 0
+                ;;
+            failed|cancelled)
+                log "    ${RED}✗${RESET} Handoff $phase (${waited}s)"
+                return 1
+                ;;
+            *)
+                log "    ${DIM}[${waited}s] phase: $phase${RESET}"
+                ;;
+        esac
+    done
+
+    log "    ${RED}✗${RESET} Handoff timed out after ${timeout}s"
+    return 1
+}
+
+_do_candidate_gpu_release() {
+    local orch_url=$1
+    set +e
+    curl -sf --max-time 10 -X POST "$orch_url/gpu/release" > /dev/null 2>&1
+    local exit_code=$?
+    set -e
+    return $exit_code
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Initialize log
 # ═══════════════════════════════════════════════════════════════════════════
@@ -243,13 +346,116 @@ log "${BOLD}=== GAIA Candidate Promotion Pipeline ===${RESET}"
 log "  Date:      $TIMESTAMP"
 log "  Services:  $SERVICES"
 log "  Mode:      $([ "$DRY_RUN" = true ] && echo 'DRY RUN' || echo 'LIVE PROMOTION')"
-log "  Options:   validate=$([ "$SKIP_VALIDATE" = true ] && echo 'skip' || echo 'yes') smoke=$([ "$SKIP_SMOKE" = true ] && echo 'skip' || echo 'yes') flatten=$([ "$SKIP_FLATTEN" = true ] && echo 'skip' || echo 'yes') qlora=$([ "$DO_QLORA" = true ] && echo 'yes' || echo 'no') keep-live=$([ "$KEEP_LIVE" = true ] && echo 'yes' || echo 'no')"
+log "  Options:   validate=$([ "$SKIP_VALIDATE" = true ] && echo 'skip' || echo 'yes') smoke=$([ "$SKIP_SMOKE" = true ] && echo 'skip' || echo 'yes') flatten=$([ "$SKIP_FLATTEN" = true ] && echo 'skip' || echo 'yes') qlora=$([ "$DO_QLORA" = true ] && echo 'yes' || echo 'no') keep-live=$([ "$KEEP_LIVE" = true ] && echo 'yes' || echo 'no') gpu=$([ "$GPU_SKIP" = true ] && echo 'skip' || echo "auto(timeout=${GPU_TIMEOUT}s$([ "$GPU_TO_STUDY" = true ] && echo ',to-study'))")"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 0: Graceful Live Shutdown
+# Stage 0: GPU State Normalization
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 0 "Graceful Live Shutdown"
+stage_header 0 "GPU State Normalization"
+
+if [ "$GPU_SKIP" = true ]; then
+    stage_skip "GPU State Normalization (--gpu-skip)"
+else
+    # Determine desired GPU owner after promotion
+    if [ "$GPU_TO_STUDY" = true ]; then
+        desired_owner="gaia-study"
+    else
+        desired_owner="gaia-core"
+    fi
+
+    # Find a reachable orchestrator
+    orch_url=$(_find_orchestrator)
+
+    if [ -z "$orch_url" ]; then
+        if [ "$DRY_RUN" = true ]; then
+            log "  ${YELLOW}⚠${RESET} No orchestrator reachable — skipping GPU check (dry-run)"
+            stage_skip "GPU State Normalization (orchestrator unreachable)"
+        else
+            log "  ${RED}✗${RESET} No orchestrator reachable — cannot verify GPU state"
+            stage_fail "GPU State Normalization" "Orchestrator unreachable at $ORCH_LIVE_URL and $ORCH_CANDIDATE_URL"
+        fi
+    else
+        log "  Orchestrator found at ${orch_url}"
+        current_owner=$(_get_gpu_owner "$orch_url")
+        log "  GPU owner: ${BOLD}${current_owner}${RESET} (desired: ${desired_owner})"
+
+        case "$current_owner" in
+            "$desired_owner")
+                log "  ${GREEN}✓${RESET} GPU already owned by $desired_owner — no action needed"
+                stage_pass "GPU State Normalization"
+                ;;
+            none)
+                log "  ${GREEN}✓${RESET} GPU unowned — $desired_owner will claim on startup"
+                stage_pass "GPU State Normalization"
+                ;;
+            gaia-study)
+                if [ "$desired_owner" = "gaia-core" ]; then
+                    if [ "$DRY_RUN" = true ]; then
+                        log "  ${DIM}Would trigger study-to-prime handoff (dry-run)${RESET}"
+                        stage_skip "GPU State Normalization (dry-run)"
+                    else
+                        log "  Triggering study-to-prime handoff..."
+                        if _do_gpu_handoff "$orch_url" "study-to-prime" "$GPU_TIMEOUT"; then
+                            stage_pass "GPU State Normalization"
+                        else
+                            stage_fail "GPU State Normalization" "study-to-prime handoff failed"
+                        fi
+                    fi
+                else
+                    log "  ${GREEN}✓${RESET} GPU owned by gaia-study — matches desired"
+                    stage_pass "GPU State Normalization"
+                fi
+                ;;
+            gaia-core)
+                if [ "$desired_owner" = "gaia-study" ]; then
+                    if [ "$DRY_RUN" = true ]; then
+                        log "  ${DIM}Would trigger prime-to-study handoff (dry-run)${RESET}"
+                        stage_skip "GPU State Normalization (dry-run)"
+                    else
+                        log "  Triggering prime-to-study handoff..."
+                        if _do_gpu_handoff "$orch_url" "prime-to-study" "$GPU_TIMEOUT"; then
+                            stage_pass "GPU State Normalization"
+                        else
+                            stage_fail "GPU State Normalization" "prime-to-study handoff failed"
+                        fi
+                    fi
+                else
+                    log "  ${GREEN}✓${RESET} GPU owned by gaia-core — matches desired"
+                    stage_pass "GPU State Normalization"
+                fi
+                ;;
+            gaia-core-candidate|gaia-study-candidate)
+                if [ "$DRY_RUN" = true ]; then
+                    log "  ${DIM}Would release GPU from candidate ($current_owner) (dry-run)${RESET}"
+                    stage_skip "GPU State Normalization (dry-run)"
+                else
+                    log "  Releasing GPU from candidate ($current_owner)..."
+                    if _do_candidate_gpu_release "$orch_url"; then
+                        log "  ${GREEN}✓${RESET} GPU released from candidate"
+                        stage_pass "GPU State Normalization"
+                    else
+                        stage_fail "GPU State Normalization" "Failed to release GPU from $current_owner"
+                    fi
+                fi
+                ;;
+            unknown)
+                log "  ${YELLOW}⚠${RESET} Could not determine GPU owner — continuing"
+                stage_warn "GPU State Normalization"
+                ;;
+            *)
+                log "  ${YELLOW}⚠${RESET} Unexpected GPU owner: $current_owner — continuing"
+                stage_warn "GPU State Normalization"
+                ;;
+        esac
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Stage 1: Graceful Live Shutdown
+# ═══════════════════════════════════════════════════════════════════════════
+
+stage_header 1 "Graceful Live Shutdown"
 
 if [ "$KEEP_LIVE" = true ]; then
     stage_skip "Graceful Live Shutdown (--keep-live)"
@@ -257,7 +463,7 @@ elif [ "$DRY_RUN" = true ]; then
     log "  ${DIM}Would shut down live services (dry-run)${RESET}"
     stage_skip "Graceful Live Shutdown (dry-run)"
 else
-    # 0a. Verify candidate stack is healthy BEFORE shutting down live
+    # 1a. Verify candidate stack is healthy BEFORE shutting down live
     log "  Verifying candidate stack is healthy before shutting down live..."
     candidate_ok=true
     for svc in "${SERVICE_LIST[@]}"; do
@@ -276,7 +482,7 @@ else
         stage_fail "Graceful Live Shutdown" "Candidate stack not healthy — refusing to shut down live"
     fi
 
-    # 0b. Shut down live services (20s grace for in-flight requests)
+    # 1b. Shut down live services (20s grace for in-flight requests)
     log "  Shutting down live services (20s grace period)..."
     cd "$GAIA_ROOT"
     set +e
@@ -288,7 +494,7 @@ else
         stage_fail "Graceful Live Shutdown" "docker compose down failed (exit $down_exit)"
     fi
 
-    # 0c. Verify all live containers are actually stopped
+    # 1c. Verify all live containers are actually stopped
     live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
     if [ "$live_remaining" -gt 0 ]; then
         log "  ${YELLOW}⚠${RESET} $live_remaining live containers still running"
@@ -303,14 +509,14 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 1: Pre-flight Checks
+# Stage 2: Pre-flight Checks
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 1 "Pre-flight Checks"
+stage_header 2 "Pre-flight Checks"
 
 preflight_ok=true
 
-# 1a. Health-check candidate services
+# 2a. Health-check candidate services
 #     When --skip-smoke is set, candidate containers aren't required
 #     (validation uses Docker builds, not running containers)
 for svc in "${SERVICE_LIST[@]}"; do
@@ -329,7 +535,7 @@ for svc in "${SERVICE_LIST[@]}"; do
     fi
 done
 
-# 1b. Check gaia-common sync
+# 2b. Check gaia-common sync
 CANDIDATE_COMMON="$GAIA_ROOT/candidates/gaia-common"
 LIVE_COMMON="$GAIA_ROOT/gaia-common"
 CP_CANDIDATE="$CANDIDATE_COMMON/gaia_common/protocols/cognition_packet.py"
@@ -354,7 +560,7 @@ if [ -f "$GC_CANDIDATE" ] && [ -f "$GC_LIVE" ]; then
     fi
 fi
 
-# 1c. Git state
+# 2c. Git state
 cd "$GAIA_ROOT"
 UNCOMMITTED=$(git status --porcelain 2>/dev/null | wc -l)
 if [ "$UNCOMMITTED" -gt 0 ]; then
@@ -370,10 +576,10 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 2: Validation (lint/type/unit)
+# Stage 3: Validation (lint/type/unit)
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 2 "Validation (Lint / Type / Unit)"
+stage_header 3 "Validation (Lint / Type / Unit)"
 
 VALIDATION_RESULTS=()
 
@@ -480,10 +686,10 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 3: Cognitive Smoke Tests (against candidate)
+# Stage 4: Cognitive Smoke Tests (against candidate)
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 3 "Cognitive Smoke Tests (Candidate)"
+stage_header 4 "Cognitive Smoke Tests (Candidate)"
 
 if [ "$SKIP_SMOKE" = true ]; then
     stage_skip "Smoke Tests (Candidate)"
@@ -511,10 +717,10 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 4: Promote Services (dependency order)
+# Stage 5: Promote Services (dependency order)
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 4 "Promote Services"
+stage_header 5 "Promote Services"
 
 if [ "$DRY_RUN" = true ]; then
     log "  ${YELLOW}DRY RUN — skipping actual promotion${RESET}"
@@ -570,7 +776,7 @@ else
         stage_fail "Promote Services" "Service promotion failed — manual rollback may be needed"
     fi
 
-    # ── 4b. Rebuild Docker images ────────────────────────────────────────
+    # ── 5b. Rebuild Docker images ────────────────────────────────────────
     # Always rebuild after promotion so the pip-installed gaia-common
     # inside container images stays in sync with the promoted source.
     # Takes <60s total and prevents stale site-packages issues.
@@ -591,17 +797,17 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 5: Post-Promotion Verification
+# Stage 6: Post-Promotion Verification
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 5 "Post-Promotion Verification"
+stage_header 6 "Post-Promotion Verification"
 
 if [ "$DRY_RUN" = true ]; then
     stage_skip "Post-Promotion Verification (dry-run)"
 else
     post_ok=true
 
-    # 5a. Restart live services if we shut them down in Stage 0
+    # 6a. Restart live services if we shut them down in Stage 1
     if [ "$LIVE_STOPPED" = true ]; then
         log "  Restarting live services after promotion..."
         cd "$GAIA_ROOT"
@@ -645,7 +851,7 @@ else
         fi
     fi
 
-    # 5b. Health checks on live services (individual)
+    # 6b. Health checks on live services (individual)
     log "  Health checks on live services..."
     any_live_running=false
     for svc in "${SERVICE_LIST[@]}"; do
@@ -667,7 +873,7 @@ else
         fi
     done
 
-    # 5c. Quick smoke test subset against live (only if live containers exist)
+    # 6c. Quick smoke test subset against live (only if live containers exist)
     log ""
     if [ "$any_live_running" = true ]; then
         log "  Quick smoke test (tests 1,2,7) against live (port 6415)..."
@@ -695,14 +901,14 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 6: Dev Journal + Flatten + Commit
+# Stage 7: Dev Journal + Flatten + Commit
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 6 "Dev Journal + Flatten + Commit"
+stage_header 7 "Dev Journal + Flatten + Commit"
 
 JOURNAL_FILE="$GAIA_ROOT/knowledge/Dev_Notebook/${DATE}_promotion_journal.md"
 
-# 6a. Generate dev journal
+# 7a. Generate dev journal
 elapsed=$(( $(date +%s) - PIPELINE_START ))
 mins=$(( elapsed / 60 ))
 secs=$(( elapsed % 60 ))
@@ -762,7 +968,7 @@ FOOTER
 
 log "  ${GREEN}✓${RESET} Dev journal written to $JOURNAL_FILE"
 
-# 6b. Flatten SOA (unless skipped or dry-run)
+# 7b. Flatten SOA (unless skipped or dry-run)
 if [ "$SKIP_FLATTEN" = true ] || [ "$DRY_RUN" = true ]; then
     log "  ${DIM}⊘${RESET} flatten_soa.sh skipped"
 else
@@ -782,7 +988,7 @@ else
     fi
 fi
 
-# 6c. Git commit + push
+# 7c. Git commit + push
 if [ "$DRY_RUN" = true ]; then
     log "  ${DIM}⊘${RESET} Git commit skipped (dry-run)"
 else
@@ -824,10 +1030,10 @@ fi
 stage_pass "Dev Journal + Flatten + Commit"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Stage 7: QLoRA Validation (optional)
+# Stage 8: QLoRA Validation (optional)
 # ═══════════════════════════════════════════════════════════════════════════
 
-stage_header 7 "QLoRA Validation"
+stage_header 8 "QLoRA Validation"
 
 if [ "$DO_QLORA" = true ]; then
     QLORA_SCRIPT="$SCRIPTS_DIR/validate_qlora.sh"

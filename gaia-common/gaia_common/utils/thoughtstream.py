@@ -1,5 +1,5 @@
 import os, json, time, logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -37,7 +37,7 @@ def write(
     if ts_dir is None:
         ts_dir = Path('/tmp/gaia/thoughtstreams') # Fallback to a safe temp directory
 
-    stamp = datetime.utcnow().isoformat()
+    stamp = datetime.now(timezone.utc).isoformat()
     # Ensure target dir exists (race-safe best-effort)
     try:
         ts_dir.mkdir(parents=True, exist_ok=True)

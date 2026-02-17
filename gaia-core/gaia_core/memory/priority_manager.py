@@ -1,7 +1,7 @@
 import json
 import os
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class GAIAPriorityManager:
     """
@@ -38,7 +38,7 @@ class GAIAPriorityManager:
             "impact": impact,
             "source": source,
             "status": "open",
-            "created": datetime.utcnow().isoformat()
+            "created": datetime.now(timezone.utc).isoformat()
         }
         self.tasks.append(task)
         self._save()
@@ -58,7 +58,7 @@ class GAIAPriorityManager:
         for t in self.tasks:
             if t["task"] == label and t["status"] == "open":
                 t["status"] = "resolved"
-                t["resolved"] = datetime.utcnow().isoformat()
+                t["resolved"] = datetime.now(timezone.utc).isoformat()
                 self._save()
                 return True
         return False

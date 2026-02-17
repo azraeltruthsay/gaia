@@ -8,9 +8,9 @@ import threading
 import time
 import logging
 
-from app.utils.background.task_queue import TaskQueue
-from app.utils.background.background_tasks import BackgroundTask
-from app.utils.background.idle_monitor import IdleMonitor
+from gaia_common.utils.background.task_queue import TaskQueue
+from gaia_common.utils.background.background_tasks import BackgroundTask
+from gaia_common.utils.background.idle_monitor import IdleMonitor
 
 # NOTE: The initiative_handler module was never migrated from the monolith.
 # The GIL (GAIA Initiative Loop) is being revived in gaia-core as

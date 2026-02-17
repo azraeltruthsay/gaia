@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Routing, Model, Intent, Context,
     SessionHistoryRef, Cheatsheet, Constraints, Content, DataField,
@@ -58,7 +58,7 @@ def upgrade_v2_to_v3_packet(old_packet_data: Dict) -> CognitionPacket:
     def g(key, default=None):
         return old_packet_data.get(key, default)
     # Header / Persona
-    datetime_str = g("time_date") or datetime.utcnow().isoformat()
+    datetime_str = g("time_date") or datetime.now(timezone.utc).isoformat()
     session_id = g("session_id") or g("session") or "legacy-session"
     packet_id = g("packet_id") or g("packet_id") or "legacy-pkt"
     sub_id = g("sub_packet_id") or ""

@@ -12,7 +12,7 @@ Location: /app/utils/topic_manager.py
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger("GAIA.TopicManager")
@@ -56,7 +56,7 @@ def resolve_topic(path: str, topic_id: str) -> bool:
     for t in cache:
         if t.get("topic_id") == topic_id:
             t["resolved"] = True
-            t["last_discussed"] = datetime.utcnow().isoformat()
+            t["last_discussed"] = datetime.now(timezone.utc).isoformat()
             _save_topic_cache(path, cache)
             logger.info(f"✔️ Resolved topic {topic_id}")
             return True

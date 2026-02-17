@@ -105,6 +105,7 @@ FILE_LIST=$(
         -path 'knowledge/projects' -prune -o \
         -path '*/session_vectors' -prune -o \
         -path '*/archive' -prune -o \
+        -path '*/.mypy_cache' -prune -o \
         -type f \( \
             -name '*.py' -o \
             -name '*.json' -o \
@@ -168,8 +169,12 @@ else
             continue
         fi
 
-        cp "$clean_path" "$dest_file"
-        copied=$((copied + 1))
+        if cp "$clean_path" "$dest_file" 2>/dev/null; then
+            copied=$((copied + 1))
+        else
+            echo "  Warning: cannot read $clean_path (permission denied?), skipping"
+            empty_skipped=$((empty_skipped + 1))
+        fi
     done <<< "$ALL_FILES"
 
     # Remove stale files from DEST_DIR that are no longer in the source list
