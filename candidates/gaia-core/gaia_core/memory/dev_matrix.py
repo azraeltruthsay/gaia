@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 import argparse
 
@@ -39,7 +39,7 @@ class GAIADevMatrix:
             "impact": impact,
             "source": source,
             "status": "open",
-            "created": datetime.utcnow().isoformat()
+            "created": datetime.now(timezone.utc).isoformat()
         }
         self.tasks.append(task)
         self._save()
@@ -51,7 +51,7 @@ class GAIADevMatrix:
         for t in self.tasks:
             if t["task"] == label and t["status"] == "open":
                 t["status"] = "resolved"
-                t["resolved"] = datetime.utcnow().isoformat()
+                t["resolved"] = datetime.now(timezone.utc).isoformat()
                 self._save()
                 return True
         return False

@@ -15,6 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for container execution (host UID mapping)
+RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+ENV HOME=/home/gaia
+ENV USER=gaia
+
 # Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
@@ -50,8 +55,9 @@ COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
 # Copy canonical constants file from gaia-common (single source of truth)
 COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
-# Create writable directories for non-root execution
-RUN mkdir -p /app/.pytest_cache /logs && chmod 777 /app/.pytest_cache /logs
+# Create writable directories and set ownership
+RUN mkdir -p /app/.pytest_cache /logs \
+    && chown -R gaia:gaia /app /logs
 
 # Expose service port
 EXPOSE 6415
@@ -59,6 +65,9 @@ EXPOSE 6415
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:6415/health || exit 1
+
+# Run as non-root user
+USER gaia
 
 # Run the service
 CMD ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415"]

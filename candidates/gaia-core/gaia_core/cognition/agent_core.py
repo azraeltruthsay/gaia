@@ -1,12 +1,11 @@
 import logging
 import regex as re
-import ast
 import uuid
 import json
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from gaia_core.memory.semantic_codex import SemanticCodex
 from gaia_core.memory.codex_writer import CodexWriter
 from typing import Generator, Dict, Any, List, Optional
@@ -282,7 +281,7 @@ class AgentCore:
             destination: Output destination (cli_chat, discord, web, etc.)
             metadata: Additional context (is_dm, user_id, channel_id, etc.)
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         active_persona = self.ai_manager.active_persona        
         model_config = self.config # Use the main config object
 

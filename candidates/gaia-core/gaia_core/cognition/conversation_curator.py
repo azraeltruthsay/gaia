@@ -12,7 +12,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger("GAIA.ConversationCurator")
@@ -85,7 +85,7 @@ class ConversationCurator:
 
     def _format_conversation(self, session_id: str, messages: List[Dict]) -> str:
         channel_type = self._detect_channel_type(session_id)
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         lines = [f"\n---\n\n## Discord {channel_type} Conversation — {date_str}\n"]
 
         for msg in messages:

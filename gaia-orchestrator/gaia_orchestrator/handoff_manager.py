@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -82,7 +82,7 @@ class HandoffManager:
             phase=HandoffPhase.INITIATED,
             source=GPUOwner.CORE,
             destination=GPUOwner.STUDY,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             progress_pct=0,
         )
         await self.state_manager.start_handoff(handoff)
@@ -172,7 +172,7 @@ class HandoffManager:
             phase=HandoffPhase.INITIATED,
             source=GPUOwner.STUDY,
             destination=GPUOwner.CORE,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             progress_pct=0,
         )
         await self.state_manager.start_handoff(handoff)

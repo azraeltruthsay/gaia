@@ -531,25 +531,26 @@ class CognitionPacket:
         # We need to dump to a dict first, then use json.dumps.
         return json.dumps(self.to_dict(), indent=2, sort_keys=True)
 
+    @staticmethod
+    def _normalize_enums(obj):
+        """Recursively convert Enum instances to their primitive values."""
+        from enum import Enum
+        if isinstance(obj, dict):
+            return {k: CognitionPacket._normalize_enums(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [CognitionPacket._normalize_enums(v) for v in obj]
+        if isinstance(obj, Enum):
+            return obj.value
+        return obj
+
     def compute_hashes(self):
         """Computes and sets the header and content hashes for integrity checks."""
-        # Exclude the signatures themselves from the hash calculation
         header_dict = self.header.to_dict()
         content_dict = self.content.to_dict()
-        # dataclasses_json may leave Enum instances in the dict; convert them to primitives
-        def _normalize(obj):
-            from enum import Enum
-            if isinstance(obj, dict):
-                return {k: _normalize(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_normalize(v) for v in obj]
-            if isinstance(obj, Enum):
-                return obj.value
-            return obj
 
-        header_str = json.dumps(_normalize(header_dict), sort_keys=True)
-        content_str = json.dumps(_normalize(content_dict), sort_keys=True)
-        
+        header_str = json.dumps(self._normalize_enums(header_dict), sort_keys=True)
+        content_str = json.dumps(self._normalize_enums(content_dict), sort_keys=True)
+
         self.governance.signatures.header_hash = hashlib.sha256(header_str.encode('utf-8')).hexdigest()
         self.governance.signatures.content_hash = hashlib.sha256(content_str.encode('utf-8')).hexdigest()
 
@@ -558,17 +559,7 @@ class CognitionPacket:
 
         Useful for logging, telemetry, and JSON dumps where Enum instances would otherwise fail.
         """
-        def _normalize(obj):
-            from enum import Enum
-            if isinstance(obj, dict):
-                return {k: _normalize(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_normalize(v) for v in obj]
-            if isinstance(obj, Enum):
-                return obj.value
-            return obj
-
-        return _normalize(self.to_dict())
+        return self._normalize_enums(self.to_dict())
 
     def validate(self, schema: Dict):
         """Validates the packet against the formal JSON schema."""

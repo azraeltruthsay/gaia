@@ -55,7 +55,7 @@ class SnapshotManager:
     def _hash_file(self, path: str) -> str:
         try:
             with open(path, "rb") as f:
-                return hashlib.md5(f.read()).hexdigest()
+                return hashlib.sha256(f.read()).hexdigest()
         except Exception:
             return ""
 

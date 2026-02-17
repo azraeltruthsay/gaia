@@ -208,20 +208,25 @@ async def output_router(packet: Dict[str, Any]):
     This endpoint is called by gaia-core when it has a response ready
     for delivery (either in response to a user message or autonomously).
     """
-    logger.info(f"Output router received packet_id: {packet.header.packet_id}")
+    header = packet.get("header", {})
+    packet_id = header.get("packet_id", "unknown")
+    logger.info(f"Output router received packet_id: {packet_id}")
 
     # Determine the primary destination from the packet
-    output_routing = packet.header.output_routing
-    if not output_routing or not output_routing.primary:
-        logger.warning(f"Packet {packet.header.packet_id} has no primary output routing. Logging only.")
-        logger.info(f"Output (log only for packet {packet.header.packet_id}): {packet.response.candidate[:200]}...")
+    output_routing = header.get("output_routing", {})
+    primary_destination = output_routing.get("primary") if isinstance(output_routing, dict) else None
+    if not primary_destination:
+        logger.warning(f"Packet {packet_id} has no primary output routing. Logging only.")
+        response = packet.get("response", {})
+        candidate = response.get("candidate", "")
+        logger.info(f"Output (log only for packet {packet_id}): {str(candidate)[:200]}...")
         return JSONResponse(content={"status": "success", "message": "Logged due to no routing info"}, status_code=200)
 
-    primary_destination = output_routing.primary
-    destination_type = primary_destination.destination
-    content = packet.response.candidate # The LLM's response
+    destination_type = primary_destination.get("destination") if isinstance(primary_destination, dict) else None
+    response = packet.get("response", {})
+    content = response.get("candidate", "")  # The LLM's response
 
-    if destination_type == OutputDestination.DISCORD:
+    if destination_type == "discord":
         try:
             from .discord_interface import send_to_channel, send_to_user, is_bot_ready
 
@@ -230,13 +235,17 @@ async def output_router(packet: Dict[str, Any]):
                 return JSONResponse(content={"status": "error", "message": "Discord bot not connected"}, status_code=503)
 
             success = False
-            # Check metadata for is_dm and use_id, as send_to_user is specific
-            if primary_destination.user_id and primary_destination.metadata.get("is_dm"):
-                success = await send_to_user(primary_destination.user_id, content)
-            elif primary_destination.channel_id:
-                success = await send_to_channel(primary_destination.channel_id, content, primary_destination.reply_to_message_id)
+            user_id = primary_destination.get("user_id") if isinstance(primary_destination, dict) else None
+            channel_id = primary_destination.get("channel_id") if isinstance(primary_destination, dict) else None
+            reply_to = primary_destination.get("reply_to_message_id") if isinstance(primary_destination, dict) else None
+            metadata = primary_destination.get("metadata", {}) if isinstance(primary_destination, dict) else {}
+
+            if user_id and metadata.get("is_dm"):
+                success = await send_to_user(user_id, content)
+            elif channel_id:
+                success = await send_to_channel(channel_id, content, reply_to)
             else:
-                logger.warning(f"Discord routing failed: No channel_id or user_id in packet {packet.header.packet_id}")
+                logger.warning(f"Discord routing failed: No channel_id or user_id in packet {packet_id}")
                 return JSONResponse(content={"status": "error", "message": "No channel_id or user_id provided for Discord"}, status_code=400)
 
             if success:
@@ -248,21 +257,19 @@ async def output_router(packet: Dict[str, Any]):
             logger.error("Discord integration not available during routing.")
             return JSONResponse(content={"status": "error", "message": "Discord integration not available"}, status_code=500)
         except Exception as e:
-            logger.exception(f"Error routing to Discord for packet {packet.header.packet_id}: {e}")
-            return JSONResponse(content={"status": "error", "message": f"Error: {str(e)}"}, status_code=500)
+            logger.exception(f"Error routing to Discord for packet {packet_id}: {e}")
+            return JSONResponse(content={"status": "error", "message": "Internal routing error"}, status_code=500)
 
-    elif destination_type == OutputDestination.WEB:
-        # Future: WebSocket push to web clients
-        logger.info(f"Web output routing for packet {packet.header.packet_id} not yet implemented")
+    elif destination_type == "web":
+        logger.info(f"Web output routing for packet {packet_id} not yet implemented")
         return JSONResponse(content={"status": "error", "message": "Web output routing not yet implemented"}, status_code=501)
 
-    elif destination_type == OutputDestination.LOG:
-        # Just log the output
-        logger.info(f"Output (log only for packet {packet.header.packet_id}): {content[:200]}...")
+    elif destination_type == "log":
+        logger.info(f"Output (log only for packet {packet_id}): {str(content)[:200]}...")
         return JSONResponse(content={"status": "success", "message": "Logged"}, status_code=200)
 
     else:
-        logger.warning(f"Unknown destination type '{destination_type}' for packet {packet.header.packet_id}")
+        logger.warning(f"Unknown destination type '{destination_type}' for packet {packet_id}")
         return JSONResponse(content={"status": "error", "message": f"Unknown destination type: {destination_type}"}, status_code=400)
 
 

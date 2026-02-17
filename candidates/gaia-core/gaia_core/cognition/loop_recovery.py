@@ -239,7 +239,7 @@ class LoopRecoveryManager:
         """Capture current state before reset."""
         import hashlib
 
-        pattern_hash = hashlib.md5(result.pattern.encode()).hexdigest()[:16]
+        pattern_hash = hashlib.sha256(result.pattern.encode()).hexdigest()[:16]
 
         metadata = LoopMetadata(
             detected_at=time.strftime("%Y-%m-%dT%H:%M:%S"),

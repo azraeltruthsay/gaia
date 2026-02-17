@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Tuple
+from typing import ClassVar, Dict, Any, Optional, Tuple
 import json
 import os
 import logging
@@ -65,7 +65,7 @@ class Config:
     constants: Dict[str, Any] = field(default_factory=dict)
 
     # Singleton instance
-    _instance: Optional[Config] = None
+    _instance: ClassVar[Optional['Config']] = None
 
     def __post_init__(self):
         """Load constants from gaia_constants.json if available."""

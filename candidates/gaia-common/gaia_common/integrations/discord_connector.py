@@ -35,12 +35,12 @@ class DiscordConnector(DestinationConnector):
         self.config = config or DiscordConfig.from_env()
         self._webhook_sender: Optional[DiscordWebhookSender] = None
         self._bot_client = None  # Will hold discord.py client when available
-        self._bot_thread: Optional[threading.Thread] = None
         self._message_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
         self._sanitize_callback = sanitize_callback
         self._last_presence_update: float = 0
         self._presence_min_interval: float = 12  # Discord allows ~5 updates/min
         self._idle_status: str = "over the studio"
+        self._callback_executor: Optional['concurrent.futures.ThreadPoolExecutor'] = None
 
         # Check if Discord integration is enabled
         if not self.config.enabled:
@@ -419,9 +419,9 @@ class DiscordConnector(DestinationConnector):
                     # Run callback in a thread pool to avoid blocking the Discord event loop
                     # This allows the bot to maintain heartbeat while AgentCore processes
                     import concurrent.futures
-                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                    executor.submit(self._message_callback, content, str(message.author.id), metadata)
-                    executor.shutdown(wait=False)  # Don't wait, let it run in background
+                    if self._callback_executor is None:
+                        self._callback_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="discord-cb")
+                    self._callback_executor.submit(self._message_callback, content, str(message.author.id), metadata)
 
             # Process commands if any (only in guild channels)
             if not is_dm:
@@ -439,8 +439,8 @@ class DiscordConnector(DestinationConnector):
                 loop.close()
 
         self._bot_client = bot
-        self._bot_thread = threading.Thread(target=run_bot, daemon=True)
-        self._bot_thread.start()
+        thread = threading.Thread(target=run_bot, daemon=True)
+        thread.start()
 
         logger.info("Discord bot listener started in background thread")
         return True

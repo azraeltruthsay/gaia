@@ -1,7 +1,7 @@
 import logging
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 
@@ -104,7 +104,7 @@ def log_chat_entry_structured(
     jsonl_file = os.path.join(log_dir, f"structured_{datetime.now().strftime('%Y%m%d')}.jsonl")
 
     entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": source,
         "session_id": session_id,
         "is_dm": metadata.get("is_dm", False) if metadata else False,

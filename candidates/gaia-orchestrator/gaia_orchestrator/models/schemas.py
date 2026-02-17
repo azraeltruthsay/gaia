@@ -5,7 +5,7 @@ Defines request/response schemas for GPU management, container lifecycle,
 handoff protocol, and notifications.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
@@ -135,7 +135,7 @@ class HandoffStatus(BaseModel):
     handoff_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     handoff_type: HandoffType
     phase: HandoffPhase = HandoffPhase.INITIATED
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
     source: GPUOwner
     destination: GPUOwner
@@ -163,7 +163,7 @@ class OracleNotification(BaseModel):
     fallback_model: str = Field(..., description="Model being used as fallback")
     original_role: str = Field(..., description="Role that needed the model")
     reason: str = Field(default="", description="Why fallback was needed")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Notification(BaseModel):
@@ -172,7 +172,7 @@ class Notification(BaseModel):
     notification_type: NotificationType
     title: str
     message: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -186,4 +186,4 @@ class OrchestratorState(BaseModel):
     containers: ContainerStatus = Field(default_factory=ContainerStatus)
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

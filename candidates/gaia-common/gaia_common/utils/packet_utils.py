@@ -8,7 +8,7 @@ This module provides utility functions for working with CognitionPackets:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ def upgrade_v2_to_v3_packet(old_packet_data: Dict[str, Any]) -> "CognitionPacket
         return old_packet_data.get(key, default)
 
     # Header / Persona
-    datetime_str = g("time_date") or datetime.utcnow().isoformat()
+    datetime_str = g("time_date") or datetime.now(timezone.utc).isoformat()
     session_id = g("session_id") or g("session") or "legacy-session"
     packet_id = g("packet_id") or "legacy-pkt"
     sub_id = g("sub_packet_id") or ""

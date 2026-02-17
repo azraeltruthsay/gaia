@@ -56,8 +56,8 @@ class DockerManager:
                 raise
         return self._client
 
-    def _get_container_state(self, container_name: str) -> ContainerState:
-        """Get the state of a container by name."""
+    def _get_container_state_sync(self, container_name: str) -> ContainerState:
+        """Get the state of a container by name (synchronous)."""
         try:
             container = self.client.containers.get(container_name)
             status = container.status.lower()
@@ -79,6 +79,11 @@ class DockerManager:
             logger.warning(f"Error getting container state for {container_name}: {e}")
             return ContainerState.UNKNOWN
 
+    async def _get_container_state(self, container_name: str) -> ContainerState:
+        """Get the state of a container by name (async-safe)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_container_state_sync, container_name)
+
     async def _check_service_health(self, container_name: str, port: int) -> bool:
         """Check if a service is healthy via its health endpoint over Docker network."""
         import httpx
@@ -98,7 +103,7 @@ class DockerManager:
         # Check live services
         for service in self.LIVE_SERVICES:
             port = self.SERVICE_PORTS.get(service, 0)
-            state = self._get_container_state(service)
+            state = await self._get_container_state(service)
             healthy = False
             if state == ContainerState.RUNNING:
                 healthy = await self._check_service_health(service, port)
@@ -115,7 +120,7 @@ class DockerManager:
         # Check candidate services
         for service in self.CANDIDATE_SERVICES:
             port = self.SERVICE_PORTS.get(service, 0)
-            state = self._get_container_state(service)
+            state = await self._get_container_state(service)
             healthy = False
             if state == ContainerState.RUNNING:
                 healthy = await self._check_service_health(service, port)
@@ -228,7 +233,7 @@ class DockerManager:
         if target == "candidate":
             # Start the candidate service if not running
             candidate_name = f"gaia-{service}-candidate"
-            state = self._get_container_state(candidate_name)
+            state = await self._get_container_state(candidate_name)
 
             if state != ContainerState.RUNNING:
                 logger.info(f"Starting {candidate_name}...")
@@ -241,9 +246,9 @@ class DockerManager:
 
             # Now restart the caller service with the candidate endpoint
             endpoint_map = {
-                "mcp": ("MCP_ENDPOINT", f"http://gaia-mcp-candidate:8765/jsonrpc", "gaia-core"),
-                "study": ("STUDY_ENDPOINT", f"http://gaia-study-candidate:8766", "gaia-core"),
-                "core": ("CORE_ENDPOINT", f"http://gaia-core-candidate:6415", "gaia-web"),
+                "mcp": ("MCP_ENDPOINT", f"http://gaia-mcp-candidate:{self.SERVICE_PORTS['gaia-mcp-candidate']}/jsonrpc", "gaia-core"),
+                "study": ("STUDY_ENDPOINT", f"http://gaia-study-candidate:{self.SERVICE_PORTS['gaia-study-candidate']}", "gaia-core"),
+                "core": ("CORE_ENDPOINT", f"http://gaia-core-candidate:{self.SERVICE_PORTS['gaia-core-candidate']}", "gaia-web"),
             }
 
             if service == "web":
@@ -279,28 +284,40 @@ class DockerManager:
 
     async def stop_container(self, container_name: str) -> bool:
         """Stop a specific container."""
+        loop = asyncio.get_event_loop()
+
+        def _stop():
+            try:
+                container = self.client.containers.get(container_name)
+                container.stop(timeout=30)
+                logger.info(f"Stopped container: {container_name}")
+                return True
+            except NotFound:
+                logger.warning(f"Container not found: {container_name}")
+                return False
+
         try:
-            container = self.client.containers.get(container_name)
-            container.stop(timeout=30)
-            logger.info(f"Stopped container: {container_name}")
-            return True
-        except NotFound:
-            logger.warning(f"Container not found: {container_name}")
-            return False
+            return await loop.run_in_executor(None, _stop)
         except Exception as e:
             logger.error(f"Error stopping container {container_name}: {e}")
             raise
 
     async def start_container(self, container_name: str) -> bool:
         """Start a specific container."""
+        loop = asyncio.get_event_loop()
+
+        def _start():
+            try:
+                container = self.client.containers.get(container_name)
+                container.start()
+                logger.info(f"Started container: {container_name}")
+                return True
+            except NotFound:
+                logger.warning(f"Container not found: {container_name}")
+                return False
+
         try:
-            container = self.client.containers.get(container_name)
-            container.start()
-            logger.info(f"Started container: {container_name}")
-            return True
-        except NotFound:
-            logger.warning(f"Container not found: {container_name}")
-            return False
+            return await loop.run_in_executor(None, _start)
         except Exception as e:
             logger.error(f"Error starting container {container_name}: {e}")
             raise

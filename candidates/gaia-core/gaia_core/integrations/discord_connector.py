@@ -33,7 +33,6 @@ class DiscordConnector(DestinationConnector):
         self.config = config or DiscordConfig.from_env()
         self._webhook_sender: Optional[DiscordWebhookSender] = None
         self._bot_client = None  # Will hold discord.py client when available
-        self._bot_thread: Optional[threading.Thread] = None
         self._message_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
 
         # Check if Discord integration is enabled
@@ -344,8 +343,8 @@ class DiscordConnector(DestinationConnector):
                 loop.close()
 
         self._bot_client = bot
-        self._bot_thread = threading.Thread(target=run_bot, daemon=True)
-        self._bot_thread.start()
+        thread = threading.Thread(target=run_bot, daemon=True)
+        thread.start()
 
         logger.info("Discord bot listener started in background thread")
         return True

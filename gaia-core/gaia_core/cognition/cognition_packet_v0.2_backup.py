@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.config import Config
 
 class CognitionPacket:
@@ -81,7 +81,7 @@ class CognitionPacket:
 
 # Packet factory
 def create_packet(config: Config, prompt: str, session_id: str, history: List[Dict[str, Any]], persona_instructions: List[str]) -> CognitionPacket:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return CognitionPacket(
         session_id=session_id,
         packet_id=str(uuid.uuid4()),

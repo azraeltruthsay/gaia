@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from typing import List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from gaia_core.config import Config, get_config
 
 # Import the specialist tools the manager will orchestrate
@@ -33,7 +33,7 @@ class Session:
         self.persona: str = persona
         self.history: List[Dict] = []
         self.meta: Dict = {}
-        self.created_at: datetime = datetime.utcnow()
+        self.created_at: datetime = datetime.now(timezone.utc)
 
     def to_dict(self) -> Dict:
         """Serializes the session object to a dictionary for JSON storage."""
@@ -53,10 +53,10 @@ class Session:
         session.meta = data.get("meta", {})
         try:
             # Handle ISO format strings for datetime objects
-            session.created_at = datetime.fromisoformat(data.get("created_at", datetime.utcnow().isoformat()))
+            session.created_at = datetime.fromisoformat(data.get("created_at", datetime.now(timezone.utc).isoformat()))
         except (TypeError, ValueError):
             logger.warning(f"Could not parse 'created_at' for session {session.session_id}, using current time.")
-            session.created_at = datetime.utcnow()
+            session.created_at = datetime.now(timezone.utc)
         return session
 
 
@@ -271,7 +271,7 @@ class SessionManager:
             Dict with counts: sessions_purged, vectors_purged, smoke_purged
         """
         counts = {"sessions_purged": 0, "vectors_purged": 0, "smoke_purged": 0}
-        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
 
         # ── Step 1: Purge test/smoke sessions from in-memory state ──
         to_remove = []
@@ -335,7 +335,7 @@ class SessionManager:
             try:
                 os.makedirs(os.path.dirname(LAST_ACTIVITY_FILE), exist_ok=True)
                 with open(LAST_ACTIVITY_FILE, 'w', encoding='utf-8') as f:
-                    f.write(datetime.utcnow().isoformat())
+                    f.write(datetime.now(timezone.utc).isoformat())
                 logger.debug(f"Timestamp updated in {LAST_ACTIVITY_FILE}")
             except IOError as e:
                 logger.error(f"❌ Could not write to last activity file {LAST_ACTIVITY_FILE}: {e}")

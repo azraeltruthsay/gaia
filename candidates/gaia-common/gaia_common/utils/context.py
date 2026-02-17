@@ -3,14 +3,14 @@
 # Generates lightweight runtime context strings for LLM prompts.
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 def get_context_for_task(task_type: str, config=None) -> str:
     """
     Builds a basic runtime context string for LLM prompts.
     Optionally consults Config.task_context_templates for custom behavior.
     """
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat() + "Z"
     context_id = str(uuid.uuid4())
 
     # Check if config has predefined context templates

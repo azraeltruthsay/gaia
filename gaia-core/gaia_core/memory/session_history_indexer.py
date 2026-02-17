@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -136,7 +136,7 @@ class SessionHistoryIndexer:
             "idx": turn_idx,
             "user": user_msg[:2000],
             "assistant": assistant_msg[:2000],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         self.turn_embeddings.append(embedding)
 
@@ -230,7 +230,7 @@ class SessionHistoryIndexer:
             "label": topic_label,
             "summary": summary,
             "turn_range": [batch[0]["idx"], batch[-1]["idx"]],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         self.topic_embeddings.append(embedding)
         self._last_topic_turn_idx = unsummarized_start + _TOPIC_INTERVAL - 1
@@ -240,7 +240,7 @@ class SessionHistoryIndexer:
         if not self.turns and not self.topics:
             return
 
-        archive_path = os.path.join(self.persist_dir, "archive", f"{self.session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+        archive_path = os.path.join(self.persist_dir, "archive", f"{self.session_id}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json")
         try:
             os.makedirs(os.path.dirname(archive_path), exist_ok=True)
             self._save_to(archive_path)

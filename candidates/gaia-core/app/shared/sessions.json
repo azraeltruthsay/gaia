@@ -3,12 +3,14 @@
     "session_id": "discord_dm_596925786208993283",
     "persona": "default",
     "history": [],
+    "meta": {},
     "created_at": "2026-02-12T04:14:51.378174"
   },
   "web_ui_session": {
     "session_id": "web_ui_session",
     "persona": "default",
     "history": [],
+    "meta": {},
     "created_at": "2026-02-13T06:26:52.860099"
   },
   "smoke-test-5e7ba237": {
@@ -72,6 +74,7 @@
         "content": "Your favorite color is cerulean."
       }
     ],
+    "meta": {},
     "created_at": "2026-02-14T22:08:06.024086"
   },
   "smoke-test-8621b2fe": {
@@ -103,6 +106,7 @@
         "content": "I encountered an error while answering: Cannot reach vLLM server at http://gaia-prime-candidate:7777/v1/chat/completions. Is gaia-prime running?"
       }
     ],
+    "meta": {},
     "created_at": "2026-02-15T00:09:29.447162"
   },
   "smoke-test-0dd7041a": {
@@ -138,6 +142,7 @@
         "content": "I encountered an error while answering: Cannot reach vLLM server at http://gaia-prime-candidate:7777/v1/chat/completions. Is gaia-prime running?"
       }
     ],
+    "meta": {},
     "created_at": "2026-02-15T00:36:34.224064"
   },
   "smoke-test-1b753e51": {
@@ -201,6 +206,7 @@
         "content": "Your favorite color is cerulean."
       }
     ],
+    "meta": {},
     "created_at": "2026-02-15T01:12:39.244511"
   },
   "smoke-test-b20a20ce": {
@@ -236,6 +242,7 @@
         "content": "I encountered an error while answering: Cannot reach vLLM server at http://gaia-prime:7777/v1/chat/completions. Is gaia-prime running?"
       }
     ],
+    "meta": {},
     "created_at": "2026-02-15T01:34:44.994968"
   },
   "smoke-test-4cf07ac1": {
@@ -299,6 +306,56 @@
         "content": "Your favorite color is cerulean."
       }
     ],
+    "meta": {},
     "created_at": "2026-02-15T01:53:05.767484"
+  },
+  "smoke-test-fb7bcdb6": {
+    "session_id": "smoke-test-fb7bcdb6",
+    "persona": "default",
+    "history": [
+      {
+        "role": "assistant",
+        "content": "I encountered an error while answering: Cannot reach vLLM server at http://gaia-prime-candidate:7777/v1/chat/completions. Is gaia-prime running?"
+      },
+      {
+        "role": "user",
+        "content": "Update my knowledge base with this fact: The Raven was first published in the New York Evening Mirror on January 29, 1845."
+      },
+      {
+        "role": "user",
+        "content": "Read the file /knowledge/blueprints/QLORA_SELF_STUDY.md"
+      },
+      {
+        "role": "user",
+        "content": "Explain what you know and what you don't know about quantum entanglement."
+      },
+      {
+        "role": "user",
+        "content": "Remember this: my favorite color is cerulean."
+      },
+      {
+        "role": "user",
+        "content": "What is my favorite color?"
+      },
+      {
+        "role": "assistant",
+        "content": "I encountered an error while answering: Cannot reach vLLM server at http://gaia-prime-candidate:7777/v1/chat/completions. Is gaia-prime running?"
+      }
+    ],
+    "meta": {
+      "goal_state": {
+        "current_goal": {
+          "goal_id": "information_seeking",
+          "description": "Clarifying previously discussed information",
+          "confidence": "GoalConfidence.HIGH",
+          "detected_at": "2026-02-17T04:07:13.916017+00:00",
+          "source": "session_carry"
+        },
+        "previous_goals": [],
+        "turn_count": 1,
+        "goal_shifts": 0
+      }
+    },
+    "created_at": "2026-02-17T04:04:34.112884+00:00"
   }
 }

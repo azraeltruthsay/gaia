@@ -10,7 +10,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 import subprocess
 
@@ -107,7 +107,7 @@ class GAIARescueHelper:
     # ---------
     def sketchpad_write(self, title: str, content: str) -> str:
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "title": str(title).strip(),
             "content": str(content),
         }
@@ -147,7 +147,7 @@ class GAIARescueHelper:
         # Backup and clear
         try:
             if self.sketchpad_path.exists():
-                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 backup = self.sketchpad_path.with_suffix(self.sketchpad_path.suffix + f".bak.{ts}")
                 try:
                     self.sketchpad_path.replace(backup)
@@ -215,7 +215,7 @@ class GAIARescueHelper:
             "continuation_hint": continuation_hint,
             "is_complete": is_complete,
             "token_count": token_count,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
         store = self._load_fragments_store()
@@ -354,7 +354,7 @@ class GAIARescueHelper:
         if not key:
             return "⚠️ 'key' is required when calling remember_fact."
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "key": key,
             "value": str(value or ""),
             "note": str(note or ""),
@@ -411,7 +411,7 @@ class GAIARescueHelper:
             "prompt": str(prompt).strip(),
             "note": note or "Queued from shell",
             "priority": (priority or "normal").lower(),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "shell",
         }
         # Load existing list
@@ -440,45 +440,62 @@ class GAIARescueHelper:
     # -------------------
 
     def buffer_and_execute_shell(self, content: str) -> None:
-        """Find an EXECUTE block, verify whitelist, run, log result, sketch it."""
+        """Find an EXECUTE block, verify whitelist, run safely, log result, sketch it."""
         import re
+        import shlex
         m = re.search(r"EXECUTE:\s*(?:```(?:bash|python)?\s*)?(.+?)(?:```)?$", str(content).strip(), re.DOTALL)
         if not m:
             logger.warning("🛑 EXECUTE block not found or malformed.")
             return
         command = m.group(1).strip()
         safe_cmds = set(self.config.SAFE_EXECUTE_FUNCTIONS or [])
-        if not any(command.startswith(func) for func in safe_cmds):
+        try:
+            parts = shlex.split(command)
+        except ValueError as e:
+            logger.warning(f"⛔ Failed to parse command: {e}")
+            return
+        if not parts or parts[0] not in safe_cmds:
             logger.warning(f"⛔ Unsafe command blocked: {command}")
             return
         stdout = stderr = ""
         try:
             from subprocess import Popen, PIPE
-            proc = Popen(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
-            stdout, stderr = proc.communicate()
-        except Exception:
-            from subprocess import Popen, PIPE
-            proc = Popen(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
-            stdout, stderr = proc.communicate()
+            proc = Popen(parts, shell=False, stdout=PIPE, stderr=PIPE, text=True)
+            stdout, stderr = proc.communicate(timeout=30)
+        except Exception as e:
+            logger.error(f"Shell execution failed: {e}")
+            stderr = str(e)
         result = (stdout or "").strip() or (stderr or "").strip()
         self.sketchpad_write("ShellCommand", f"EXECUTE: {command}\n\n{result}")
 
     # -------------
     # Code helpers
     # -------------
+    _ALLOWED_READ_DIRS = ("/gaia/", "/app/", "/knowledge/", "/sandbox/", "/shared/", "/tmp/")
+
+    def _validate_read_path(self, path: str) -> str:
+        """Resolve and validate path is within allowed directories."""
+        resolved = os.path.realpath(path)
+        if not any(resolved.startswith(d) for d in self._ALLOWED_READ_DIRS):
+            raise PermissionError(f"Path '{path}' resolves outside allowed directories")
+        return resolved
+
     def code_read(self, path: str) -> Dict[str, Any]:
         try:
-            rp = os.path.realpath(path)
+            rp = self._validate_read_path(path)
             if not os.path.exists(rp):
                 return {"kind": "code", "path": path, "error": "not found"}
             with open(rp, "r", encoding="utf-8") as f:
                 txt = f.read()
             return {"kind": "code", "path": path, "content": txt}
+        except PermissionError as e:
+            return {"kind": "code", "path": path, "error": str(e)}
         except Exception as e:
             return {"kind": "code", "path": path, "error": str(e)}
 
     def code_span(self, path: str, start: int, end: int) -> Dict[str, Any]:
         try:
+            self._validate_read_path(path)
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             start = max(1, int(start))
@@ -490,6 +507,7 @@ class GAIARescueHelper:
 
     def code_symbol(self, path: str, symbol: str) -> Dict[str, Any]:
         try:
+            self._validate_read_path(path)
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             idx = next((i for i, l in enumerate(lines) if str(symbol) in l), -1)

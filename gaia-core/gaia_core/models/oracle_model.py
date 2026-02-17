@@ -8,7 +8,13 @@ class GPTAPIModel:
     def __init__(self, model_alias: str = "oracle_openai", config: Config = None):
         self.config = config or get_config()
         self.model_alias = model_alias
-        self.client = openai.OpenAI(api_key=self.config.get_api_key("openai"))
+        api_key = self.config.get_api_key("openai")
+        if not api_key:
+            raise ValueError(
+                f"OpenAI API key not configured. Set OPENAI_API_KEY environment variable "
+                f"or configure 'openai' in API_KEYS."
+            )
+        self.client = openai.OpenAI(api_key=api_key)
         self.logger = logging.getLogger(__name__)
 
     def create_chat_completion(self, messages, max_tokens, temperature, top_p, stream=False):

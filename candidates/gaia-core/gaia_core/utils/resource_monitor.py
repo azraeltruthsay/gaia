@@ -5,10 +5,12 @@ from typing import Optional
 
 try:
     import pynvml
-    pynvml.nvmlInit()
     HAS_NVML = True
-except Exception:
+except ImportError:
+    pynvml = None
     HAS_NVML = False
+
+_nvml_initialized = False
 
 try:
     import psutil
@@ -32,10 +34,22 @@ class ResourceMonitor:
 
     _initialized: bool = False
 
+    @staticmethod
+    def _ensure_nvml():
+        global _nvml_initialized, HAS_NVML
+        if HAS_NVML and not _nvml_initialized:
+            try:
+                pynvml.nvmlInit()
+                _nvml_initialized = True
+            except Exception:
+                HAS_NVML = False
+
     def __init__(self, poll_interval: int = 5):
         if self._initialized:
             return
         self._initialized = True
+
+        self._ensure_nvml()
 
         self.poll_interval = poll_interval
         self.gpu_utilization = None
@@ -72,6 +86,7 @@ class ResourceMonitor:
             logger.info("Resource monitor stopped.")
 
     def _monitor(self):
+        self._ensure_nvml()
         while not self._stop_event.is_set():
             try:
                 # GPU polling
@@ -156,7 +171,7 @@ class ResourceMonitor:
 def shutdown_monitor():
     if ResourceMonitor._instance:
         ResourceMonitor._instance.stop()
-        if HAS_NVML:
+        if HAS_NVML and _nvml_initialized:
             pynvml.nvmlShutdown()
 
 import atexit

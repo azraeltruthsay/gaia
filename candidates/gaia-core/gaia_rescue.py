@@ -83,7 +83,7 @@ import logging
 import subprocess
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from gaia_core.cognition.self_review_worker import run_review_with_prompt
 from typing import Dict, Any
 
@@ -240,7 +240,7 @@ class MinimalAIManager:
             logger.debug("Could not eagerly acquire embed_model for rescue session; proceeding without it.", exc_info=True)
 
         # ---------------------------------------------------------------- state
-        self.status: Dict[str, Any] = {"boot_time": datetime.utcnow().isoformat()}
+        self.status: Dict[str, Any] = {"boot_time": datetime.now(timezone.utc).isoformat()}
         self.helper = helper  # hot‑reloadable helper limb
         self.topic_cache_path = "app/shared/topic_cache.json"
 

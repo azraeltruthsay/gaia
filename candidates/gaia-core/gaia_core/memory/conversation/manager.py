@@ -4,7 +4,7 @@ import os
 import json
 import logging
 from typing import List, Optional, Dict # MODIFIED: Added Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer
 from gaia_core.memory.conversation.keywords import ConversationKeywordExtractor
@@ -26,7 +26,7 @@ class ConversationManager:
         self.summarizer = ConversationSummarizer(llm=llm, embed_model=embed_model) # MODIFIED: Pass embed_model
         self.keyword_extractor = ConversationKeywordExtractor()
         self.archiver = ConversationArchiver(config)
-        self.session_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        self.session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         self.persona = "default"
 
     def set_persona(self, persona: str):
@@ -71,7 +71,7 @@ class ConversationManager:
     def reset(self):
         logger.info("🔄 Conversation history reset.")
         self.history = []
-        self.session_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        self.session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     # NEW METHOD: Expose smart history building through the manager
     def build_smart_history(self, current_input: str, max_recent: int = 3, max_salient: int = 2) -> List[Dict]:

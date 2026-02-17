@@ -22,6 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
+# Create non-root user for container execution (host UID mapping)
+RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+ENV HOME=/home/gaia
+ENV USER=gaia
+
 # Upgrade pip
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
@@ -73,8 +78,8 @@ RUN pip install -e "/gaia-common[vector]"
 
 RUN pip install -e /app/gaia-study/.[dev]
 
-
-
+# Set ownership for non-root execution
+RUN chown -R gaia:gaia /app
 
 
 
@@ -85,6 +90,9 @@ EXPOSE 8766
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8766/health || exit 1
+
+# Run as non-root user
+USER gaia
 
 # Run the service
 CMD ["python", "-m", "uvicorn", "gaia_study.main:app", "--host", "0.0.0.0", "--port", "8766"]

@@ -9,7 +9,7 @@ import os
 import difflib
 from pathlib import Path
 from typing import Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 DEV_MATRIX_PATH = Path(os.environ.get("DEV_MATRIX_PATH", "app/shared/dev_matrix.json")).resolve()
 
@@ -42,7 +42,7 @@ def mark_task_complete(task_key: str, prompt: str = None, path: Path = DEV_MATRI
     # Deep copy via json round-trip to avoid mutating in-place
     new = json.loads(json.dumps(old))
 
-    ts = datetime.utcnow().isoformat()
+    ts = datetime.now(timezone.utc).isoformat()
 
     # Case 1: dict keyed by task_key
     if isinstance(new, dict):

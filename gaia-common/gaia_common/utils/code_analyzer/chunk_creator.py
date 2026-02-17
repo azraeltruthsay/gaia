@@ -37,7 +37,7 @@ def create_chunks(file_path: str, code: str, structure: Dict) -> List[Dict]:
                 "name": item.get("name"),
                 "lines": f"{start+1}-{end}",
                 "content": snippet,
-                "hash": hashlib.md5(snippet.encode("utf-8")).hexdigest()
+                "hash": hashlib.sha256(snippet.encode("utf-8")).hexdigest()
             }
             chunks.append(chunk)
 
