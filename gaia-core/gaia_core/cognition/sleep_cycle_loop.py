@@ -68,10 +68,24 @@ class SleepCycleLoop:
     def start(self) -> None:
         if self._thread is not None:
             return
+        self._probe_prime_on_boot()
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True, name="SleepCycleLoop")
         self._thread.start()
         logger.info("Sleep cycle loop started")
+
+    def _probe_prime_on_boot(self) -> None:
+        """Check if gaia-prime is already healthy on startup and set prime_available."""
+        prime_url = os.getenv("PRIME_ENDPOINT", "http://gaia-prime:7777")
+        try:
+            resp = httpx.get(f"{prime_url}/health", timeout=5.0)
+            if resp.status_code == 200:
+                self.sleep_wake_manager.prime_available = True
+                logger.info("Prime detected healthy on boot — prime_available=True")
+            else:
+                logger.info("Prime returned %s on boot — prime_available remains False", resp.status_code)
+        except Exception:
+            logger.info("Prime unreachable on boot — prime_available remains False")
 
     def stop(self) -> None:
         self._running = False
