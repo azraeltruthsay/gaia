@@ -192,6 +192,7 @@ def _detect_fragmentation_request(text: str) -> bool:
         "protocol",
         "charter",
         "document",
+        "blueprint",
     ]
 
     # Well-known works that are likely to be lengthy
@@ -230,6 +231,8 @@ def _detect_fragmentation_request(text: str) -> bool:
         "coalition of minds",
         "mindscape manifest",
         "cognition protocol",
+        "core blueprint",
+        "gaia core blueprint",
     ]
 
     # Check for explicit recitation verbs

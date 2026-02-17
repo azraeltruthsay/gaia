@@ -128,6 +128,11 @@ RECITABLE_DOCUMENTS = {
         "path": "knowledge/system_reference/core_documents/mindscape_manifest.md",
         "title": "The Mindscape Manifest",
     },
+    "core_blueprint": {
+        "keywords": ["core blueprint", "gaia core blueprint", "your blueprint", "your core blueprint"],
+        "path": "knowledge/blueprints/GAIA_CORE.md",
+        "title": "The GAIA Core Blueprint",
+    },
 }
 
 
