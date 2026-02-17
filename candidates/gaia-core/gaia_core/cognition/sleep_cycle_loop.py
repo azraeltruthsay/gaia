@@ -29,7 +29,8 @@ logger = logging.getLogger("GAIA.SleepCycle")
 class SleepCycleLoop:
     """Background thread that monitors idle state and drives sleep/wake."""
 
-    POLL_INTERVAL = 10  # seconds between idle checks
+    POLL_INTERVAL_ACTIVE = 10  # seconds between idle checks when ACTIVE
+    POLL_INTERVAL_ASLEEP = 2   # seconds when ASLEEP — react fast to wake signals
     DISTRACTED_RECHECK_INTERVAL = 300  # 5 min between distracted rechecks
 
     def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None) -> None:
@@ -116,7 +117,11 @@ class SleepCycleLoop:
                 time.sleep(15)
                 continue
 
-            time.sleep(self.POLL_INTERVAL)
+            # Poll faster when asleep to react quickly to wake signals
+            if state in (GaiaState.ASLEEP, GaiaState.DISTRACTED):
+                time.sleep(self.POLL_INTERVAL_ASLEEP)
+            else:
+                time.sleep(self.POLL_INTERVAL_ACTIVE)
 
     # ------------------------------------------------------------------
     # Per-state handlers
