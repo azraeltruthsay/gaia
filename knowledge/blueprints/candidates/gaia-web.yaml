@@ -1,0 +1,223 @@
+# gaia-web blueprint — MANUAL SEED (bootstrap)
+# Hand-authored from codebase audit (2026-02-17).
+# Covers ~95% of gaia-web's actual surface area as of commit d589a85.
+# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+
+id: gaia-web
+version: "0.5"
+role: "The Face (Web/Discord Gateway)"
+service_status: live
+
+runtime:
+  port: 6414
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: "uvicorn gaia_web.main:app --host 0.0.0.0 --port 6414"
+  health_check: "curl -f http://localhost:6414/health"
+  user: "${UID}:${GID}"
+  dockerfile: gaia-web/Dockerfile
+  compose_service: gaia-web
+
+interfaces:
+
+  # ── Inbound ────────────────────────────────────────────────────────────────
+
+  - id: health
+    direction: inbound
+    description: "Container health check endpoint."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+  - id: root
+    direction: inbound
+    description: "Root endpoint — returns service info and available endpoints for discovery."
+    status: active
+    transport:
+      type: http_rest
+      path: /
+      method: GET
+
+  - id: queue_status
+    direction: inbound
+    description: "Message queue telemetry — queued count, wake signal state, oldest message age."
+    status: active
+    transport:
+      type: http_rest
+      path: /queue/status
+      method: GET
+
+  - id: process_user_input
+    direction: inbound
+    description: "Primary user input entry point. Receives text from web/Discord, converts to CognitionPacket, sends to gaia-core. Sleep-aware: enqueues + wakes + polls if GAIA is asleep."
+    status: active
+    transport:
+      type: http_rest
+      path: /process_user_input
+      method: POST
+
+  - id: presence
+    direction: inbound
+    description: "Update Discord bot presence (status dot + activity text). Called by gaia-core's SleepCycleLoop."
+    status: active
+    transport:
+      type: http_rest
+      path: /presence
+      method: POST
+
+  - id: output_router
+    direction: inbound
+    description: "Route completed packets to output destinations (Discord channels, DMs, logs). Called by gaia-core after response generation."
+    status: active
+    transport:
+      type: http_rest
+      path: /output_router
+      method: POST
+
+  # ── Outbound ───────────────────────────────────────────────────────────────
+
+  - id: core_process_packet
+    direction: outbound
+    description: "Send CognitionPacket to gaia-core for cognitive processing."
+    status: active
+    transport:
+      type: http_rest
+      path: /process_packet
+      method: POST
+
+  - id: core_sleep_distracted_check
+    direction: outbound
+    description: "Check gaia-core sleep state before enqueueing messages."
+    status: active
+    transport:
+      type: http_rest
+      path: /sleep/distracted-check
+      method: GET
+
+  - id: core_sleep_wake
+    direction: outbound
+    description: "Send wake signal to gaia-core. Triggers ASLEEP -> WAKING transition."
+    status: active
+    transport:
+      type: http_rest
+      path: /sleep/wake
+      method: POST
+
+  - id: core_sleep_status
+    direction: outbound
+    description: "Poll gaia-core sleep status in wait_for_active loop."
+    status: active
+    transport:
+      type: http_rest
+      path: /sleep/status
+      method: GET
+
+  - id: discord_bot
+    direction: outbound
+    description: "discord.py bot instance — sends/receives Discord messages in background thread."
+    status: active
+    transport:
+      type: direct_call
+      symbol: "gaia_web.discord_interface.DiscordInterface"
+
+dependencies:
+  services:
+    - id: gaia-core
+      role: cognitive_processing
+      required: true
+      fallback: null
+
+  volumes:
+    - name: gaia-common
+      access: ro
+      purpose: "Shared library (CognitionPacket, protocols)"
+      mount_path: /gaia-common
+    - name: knowledge
+      access: ro
+      purpose: "Static knowledge base, blueprints, semantic codex"
+      mount_path: /knowledge
+
+  external_apis:
+    - name: discord
+      purpose: bot_messaging_gateway
+      required: false
+
+source_files:
+  - path: gaia-web/gaia_web/main.py
+    role: entrypoint
+    file_type: python
+  - path: gaia-web/gaia_web/discord_interface.py
+    role: discord_gateway
+    file_type: python
+  - path: gaia-web/gaia_web/queue/message_queue.py
+    role: sleep_wake_queue
+    file_type: python
+  - path: gaia-web/Dockerfile
+    role: build_config
+    file_type: dockerfile
+
+failure_modes:
+  - condition: "gaia-core unavailable"
+    response: "HTTP 503/504 returned to client; timeout after 300s"
+    severity: fatal
+    auto_recovers: false
+
+  - condition: "Discord bot token missing or invalid"
+    response: "Discord integration disabled; web input processing still works"
+    severity: degraded
+    auto_recovers: false
+
+  - condition: "Discord bot websocket down"
+    response: "/output_router returns 503 for Discord sends; bot auto-reconnects via discord.py"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Sleep/wake queue timeout"
+    response: "wait_for_active times out; user gets timeout error"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Discord message send fails (permissions, deleted channel)"
+    response: "/output_router returns 500; response lost (not retried)"
+    severity: degraded
+    auto_recovers: false
+
+intent:
+  purpose: >
+    The user-facing gateway of GAIA. Handles all external interactions:
+    web form submissions, Discord messaging (mentions + DMs), and output
+    routing back to endpoints. Integrates sleep/wake coordination: enqueues
+    messages while GAIA sleeps, wakes on first message, polls for active
+    state before returning response.
+  cognitive_role: "The Face"
+  design_decisions:
+    - "FastAPI + uvicorn for concurrent Discord and web traffic"
+    - "Discord bot runs in background thread (separate event loop) to avoid blocking HTTP handlers"
+    - "Sleep-aware message queue holds incoming messages while GAIA sleeps, sends wake signal, waits for active"
+    - "Direct Discord bot control: /presence and /output_router directly manipulate discord.py bot"
+    - "Message splitting respects Discord's 2000-char limit while preferring newline/word boundaries"
+    - "gaia-core is the single source of truth for sleep state; web polls rather than caches"
+    - "Graceful degradation: Discord unavailability doesn't block web API"
+  open_questions:
+    - "Should message queue persistence survive service restart, or is in-memory-only acceptable?"
+    - "Is MessageQueue polling interval (1.5s default) optimal, or should it be configurable?"
+    - "Should /output_router handle async retries for failed Discord sends?"
+
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: "0.2"
+  schema_version: "1.0"
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null

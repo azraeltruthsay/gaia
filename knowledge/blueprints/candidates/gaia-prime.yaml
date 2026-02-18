@@ -1,0 +1,181 @@
+# gaia-prime blueprint — MANUAL SEED (bootstrap)
+# Hand-authored from codebase audit (2026-02-17).
+# Covers ~95% of gaia-prime's actual surface area as of commit d589a85.
+# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+
+id: gaia-prime
+version: "0.5"
+role: "The Voice (Inference)"
+service_status: live
+
+runtime:
+  port: 7777
+  base_image: "nvcr.io/nvidia/pytorch:25.03-py3"
+  gpu: true
+  gpu_count: 1
+  startup_cmd: >-
+    python -m vllm.entrypoints.openai.api_server
+    --model /models/Qwen3-4B-Instruct-2507-heretic
+    --host 0.0.0.0 --port 7777
+    --gpu-memory-utilization 0.70
+    --max-model-len 8192 --max-num-seqs 4
+    --trust-remote-code --dtype auto --enforce-eager
+    --enable-lora --max-loras 4 --max-lora-rank 64
+    --enable-sleep-mode --enable-prefix-caching
+    --kv-offloading-backend native --kv-offloading-size 8
+    --disable-hybrid-kv-cache-manager
+  health_check: "curl -f http://localhost:7777/health"
+  dockerfile: gaia-prime/Dockerfile
+  compose_service: gaia-prime
+
+interfaces:
+
+  # ── Inbound (OpenAI-Compatible API) ─────────────────────────────────────
+
+  - id: health
+    direction: inbound
+    description: "Health check endpoint for container probes and orchestrator monitoring."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+  - id: models_list
+    direction: inbound
+    description: "List models registered with vLLM server."
+    status: active
+    transport:
+      type: http_rest
+      path: /v1/models
+      method: GET
+
+  - id: chat_completions
+    direction: inbound
+    description: "Chat completion — OpenAI-compatible API. Supports streaming, guided decoding (JSON/regex), and LoRA adapter selection."
+    status: active
+    transport:
+      type: http_rest
+      path: /v1/chat/completions
+      method: POST
+
+  - id: text_completions
+    direction: inbound
+    description: "Text completion — OpenAI-compatible API for raw text generation."
+    status: active
+    transport:
+      type: http_rest
+      path: /v1/completions
+      method: POST
+
+  - id: vllm_sleep
+    direction: inbound
+    description: "vLLM sleep mode — offload KV cache to CPU RAM to reduce VRAM. Requires VLLM_SERVER_DEV_MODE=1."
+    status: active
+    transport:
+      type: http_rest
+      path: /sleep
+      method: POST
+
+  - id: vllm_wake_up
+    direction: inbound
+    description: "vLLM wake — restore KV cache from CPU RAM back to GPU VRAM."
+    status: active
+    transport:
+      type: http_rest
+      path: /wake_up
+      method: POST
+
+  # No outbound interfaces — gaia-prime is a pure inference server.
+
+dependencies:
+  services: []
+
+  volumes:
+    - name: gaia_warm_pool
+      access: ro
+      purpose: "Model weights and LoRA adapters (warm pool seeded at boot by systemd)"
+      mount_path: /models
+
+  external_apis: []
+
+source_files:
+  - path: gaia-prime/Dockerfile
+    role: build_config
+    file_type: dockerfile
+  - path: gaia-prime/patch_float8.sh
+    role: build_helper
+    file_type: bash
+  - path: gaia-prime/cmake_wrapper.sh
+    role: build_hook
+    file_type: bash
+
+failure_modes:
+  - condition: "gaia-prime unreachable"
+    response: "gaia-core falls back to Groq API, then local GGUF model"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "GPU out of memory (VRAM exhausted)"
+    response: "vLLM rejects request with 503; requires container restart"
+    severity: fatal
+    auto_recovers: false
+
+  - condition: "Model loading timeout (>120s)"
+    response: "Health check fails; orchestrator does not bring service online"
+    severity: fatal
+    auto_recovers: false
+
+  - condition: "vLLM process crash (OOM, CUDA error)"
+    response: "Container exits; restart policy=unless-stopped restarts automatically"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "LoRA adapter not found or mismatched"
+    response: "Request fails; gaia-core catches exception and retries with base model"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "CUDA architecture mismatch (wrong sm_ code)"
+    response: "Container fails during vLLM init; orchestrator detects health check failure"
+    severity: fatal
+    auto_recovers: false
+
+intent:
+  purpose: >
+    GPU-accelerated LLM inference decoupled from the cognitive loop.
+    Enables gaia-core (CPU-only) to delegate all LLM computation while
+    maintaining control flow. Supports GPU time-sharing between inference
+    (prime) and training (study) via orchestrator-managed container lifecycle.
+  cognitive_role: "The Voice"
+  design_decisions:
+    - "Standalone vLLM server — no custom wrapper code reduces maintenance and leverages community ecosystem"
+    - "Blackwell (sm_120) optimized via NGC PyTorch 25.03 + custom Float8 patches for RTX 5080"
+    - "LoRA support (4 concurrent adapters) allows persona/user-specific behavior without full finetune"
+    - "8GB KV cache offloading buffer tolerates longer context despite --enforce-eager limitation"
+    - "Sleep/wake endpoints enable GPU handoff signaling; orchestrator uses container stop/start for full VRAM release"
+    - "Warm pool (/mnt/gaia_warm_pool tmpfs) seeded at boot reduces cold start from ~41s (NVMe) to ~37s (RAM)"
+    - "Prefix caching optimizes repeated long prefixes (system prompt + conversation context)"
+    - "Max context window 8192 tokens balances latency vs reasoning depth"
+    - "Guided decoding (JSON schema, regex) ensures reliable tool-calling output"
+  open_questions:
+    - "Should gpu_memory_utilization be dynamic based on session queue depth?"
+    - "Can prefix caching be leveraged more aggressively for knowledge retrieval patterns?"
+    - "Optimal LoRA rank for tier3_session ephemeral adapters to minimize performance impact?"
+
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: "0.2"
+  schema_version: "1.0"
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null

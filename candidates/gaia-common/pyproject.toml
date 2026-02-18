@@ -23,6 +23,7 @@ dependencies = [
     "dataclasses-json",
     "requests",
     "httpx>=0.25.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
@@ -34,6 +35,7 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "types-PyYAML>=6.0",
 ]
 
 [tool.ruff]
