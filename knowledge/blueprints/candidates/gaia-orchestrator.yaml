@@ -1,0 +1,393 @@
+# gaia-orchestrator blueprint — MANUAL SEED (bootstrap)
+# Hand-authored from codebase audit (2026-02-17).
+# Covers ~95% of gaia-orchestrator's actual surface area as of commit d589a85.
+# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+
+id: gaia-orchestrator
+version: "0.5"
+role: "The Coordinator (Infrastructure)"
+service_status: live
+
+runtime:
+  port: 6410
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: "uvicorn gaia_orchestrator.main:app --host 0.0.0.0 --port 6410"
+  health_check: "curl -f http://localhost:6410/health"
+  user: "${UID}:${GID}"
+  dockerfile: gaia-orchestrator/Dockerfile
+  compose_service: gaia-orchestrator
+
+interfaces:
+
+  # ── Inbound ────────────────────────────────────────────────────────────────
+
+  - id: health
+    direction: inbound
+    description: "Container health check endpoint."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+  - id: root
+    direction: inbound
+    description: "Root endpoint — full API overview for service discovery."
+    status: active
+    transport:
+      type: http_rest
+      path: /
+      method: GET
+
+  - id: status
+    direction: inbound
+    description: "Complete orchestrator state: GPU status, container statuses, active handoff."
+    status: active
+    transport:
+      type: http_rest
+      path: /status
+      method: GET
+
+  - id: gpu_status
+    direction: inbound
+    description: "Current GPU ownership (owner, lease_id, acquired_at, queue)."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/status
+      method: GET
+
+  - id: gpu_acquire
+    direction: inbound
+    description: "Request GPU ownership; queues if unavailable."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/acquire
+      method: POST
+
+  - id: gpu_release
+    direction: inbound
+    description: "Release GPU ownership; advances queue to next requester."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/release
+      method: POST
+
+  - id: gpu_wait
+    direction: inbound
+    description: "Block and wait for GPU availability, then acquire."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/wait
+      method: POST
+
+  - id: gpu_sleep
+    direction: inbound
+    description: "Release GPU for sleep — stops prime container, demotes gpu_prime. Called by gaia-core SleepCycleLoop."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/sleep
+      method: POST
+
+  - id: gpu_wake
+    direction: inbound
+    description: "Reclaim GPU after wake — starts prime container, restores gpu_prime. Called by gaia-core SleepCycleLoop."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/wake
+      method: POST
+
+  - id: containers_status
+    direction: inbound
+    description: "Get all live + candidate service container states."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/status
+      method: GET
+
+  - id: containers_live_start
+    direction: inbound
+    description: "Start live stack (gaia-core, gaia-web, gaia-mcp, gaia-study)."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/live/start
+      method: POST
+
+  - id: containers_live_stop
+    direction: inbound
+    description: "Stop live stack and release GPU."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/live/stop
+      method: POST
+
+  - id: containers_candidate_start
+    direction: inbound
+    description: "Start candidate stack with --profile full."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/candidate/start
+      method: POST
+
+  - id: containers_candidate_stop
+    direction: inbound
+    description: "Stop candidate stack and release GPU if owned."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/candidate/stop
+      method: POST
+
+  - id: containers_swap
+    direction: inbound
+    description: "Swap service between live/candidate; injects candidate into live traffic."
+    status: active
+    transport:
+      type: http_rest
+      path: /containers/swap
+      method: POST
+
+  - id: handoff_prime_to_study
+    direction: inbound
+    description: "Initiate GPU handoff from prime to study (5-phase: release -> cleanup -> transfer -> signal -> complete)."
+    status: active
+    transport:
+      type: http_rest
+      path: /handoff/prime-to-study
+      method: POST
+
+  - id: handoff_study_to_prime
+    direction: inbound
+    description: "Initiate GPU handoff from study back to prime."
+    status: active
+    transport:
+      type: http_rest
+      path: /handoff/study-to-prime
+      method: POST
+
+  - id: handoff_status
+    direction: inbound
+    description: "Query handoff status by ID."
+    status: active
+    transport:
+      type: http_rest
+      path: "/handoff/{handoff_id}/status"
+      method: GET
+
+  - id: notify_oracle_fallback
+    direction: inbound
+    description: "Receive Oracle inference fallback notifications."
+    status: active
+    transport:
+      type: http_rest
+      path: /notify/oracle-fallback
+      method: POST
+
+  - id: ws_notifications
+    direction: inbound
+    description: "Real-time notification stream; broadcasts to all connected WebSocket clients."
+    status: active
+    transport:
+      type: websocket
+      path: /ws/notifications
+
+  # ── Outbound ───────────────────────────────────────────────────────────────
+
+  - id: core_gpu_release
+    direction: outbound
+    description: "Notify gaia-core to demote gpu_prime from model pool."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/release
+      method: POST
+
+  - id: core_gpu_reclaim
+    direction: outbound
+    description: "Notify gaia-core to restore gpu_prime to model pool."
+    status: active
+    transport:
+      type: http_rest
+      path: /gpu/reclaim
+      method: POST
+
+  - id: core_study_handoff
+    direction: outbound
+    description: "Notify gaia-core sleep state machine of handoff completion."
+    status: active
+    transport:
+      type: http_rest
+      path: /sleep/study-handoff
+      method: POST
+
+  - id: study_gpu_ready
+    direction: outbound
+    description: "Signal gaia-study that GPU is available for training."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/gpu-ready
+      method: POST
+
+  - id: study_gpu_release
+    direction: outbound
+    description: "Request gaia-study release GPU during study-to-prime handoff."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/gpu-release
+      method: POST
+
+  - id: prime_health_probe
+    direction: outbound
+    description: "Health probe to gaia-prime during container start (waits for model loaded)."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+dependencies:
+  services:
+    - id: gaia-core
+      role: gpu_negotiation
+      required: true
+      fallback: null
+    - id: gaia-prime
+      role: inference_container
+      required: false
+      fallback: null
+    - id: gaia-study
+      role: training_container
+      required: false
+      fallback: null
+
+  volumes:
+    - name: docker-socket
+      access: ro
+      purpose: "Docker daemon access for container lifecycle management"
+      mount_path: /var/run/docker.sock
+    - name: gaia-shared
+      access: rw
+      purpose: "State persistence (/shared/orchestrator/state.json)"
+      mount_path: /shared
+    - name: project-root
+      access: ro
+      purpose: "Compose file access for live + candidate stacks"
+      mount_path: /gaia/GAIA_Project
+
+  external_apis: []
+
+source_files:
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/main.py
+    role: entrypoint
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/gpu_manager.py
+    role: gpu_coordination
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/docker_manager.py
+    role: container_lifecycle
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/handoff_manager.py
+    role: handoff_protocol
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/state.py
+    role: state_persistence
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/notification_manager.py
+    role: websocket_broadcast
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/config.py
+    role: configuration
+    file_type: python
+  - path: candidates/gaia-orchestrator/gaia_orchestrator/models/schemas.py
+    role: data_models
+    file_type: python
+  - path: candidates/gaia-orchestrator/Dockerfile
+    role: build_config
+    file_type: dockerfile
+
+failure_modes:
+  - condition: "Docker daemon unreachable"
+    response: "Container start/stop endpoints return 500; GPU tracking still functional"
+    severity: fatal
+    auto_recovers: false
+
+  - condition: "gaia-core GPU release/reclaim fails"
+    response: "Logs error; GPU lease remains held; handoff may stall"
+    severity: partial
+    auto_recovers: false
+
+  - condition: "gaia-prime health check timeout (120s)"
+    response: "GPU wake fails; study cycle exits with timeout"
+    severity: partial
+    auto_recovers: false
+
+  - condition: "CUDA cleanup timeout (30s)"
+    response: "Handoff fails with timeout; GPU remains locked to previous owner"
+    severity: partial
+    auto_recovers: false
+
+  - condition: "State file corruption on disk"
+    response: "Fresh state initialized on boot; handoff history lost but GPU ownership recovers"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "gaia-study unreachable during handoff"
+    response: "Signal calls log warnings but don't fail handoff; study may miss GPU-ready notification"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Concurrent handoffs triggered"
+    response: "Handoff manager rejects 2nd handoff with 'already in progress' error"
+    severity: degraded
+    auto_recovers: true
+
+intent:
+  purpose: >
+    Central resource broker for GPU allocation and container lifecycle in a
+    single-GPU GAIA system. Enables gaia-prime (inference) and gaia-study
+    (training) to share the GPU via coordinated handoffs. Provides real-time
+    monitoring, container swapping, and graceful state recovery.
+  cognitive_role: "The Coordinator"
+  design_decisions:
+    - "CPU-only by design — async handoff orchestration without blocking cognition"
+    - "Single GPU multiplexing via container stop/start (not vLLM sleep) because --enforce-eager prevents full VRAM release"
+    - "VRAM cleanup uses pynvml if available; falls back to container status check on non-GPU hosts"
+    - "Atomic state persistence to /shared/orchestrator/state.json with rename to prevent corruption"
+    - "Lazy manager initialization — GPU, Docker, Handoff managers init only on first use"
+    - "Graceful service degradation — HTTP calls to study/prime that timeout log warnings but don't fail handoff"
+    - "WebSocket history buffer keeps last 100 notifications for new clients to catch up"
+    - "Docker compose subprocess (not Python SDK) for full compose support (profiles, env overrides)"
+    - "Handoff phases with progress tracking (6 phases: INITIATED -> RELEASING -> CLEANUP -> TRANSFER -> SIGNALING -> COMPLETED)"
+  open_questions:
+    - "Should GPU cleanup timeout be dynamic based on model size, or remain fixed at 30s?"
+    - "Should concurrent handoff requests queue, or immediately fail with 409 Conflict?"
+    - "Is prime health polling sufficient, or should orchestrator have explicit ownership tracking?"
+
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: "0.2"
+  schema_version: "1.0"
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null

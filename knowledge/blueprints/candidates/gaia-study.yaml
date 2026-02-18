@@ -1,0 +1,308 @@
+# gaia-study blueprint — MANUAL SEED (bootstrap)
+# Hand-authored from codebase audit (2026-02-17).
+# Covers ~95% of gaia-study's actual surface area as of commit d589a85.
+# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+
+id: gaia-study
+version: "0.5"
+role: "The Subconscious (Background Learning)"
+service_status: live
+
+runtime:
+  port: 8766
+  base_image: "nvidia/cuda:12.4.0-devel-ubuntu22.04"
+  gpu: true
+  gpu_count: "all"
+  startup_cmd: "uvicorn gaia_study.main:app --host 0.0.0.0 --port 8766"
+  health_check: "curl -f http://localhost:8766/health"
+  user: "${UID}:${GID}"
+  dockerfile: gaia-study/Dockerfile
+  compose_service: gaia-study
+
+interfaces:
+
+  # ── Inbound ────────────────────────────────────────────────────────────────
+
+  - id: health
+    direction: inbound
+    description: "Container health check endpoint."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+  - id: status
+    direction: inbound
+    description: "Service status with loaded indexes and statistics."
+    status: active
+    transport:
+      type: http_rest
+      path: /status
+      method: GET
+
+  - id: index_build
+    direction: inbound
+    description: "Build or rebuild vector index from documents (async background task)."
+    status: active
+    transport:
+      type: http_rest
+      path: /index/build
+      method: POST
+
+  - id: index_add
+    direction: inbound
+    description: "Add single document to existing vector index."
+    status: active
+    transport:
+      type: http_rest
+      path: /index/add
+      method: POST
+
+  - id: index_query
+    direction: inbound
+    description: "Query index for semantically similar documents."
+    status: active
+    transport:
+      type: http_rest
+      path: /index/query
+      method: POST
+
+  - id: index_status
+    direction: inbound
+    description: "Get status of a specific knowledge base index."
+    status: active
+    transport:
+      type: http_rest
+      path: "/index/{knowledge_base_name}/status"
+      method: GET
+
+  - id: index_refresh
+    direction: inbound
+    description: "Reload index from disk."
+    status: active
+    transport:
+      type: http_rest
+      path: "/index/{knowledge_base_name}/refresh"
+      method: POST
+
+  - id: gpu_ready
+    direction: inbound
+    description: "Signal from orchestrator that GPU is available for training."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/gpu-ready
+      method: POST
+
+  - id: gpu_release
+    direction: inbound
+    description: "Signal from orchestrator to release GPU; cancels training, cleans CUDA resources."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/gpu-release
+      method: POST
+
+  - id: study_start
+    direction: inbound
+    description: "Start LoRA adapter training from documents (async background task). Supports 3 tiers: global, user, session."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/start
+      method: POST
+
+  - id: study_status
+    direction: inbound
+    description: "Get current training status (IDLE, PREPARING, TRAINING, COMPLETE, FAILED)."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/status
+      method: GET
+
+  - id: study_cancel
+    direction: inbound
+    description: "Cancel in-progress training."
+    status: active
+    transport:
+      type: http_rest
+      path: /study/cancel
+      method: POST
+
+  - id: adapter_list
+    direction: inbound
+    description: "List all LoRA adapters, optionally filtered by tier."
+    status: active
+    transport:
+      type: http_rest
+      path: /adapters
+      method: GET
+
+  - id: adapter_load
+    direction: inbound
+    description: "Load adapter for generation (stub — requires model pool integration)."
+    status: active
+    transport:
+      type: http_rest
+      path: /adapters/load
+      method: POST
+
+  - id: adapter_unload
+    direction: inbound
+    description: "Unload adapter (stub — requires model pool integration)."
+    status: active
+    transport:
+      type: http_rest
+      path: /adapters/unload
+      method: POST
+
+  - id: adapter_info
+    direction: inbound
+    description: "Get detailed adapter metadata."
+    status: active
+    transport:
+      type: http_rest
+      path: "/adapters/{adapter_name}"
+      method: GET
+
+  - id: adapter_delete
+    direction: inbound
+    description: "Delete adapter (tier 1 protected from deletion)."
+    status: active
+    transport:
+      type: http_rest
+      path: "/adapters/{adapter_name}"
+      method: DELETE
+
+  # No outbound interfaces — gaia-study is called by orchestrator/mcp, not the caller.
+
+dependencies:
+  services: []
+
+  volumes:
+    - name: gaia-common
+      access: ro
+      purpose: "Shared library (vector client, utils)"
+      mount_path: /gaia-common
+    - name: knowledge
+      access: rw
+      purpose: "Knowledge base documents for indexing (sole writer to vector indices)"
+      mount_path: /knowledge
+    - name: vector_store
+      access: rw
+      purpose: "Vector store — sole writer for FAISS indices"
+      mount_path: /vector_store
+    - name: gaia-models
+      access: rw
+      purpose: "Embedding models, LoRA adapters, base model for training"
+      mount_path: /models
+    - name: gaia-shared
+      access: rw
+      purpose: "Shared state volume"
+      mount_path: /shared
+    - name: logs
+      access: rw
+      purpose: "Consolidated service logs"
+      mount_path: /logs
+
+  external_apis: []
+
+source_files:
+  - path: candidates/gaia-study/gaia_study/main.py
+    role: entrypoint
+    file_type: python
+  - path: candidates/gaia-study/gaia_study/server.py
+    role: api_factory
+    file_type: python
+  - path: candidates/gaia-study/gaia_study/indexer.py
+    role: vector_indexer
+    file_type: python
+  - path: candidates/gaia-study/gaia_study/study_mode_manager.py
+    role: training_orchestration
+    file_type: python
+  - path: candidates/gaia-study/gaia_study/qlora_trainer.py
+    role: qlora_training
+    file_type: python
+  - path: candidates/gaia-study/gaia_study/training_utils.py
+    role: training_utilities
+    file_type: python
+  - path: candidates/gaia-study/Dockerfile
+    role: build_config
+    file_type: dockerfile
+
+failure_modes:
+  - condition: "Document directory not found"
+    response: "FileNotFoundError raised; index build fails gracefully"
+    severity: degraded
+    auto_recovers: false
+
+  - condition: "No valid training samples"
+    response: "TrainingResult with success=False; adapter not created"
+    severity: degraded
+    auto_recovers: false
+
+  - condition: "GPU OOM during training"
+    response: "Training marked failed; CUDA cache cleared"
+    severity: partial
+    auto_recovers: false
+
+  - condition: "Adapter tier limit exceeded"
+    response: "HTTPException 409 Conflict"
+    severity: degraded
+    auto_recovers: false
+
+  - condition: "Content validation failure (forbidden patterns)"
+    response: "Offending samples skipped with logged warning; training continues with remaining"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Model load failure (missing base model)"
+    response: "Falls back to simulated training mode for UI/workflow testing"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Vector index corruption"
+    response: "Returns empty index; rebuild via /index/build"
+    severity: degraded
+    auto_recovers: true
+
+intent:
+  purpose: >
+    Background processing service for GAIA's self-study during sleep cycles.
+    Handles vector index building, document embedding, LoRA adapter training
+    via QLoRA, and adapter lifecycle management. Sole writer to the vector
+    store and LoRA adapter directories — all other services read only.
+  cognitive_role: "The Subconscious"
+  design_decisions:
+    - "Sole writer principle — only gaia-study writes to /vector_store and LoRA adapter directories"
+    - "GPU isolation — exclusive GPU access during training via orchestrator-managed handoff"
+    - "Async background processing — long-running ops don't block HTTP responses; client polls /study/status"
+    - "Tiered adapter architecture: tier 1 (global, protected), tier 2 (user), tier 3 (session, ephemeral)"
+    - "QLoRA 4-bit quantization reduces VRAM from ~50GB to ~16GB for large models"
+    - "Gradient checkpointing + paged AdamW (8-bit) further reduce memory footprint"
+    - "Content governance: forbidden pattern detection, size limits, sample count limits"
+    - "JSON-based vector store for human readability and debugging; suitable for ~100K documents"
+    - "Fallback to simulated training when real training dependencies unavailable"
+  open_questions:
+    - "Should vector store migrate to FAISS or ChromaDB for better performance at scale?"
+    - "Should CUDA_VISIBLE_DEVICES be dynamic based on orchestrator GPU allocation?"
+    - "Optimal gradient accumulation steps for RTX 5080 16GB VRAM?"
+
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: "0.2"
+  schema_version: "1.0"
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null
