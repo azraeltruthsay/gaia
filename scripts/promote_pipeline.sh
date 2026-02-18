@@ -27,6 +27,7 @@
 #   --gpu-to-study   Hand GPU to study instead of prime after promotion
 #   --gpu-skip       Don't touch GPU state at all
 #   --gpu-timeout N  Seconds to wait for GPU handoff (default: 180)
+#   --no-auto-start  Don't auto-start candidate stack (assume already running)
 #   --services LIST  Comma-separated services to promote
 #                    (default: gaia-common,gaia-mcp,gaia-core,gaia-study)
 #   -v, --verbose    Pass -v to smoke test runner
@@ -49,6 +50,7 @@ SCRIPTS_DIR="$GAIA_ROOT/scripts"
 PROMOTE_SCRIPT="$SCRIPTS_DIR/promote_candidate.sh"
 SMOKE_SCRIPT="$GAIA_ROOT/candidates/gaia-core/scripts/smoke_test_cognitive.py"
 FLATTEN_SCRIPT="$GAIA_ROOT/flatten_soa.sh"
+CANDIDATE_COMPOSE="$GAIA_ROOT/docker-compose.candidate.yml"
 LOG_FILE="$GAIA_ROOT/logs/promote_pipeline.log"
 DATE=$(date +%Y-%m-%d)
 TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)

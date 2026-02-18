@@ -511,3 +511,67 @@ class TestCheckpointConsumed:
 
         manager.checkpoint_manager.create_checkpoint()
         assert manager.checkpoint_manager.is_consumed() is False
+
+
+# ── Early/late cancel and idle_monitor wiring ─────────────────────────
+
+class TestDrowsyCancelBehavior:
+    def test_early_cancel_skips_checkpoint_entirely(self, mock_config):
+        """When wake_signal_pending is set BEFORE initiate_drowsy, no checkpoint is written."""
+        mgr = SleepWakeManager(mock_config)
+        checkpoint_dir = Path(mock_config.SHARED_DIR) / "sleep_state"
+
+        # Set wake signal before entering drowsy
+        mgr.wake_signal_pending = True
+        result = mgr.initiate_drowsy()
+
+        assert result is False
+        assert mgr.get_state() == GaiaState.ACTIVE
+        assert mgr.wake_signal_pending is False
+        # No checkpoint should have been written
+        prime_md = checkpoint_dir / "prime.md"
+        assert not prime_md.exists()
+
+    def test_late_cancel_marks_checkpoint_consumed(self, mock_config):
+        """When wake signal arrives during checkpoint write, the checkpoint is marked consumed."""
+        mgr = SleepWakeManager(mock_config)
+        checkpoint_dir = Path(mock_config.SHARED_DIR) / "sleep_state"
+        sentinel = checkpoint_dir / ".prime_consumed"
+
+        # Inject wake signal during create_checkpoint
+        original_create = mgr.checkpoint_manager.create_checkpoint
+
+        def inject_wake(*args, **kwargs):
+            result = original_create(*args, **kwargs)
+            mgr.wake_signal_pending = True
+            return result
+
+        mgr.checkpoint_manager.create_checkpoint = inject_wake
+        result = mgr.initiate_drowsy()
+
+        assert result is False
+        assert mgr.get_state() == GaiaState.ACTIVE
+        # Checkpoint was written (late cancel), so sentinel should exist
+        assert sentinel.exists()
+        assert mgr.checkpoint_manager.is_consumed() is True
+
+
+class TestWakeSignalIdleMonitor:
+    def test_receive_wake_signal_resets_idle_monitor(self, mock_config):
+        """Wake signal should call idle_monitor.mark_active() to reset idle timer."""
+        mock_idle = MagicMock()
+        mgr = SleepWakeManager(mock_config, idle_monitor=mock_idle)
+        mgr.state = GaiaState.ASLEEP
+
+        mgr.receive_wake_signal()
+
+        mock_idle.mark_active.assert_called_once()
+
+    def test_receive_wake_signal_without_idle_monitor(self, mock_config):
+        """Wake signal should work fine when idle_monitor is None."""
+        mgr = SleepWakeManager(mock_config, idle_monitor=None)
+        mgr.state = GaiaState.ASLEEP
+
+        # Should not raise
+        mgr.receive_wake_signal()
+        assert mgr.wake_signal_pending is True

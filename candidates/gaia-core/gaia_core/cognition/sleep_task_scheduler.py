@@ -96,7 +96,7 @@ class SleepTaskScheduler:
             task_type="blueprint_validation",
             priority=3,
             interruptible=True,
-            estimated_duration_seconds=300,
+            estimated_duration_seconds=420,
             handler=self._run_blueprint_validation,
         ))
 
@@ -249,6 +249,8 @@ class SleepTaskScheduler:
             total_mismatches, len(self._BLUEPRINT_SOURCES),
         )
 
+        self._rebuild_blueprint_embeddings()
+
     @staticmethod
     def _extract_facts(
         source_files: List[str],
@@ -359,3 +361,18 @@ class SleepTaskScheduler:
 
         with open(bp_path, "a", encoding="utf-8") as f:
             f.write(note)
+
+    def _rebuild_blueprint_embeddings(self) -> None:
+        """Rebuild the vector index for all blueprint documents."""
+        try:
+            from gaia_common.utils.vector_indexer import VectorIndexer
+
+            VectorIndexer._instances.pop("blueprints", None)
+            indexer = VectorIndexer.instance("blueprints")
+            indexer.build_index_from_docs(chunk_size=1024, chunk_overlap=128)
+            logger.info(
+                "Blueprint embeddings rebuilt: %d chunks indexed",
+                len(indexer.index.get("docs", [])),
+            )
+        except Exception:
+            logger.error("Failed to rebuild blueprint embeddings", exc_info=True)

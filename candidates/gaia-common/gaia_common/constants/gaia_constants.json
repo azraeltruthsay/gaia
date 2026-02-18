@@ -253,6 +253,10 @@
     "system": {
       "doc_dir": "system_reference",
       "vector_store_dir": "vectordb/system"
+    },
+    "blueprints": {
+      "doc_dir": "blueprints",
+      "vector_store_dir": "vectordb/blueprints"
     }
   },
   "SEMANTIC_PROBE": {

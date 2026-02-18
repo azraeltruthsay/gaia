@@ -157,7 +157,7 @@ class DiscordInterface:
             logger.debug("Distracted-check failed — proceeding normally", exc_info=True)
 
         # Sleep-aware: enqueue, wake, wait, then process normally
-        if core_state == "asleep" and self.message_queue is not None:
+        if core_state in ("asleep", "drowsy") and self.message_queue is not None:
             from gaia_web.queue.message_queue import QueuedMessage
 
             qm = QueuedMessage(
