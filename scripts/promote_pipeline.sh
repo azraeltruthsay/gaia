@@ -581,107 +581,37 @@ fi
 
 stage_header 3 "Validation (Lint / Type / Unit)"
 
-VALIDATION_RESULTS=()
+VALIDATE_SCRIPT="$SCRIPTS_DIR/validate.sh"
 
 if [ "$SKIP_VALIDATE" = true ]; then
     stage_skip "Validation"
 else
-    validate_ok=true
+    if [ ! -x "$VALIDATE_SCRIPT" ]; then
+        stage_fail "Validation" "validate.sh not found or not executable at $VALIDATE_SCRIPT"
+    fi
 
+    # Build service list for validate.sh (space-separated)
+    validate_services=""
     for svc in "${SERVICE_LIST[@]}"; do
-        # Skip gaia-prime (no Python validation)
-        if [ "$svc" = "gaia-prime" ]; then
-            log "  ${DIM}⊘${RESET} $svc — no Python validation"
-            VALIDATION_RESULTS+=("$svc|skip|skip|skip")
-            continue
-        fi
-
-        candidate_dir="$GAIA_ROOT/candidates/$svc"
-        dockerfile="$candidate_dir/Dockerfile"
-
-        if [ ! -f "$dockerfile" ]; then
-            log "  ${YELLOW}⚠${RESET} $svc — no Dockerfile, skipping validation"
-            VALIDATION_RESULTS+=("$svc|skip|skip|skip")
-            continue
-        fi
-
-        log "  Validating ${BOLD}$svc${RESET}..."
-
-        # Run Docker-based validation directly (ruff + mypy + pytest)
-        # We don't use promote_candidate.sh --validate because it also
-        # runs the full promotion flow (rsync + restart) after validation.
-        image_name="gaia-validate-${svc}:$(date +%s)"
-        build_context="$GAIA_ROOT"
-
-        ruff_status="?"
-        mypy_status="?"
-        pytest_status="?"
-
-        # Build image
-        set +e
-        build_output=$(docker build -t "$image_name" -f "$dockerfile" "$build_context" 2>&1)
-        build_exit=$?
-        set -e
-
-        if [ $build_exit -ne 0 ]; then
-            log "    ${RED}✗${RESET} $svc — Docker build failed"
-            echo "$build_output" | tail -10 | while read -r line; do log "      $line"; done
-            VALIDATION_RESULTS+=("$svc|build-fail|?|?")
-            validate_ok=false
-            docker rmi "$image_name" > /dev/null 2>&1 || true
-            continue
-        fi
-
-        # Ruff
-        set +e
-        docker run --rm "$image_name" python -m ruff check /app > /dev/null 2>&1
-        ruff_exit=$?
-        set -e
-        if [ $ruff_exit -eq 0 ]; then ruff_status="pass"; else ruff_status="FAIL"; validate_ok=false; fi
-
-        # MyPy (non-blocking)
-        set +e
-        docker run --rm "$image_name" python -m mypy /app > /dev/null 2>&1
-        mypy_exit=$?
-        set -e
-        if [ $mypy_exit -eq 0 ]; then mypy_status="pass"; else mypy_status="warn"; fi
-
-        # Pytest
-        set +e
-        pytest_output=$(docker run --rm "$image_name" python -m pytest /app --import-mode=importlib --no-header -q 2>&1)
-        pytest_exit=$?
-        set -e
-        if [ $pytest_exit -eq 0 ]; then
-            pytest_status="pass"
-        elif [ $pytest_exit -eq 5 ]; then
-            pytest_status="none"
-        else
-            pytest_status="FAIL"
-            validate_ok=false
-        fi
-
-        # Cleanup image
-        docker rmi "$image_name" > /dev/null 2>&1 || true
-
-        VALIDATION_RESULTS+=("$svc|$ruff_status|$mypy_status|$pytest_status")
-
-        # Status icon
-        if [ "$ruff_status" != "FAIL" ] && [ "$pytest_status" != "FAIL" ]; then
-            log "    ${GREEN}✓${RESET} $svc — ruff:$ruff_status mypy:$mypy_status pytest:$pytest_status"
-        else
-            log "    ${RED}✗${RESET} $svc — ruff:$ruff_status mypy:$mypy_status pytest:$pytest_status"
-            if [ "$pytest_status" = "FAIL" ]; then
-                echo "$pytest_output" | tail -15 | while read -r line; do
-                    log "      $line"
-                done
-            fi
-        fi
+        validate_services="$validate_services $svc"
     done
 
-    if [ "$validate_ok" = true ]; then
+    log "  Delegating to validate.sh: $validate_services"
+    echo ""
+
+    set +e
+    validate_output=$("$VALIDATE_SCRIPT" $validate_services $VERBOSE 2>&1)
+    validate_exit=$?
+    set -e
+
+    # Print and log output
+    echo "$validate_output"
+    echo "$validate_output" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+
+    if [ $validate_exit -eq 0 ]; then
         stage_pass "Validation"
     else
-        stage_fail "Validation" "One or more services failed lint or unit tests"
+        stage_fail "Validation" "validate.sh exited with code $validate_exit"
     fi
 fi
 
@@ -944,20 +874,7 @@ for result in "${STAGE_RESULTS[@]}"; do
     echo "| $name | $status |" >> "$JOURNAL_FILE"
 done
 
-# Add validation table if we have it
-if [ "${VALIDATION_RESULTS[*]+set}" = "set" ] && [ ${#VALIDATION_RESULTS[@]} -gt 0 ]; then
-    cat >> "$JOURNAL_FILE" << 'VHDR'
-
-## Validation
-
-| Service | Ruff | MyPy | Pytest |
-|---------|------|------|--------|
-VHDR
-    for vr in "${VALIDATION_RESULTS[@]}"; do
-        IFS='|' read -r v_svc v_ruff v_mypy v_pytest <<< "$vr"
-        echo "| $v_svc | $v_ruff | $v_mypy | $v_pytest |" >> "$JOURNAL_FILE"
-    done
-fi
+# Note: Validation details are printed by scripts/validate.sh and captured in the pipeline log.
 
 cat >> "$JOURNAL_FILE" << FOOTER
 
