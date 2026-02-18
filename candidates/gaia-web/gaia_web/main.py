@@ -9,13 +9,16 @@ import os
 import uuid
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from gaia_web.queue.message_queue import MessageQueue
+from gaia_web.routes.blueprints import router as blueprints_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -35,6 +38,7 @@ except ImportError:
 
 # Configuration from environment
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
+ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
 
@@ -43,6 +47,14 @@ app = FastAPI(
     description="The Face - UI and API gateway",
     version="0.1.0",
 )
+
+# Blueprint API router (must be before static mount)
+app.include_router(blueprints_router)
+
+# Static file serving for dashboard UI
+_static_dir = Path(__file__).parent.parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 @app.get("/health")
@@ -75,9 +87,46 @@ async def root():
         "endpoints": {
             "/health": "Health check",
             "/queue/status": "Message queue status",
+            "/dashboard": "Mission Control dashboard",
+            "/api/blueprints": "Blueprint API",
+            "/api/blueprints/graph": "Blueprint graph topology",
+            "/api/system/status": "System status (proxy)",
+            "/api/system/sleep": "Sleep status (proxy)",
             "/": "This endpoint",
         }
     }
+
+
+@app.get("/dashboard")
+async def dashboard_redirect():
+    """Redirect to the Mission Control dashboard."""
+    return RedirectResponse(url="/static/index.html")
+
+
+@app.get("/api/system/status")
+async def system_status_proxy():
+    """Proxy to orchestrator /status endpoint (avoids CORS from browser)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_ENDPOINT}/status")
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "orchestrator unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@app.get("/api/system/sleep")
+async def system_sleep_proxy():
+    """Proxy to gaia-core /sleep/status endpoint (avoids CORS from browser)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{CORE_ENDPOINT}/sleep/status")
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
 
 
 @app.post("/process_user_input")
@@ -94,7 +143,7 @@ async def process_user_input(user_input: str):
                 check = await client.get(f"{CORE_ENDPOINT}/sleep/distracted-check")
                 if check.status_code == 200:
                     data = check.json()
-                    if data.get("state") == "asleep":
+                    if data.get("state") in ("asleep", "drowsy"):
                         from gaia_web.queue.message_queue import QueuedMessage
                         qm = QueuedMessage(
                             message_id=str(uuid.uuid4()),

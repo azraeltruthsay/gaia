@@ -36,7 +36,7 @@ class SleepCycleLoop:
     def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None) -> None:
         self.config = config
         self.idle_monitor = IdleMonitor()
-        self.sleep_wake_manager = SleepWakeManager(config, model_pool=model_pool)
+        self.sleep_wake_manager = SleepWakeManager(config, model_pool=model_pool, idle_monitor=self.idle_monitor)
         self.discord_connector = discord_connector
         self.model_pool = model_pool
         self.agent_core = agent_core

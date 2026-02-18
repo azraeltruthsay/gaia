@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAIA Mission Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- D3.js for graph visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+</head>
+<body>
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <span class="logo">GAIA</span>
+      <span class="subtitle">Mission Control</span>
+    </div>
+    <div class="top-bar-right">
+      <span id="service-count" class="badge">-- services</span>
+      <span id="pending-count" class="badge badge-warn">-- pending</span>
+      <span id="connection-status" class="badge badge-ok">connected</span>
+    </div>
+  </header>
+
+  <main class="panels">
+    <!-- Left: Chat -->
+    <section class="panel panel-chat">
+      <div class="panel-header">Chat</div>
+      <div class="panel-body">
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="Talk to GAIA..." autocomplete="off">
+          <button id="chat-send">Send</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Center: System State -->
+    <section class="panel panel-system">
+      <div class="panel-header">System State</div>
+      <div class="panel-body">
+        <div id="system-state" class="system-state">
+          <div class="state-card">
+            <div class="state-label">Sleep State</div>
+            <div id="sleep-state" class="state-value">--</div>
+          </div>
+          <div class="state-card">
+            <div class="state-label">GPU Owner</div>
+            <div id="gpu-owner" class="state-value">--</div>
+          </div>
+          <div class="state-card">
+            <div class="state-label">Orchestrator</div>
+            <div id="orch-status" class="state-value">--</div>
+          </div>
+          <div class="state-card">
+            <div class="state-label">Core</div>
+            <div id="core-status" class="state-value">--</div>
+          </div>
+        </div>
+
+        <div class="panel-subheader">Service Graph</div>
+        <div id="graph-container" class="graph-container">
+          <svg id="graph-svg"></svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Blueprints -->
+    <section class="panel panel-blueprints">
+      <div class="panel-header">Blueprints</div>
+      <div class="panel-body">
+        <div id="blueprint-list" class="blueprint-list"></div>
+        <div id="blueprint-detail" class="blueprint-detail"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

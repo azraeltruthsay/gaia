@@ -25,8 +25,8 @@ COPY candidates/gaia-orchestrator/gaia_orchestrator/ ./gaia_orchestrator/
 COPY candidates/gaia-orchestrator/config/ ./config/
 COPY candidates/gaia-orchestrator/pyproject.toml .
 
-# Install the package
-RUN pip install --no-cache-dir -e .
+# Install the package (with dev deps for validation: ruff, pytest, mypy)
+RUN pip install --no-cache-dir -e ".[dev]"
 
 # Create directories for state persistence and set ownership
 RUN mkdir -p /shared/orchestrator \

@@ -65,7 +65,7 @@ CANNED_DISTRACTED = (
 class SleepWakeManager:
     """Manages GAIA's sleep/wake state transitions with cognitive continuity."""
 
-    def __init__(self, config, model_pool=None) -> None:
+    def __init__(self, config, model_pool=None, idle_monitor=None) -> None:
         self.config = config
         self.state = GaiaState.ACTIVE
         self._phase = _TransientPhase.NONE
@@ -73,6 +73,7 @@ class SleepWakeManager:
         self.wake_signal_pending = False
         self.prime_available = False
         self.model_pool = model_pool
+        self.idle_monitor = idle_monitor
         self.checkpoint_manager = PrimeCheckpointManager(config)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
@@ -114,6 +115,14 @@ class SleepWakeManager:
         self.last_state_change = datetime.now(timezone.utc)
         logger.info("Entering DROWSY — writing checkpoint...")
 
+        # Early bail-out: if a wake signal already arrived, skip checkpoint entirely
+        if self.wake_signal_pending:
+            logger.info("Wake signal already pending — skipping checkpoint, returning to ACTIVE")
+            self.state = GaiaState.ACTIVE
+            self.wake_signal_pending = False
+            self.last_state_change = datetime.now(timezone.utc)
+            return False
+
         try:
             # Rotate FIRST so the backup captures the *previous* checkpoint
             self.checkpoint_manager.rotate_checkpoints()
@@ -122,6 +131,8 @@ class SleepWakeManager:
             # Check if we were interrupted during checkpoint write
             if self.wake_signal_pending:
                 logger.info("Message arrived during DROWSY — cancelling sleep")
+                # Mark the freshly-written checkpoint as consumed to prevent stale injection
+                self.checkpoint_manager.mark_consumed()
                 self.state = GaiaState.ACTIVE
                 self.wake_signal_pending = False
                 self.last_state_change = datetime.now(timezone.utc)
@@ -142,6 +153,10 @@ class SleepWakeManager:
     def receive_wake_signal(self) -> None:
         """Called by gaia-web (via POST /sleep/wake) when a message is queued."""
         self.wake_signal_pending = True
+
+        # Reset idle timer so GAIA doesn't immediately re-enter DROWSY after wake
+        if self.idle_monitor is not None:
+            self.idle_monitor.mark_active()
 
         if self.state == GaiaState.DROWSY:
             # initiate_drowsy() will notice the flag and cancel

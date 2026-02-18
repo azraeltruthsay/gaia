@@ -22,6 +22,7 @@ venv_notebooklm/
 *.key
 *.ke
 *.pem
+wireguard_setup/
 
 # --- Logs ---
 logs/

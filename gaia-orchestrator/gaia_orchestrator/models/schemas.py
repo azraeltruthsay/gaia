@@ -29,7 +29,7 @@ class GPUAcquireRequest(BaseModel):
     """Request to acquire GPU ownership."""
     requester: GPUOwner = Field(..., description="Service requesting GPU")
     reason: str = Field(..., description="Why GPU is needed")
-    timeout_seconds: int = Field(default=60, ge=1, le=60, description="Max wait time if queued (capped at 60s)")
+    timeout_seconds: int = Field(default=300, description="Max wait time if queued")
     priority: int = Field(default=0, description="Higher = more urgent")
 
 
