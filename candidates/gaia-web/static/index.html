@@ -9,6 +9,13 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- D3.js for graph visualization -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <!-- xterm.js for terminal emulation -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/lib/addon-web-links.min.js"></script>
+  <!-- Alpine.js for reactive components -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 </head>
 <body>
   <header class="top-bar">
@@ -16,142 +23,210 @@
       <span class="logo">GAIA</span>
       <span class="subtitle">Mission Control</span>
     </div>
-    <div class="top-bar-right">
-      <span id="service-count" class="badge">-- services</span>
-      <span id="pending-count" class="badge badge-warn">-- pending</span>
-      <span id="discord-badge" class="badge" title="Discord connectivity">discord: --</span>
+    <div class="top-bar-right" x-data>
+      <span class="badge" x-text="$store.header.serviceCount">-- services</span>
+      <span :class="$store.header.pendingWarn ? 'badge badge-warn' : 'badge'" x-text="$store.header.pendingCount">-- pending</span>
+      <span :class="$store.header.discordClass" :title="$store.header.discordTitle" x-text="$store.header.discordStatus">discord: --</span>
     </div>
   </header>
 
-  <nav class="tab-bar">
-    <button class="tab active" data-view="dashboard">Dashboard</button>
-    <button class="tab" data-view="hooks">Commands</button>
-    <button class="tab" data-view="files">Files</button>
-    <button class="tab" data-view="knowledge">Knowledge</button>
-    <button class="tab" data-view="terminal">Terminal</button>
+  <nav class="tab-bar" x-data>
+    <template x-for="tab in $store.nav.tabs" :key="tab.id">
+      <button class="tab"
+              :class="{ active: $store.nav.currentView === tab.id }"
+              @click="$store.nav.switchView(tab.id)"
+              x-text="tab.label">
+      </button>
+    </template>
   </nav>
 
   <!-- ── Dashboard View (original 3-panel layout) ── -->
-  <section class="view active" data-view="dashboard">
+  <section class="view" x-show="$store.nav.currentView === 'dashboard'" x-cloak>
     <main class="panels">
       <!-- Left: Chat -->
-      <section class="panel panel-chat">
+      <section class="panel panel-chat" x-data="chatPanel()">
         <div class="panel-header">Chat</div>
         <div class="panel-body">
-          <div id="chat-messages" class="chat-messages"></div>
+          <div x-ref="messages" class="chat-messages">
+            <template x-for="msg in messages" :key="msg.id">
+              <div class="chat-msg" :class="msg.type" x-html="renderMessage(msg)"></div>
+            </template>
+          </div>
           <div class="chat-input-row">
-            <input type="text" id="chat-input" placeholder="Talk to GAIA..." autocomplete="off">
-            <button id="chat-send">Send</button>
+            <input type="text" x-model="input" placeholder="Talk to GAIA..." autocomplete="off"
+                   @keydown.enter.prevent="send()" :disabled="sending">
+            <button @click="send()" :disabled="sending">Send</button>
           </div>
         </div>
       </section>
 
       <!-- Center: System State -->
-      <section class="panel panel-system">
+      <section class="panel panel-system" x-data="systemPanel()"
+               @load-component-graph.window="loadComponentGraph($event.detail.id)">
         <div class="panel-header">System State</div>
         <div class="panel-body">
-          <div id="service-grid" class="service-grid">
-            <!-- Populated by JS -->
+          <div class="service-grid">
+            <div class="state-card state-card-sleep">
+              <div class="state-label">Sleep State</div>
+              <div class="state-value" :class="sleepStateClass" x-text="sleepState"></div>
+            </div>
+            <div class="state-card">
+              <div class="state-label">GPU Owner</div>
+              <div class="state-value" :class="gpuOwner !== '--' ? 'ok' : ''" x-text="gpuOwner"></div>
+            </div>
+            <template x-for="svc in services" :key="svc.id">
+              <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
+                <div class="state-label">
+                  <span x-text="serviceLabel(svc.id)"></span>
+                  <span x-show="svc.candidate" class="state-candidate-badge">CAND</span>
+                </div>
+                <div class="state-value" :class="statusClass(svc.status)" x-text="svc.status"></div>
+                <div x-show="svc.latency_ms != null" class="state-latency" x-text="svc.latency_ms + 'ms'"></div>
+                <div x-show="svc.id === 'discord' && svc.discord?.user" class="state-extra"
+                     x-text="svc.discord ? svc.discord.user + ' · ' + svc.discord.guilds + ' guild' + (svc.discord.guilds !== 1 ? 's' : '') : ''"></div>
+              </div>
+            </template>
           </div>
 
           <!-- Audio Processing Widget -->
-          <div id="audio-panel" class="audio-panel">
+          <div class="audio-panel" x-data="audioWidget()">
             <div class="audio-header">
               <span class="audio-title">Audio Processing</span>
-              <span id="audio-state-badge" class="audio-state-badge state-idle">idle</span>
-              <span id="audio-gpu-badge" class="audio-gpu-badge">GPU: idle</span>
-              <button id="audio-mute-btn" class="audio-mute-btn" title="Mute/Unmute audio">Mute</button>
+              <span :class="stateClass" x-text="state"></span>
+              <span class="audio-gpu-badge" x-text="'GPU: ' + gpuMode"></span>
+              <button class="audio-mute-btn" :class="{ muted: muted }" @click="toggleMute()" x-text="muteLabel" title="Mute/Unmute audio"></button>
             </div>
             <div class="audio-body">
               <div class="audio-gpu-bar">
-                <div class="audio-vram-track"><div id="audio-vram-fill" class="audio-vram-fill" style="width:0%"></div></div>
-                <span id="audio-vram-text" class="audio-vram-text">0 / 5600 MB</span>
+                <div class="audio-vram-track"><div class="audio-vram-fill" :style="'width:' + vramPercent + '%'"></div></div>
+                <span class="audio-vram-text" x-text="Math.round(vramUsed) + ' / ' + vramBudget + ' MB'"></span>
               </div>
               <div class="audio-columns">
                 <div class="audio-col">
                   <div class="audio-col-header">Live Transcript</div>
-                  <div id="audio-transcript-log" class="audio-log"></div>
+                  <div class="audio-log">
+                    <template x-for="entry in transcriptLog" :key="entry.id">
+                      <div class="audio-log-entry" :class="entry.type">
+                        <span class="audio-log-time" x-text="entry.time"></span>
+                        <span class="audio-log-text" x-text="entry.text"></span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
                 <div class="audio-col">
                   <div class="audio-col-header">Event Log</div>
-                  <div id="audio-event-log" class="audio-log"></div>
+                  <div class="audio-log">
+                    <template x-for="entry in eventLog" :key="entry.id">
+                      <div class="audio-log-entry" :class="entry.type">
+                        <span class="audio-log-time" x-text="entry.time"></span>
+                        <span class="audio-log-text" x-text="entry.text"></span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </div>
               <div class="audio-latency-row">
                 <span class="audio-latency-label">STT latency</span>
-                <canvas id="audio-stt-sparkline" width="120" height="24"></canvas>
+                <canvas x-ref="sttSparkline" width="120" height="24"></canvas>
                 <span class="audio-latency-label">TTS latency</span>
-                <canvas id="audio-tts-sparkline" width="120" height="24"></canvas>
+                <canvas x-ref="ttsSparkline" width="120" height="24"></canvas>
               </div>
             </div>
           </div>
 
           <!-- Voice Auto-Answer Widget -->
-          <div id="voice-panel" class="voice-panel">
+          <div class="voice-panel" x-data="voiceWidget()">
             <div class="voice-header">
               <span class="voice-title">Voice Auto-Answer</span>
-              <span id="voice-state-badge" class="voice-state-badge state-disconnected">disconnected</span>
-              <button id="voice-disconnect-btn" class="voice-disconnect-btn" style="display:none" title="Disconnect from voice">Disconnect</button>
+              <span :class="stateClass" x-text="state"></span>
+              <button class="voice-disconnect-btn" x-show="connected" @click="disconnect()" title="Disconnect from voice">Disconnect</button>
             </div>
             <div class="voice-body">
               <div class="voice-status-row">
-                <span id="voice-channel-name" class="voice-channel">--</span>
-                <span id="voice-duration" class="voice-duration">--</span>
+                <span class="voice-channel" x-text="channelName"></span>
+                <span class="voice-duration" x-text="duration"></span>
               </div>
               <div class="voice-whitelist-header">
                 <span>Users</span>
                 <span class="voice-whitelist-hint">click to toggle auto-answer</span>
               </div>
-              <div id="voice-user-list" class="voice-user-list">
-                <!-- Populated by JS -->
+              <div class="voice-user-list">
+                <template x-for="user in users" :key="user.user_id">
+                  <div class="voice-user-card" :class="{ whitelisted: user.whitelisted }"
+                       @click="toggleWhitelist(user.user_id, user.whitelisted)">
+                    <span class="voice-user-name" x-text="user.name"></span>
+                    <span class="voice-user-badge" :class="user.whitelisted ? 'on' : 'off'"
+                          x-text="user.whitelisted ? 'auto-answer' : 'off'"></span>
+                  </div>
+                </template>
+                <template x-if="users.length === 0">
+                  <div style="font-size:10px;color:var(--text-muted);padding:8px;">No users seen yet. GAIA will populate this list from Discord activity.</div>
+                </template>
               </div>
             </div>
           </div>
 
-          <div id="graph-breadcrumb" class="graph-breadcrumb">
-            <span id="graph-title" class="graph-title">Service Graph</span>
-            <span id="graph-zoom-hint" class="graph-zoom-hint">scroll to zoom</span>
-            <button id="graph-back" class="graph-back" style="display:none" title="Back to service graph">&larr; All Services</button>
+          <div class="graph-breadcrumb">
+            <span class="graph-title" x-text="graphTitle"></span>
+            <span class="graph-zoom-hint">scroll to zoom</span>
+            <button class="graph-back" x-show="showGraphBack" @click="backToServiceGraph()" title="Back to service graph">&larr; All Services</button>
           </div>
-          <div id="graph-container" class="graph-container">
-            <svg id="graph-svg"></svg>
+          <div x-ref="graphContainer" class="graph-container">
+            <svg x-ref="graphSvg"></svg>
           </div>
         </div>
       </section>
 
       <!-- Right: Blueprints -->
-      <section class="panel panel-blueprints">
+      <section class="panel panel-blueprints" x-data="blueprintPanel()"
+               @select-blueprint.window="selectBlueprint($event.detail.id)"
+               @show-component-detail.window="showComponentDetail($event.detail)">
         <div class="panel-header">Blueprints</div>
         <div class="panel-body">
-          <div id="blueprint-list" class="blueprint-list"></div>
-          <div id="blueprint-detail" class="blueprint-detail"></div>
+          <div class="blueprint-list">
+            <template x-for="bp in blueprints" :key="bp.id">
+              <div class="bp-card" :class="{ selected: bp.id === selectedId }" @click="selectBlueprint(bp.id)">
+                <div class="bp-card-left">
+                  <div class="bp-card-id" x-text="bp.id"></div>
+                  <div class="bp-card-role" x-text="bp.role"></div>
+                </div>
+                <div class="bp-card-badges">
+                  <span class="bp-badge" :class="bp.status === 'live' ? 'live' : 'candidate'" x-text="bp.status"></span>
+                  <template x-if="bp.genesis">
+                    <span class="bp-badge genesis">genesis</span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="blueprint-detail" x-html="detailHtml"></div>
         </div>
       </section>
     </main>
   </section>
 
   <!-- ── Commands View (Hooks Panel) ── -->
-  <section class="view" data-view="hooks">
-    <div class="hooks-grid">
+  <section class="view" x-show="$store.nav.currentView === 'hooks'" x-cloak>
+    <div class="hooks-grid" x-data="hooksPanel()">
 
       <!-- Sleep Control -->
       <div class="hook-group">
         <div class="hook-group-header">Sleep Control</div>
         <div class="hook-status">
           <span class="hook-status-label">State:</span>
-          <span id="hook-sleep-state" class="hook-status-value">--</span>
+          <span class="hook-status-value" x-text="sleepState"></span>
         </div>
         <div class="hook-status">
           <span class="hook-status-label">Cycle:</span>
-          <span id="hook-sleep-cycle" class="hook-status-value">--</span>
+          <span class="hook-status-value" x-text="sleepCycle"></span>
         </div>
         <div class="hook-status">
           <span class="hook-status-label">Uptime:</span>
-          <span id="hook-sleep-uptime" class="hook-status-value">--</span>
+          <span class="hook-status-value" x-text="sleepUptime"></span>
         </div>
         <div class="hook-actions">
-          <button class="hook-btn hook-btn-primary" onclick="hookAction('sleep/wake')">Wake</button>
-          <button class="hook-btn hook-btn-danger" onclick="hookAction('sleep/shutdown')">Shutdown</button>
+          <button class="hook-btn hook-btn-primary" @click="action('sleep/wake')">Wake</button>
+          <button class="hook-btn hook-btn-danger" @click="action('sleep/shutdown')">Shutdown</button>
         </div>
       </div>
 
@@ -160,15 +235,15 @@
         <div class="hook-group-header">GPU Management</div>
         <div class="hook-status">
           <span class="hook-status-label">Owner:</span>
-          <span id="hook-gpu-owner" class="hook-status-value">--</span>
+          <span class="hook-status-value" x-text="gpuOwner"></span>
         </div>
         <div class="hook-status">
           <span class="hook-status-label">VRAM:</span>
-          <span id="hook-gpu-vram" class="hook-status-value">--</span>
+          <span class="hook-status-value" x-text="gpuVram"></span>
         </div>
         <div class="hook-actions">
-          <button class="hook-btn hook-btn-warn" onclick="hookAction('gpu/release')">Release</button>
-          <button class="hook-btn hook-btn-primary" onclick="hookAction('gpu/reclaim')">Reclaim</button>
+          <button class="hook-btn hook-btn-warn" @click="action('gpu/release')">Release</button>
+          <button class="hook-btn hook-btn-primary" @click="action('gpu/reclaim')">Reclaim</button>
         </div>
       </div>
 
@@ -176,38 +251,175 @@
       <div class="hook-group hook-group-wide">
         <div class="hook-group-header">Semantic Codex Lookup</div>
         <div class="hook-search-row">
-          <input type="text" id="hook-codex-input" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off">
-          <button class="hook-btn hook-btn-primary" onclick="hookCodexSearch()">Search</button>
+          <input type="text" x-model="codexQuery" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off"
+                 @keydown.enter.prevent="codexSearch()">
+          <button class="hook-btn hook-btn-primary" @click="codexSearch()">Search</button>
         </div>
-        <div id="hook-codex-results" class="hook-codex-results">
-          <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
+        <div class="hook-codex-results">
+          <template x-if="codexSearching">
+            <div class="hook-codex-placeholder">Searching...</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && !codexQuery">
+            <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && codexQuery && codexSearched">
+            <div class="hook-codex-placeholder">No results found.</div>
+          </template>
+          <template x-for="r in codexResults" :key="r.id || r.title">
+            <div class="hook-codex-result">
+              <span x-show="r.score != null" class="hook-codex-result-score" x-text="r.score?.toFixed(3)"></span>
+              <div class="hook-codex-result-title" x-text="r.title || r.key || r.id || 'untitled'"></div>
+              <div class="hook-codex-result-snippet" x-text="(r.snippet || r.text || r.content || '').substring(0, 200)"></div>
+            </div>
+          </template>
         </div>
       </div>
 
       <!-- Hook Action Log -->
       <div class="hook-group hook-group-wide">
         <div class="hook-group-header">Action Log</div>
-        <div id="hook-action-log" class="hook-action-log">
-          <div class="hook-log-placeholder">Actions will appear here.</div>
+        <div class="hook-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
         </div>
       </div>
 
     </div>
   </section>
 
-  <!-- ── Files View (Phase 2 placeholder) ── -->
-  <section class="view" data-view="files">
-    <div class="view-placeholder">File Browser — coming in Phase 2</div>
+  <!-- ── Files View ── -->
+  <section class="view" x-show="$store.nav.currentView === 'files'" x-cloak>
+    <div class="file-browser" x-data="fileBrowser()">
+      <div class="fb-toolbar">
+        <select class="fb-root-select" x-model="currentRoot" @change="changeRoot()">
+          <template x-for="r in roots" :key="r.name">
+            <option :value="r.name" x-text="r.name"></option>
+          </template>
+        </select>
+        <div class="fb-breadcrumbs">
+          <button class="fb-crumb" @click="browse(currentRoot, '')">/</button>
+          <template x-for="crumb in breadcrumbs" :key="crumb.path">
+            <button class="fb-crumb" @click="navigateBreadcrumb(crumb.path)" x-text="crumb.name"></button>
+          </template>
+        </div>
+        <span class="fb-loading" x-show="loading">Loading...</span>
+      </div>
+
+      <div class="fb-error" x-show="error" x-text="error"></div>
+
+      <!-- File listing -->
+      <div class="fb-listing" x-show="!viewingFile && !loading">
+        <button class="fb-entry fb-entry-up" x-show="currentPath" @click="navigateUp()">
+          <span class="fb-entry-icon">..</span>
+          <span class="fb-entry-name">(parent directory)</span>
+        </button>
+        <template x-for="entry in entries" :key="entry.name">
+          <button class="fb-entry" :class="'fb-entry-' + entry.type" @click="clickEntry(entry)">
+            <span class="fb-entry-icon" x-text="entry.type === 'dir' ? '📁' : '📄'"></span>
+            <span class="fb-entry-name" x-text="entry.name"></span>
+            <span class="fb-entry-size" x-text="formatSize(entry.size)"></span>
+            <span class="fb-entry-date" x-text="formatDate(entry.modified)"></span>
+          </button>
+        </template>
+        <template x-if="!loading && entries.length === 0 && !error">
+          <div class="fb-empty">Empty directory</div>
+        </template>
+      </div>
+
+      <!-- File viewer -->
+      <div class="fb-viewer" x-show="viewingFile">
+        <div class="fb-viewer-header">
+          <button class="fb-back-btn" @click="backToListing()">&larr; Back</button>
+          <span class="fb-viewer-filename" x-text="fileName"></span>
+          <div class="fb-editor-actions" x-show="isWritableRoot">
+            <button class="fb-edit-btn" x-show="!editing" @click="enterEdit()">Edit</button>
+            <button class="fb-save-btn" x-show="editing" @click="saveFile()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save'"></button>
+            <button class="fb-cancel-btn" x-show="editing" @click="cancelEdit()">Cancel</button>
+          </div>
+        </div>
+        <!-- Read-only view -->
+        <pre class="fb-viewer-content" x-show="!editing"><code x-text="fileContent"></code></pre>
+        <!-- Editor -->
+        <textarea class="fb-editor" x-show="editing" x-model="editContent"
+                  @keydown.ctrl.s.prevent="saveFile()" @keydown.meta.s.prevent="saveFile()"></textarea>
+      </div>
+    </div>
   </section>
 
-  <!-- ── Knowledge View (Phase 2 placeholder) ── -->
-  <section class="view" data-view="knowledge">
-    <div class="view-placeholder">Knowledge Browser — coming in Phase 2</div>
+  <!-- ── Knowledge View ── -->
+  <section class="view" x-show="$store.nav.currentView === 'knowledge'" x-cloak>
+    <div class="file-browser kb-browser" x-data="knowledgeBrowser()">
+      <div class="fb-toolbar">
+        <span class="kb-root-label">knowledge</span>
+        <div class="fb-breadcrumbs">
+          <button class="fb-crumb" @click="browse('')">/</button>
+          <template x-for="crumb in breadcrumbs" :key="crumb.path">
+            <button class="fb-crumb" @click="navigateBreadcrumb(crumb.path)" x-text="crumb.name"></button>
+          </template>
+        </div>
+        <span class="fb-loading" x-show="loading">Loading...</span>
+      </div>
+
+      <div class="fb-error" x-show="error" x-text="error"></div>
+
+      <!-- File listing -->
+      <div class="fb-listing" x-show="!viewingFile && !loading">
+        <button class="fb-entry fb-entry-up" x-show="currentPath" @click="navigateUp()">
+          <span class="fb-entry-icon">..</span>
+          <span class="fb-entry-name">(parent directory)</span>
+        </button>
+        <template x-for="entry in entries" :key="entry.name">
+          <button class="fb-entry" :class="'fb-entry-' + entry.type" @click="clickEntry(entry)">
+            <span class="fb-entry-icon" x-text="entry.type === 'dir' ? '📁' : '📄'"></span>
+            <span class="fb-entry-name" x-text="entry.name"></span>
+            <span class="fb-entry-size" x-text="formatSize(entry.size)"></span>
+          </button>
+        </template>
+        <template x-if="!loading && entries.length === 0 && !error">
+          <div class="fb-empty">Empty directory</div>
+        </template>
+      </div>
+
+      <!-- File viewer -->
+      <div class="fb-viewer" x-show="viewingFile">
+        <div class="fb-viewer-header">
+          <button class="fb-back-btn" @click="backToListing()">&larr; Back</button>
+          <span class="fb-viewer-filename" x-text="fileName"></span>
+        </div>
+        <!-- Markdown rendered -->
+        <div class="kb-markdown blueprint-detail" x-show="isMarkdown" x-html="renderedHtml"></div>
+        <!-- Plain text fallback -->
+        <pre class="fb-viewer-content" x-show="!isMarkdown"><code x-text="fileContent"></code></pre>
+      </div>
+    </div>
   </section>
 
-  <!-- ── Terminal View (Phase 4 placeholder) ── -->
-  <section class="view" data-view="terminal">
-    <div class="view-placeholder">Shell Terminal — coming in Phase 4</div>
+  <!-- ── Terminal View ── -->
+  <section class="view" x-show="$store.nav.currentView === 'terminal'" x-cloak>
+    <div class="terminal-panel" x-data="terminalPanel()">
+      <div class="term-toolbar">
+        <select class="term-container-select" x-model="selectedContainer" :disabled="connected">
+          <option value="">Select container...</option>
+          <template x-for="c in containers" :key="c.name">
+            <option :value="c.name" :disabled="c.status !== 'running'" x-text="c.name + ' (' + c.status + ')'"></option>
+          </template>
+        </select>
+        <button class="term-connect-btn" x-show="!connected" @click="connect()" :disabled="!selectedContainer || connecting" x-text="connecting ? 'Connecting...' : 'Connect'"></button>
+        <button class="term-disconnect-btn" x-show="connected" @click="disconnect()">Disconnect</button>
+        <button class="term-refresh-btn" @click="loadContainers()" :disabled="connected" title="Refresh container list">&#x21bb;</button>
+        <span class="term-status" :class="connected ? 'term-status-on' : ''" x-text="connected ? 'Connected' : 'Disconnected'"></span>
+      </div>
+      <div class="term-error" x-show="error" x-text="error"></div>
+      <div x-ref="termContainer" class="term-container"></div>
+    </div>
   </section>
 
   <script src="/static/app.js"></script>

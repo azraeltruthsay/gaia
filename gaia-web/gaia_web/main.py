@@ -19,6 +19,10 @@ from fastapi.staticfiles import StaticFiles
 
 from gaia_web.queue.message_queue import MessageQueue
 from gaia_web.routes.blueprints import router as blueprints_router
+from gaia_web.routes.files import router as files_router
+from gaia_web.routes.hooks import router as hooks_router
+from gaia_web.routes.terminal import router as terminal_router
+from gaia_web.routes.voice import router as voice_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -41,6 +45,20 @@ CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
+AUDIO_ENDPOINT = os.environ.get("AUDIO_ENDPOINT", "http://gaia-audio:8080")
+GAIA_CONSTANTS_PATH = os.environ.get("GAIA_CONSTANTS_PATH", "/app/gaia_common/constants/gaia_constants.json")
+
+
+def _load_constants() -> dict:
+    """Load gaia_constants.json (cached after first read)."""
+    if not hasattr(_load_constants, "_cache"):
+        import json
+        try:
+            with open(GAIA_CONSTANTS_PATH, encoding="utf-8") as f:
+                _load_constants._cache = json.load(f)
+        except Exception:
+            _load_constants._cache = {}
+    return _load_constants._cache
 
 app = FastAPI(
     title="GAIA Web",
@@ -48,8 +66,12 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Blueprint API router (must be before static mount)
+# API routers (must be before static mount)
 app.include_router(blueprints_router)
+app.include_router(files_router)
+app.include_router(hooks_router)
+app.include_router(terminal_router)
+app.include_router(voice_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
@@ -298,21 +320,20 @@ async def process_user_input(user_input: str):
     packet.compute_hashes()
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{CORE_ENDPOINT}/process_packet",
-                json=packet.to_serializable_dict(),
-                headers={"Content-Type": "application/json"}
-            )
-            response.raise_for_status()
+        from gaia_web.utils.retry import post_with_retry
 
-            completed_packet_dict = response.json()
-            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+        response = await post_with_retry(
+            f"{CORE_ENDPOINT}/process_packet",
+            json=packet.to_serializable_dict(),
+        )
 
-            return JSONResponse(
-                status_code=200,
-                content={"response": completed_packet.response.candidate, "packet_id": completed_packet.header.packet_id}
-            )
+        completed_packet_dict = response.json()
+        completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+
+        return JSONResponse(
+            status_code=200,
+            content={"response": completed_packet.response.candidate, "packet_id": completed_packet.header.packet_id}
+        )
 
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
@@ -321,6 +342,78 @@ async def process_user_input(user_input: str):
     except Exception as e:
         logger.exception(f"Error processing user input: {e}")
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.post("/process_audio_input")
+async def process_audio_input(body: Dict[str, Any]):
+    """Accept transcribed text from gaia-audio, route through gaia-core.
+
+    Like /process_user_input but sets origin=audio and destination=AUDIO
+    so the response is routed back to gaia-audio for synthesis.
+    """
+    user_input = body.get("text", "")
+    session_id = body.get("session_id", "voice_session")
+    if not user_input:
+        raise HTTPException(status_code=400, detail="'text' field required")
+
+    packet_id = f"pkt-audio-{uuid.uuid4().hex[:12]}"
+    now = datetime.now().isoformat()
+
+    packet = CognitionPacket(
+        version="0.3",
+        header=Header(
+            datetime=now,
+            session_id=session_id,
+            packet_id=packet_id,
+            sub_id="audio-web-gateway",
+            persona=Persona(identity_id="Prime", persona_id="Default", role=PersonaRole.DEFAULT),
+            origin=Origin(source="audio", source_destination=OutputDestination.AUDIO),
+            routing=Routing(target_engine=TargetEngine.PRIME),
+            model=Model(name="auto", provider="auto", context_window_tokens=8192),
+            output_routing=OutputRouting(
+                primary=DestinationTarget(destination=OutputDestination.AUDIO.value),
+            ),
+        ),
+        intent=Intent(
+            user_intent=user_input[:200],
+            system_task=SystemTask.CHAT,
+            confidence=0.9,
+        ),
+        context=Context(
+            session_history_ref=SessionHistoryRef(type="ref", value=session_id),
+            cheatsheets=[],
+            constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="standard"),
+        ),
+        content=Content(original_prompt=user_input),
+        reasoning=Reasoning(),
+        response=Response(candidate="", confidence=0.0, stream_proposal=False),
+        governance=Governance(safety=Safety(execution_allowed=False, dry_run=False)),
+        metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
+        status=Status(finalized=False, state=PacketState.PROCESSING),
+    )
+
+    try:
+        from gaia_web.utils.retry import post_with_retry
+
+        response = await post_with_retry(
+            f"{CORE_ENDPOINT}/process_packet",
+            json=packet.to_serializable_dict(),
+        )
+        completed_packet_dict = response.json()
+        completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "response": completed_packet.response.candidate,
+                "packet_id": completed_packet.header.packet_id,
+                "destination": "audio",
+            },
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
+    except Exception as e:
+        logger.exception(f"Error processing audio input: {e}")
+        raise HTTPException(status_code=500, detail=f"Audio processing error: {e}")
 
 
 @app.post("/presence")
@@ -416,6 +509,23 @@ async def output_router(packet: Dict[str, Any]):
         logger.info(f"Output (log only for packet {packet_id}): {str(content)[:200]}...")
         return JSONResponse(content={"status": "success", "message": "Logged"}, status_code=200)
 
+    elif destination_type == "audio":
+        try:
+            constants = _load_constants()
+            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
+            audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{audio_endpoint}/synthesize",
+                    json={"text": content, "voice": None},
+                )
+                resp.raise_for_status()
+            logger.info(f"Audio synthesis dispatched for packet {packet_id}")
+            return JSONResponse(content={"status": "success", "message": "Dispatched to gaia-audio"}, status_code=200)
+        except Exception as e:
+            logger.error(f"Audio routing failed for packet {packet_id}: {e}")
+            return JSONResponse(content={"status": "error", "message": f"Audio dispatch failed: {e}"}, status_code=500)
+
     else:
         logger.warning(f"Unknown destination type '{destination_type}' for packet {packet_id}")
         return JSONResponse(content={"status": "error", "message": f"Unknown destination type: {destination_type}"}, status_code=400)
@@ -427,12 +537,35 @@ async def startup_event():
     # Initialize message queue for sleep/wake cycle
     app.state.message_queue = MessageQueue(core_url=CORE_ENDPOINT)
 
+    # Initialize voice manager (whitelist persists to /app/data/)
+    voice_manager = None
+    try:
+        from gaia_web.voice_manager import VoiceManager, VoiceWhitelist
+        constants = _load_constants()
+        voice_cfg = constants.get("INTEGRATIONS", {}).get("discord", {}).get("voice", {})
+        whitelist = VoiceWhitelist(data_dir=os.environ.get("VOICE_DATA_DIR", "/app/data"))
+        voice_manager = VoiceManager(
+            core_endpoint=CORE_ENDPOINT,
+            audio_endpoint=AUDIO_ENDPOINT,
+            whitelist=whitelist,
+            voice_config=voice_cfg,
+        )
+        app.state.voice_manager = voice_manager
+        print("[STARTUP] Voice manager initialized")
+    except Exception as e:
+        print(f"[STARTUP] Voice manager init failed (non-fatal): {e}")
+        app.state.voice_manager = None
+
     print(f"[STARTUP] ENABLE_DISCORD={ENABLE_DISCORD}, TOKEN_SET={bool(DISCORD_BOT_TOKEN)}")
     if ENABLE_DISCORD and DISCORD_BOT_TOKEN:
         print("[STARTUP] Starting Discord bot...")
         try:
             from .discord_interface import start_discord_bot
-            result = start_discord_bot(DISCORD_BOT_TOKEN, CORE_ENDPOINT, message_queue=app.state.message_queue)
+            result = start_discord_bot(
+                DISCORD_BOT_TOKEN, CORE_ENDPOINT,
+                message_queue=app.state.message_queue,
+                voice_manager=voice_manager,
+            )
             print(f"[STARTUP] Discord bot startup result: {result}")
         except Exception as e:
             print(f"[STARTUP] Failed to start Discord bot: {e}")
@@ -447,6 +580,14 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop Discord bot on application shutdown."""
+    # Disconnect voice if active
+    vm = getattr(app.state, "voice_manager", None)
+    if vm is not None:
+        try:
+            await vm.disconnect()
+        except Exception:
+            pass
+
     if ENABLE_DISCORD:
         try:
             from .discord_interface import stop_discord_bot

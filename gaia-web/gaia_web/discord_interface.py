@@ -31,6 +31,7 @@ logger = logging.getLogger("GAIA.Web.Discord")
 _bot = None
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
 _message_handler: Optional[Callable] = None
+_voice_manager = None  # VoiceManager instance (set by start_discord_bot)
 
 
 def _run_on_bot_loop(coro, timeout: float = 30.0):
@@ -76,6 +77,7 @@ class DiscordInterface:
         intents.guild_messages = True
         intents.dm_messages = True
         intents.members = True
+        intents.voice_states = True
 
         bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -98,6 +100,16 @@ class DiscordInterface:
         async def on_message(message):
             if message.author == bot.user:
                 return
+
+            # Track user for voice whitelist (populate dashboard seen-users list)
+            if _voice_manager is not None:
+                try:
+                    guild_id = str(message.guild.id) if message.guild else None
+                    _voice_manager.whitelist.record_seen(
+                        str(message.author.id), message.author.display_name, guild_id
+                    )
+                except Exception:
+                    pass
 
             is_dm = message.guild is None
             should_respond = False
@@ -132,6 +144,14 @@ class DiscordInterface:
 
             if not is_dm:
                 await bot.process_commands(message)
+
+        @bot.event
+        async def on_voice_state_update(member, before, after):
+            if _voice_manager is not None:
+                try:
+                    await _voice_manager.handle_voice_state_update(member, before, after)
+                except Exception:
+                    logger.error("Voice state update handler error", exc_info=True)
 
         self._bot = bot
         global _bot
@@ -273,24 +293,23 @@ class DiscordInterface:
         packet.compute_hashes() # Compute hashes for integrity
 
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                response = await client.post(
-                    f"{self.core_endpoint}/process_packet", # New endpoint name
-                    json=packet.to_serializable_dict(), # Send as serializable dict
-                    headers={"Content-Type": "application/json"}
-                )
-                response.raise_for_status()
+            from gaia_web.utils.retry import post_with_retry
 
-                # Expect a full CognitionPacket back
-                completed_packet_dict = response.json()
-                completed_packet = CognitionPacket.from_dict(completed_packet_dict) # Deserialize back to object
+            response = await post_with_retry(
+                f"{self.core_endpoint}/process_packet",
+                json=packet.to_serializable_dict(),
+            )
 
-                gaia_response_text = completed_packet.response.candidate # Extract LLM response
-                if not gaia_response_text:
-                    gaia_response_text = "GAIA processed your request but did not generate a text response."
+            # Expect a full CognitionPacket back
+            completed_packet_dict = response.json()
+            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
-                # Send response back to Discord
-                await self._send_response(message_obj, gaia_response_text, is_dm)
+            gaia_response_text = completed_packet.response.candidate
+            if not gaia_response_text:
+                gaia_response_text = "GAIA processed your request but did not generate a text response."
+
+            # Send response back to Discord
+            await self._send_response(message_obj, gaia_response_text, is_dm)
 
         except httpx.TimeoutException:
             logger.error("Discord: Request to gaia-core timed out")
@@ -414,7 +433,7 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return False
 
 
-def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None) -> bool:
+def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None) -> bool:
     """
     Start the Discord bot in a background thread.
 
@@ -422,10 +441,14 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None) ->
         bot_token: Discord bot token
         core_endpoint: URL of gaia-core service (e.g., http://gaia-core:6415)
         message_queue: Optional MessageQueue instance for sleep/wake queueing
+        voice_manager: Optional VoiceManager for voice auto-answer
 
     Returns:
         True if started successfully
     """
+    global _voice_manager
+    _voice_manager = voice_manager
+
     if not bot_token:
         logger.error("Cannot start Discord bot: no token provided")
         return False

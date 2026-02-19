@@ -19,7 +19,9 @@ from fastapi.staticfiles import StaticFiles
 
 from gaia_web.queue.message_queue import MessageQueue
 from gaia_web.routes.blueprints import router as blueprints_router
+from gaia_web.routes.files import router as files_router
 from gaia_web.routes.hooks import router as hooks_router
+from gaia_web.routes.terminal import router as terminal_router
 from gaia_web.routes.voice import router as voice_router
 
 from gaia_common.protocols.cognition_packet import (
@@ -66,7 +68,9 @@ app = FastAPI(
 
 # API routers (must be before static mount)
 app.include_router(blueprints_router)
+app.include_router(files_router)
 app.include_router(hooks_router)
+app.include_router(terminal_router)
 app.include_router(voice_router)
 
 # Static file serving for dashboard UI
@@ -316,21 +320,20 @@ async def process_user_input(user_input: str):
     packet.compute_hashes()
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{CORE_ENDPOINT}/process_packet",
-                json=packet.to_serializable_dict(),
-                headers={"Content-Type": "application/json"}
-            )
-            response.raise_for_status()
+        from gaia_web.utils.retry import post_with_retry
 
-            completed_packet_dict = response.json()
-            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+        response = await post_with_retry(
+            f"{CORE_ENDPOINT}/process_packet",
+            json=packet.to_serializable_dict(),
+        )
 
-            return JSONResponse(
-                status_code=200,
-                content={"response": completed_packet.response.candidate, "packet_id": completed_packet.header.packet_id}
-            )
+        completed_packet_dict = response.json()
+        completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+
+        return JSONResponse(
+            status_code=200,
+            content={"response": completed_packet.response.candidate, "packet_id": completed_packet.header.packet_id}
+        )
 
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
@@ -390,23 +393,22 @@ async def process_audio_input(body: Dict[str, Any]):
     )
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{CORE_ENDPOINT}/process_packet",
-                json=packet.to_serializable_dict(),
-                headers={"Content-Type": "application/json"},
-            )
-            response.raise_for_status()
-            completed_packet_dict = response.json()
-            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "response": completed_packet.response.candidate,
-                    "packet_id": completed_packet.header.packet_id,
-                    "destination": "audio",
-                },
-            )
+        from gaia_web.utils.retry import post_with_retry
+
+        response = await post_with_retry(
+            f"{CORE_ENDPOINT}/process_packet",
+            json=packet.to_serializable_dict(),
+        )
+        completed_packet_dict = response.json()
+        completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "response": completed_packet.response.candidate,
+                "packet_id": completed_packet.header.packet_id,
+                "destination": "audio",
+            },
+        )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
     except Exception as e:
