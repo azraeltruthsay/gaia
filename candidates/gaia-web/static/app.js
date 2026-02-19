@@ -841,6 +841,99 @@ if (audioMuteBtn) {
   });
 }
 
+// ── Voice Auto-Answer Widget ─────────────────────────────────────────────────
+
+const voiceStateBadge = document.getElementById("voice-state-badge");
+const voiceChannelName = document.getElementById("voice-channel-name");
+const voiceDuration = document.getElementById("voice-duration");
+const voiceDisconnectBtn = document.getElementById("voice-disconnect-btn");
+const voiceUserList = document.getElementById("voice-user-list");
+
+function updateVoiceState(state) {
+  if (!voiceStateBadge) return;
+  voiceStateBadge.textContent = state;
+  voiceStateBadge.className = "voice-state-badge state-" + state;
+}
+
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return "--";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+async function pollVoiceStatus() {
+  try {
+    const resp = await fetch("/api/voice/status");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    updateVoiceState(data.state || "disconnected");
+    if (voiceChannelName) voiceChannelName.textContent = data.channel_name || "--";
+    if (voiceDuration) voiceDuration.textContent = formatDuration(data.duration_seconds);
+    if (voiceDisconnectBtn) voiceDisconnectBtn.style.display = data.connected ? "" : "none";
+  } catch {
+    updateVoiceState("disconnected");
+  }
+}
+
+async function loadVoiceUsers() {
+  try {
+    const resp = await fetch("/api/voice/users");
+    if (!resp.ok) return;
+    const users = await resp.json();
+    renderVoiceUsers(users);
+  } catch {
+    // Voice API not available
+  }
+}
+
+function renderVoiceUsers(users) {
+  if (!voiceUserList) return;
+  voiceUserList.innerHTML = "";
+  for (const user of users) {
+    const card = document.createElement("div");
+    card.className = "voice-user-card" + (user.whitelisted ? " whitelisted" : "");
+    card.innerHTML = `
+      <span class="voice-user-name">${escapeHtml(user.name)}</span>
+      <span class="voice-user-badge ${user.whitelisted ? 'on' : 'off'}">${user.whitelisted ? 'auto-answer' : 'off'}</span>
+    `;
+    card.addEventListener("click", () => toggleVoiceWhitelist(user.user_id, user.whitelisted));
+    voiceUserList.appendChild(card);
+  }
+  if (users.length === 0) {
+    voiceUserList.innerHTML = '<div style="font-size:10px;color:var(--text-muted);padding:8px;">No users seen yet. GAIA will populate this list from Discord activity.</div>';
+  }
+}
+
+async function toggleVoiceWhitelist(userId, currentlyWhitelisted) {
+  try {
+    if (currentlyWhitelisted) {
+      await fetch(`/api/voice/whitelist/${userId}`, { method: "DELETE" });
+    } else {
+      await fetch("/api/voice/whitelist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      });
+    }
+    // Refresh list
+    await loadVoiceUsers();
+  } catch {
+    // Silently fail
+  }
+}
+
+if (voiceDisconnectBtn) {
+  voiceDisconnectBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/api/voice/disconnect", { method: "POST" });
+      await pollVoiceStatus();
+    } catch {
+      // Silently fail
+    }
+  });
+}
+
 // ── Initialization ───────────────────────────────────────────────────────────
 
 async function init() {
@@ -855,6 +948,12 @@ async function init() {
   // Audio: try WebSocket, fall back to polling
   connectAudioWs();
   setInterval(pollAudioStatus, 5000);
+
+  // Voice: load users and start polling
+  await loadVoiceUsers();
+  pollVoiceStatus();
+  setInterval(pollVoiceStatus, POLL_INTERVAL);
+  setInterval(loadVoiceUsers, 30000);  // Refresh user list every 30s
 
   // Handle graph resize — re-render whichever view is active
   window.addEventListener("resize", () => {
