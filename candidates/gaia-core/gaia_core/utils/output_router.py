@@ -136,6 +136,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     """
     config = ai_manager.config
     execution_results = []
+    side_effects = []
     response_to_user = ""
 
     # The LLM's raw output might contain a candidate response and proposed sidecar actions.
@@ -157,9 +158,14 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         logger.info(f"Packet contains {len(packet.response.sidecar_actions)} sidecar actions to evaluate.")
         if is_execution_safe(packet):
             logger.info("Safety gate passed. Proceeding with execution.")
-            # The executor should be responsible for running the actions.
-            # This is a conceptual change from the old router.
             execution_results = dispatch_sidecar_actions(packet, config)
+            for res in execution_results:
+                side_effects.append({
+                    "type": "sidecar_action",
+                    "action_type": res.get("id", "unknown").rsplit("-", 1)[0] if "-" in res.get("id", "") else res.get("id", "unknown"),
+                    "ok": "error" not in res,
+                    "error": res.get("error", {}).get("message") if isinstance(res.get("error"), dict) else res.get("error"),
+                })
         else:
             logger.warning("Safety gate FAILED. Execution of sidecar actions is denied.")
             denied_actions = ", ".join([action.action_type for action in packet.response.sidecar_actions])
@@ -192,7 +198,12 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         seed_text = thought_seed_match.group(1).strip()
         logger.info(f"Routing THOUGHT_SEED directive: {seed_text[:80]}...")
         from gaia_core.cognition.thought_seed import save_thought_seed
-        save_thought_seed(seed_text, packet, config)
+        seed_result = save_thought_seed(seed_text, packet, config)
+        side_effects.append({
+            "type": "thought_seed",
+            "path": seed_result.get("_saved_path") if seed_result else None,
+            "ok": seed_result is not None,
+        })
 
     # Handle GOAL_SHIFT directive — the model signals the user's goal has changed
     goal_shift_match = re.search(r"GOAL_SHIFT:\s*(.*?)(?:\n|$)", response_text)
@@ -200,12 +211,19 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         new_goal_desc = goal_shift_match.group(1).strip()
         if new_goal_desc:
             logger.info(f"Routing GOAL_SHIFT directive: {new_goal_desc[:80]}...")
+            goal_ok = True
             try:
                 from gaia_core.cognition.goal_detector import GoalDetector
                 sm = getattr(ai_manager, "session_manager", None)
                 GoalDetector.handle_goal_shift(new_goal_desc, packet, sm, session_id)
             except Exception:
+                goal_ok = False
                 logger.debug("GOAL_SHIFT handling failed (non-fatal)", exc_info=True)
+            side_effects.append({
+                "type": "goal_shift",
+                "goal": new_goal_desc[:120],
+                "ok": goal_ok,
+            })
 
     # Strip any <think> tags from the response before sending to user
     # This handles cases where the model's reasoning blocks weren't properly stripped
@@ -249,7 +267,8 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     return {
         "response_to_user": response_to_user,
         "execution_results": execution_results,
-        "destination_results": destination_results
+        "destination_results": destination_results,
+        "side_effects": side_effects,
     }
 
 

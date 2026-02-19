@@ -20,7 +20,9 @@ from gaia_common.utils.thoughtstream import write as ts_write
 
 logger = logging.getLogger("GAIA.ThoughtSeed")
 
-SEEDS_DIR = Path("./knowledge/seeds")
+SEEDS_DIR = Path("/knowledge/seeds")
+SEEDS_ARCHIVE_DIR = SEEDS_DIR / "archive"
+SEEDS_PENDING_DIR = SEEDS_DIR / "pending"
 # Do not create the seeds directory at import time (bind mounts may be
 # owned by root and cause a PermissionError during import). Create lazily
 # when saving or listing seeds and handle failures gracefully.
@@ -57,6 +59,7 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
             json.dump(seed_obj, f, indent=2)
         logger.info(f"🌱 Thought seed saved: {fname}")
         ts_write({"type": "thought_seed_saved", "seed": seed_text.strip()}, packet.header.packet_id if hasattr(packet, 'header') else 'unknown')
+        seed_obj["_saved_path"] = str(SEEDS_DIR / fname)
         return seed_obj
     except Exception as e:
         logger.error(f"❌ Error saving thought seed: {e}", exc_info=True)
@@ -214,3 +217,119 @@ def maybe_review_seeds(config, llm=None):  # <--- llm parameter added
     # Add conditions as needed—by default, always review for demonstration.
     review_and_process_seeds(config=config, llm=llm, auto_act=False)  # <--- Pass llm here
     # Set auto_act=True if you want seeds to trigger actions directly.
+
+
+# ── Heartbeat directory operations ──────────────────────────────────────
+
+
+def archive_seed(seed_filename: str) -> bool:
+    """Move a seed to the archive directory (permanently dismissed).
+
+    Reads the seed, stamps it with archived metadata, writes to
+    SEEDS_ARCHIVE_DIR, and deletes the original.
+    """
+    src = SEEDS_DIR / seed_filename
+    if not src.is_file():
+        logger.warning("archive_seed: source not found: %s", seed_filename)
+        return False
+
+    try:
+        SEEDS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(src, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["archived"] = True
+        data["archived_at"] = datetime.now(timezone.utc).isoformat()
+        with open(SEEDS_ARCHIVE_DIR / seed_filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        src.unlink()
+        logger.info("Seed archived: %s", seed_filename)
+        return True
+    except Exception:
+        logger.error("Failed to archive seed %s", seed_filename, exc_info=True)
+        return False
+
+
+def defer_seed(seed_filename: str, revisit_after: str | None = None) -> bool:
+    """Move a seed to the pending directory (deferred for later).
+
+    Args:
+        seed_filename: Name of the seed file in SEEDS_DIR.
+        revisit_after: Optional ISO-8601 datetime string for when to re-triage.
+    """
+    src = SEEDS_DIR / seed_filename
+    if not src.is_file():
+        logger.warning("defer_seed: source not found: %s", seed_filename)
+        return False
+
+    try:
+        SEEDS_PENDING_DIR.mkdir(parents=True, exist_ok=True)
+        with open(src, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["pending"] = True
+        data["deferred_at"] = datetime.now(timezone.utc).isoformat()
+        if revisit_after:
+            data["revisit_after"] = revisit_after
+        with open(SEEDS_PENDING_DIR / seed_filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        src.unlink()
+        logger.info("Seed deferred: %s (revisit_after=%s)", seed_filename, revisit_after)
+        return True
+    except Exception:
+        logger.error("Failed to defer seed %s", seed_filename, exc_info=True)
+        return False
+
+
+def list_pending_seeds_due() -> list[tuple[Path, dict]]:
+    """Promote overdue pending seeds back to the triage queue.
+
+    A seed is "due" if:
+    - It has a ``revisit_after`` datetime that has passed, or
+    - It has no ``revisit_after`` and was deferred more than 7 days ago.
+
+    Promoted seeds are moved from SEEDS_PENDING_DIR back to SEEDS_DIR.
+    Returns a list of (new_path, seed_data) for each promoted seed.
+    """
+    promoted: list[tuple[Path, dict]] = []
+    if not SEEDS_PENDING_DIR.exists():
+        return promoted
+
+    now = datetime.now(timezone.utc)
+
+    for fp in SEEDS_PENDING_DIR.glob("seed_*.json"):
+        try:
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            due = False
+            revisit = data.get("revisit_after")
+            if revisit:
+                try:
+                    due = datetime.fromisoformat(revisit) <= now
+                except (ValueError, TypeError):
+                    due = False
+            else:
+                deferred_at = data.get("deferred_at")
+                if deferred_at:
+                    try:
+                        deferred_dt = datetime.fromisoformat(deferred_at)
+                        due = (now - deferred_dt).days >= 7
+                    except (ValueError, TypeError):
+                        pass
+
+            if due:
+                # Move back to SEEDS_DIR
+                SEEDS_DIR.mkdir(parents=True, exist_ok=True)
+                dest = SEEDS_DIR / fp.name
+                data.pop("pending", None)
+                data.pop("deferred_at", None)
+                data.pop("revisit_after", None)
+                data["reviewed"] = False  # Reset so heartbeat re-triages
+                with open(dest, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                fp.unlink()
+                promoted.append((dest, data))
+                logger.info("Pending seed promoted back to triage: %s", fp.name)
+        except Exception:
+            logger.error("Error checking pending seed %s", fp.name, exc_info=True)
+
+    return promoted

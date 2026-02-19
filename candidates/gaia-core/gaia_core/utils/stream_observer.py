@@ -7,7 +7,7 @@ from gaia_core.config import Config
 from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_common.protocols.cognition_packet import CognitionPacket, ReflectionLog
 from gaia_common.utils.string_tools import trim_text
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 logger = logging.getLogger("GAIA.StreamObserver")
 logger.setLevel(logging.DEBUG)
@@ -691,3 +691,104 @@ class StreamObserver:
             })
         logger.debug(f"StreamObserver: _validate_code_paths - Final validation results: {validation_results}")
         return validation_results
+
+    # ── Post-execution side-effect verification ──────────────────────────
+
+    def verify_side_effects(
+        self,
+        packet: Optional[CognitionPacket],
+        route_result: Dict[str, Any],
+        llm_output: str = "",
+    ) -> Interrupt:
+        """Verify that side effects from route_output() actually succeeded.
+
+        Called AFTER route_output() returns.  Does NOT call the LLM — pure
+        filesystem / result-dict checking.  Appends findings to the packet's
+        reflection_log.
+
+        Returns OK if all verified, CAUTION if issues found (never blocks).
+        """
+        if not self.config.constants.get("OBSERVER_VERIFY_SIDE_EFFECTS", True):
+            return Interrupt(level="OK", reason="Side-effect verification disabled by config")
+
+        if not packet:
+            return Interrupt(level="OK", reason="No packet for side-effect verification")
+
+        side_effects = route_result.get("side_effects", [])
+        issues: List[str] = []
+        verified: List[str] = []
+
+        for effect in side_effects:
+            effect_type = effect.get("type", "unknown")
+
+            if effect_type == "thought_seed":
+                if not effect.get("ok"):
+                    issues.append("THOUGHT_SEED: save returned failure")
+                    continue
+                path = effect.get("path")
+                if path:
+                    if not os.path.isfile(path):
+                        issues.append(f"THOUGHT_SEED: file not found at {path}")
+                    elif os.path.getsize(path) < 3:
+                        issues.append(f"THOUGHT_SEED: file at {path} is empty or trivially small")
+                    else:
+                        verified.append(f"THOUGHT_SEED: verified at {path}")
+                else:
+                    issues.append("THOUGHT_SEED: no path returned from save operation")
+
+            elif effect_type == "sidecar_action":
+                action_name = effect.get("action_type", "unknown")
+                if not effect.get("ok"):
+                    error = effect.get("error", "unknown error")
+                    issues.append(f"EXECUTE({action_name}): {error}")
+                else:
+                    verified.append(f"EXECUTE({action_name}): ok")
+
+            elif effect_type == "goal_shift":
+                if not effect.get("ok"):
+                    issues.append("GOAL_SHIFT: handler reported failure")
+                else:
+                    verified.append(f"GOAL_SHIFT: {effect.get('goal', '')[:40]}")
+
+        # Fallback: if no side_effects key but THOUGHT_SEED: in LLM output,
+        # check the seeds directory for recently created files.
+        if not side_effects and "THOUGHT_SEED:" in llm_output:
+            from pathlib import Path as _Path
+            seeds_dir = _Path("/knowledge/seeds")
+            if seeds_dir.exists():
+                now = time.time()
+                recent = [f for f in seeds_dir.glob("seed_*.json")
+                          if (now - f.stat().st_mtime) < 30]
+                if recent:
+                    verified.append(f"THOUGHT_SEED: found {len(recent)} recent seed file(s) (fallback)")
+                else:
+                    issues.append("THOUGHT_SEED: directive in output but no recent seed file found")
+            else:
+                issues.append(f"THOUGHT_SEED: seeds directory {seeds_dir} does not exist")
+
+        # Build summary and append to reflection_log
+        parts = []
+        if verified:
+            parts.append(f"Verified: {'; '.join(verified)}")
+        if issues:
+            parts.append(f"Issues: {'; '.join(issues)}")
+        summary = " | ".join(parts) if parts else "No side effects to verify"
+
+        try:
+            log_entry = ReflectionLog(step="observer_side_effect_verification", summary=summary)
+            if hasattr(packet.reasoning, "reflection_log"):
+                packet.reasoning.reflection_log.append(log_entry)
+            else:
+                packet.reasoning.reflection_log = [log_entry]
+        except Exception:
+            logger.debug("verify_side_effects: failed to append to reflection_log", exc_info=True)
+
+        if issues:
+            reason = f"Side-effect verification found {len(issues)} issue(s): {'; '.join(issues[:3])}"
+            logger.warning("StreamObserver: SIDE-EFFECT ISSUE — %s", reason)
+            return Interrupt(level="CAUTION", reason=reason)
+
+        if verified:
+            logger.debug("StreamObserver: side-effect verification passed — %s", summary)
+
+        return Interrupt(level="OK", reason="All side effects verified" if verified else "No side effects to verify")

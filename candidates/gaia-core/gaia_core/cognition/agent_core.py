@@ -208,9 +208,24 @@ class AgentCore:
             # Fallback to the module-level logger
             self.logger = logger
         
+        # Timeline store for temporal grounding (set by main.py after sleep loop init)
+        self.timeline_store = None
+
         # Initialize SemanticCodex and CodexWriter
         self.semantic_codex = SemanticCodex.instance(self.config)
         self.codex_writer = CodexWriter(self.config, self.semantic_codex)
+
+    def _emit_timeline_message(self, session_id: str, role: str, source: str = "") -> None:
+        """Emit a message event to the timeline store (best-effort)."""
+        if self.timeline_store is not None:
+            try:
+                self.timeline_store.append("message", {
+                    "session_id": session_id,
+                    "role": role,
+                    "source": source,
+                })
+            except Exception:
+                pass  # Timeline failures must never break cognition
 
     def _build_output_routing(self, source: str, destination: str, metadata: dict) -> OutputRouting:
         """Build OutputRouting from source/destination/metadata.
@@ -876,6 +891,7 @@ class AgentCore:
             source=source, destination=destination, metadata=_metadata
         )
         self.session_manager.add_message(session_id, "user", user_input)
+        self._emit_timeline_message(session_id, "user", source)
 
         # Inject semantic probe result into packet (if probe found hits)
         if probe_result and probe_result.has_hits:
@@ -1812,6 +1828,15 @@ class AgentCore:
 
             packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
 
+            # Post-execution side-effect verification
+            if post_run_observer and not disable_observer:
+                try:
+                    se_check = post_run_observer.verify_side_effects(packet, routed_output, full_response)
+                    if se_check.level != "OK":
+                        logger.warning("Side-effect verification: %s — %s", se_check.level, se_check.reason)
+                except Exception:
+                    logger.warning("Side-effect verification failed; continuing", exc_info=True)
+
             logger.debug(f"User-facing response after routing: {user_facing_response}")
 
             # Epistemic citation check — warn user if fabricated citations detected
@@ -1857,6 +1882,7 @@ class AgentCore:
             packet.response.confidence = 0.93 # Placeholder
             self.ai_manager.status["last_response"] = user_facing_response
             self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
+            self._emit_timeline_message(session_id, "assistant", source)
 
             if execution_results:
                 process_execution_results(execution_results, self.session_manager, session_id, packet)
