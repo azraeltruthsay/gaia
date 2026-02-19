@@ -36,8 +36,16 @@ class StateManager:
         self._lock = asyncio.Lock()
         self._dirty = False
 
+    # Handoff phases that indicate a terminal (completed) state
+    _TERMINAL_HANDOFF_PHASES = frozenset({"completed", "failed", "cancelled"})
+
     async def initialize(self) -> None:
-        """Initialize state manager, loading existing state if present."""
+        """Initialize state manager, loading existing state if present.
+
+        After loading, reconciles any stale in-progress handoffs by marking
+        them FAILED — we cannot know the actual GPU/container state after a
+        crash, so failing is the safe default.
+        """
         # Ensure state directory exists
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,6 +59,52 @@ class StateManager:
                 self._state = OrchestratorState()
         else:
             logger.info("No existing state found, starting fresh")
+
+        # Reconcile stale handoffs: if there's an active handoff in a
+        # non-terminal phase, it was interrupted by a crash. Mark it
+        # FAILED and move it to history so new handoffs aren't blocked.
+        await self._reconcile_stale_handoff()
+
+    async def _reconcile_stale_handoff(self) -> None:
+        """Mark any in-progress handoff as FAILED after a crash/restart.
+
+        We can't know the actual GPU/container state after an unclean
+        shutdown, so failing is the safe default. The next sleep cycle
+        will initiate a clean handoff.
+        """
+        handoff = self._state.active_handoff
+        if handoff is None:
+            return
+
+        phase_str = handoff.phase if isinstance(handoff.phase, str) else handoff.phase.value
+        if phase_str in self._TERMINAL_HANDOFF_PHASES:
+            return
+
+        logger.warning(
+            "Reconciling stale handoff %s (phase=%s) — marking FAILED",
+            handoff.handoff_id, phase_str,
+        )
+
+        # Import the enum to set the phase properly
+        from .models.schemas import HandoffPhase
+
+        handoff.phase = HandoffPhase.FAILED
+        handoff.error = (
+            f"Handoff was in phase '{phase_str}' when orchestrator restarted. "
+            f"Marked FAILED during startup reconciliation."
+        )
+        handoff.completed_at = datetime.now(timezone.utc)
+
+        self._state.handoff_history.append(handoff)
+        self._state.active_handoff = None
+
+        # Keep only last 100 handoffs
+        if len(self._state.handoff_history) > 100:
+            self._state.handoff_history = self._state.handoff_history[-100:]
+
+        # Persist immediately
+        await self._save_state()
+        logger.info("Stale handoff %s reconciled — new handoffs unblocked", handoff.handoff_id)
 
     async def _load_state(self) -> None:
         """Load state from disk."""

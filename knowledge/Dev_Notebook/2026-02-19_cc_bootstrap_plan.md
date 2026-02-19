@@ -1,11 +1,11 @@
 # GAIA Code Generation Bootstrap Plan
 ## CC-Assisted Code Quality, Self-Review, and QLoRA Training Loop
 
-**Document status:** Implementation specification (Revision 2)
+**Document status:** Implementation specification (Revision 5)
 **Intended audience:** Claude Code (CC) for autonomous implementation
 **Date:** 2026-02-19
 **Author:** Seumas & Claude (Sonnet 4.6) via GAIA Project Chat
-**Revised by:** Claude (Opus 4.6) via Claude Code — incorporated retroactive corpus bootstrapping, AST summary refinements, code_analyzer reuse, and practical implementation fixes
+**Revised by:** Claude (Opus 4.6) via Claude Code — Rev 2-5 (see revision log)
 
 ---
 
@@ -65,6 +65,8 @@ The promotion journal is the primary source of structured ground-truth data for 
 ### 2.3 Existing Blueprint Validation (Sleep Task)
 
 `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` already implements mechanical blueprint-vs-code validation during sleep cycles. It uses regex/AST extraction to check that enum members, endpoints, and constants declared in blueprints are present in source files. This is the foundation we extend — it catches *structural* staleness but not *semantic* divergence.
+
+The validation logic is currently embedded in the `_run_blueprint_validation` handler method. This plan requires factoring it out into a reusable function (Section 3.5) so the review prompt builder can invoke it independently to produce mechanical pre-check annotations for the LLM reviewer.
 
 ### 2.4 Existing Code Analyzer Infrastructure
 
@@ -134,13 +136,17 @@ To address this without including full function bodies, the summarizer must also
 - **HTTP client calls:** For each call matching `httpx.*`, `requests.*`, or `self.client.*`, record the method, target URL/path pattern, and enclosing function name (e.g., `"POST /mcp/invoke in call_mcp_tool()"`)
 - **gaia-common client utility calls:** For each call to known client utilities (e.g., `ServiceClient.call()`, any function from `gaia_common.clients`), record the target service and method
 
-These are added as `error_handlers` and `http_calls` keys in the summary dict. They allow the reviewer to assess failure mode coverage and dependency correctness without reading full function bodies.
+These are added as `error_handlers` and `http_calls` keys in the summary dict. They provide heuristic evidence for the LLM reviewer on dimensions 2 and 3.
+
+**Known limitations of targeted extraction alone:** These heuristics will miss conditional guards that aren't `try/except` blocks, retry/circuit-breaker semantics, implicit dependencies via environment variables, failure handling delegated to utility functions in other files, middleware-level handlers, and handlers defined in base classes. The false-negative rate for failure mode detection via targeted extraction alone is estimated at ~30-40%.
+
+This is why targeted extraction is complemented by mechanical pre-check annotations (Section 3.5). The pre-checks run the existing sleep-task blueprint validator against full source code and provide deterministic structural completeness results. Together, the AST summary (including targeted extractions) gives the LLM *what* the code does, while the pre-check gives it *what's structurally present or missing*. The LLM's role shifts from "find what's missing" to "assess whether what's present actually implements the blueprint's intent."
 
 ### 3.2 Blueprint-Anchored Review Prompt Builder
 
 **Location:** `gaia-common/gaia_common/utils/review_prompt_builder.py`
 
-**Purpose:** Given a blueprint YAML and one or more AST summaries, construct a structured review prompt that asks an LLM to identify specific, blueprint-anchored discrepancies.
+**Purpose:** Given a blueprint YAML, one or more AST summaries, and mechanical pre-check results, construct a structured review prompt that asks an LLM to identify specific, blueprint-anchored discrepancies. The prompt combines three information sources: the blueprint (what should exist), the AST summaries (what the code looks like), and the pre-check results (what's structurally present or missing).
 
 **Prompt structure:**
 
@@ -152,25 +158,31 @@ the provided source code faithfully implements its blueprint specification.
 You are NOT evaluating general code quality. You are evaluating blueprint
 fidelity across five dimensions:
 
-1. CONTRACT FIDELITY — Do the exposed endpoints match the blueprint's
-   interfaces section exactly? Check: paths, HTTP methods, request/response
-   schema field names.
+1. CONTRACT FIDELITY — The mechanical pre-check below shows which endpoints
+   are structurally present or missing. For [FOUND] endpoints, verify from
+   the AST summaries that the implementation signature (parameters, return
+   type) matches the blueprint's schema. For [MISSING] endpoints, confirm
+   they are genuinely absent or flag if implemented under a different path.
 
-2. DEPENDENCY CORRECTNESS — Does the code only call services and volumes
-   declared in the blueprint's dependencies section? Flag any undeclared
-   external calls. Note: gaia-common imports are universally available and
-   should NOT be flagged as undeclared dependencies.
+2. DEPENDENCY CORRECTNESS — The pre-check confirms which declared dependencies
+   appear in imports. Your task: verify from the AST summaries that dependency
+   calls use correct paths/methods, and flag any UNDECLARED external calls the
+   pre-check may have missed. Note: gaia-common imports are universally
+   available and should NOT be flagged as undeclared dependencies.
 
-3. FAILURE MODE COVERAGE — For each failure mode in the blueprint, is there
-   corresponding handling code? Check the error_handlers and http_calls
-   sections of the AST summaries for evidence. Flag failure modes with no
-   observable implementation.
+3. FAILURE MODE COVERAGE — The pre-check shows which failure modes have
+   matching handlers. For [FOUND] handlers, assess from the AST summary
+   whether the handling logic matches the blueprint's documented response
+   (not just that a handler exists). For [MISSING] handlers, confirm absence
+   or flag if handled via a non-standard pattern.
 
 4. INTENT COHERENCE — Does the code's overall structure reflect the blueprint's
-   stated purpose and cognitive_role? Flag obvious divergences.
+   stated purpose and cognitive_role? This dimension is NOT covered by
+   mechanical pre-checks — it requires your semantic judgment. Flag obvious
+   divergences.
 
 5. OPEN QUESTIONS — Does the code reveal answers to any open_questions in the
-   blueprint? Or does it raise new ones?
+   blueprint? Or does it raise new ones? Also NOT covered by pre-checks.
 
 Respond ONLY with a structured JSON object matching the ReviewResult schema below.
 
@@ -198,6 +210,12 @@ Cognitive role: {bp.intent.cognitive_role}
 
 ---
 
+## Mechanical Pre-Check Results
+
+{precheck_result.to_prompt_text()}
+
+---
+
 ## Source Files Under Review
 
 {for each file: filename header + ast_summary.to_prompt_text()}
@@ -206,9 +224,18 @@ Cognitive role: {bp.intent.cognitive_role}
 
 ## Review Task
 
-Identify all discrepancies between the blueprint specification above and the
-source code summaries. Be specific: cite the blueprint claim and the contradicting
-(or absent) code evidence.
+The mechanical pre-check above shows structural completeness — what is present
+or missing at a syntactic level. Your task is to assess SEMANTIC fidelity:
+
+- For items the pre-check marked [FOUND]: does the implementation actually
+  fulfill the blueprint's intent, or is it a superficial match?
+- For items the pre-check marked [MISSING]: is this genuinely absent, or
+  implemented in a way the pre-check couldn't detect?
+- For dimensions 4-5 (intent coherence, open questions): apply your own
+  judgment — these have no mechanical coverage.
+
+Be specific: cite the blueprint claim and the contradicting (or absent)
+code evidence.
 ```
 
 **ReviewResult schema** (Pydantic model, also in this module):
@@ -238,7 +265,25 @@ class ReviewResult(BaseModel):
     summary_note: str             # 2-3 sentence human-readable summary
 ```
 
-**Testing:** `gaia-common/tests/utils/test_review_prompt_builder.py` — verify prompt renders correctly from a seed blueprint + mock AST summaries; verify ReviewResult parses from a known CC response.
+#### 3.2.1 Token Budget Guard
+
+The assembled review prompt for a multi-file service can be large. For CC review sessions (Phase 2), this is manageable — Claude has ample context. But for Phase 5 sleep-cycle reviews where gaia-prime (3B, limited context window) runs autonomously, prompts must fit within the model's effective context.
+
+The review prompt builder must accept a `max_prompt_tokens` parameter (default: `None` for CC, e.g. `3072` for gaia-prime) and enforce it via progressive truncation:
+
+**Truncation priority (drop lowest-priority sections first):**
+
+1. **Open questions** — most expendable, least impact on structural review
+2. **Intent section** — can be reduced to `purpose` only (drop `design_decisions`)
+3. **AST summaries** — truncate per-file summaries to signatures-only (drop `error_handlers`, `http_calls`, `gaia_imports`)
+4. **Pre-check results** — reduce to summary line only (drop per-item detail)
+5. **Interfaces/failure modes** — NEVER truncated, these are the review target
+
+The builder should log a warning when truncation is applied, including which sections were reduced and the final token count.
+
+**Token estimation:** Use a simple `len(text) / 4` heuristic for token count (conservative for English text). Do not add a tokenizer dependency just for this — the guard is a safety rail, not a precise budget.
+
+**Testing:** `gaia-common/tests/utils/test_review_prompt_builder.py` — verify prompt renders correctly from a seed blueprint + mock AST summaries; verify ReviewResult parses from a known CC response. Test that truncation activates correctly when `max_prompt_tokens` is set below the natural prompt size, and that critical sections survive truncation.
 
 ### 3.3 ruff Format Post-Processing Hook
 
@@ -263,6 +308,126 @@ Wire this into `promote_pipeline.sh` Stage 3 (before ruff lint, not instead of i
 ### 3.4 mypy Promotion to Error
 
 In `promote_candidate.sh`, change mypy result from `warn` to `fail` for gaia-core, gaia-mcp, and gaia-study. gaia-common already has the most complete type coverage and should be the model. Add a `# type: ignore` count check — compare the candidate's ignore count against the live version of the same file (not the entire branch). Fail if any individual file's ignore count increases. Implementation: a small Python helper script (`scripts/check_type_ignores.py`) that takes two directories and diffs per-file counts, called from `promote_candidate.sh`.
+
+### 3.5 Mechanical Pre-Check Validator (Refactored)
+
+**Extracted from:** `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` (`_run_blueprint_validation` handler)
+**New location:** `gaia-common/gaia_common/utils/blueprint_precheck.py`
+
+**Purpose:** Factor the existing mechanical blueprint-vs-code validation logic out of the sleep-task handler into a standalone, importable function. This serves two consumers:
+
+1. **The sleep-task handler** — calls it as before during sleep cycles (no behavior change)
+2. **The review prompt builder** — calls it to produce structured pre-check annotations that are included in the LLM review prompt
+
+**Function signature:**
+
+```python
+@dataclass
+class PreCheckItem:
+    category: Literal["endpoint", "enum_member", "constant", "failure_mode", "dependency"]
+    blueprint_claim: str          # what the blueprint declares
+    status: Literal["found", "missing", "diverged"]
+    source_file: Optional[str]    # where it was found (or expected)
+    detail: str                   # e.g., "GET /health found at router.py:42"
+
+@dataclass
+class PreCheckResult:
+    service_id: str
+    timestamp: datetime
+    items: List[PreCheckItem]
+    summary: PreCheckSummary       # counts by category and status
+
+    def to_prompt_text(self) -> str:
+        """Render as a concise block for inclusion in an LLM review prompt."""
+
+def run_blueprint_precheck(
+    blueprint_path: str,
+    source_dir: str,
+    *,
+    categories: Optional[List[str]] = None,  # filter to specific categories
+) -> PreCheckResult:
+    """
+    Run mechanical blueprint-vs-code validation.
+
+    Checks structural presence of blueprint-declared items in source code
+    using regex and AST extraction (NOT LLM inference). Fast and deterministic.
+
+    This is the same logic currently in sleep_task_scheduler._run_blueprint_validation,
+    refactored for reuse.
+    """
+```
+
+**What the pre-check covers:**
+
+| Category | What it checks | Method |
+|----------|----------------|--------|
+| `endpoint` | Each interface endpoint path + HTTP method exists as a `@router.{method}("{path}")` decorator | Regex scan of source files |
+| `enum_member` | Each enum declared in blueprint has matching `class(Enum)` with expected members | AST extraction |
+| `constant` | Each constant declared in blueprint exists as `UPPER_CASE = value` at module level | AST extraction |
+| `failure_mode` | Each failure mode ID has a matching exception handler or status code return | Regex scan for exception types + HTTP status codes |
+| `dependency` | Each declared dependency service appears in import statements or client calls | Regex scan for service names in imports and URL patterns |
+
+**Per-dimension pre-check reliability:**
+
+| Category | Estimated accuracy | Why |
+|----------|-------------------|-----|
+| `endpoint` | ~95% | Decorator patterns are highly regular, few false negatives |
+| `dependency` | ~85% | Misses env-var-based URLs and indirect client construction |
+| `failure_mode` | ~50-60% | Misses middleware handlers, base class handlers, delegation to gaia-common utilities, retry/circuit-breaker patterns, conditional guards that aren't try/except |
+| `enum_member` | ~95% | AST extraction is deterministic for enum classes |
+| `constant` | ~90% | Misses constants defined in config files or env vars |
+
+The LLM reviewer carries the majority of dimension 3 (failure mode coverage) load. The pre-check's `[FOUND]`/`[MISSING]` for failure modes should be treated as a *hint*, not ground truth. The review prompt instructions reflect this — the LLM is told to check for "non-standard patterns" on [MISSING] items, which is where the pre-check's blind spots concentrate.
+
+**What the pre-check does NOT cover** (this is the LLM reviewer's domain):
+- Whether an endpoint's *behavior* matches the blueprint's description
+- Whether a failure mode handler actually implements the *correct recovery strategy*
+- Whether the dependency calls use the *right parameters*
+- Whether the code's overall architecture reflects the blueprint's *intent*
+- Whether open questions have been answered or new ones raised
+
+**Pre-check output in the review prompt:**
+
+The `to_prompt_text()` method renders a concise block like:
+
+```
+## Mechanical Pre-Check Results: gaia-core
+
+### Endpoints (7/8 found)
+  [FOUND] GET  /health                     → main.py:15
+  [FOUND] POST /turn                       → run_turn.py:45
+  [FOUND] GET  /sessions                   → sessions.py:22
+  [FOUND] POST /sessions/{id}/message      → sessions.py:67
+  [FOUND] GET  /cognition/status           → cognition_manager.py:31
+  [FOUND] POST /cognition/sleep            → cognition_manager.py:89
+  [FOUND] GET  /blueprints                 → blueprint_router.py:14
+  [MISSING] DELETE /sessions/{id}          → expected in sessions.py
+
+### Failure Modes (4/5 matched)
+  [FOUND] mcp_timeout           → httpx.TimeoutException handler in mcp_client.py:112
+  [FOUND] study_unavailable     → ConnectionError handler in study_client.py:45
+  [FOUND] invalid_session       → ValueError guard in sessions.py:71
+  [FOUND] token_limit_exceeded  → conditional return in run_turn.py:89
+  [MISSING] blueprint_parse_error → no matching handler found
+
+### Dependencies (3/3 confirmed)
+  [FOUND] gaia-mcp              → import in mcp_client.py
+  [FOUND] gaia-study            → import in study_client.py
+  [FOUND] gaia-prime (via vLLM) → httpx call in inference.py:33
+
+### Summary
+  Total checks: 16 | Found: 14 | Missing: 2 | Diverged: 0
+  Structural completeness: 87.5%
+```
+
+This gives the LLM reviewer a **cheat sheet** for dimensions 1-3. The reviewer doesn't need to independently discover whether a `try/except` exists — the pre-check already answered that. The reviewer's job shifts to:
+- **For [FOUND] items:** Does the implementation actually match the blueprint's *semantic intent*, not just its surface structure?
+- **For [MISSING] items:** Is this genuinely missing, or is it implemented in a non-standard way the pre-check couldn't detect?
+- **For dimensions 4-5 (intent coherence, open questions):** These remain pure LLM judgment calls, unaffected by pre-checks.
+
+**Testing:** `gaia-common/tests/utils/test_blueprint_precheck.py` — verify pre-check output against a known service (gaia-core) with at least one [FOUND] and one [MISSING] item seeded by a modified test blueprint.
+
+**Migration:** After extracting the logic, update `sleep_task_scheduler.py` to import and call `run_blueprint_precheck()` instead of its inline implementation. This is a pure refactor with no behavior change for the sleep cycle.
 
 ---
 
@@ -338,8 +503,9 @@ The review session receives:
 
 1. **The blueprint seed** — the design specification
 2. **AST summaries of all generated files** — produced by running `ast_summarizer.py` on the candidate directory (not raw source)
-3. **The ReviewResult schema** — so CC knows exactly what to produce
-4. **Explicit instruction:** "You did not write this code. Review it against the blueprint without reference to any generative intent."
+3. **Mechanical pre-check results** — produced by running `run_blueprint_precheck()` against the candidate source (deterministic structural completeness check)
+4. **The ReviewResult schema** — so CC knows exactly what to produce
+5. **Explicit instruction:** "You did not write this code. The mechanical pre-check shows structural completeness. Assess semantic fidelity beyond what the pre-check covers."
 
 CC must not receive: the full source files, any generation session context, or any human commentary on the code quality.
 
@@ -352,15 +518,22 @@ You are performing a blueprint fidelity review for the GAIA AI system.
 
 You will be given:
 1. A blueprint specification (YAML)
-2. AST summaries of the candidate source files
+2. Mechanical pre-check results (deterministic structural completeness)
+3. AST summaries of the candidate source files
 
-Your task is to produce a ReviewResult JSON object identifying all discrepancies
-between the blueprint's claims and the code's actual structure.
+The mechanical pre-check has already verified structural presence of endpoints,
+failure mode handlers, dependencies, enums, and constants. Your task is to
+assess SEMANTIC fidelity — whether the structurally-present elements actually
+implement the blueprint's intent correctly.
+
+Produce a ReviewResult JSON object identifying all discrepancies.
 
 IMPORTANT:
 - You are reviewing for blueprint fidelity ONLY, not general code quality
-- Base your assessment exclusively on what the AST summaries show
-- If something is absent from the summaries, note it as "not found in summary"
+- Use the pre-check results as your starting point for dimensions 1-3
+- For [FOUND] items: verify semantic correctness from AST summaries
+- For [MISSING] items: confirm absence or identify non-standard implementations
+- Dimensions 4-5 (intent coherence, open questions) have no pre-check coverage
 - Your output must be valid JSON matching the ReviewResult schema exactly
 
 ReviewResult schema:
@@ -370,6 +543,11 @@ ReviewResult schema:
 
 BLUEPRINT:
 {blueprint_yaml}
+
+---
+
+MECHANICAL PRE-CHECK:
+{precheck_text}
 
 ---
 
@@ -423,10 +601,17 @@ python3 scripts/generate_ast_summaries.py \
     --source-dir "$SOURCE_DIR" \
     --output "$REVIEW_DIR/ast_summaries_${TIMESTAMP}.json"
 
-# Step 2: Build review prompt
+# Step 2: Run mechanical pre-check
+python3 scripts/run_blueprint_precheck.py \
+    --blueprint "$BLUEPRINT" \
+    --source-dir "$SOURCE_DIR" \
+    --output "$REVIEW_DIR/precheck_${TIMESTAMP}.json"
+
+# Step 3: Build review prompt (combines blueprint + pre-check + AST summaries)
 python3 scripts/build_review_prompt.py \
     --blueprint "$BLUEPRINT" \
     --ast-summaries "$REVIEW_DIR/ast_summaries_${TIMESTAMP}.json" \
+    --precheck "$REVIEW_DIR/precheck_${TIMESTAMP}.json" \
     --output "$REVIEW_DIR/review_prompt_${TIMESTAMP}.txt"
 
 # Step 3: Instructions for CC invocation
@@ -491,10 +676,30 @@ Per-file training pairs require scoping the blueprint to what each file is respo
 - A file tagged as `model` or `schema` → scope to the data models referenced by interfaces
 - A file tagged as `client` → scope to the dependencies section
 - A file tagged as `core` or `logic` → scope to intent + failure modes
+- **Any file with no role tag, multiple role tags, or a role that doesn't map cleanly** → **use the full blueprint**. Many GAIA service files are composite — a handler that both exposes an endpoint AND calls gaia-mcp, or a core module that also defines models. Silently dropping relevant blueprint sections for these files would produce training pairs with incomplete context. The full-blueprint default is the safe choice; the scoped variants are an optimization for clearly single-responsibility files.
 
-The review prompt builder (Section 3.2) should accept an optional `scope_to_file` parameter that filters the blueprint context accordingly.
+The review prompt builder (Section 3.2) should accept an optional `scope_to_file` parameter that filters the blueprint context accordingly. When the scoping logic cannot confidently reduce the blueprint (composite files, ambiguous roles), it must pass `scope_to_file=None` and include the full blueprint.
 
-### 6.3 Training Signal Characteristics
+### 6.3 Retroactive Review Result Handling
+
+Retroactive reviews follow a different result handling path from forward reviews (Section 5.4), because the code under review is already live and promoted.
+
+**If `promotion_recommendation == "approve"` or `"approve_with_notes"`:**
+- Record the ReviewResult as a training pair (standard path)
+- For `approve_with_notes`: append discrepancies to the live blueprint's `open_questions` for future awareness, but do NOT trigger remediation — the service is already running and passed promotion
+
+**If `promotion_recommendation == "reject"`:**
+This means CC found a significant blueprint fidelity problem in a live promoted service. This is a different outcome from a forward-pair rejection — we cannot "return to generation" because the code is already in production. Instead:
+
+1. **Record the ReviewResult as a training pair** — rejections are high-value training signal regardless of source
+2. **Append all `critical` and `major` discrepancies to the live blueprint's `open_questions`** with a tag: `source: retroactive_review`
+3. **Create a Review Queue item** (if the Web UI Review Queue exists, per Section 9.2) flagging the service for human attention
+4. **Log to `prime.md`:** *"Retroactive review of {service_id} found {n} critical/{m} major discrepancies. Blueprint fidelity concern on a live service — human review recommended."*
+5. **Do NOT automatically trigger a remediation cycle.** The service passed promotion, meaning it satisfies mechanical gates and smoke tests. A CC review rejection on a live service most likely indicates either (a) blueprint drift since promotion, or (b) a blueprint that was incomplete when the service was promoted. Both require human judgment about whether the *code* needs fixing or the *blueprint* needs updating.
+
+This path ensures retroactive rejections surface as actionable information without triggering automated code changes to running services.
+
+### 6.5 Training Signal Characteristics
 
 Retroactive pairs have different training signal from forward pairs:
 
@@ -507,7 +712,7 @@ Retroactive pairs have different training signal from forward pairs:
 
 Both signals are complementary. The training pair schema (Section 7.1) includes a `pair_type` field to distinguish them so their effectiveness can be analyzed separately during validation.
 
-### 6.4 Corpus Size Estimate
+### 6.6 Corpus Size Estimate
 
 | Source | Estimated pairs |
 |--------|----------------|
@@ -517,7 +722,7 @@ Both signals are complementary. The training pair schema (Section 7.1) includes 
 
 This is likely enough to **hit the 50-pair training threshold** from Phase 0-2 infrastructure alone, unblocking Phase 4 (QLoRA training) without waiting for months of organic forward-pair accumulation.
 
-### 6.5 Retroactive Corpus Generation Script
+### 6.7 Retroactive Corpus Generation Script
 
 **Location:** `scripts/generate_retroactive_corpus.sh`
 
@@ -581,7 +786,7 @@ echo "Retroactive corpus preparation complete."
 echo "Next: invoke CC in cold sessions for each review prompt."
 ```
 
-### 6.6 Retroactive Corpus Storage
+### 6.8 Retroactive Corpus Storage
 
 ```
 knowledge/curricula/code-architect/
@@ -710,6 +915,20 @@ This script:
 4. Constructs instruction/output pairs using the base model's chat template (loaded from tokenizer config, NOT hardcoded)
 5. Outputs to `train.jsonl` and `validation.jsonl` with stratified split (ensure both pair types are represented in validation)
 
+#### 7.4.1 Reference Implementation Selection
+
+The training instruction includes AST summaries from 3 existing live services as style exemplars. The selection mechanism must be deterministic and documented so training pairs have consistent context.
+
+**Selection criteria (applied in order):**
+
+1. **Dependency overlap** (primary): Select services that share the most declared dependencies with the target blueprint. A service that calls gaia-mcp and gaia-study is most similar to another service that calls gaia-mcp and gaia-study, because they face the same client patterns and failure modes.
+
+2. **Interface type overlap** (secondary): Among tied candidates, prefer services with the same interface types (http_rest, websocket, mcp, etc.). A REST API service learns more from another REST API service than from a WebSocket service.
+
+3. **Recency** (tiebreaker): Among still-tied candidates, prefer the most recently promoted (from dev journal dates), as they represent the latest idioms.
+
+**Implementation:** A `select_reference_services(target_blueprint, all_blueprints, n=3)` function in `generate_pairs.py` that scores each live blueprint on dependency overlap (Jaccard similarity of dependency service sets) + interface type overlap (Jaccard of interface types), and returns the top `n`. This function must be used consistently for both training pair generation AND the live generation rubric (Section 4.1), so the model trains on the same reference selection logic it will encounter at inference time.
+
 **Instruction format for each pair:**
 
 ```
@@ -724,7 +943,7 @@ BLUEPRINT:
 {blueprint_yaml}
 
 AVAILABLE GAIA IDIOMS (from reference implementations):
-{3 most relevant AST summaries from existing live services}
+{3 reference AST summaries, selected by dependency + interface overlap}
 
 Generate the implementation for: {service_id}
 {chat_template.user_suffix}
@@ -745,18 +964,35 @@ Once the corpus reaches `minimum_corpus_size` (50 pairs), trigger training.
 
 ### 8.1 Training Trigger
 
-Add corpus size monitoring to the blueprint_validation sleep task in `sleep_task_scheduler.py`. When `len(pairs/*.json) >= minimum_corpus_size` and no `code-architect` adapter exists (or the current adapter version is stale):
+Add corpus size monitoring to the blueprint_validation sleep task in `sleep_task_scheduler.py`. Training readiness requires BOTH:
 
-1. Log a note to `prime.md`: *"code-architect corpus has reached training threshold ({n} pairs: {r} retroactive, {f} forward). Recommend triggering training via promote_pipeline.sh --qlora --adapter code-architect"*
+- **Total corpus size:** `len(pairs/*.json) >= minimum_corpus_size` (50)
+- **Forward pair minimum:** At least 15% of pairs must be `pair_type: "forward"` (i.e., ≥ 8 forward pairs)
+
+The forward-pair minimum prevents training on a corpus dominated by retroactive approvals. Retroactive pairs teach "what correct code looks like" but not "error → correction" patterns. Without forward pairs showing mistakes and fixes, the model may learn to produce superficially correct-looking code that doesn't handle the edge cases that real generation cycles reveal.
+
+When both conditions are met and no `code-architect` adapter exists (or the current adapter version is stale):
+
+1. Log a note to `prime.md`: *"code-architect corpus has reached training threshold ({n} pairs: {r} retroactive, {f} forward). Forward pair ratio: {f/n:.0%}. Recommend triggering training via promote_pipeline.sh --qlora --adapter code-architect"*
 2. Add a `high_priority` flag to the blueprint's `open_questions`
+
+If total corpus ≥ 50 but forward pairs < 15%, log a different note: *"code-architect corpus size sufficient ({n} pairs) but forward pair ratio too low ({f/n:.0%} < 15%). Need {needed} more forward pairs before training."*
+
+Additionally, when constructing `train.jsonl`, apply a **loss weight multiplier of 1.5x** to forward pairs if they constitute < 30% of the corpus. This compensates for retroactive-pair dominance in early training cycles without requiring strict parity. The multiplier is applied in `generate_pairs.py` as a `weight` field in the JSONL records, consumed by `qlora_trainer.py`'s data loader.
+
+**Calibration note:** The 15% minimum ratio, the 30% weighting threshold, and the 1.5x multiplier are initial estimates, not empirically derived. After the first training cycle, compare validation loss on the forward-pair subset vs. the retroactive-pair subset. If the model performs significantly worse on forward pairs (error-correction patterns) than retroactive pairs (approval patterns), increase the multiplier or the minimum ratio. If performance is comparable, the current values are adequate. Log the per-subset validation metrics in the dev journal alongside the composite score so these thresholds can be tuned with data.
 
 Training is deliberately not triggered automatically — it requires a conscious human decision given the GPU time involved.
 
 ### 8.2 Validation Dimensions
 
-The `validate_adapter.py` script needs a new validation pipeline for code-architect. This is not a simple mode flag — the dimensions require fundamentally different evaluation logic from json-architect's JSON validity scoring. Implement as a new class `BlueprintFidelityValidator` alongside the existing `JSONSchemaValidator`.
+The code-architect adapter requires a fundamentally different validation pipeline from json-architect's JSON validity scoring. It needs to shell out to ruff, run AST extraction pipelines, and compare against blueprints — too much logic to co-locate with the JSON validator.
 
-Add `--validator blueprint_fidelity` with these dimensions:
+**Location:** `candidates/gaia-study/scripts/validators/blueprint_fidelity.py`
+
+Implement `BlueprintFidelityValidator` as a standalone module. Update `validate_adapter.py` to act as a router: `--validator json_schema` dispatches to the existing logic, `--validator blueprint_fidelity` dispatches to the new module. This keeps each validator self-contained and follows the extend-don't-duplicate principle.
+
+Validation dimensions:
 
 | Dimension | Weight | Measurement |
 |-----------|--------|-------------|
@@ -770,11 +1006,18 @@ Add `--validator blueprint_fidelity` with these dimensions:
 
 ### 8.3 Graduation Criteria
 
-The goal is for GAIA's `code-architect` adapter to match CC's review quality on the project's own codebase. Graduation — meaning CC steps back from mandatory review — is reached when:
+Graduation means CC steps back from mandatory review of every generated candidate. There are two distinct capabilities to assess:
+
+**Generation quality** (can code-architect produce good code?):
 
 1. **Divergence score convergence:** Average divergence score of last 10 code-architect generations ≤ 0.15 (vs. CC-reviewed baseline of ≈ 0.12)
-2. **First-pass promotion rate:** ≥ 80% of generated candidates pass the promotion pipeline without modification
-3. **CC spot-check agreement:** On a random sample of 5 generations, CC review agrees with code-architect's self-assessment in ≥ 90% of discrepancy classifications
+2. **First-pass promotion rate:** ≥ 80% of generated candidates pass the full promotion pipeline (mechanical gates + smoke tests) without modification
+
+**Review quality** is a separate concern that applies to Phase 5 (sleep-cycle autonomous review), NOT to generation graduation. The code-architect adapter is trained for *generation*. Phase 5's sleep-task reviewer uses it with a review prompt, but the adapter wasn't specifically trained on the review task. If Phase 5 review quality needs to match CC, that requires a separate `code-reviewer` adapter or a review-specific fine-tuning pass — a future extension, not a graduation gate.
+
+**CC spot-check** (is the generation quality durable?):
+
+3. **CC audit agreement:** On a random sample of 5 generated candidates, CC reviews them cold and finds no `critical` discrepancies and ≤ 2 `major` discrepancies total across all 5. This validates that the mechanical gates and divergence scores aren't masking semantic issues that only an LLM reviewer would catch.
 
 These metrics should be tracked in the dev journal. When all three are met for two consecutive training cycles, CC moves from mandatory reviewer to periodic auditor (every 5th generation rather than every generation).
 
@@ -822,19 +1065,20 @@ Human approval clears the item from the queue. Approval without fix closes the d
 
 ```
 Phase 0 (Infrastructure)
-├── 3.1  AST Summarizer (extend code_analyzer)  ← implement first, no deps
-├── 3.2  Review Prompt Builder + schema          ← depends on 3.1
-├── 3.3  ruff format hook                        ← no dependencies, trivial
-└── 3.4  mypy promotion to error + ignore check  ← no dependencies, small script
+├── 3.1  AST Summarizer (extend code_analyzer)     ← implement first, no deps
+├── 3.2  Review Prompt Builder + schema             ← depends on 3.1, 3.5
+├── 3.3  ruff format hook                           ← no dependencies, trivial
+├── 3.4  mypy promotion to error + ignore check     ← no dependencies, small script
+└── 3.5  Mechanical Pre-Check Validator (refactor)  ← no deps (extracts existing code)
 
 Phase 1 (CC Generation Workflow)
-├── 4.x  Generation rubric + context             ← depends on 3.1, 3.2
-└── 4.3  Candidate directory structure            ← depends on generation rubric
+├── 4.x  Generation rubric + context                ← depends on 3.1, 3.2
+└── 4.3  Candidate directory structure               ← depends on generation rubric
 
 Phase 2 (CC Review Workflow)
-├── 5.2  Review prompt template                   ← depends on 3.2
-├── 5.3  cc_review_candidate.sh (+ --live flag)   ← depends on 3.1, 5.2
-└── 5.4  Result handling + routing                ← depends on 5.3
+├── 5.2  Review prompt template                      ← depends on 3.2, 3.5
+├── 5.3  cc_review_candidate.sh (+ --live flag)      ← depends on 3.1, 3.5, 5.2
+└── 5.4  Result handling + routing                   ← depends on 5.3
 
 Phase 2.5 (Retroactive Corpus Bootstrapping)     ← NEW
 ├── 6.1  generate_retroactive_corpus.sh           ← depends on Phase 0 + 2
@@ -869,16 +1113,20 @@ Phase 5 (Sleep Cycle Integration)
 | File | Purpose | Phase |
 |------|---------|-------|
 | `gaia-common/gaia_common/utils/ast_summarizer.py` | AST-based source file summarizer (extends code_analyzer) | 0 |
+| `gaia-common/gaia_common/utils/blueprint_precheck.py` | Refactored mechanical pre-check validator | 0 |
 | `gaia-common/gaia_common/utils/review_prompt_builder.py` | Prompt construction + ReviewResult schema | 0 |
 | `gaia-common/tests/utils/test_ast_summarizer.py` | AST summarizer tests | 0 |
+| `gaia-common/tests/utils/test_blueprint_precheck.py` | Pre-check validator tests | 0 |
 | `gaia-common/tests/utils/test_review_prompt_builder.py` | Review builder tests | 0 |
 | `scripts/format_candidate.sh` | ruff format wrapper | 0 |
 | `scripts/check_type_ignores.py` | Per-file type-ignore count diffing | 0 |
+| `scripts/run_blueprint_precheck.py` | CLI wrapper for mechanical pre-check | 2 |
 | `scripts/cc_review_candidate.sh` | CC review invocation helper (+ --live) | 2 |
 | `scripts/generate_ast_summaries.py` | CLI wrapper for batch AST summarization | 2 |
 | `scripts/build_review_prompt.py` | CLI wrapper for prompt construction | 2 |
 | `scripts/review_templates/cc_review_prompt.txt` | Review prompt template | 2 |
 | `scripts/generate_retroactive_corpus.sh` | Retroactive corpus bootstrapping | 2.5 |
+| `candidates/gaia-study/scripts/validators/blueprint_fidelity.py` | BlueprintFidelityValidator (standalone module) | 4 |
 | `knowledge/curricula/code-architect/curriculum.json` | Adapter training spec (versioned) | 3 |
 | `knowledge/curricula/code-architect/generate_pairs.py` | Training pair generator (both types) | 3 |
 
@@ -889,8 +1137,9 @@ Phase 5 (Sleep Cycle Integration)
 | `scripts/promote_pipeline.sh` | Wire in format_candidate.sh before Stage 3 | 0 |
 | `scripts/promote_candidate.sh` | mypy warn→error + type-ignore check | 0 |
 | `gaia-common/gaia_common/utils/code_analyzer/structure_extractor.py` | Add signature/decorator/enum extraction | 0 |
-| `candidates/gaia-study/scripts/validate_adapter.py` | Add BlueprintFidelityValidator class | 4 |
-| `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` | Add code_review task | 5 |
+| `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` | Refactor `_run_blueprint_validation` to call `blueprint_precheck.run_blueprint_precheck()` | 0 |
+| `candidates/gaia-study/scripts/validate_adapter.py` | Add `--validator` routing to dispatch json_schema vs blueprint_fidelity | 4 |
+| `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` | Add code_review task (uses pre-check + code-architect adapter) | 5 |
 | `knowledge/blueprints/QLORA_SELF_STUDY.md` | Add code-architect adapter section | 3 |
 
 ---
@@ -903,7 +1152,7 @@ These are the architectural invariants CC must respect throughout implementation
 
 2. **Blueprints are the spec, not the code.** The review always flows from blueprint → code, never from code → inferred intent. If the blueprint is wrong, fix the blueprint; don't bend the review.
 
-3. **AST summaries for LLM context, source for mechanical validation.** The regex/AST extraction in `sleep_task_scheduler.py` works on full source and is fast. LLM review works on summaries and is expensive. Never feed full source to the LLM reviewer. The targeted body extractions (Section 3.1.1) are a controlled exception — they extract structured signals, not raw bodies.
+3. **Mechanical pre-checks for structural completeness, LLM for semantic fidelity.** The refactored blueprint pre-check (Section 3.5) runs on full source, is fast and deterministic, and answers "is it there?" The LLM reviewer receives pre-check results + AST summaries and answers "does it do the right thing?" Never feed full source to the LLM reviewer. The targeted body extractions (Section 3.1.1) provide heuristic evidence; the pre-check provides ground truth for structural presence. Together they give the LLM reviewer near-complete coverage without context budget explosion.
 
 4. **gaia-study is the sole writer.** All training data, adapter weights, and vector store writes go through gaia-study. Nothing in this plan bypasses that. CC generates artifacts to `candidates/` and `knowledge/curricula/` but does not invoke training directly.
 
@@ -926,3 +1175,6 @@ These are the architectural invariants CC must respect throughout implementation
 |------|--------|---------|
 | 2026-02-19 | Seumas & Claude (Sonnet 4.6) | Original specification |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 2: Added Phase 2.5 (retroactive corpus bootstrapping), Section 3.1.1 (targeted body extraction), Section 2.4 (code_analyzer reuse), adapter versioning, chat template parameterization, per-file blueprint scoping, gaia-common import exemption, blueprint path fix, fidelity formula normalization note, validate_adapter.py rework clarification, type-ignore diffing script, Design Principle 7 (extend don't duplicate) and 8 (model-derived templates) |
+| 2026-02-19 | Claude (Opus 4.6) via CC | Rev 3: Added Section 3.5 (mechanical pre-check validator — refactored from sleep_task_scheduler). Adopted hybrid review architecture: pre-checks provide structural ground truth, LLM assesses semantic fidelity. Updated review prompt (3.2), prompt template (5.2), review script (5.3), session setup (5.1) to incorporate pre-check results. Reframed LLM reviewer role from "find what's missing" to "assess whether what's present implements intent." Updated Design Principle 3. Added blueprint_precheck.py, test_blueprint_precheck.py, run_blueprint_precheck.py to file manifest. |
+| 2026-02-19 | Claude (Opus 4.6) via CC | Rev 4: Calibrated pre-check accuracy estimates (failure_mode ~50-60%, honest per-dimension table). Added Section 3.2.1 token budget guard with progressive truncation priority for gaia-prime context limits. Pinned reference implementation selection (Section 7.4.1) to dependency+interface Jaccard overlap. Separated graduation criteria into generation quality vs review quality (Section 8.3) — review quality deferred to Phase 5 maturity. Added 15% minimum forward-pair ratio + 1.5x loss weight for forward pairs in skewed corpora (Section 8.1). Moved BlueprintFidelityValidator to standalone `validators/blueprint_fidelity.py` module. |
+| 2026-02-19 | Claude (Opus 4.6) via CC | Rev 5: Added calibration caveat to forward-pair ratio/weight thresholds — explicitly marked as initial estimates requiring post-first-cycle tuning (Section 8.1). Fixed per-file blueprint scoping (Section 6.2) to default to full blueprint for composite files, ambiguous roles, or missing role tags. Added Section 6.3 (retroactive review rejection handling) — defines the distinct result path for live services where rejection surfaces as blueprint open_questions + Review Queue items rather than looping back to generation. |

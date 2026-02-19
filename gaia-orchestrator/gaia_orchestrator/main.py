@@ -51,13 +51,14 @@ _gpu_manager = None
 _docker_manager = None
 _handoff_manager = None
 _notification_manager = None
+_health_watchdog = None
 _gpu_lock = asyncio.Lock()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
-    global _state_manager, _gpu_manager, _docker_manager, _handoff_manager, _notification_manager
+    global _state_manager, _gpu_manager, _docker_manager, _handoff_manager, _notification_manager, _health_watchdog
 
     logger.info("GAIA Orchestrator starting up...")
     config = get_config()
@@ -95,11 +96,22 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning("Notification manager not available yet")
 
+    # Start health watchdog (polls gaia-core + gaia-prime every 30s)
+    try:
+        from .health_watchdog import HealthWatchdog
+        _health_watchdog = HealthWatchdog(notification_manager=_notification_manager)
+        await _health_watchdog.start()
+        logger.info("Health watchdog started")
+    except ImportError:
+        logger.warning("Health watchdog not available yet")
+
     logger.info("GAIA Orchestrator ready")
     yield
 
     # Shutdown
     logger.info("GAIA Orchestrator shutting down...")
+    if _health_watchdog:
+        await _health_watchdog.stop()
     if _state_manager:
         await _state_manager.save()
 

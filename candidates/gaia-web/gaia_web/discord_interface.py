@@ -56,9 +56,10 @@ class DiscordInterface:
     - Converting between Discord events and CognitionPackets
     """
 
-    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None):
+    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None, core_fallback_endpoint: str = ""):
         self.bot_token = bot_token
         self.core_endpoint = core_endpoint
+        self.core_fallback_endpoint = core_fallback_endpoint
         self.message_queue = message_queue
         self._bot = None
         self._loop = None
@@ -293,24 +294,25 @@ class DiscordInterface:
         packet.compute_hashes() # Compute hashes for integrity
 
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                response = await client.post(
-                    f"{self.core_endpoint}/process_packet", # New endpoint name
-                    json=packet.to_serializable_dict(), # Send as serializable dict
-                    headers={"Content-Type": "application/json"}
-                )
-                response.raise_for_status()
+            from gaia_web.utils.retry import post_with_retry
 
-                # Expect a full CognitionPacket back
-                completed_packet_dict = response.json()
-                completed_packet = CognitionPacket.from_dict(completed_packet_dict) # Deserialize back to object
+            fallback = f"{self.core_fallback_endpoint}/process_packet" if self.core_fallback_endpoint else None
+            response = await post_with_retry(
+                f"{self.core_endpoint}/process_packet",
+                json=packet.to_serializable_dict(),
+                fallback_url=fallback,
+            )
 
-                gaia_response_text = completed_packet.response.candidate # Extract LLM response
-                if not gaia_response_text:
-                    gaia_response_text = "GAIA processed your request but did not generate a text response."
+            # Expect a full CognitionPacket back
+            completed_packet_dict = response.json()
+            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
-                # Send response back to Discord
-                await self._send_response(message_obj, gaia_response_text, is_dm)
+            gaia_response_text = completed_packet.response.candidate
+            if not gaia_response_text:
+                gaia_response_text = "GAIA processed your request but did not generate a text response."
+
+            # Send response back to Discord
+            await self._send_response(message_obj, gaia_response_text, is_dm)
 
         except httpx.TimeoutException:
             logger.error("Discord: Request to gaia-core timed out")
@@ -434,7 +436,7 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return False
 
 
-def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None) -> bool:
+def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None, core_fallback_endpoint: str = "") -> bool:
     """
     Start the Discord bot in a background thread.
 
@@ -443,6 +445,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
         core_endpoint: URL of gaia-core service (e.g., http://gaia-core:6415)
         message_queue: Optional MessageQueue instance for sleep/wake queueing
         voice_manager: Optional VoiceManager for voice auto-answer
+        core_fallback_endpoint: Optional HA fallback URL for gaia-core
 
     Returns:
         True if started successfully
@@ -454,7 +457,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
         logger.error("Cannot start Discord bot: no token provided")
         return False
 
-    interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue)
+    interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue, core_fallback_endpoint=core_fallback_endpoint)
 
     def run_bot():
         loop = asyncio.new_event_loop()

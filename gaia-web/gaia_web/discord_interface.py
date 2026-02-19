@@ -56,9 +56,10 @@ class DiscordInterface:
     - Converting between Discord events and CognitionPackets
     """
 
-    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None):
+    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None, core_fallback_endpoint: str = ""):
         self.bot_token = bot_token
         self.core_endpoint = core_endpoint
+        self.core_fallback_endpoint = core_fallback_endpoint
         self.message_queue = message_queue
         self._bot = None
         self._loop = None
@@ -295,9 +296,11 @@ class DiscordInterface:
         try:
             from gaia_web.utils.retry import post_with_retry
 
+            fallback = f"{self.core_fallback_endpoint}/process_packet" if self.core_fallback_endpoint else None
             response = await post_with_retry(
                 f"{self.core_endpoint}/process_packet",
                 json=packet.to_serializable_dict(),
+                fallback_url=fallback,
             )
 
             # Expect a full CognitionPacket back
@@ -433,7 +436,7 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return False
 
 
-def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None) -> bool:
+def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None, core_fallback_endpoint: str = "") -> bool:
     """
     Start the Discord bot in a background thread.
 
@@ -442,6 +445,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
         core_endpoint: URL of gaia-core service (e.g., http://gaia-core:6415)
         message_queue: Optional MessageQueue instance for sleep/wake queueing
         voice_manager: Optional VoiceManager for voice auto-answer
+        core_fallback_endpoint: Optional HA fallback URL for gaia-core
 
     Returns:
         True if started successfully
@@ -453,7 +457,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
         logger.error("Cannot start Discord bot: no token provided")
         return False
 
-    interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue)
+    interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue, core_fallback_endpoint=core_fallback_endpoint)
 
     def run_bot():
         loop = asyncio.new_event_loop()
