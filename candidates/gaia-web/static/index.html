@@ -41,7 +41,7 @@
   </nav>
 
   <!-- ── Dashboard View (original 3-panel layout) ── -->
-  <section class="view" x-show="$store.nav.currentView === 'dashboard'" x-cloak>
+  <section class="view" x-data x-show="$store.nav.currentView === 'dashboard'" x-cloak>
     <main class="panels">
       <!-- Left: Chat -->
       <section class="panel panel-chat" x-data="chatPanel()">
@@ -206,7 +206,7 @@
   </section>
 
   <!-- ── Commands View (Hooks Panel) ── -->
-  <section class="view" x-show="$store.nav.currentView === 'hooks'" x-cloak>
+  <section class="view" x-data x-show="$store.nav.currentView === 'hooks'" x-cloak>
     <div class="hooks-grid" x-data="hooksPanel()">
 
       <!-- Sleep Control -->
@@ -296,7 +296,7 @@
   </section>
 
   <!-- ── Files View ── -->
-  <section class="view" x-show="$store.nav.currentView === 'files'" x-cloak>
+  <section class="view" x-data x-show="$store.nav.currentView === 'files'" x-cloak>
     <div class="file-browser" x-data="fileBrowser()">
       <div class="fb-toolbar">
         <select class="fb-root-select" x-model="currentRoot" @change="changeRoot()">
@@ -355,7 +355,7 @@
   </section>
 
   <!-- ── Knowledge View ── -->
-  <section class="view" x-show="$store.nav.currentView === 'knowledge'" x-cloak>
+  <section class="view" x-data x-show="$store.nav.currentView === 'knowledge'" x-cloak>
     <div class="file-browser kb-browser" x-data="knowledgeBrowser()">
       <div class="fb-toolbar">
         <span class="kb-root-label">knowledge</span>
@@ -403,7 +403,7 @@
   </section>
 
   <!-- ── Terminal View ── -->
-  <section class="view" x-show="$store.nav.currentView === 'terminal'" x-cloak>
+  <section class="view" x-data x-show="$store.nav.currentView === 'terminal'" x-cloak>
     <div class="terminal-panel" x-data="terminalPanel()">
       <div class="term-toolbar">
         <select class="term-container-select" x-model="selectedContainer" :disabled="connected">
