@@ -224,19 +224,51 @@ class VLLMRemoteModel:
             return self._active_adapter
         return self.model_name
 
+    # Retry configuration for transient failures
+    _MAX_RETRIES = 3
+    _RETRY_BASE_DELAY = 1.5  # seconds; delays: 1.5s, 3.0s
+
     def _post(self, path: str, payload: dict) -> dict:
         url = f"{self.endpoint}{path}"
-        try:
-            r = self._session.post(url, json=payload, timeout=self.timeout)
-            r.raise_for_status()
-            return r.json()
-        except requests.exceptions.ConnectionError as exc:
-            raise RuntimeError(
-                f"Cannot reach vLLM server at {url}. Is gaia-prime running?"
-            ) from exc
-        except requests.exceptions.HTTPError as exc:
-            logger.error("vLLM HTTP error %s: %s", r.status_code, r.text[:500])
-            raise RuntimeError(f"vLLM request failed ({r.status_code})") from exc
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(1, self._MAX_RETRIES + 1):
+            try:
+                r = self._session.post(url, json=payload, timeout=self.timeout)
+                # Retry on 503 (vLLM model-loading state), not other errors
+                if r.status_code == 503 and attempt < self._MAX_RETRIES:
+                    delay = self._RETRY_BASE_DELAY * attempt
+                    logger.warning(
+                        "vLLM returned 503 on attempt %d/%d, retrying in %.1fs...",
+                        attempt, self._MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                r.raise_for_status()
+                return r.json()
+            except requests.exceptions.ConnectionError as exc:
+                last_exc = exc
+                if attempt < self._MAX_RETRIES:
+                    delay = self._RETRY_BASE_DELAY * attempt
+                    logger.warning(
+                        "vLLM connection failed on attempt %d/%d, retrying in %.1fs...",
+                        attempt, self._MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(
+                    f"Cannot reach vLLM server at {url} after {self._MAX_RETRIES} attempts. "
+                    f"Is gaia-prime running?"
+                ) from exc
+            except requests.exceptions.HTTPError as exc:
+                # Don't retry 4xx — those are client errors
+                logger.error("vLLM HTTP error %s: %s", r.status_code, r.text[:500])
+                raise RuntimeError(f"vLLM request failed ({r.status_code})") from exc
+
+        # Should not reach here, but safety net
+        raise RuntimeError(
+            f"vLLM request to {url} failed after {self._MAX_RETRIES} attempts"
+        ) from last_exc
 
     def _stream_completions(self, payload: dict) -> Generator[Dict[str, Any], None, None]:
         payload["stream"] = True

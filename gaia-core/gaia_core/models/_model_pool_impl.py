@@ -1067,8 +1067,15 @@ class ModelPool:
         self.set_status(name, "busy")
         return model
 
+    # Fallback chain for inference-level failures (model acquired but fails mid-call)
+    _INFERENCE_FALLBACK_CHAIN = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
+
     def forward_to_model(self, role: str, messages: list, release: bool = True, **kwargs):
-        """Utility used by AgentCore/tests to run a short chat completion via role lookup."""
+        """Utility used by AgentCore/tests to run a short chat completion via role lookup.
+
+        If the primary model raises RuntimeError during inference (e.g. vLLM
+        unreachable after retries), walks the fallback chain before giving up.
+        """
         name = self._resolve_model_name_for_role(role)
         if not name or name not in self.models:
             raise ValueError(f"Model '{role}' not found in pool.")
@@ -1082,6 +1089,42 @@ class ModelPool:
             else:
                 raise ValueError(f"Model '{name}' does not support chat completions")
             return result
+        except RuntimeError as primary_exc:
+            # Primary model failed during inference — try fallback chain
+            logger.warning(
+                "Primary model '%s' failed during inference: %s. Trying fallback chain...",
+                name, primary_exc,
+            )
+            for fallback_name in self._INFERENCE_FALLBACK_CHAIN:
+                if fallback_name == name:
+                    continue  # Skip the model that just failed
+                fallback_model = self.models.get(fallback_name)
+                if not fallback_model:
+                    # Try lazy loading
+                    if self.ensure_model_loaded(fallback_name):
+                        fallback_model = self.models.get(fallback_name)
+                if not fallback_model:
+                    continue
+                try:
+                    logger.warning("Attempting inference fallback to '%s'...", fallback_name)
+                    self.set_status(fallback_name, "busy")
+                    if hasattr(fallback_model, "create_chat_completion"):
+                        result = fallback_model.create_chat_completion(messages=messages, **kwargs)
+                    elif callable(fallback_model):
+                        result = fallback_model(messages)
+                    else:
+                        continue
+                    logger.info("Inference fallback to '%s' succeeded", fallback_name)
+                    return result
+                except Exception as fb_exc:
+                    logger.warning("Fallback '%s' also failed: %s", fallback_name, fb_exc)
+                    continue
+                finally:
+                    self.release_model(fallback_name)
+
+            # All fallbacks exhausted — re-raise original
+            logger.error("All inference fallbacks exhausted for role '%s'", role)
+            raise
         finally:
             if release:
                 self.release_model(name)

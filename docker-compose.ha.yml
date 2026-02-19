@@ -1,0 +1,82 @@
+# GAIA HA Hot Standby Override
+#
+# Layered on top of docker-compose.candidate.yml to run candidate-core
+# and candidate-mcp as HA hot standbys for the live stack.
+#
+# Key differences from normal candidate mode:
+#   - Candidates point at LIVE gaia-prime (shared GPU inference)
+#   - Candidates point at LIVE gaia-mcp/study (not candidate counterparts)
+#   - restart: unless-stopped (HA services must survive crashes)
+#   - "ha" profile for selective activation
+#
+# Also configures the LIVE gaia-web to fail over to candidate-core,
+# and LIVE gaia-core to fail over to candidate-mcp.
+#
+# Usage:
+#   docker compose -f docker-compose.candidate.yml \
+#                  -f docker-compose.ha.yml \
+#                  --profile ha up -d
+#
+# Or use the convenience scripts:
+#   ./scripts/ha_start.sh
+#   ./scripts/ha_stop.sh
+
+services:
+  gaia-core-candidate:
+    # Override profiles to include "ha"
+    profiles: ["ha", "full", "core"]
+    restart: unless-stopped
+
+    environment:
+      # --- Override candidate defaults to point at LIVE services ---
+      # LIVE gaia-prime for GPU inference (same Docker network)
+      - PRIME_ENDPOINT=http://gaia-prime:7777
+      # LIVE gaia-mcp for tool execution
+      - MCP_ENDPOINT=http://gaia-mcp:8765/jsonrpc
+      - MCP_LITE_ENDPOINT=http://gaia-mcp:8765/jsonrpc
+      # LIVE gaia-study for background operations
+      - STUDY_ENDPOINT=http://gaia-study:8766
+      # --- Preserve all other env vars from candidate compose ---
+      - PYTHONPATH=/app:/app/gaia-common
+      - GAIA_SERVICE=core
+      - GAIA_ENV=${GAIA_ENV:-development}
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - KNOWLEDGE_DIR=/knowledge
+      - VECTOR_STORE_PATH=/vector_store
+      - MODELS_DIR=/models
+      - SHARED_DIR=/shared
+      - GAIA_BACKEND=${GAIA_CANDIDATE_BACKEND:-gpu_prime}
+      - GAIA_FORCE_CPU=1
+      - N_GPU_LAYERS=0
+      - GAIA_ALLOW_PRIME_LOAD=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OBSERVER_MODE=warn
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-AWQ}
+
+    deploy:
+      resources: {}  # No GPU reservation — inference via live prime
+
+  gaia-mcp-candidate:
+    # Override profiles to include "ha"
+    profiles: ["ha", "full", "mcp"]
+    restart: unless-stopped
+
+    environment:
+      # --- Override candidate defaults to point at LIVE services ---
+      - STUDY_ENDPOINT=http://gaia-study:8766
+      # --- Preserve all other env vars from candidate compose ---
+      - PYTHONPATH=/app:/app/gaia-common
+      - GAIA_SERVICE=mcp
+      - GAIA_ENV=${GAIA_ENV:-development}
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - MODELS_DIR=/models
+      - SANDBOX_ROOT=/sandbox
+      - KNOWLEDGE_DIR=/knowledge
+      - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
+      - MCP_APPROVAL_TTL=900
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    deploy:
+      resources: {}  # No GPU reservation

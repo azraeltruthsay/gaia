@@ -42,6 +42,7 @@ except ImportError:
 
 # Configuration from environment
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
+CORE_FALLBACK_ENDPOINT = os.environ.get("CORE_FALLBACK_ENDPOINT", "")
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
@@ -322,9 +323,11 @@ async def process_user_input(user_input: str):
     try:
         from gaia_web.utils.retry import post_with_retry
 
+        fallback = f"{CORE_FALLBACK_ENDPOINT}/process_packet" if CORE_FALLBACK_ENDPOINT else None
         response = await post_with_retry(
             f"{CORE_ENDPOINT}/process_packet",
             json=packet.to_serializable_dict(),
+            fallback_url=fallback,
         )
 
         completed_packet_dict = response.json()
@@ -395,9 +398,11 @@ async def process_audio_input(body: Dict[str, Any]):
     try:
         from gaia_web.utils.retry import post_with_retry
 
+        fallback = f"{CORE_FALLBACK_ENDPOINT}/process_packet" if CORE_FALLBACK_ENDPOINT else None
         response = await post_with_retry(
             f"{CORE_ENDPOINT}/process_packet",
             json=packet.to_serializable_dict(),
+            fallback_url=fallback,
         )
         completed_packet_dict = response.json()
         completed_packet = CognitionPacket.from_dict(completed_packet_dict)
@@ -565,6 +570,7 @@ async def startup_event():
                 DISCORD_BOT_TOKEN, CORE_ENDPOINT,
                 message_queue=app.state.message_queue,
                 voice_manager=voice_manager,
+                core_fallback_endpoint=CORE_FALLBACK_ENDPOINT,
             )
             print(f"[STARTUP] Discord bot startup result: {result}")
         except Exception as e:

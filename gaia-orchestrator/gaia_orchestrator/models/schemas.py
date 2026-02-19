@@ -156,6 +156,8 @@ class NotificationType(str, Enum):
     HANDOFF_COMPLETED = "handoff_completed"
     HANDOFF_FAILED = "handoff_failed"
     SERVICE_ERROR = "service_error"
+    SERVICE_HEALTH_CHANGE = "service_health_change"
+    HA_STATUS_CHANGE = "ha_status_change"
 
 
 class OracleNotification(BaseModel):

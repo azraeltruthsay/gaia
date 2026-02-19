@@ -202,11 +202,67 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Shutdown — write cognitive checkpoints before stopping
+    logger.info("GAIA Core shutting down — writing cognitive checkpoints...")
+    try:
+        _write_shutdown_checkpoints(app)
+    except Exception:
+        logger.warning("Shutdown checkpoint write failed", exc_info=True)
+
     if _sleep_loop is not None:
         _sleep_loop.initiate_shutdown()
         logger.info("Sleep cycle loop stopped (OFFLINE)")
-    logger.info("GAIA Core shutting down...")
+    logger.info("GAIA Core shutdown complete.")
+
+
+def _write_shutdown_checkpoints(app: FastAPI) -> dict:
+    """Write prime.md and Lite.md checkpoints (called on shutdown and via endpoint)."""
+    results = {}
+
+    if _ai_manager is None:
+        logger.warning("Cannot write checkpoints — cognitive system not initialized")
+        return {"error": "cognitive system not initialized"}
+
+    config = _ai_manager.config
+    model_pool = _ai_manager.model_pool
+    timeline_store = getattr(app.state, "timeline_store", None)
+    sleep_wake_manager = getattr(app.state, "sleep_wake_manager", None)
+
+    # Write prime.md
+    try:
+        from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
+
+        pm = PrimeCheckpointManager(config, timeline_store=timeline_store)
+        pm.rotate_checkpoints()
+        path = pm.create_checkpoint(packet=None, model_pool=model_pool)
+        results["prime"] = {"status": "ok", "path": str(path)}
+        logger.info("Shutdown checkpoint: prime.md written")
+    except Exception as exc:
+        results["prime"] = {"status": "error", "detail": str(exc)}
+        logger.error("Shutdown checkpoint: prime.md failed: %s", exc, exc_info=True)
+
+    # Write Lite.md
+    try:
+        from gaia_core.cognition.lite_journal import LiteJournal
+
+        lj = LiteJournal(
+            config,
+            model_pool=model_pool,
+            timeline_store=timeline_store,
+            sleep_wake_manager=sleep_wake_manager,
+        )
+        entry = lj.write_entry()
+        if entry:
+            results["lite"] = {"status": "ok", "chars": len(entry)}
+            logger.info("Shutdown checkpoint: Lite.md entry written")
+        else:
+            results["lite"] = {"status": "skipped", "reason": "no Lite model available"}
+            logger.info("Shutdown checkpoint: Lite.md skipped (no model)")
+    except Exception as exc:
+        results["lite"] = {"status": "error", "detail": str(exc)}
+        logger.error("Shutdown checkpoint: Lite.md failed: %s", exc, exc_info=True)
+
+    return results
 
 
 app = FastAPI(
@@ -256,6 +312,7 @@ async def root():
             "/sleep/study-handoff": "Study handoff notification (POST)",
             "/sleep/distracted-check": "Check for canned response (GET)",
             "/sleep/shutdown": "Graceful shutdown (POST)",
+            "/cognition/checkpoint": "Write cognitive checkpoints (POST)",
         }
     }
 
@@ -292,6 +349,21 @@ async def get_status():
             "status": model_status,
         }
     }
+
+
+@app.post("/cognition/checkpoint")
+async def cognition_checkpoint():
+    """Write cognitive checkpoints (prime.md + Lite.md).
+
+    Called by graceful_checkpoint.sh before container shutdown, or manually
+    to persist cognitive state.  Safe to call multiple times.
+    """
+    results = _write_shutdown_checkpoints(app)
+
+    if "error" in results:
+        return JSONResponse(status_code=503, content=results)
+
+    return JSONResponse(status_code=200, content=results)
 
 
 @app.post("/process_packet")
