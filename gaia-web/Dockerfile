@@ -9,6 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    build-essential \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for container execution (host UID mapping)
