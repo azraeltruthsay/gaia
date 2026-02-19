@@ -147,7 +147,15 @@
       "bot_name": "GAIA",
       "avatar_url": null,
       "default_channel_id": null,
-      "bot_token": ""
+      "bot_token": "",
+      "voice": {
+        "enabled": true,
+        "auto_answer": true,
+        "max_utterance_seconds": 30,
+        "silence_threshold_ms": 800,
+        "min_speech_ms": 300,
+        "single_connection": true
+      }
     },
     "webhooks": {
       "dev_notifications": null,

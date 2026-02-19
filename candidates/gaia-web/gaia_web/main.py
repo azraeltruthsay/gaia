@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from gaia_web.queue.message_queue import MessageQueue
 from gaia_web.routes.blueprints import router as blueprints_router
+from gaia_web.routes.voice import router as voice_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -41,6 +42,7 @@ CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
+AUDIO_ENDPOINT = os.environ.get("AUDIO_ENDPOINT", "http://gaia-audio:8080")
 GAIA_CONSTANTS_PATH = os.environ.get("GAIA_CONSTANTS_PATH", "/app/gaia_common/constants/gaia_constants.json")
 
 
@@ -61,8 +63,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Blueprint API router (must be before static mount)
+# API routers (must be before static mount)
 app.include_router(blueprints_router)
+app.include_router(voice_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
@@ -530,12 +533,35 @@ async def startup_event():
     # Initialize message queue for sleep/wake cycle
     app.state.message_queue = MessageQueue(core_url=CORE_ENDPOINT)
 
+    # Initialize voice manager (whitelist persists to /app/data/)
+    voice_manager = None
+    try:
+        from gaia_web.voice_manager import VoiceManager, VoiceWhitelist
+        constants = _load_constants()
+        voice_cfg = constants.get("INTEGRATIONS", {}).get("discord", {}).get("voice", {})
+        whitelist = VoiceWhitelist(data_dir=os.environ.get("VOICE_DATA_DIR", "/app/data"))
+        voice_manager = VoiceManager(
+            core_endpoint=CORE_ENDPOINT,
+            audio_endpoint=AUDIO_ENDPOINT,
+            whitelist=whitelist,
+            voice_config=voice_cfg,
+        )
+        app.state.voice_manager = voice_manager
+        print("[STARTUP] Voice manager initialized")
+    except Exception as e:
+        print(f"[STARTUP] Voice manager init failed (non-fatal): {e}")
+        app.state.voice_manager = None
+
     print(f"[STARTUP] ENABLE_DISCORD={ENABLE_DISCORD}, TOKEN_SET={bool(DISCORD_BOT_TOKEN)}")
     if ENABLE_DISCORD and DISCORD_BOT_TOKEN:
         print("[STARTUP] Starting Discord bot...")
         try:
             from .discord_interface import start_discord_bot
-            result = start_discord_bot(DISCORD_BOT_TOKEN, CORE_ENDPOINT, message_queue=app.state.message_queue)
+            result = start_discord_bot(
+                DISCORD_BOT_TOKEN, CORE_ENDPOINT,
+                message_queue=app.state.message_queue,
+                voice_manager=voice_manager,
+            )
             print(f"[STARTUP] Discord bot startup result: {result}")
         except Exception as e:
             print(f"[STARTUP] Failed to start Discord bot: {e}")
@@ -550,6 +576,14 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop Discord bot on application shutdown."""
+    # Disconnect voice if active
+    vm = getattr(app.state, "voice_manager", None)
+    if vm is not None:
+        try:
+            await vm.disconnect()
+        except Exception:
+            pass
+
     if ENABLE_DISCORD:
         try:
             from .discord_interface import stop_discord_bot

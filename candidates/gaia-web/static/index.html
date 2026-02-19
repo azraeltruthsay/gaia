@@ -76,6 +76,28 @@
           </div>
         </div>
 
+        <!-- Voice Auto-Answer Widget -->
+        <div id="voice-panel" class="voice-panel">
+          <div class="voice-header">
+            <span class="voice-title">Voice Auto-Answer</span>
+            <span id="voice-state-badge" class="voice-state-badge state-disconnected">disconnected</span>
+            <button id="voice-disconnect-btn" class="voice-disconnect-btn" style="display:none" title="Disconnect from voice">Disconnect</button>
+          </div>
+          <div class="voice-body">
+            <div class="voice-status-row">
+              <span id="voice-channel-name" class="voice-channel">--</span>
+              <span id="voice-duration" class="voice-duration">--</span>
+            </div>
+            <div class="voice-whitelist-header">
+              <span>Users</span>
+              <span class="voice-whitelist-hint">click to toggle auto-answer</span>
+            </div>
+            <div id="voice-user-list" class="voice-user-list">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+
         <div id="graph-breadcrumb" class="graph-breadcrumb">
           <span id="graph-title" class="graph-title">Service Graph</span>
           <span id="graph-zoom-hint" class="graph-zoom-hint">scroll to zoom</span>
