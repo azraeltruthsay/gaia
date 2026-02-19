@@ -23,101 +23,192 @@
     </div>
   </header>
 
-  <main class="panels">
-    <!-- Left: Chat -->
-    <section class="panel panel-chat">
-      <div class="panel-header">Chat</div>
-      <div class="panel-body">
-        <div id="chat-messages" class="chat-messages"></div>
-        <div class="chat-input-row">
-          <input type="text" id="chat-input" placeholder="Talk to GAIA..." autocomplete="off">
-          <button id="chat-send">Send</button>
-        </div>
-      </div>
-    </section>
+  <nav class="tab-bar">
+    <button class="tab active" data-view="dashboard">Dashboard</button>
+    <button class="tab" data-view="hooks">Commands</button>
+    <button class="tab" data-view="files">Files</button>
+    <button class="tab" data-view="knowledge">Knowledge</button>
+    <button class="tab" data-view="terminal">Terminal</button>
+  </nav>
 
-    <!-- Center: System State -->
-    <section class="panel panel-system">
-      <div class="panel-header">System State</div>
-      <div class="panel-body">
-        <div id="service-grid" class="service-grid">
-          <!-- Populated by JS -->
-        </div>
-
-        <!-- Audio Processing Widget -->
-        <div id="audio-panel" class="audio-panel">
-          <div class="audio-header">
-            <span class="audio-title">Audio Processing</span>
-            <span id="audio-state-badge" class="audio-state-badge state-idle">idle</span>
-            <span id="audio-gpu-badge" class="audio-gpu-badge">GPU: idle</span>
-            <button id="audio-mute-btn" class="audio-mute-btn" title="Mute/Unmute audio">Mute</button>
+  <!-- ── Dashboard View (original 3-panel layout) ── -->
+  <section class="view active" data-view="dashboard">
+    <main class="panels">
+      <!-- Left: Chat -->
+      <section class="panel panel-chat">
+        <div class="panel-header">Chat</div>
+        <div class="panel-body">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input-row">
+            <input type="text" id="chat-input" placeholder="Talk to GAIA..." autocomplete="off">
+            <button id="chat-send">Send</button>
           </div>
-          <div class="audio-body">
-            <div class="audio-gpu-bar">
-              <div class="audio-vram-track"><div id="audio-vram-fill" class="audio-vram-fill" style="width:0%"></div></div>
-              <span id="audio-vram-text" class="audio-vram-text">0 / 5600 MB</span>
+        </div>
+      </section>
+
+      <!-- Center: System State -->
+      <section class="panel panel-system">
+        <div class="panel-header">System State</div>
+        <div class="panel-body">
+          <div id="service-grid" class="service-grid">
+            <!-- Populated by JS -->
+          </div>
+
+          <!-- Audio Processing Widget -->
+          <div id="audio-panel" class="audio-panel">
+            <div class="audio-header">
+              <span class="audio-title">Audio Processing</span>
+              <span id="audio-state-badge" class="audio-state-badge state-idle">idle</span>
+              <span id="audio-gpu-badge" class="audio-gpu-badge">GPU: idle</span>
+              <button id="audio-mute-btn" class="audio-mute-btn" title="Mute/Unmute audio">Mute</button>
             </div>
-            <div class="audio-columns">
-              <div class="audio-col">
-                <div class="audio-col-header">Live Transcript</div>
-                <div id="audio-transcript-log" class="audio-log"></div>
+            <div class="audio-body">
+              <div class="audio-gpu-bar">
+                <div class="audio-vram-track"><div id="audio-vram-fill" class="audio-vram-fill" style="width:0%"></div></div>
+                <span id="audio-vram-text" class="audio-vram-text">0 / 5600 MB</span>
               </div>
-              <div class="audio-col">
-                <div class="audio-col-header">Event Log</div>
-                <div id="audio-event-log" class="audio-log"></div>
+              <div class="audio-columns">
+                <div class="audio-col">
+                  <div class="audio-col-header">Live Transcript</div>
+                  <div id="audio-transcript-log" class="audio-log"></div>
+                </div>
+                <div class="audio-col">
+                  <div class="audio-col-header">Event Log</div>
+                  <div id="audio-event-log" class="audio-log"></div>
+                </div>
+              </div>
+              <div class="audio-latency-row">
+                <span class="audio-latency-label">STT latency</span>
+                <canvas id="audio-stt-sparkline" width="120" height="24"></canvas>
+                <span class="audio-latency-label">TTS latency</span>
+                <canvas id="audio-tts-sparkline" width="120" height="24"></canvas>
               </div>
             </div>
-            <div class="audio-latency-row">
-              <span class="audio-latency-label">STT latency</span>
-              <canvas id="audio-stt-sparkline" width="120" height="24"></canvas>
-              <span class="audio-latency-label">TTS latency</span>
-              <canvas id="audio-tts-sparkline" width="120" height="24"></canvas>
-            </div>
           </div>
-        </div>
 
-        <!-- Voice Auto-Answer Widget -->
-        <div id="voice-panel" class="voice-panel">
-          <div class="voice-header">
-            <span class="voice-title">Voice Auto-Answer</span>
-            <span id="voice-state-badge" class="voice-state-badge state-disconnected">disconnected</span>
-            <button id="voice-disconnect-btn" class="voice-disconnect-btn" style="display:none" title="Disconnect from voice">Disconnect</button>
+          <!-- Voice Auto-Answer Widget -->
+          <div id="voice-panel" class="voice-panel">
+            <div class="voice-header">
+              <span class="voice-title">Voice Auto-Answer</span>
+              <span id="voice-state-badge" class="voice-state-badge state-disconnected">disconnected</span>
+              <button id="voice-disconnect-btn" class="voice-disconnect-btn" style="display:none" title="Disconnect from voice">Disconnect</button>
+            </div>
+            <div class="voice-body">
+              <div class="voice-status-row">
+                <span id="voice-channel-name" class="voice-channel">--</span>
+                <span id="voice-duration" class="voice-duration">--</span>
+              </div>
+              <div class="voice-whitelist-header">
+                <span>Users</span>
+                <span class="voice-whitelist-hint">click to toggle auto-answer</span>
+              </div>
+              <div id="voice-user-list" class="voice-user-list">
+                <!-- Populated by JS -->
+              </div>
+            </div>
           </div>
-          <div class="voice-body">
-            <div class="voice-status-row">
-              <span id="voice-channel-name" class="voice-channel">--</span>
-              <span id="voice-duration" class="voice-duration">--</span>
-            </div>
-            <div class="voice-whitelist-header">
-              <span>Users</span>
-              <span class="voice-whitelist-hint">click to toggle auto-answer</span>
-            </div>
-            <div id="voice-user-list" class="voice-user-list">
-              <!-- Populated by JS -->
-            </div>
-          </div>
-        </div>
 
-        <div id="graph-breadcrumb" class="graph-breadcrumb">
-          <span id="graph-title" class="graph-title">Service Graph</span>
-          <span id="graph-zoom-hint" class="graph-zoom-hint">scroll to zoom</span>
-          <button id="graph-back" class="graph-back" style="display:none" title="Back to service graph">&larr; All Services</button>
+          <div id="graph-breadcrumb" class="graph-breadcrumb">
+            <span id="graph-title" class="graph-title">Service Graph</span>
+            <span id="graph-zoom-hint" class="graph-zoom-hint">scroll to zoom</span>
+            <button id="graph-back" class="graph-back" style="display:none" title="Back to service graph">&larr; All Services</button>
+          </div>
+          <div id="graph-container" class="graph-container">
+            <svg id="graph-svg"></svg>
+          </div>
         </div>
-        <div id="graph-container" class="graph-container">
-          <svg id="graph-svg"></svg>
+      </section>
+
+      <!-- Right: Blueprints -->
+      <section class="panel panel-blueprints">
+        <div class="panel-header">Blueprints</div>
+        <div class="panel-body">
+          <div id="blueprint-list" class="blueprint-list"></div>
+          <div id="blueprint-detail" class="blueprint-detail"></div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <!-- ── Commands View (Hooks Panel) ── -->
+  <section class="view" data-view="hooks">
+    <div class="hooks-grid">
+
+      <!-- Sleep Control -->
+      <div class="hook-group">
+        <div class="hook-group-header">Sleep Control</div>
+        <div class="hook-status">
+          <span class="hook-status-label">State:</span>
+          <span id="hook-sleep-state" class="hook-status-value">--</span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Cycle:</span>
+          <span id="hook-sleep-cycle" class="hook-status-value">--</span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Uptime:</span>
+          <span id="hook-sleep-uptime" class="hook-status-value">--</span>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" onclick="hookAction('sleep/wake')">Wake</button>
+          <button class="hook-btn hook-btn-danger" onclick="hookAction('sleep/shutdown')">Shutdown</button>
         </div>
       </div>
-    </section>
 
-    <!-- Right: Blueprints -->
-    <section class="panel panel-blueprints">
-      <div class="panel-header">Blueprints</div>
-      <div class="panel-body">
-        <div id="blueprint-list" class="blueprint-list"></div>
-        <div id="blueprint-detail" class="blueprint-detail"></div>
+      <!-- GPU Management -->
+      <div class="hook-group">
+        <div class="hook-group-header">GPU Management</div>
+        <div class="hook-status">
+          <span class="hook-status-label">Owner:</span>
+          <span id="hook-gpu-owner" class="hook-status-value">--</span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">VRAM:</span>
+          <span id="hook-gpu-vram" class="hook-status-value">--</span>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-warn" onclick="hookAction('gpu/release')">Release</button>
+          <button class="hook-btn hook-btn-primary" onclick="hookAction('gpu/reclaim')">Reclaim</button>
+        </div>
       </div>
-    </section>
-  </main>
+
+      <!-- Semantic Codex -->
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Semantic Codex Lookup</div>
+        <div class="hook-search-row">
+          <input type="text" id="hook-codex-input" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off">
+          <button class="hook-btn hook-btn-primary" onclick="hookCodexSearch()">Search</button>
+        </div>
+        <div id="hook-codex-results" class="hook-codex-results">
+          <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
+        </div>
+      </div>
+
+      <!-- Hook Action Log -->
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Action Log</div>
+        <div id="hook-action-log" class="hook-action-log">
+          <div class="hook-log-placeholder">Actions will appear here.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Files View (Phase 2 placeholder) ── -->
+  <section class="view" data-view="files">
+    <div class="view-placeholder">File Browser — coming in Phase 2</div>
+  </section>
+
+  <!-- ── Knowledge View (Phase 2 placeholder) ── -->
+  <section class="view" data-view="knowledge">
+    <div class="view-placeholder">Knowledge Browser — coming in Phase 2</div>
+  </section>
+
+  <!-- ── Terminal View (Phase 4 placeholder) ── -->
+  <section class="view" data-view="terminal">
+    <div class="view-placeholder">Shell Terminal — coming in Phase 4</div>
+  </section>
 
   <script src="/static/app.js"></script>
 </body>
