@@ -372,6 +372,13 @@ class ThoughtSeedHeartbeat:
             return
 
         try:
+            # ACT seeds go through Prime — that's real cognitive work,
+            # so reset the idle timer (run_turn bypasses /process_packet).
+            if self.sleep_wake_manager is not None:
+                idle_mon = getattr(self.sleep_wake_manager, "idle_monitor", None)
+                if idle_mon is not None:
+                    idle_mon.mark_active()
+
             logger.info("Heartbeat: acting on seed %s", seed_filename)
             for _event in self.agent_core.run_turn(
                 user_input=expanded,

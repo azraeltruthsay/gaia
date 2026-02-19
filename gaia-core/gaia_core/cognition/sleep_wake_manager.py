@@ -111,6 +111,33 @@ class SleepWakeManager:
             except Exception:
                 logger.debug("Timeline state_change emit failed", exc_info=True)
 
+        # Notify gaia-audio of mute/unmute based on state transitions
+        self._notify_audio_state(to_state)
+
+    def _notify_audio_state(self, to_state: str) -> None:
+        """Notify gaia-audio to mute/unmute based on sleep state (best-effort)."""
+        try:
+            constants = getattr(self.config, "constants", {})
+            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
+            if not audio_cfg.get("enabled") or not audio_cfg.get("mute_on_sleep"):
+                return
+
+            audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+
+            if to_state in ("asleep", "dreaming"):
+                action = "mute"
+            elif to_state == "active":
+                action = "unmute"
+            else:
+                return
+
+            import httpx
+            with httpx.Client(timeout=3.0) as client:
+                client.post(f"{audio_endpoint}/{action}")
+            logger.debug("Audio %s signal sent", action)
+        except Exception:
+            logger.debug("Audio state notification failed (non-fatal)", exc_info=True)
+
     # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
@@ -173,8 +200,12 @@ class SleepWakeManager:
         """Called by gaia-web (via POST /sleep/wake) when a message is queued."""
         self.wake_signal_pending = True
 
-        # Reset idle timer so GAIA doesn't immediately re-enter DROWSY after wake
-        if self.idle_monitor is not None:
+        # Only reset idle timer when waking from a sleep state (DROWSY/ASLEEP).
+        # When already ACTIVE, /process_packet handles mark_active() itself —
+        # resetting here would prevent the idle countdown from ever completing.
+        if self.idle_monitor is not None and self.state in (
+            GaiaState.DROWSY, GaiaState.ASLEEP,
+        ):
             self.idle_monitor.mark_active()
 
         if self.state == GaiaState.DROWSY:

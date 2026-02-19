@@ -200,8 +200,12 @@ class SleepWakeManager:
         """Called by gaia-web (via POST /sleep/wake) when a message is queued."""
         self.wake_signal_pending = True
 
-        # Reset idle timer so GAIA doesn't immediately re-enter DROWSY after wake
-        if self.idle_monitor is not None:
+        # Only reset idle timer when waking from a sleep state (DROWSY/ASLEEP).
+        # When already ACTIVE, /process_packet handles mark_active() itself —
+        # resetting here would prevent the idle countdown from ever completing.
+        if self.idle_monitor is not None and self.state in (
+            GaiaState.DROWSY, GaiaState.ASLEEP,
+        ):
             self.idle_monitor.mark_active()
 
         if self.state == GaiaState.DROWSY:
