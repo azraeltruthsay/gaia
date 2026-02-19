@@ -253,6 +253,54 @@ class SourceFile(BaseModel):
     file_type: Optional[str] = None  # python | dockerfile | shell | yaml | json | other
 
 
+# ── Internal architecture models ─────────────────────────────────────────────
+
+
+class InternalComponent(BaseModel):
+    """
+    A logical module or subsystem within a service.
+
+    Groups related source files, maps to external interfaces, and lists
+    key classes/functions so the architecture graph is self-documenting
+    without needing to read the source files directly.
+    """
+    id: str                                              # e.g. "cognition_engine"
+    label: str                                           # Human-readable "Cognition Engine"
+    description: str                                     # What this component does
+    source_files: List[str] = Field(default_factory=list)  # refs to SourceFile.path values
+    key_classes: List[str] = Field(default_factory=list)   # e.g. ["CognitiveDispatcher"]
+    key_functions: List[str] = Field(default_factory=list) # e.g. ["dispatch()", "detect_goal()"]
+    exposes_interfaces: List[str] = Field(default_factory=list)  # Interface.id refs this component implements
+    consumes_interfaces: List[str] = Field(default_factory=list) # Interface.id refs this component calls
+
+
+class InternalEdge(BaseModel):
+    """
+    A wiring connection between two internal components.
+
+    Captures data flow within a service — how modules call each other,
+    what data they pass, and the transport mechanism (usually function calls).
+    """
+    from_component: str       # InternalComponent.id
+    to_component: str         # InternalComponent.id
+    label: str                # e.g. "dispatches packets to"
+    transport: str = "function_call"  # function_call | event | queue | import
+    data_flow: Optional[str] = None   # e.g. "CognitionPacket", "session_id"
+
+
+class ServiceArchitecture(BaseModel):
+    """
+    Internal architecture of a service — components and their wiring.
+
+    This is the 'zoom in' layer: the service graph shows boxes connected
+    by edges; clicking a box reveals this internal component graph with
+    its own nodes and edges. Together they provide a complete structural
+    map from system level down to module level.
+    """
+    components: List[InternalComponent] = Field(default_factory=list)
+    edges: List[InternalEdge] = Field(default_factory=list)
+
+
 # ── Failure mode models ───────────────────────────────────────────────────────
 
 
@@ -432,6 +480,11 @@ class BlueprintModel(BaseModel):
     )
     failure_modes: List[FailureMode] = Field(default_factory=list)
     intent: Optional[Intent] = None
+    architecture: Optional[ServiceArchitecture] = Field(
+        default=None,
+        description="Internal component graph — modules, wiring, key classes/functions. "
+                    "The 'zoom in' layer rendered when clicking a service node."
+    )
 
     # Blueprint metadata
     meta: BlueprintMeta

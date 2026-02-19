@@ -45,10 +45,12 @@ class SleepTaskScheduler:
         config,
         model_pool=None,
         agent_core=None,
+        timeline_store=None,
     ) -> None:
         self.config = config
         self.model_pool = model_pool
         self.agent_core = agent_core
+        self._timeline = timeline_store
         self._tasks: List[SleepTask] = []
 
         self._register_default_tasks()
@@ -74,30 +76,21 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
-            task_id="thought_seed_review",
-            task_type="thought_seed_review",
-            priority=1,
-            interruptible=True,
-            estimated_duration_seconds=120,
-            handler=self._run_thought_seed_review,
-        ))
-
-        self.register_task(SleepTask(
-            task_id="initiative_cycle",
-            task_type="initiative_cycle",
-            priority=2,
-            interruptible=True,
-            estimated_duration_seconds=180,
-            handler=self._run_initiative_cycle,
-        ))
-
-        self.register_task(SleepTask(
             task_id="blueprint_validation",
             task_type="blueprint_validation",
             priority=3,
             interruptible=True,
             estimated_duration_seconds=420,
             handler=self._run_blueprint_validation,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="code_evolution",
+            task_type="code_evolution",
+            priority=3,
+            interruptible=True,
+            estimated_duration_seconds=30,
+            handler=self._run_code_evolution,
         ))
 
     # ------------------------------------------------------------------
@@ -128,12 +121,14 @@ class SleepTaskScheduler:
             task.run_count += 1
             task.last_error = None
             logger.info("Completed %s in %.1fs (run #%d)", task.task_id, elapsed, task.run_count)
+            self._emit_task_exec(task.task_id, task.task_type, elapsed, True)
             return True
         except Exception as exc:
             elapsed = time.monotonic() - start
             task.last_run = datetime.now(timezone.utc)
             task.last_error = str(exc)
             logger.error("Task %s failed after %.1fs: %s", task.task_id, elapsed, exc, exc_info=True)
+            self._emit_task_exec(task.task_id, task.task_type, elapsed, False, str(exc))
             return False
 
     # ------------------------------------------------------------------
@@ -174,23 +169,6 @@ class SleepTaskScheduler:
                     curated += 1
 
         logger.info("Conversation curation: %d sessions curated", curated)
-
-    def _run_thought_seed_review(self) -> None:
-        """Review unprocessed thought seeds using CPU Lite model."""
-        from gaia_core.cognition.thought_seed import review_and_process_seeds
-
-        llm = None
-        if self.model_pool is not None:
-            llm = self.model_pool.get_model_for_role("lite")
-
-        review_and_process_seeds(config=self.config, llm=llm, auto_act=True)
-
-    def _run_initiative_cycle(self) -> None:
-        """Execute one autonomous thought cycle via the initiative engine."""
-        from gaia_core.cognition.initiative_engine import InitiativeEngine
-
-        engine = InitiativeEngine(config=self.config, agent_core=self.agent_core)
-        engine.execute_turn()
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {
@@ -376,3 +354,37 @@ class SleepTaskScheduler:
             )
         except Exception:
             logger.error("Failed to rebuild blueprint embeddings", exc_info=True)
+
+    def _run_code_evolution(self) -> None:
+        """Generate code evolution snapshot for temporal self-awareness."""
+        try:
+            from gaia_common.utils.code_evolution import generate_code_evolution_snapshot
+
+            shared_dir = os.getenv("SHARED_DIR", "/shared")
+            output_path = os.path.join(shared_dir, "self_model", "code_evolution.md")
+            generate_code_evolution_snapshot(
+                project_root="/gaia/GAIA_Project",
+                output_path=output_path,
+            )
+            logger.info("Code evolution snapshot generated at %s", output_path)
+        except Exception:
+            logger.error("Code evolution snapshot failed", exc_info=True)
+            raise
+
+    def _emit_task_exec(
+        self, task_id: str, task_type: str, elapsed: float, success: bool, error: str = "",
+    ) -> None:
+        """Emit a task_exec event to the timeline store (best-effort)."""
+        if self._timeline is not None:
+            try:
+                data = {
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "duration_s": round(elapsed, 1),
+                    "success": success,
+                }
+                if error:
+                    data["error"] = error[:200]
+                self._timeline.append("task_exec", data)
+            except Exception:
+                logger.debug("Timeline task_exec emit failed", exc_info=True)

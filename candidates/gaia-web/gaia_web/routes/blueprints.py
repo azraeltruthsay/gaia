@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from gaia_common.utils.blueprint_io import (
+    derive_component_topology,
     derive_graph_topology,
     load_all_candidate_blueprints,
     load_all_live_blueprints,
@@ -111,3 +112,23 @@ async def get_blueprint_markdown(service_id: str, candidate: Optional[bool] = No
         raise HTTPException(status_code=404, detail=f"Blueprint not found: {service_id}")
 
     return PlainTextResponse(content=render_markdown(bp), media_type="text/markdown")
+
+
+@router.get("/{service_id}/components")
+async def get_component_topology(service_id: str, candidate: Optional[bool] = None):
+    """Return internal component graph for a service.
+
+    If candidate is not specified, tries live first then candidate.
+    """
+    bp = None
+    if candidate is None:
+        bp = load_blueprint(service_id, candidate=False)
+        if bp is None:
+            bp = load_blueprint(service_id, candidate=True)
+    else:
+        bp = load_blueprint(service_id, candidate=candidate)
+
+    if bp is None:
+        raise HTTPException(status_code=404, detail=f"Blueprint not found: {service_id}")
+
+    return derive_component_topology(bp)

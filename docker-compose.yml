@@ -176,6 +176,7 @@ services:
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
       - SHARED_DIR=/shared
@@ -246,6 +247,7 @@ services:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       # Service endpoints (configurable for candidate injection)
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
@@ -310,6 +312,7 @@ services:
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
       - SHARED_DIR=/shared
@@ -374,6 +377,7 @@ services:
       # Paths
       - SANDBOX_ROOT=/sandbox
       - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       # Security
       - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
       - MCP_APPROVAL_TTL=900

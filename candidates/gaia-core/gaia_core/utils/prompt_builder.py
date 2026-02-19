@@ -7,6 +7,7 @@ Prompt Builder (robust, persona/context-aware)
 
 import logging
 import os
+from datetime import datetime
 from typing import List, Dict
 
 # [GCP v0.3] Import the new packet structure
@@ -346,6 +347,63 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     if world_state_block_content:
         system_content_parts.append("World State (compact):\n" + world_state_block_content)
 
+    # Defensive session id resolution: test harness packets and older headers
+    # may not expose `session_id` under the same attribute name.
+    def _safe_session_id(pkt):
+        try:
+            hdr = getattr(pkt, 'header', None)
+            if hdr:
+                sid = getattr(hdr, 'session_id', None) or getattr(hdr, 'session', None) or getattr(hdr, 'sid', None)
+                if sid:
+                    return str(sid)
+            if hasattr(pkt, 'session_id'):
+                return str(getattr(pkt, 'session_id'))
+        except Exception:
+            pass
+        return 'system'
+
+    # 5.5. Temporal Context (wake cycle, session info, code evolution)
+    if not compact_mode:
+        try:
+            from gaia_core.utils.temporal_context import build_temporal_context
+
+            _tc_session_id = _safe_session_id(packet)
+            _tc_timeline = None
+            _tc_sleep_status = None
+
+            # Get timeline store and sleep manager from app state
+            try:
+                import gaia_core.main as _core_main
+                _tc_app = getattr(_core_main, 'app', None)
+                if _tc_app:
+                    _tc_timeline = getattr(_tc_app.state, 'timeline_store', None)
+                    _tc_swm = getattr(_tc_app.state, 'sleep_wake_manager', None)
+                    if _tc_swm:
+                        _tc_sleep_status = _tc_swm.get_status()
+            except Exception:
+                pass
+
+            # Get session message count from packet history
+            _tc_msg_count = 0
+            _tc_last_msg_ts = None
+            try:
+                pkt_history = getattr(packet.content, 'history', None) or []
+                _tc_msg_count = len(pkt_history)
+            except Exception:
+                pass
+
+            temporal_block = build_temporal_context(
+                timeline_store=_tc_timeline,
+                sleep_manager_status=_tc_sleep_status,
+                session_id=_tc_session_id,
+                session_message_count=_tc_msg_count,
+                last_message_ts=_tc_last_msg_ts,
+            )
+            if temporal_block:
+                system_content_parts.append(temporal_block)
+        except Exception:
+            logger.debug("Temporal context injection skipped", exc_info=True)
+
     # 6. Knowledge Base Context
     if knowledge_base_content:
         system_content_parts.append(knowledge_base_content)
@@ -441,23 +499,6 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     summary_prompt = {}
     # This part remains similar, as it's file-based, but could be moved into the packet itself in a future version.
     os.makedirs(SUMMARY_DIR, exist_ok=True)
-    # Defensive session id resolution: test harness packets and older headers
-    # may not expose `session_id` under the same attribute name. Try a few
-    # sensible fallbacks before giving up and using 'system' as a default.
-    def _safe_session_id(pkt):
-        try:
-            hdr = getattr(pkt, 'header', None)
-            if hdr:
-                sid = getattr(hdr, 'session_id', None) or getattr(hdr, 'session', None) or getattr(hdr, 'sid', None)
-                if sid:
-                    return str(sid)
-            # Older packet shapes may store session_id at the top-level
-            if hasattr(pkt, 'session_id'):
-                return str(getattr(pkt, 'session_id'))
-        except Exception:
-            pass
-        return 'system'
-
     session_id_safe = _safe_session_id(packet)
     summary_file_path = os.path.join(SUMMARY_DIR, f"{session_id_safe}.summary")
     if os.path.exists(summary_file_path):

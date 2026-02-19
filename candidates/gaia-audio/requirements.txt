@@ -1,0 +1,26 @@
+# Core framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+pydantic>=2.0
+
+# STT - faster-whisper (Whisper CTranslate2 backend)
+faster-whisper>=1.0.0
+
+# TTS - RealtimeTTS provides modular engine abstraction
+RealtimeTTS[system]>=0.4.0
+
+# Audio processing
+numpy
+soundfile
+scipy
+
+# GPU management
+torch>=2.0.0
+
+# Vision prep (Phase 4)
+opencv-python-headless
+pillow
+
+# WebSocket for dashboard status stream
+websockets>=12.0

@@ -41,6 +41,19 @@ CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
+GAIA_CONSTANTS_PATH = os.environ.get("GAIA_CONSTANTS_PATH", "/app/gaia_common/constants/gaia_constants.json")
+
+
+def _load_constants() -> dict:
+    """Load gaia_constants.json (cached after first read)."""
+    if not hasattr(_load_constants, "_cache"):
+        import json
+        try:
+            with open(GAIA_CONSTANTS_PATH, encoding="utf-8") as f:
+                _load_constants._cache = json.load(f)
+        except Exception:
+            _load_constants._cache = {}
+    return _load_constants._cache
 
 app = FastAPI(
     title="GAIA Web",
@@ -114,6 +127,78 @@ async def system_status_proxy():
         return JSONResponse(status_code=503, content={"error": "orchestrator unreachable"})
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+# Service registry: name → (internal URL, is_candidate)
+_SERVICE_REGISTRY = {
+    "gaia-core": (os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415"), False),
+    "gaia-web": ("http://localhost:6414", False),  # self
+    "gaia-orchestrator": (os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410"), False),
+    "gaia-prime": (os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"), False),
+    "gaia-mcp": (os.environ.get("MCP_HEALTH_ENDPOINT", "http://gaia-mcp:8765"), False),
+    "gaia-study": (os.environ.get("STUDY_ENDPOINT", "http://gaia-study:8766"), False),
+}
+
+# Add candidate services if they exist
+_CANDIDATE_CORE = os.environ.get("CANDIDATE_CORE_ENDPOINT", "http://gaia-core-candidate:6415")
+if _CANDIDATE_CORE:
+    _SERVICE_REGISTRY["gaia-core-candidate"] = (_CANDIDATE_CORE, True)
+
+
+@app.get("/api/system/services")
+async def system_services():
+    """Health check all known services. Returns status for dashboard."""
+    results = []
+
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for name, (url, is_candidate) in _SERVICE_REGISTRY.items():
+            entry = {
+                "id": name,
+                "candidate": is_candidate,
+                "url": url,
+                "status": "unknown",
+                "latency_ms": None,
+            }
+            try:
+                import time as _time
+                t0 = _time.monotonic()
+                resp = await client.get(f"{url}/health")
+                latency = (_time.monotonic() - t0) * 1000
+                entry["latency_ms"] = round(latency, 1)
+                if resp.status_code == 200:
+                    entry["status"] = "online"
+                else:
+                    entry["status"] = f"error ({resp.status_code})"
+            except httpx.ConnectError:
+                entry["status"] = "offline"
+            except httpx.TimeoutException:
+                entry["status"] = "timeout"
+            except Exception:
+                entry["status"] = "error"
+            results.append(entry)
+
+    # Add Discord status (not an HTTP service)
+    try:
+        from .discord_interface import get_discord_status
+        discord_status = get_discord_status()
+        results.append({
+            "id": "discord",
+            "candidate": False,
+            "url": None,
+            "status": "online" if discord_status["connected"] else discord_status["status"],
+            "latency_ms": discord_status.get("latency_ms"),
+            "discord": discord_status,
+        })
+    except ImportError:
+        results.append({
+            "id": "discord",
+            "candidate": False,
+            "url": None,
+            "status": "not_available",
+            "latency_ms": None,
+        })
+
+    return results
 
 
 @app.get("/api/system/sleep")
@@ -251,41 +336,102 @@ async def process_user_input(user_input: str):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+@app.post("/process_audio_input")
+async def process_audio_input(body: Dict[str, Any]):
+    """Accept transcribed text from gaia-audio, route through gaia-core.
+
+    Like /process_user_input but sets origin=audio and destination=AUDIO
+    so the response is routed back to gaia-audio for synthesis.
+    """
+    user_input = body.get("text", "")
+    session_id = body.get("session_id", "voice_session")
+    if not user_input:
+        raise HTTPException(status_code=400, detail="'text' field required")
+
+    packet_id = f"pkt-audio-{uuid.uuid4().hex[:12]}"
+    now = datetime.now().isoformat()
+
+    packet = CognitionPacket(
+        version="0.3",
+        header=Header(
+            datetime=now,
+            session_id=session_id,
+            packet_id=packet_id,
+            sub_id="audio-web-gateway",
+            persona=Persona(identity_id="Prime", persona_id="Default", role=PersonaRole.DEFAULT),
+            origin=Origin(source="audio", source_destination=OutputDestination.AUDIO),
+            routing=Routing(target_engine=TargetEngine.PRIME),
+            model=Model(name="auto", provider="auto", context_window_tokens=8192),
+            output_routing=OutputRouting(
+                primary=DestinationTarget(destination=OutputDestination.AUDIO.value),
+            ),
+        ),
+        intent=Intent(
+            user_intent=user_input[:200],
+            system_task=SystemTask.CHAT,
+            confidence=0.9,
+        ),
+        context=Context(
+            session_history_ref=SessionHistoryRef(type="ref", value=session_id),
+            cheatsheets=[],
+            constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="standard"),
+        ),
+        content=Content(original_prompt=user_input),
+        reasoning=Reasoning(),
+        response=Response(candidate="", confidence=0.0, stream_proposal=False),
+        governance=Governance(safety=Safety(execution_allowed=False, dry_run=False)),
+        metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
+        status=Status(finalized=False, state=PacketState.PROCESSING),
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                f"{CORE_ENDPOINT}/process_packet",
+                json=packet.to_serializable_dict(),
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            completed_packet_dict = response.json()
+            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "response": completed_packet.response.candidate,
+                    "packet_id": completed_packet.header.packet_id,
+                    "destination": "audio",
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
+    except Exception as e:
+        logger.exception(f"Error processing audio input: {e}")
+        raise HTTPException(status_code=500, detail=f"Audio processing error: {e}")
+
+
 @app.post("/presence")
 async def update_presence(body: Dict[str, Any]):
     """Update Discord bot presence (status dot + activity text).
 
     Called by gaia-core's SleepCycleLoop to show sleep/wake status.
-    Operates directly on the bot instance owned by discord_interface.
+    Uses run_coroutine_threadsafe to safely schedule on the bot's event loop.
     """
     try:
-        from .discord_interface import _bot
+        from .discord_interface import change_presence_from_external, is_bot_ready
     except ImportError:
         return JSONResponse(status_code=501, content={"ok": False, "error": "Discord module not available"})
 
-    if not _bot or not _bot.is_ready():
+    if not is_bot_ready():
         return JSONResponse(status_code=503, content={"ok": False, "error": "Bot not connected"})
-
-    import discord
 
     activity_name = body.get("activity", "over the studio")
     status_str = body.get("status")  # "idle", "online", "dnd", or None
-    status_map = {
-        "idle": discord.Status.idle,
-        "online": discord.Status.online,
-        "dnd": discord.Status.dnd,
-        "invisible": discord.Status.invisible,
-    }
-    effective_status = status_map.get(status_str, discord.Status.online)
 
-    if effective_status == discord.Status.invisible:
-        await _bot.change_presence(status=effective_status, activity=None)
-    else:
-        await _bot.change_presence(
-            status=effective_status,
-            activity=discord.Activity(type=discord.ActivityType.watching, name=activity_name)
-        )
-    return {"ok": True}
+    try:
+        change_presence_from_external(activity_name, status_str)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
 @app.post("/output_router")
@@ -355,6 +501,23 @@ async def output_router(packet: Dict[str, Any]):
     elif destination_type == "log":
         logger.info(f"Output (log only for packet {packet_id}): {str(content)[:200]}...")
         return JSONResponse(content={"status": "success", "message": "Logged"}, status_code=200)
+
+    elif destination_type == "audio":
+        try:
+            constants = _load_constants()
+            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
+            audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{audio_endpoint}/synthesize",
+                    json={"text": content, "voice": None},
+                )
+                resp.raise_for_status()
+            logger.info(f"Audio synthesis dispatched for packet {packet_id}")
+            return JSONResponse(content={"status": "success", "message": "Dispatched to gaia-audio"}, status_code=200)
+        except Exception as e:
+            logger.error(f"Audio routing failed for packet {packet_id}: {e}")
+            return JSONResponse(content={"status": "error", "message": f"Audio dispatch failed: {e}"}, status_code=500)
 
     else:
         logger.warning(f"Unknown destination type '{destination_type}' for packet {packet_id}")

@@ -71,6 +71,7 @@ class OutputDestination(Enum):
     WEBHOOK = "webhook"           # Outbound webhook
     LOG = "log"                    # Logging only (no user-facing output)
     BROADCAST = "broadcast"       # All registered destinations
+    AUDIO = "audio"               # Audio synthesis output (gaia-audio)
 
 # --- Header ---
 @dataclass_json

@@ -202,17 +202,27 @@ html, body {
 
 /* ── System State Panel ──────────────── */
 
-.system-state {
+.service-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+  margin-bottom: 4px;
 }
 
 .state-card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px;
+  position: relative;
+}
+
+.state-card-candidate {
+  border-left: 3px solid var(--warn);
+}
+
+.state-card-sleep {
+  border-left: 3px solid var(--highlight);
 }
 
 .state-label {
@@ -220,17 +230,203 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.state-candidate-badge {
+  font-size: 8px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 167, 38, 0.2);
+  color: var(--warn);
+  letter-spacing: 0;
 }
 
 .state-value {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .state-value.ok { color: var(--success); }
 .state-value.warn { color: var(--warn); }
 .state-value.error { color: var(--error); }
+
+.state-latency {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.state-extra {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Audio Processing Widget ─────────── */
+
+.audio-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.audio-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.audio-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.audio-state-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.audio-state-badge.state-idle { background: rgba(128,128,128,0.2); color: #999; }
+.audio-state-badge.state-listening { background: rgba(76,175,80,0.25); color: var(--success); animation: pulse-glow 2s infinite; }
+.audio-state-badge.state-transcribing { background: rgba(79,195,247,0.25); color: #4fc3f7; }
+.audio-state-badge.state-synthesizing { background: rgba(255,167,38,0.25); color: var(--warn); }
+.audio-state-badge.state-muted { background: rgba(233,69,96,0.25); color: var(--error); }
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.audio-gpu-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
+
+.audio-mute-btn {
+  font-size: 10px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.audio-mute-btn:hover { border-color: var(--highlight); }
+.audio-mute-btn.muted { background: rgba(233,69,96,0.2); border-color: var(--error); color: var(--error); }
+
+.audio-body {
+  padding: 8px 10px;
+}
+
+.audio-gpu-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.audio-vram-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-card);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.audio-vram-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--warn));
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.audio-vram-text {
+  font-size: 9px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.audio-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.audio-col-header {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.audio-log {
+  height: 80px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.audio-log-entry {
+  display: flex;
+  gap: 4px;
+}
+
+.audio-log-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.audio-log-text {
+  color: var(--text);
+  word-break: break-word;
+}
+
+.audio-log-entry.stt .audio-log-text { color: #4fc3f7; }
+.audio-log-entry.tts .audio-log-text { color: var(--warn); }
+.audio-log-entry.error .audio-log-text { color: var(--error); }
+.audio-log-entry.gpu .audio-log-text { color: #81c784; }
+
+.audio-latency-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-latency-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
 
 /* ── Graph Container ─────────────────── */
 
@@ -247,6 +443,11 @@ html, body {
 #graph-svg {
   width: 100%;
   height: 100%;
+  cursor: grab;
+}
+
+#graph-svg:active {
+  cursor: grabbing;
 }
 
 .graph-node circle {
@@ -268,6 +469,113 @@ html, body {
 .graph-edge.active { stroke: #4fc3f7; }
 .graph-edge.planned { stroke: #666; stroke-dasharray: 4,4; }
 .graph-edge.deprecated { stroke: var(--error); stroke-dasharray: 2,2; }
+
+/* ── Graph Breadcrumb ────────────────── */
+
+.graph-breadcrumb {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 2px;
+  gap: 8px;
+}
+
+.graph-zoom-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  flex: 1;
+  text-align: right;
+}
+
+.graph-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.graph-back {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.graph-back:hover { background: var(--accent); }
+
+/* ── Component Graph ─────────────────── */
+
+.component-node circle {
+  stroke-width: 2px;
+}
+
+.component-node text {
+  font-size: 9px;
+  fill: var(--text);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.component-edge {
+  stroke: #7986cb;
+  stroke-width: 1px;
+  fill: none;
+  stroke-dasharray: 3,2;
+}
+
+.component-edge-label {
+  font-size: 8px;
+  fill: var(--text-muted);
+  pointer-events: none;
+}
+
+.component-detail {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.component-detail h4 {
+  color: var(--text-bright);
+  margin-bottom: 6px;
+}
+
+.component-detail .comp-desc {
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.component-detail code {
+  background: var(--bg-panel);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.component-detail ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.component-detail li {
+  padding: 1px 0;
+}
+
+.component-detail li::before {
+  content: '>';
+  color: var(--accent);
+  margin-right: 6px;
+}
 
 .tooltip {
   position: absolute;

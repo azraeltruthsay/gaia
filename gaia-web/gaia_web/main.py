@@ -116,6 +116,78 @@ async def system_status_proxy():
         return JSONResponse(status_code=502, content={"error": str(e)})
 
 
+# Service registry: name → (internal URL, is_candidate)
+_SERVICE_REGISTRY = {
+    "gaia-core": (os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415"), False),
+    "gaia-web": ("http://localhost:6414", False),  # self
+    "gaia-orchestrator": (os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410"), False),
+    "gaia-prime": (os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"), False),
+    "gaia-mcp": (os.environ.get("MCP_HEALTH_ENDPOINT", "http://gaia-mcp:8765"), False),
+    "gaia-study": (os.environ.get("STUDY_ENDPOINT", "http://gaia-study:8766"), False),
+}
+
+# Add candidate services if they exist
+_CANDIDATE_CORE = os.environ.get("CANDIDATE_CORE_ENDPOINT", "http://gaia-core-candidate:6415")
+if _CANDIDATE_CORE:
+    _SERVICE_REGISTRY["gaia-core-candidate"] = (_CANDIDATE_CORE, True)
+
+
+@app.get("/api/system/services")
+async def system_services():
+    """Health check all known services. Returns status for dashboard."""
+    results = []
+
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for name, (url, is_candidate) in _SERVICE_REGISTRY.items():
+            entry = {
+                "id": name,
+                "candidate": is_candidate,
+                "url": url,
+                "status": "unknown",
+                "latency_ms": None,
+            }
+            try:
+                import time as _time
+                t0 = _time.monotonic()
+                resp = await client.get(f"{url}/health")
+                latency = (_time.monotonic() - t0) * 1000
+                entry["latency_ms"] = round(latency, 1)
+                if resp.status_code == 200:
+                    entry["status"] = "online"
+                else:
+                    entry["status"] = f"error ({resp.status_code})"
+            except httpx.ConnectError:
+                entry["status"] = "offline"
+            except httpx.TimeoutException:
+                entry["status"] = "timeout"
+            except Exception:
+                entry["status"] = "error"
+            results.append(entry)
+
+    # Add Discord status (not an HTTP service)
+    try:
+        from .discord_interface import get_discord_status
+        discord_status = get_discord_status()
+        results.append({
+            "id": "discord",
+            "candidate": False,
+            "url": None,
+            "status": "online" if discord_status["connected"] else discord_status["status"],
+            "latency_ms": discord_status.get("latency_ms"),
+            "discord": discord_status,
+        })
+    except ImportError:
+        results.append({
+            "id": "discord",
+            "candidate": False,
+            "url": None,
+            "status": "not_available",
+            "latency_ms": None,
+        })
+
+    return results
+
+
 @app.get("/api/system/sleep")
 async def system_sleep_proxy():
     """Proxy to gaia-core /sleep/status endpoint (avoids CORS from browser)."""
@@ -256,36 +328,24 @@ async def update_presence(body: Dict[str, Any]):
     """Update Discord bot presence (status dot + activity text).
 
     Called by gaia-core's SleepCycleLoop to show sleep/wake status.
-    Operates directly on the bot instance owned by discord_interface.
+    Uses run_coroutine_threadsafe to safely schedule on the bot's event loop.
     """
     try:
-        from .discord_interface import _bot
+        from .discord_interface import change_presence_from_external, is_bot_ready
     except ImportError:
         return JSONResponse(status_code=501, content={"ok": False, "error": "Discord module not available"})
 
-    if not _bot or not _bot.is_ready():
+    if not is_bot_ready():
         return JSONResponse(status_code=503, content={"ok": False, "error": "Bot not connected"})
-
-    import discord
 
     activity_name = body.get("activity", "over the studio")
     status_str = body.get("status")  # "idle", "online", "dnd", or None
-    status_map = {
-        "idle": discord.Status.idle,
-        "online": discord.Status.online,
-        "dnd": discord.Status.dnd,
-        "invisible": discord.Status.invisible,
-    }
-    effective_status = status_map.get(status_str, discord.Status.online)
 
-    if effective_status == discord.Status.invisible:
-        await _bot.change_presence(status=effective_status, activity=None)
-    else:
-        await _bot.change_presence(
-            status=effective_status,
-            activity=discord.Activity(type=discord.ActivityType.watching, name=activity_name)
-        )
-    return {"ok": True}
+    try:
+        change_presence_from_external(activity_name, status_str)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
 @app.post("/output_router")

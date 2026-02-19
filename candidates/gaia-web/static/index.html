@@ -19,7 +19,7 @@
     <div class="top-bar-right">
       <span id="service-count" class="badge">-- services</span>
       <span id="pending-count" class="badge badge-warn">-- pending</span>
-      <span id="connection-status" class="badge badge-ok">connected</span>
+      <span id="discord-badge" class="badge" title="Discord connectivity">discord: --</span>
     </div>
   </header>
 
@@ -40,26 +40,47 @@
     <section class="panel panel-system">
       <div class="panel-header">System State</div>
       <div class="panel-body">
-        <div id="system-state" class="system-state">
-          <div class="state-card">
-            <div class="state-label">Sleep State</div>
-            <div id="sleep-state" class="state-value">--</div>
+        <div id="service-grid" class="service-grid">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Audio Processing Widget -->
+        <div id="audio-panel" class="audio-panel">
+          <div class="audio-header">
+            <span class="audio-title">Audio Processing</span>
+            <span id="audio-state-badge" class="audio-state-badge state-idle">idle</span>
+            <span id="audio-gpu-badge" class="audio-gpu-badge">GPU: idle</span>
+            <button id="audio-mute-btn" class="audio-mute-btn" title="Mute/Unmute audio">Mute</button>
           </div>
-          <div class="state-card">
-            <div class="state-label">GPU Owner</div>
-            <div id="gpu-owner" class="state-value">--</div>
-          </div>
-          <div class="state-card">
-            <div class="state-label">Orchestrator</div>
-            <div id="orch-status" class="state-value">--</div>
-          </div>
-          <div class="state-card">
-            <div class="state-label">Core</div>
-            <div id="core-status" class="state-value">--</div>
+          <div class="audio-body">
+            <div class="audio-gpu-bar">
+              <div class="audio-vram-track"><div id="audio-vram-fill" class="audio-vram-fill" style="width:0%"></div></div>
+              <span id="audio-vram-text" class="audio-vram-text">0 / 5600 MB</span>
+            </div>
+            <div class="audio-columns">
+              <div class="audio-col">
+                <div class="audio-col-header">Live Transcript</div>
+                <div id="audio-transcript-log" class="audio-log"></div>
+              </div>
+              <div class="audio-col">
+                <div class="audio-col-header">Event Log</div>
+                <div id="audio-event-log" class="audio-log"></div>
+              </div>
+            </div>
+            <div class="audio-latency-row">
+              <span class="audio-latency-label">STT latency</span>
+              <canvas id="audio-stt-sparkline" width="120" height="24"></canvas>
+              <span class="audio-latency-label">TTS latency</span>
+              <canvas id="audio-tts-sparkline" width="120" height="24"></canvas>
+            </div>
           </div>
         </div>
 
-        <div class="panel-subheader">Service Graph</div>
+        <div id="graph-breadcrumb" class="graph-breadcrumb">
+          <span id="graph-title" class="graph-title">Service Graph</span>
+          <span id="graph-zoom-hint" class="graph-zoom-hint">scroll to zoom</span>
+          <button id="graph-back" class="graph-back" style="display:none" title="Back to service graph">&larr; All Services</button>
+        </div>
         <div id="graph-container" class="graph-container">
           <svg id="graph-svg"></svg>
         </div>

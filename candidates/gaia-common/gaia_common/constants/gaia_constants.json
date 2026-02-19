@@ -152,6 +152,22 @@
     "webhooks": {
       "dev_notifications": null,
       "alerts": null
+    },
+    "audio": {
+      "enabled": true,
+      "endpoint": "http://gaia-audio:8080",
+      "stt_model": "base.en",
+      "tts_engine": "system",
+      "tts_voice": null,
+      "sample_rate": 16000,
+      "vram_budget_mb": 5600,
+      "half_duplex": true,
+      "mute_on_sleep": true,
+      "cloud_fallback": {
+        "provider": "elevenlabs",
+        "enabled": false,
+        "api_key_env": "ELEVENLABS_API_KEY"
+      }
     }
   },
   "FRAGMENTATION": {

@@ -65,59 +65,164 @@ chatInput.addEventListener("keydown", (e) => {
 
 // ── System State Panel ───────────────────────────────────────────────────────
 
-const sleepStateEl = document.getElementById("sleep-state");
-const gpuOwnerEl = document.getElementById("gpu-owner");
-const orchStatusEl = document.getElementById("orch-status");
-const coreStatusEl = document.getElementById("core-status");
+const serviceGridEl = document.getElementById("service-grid");
+const discordBadgeEl = document.getElementById("discord-badge");
 
-function setStateValue(el, text, status) {
-  el.textContent = text;
-  el.className = `state-value ${status}`;
+// Display name mapping for cleaner labels
+const SERVICE_LABELS = {
+  "gaia-core": "Core",
+  "gaia-web": "Web",
+  "gaia-orchestrator": "Orchestrator",
+  "gaia-prime": "Prime",
+  "gaia-mcp": "MCP",
+  "gaia-study": "Study",
+  "gaia-core-candidate": "Core (cand.)",
+  "discord": "Discord",
+};
+
+function statusClass(status) {
+  if (status === "online" || status === "ready") return "ok";
+  if (status === "offline" || status === "not_started" || status === "not_available") return "error";
+  if (status === "connecting" || status === "timeout") return "warn";
+  if (typeof status === "string" && status.startsWith("error")) return "error";
+  return "";
+}
+
+function renderServiceGrid(services) {
+  serviceGridEl.innerHTML = "";
+
+  // Sleep state card first (special — fetched from sleep endpoint)
+  const sleepCard = document.createElement("div");
+  sleepCard.className = "state-card state-card-sleep";
+  sleepCard.id = "sleep-state-card";
+  sleepCard.innerHTML = `
+    <div class="state-label">Sleep State</div>
+    <div id="sleep-state" class="state-value">--</div>
+  `;
+  serviceGridEl.appendChild(sleepCard);
+
+  // GPU owner card
+  const gpuCard = document.createElement("div");
+  gpuCard.className = "state-card";
+  gpuCard.id = "gpu-owner-card";
+  gpuCard.innerHTML = `
+    <div class="state-label">GPU Owner</div>
+    <div id="gpu-owner" class="state-value">--</div>
+  `;
+  serviceGridEl.appendChild(gpuCard);
+
+  // Service cards
+  for (const svc of services) {
+    const card = document.createElement("div");
+    const cls = statusClass(svc.status);
+    card.className = `state-card${svc.candidate ? " state-card-candidate" : ""}`;
+
+    const label = SERVICE_LABELS[svc.id] || svc.id;
+    const latency = svc.latency_ms != null ? `${svc.latency_ms}ms` : "";
+    const candidateBadge = svc.candidate ? `<span class="state-candidate-badge">CAND</span>` : "";
+
+    // Discord gets special treatment
+    let extra = "";
+    if (svc.id === "discord" && svc.discord) {
+      const d = svc.discord;
+      if (d.user) extra = `<div class="state-extra">${d.user} · ${d.guilds} guild${d.guilds !== 1 ? "s" : ""}</div>`;
+    }
+
+    card.innerHTML = `
+      <div class="state-label">${label} ${candidateBadge}</div>
+      <div class="state-value ${cls}">${svc.status}</div>
+      ${latency ? `<div class="state-latency">${latency}</div>` : ""}
+      ${extra}
+    `;
+    serviceGridEl.appendChild(card);
+  }
 }
 
 async function pollSystemState() {
-  // Sleep / core status
+  // Fetch all service statuses
+  try {
+    const resp = await fetch("/api/system/services");
+    if (resp.ok) {
+      const services = await resp.json();
+      renderServiceGrid(services);
+
+      // Update Discord badge in header
+      const discord = services.find((s) => s.id === "discord");
+      if (discord) {
+        const cls = statusClass(discord.status);
+        discordBadgeEl.textContent = `discord: ${discord.status}`;
+        discordBadgeEl.className = `badge badge-${cls}`;
+        if (discord.discord?.latency_ms) {
+          discordBadgeEl.title = `Discord: ${discord.discord.user || "?"} (${discord.discord.latency_ms}ms)`;
+        }
+      }
+    }
+  } catch {
+    // Service endpoint not available — fall back
+    serviceGridEl.innerHTML = '<div class="state-card"><div class="state-value error">services unreachable</div></div>';
+  }
+
+  // Sleep / core status (for sleep state + GPU owner cards)
   try {
     const resp = await fetch("/api/system/sleep");
     if (resp.ok) {
       const data = await resp.json();
       const state = data.state || data.sleep_state || "unknown";
       const stateMap = { active: "ok", asleep: "warn", drowsy: "warn", waking: "ok" };
-      setStateValue(sleepStateEl, state, stateMap[state] || "");
-      setStateValue(coreStatusEl, "online", "ok");
-
-      if (data.gpu_owner) {
-        setStateValue(gpuOwnerEl, data.gpu_owner, "ok");
+      const el = document.getElementById("sleep-state");
+      if (el) {
+        el.textContent = state;
+        el.className = `state-value ${stateMap[state] || ""}`;
       }
-    } else {
-      setStateValue(coreStatusEl, "error", "error");
-      setStateValue(sleepStateEl, "--", "");
+      if (data.gpu_owner) {
+        const gpuEl = document.getElementById("gpu-owner");
+        if (gpuEl) {
+          gpuEl.textContent = data.gpu_owner;
+          gpuEl.className = "state-value ok";
+        }
+      }
     }
   } catch {
-    setStateValue(coreStatusEl, "offline", "error");
-    setStateValue(sleepStateEl, "--", "");
+    // sleep endpoint unavailable
   }
 
-  // Orchestrator status
+  // Orchestrator status (for GPU owner if not from sleep)
   try {
     const resp = await fetch("/api/system/status");
     if (resp.ok) {
-      setStateValue(orchStatusEl, "online", "ok");
       const data = await resp.json();
       if (data.gpu_owner) {
-        setStateValue(gpuOwnerEl, data.gpu_owner, "ok");
+        const gpuEl = document.getElementById("gpu-owner");
+        if (gpuEl && gpuEl.textContent === "--") {
+          gpuEl.textContent = data.gpu_owner;
+          gpuEl.className = "state-value ok";
+        }
       }
-    } else {
-      setStateValue(orchStatusEl, `error (${resp.status})`, "error");
     }
   } catch {
-    setStateValue(orchStatusEl, "offline", "error");
+    // orchestrator unavailable
   }
 }
 
 // ── Graph Visualization ──────────────────────────────────────────────────────
 
 let graphData = null;
+let currentGraphView = "service"; // "service" or "component"
+let currentComponentServiceId = null;
+
+const graphTitleEl = document.getElementById("graph-title");
+const graphBackEl = document.getElementById("graph-back");
+
+// Back button → return to service graph
+graphBackEl.addEventListener("click", backToServiceGraph);
+
+function backToServiceGraph() {
+  currentGraphView = "service";
+  currentComponentServiceId = null;
+  graphTitleEl.textContent = "Service Graph";
+  graphBackEl.style.display = "none";
+  if (graphData) renderGraph(graphData);
+}
 
 async function loadGraph() {
   try {
@@ -148,6 +253,22 @@ function renderGraph(data) {
   svg.attr("viewBox", `0 0 ${width} ${height}`);
 
   if (!data.nodes || data.nodes.length === 0) return;
+
+  // Create a group for zoomable content
+  const g = svg.append("g").attr("class", "graph-root");
+
+  // Add zoom behavior
+  const zoom = d3.zoom()
+    .scaleExtent([0.3, 5])
+    .on("zoom", (event) => {
+      g.attr("transform", event.transform);
+    });
+  svg.call(zoom);
+
+  // Double-click to reset zoom
+  svg.on("dblclick.zoom", () => {
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+  });
 
   // Build node/link data for D3
   const nodeMap = {};
@@ -192,7 +313,7 @@ function renderGraph(data) {
     grpc: "3,6",
   };
 
-  const link = svg.append("g")
+  const link = g.append("g")
     .selectAll("line")
     .data(links)
     .join("line")
@@ -213,7 +334,7 @@ function renderGraph(data) {
     return "#ffa726";
   };
 
-  const node = svg.append("g")
+  const node = g.append("g")
     .selectAll("g")
     .data(nodes)
     .join("g")
@@ -247,6 +368,183 @@ function renderGraph(data) {
       .attr("y2", (d) => d.target.y);
     node.attr("transform", (d) => `translate(${d.x},${d.y})`);
   });
+}
+
+// ── Component Graph (drill-down) ────────────────────────────────────────────
+
+async function loadComponentGraph(serviceId) {
+  try {
+    const resp = await fetch(`/api/blueprints/${serviceId}/components`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.components || data.components.length === 0) return;
+
+    currentGraphView = "component";
+    currentComponentServiceId = serviceId;
+    graphTitleEl.textContent = `${serviceId} — Architecture`;
+    graphBackEl.style.display = "inline-block";
+
+    renderComponentGraph(data);
+  } catch {
+    // component graph not available
+  }
+}
+
+function renderComponentGraph(data) {
+  const container = document.getElementById("graph-container");
+  const svg = d3.select("#graph-svg");
+  svg.selectAll("*").remove();
+
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+  if (!data.components || data.components.length === 0) return;
+
+  // Create a group for zoomable content
+  const g = svg.append("g").attr("class", "graph-root");
+
+  // Add zoom behavior
+  const zoom = d3.zoom()
+    .scaleExtent([0.3, 5])
+    .on("zoom", (event) => {
+      g.attr("transform", event.transform);
+    });
+  svg.call(zoom);
+
+  // Double-click to reset zoom
+  svg.on("dblclick.zoom", () => {
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+  });
+
+  // Build node/link data
+  const nodeMap = {};
+  const nodes = data.components.map((c) => {
+    const node = { ...c };
+    nodeMap[c.id] = node;
+    return node;
+  });
+
+  const links = (data.edges || [])
+    .filter((e) => nodeMap[e.from_component] && nodeMap[e.to_component])
+    .map((e) => ({
+      source: e.from_component,
+      target: e.to_component,
+      label: e.label,
+      transport: e.transport,
+      data_flow: e.data_flow,
+    }));
+
+  // Force simulation — tighter than service graph
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id((d) => d.id).distance(110))
+    .force("charge", d3.forceManyBody().strength(-400))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide(35));
+
+  // Tooltip
+  let tooltip = d3.select(".tooltip");
+  if (tooltip.empty()) {
+    tooltip = d3.select("body").append("div").attr("class", "tooltip").style("display", "none");
+  }
+
+  // Edges
+  const link = g.append("g")
+    .selectAll("line")
+    .data(links)
+    .join("line")
+    .attr("class", "component-edge")
+    .on("mouseover", (event, d) => {
+      tooltip.style("display", "block")
+        .html(`<strong>${d.label}</strong>${d.data_flow ? `<br>Data: ${d.data_flow}` : ""}`)
+        .style("left", `${event.pageX + 10}px`)
+        .style("top", `${event.pageY - 10}px`);
+    })
+    .on("mouseout", () => tooltip.style("display", "none"));
+
+  // Edge labels (abbreviated, placed at midpoint)
+  const edgeLabels = g.append("g")
+    .selectAll("text")
+    .data(links)
+    .join("text")
+    .attr("class", "component-edge-label")
+    .text((d) => d.data_flow ? d.data_flow.substring(0, 24) : "");
+
+  // Component color palette (blue-purple range)
+  const colorScale = d3.scaleOrdinal()
+    .range(["#5c6bc0", "#7986cb", "#4fc3f7", "#4dd0e1", "#4db6ac", "#81c784", "#aed581"]);
+
+  // Nodes
+  const node = g.append("g")
+    .selectAll("g")
+    .data(nodes)
+    .join("g")
+    .attr("class", "component-node")
+    .call(d3.drag()
+      .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on("end", (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+    )
+    .on("click", (event, d) => {
+      event.stopPropagation();
+      showComponentDetail(d);
+    });
+
+  node.append("circle")
+    .attr("r", (d) => 8 + (d.interface_count || 0) * 1.2)
+    .attr("fill", (d) => colorScale(d.id))
+    .attr("stroke", (d) => d3.color(colorScale(d.id)).darker(0.5))
+    .attr("stroke-width", 2)
+    .attr("opacity", 0.9);
+
+  node.append("text")
+    .attr("dy", (d) => 8 + (d.interface_count || 0) * 1.2 + 14)
+    .text((d) => d.label);
+
+  // Tick
+  sim.on("tick", () => {
+    link
+      .attr("x1", (d) => d.source.x)
+      .attr("y1", (d) => d.source.y)
+      .attr("x2", (d) => d.target.x)
+      .attr("y2", (d) => d.target.y);
+    edgeLabels
+      .attr("x", (d) => (d.source.x + d.target.x) / 2)
+      .attr("y", (d) => (d.source.y + d.target.y) / 2 - 4);
+    node.attr("transform", (d) => `translate(${d.x},${d.y})`);
+  });
+}
+
+function showComponentDetail(comp) {
+  const detailEl = document.getElementById("blueprint-detail");
+
+  const srcList = (comp.source_files || []).map((f) =>
+    `<li><code>${f}</code></li>`
+  ).join("");
+
+  const classList = (comp.key_classes || []).map((c) =>
+    `<li><code>${c}</code></li>`
+  ).join("");
+
+  const funcList = (comp.key_functions || []).map((f) =>
+    `<li><code>${f}</code></li>`
+  ).join("");
+
+  const ifaceList = [
+    ...(comp.exposes_interfaces || []).map((i) => `<li>exposes: <code>${i}</code></li>`),
+    ...(comp.consumes_interfaces || []).map((i) => `<li>consumes: <code>${i}</code></li>`),
+  ].join("");
+
+  detailEl.innerHTML = `
+    <div class="component-detail">
+      <h4>${comp.label}</h4>
+      <p class="comp-desc">${comp.description}</p>
+      ${classList ? `<h4>Key Classes</h4><ul>${classList}</ul>` : ""}
+      ${funcList ? `<h4>Key Functions</h4><ul>${funcList}</ul>` : ""}
+      ${srcList ? `<h4>Source Files</h4><ul>${srcList}</ul>` : ""}
+      ${ifaceList ? `<h4>Interfaces</h4><ul>${ifaceList}</ul>` : ""}
+    </div>
+  `;
 }
 
 // ── Blueprint Panel ──────────────────────────────────────────────────────────
@@ -300,21 +598,27 @@ async function selectBlueprint(serviceId) {
 
   blueprintDetailEl.innerHTML = "<em>Loading...</em>";
 
-  try {
-    const resp = await fetch(`/api/blueprints/${serviceId}/markdown`);
-    if (!resp.ok) {
-      blueprintDetailEl.innerHTML = `<em>Error ${resp.status}</em>`;
-      return;
-    }
-    const md = await resp.text();
-    if (typeof marked !== "undefined") {
-      blueprintDetailEl.innerHTML = marked.parse(md);
-    } else {
-      blueprintDetailEl.textContent = md;
-    }
-  } catch (err) {
-    blueprintDetailEl.innerHTML = `<em>Failed: ${err.message}</em>`;
-  }
+  // Load blueprint markdown + component graph in parallel
+  const mdPromise = fetch(`/api/blueprints/${serviceId}/markdown`)
+    .then(async (resp) => {
+      if (!resp.ok) {
+        blueprintDetailEl.innerHTML = `<em>Error ${resp.status}</em>`;
+        return;
+      }
+      const md = await resp.text();
+      if (typeof marked !== "undefined") {
+        blueprintDetailEl.innerHTML = marked.parse(md);
+      } else {
+        blueprintDetailEl.textContent = md;
+      }
+    })
+    .catch((err) => {
+      blueprintDetailEl.innerHTML = `<em>Failed: ${err.message}</em>`;
+    });
+
+  const graphPromise = loadComponentGraph(serviceId);
+
+  await Promise.all([mdPromise, graphPromise]);
 }
 
 // ── Initialization ───────────────────────────────────────────────────────────
@@ -328,9 +632,13 @@ async function init() {
   // Start polling
   setInterval(pollSystemState, POLL_INTERVAL);
 
-  // Handle graph resize
+  // Handle graph resize — re-render whichever view is active
   window.addEventListener("resize", () => {
-    if (graphData) renderGraph(graphData);
+    if (currentGraphView === "component" && currentComponentServiceId) {
+      loadComponentGraph(currentComponentServiceId);
+    } else if (graphData) {
+      renderGraph(graphData);
+    }
   });
 }
 

@@ -17,6 +17,7 @@ from typing import Optional
 import httpx
 
 from gaia_common.utils.background.idle_monitor import IdleMonitor
+from gaia_common.utils.timeline_store import TimelineStore
 from gaia_core.cognition.sleep_wake_manager import (
     GaiaState,
     SleepWakeManager,
@@ -33,10 +34,20 @@ class SleepCycleLoop:
     POLL_INTERVAL_ASLEEP = 2   # seconds when ASLEEP — react fast to wake signals
     DISTRACTED_RECHECK_INTERVAL = 300  # 5 min between distracted rechecks
 
-    def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None) -> None:
+    def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None, session_manager=None) -> None:
         self.config = config
         self.idle_monitor = IdleMonitor()
-        self.sleep_wake_manager = SleepWakeManager(config, model_pool=model_pool, idle_monitor=self.idle_monitor)
+
+        # Temporal grounding: shared timeline event log
+        shared_dir = os.getenv("SHARED_DIR", "/shared")
+        self.timeline_store = TimelineStore(
+            timeline_dir=os.path.join(shared_dir, "timeline")
+        )
+
+        self.sleep_wake_manager = SleepWakeManager(
+            config, model_pool=model_pool, idle_monitor=self.idle_monitor,
+            timeline_store=self.timeline_store,
+        )
         self.discord_connector = discord_connector
         self.model_pool = model_pool
         self.agent_core = agent_core
@@ -52,7 +63,22 @@ class SleepCycleLoop:
         from gaia_core.cognition.sleep_task_scheduler import SleepTaskScheduler
         self.sleep_task_scheduler = SleepTaskScheduler(
             config, model_pool=model_pool, agent_core=agent_core,
+            timeline_store=self.timeline_store,
         )
+
+        # Phase 3: Thought seed heartbeat (independent of sleep)
+        self.heartbeat = None
+        heartbeat_enabled = getattr(config, "HEARTBEAT_ENABLED", True)
+        if heartbeat_enabled:
+            from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+            self.heartbeat = ThoughtSeedHeartbeat(
+                config=config,
+                model_pool=model_pool,
+                agent_core=agent_core,
+                sleep_wake_manager=self.sleep_wake_manager,
+                timeline_store=self.timeline_store,
+                session_manager=session_manager,
+            )
 
         # Resource monitor for distracted detection
         self._resource_monitor = None
@@ -72,10 +98,14 @@ class SleepCycleLoop:
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True, name="SleepCycleLoop")
         self._thread.start()
+        if self.heartbeat:
+            self.heartbeat.start()
         logger.info("Sleep cycle loop started")
 
     def stop(self) -> None:
         self._running = False
+        if self.heartbeat:
+            self.heartbeat.stop()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
         self._thread = None
@@ -85,6 +115,8 @@ class SleepCycleLoop:
         """Graceful shutdown: transition to OFFLINE and stop the loop."""
         self.sleep_wake_manager.initiate_offline()
         self._update_presence(None, offline=True)
+        if self.heartbeat:
+            self.heartbeat.stop()
         self.stop()
 
     # ------------------------------------------------------------------

@@ -35,8 +35,9 @@ _SUMMARY_DIR = "data/shared/summaries"
 class PrimeCheckpointManager:
     """Manages Prime model's cognitive state checkpointing."""
 
-    def __init__(self, config):
+    def __init__(self, config, timeline_store=None):
         self.config = config
+        self._timeline = timeline_store
         shared_dir = getattr(config, "SHARED_DIR", os.getenv("SHARED_DIR", "/shared"))
         self.checkpoint_dir = Path(shared_dir) / "sleep_state"
         self.checkpoint_file = self.checkpoint_dir / "prime.md"
@@ -75,6 +76,7 @@ class PrimeCheckpointManager:
         self.checkpoint_file.write_text(state_summary, encoding="utf-8")
 
         logger.info("Checkpoint written: %s (%d chars)", self.checkpoint_file, len(state_summary))
+        self._emit_checkpoint(packet, "create")
         return self.checkpoint_file
 
     def rotate_checkpoints(self) -> None:
@@ -245,6 +247,26 @@ class PrimeCheckpointManager:
             f"This checkpoint was generated automatically during sleep transition.\n"
             f"Review this content to restore working memory context.\n"
         )
+
+    # ------------------------------------------------------------------
+    # Timeline event helper
+    # ------------------------------------------------------------------
+
+    def _emit_checkpoint(self, packet, method: str) -> None:
+        """Emit a checkpoint event to the timeline store (best-effort)."""
+        if self._timeline is not None:
+            try:
+                session_id = "unknown"
+                if packet is not None:
+                    hdr = getattr(packet, "header", None)
+                    if hdr:
+                        session_id = getattr(hdr, "session_id", None) or "unknown"
+                self._timeline.append("checkpoint", {
+                    "method": method,
+                    "session_id": session_id,
+                })
+            except Exception:
+                logger.debug("Timeline checkpoint emit failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Context extraction helpers

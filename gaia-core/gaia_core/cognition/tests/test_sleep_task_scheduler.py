@@ -34,6 +34,7 @@ def bare_scheduler(config):
     s.config = config
     s.model_pool = None
     s.agent_core = None
+    s._timeline = None
     s._tasks = []
     return s
 
@@ -45,11 +46,11 @@ def bare_scheduler(config):
 
 class TestRegistration:
     def test_default_tasks_registered(self, scheduler):
-        assert len(scheduler._tasks) == 4
+        assert len(scheduler._tasks) == 3
 
     def test_default_task_ids(self, scheduler):
         ids = {t.task_id for t in scheduler._tasks}
-        assert ids == {"conversation_curation", "thought_seed_review", "initiative_cycle", "blueprint_validation"}
+        assert ids == {"conversation_curation", "blueprint_validation", "code_evolution"}
 
     def test_register_custom_task(self, bare_scheduler):
         task = SleepTask(
@@ -192,7 +193,7 @@ class TestStatus:
     def test_status_shape(self, scheduler):
         status = scheduler.get_status()
         assert isinstance(status, list)
-        assert len(status) == 4
+        assert len(status) == 3
 
         for entry in status:
             assert "task_id" in entry

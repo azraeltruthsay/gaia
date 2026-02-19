@@ -175,7 +175,13 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     snap = world_state_snapshot()
     logger.debug(f"World state snapshot data: {snap}")
     lines: List[str] = []
-    lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
+    # Use semantic time for richer temporal grounding
+    try:
+        from gaia_core.utils.temporal_context import _semantic_time
+        from datetime import datetime, timezone
+        lines.append(f"Clock: {_semantic_time(datetime.now(timezone.utc))}")
+    except Exception:
+        lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
 
     models = snap.get("models", {})

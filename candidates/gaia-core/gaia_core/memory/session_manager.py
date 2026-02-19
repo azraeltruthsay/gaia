@@ -59,6 +59,17 @@ class Session:
             session.created_at = datetime.now(timezone.utc)
         return session
 
+    def last_message_timestamp(self):
+        """Return the timestamp of the most recent message, or None."""
+        for msg in reversed(self.history):
+            ts_str = msg.get("timestamp")
+            if ts_str:
+                try:
+                    return datetime.fromisoformat(ts_str)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
 
 class SessionManager:
     """
@@ -138,7 +149,11 @@ class SessionManager:
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return
         session = self.get_or_create_session(session_id)
-        session.history.append({"role": role, "content": content})
+        session.history.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         logger.debug(f"💬 Added '{role}' message to session '{session_id}'. History length: {len(session.history)}")
 
         # Index completed turn-pairs for session RAG retrieval

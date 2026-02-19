@@ -29,7 +29,20 @@ logger = logging.getLogger("GAIA.Web.Discord")
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
+_bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
 _message_handler: Optional[Callable] = None
+
+
+def _run_on_bot_loop(coro, timeout: float = 30.0):
+    """Schedule a coroutine on the bot's event loop from any thread.
+
+    Returns the result or raises the exception from the coroutine.
+    This is the safe way to call bot methods from uvicorn's event loop.
+    """
+    if _bot_loop is None or _bot_loop.is_closed():
+        raise RuntimeError("Bot event loop not available")
+    future = asyncio.run_coroutine_threadsafe(coro, _bot_loop)
+    return future.result(timeout=timeout)
 
 
 class DiscordInterface:
@@ -68,7 +81,10 @@ class DiscordInterface:
 
         @bot.event
         async def on_ready():
+            global _bot_loop
+            _bot_loop = asyncio.get_running_loop()
             logger.info(f"Discord bot connected as {bot.user}")
+            print(f"[DISCORD] Bot connected as {bot.user} — loop captured")
             await bot.change_presence(
                 status=discord.Status.online,
                 activity=discord.Activity(
@@ -335,69 +351,64 @@ class DiscordInterface:
 
 
 async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool:
-    """Send a message to a specific Discord channel (for autonomous messages)."""
+    """Send a message to a specific Discord channel (for autonomous messages).
+
+    Safe to call from any event loop — schedules work on the bot's own loop.
+    """
     global _bot
     if not _bot or not _bot.is_ready():
         logger.error("Discord bot not connected")
         return False
 
-    try:
+    async def _send():
         channel = _bot.get_channel(int(channel_id))
         if not channel:
             channel = await _bot.fetch_channel(int(channel_id))
-        if channel:
-            messages = DiscordInterface(None, None)._split_message(content) # Use helper
-            for msg in messages:
-                if reply_to_message_id:
-                    # Attempt to reply to a specific message if ID is provided
-                    try:
-                        reply_message = await channel.fetch_message(int(reply_to_message_id))
-                        await reply_message.reply(msg)
-                    except Exception as e:
-                        logger.warning(f"Failed to reply to message {reply_to_message_id}: {e}. Sending as regular message.")
-                        await channel.send(msg)
-                else:
-                    await channel.send(msg)
-            return True
-        else:
+        if not channel:
             logger.error(f"Could not find channel {channel_id}")
             return False
+        messages = DiscordInterface(None, None)._split_message(content)
+        for msg in messages:
+            if reply_to_message_id:
+                try:
+                    reply_message = await channel.fetch_message(int(reply_to_message_id))
+                    await reply_message.reply(msg)
+                except Exception as e:
+                    logger.warning(f"Failed to reply to message {reply_to_message_id}: {e}. Sending as regular message.")
+                    await channel.send(msg)
+            else:
+                await channel.send(msg)
+        return True
+
+    try:
+        return _run_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
         logger.error(f"Failed to send to channel {channel_id}: {e}")
         return False
 
 
 async def send_to_user(user_id: str, content: str) -> bool:
-    """Send a DM to a specific user (for autonomous messages)."""
+    """Send a DM to a specific user (for autonomous messages).
+
+    Safe to call from any event loop — schedules work on the bot's own loop.
+    """
     global _bot
     if not _bot or not _bot.is_ready():
         logger.error("Discord bot not connected")
         return False
 
-    try:
+    async def _send():
         user = await _bot.fetch_user(int(user_id))
-        if user:
-            # Split long messages
-            max_length = 2000
-            if len(content) <= max_length:
-                await user.send(content)
-            else:
-                remaining = content
-                while remaining:
-                    if len(remaining) <= max_length:
-                        await user.send(remaining)
-                        break
-                    split_point = remaining[:max_length].rfind('\n')
-                    if split_point < max_length // 2:
-                        split_point = remaining[:max_length].rfind(' ')
-                    if split_point < max_length // 2:
-                        split_point = max_length
-                    await user.send(remaining[:split_point])
-                    remaining = remaining[split_point:].lstrip()
-            return True
-        else:
+        if not user:
             logger.error(f"Could not find user {user_id}")
             return False
+        messages = DiscordInterface(None, None)._split_message(content)
+        for msg in messages:
+            await user.send(msg)
+        return True
+
+    try:
+        return _run_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
         logger.error(f"Failed to send DM to user {user_id}: {e}")
         return False
@@ -440,17 +451,65 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None) ->
 
 def stop_discord_bot():
     """Stop the Discord bot."""
-    global _bot
-    if _bot:
+    global _bot, _bot_loop
+    if _bot and _bot_loop and not _bot_loop.is_closed():
         try:
-            asyncio.run_coroutine_threadsafe(_bot.close(), _bot.loop)
+            asyncio.run_coroutine_threadsafe(_bot.close(), _bot_loop)
             logger.info("Discord bot stopped")
         except Exception as e:
             logger.error(f"Error stopping Discord bot: {e}")
-        _bot = None
+    _bot = None
+    _bot_loop = None
 
 
 def is_bot_ready() -> bool:
     """Check if the Discord bot is connected and ready."""
     global _bot
     return _bot is not None and _bot.is_ready()
+
+
+def get_discord_status() -> Dict[str, Any]:
+    """Return Discord bot connectivity status for the dashboard."""
+    global _bot, _bot_loop
+    if _bot is None:
+        return {"connected": False, "status": "not_started", "user": None, "guilds": 0}
+    if not _bot.is_ready():
+        return {"connected": False, "status": "connecting", "user": None, "guilds": 0}
+    return {
+        "connected": True,
+        "status": "ready",
+        "user": str(_bot.user) if _bot.user else None,
+        "guilds": len(_bot.guilds) if _bot.guilds else 0,
+        "latency_ms": round(_bot.latency * 1000, 1) if _bot.latency else None,
+    }
+
+
+def change_presence_from_external(activity_name: str, status_str: str | None = None):
+    """Change bot presence from an external event loop (e.g. uvicorn).
+
+    This is the safe way to call change_presence from the /presence endpoint.
+    """
+    global _bot, _bot_loop
+    if not _bot or not _bot.is_ready():
+        raise RuntimeError("Bot not connected")
+
+    import discord as _discord
+
+    status_map = {
+        "idle": _discord.Status.idle,
+        "online": _discord.Status.online,
+        "dnd": _discord.Status.dnd,
+        "invisible": _discord.Status.invisible,
+    }
+    effective_status = status_map.get(status_str, _discord.Status.online)
+
+    async def _change():
+        if effective_status == _discord.Status.invisible:
+            await _bot.change_presence(status=effective_status, activity=None)
+        else:
+            await _bot.change_presence(
+                status=effective_status,
+                activity=_discord.Activity(type=_discord.ActivityType.watching, name=activity_name),
+            )
+
+    _run_on_bot_loop(_change(), timeout=10.0)

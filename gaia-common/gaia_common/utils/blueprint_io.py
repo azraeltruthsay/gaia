@@ -469,6 +469,50 @@ def derive_graph_topology(blueprints: Optional[Dict[str, BlueprintModel]] = None
     )
 
 
+def derive_component_topology(bp: BlueprintModel) -> Dict[str, Any]:
+    """
+    Build an internal component graph for a single service.
+
+    Returns a dict suitable for JSON serialisation:
+      {service_id, components: [...], edges: [...]}
+
+    Each component node includes interface cross-references so the UI
+    can highlight which external interfaces belong to which internal module.
+    """
+    if bp.architecture is None:
+        return {"service_id": bp.id, "components": [], "edges": []}
+
+    components = []
+    for comp in bp.architecture.components:
+        components.append({
+            "id": comp.id,
+            "label": comp.label,
+            "description": comp.description,
+            "source_files": comp.source_files,
+            "key_classes": comp.key_classes,
+            "key_functions": comp.key_functions,
+            "exposes_interfaces": comp.exposes_interfaces,
+            "consumes_interfaces": comp.consumes_interfaces,
+            "interface_count": len(comp.exposes_interfaces) + len(comp.consumes_interfaces),
+        })
+
+    edges = []
+    for edge in bp.architecture.edges:
+        edges.append({
+            "from_component": edge.from_component,
+            "to_component": edge.to_component,
+            "label": edge.label,
+            "transport": edge.transport,
+            "data_flow": edge.data_flow,
+        })
+
+    return {
+        "service_id": bp.id,
+        "components": components,
+        "edges": edges,
+    }
+
+
 # ── Markdown rendering ────────────────────────────────────────────────────────
 
 
@@ -635,6 +679,51 @@ def render_markdown(bp: BlueprintModel) -> str:
             ft = f" [{sf.file_type}]" if sf.file_type else ""
             lines.append(f"- `{sf.path}` _{sf.role}_{ft}")
         lines.append("")
+
+    if bp.architecture and bp.architecture.components:
+        arch = bp.architecture
+        lines += ["## Internal Architecture", ""]
+
+        lines += [
+            "| Component | Description | Key Classes |",
+            "|-----------|-------------|-------------|",
+        ]
+        for comp in arch.components:
+            classes = ", ".join(f"`{c}`" for c in comp.key_classes[:4]) if comp.key_classes else "—"
+            desc = comp.description.replace("\n", " ").strip()[:120]
+            lines.append(f"| **{comp.label}** | {desc} | {classes} |")
+        lines.append("")
+
+        for comp in arch.components:
+            lines.append(f"### {comp.label} (`{comp.id}`)")
+            lines.append("")
+            lines.append(comp.description.strip())
+            lines.append("")
+            if comp.key_functions:
+                lines.append("**Key functions:**")
+                for fn in comp.key_functions:
+                    lines.append(f"- `{fn}`")
+                lines.append("")
+            if comp.source_files:
+                lines.append("**Source files:**")
+                for sf in comp.source_files:
+                    lines.append(f"- `{sf}`")
+                lines.append("")
+            refs = []
+            if comp.exposes_interfaces:
+                refs.append("Exposes: " + ", ".join(f"`{i}`" for i in comp.exposes_interfaces))
+            if comp.consumes_interfaces:
+                refs.append("Consumes: " + ", ".join(f"`{i}`" for i in comp.consumes_interfaces))
+            if refs:
+                lines.append("**Interface mapping:** " + " · ".join(refs))
+                lines.append("")
+
+        if arch.edges:
+            lines += ["### Internal Wiring", ""]
+            for edge in arch.edges:
+                flow = f" (`{edge.data_flow}`)" if edge.data_flow else ""
+                lines.append(f"- **{edge.from_component}** → **{edge.to_component}**: {edge.label}{flow}")
+            lines.append("")
 
     conf = bp.meta.confidence
     lines += [

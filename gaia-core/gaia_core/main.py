@@ -176,11 +176,23 @@ async def lifespan(app: FastAPI):
                 config,
                 model_pool=_ai_manager.model_pool if _ai_manager else None,
                 agent_core=_agent_core,
+                session_manager=_ai_manager.session_manager if _ai_manager else None,
             )
             # Store on app.state for endpoint access
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
             app.state.idle_monitor = _sleep_loop.idle_monitor
             app.state.sleep_cycle_loop = _sleep_loop
+            app.state.timeline_store = _sleep_loop.timeline_store
+            app.state.heartbeat = _sleep_loop.heartbeat
+            app.state.temporal_state_manager = (
+                _sleep_loop.heartbeat._temporal_state_manager
+                if _sleep_loop.heartbeat else None
+            )
+
+            # Wire timeline store to agent_core for message events
+            if _agent_core is not None:
+                _agent_core.timeline_store = _sleep_loop.timeline_store
+
             _sleep_loop.start()
             logger.info("Sleep cycle loop started")
         else:

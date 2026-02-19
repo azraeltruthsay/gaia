@@ -285,6 +285,7 @@ def _legacy_destination_to_enum(destination: str) -> Optional[OutputDestination]
         "discord": OutputDestination.DISCORD,
         "api": OutputDestination.API,
         "log": OutputDestination.LOG,
+        "audio": OutputDestination.AUDIO,
     }
     return mapping.get(destination.lower())
 
