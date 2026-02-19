@@ -50,6 +50,10 @@ services:
       # Project root for compose file access (read-only)
       - .:/gaia/GAIA_Project:ro
 
+    # Grant access to the host Docker socket (GID 962 = docker group on host)
+    group_add:
+      - "962"
+
     environment:
       - ORCHESTRATOR_HOST=0.0.0.0
       - ORCHESTRATOR_PORT=6410
