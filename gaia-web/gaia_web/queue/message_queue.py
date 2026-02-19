@@ -5,19 +5,28 @@ Messages arrive via Discord (or other sources) while GAIA is sleeping.
 They are held here until gaia-core wakes and pulls them.  The first
 enqueue triggers a wake signal to gaia-core.
 
-Implementation: lightweight asyncio queue — no heavy broker needed at
-this scale.
+Implementation: lightweight asyncio queue with JSON file persistence —
+no heavy broker needed at this scale.  File persistence ensures messages
+survive gaia-web restarts.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from dataclasses import dataclass, field
+import os
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.MessageQueue")
+
+# Default persistence path (inside gaia-web's /shared mount)
+_DEFAULT_QUEUE_FILE = os.environ.get(
+    "GAIA_MESSAGE_QUEUE_FILE", "/shared/message_queue.json"
+)
 
 
 @dataclass
@@ -32,21 +41,80 @@ class QueuedMessage:
     queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["queued_at"] = self.queued_at.isoformat()
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> QueuedMessage:
+        d = dict(d)  # shallow copy
+        if isinstance(d.get("queued_at"), str):
+            d["queued_at"] = datetime.fromisoformat(d["queued_at"])
+        return cls(**d)
+
 
 class MessageQueue:
-    """Thread-safe async message queue for sleep/wake cycle."""
+    """Thread-safe async message queue for sleep/wake cycle.
 
-    def __init__(self, core_url: str = "http://gaia-core:6415") -> None:
+    Persists messages to a JSON file so they survive gaia-web restarts.
+    """
+
+    def __init__(
+        self,
+        core_url: str = "http://gaia-core:6415",
+        queue_file: str | None = None,
+    ) -> None:
         self._queue: List[QueuedMessage] = []
         self._lock = asyncio.Lock()
         self._wake_signal_sent = False
         self._core_url = core_url
-        logger.info("MessageQueue initialized (core_url=%s)", core_url)
+        self._queue_file = Path(queue_file or _DEFAULT_QUEUE_FILE)
+
+        # Load any persisted messages from a previous run
+        self._load_from_disk()
+
+        logger.info(
+            "MessageQueue initialized (core_url=%s, persistence=%s, restored=%d)",
+            core_url, self._queue_file, len(self._queue),
+        )
+
+    # ── Persistence ───────────────────────────────────────────────────────
+
+    def _load_from_disk(self) -> None:
+        """Load persisted messages on startup (called once in __init__)."""
+        try:
+            if self._queue_file.exists():
+                data = json.loads(self._queue_file.read_text(encoding="utf-8"))
+                self._queue = [QueuedMessage.from_dict(d) for d in data]
+                if self._queue:
+                    logger.info(
+                        "Restored %d message(s) from %s", len(self._queue), self._queue_file,
+                    )
+        except Exception:
+            logger.warning("Failed to load queue from disk — starting empty", exc_info=True)
+            self._queue = []
+
+    def _persist_to_disk(self) -> None:
+        """Atomically write the current queue to disk (tmp + rename)."""
+        try:
+            self._queue_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._queue_file.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps([m.to_dict() for m in self._queue], indent=2),
+                encoding="utf-8",
+            )
+            tmp.rename(self._queue_file)
+        except Exception:
+            logger.warning("Failed to persist queue to disk", exc_info=True)
+
+    # ── Queue operations ──────────────────────────────────────────────────
 
     async def enqueue(self, message: QueuedMessage) -> bool:
         """Add a message and send wake signal on first enqueue."""
         async with self._lock:
             self._queue.append(message)
+            self._persist_to_disk()
             logger.info("Message queued: %s from %s", message.message_id, message.source)
 
             if not self._wake_signal_sent:
@@ -62,6 +130,7 @@ class MessageQueue:
                 return None
             self._queue.sort(key=lambda m: (-m.priority, m.queued_at))
             msg = self._queue.pop(0)
+            self._persist_to_disk()
             logger.info("Message dequeued: %s", msg.message_id)
             if not self._queue:
                 self._wake_signal_sent = False

@@ -116,12 +116,15 @@ services:
     container_name: gaia-web-candidate
     hostname: gaia-web-candidate
     restart: "no"
+    group_add:
+      - "${DOCKER_GID:-962}"
 
     volumes:
       - ./candidates/gaia-web:/app:rw
       - ./candidates/gaia-common:/app/gaia-common:ro
       - ./knowledge:/knowledge:ro
       - ./candidates/gaia-web/static:/app/static:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     env_file:
       - path: .env.discord
@@ -132,6 +135,7 @@ services:
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - FILE_ROOTS=project:/app,knowledge:/knowledge
       # Service endpoints - configurable for injection vs parallel modes
       - CORE_ENDPOINT=${CANDIDATE_CORE_ENDPOINT:-http://gaia-core-candidate:6415}
       - MCP_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}

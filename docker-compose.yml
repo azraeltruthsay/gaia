@@ -229,6 +229,8 @@ services:
     container_name: gaia-web
     hostname: gaia-web
     restart: unless-stopped
+    group_add:
+      - "${DOCKER_GID:-962}"
 
     env_file:
       - .env.discord
@@ -242,12 +244,15 @@ services:
       - ./knowledge:/knowledge:ro
       # Static assets (if needed)
       - ./gaia-web/static:/app/static:ro
+      # Docker socket for terminal access
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     environment:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - FILE_ROOTS=project:/app,knowledge:/knowledge
       # Service endpoints (configurable for candidate injection)
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}

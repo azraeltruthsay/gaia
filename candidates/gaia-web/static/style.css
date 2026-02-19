@@ -74,6 +74,8 @@ html, body {
 .badge-warn { background: rgba(255, 167, 38, 0.2); color: var(--warn); }
 .badge-error { background: rgba(233, 69, 96, 0.2); color: var(--error); }
 
+[x-cloak] { display: none !important; }
+
 /* ── Tab Bar ─────────────────────────── */
 
 .tab-bar {
@@ -106,12 +108,9 @@ html, body {
 /* ── Views ───────────────────────────── */
 
 .view {
-  display: none;
   height: calc(100vh - 78px); /* 44px header + 34px tab bar */
   overflow: hidden;
 }
-
-.view.active { display: block; }
 
 .view-placeholder {
   display: flex;
@@ -1043,6 +1042,105 @@ html, body {
 .hook-log-result { color: var(--text); }
 .hook-log-entry.error .hook-log-result { color: var(--error); }
 .hook-log-entry.success .hook-log-result { color: var(--success); }
+
+/* ── File Browser ────────────────────── */
+
+.file-browser { padding: 12px; height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.fb-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.fb-root-select {
+  background: var(--panel-bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 8px; font-size: 11px; font-family: inherit;
+}
+.fb-breadcrumbs { display: flex; align-items: center; gap: 2px; flex: 1; overflow-x: auto; }
+.fb-crumb {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 11px; font-family: inherit; padding: 2px 4px; border-radius: 3px;
+}
+.fb-crumb:hover { background: var(--border); color: var(--text); }
+.fb-crumb::after { content: '/'; color: var(--border); margin-left: 4px; }
+.fb-crumb:last-child { color: var(--text); }
+.fb-crumb:last-child::after { display: none; }
+.fb-loading { font-size: 10px; color: var(--text-muted); }
+.fb-error { background: rgba(255,82,82,0.1); color: var(--error); padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-top: 8px; }
+.fb-listing { flex: 1; overflow-y: auto; margin-top: 4px; }
+.fb-entry {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; border-bottom: 1px solid var(--border);
+  color: var(--text); padding: 6px 8px; cursor: pointer; font-family: inherit;
+  font-size: 11px; text-align: left;
+}
+.fb-entry:hover { background: rgba(255,255,255,0.03); }
+.fb-entry-icon { flex-shrink: 0; width: 18px; text-align: center; }
+.fb-entry-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-entry-dir .fb-entry-name { color: #4fc3f7; }
+.fb-entry-size { color: var(--text-muted); flex-shrink: 0; width: 70px; text-align: right; }
+.fb-entry-date { color: var(--text-muted); flex-shrink: 0; width: 140px; text-align: right; }
+.fb-entry-up .fb-entry-name { color: var(--text-muted); font-style: italic; }
+.fb-empty { color: var(--text-muted); font-size: 11px; padding: 20px; text-align: center; }
+
+.fb-viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-top: 4px; }
+.fb-viewer-header { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.fb-back-btn {
+  background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.fb-back-btn:hover { color: var(--text); border-color: var(--text-muted); }
+.fb-viewer-filename { font-size: 12px; font-weight: 600; color: var(--text); }
+.fb-viewer-content {
+  flex: 1; overflow: auto; margin: 0; padding: 10px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-size: 11px; line-height: 1.5; margin-top: 6px;
+}
+.fb-viewer-content code { color: var(--text); white-space: pre; }
+.fb-editor-actions { display: flex; gap: 6px; margin-left: auto; }
+.fb-edit-btn, .fb-save-btn, .fb-cancel-btn {
+  background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.fb-edit-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
+.fb-save-btn { color: var(--success); border-color: var(--success); }
+.fb-save-btn:hover { background: rgba(76,175,80,0.1); }
+.fb-save-btn:disabled { opacity: 0.5; cursor: default; }
+.fb-cancel-btn:hover { color: var(--error); border-color: var(--error); }
+.fb-editor {
+  flex: 1; width: 100%; margin-top: 6px; padding: 10px;
+  background: var(--bg); color: var(--text); border: 1px solid #4fc3f7;
+  border-radius: 4px; font-size: 11px; font-family: inherit; line-height: 1.5;
+  resize: none; outline: none;
+}
+
+/* ── Terminal ─────────────────────────── */
+
+.terminal-panel { padding: 12px; height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.term-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.term-container-select {
+  background: var(--panel-bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 8px; font-size: 11px; font-family: inherit; min-width: 220px;
+}
+.term-connect-btn, .term-disconnect-btn, .term-refresh-btn {
+  background: var(--panel-bg); color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.term-connect-btn:hover { color: var(--success); border-color: var(--success); }
+.term-connect-btn:disabled { opacity: 0.5; cursor: default; }
+.term-disconnect-btn { color: var(--error); border-color: var(--error); }
+.term-disconnect-btn:hover { background: rgba(255,82,82,0.1); }
+.term-refresh-btn:hover { color: var(--text); }
+.term-status { font-size: 10px; color: var(--text-muted); margin-left: auto; }
+.term-status-on { color: var(--success); }
+.term-error { background: rgba(255,82,82,0.1); color: var(--error); padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-top: 4px; }
+.term-container { flex: 1; margin-top: 6px; border-radius: 4px; overflow: hidden; }
+
+/* ── Knowledge Browser ───────────────── */
+
+.kb-root-label {
+  background: var(--panel-bg); color: #4fc3f7; border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600;
+}
+.kb-markdown {
+  flex: 1; overflow-y: auto; padding: 16px; margin-top: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+}
 
 /* ── Scrollbar ───────────────────────── */
 
