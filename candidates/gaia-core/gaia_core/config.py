@@ -57,6 +57,23 @@ class Config:
     SLEEP_ENABLE_DREAM: bool = False
     SLEEP_TASK_TIMEOUT: int = 600
 
+    # Heartbeat settings (thought seed triage daemon)
+    HEARTBEAT_INTERVAL_SECONDS: int = 1200  # 20 minutes
+    HEARTBEAT_ENABLED: bool = True
+
+    # Temporal awareness (Phase 1 consciousness framework)
+    LITE_JOURNAL_ENABLED: bool = True
+    TEMPORAL_STATE_ENABLED: bool = True
+    TEMPORAL_BAKE_INTERVAL_TICKS: int = 3          # Bake every N heartbeat ticks (~60 min)
+    TEMPORAL_STATE_MAX_FILES: int = 5              # Max stored KV cache snapshots
+    TEMPORAL_STATE_MAX_BYTES: int = 10_737_418_240  # 10 GB total state budget
+    TEMPORAL_STATE_BAKE_CONTEXT_TOKENS: int = 6000  # Max tokens in bake context
+
+    # Temporal awareness Phase 2 (interview protocol)
+    TEMPORAL_INTERVIEW_ENABLED: bool = True
+    TEMPORAL_INTERVIEW_INTERVAL_TICKS: int = 6    # Interview every 6 heartbeat ticks (~2h)
+    TEMPORAL_INTERVIEW_ROUNDS: int = 3             # Q&A rounds per interview
+
     # Tool and primitive settings
     primitives: list[str] = field(default_factory=lambda: ["read", "write", "vector_query", "shell"])
     SAFE_EXECUTE_FUNCTIONS: list[str] = field(default_factory=list)

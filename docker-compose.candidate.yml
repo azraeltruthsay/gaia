@@ -407,6 +407,59 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-audio-candidate: The Ears & Mouth - Half-duplex STT/TTS sensory service
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-audio-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-audio/Dockerfile
+    image: localhost:5000/gaia-audio-candidate:local
+    container_name: gaia-audio-candidate
+    hostname: gaia-audio-candidate
+    restart: "no"
+
+    volumes:
+      - ./candidates/gaia-audio:/app:rw
+      - ./candidates/gaia-common:/app/gaia_common:ro
+      - ./gaia-models/voice:/models/voice:ro
+
+    environment:
+      - PYTHONPATH=/app
+      - GAIA_SERVICE=audio
+      - GAIA_ENV=${GAIA_ENV:-development}
+      - GAIA_CONSTANTS_PATH=/app/gaia_common/constants/gaia_constants.json
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "8081:8080"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    command: ["uvicorn", "gaia_audio.main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    networks:
+      - gaia-net
+
+    profiles:
+      - full
+      - audio
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Networks - Shared with live stack (Docker reuses if already exists)
 # ═══════════════════════════════════════════════════════════════════════════

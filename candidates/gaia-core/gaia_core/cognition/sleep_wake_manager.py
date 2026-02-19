@@ -65,16 +65,17 @@ CANNED_DISTRACTED = (
 class SleepWakeManager:
     """Manages GAIA's sleep/wake state transitions with cognitive continuity."""
 
-    def __init__(self, config, model_pool=None, idle_monitor=None) -> None:
+    def __init__(self, config, model_pool=None, idle_monitor=None, timeline_store=None) -> None:
         self.config = config
         self.state = GaiaState.ACTIVE
         self._phase = _TransientPhase.NONE
         self.current_task: Optional[Dict[str, Any]] = None
         self.wake_signal_pending = False
+        self._timeline = timeline_store
         self.prime_available = False
         self.model_pool = model_pool
         self.idle_monitor = idle_monitor
-        self.checkpoint_manager = PrimeCheckpointManager(config)
+        self.checkpoint_manager = PrimeCheckpointManager(config, timeline_store=timeline_store)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
 
@@ -95,6 +96,49 @@ class SleepWakeManager:
         return idle_minutes >= threshold
 
     # ------------------------------------------------------------------
+    # Timeline event helper
+    # ------------------------------------------------------------------
+
+    def _emit_state_change(self, from_state: str, to_state: str, reason: str = "") -> None:
+        """Emit a state_change event to the timeline store (best-effort)."""
+        if self._timeline is not None:
+            try:
+                self._timeline.append("state_change", {
+                    "from": from_state,
+                    "to": to_state,
+                    "reason": reason,
+                })
+            except Exception:
+                logger.debug("Timeline state_change emit failed", exc_info=True)
+
+        # Notify gaia-audio of mute/unmute based on state transitions
+        self._notify_audio_state(to_state)
+
+    def _notify_audio_state(self, to_state: str) -> None:
+        """Notify gaia-audio to mute/unmute based on sleep state (best-effort)."""
+        try:
+            constants = getattr(self.config, "constants", {})
+            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
+            if not audio_cfg.get("enabled") or not audio_cfg.get("mute_on_sleep"):
+                return
+
+            audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+
+            if to_state in ("asleep", "dreaming"):
+                action = "mute"
+            elif to_state == "active":
+                action = "unmute"
+            else:
+                return
+
+            import httpx
+            with httpx.Client(timeout=3.0) as client:
+                client.post(f"{audio_endpoint}/{action}")
+            logger.debug("Audio %s signal sent", action)
+        except Exception:
+            logger.debug("Audio state notification failed (non-fatal)", exc_info=True)
+
+    # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
 
@@ -113,6 +157,7 @@ class SleepWakeManager:
 
         self.state = GaiaState.DROWSY
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change("active", "drowsy", "idle threshold reached")
         logger.info("Entering DROWSY — writing checkpoint...")
 
         # Early bail-out: if a wake signal already arrived, skip checkpoint entirely
@@ -141,6 +186,7 @@ class SleepWakeManager:
             # Checkpoint complete — enter ASLEEP
             self.state = GaiaState.ASLEEP
             self.last_state_change = datetime.now(timezone.utc)
+            self._emit_state_change("drowsy", "asleep", "checkpoint complete")
             logger.info("Checkpoint written — entering ASLEEP")
             return True
 
@@ -216,6 +262,7 @@ class SleepWakeManager:
             self.wake_signal_pending = False
             self.prime_available = True
             self.last_state_change = datetime.now(timezone.utc)
+            self._emit_state_change("asleep", "active", "wake signal processed")
 
             logger.info("Wake complete, context restored")
             return {
@@ -242,6 +289,7 @@ class SleepWakeManager:
         self.state = GaiaState.DREAMING
         self.dreaming_handoff_id = handoff_id
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change("asleep", "dreaming", f"handoff {handoff_id}")
         logger.info("Entering DREAMING (handoff %s)", handoff_id)
         return True
 
@@ -253,6 +301,7 @@ class SleepWakeManager:
         self.state = GaiaState.ASLEEP
         self.dreaming_handoff_id = None
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change("dreaming", "asleep", "study complete")
         logger.info("Exiting DREAMING — back to ASLEEP")
 
         # If a wake signal arrived while dreaming, start waking now
@@ -272,6 +321,7 @@ class SleepWakeManager:
             return False
         self.state = GaiaState.DISTRACTED
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change("asleep", "distracted", "sustained load")
         logger.info("Entering DISTRACTED — system under load")
         return True
 
@@ -282,6 +332,7 @@ class SleepWakeManager:
             return False
         self.state = GaiaState.ASLEEP
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change("distracted", "asleep", "load subsided")
         logger.info("Exiting DISTRACTED — back to ASLEEP")
 
         # If a wake signal arrived while distracted, start waking
@@ -300,6 +351,7 @@ class SleepWakeManager:
         self.state = GaiaState.OFFLINE
         self._phase = _TransientPhase.NONE
         self.last_state_change = datetime.now(timezone.utc)
+        self._emit_state_change(prev.value, "offline", "shutdown")
         logger.info("Entering OFFLINE from %s", prev)
 
     # ------------------------------------------------------------------
