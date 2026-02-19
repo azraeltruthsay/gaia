@@ -1,7 +1,7 @@
 /**
  * GAIA Mission Control — Dashboard JavaScript
  *
- * Three modules: Chat, System State, Blueprints
+ * Modules: Navigation, Chat, System State, Blueprints, Audio, Voice, Hooks
  * No build step — vanilla JS + D3 from CDN.
  */
 
@@ -9,6 +9,39 @@
 
 const POLL_INTERVAL = 10_000; // system state poll every 10s
 const CHAT_TIMEOUT = 300_000; // 5 minute timeout for chat
+const HOOKS_POLL_INTERVAL = 15_000; // hooks status poll every 15s
+
+// ── Navigation ──────────────────────────────────────────────────────────────
+
+let currentView = "dashboard";
+let hooksPollTimer = null;
+
+function switchView(viewName) {
+  currentView = viewName;
+  // Update tabs
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.toggle("active", t.dataset.view === viewName);
+  });
+  // Update views
+  document.querySelectorAll(".view").forEach((v) => {
+    v.classList.toggle("active", v.dataset.view === viewName);
+  });
+  // Start/stop hooks polling based on active view
+  if (viewName === "hooks") {
+    hookRefreshAll();
+    if (!hooksPollTimer) {
+      hooksPollTimer = setInterval(hookRefreshAll, HOOKS_POLL_INTERVAL);
+    }
+  } else if (hooksPollTimer) {
+    clearInterval(hooksPollTimer);
+    hooksPollTimer = null;
+  }
+}
+
+// Bind tab clicks
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => switchView(tab.dataset.view));
+});
 
 // ── Chat Panel ───────────────────────────────────────────────────────────────
 
@@ -930,6 +963,145 @@ if (voiceDisconnectBtn) {
       await pollVoiceStatus();
     } catch {
       // Silently fail
+    }
+  });
+}
+
+// ── Hooks / Commands Panel ───────────────────────────────────────────────────
+
+const hookSleepState = document.getElementById("hook-sleep-state");
+const hookSleepCycle = document.getElementById("hook-sleep-cycle");
+const hookSleepUptime = document.getElementById("hook-sleep-uptime");
+const hookGpuOwner = document.getElementById("hook-gpu-owner");
+const hookGpuVram = document.getElementById("hook-gpu-vram");
+const hookCodexInput = document.getElementById("hook-codex-input");
+const hookCodexResults = document.getElementById("hook-codex-results");
+const hookActionLog = document.getElementById("hook-action-log");
+
+function hookLogEntry(action, result, isError) {
+  if (!hookActionLog) return;
+  // Clear placeholder
+  const ph = hookActionLog.querySelector(".hook-log-placeholder");
+  if (ph) ph.remove();
+
+  const entry = document.createElement("div");
+  entry.className = `hook-log-entry ${isError ? "error" : "success"}`;
+  const time = new Date().toLocaleTimeString();
+  entry.innerHTML = `<span class="hook-log-time">${time}</span><span class="hook-log-action">${escapeHtml(action)}</span><span class="hook-log-result">${escapeHtml(result)}</span>`;
+  hookActionLog.appendChild(entry);
+  hookActionLog.scrollTop = hookActionLog.scrollHeight;
+  while (hookActionLog.children.length > 50) hookActionLog.removeChild(hookActionLog.firstChild);
+}
+
+async function hookRefreshSleep() {
+  try {
+    const resp = await fetch("/api/hooks/sleep/status");
+    if (resp.ok) {
+      const data = await resp.json();
+      if (hookSleepState) hookSleepState.textContent = data.state || data.sleep_state || "unknown";
+      if (hookSleepCycle) hookSleepCycle.textContent = data.cycle_count != null ? `#${data.cycle_count}` : "--";
+      if (hookSleepUptime) {
+        const up = data.uptime_seconds || data.uptime;
+        hookSleepUptime.textContent = up != null ? formatDuration(up) : "--";
+      }
+    }
+  } catch {
+    if (hookSleepState) hookSleepState.textContent = "unreachable";
+  }
+}
+
+async function hookRefreshGpu() {
+  try {
+    const resp = await fetch("/api/hooks/gpu/status");
+    if (resp.ok) {
+      const data = await resp.json();
+      if (hookGpuOwner) hookGpuOwner.textContent = data.owner || data.gpu_owner || "none";
+      if (hookGpuVram) {
+        const used = data.vram_used_mb || data.used_mb;
+        const total = data.vram_total_mb || data.total_mb;
+        hookGpuVram.textContent = used != null && total != null ? `${Math.round(used)} / ${Math.round(total)} MB` : "--";
+      }
+    }
+  } catch {
+    if (hookGpuOwner) hookGpuOwner.textContent = "unreachable";
+  }
+}
+
+async function hookRefreshAll() {
+  await Promise.all([hookRefreshSleep(), hookRefreshGpu()]);
+}
+
+async function hookAction(endpoint) {
+  hookLogEntry(endpoint, "sending...", false);
+  try {
+    const resp = await fetch(`/api/hooks/${endpoint}`, { method: "POST" });
+    const data = await resp.json();
+    if (resp.ok) {
+      hookLogEntry(endpoint, JSON.stringify(data).substring(0, 120), false);
+    } else {
+      hookLogEntry(endpoint, `Error ${resp.status}: ${data.error || data.detail || "unknown"}`, true);
+    }
+  } catch (err) {
+    hookLogEntry(endpoint, `Connection error: ${err.message}`, true);
+  }
+  // Refresh status after action
+  setTimeout(hookRefreshAll, 1000);
+}
+
+async function hookCodexSearch() {
+  if (!hookCodexInput || !hookCodexResults) return;
+  const query = hookCodexInput.value.trim();
+  if (!query) return;
+
+  hookCodexResults.innerHTML = '<div class="hook-codex-placeholder">Searching...</div>';
+  hookLogEntry("codex/search", `query: "${query}"`, false);
+
+  try {
+    const resp = await fetch("/api/hooks/codex/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: 5 }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      hookCodexResults.innerHTML = `<div class="hook-codex-placeholder">Error: ${escapeHtml(err.error || err.detail || "unknown")}</div>`;
+      hookLogEntry("codex/search", `Error ${resp.status}`, true);
+      return;
+    }
+    const data = await resp.json();
+    const results = data.results || data;
+    if (!Array.isArray(results) || results.length === 0) {
+      hookCodexResults.innerHTML = '<div class="hook-codex-placeholder">No results found.</div>';
+      hookLogEntry("codex/search", "0 results", false);
+      return;
+    }
+    hookCodexResults.innerHTML = "";
+    for (const r of results) {
+      const div = document.createElement("div");
+      div.className = "hook-codex-result";
+      const score = r.score != null ? r.score.toFixed(3) : "";
+      const title = r.title || r.key || r.id || "untitled";
+      const snippet = r.snippet || r.text || r.content || "";
+      div.innerHTML = `
+        ${score ? `<span class="hook-codex-result-score">${score}</span>` : ""}
+        <div class="hook-codex-result-title">${escapeHtml(title)}</div>
+        <div class="hook-codex-result-snippet">${escapeHtml(snippet.substring(0, 200))}</div>
+      `;
+      hookCodexResults.appendChild(div);
+    }
+    hookLogEntry("codex/search", `${results.length} results`, false);
+  } catch (err) {
+    hookCodexResults.innerHTML = `<div class="hook-codex-placeholder">Connection error: ${escapeHtml(err.message)}</div>`;
+    hookLogEntry("codex/search", `Connection error: ${err.message}`, true);
+  }
+}
+
+// Codex search on Enter key
+if (hookCodexInput) {
+  hookCodexInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      hookCodexSearch();
     }
   });
 }

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from gaia_web.queue.message_queue import MessageQueue
 from gaia_web.routes.blueprints import router as blueprints_router
+from gaia_web.routes.hooks import router as hooks_router
 from gaia_web.routes.voice import router as voice_router
 
 from gaia_common.protocols.cognition_packet import (
@@ -65,6 +66,7 @@ app = FastAPI(
 
 # API routers (must be before static mount)
 app.include_router(blueprints_router)
+app.include_router(hooks_router)
 app.include_router(voice_router)
 
 # Static file serving for dashboard UI
