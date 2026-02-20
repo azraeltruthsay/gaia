@@ -67,9 +67,11 @@ async def lifespan(app: FastAPI):
         stt_engine=stt_engine,
         tts_engine=tts_engine,
         vram_budget_mb=config.vram_budget_mb,
+        half_duplex=config.half_duplex,
     )
 
-    await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine})")
+    duplex_mode = "half-duplex" if config.half_duplex else "full-duplex"
+    await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine}, {duplex_mode})")
 
     # Register with orchestrator (best-effort)
     await _register_with_orchestrator()
@@ -310,6 +312,66 @@ async def unmute():
     status_tracker.state = "idle"
     await status_tracker.emit("unmute", "Audio service unmuted (GAIA awake)")
     return {"status": "unmuted"}
+
+
+# ── Deep Sleep / Wake (GPU model unload/reload) ─────────────────────
+
+
+@app.post("/sleep")
+async def sleep_mode():
+    """Deep sleep: mute + unload all GPU models to free VRAM.
+
+    Called by gaia-core when entering ASLEEP/DREAMING states.
+    Idempotent — safe to call multiple times.
+    """
+    status_tracker.muted = True
+    status_tracker.state = "sleeping"
+    await status_tracker.emit("sleep_start", "Entering deep sleep — unloading GPU models")
+
+    if gpu_manager:
+        await gpu_manager.release()
+
+    await status_tracker.emit("sleep_complete", "GPU models unloaded — VRAM freed")
+    logger.info("Audio deep sleep: models unloaded, VRAM freed")
+    return {"status": "sleeping", "vram_freed": True}
+
+
+@app.post("/wake")
+async def wake_mode():
+    """Wake from deep sleep: unmute + eagerly reload GPU models in background.
+
+    Returns immediately — model reload runs as a background task (~11s)
+    which is hidden behind Prime's ~37s cold-start.
+    Idempotent — safe to call multiple times.
+    """
+    status_tracker.muted = False
+    status_tracker.state = "waking"
+    await status_tracker.emit("wake_start", "Waking — starting background model reload")
+    logger.info("Audio wake: starting background model reload")
+
+    if gpu_manager:
+        asyncio.create_task(_background_reload())
+
+    return {"status": "waking", "reload_started": True}
+
+
+async def _background_reload():
+    """Reload GPU models in background after wake.
+
+    Non-fatal on failure — lazy loading will catch up on next request.
+    """
+    try:
+        t0 = time.monotonic()
+        if gpu_manager:
+            await gpu_manager.acquire_for_stt()  # full-duplex: loads both
+        elapsed = (time.monotonic() - t0) * 1000
+        status_tracker.state = "idle"
+        await status_tracker.emit("wake_complete", f"Models reloaded ({elapsed:.0f}ms)", elapsed)
+        logger.info("Background model reload complete in %.0fms", elapsed)
+    except Exception:
+        logger.error("Background model reload failed (non-fatal)", exc_info=True)
+        status_tracker.state = "idle"
+        await status_tracker.emit("wake_error", "Background reload failed — will lazy-load on demand")
 
 
 # ── Internal helpers ──────────────────────────────────────────────────

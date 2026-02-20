@@ -7,7 +7,11 @@ pydantic>=2.0
 # STT - faster-whisper (Whisper CTranslate2 backend)
 faster-whisper>=1.0.0
 
-# TTS - RealtimeTTS provides modular engine abstraction
+# TTS - Coqui XTTS v2 via community fork (local GPU, headless-safe)
+coqui-tts>=0.24.2
+torchcodec>=0.10.0
+
+# TTS - RealtimeTTS (ElevenLabs cloud fallback only)
 RealtimeTTS[system]>=0.4.0
 
 # Audio processing

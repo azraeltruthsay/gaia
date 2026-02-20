@@ -1,10 +1,12 @@
 """Tests for voice auto-answer — whitelist, API routes, and VoiceManager."""
 
+import asyncio
 import json
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -253,3 +255,147 @@ def test_force_disconnect(voice_client):
     resp = voice_client.post("/api/voice/disconnect")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# GaiaVoiceSink tests
+# ---------------------------------------------------------------------------
+
+
+class TestGaiaVoiceSink:
+    """Tests for the py-cord voice sink."""
+
+    def test_enqueue_puts_data(self):
+        """_enqueue adds data directly to the asyncio queue."""
+        from gaia_web.voice_manager import GaiaVoiceSink
+
+        queue = asyncio.Queue(maxsize=10)
+        loop = asyncio.new_event_loop()
+        try:
+            sink = GaiaVoiceSink(queue=queue, loop=loop)
+            sink._enqueue(b"\x01\x02\x03")
+            assert queue.qsize() == 1
+            assert queue.get_nowait() == b"\x01\x02\x03"
+        finally:
+            loop.close()
+
+    def test_user_filtering(self):
+        """write() skips audio from non-target users."""
+        from gaia_web.voice_manager import GaiaVoiceSink
+
+        queue = asyncio.Queue(maxsize=10)
+        loop = MagicMock()
+        enqueued = []
+        loop.call_soon_threadsafe = lambda fn, data: fn(data)
+
+        sink = GaiaVoiceSink(queue=queue, loop=loop, target_user_id=42)
+        # Override _enqueue to capture calls
+        sink._enqueue = lambda data: enqueued.append(data)
+
+        sink.write(b"data", user=99)  # Wrong user — should be dropped
+        assert len(enqueued) == 0
+
+        sink.write(b"data", user=42)  # Correct user
+        assert len(enqueued) == 1
+
+    def test_no_filter_accepts_all_users(self):
+        """write() accepts audio from all users when no target set."""
+        from gaia_web.voice_manager import GaiaVoiceSink
+
+        queue = asyncio.Queue(maxsize=10)
+        loop = MagicMock()
+        enqueued = []
+        loop.call_soon_threadsafe = lambda fn, data: fn(data)
+
+        sink = GaiaVoiceSink(queue=queue, loop=loop, target_user_id=None)
+        sink._enqueue = lambda data: enqueued.append(data)
+
+        sink.write(b"data", user=1)
+        sink.write(b"data", user=2)
+        assert len(enqueued) == 2
+
+    def test_paused_flag(self):
+        """write() drops audio when paused is True."""
+        from gaia_web.voice_manager import GaiaVoiceSink
+
+        queue = asyncio.Queue(maxsize=10)
+        loop = MagicMock()
+        enqueued = []
+        loop.call_soon_threadsafe = lambda fn, data: enqueued.append(data)
+
+        sink = GaiaVoiceSink(queue=queue, loop=loop)
+
+        sink.paused = True
+        sink.write(b"data", user=1)
+        assert len(enqueued) == 0
+
+        sink.paused = False
+        sink.write(b"data", user=1)
+        assert len(enqueued) == 1
+
+    def test_queue_full_drops_frame(self):
+        """_enqueue silently drops when the queue is full."""
+        from gaia_web.voice_manager import GaiaVoiceSink
+
+        queue = asyncio.Queue(maxsize=1)
+        loop = asyncio.new_event_loop()
+        try:
+            sink = GaiaVoiceSink(queue=queue, loop=loop)
+            sink._enqueue(b"first")
+            sink._enqueue(b"second")  # Should be silently dropped
+
+            assert queue.qsize() == 1
+            assert queue.get_nowait() == b"first"
+        finally:
+            loop.close()
+
+
+# ---------------------------------------------------------------------------
+# Fast PCM conversion tests
+# ---------------------------------------------------------------------------
+
+
+class TestFastPcmConversion:
+    """Tests for numpy-based PCM format conversion."""
+
+    def test_48k_stereo_to_16k_mono_dimensions(self):
+        """20 ms of 48 kHz stereo (3840 bytes) -> 20 ms of 16 kHz mono (640 bytes)."""
+        from gaia_web.voice_manager import pcm_48k_stereo_to_16k_mono_fast
+
+        # 20 ms at 48 kHz stereo = 960 samples * 2 channels * 2 bytes = 3840
+        stereo_48k = np.zeros(960 * 2, dtype=np.int16).tobytes()
+        result = pcm_48k_stereo_to_16k_mono_fast(stereo_48k)
+        assert len(result) == 640  # 320 samples * 2 bytes
+
+    def test_preserves_dc_signal(self):
+        """A constant stereo signal should produce the same constant after conversion."""
+        from gaia_web.voice_manager import pcm_48k_stereo_to_16k_mono_fast
+
+        n_samples = 960  # 20 ms at 48 kHz
+        stereo = np.array([[1000, 1000]] * n_samples, dtype=np.int16).flatten()
+        result = pcm_48k_stereo_to_16k_mono_fast(stereo.tobytes())
+
+        output = np.frombuffer(result, dtype=np.int16)
+        assert len(output) == 320
+        np.testing.assert_array_equal(output, 1000)
+
+    def test_stereo_averaging(self):
+        """L=2000, R=4000 -> mono should be 3000."""
+        from gaia_web.voice_manager import pcm_48k_stereo_to_16k_mono_fast
+
+        n_samples = 6  # Minimum: 6 stereo samples -> 2 mono after 3x decimation
+        left = np.full(n_samples, 2000, dtype=np.int16)
+        right = np.full(n_samples, 4000, dtype=np.int16)
+        stereo = np.column_stack([left, right]).flatten()
+
+        result = pcm_48k_stereo_to_16k_mono_fast(stereo.tobytes())
+        output = np.frombuffer(result, dtype=np.int16)
+        assert len(output) == 2  # 6 mono / 3 = 2
+        np.testing.assert_array_equal(output, 3000)
+
+    def test_small_input_returns_empty(self):
+        """Input too small to form 3 stereo samples returns empty bytes."""
+        from gaia_web.voice_manager import pcm_48k_stereo_to_16k_mono_fast
+
+        assert pcm_48k_stereo_to_16k_mono_fast(b"\x00\x00") == b""
+        assert pcm_48k_stereo_to_16k_mono_fast(b"") == b""

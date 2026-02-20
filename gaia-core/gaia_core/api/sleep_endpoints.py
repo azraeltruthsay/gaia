@@ -41,6 +41,35 @@ async def receive_wake_signal(request: Request):
     }
 
 
+@router.post("/voice-state")
+async def voice_state(request: Request):
+    """Notify gaia-core when GAIA joins/leaves a Discord voice channel.
+
+    Body: {"connected": true/false}
+
+    When connected=True, triggers an implicit wake signal so Prime starts
+    booting while audio stays alive for Lite-based stalling responses.
+    When connected=False during sleep, the deferred audio sleep signal fires.
+    """
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    body = await request.json()
+    connected = body.get("connected", False)
+    manager.set_voice_active(connected)
+
+    return {
+        "accepted": True,
+        "voice_active": manager.voice_active,
+        "state": manager.get_state().value,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/status")
 async def get_sleep_status(request: Request):
     """Get current sleep/wake state and task info."""

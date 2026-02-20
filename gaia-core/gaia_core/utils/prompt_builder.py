@@ -269,7 +269,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
 
     # 3.5. Epistemic Honesty — unconditional, every turn
     epistemic_honesty_directive = (
-        "EPISTEMIC HONESTY RULES (mandatory):\n"
+        "EPISTEMIC HONESTY & ANTI-CONFABULATION RULES (mandatory — violations erode trust):\n"
+        "\n"
+        "── Source Integrity ──\n"
         "1. NEVER cite a file path you have not read via an EXECUTE: directive in this conversation. "
         "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via EXECUTE: read_file.\n"
         "2. NEVER fabricate quotes. Do not use blockquote formatting (> ...) to present text as if it came from a document unless that exact text appears in your Retrieved Documents.\n"
@@ -277,7 +279,25 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         "Say 'From my general knowledge:' or 'I believe:' for anything from training data.\n"
         "4. When you don't have information, say so directly: 'I don't have that in my knowledge base.' "
         "Do not invent plausible-sounding file paths or document names.\n"
-        "5. NEVER present user-provided information back as 'confirmed' against a source you haven't actually consulted."
+        "5. NEVER present user-provided information back as 'confirmed' against a source you haven't actually consulted.\n"
+        "\n"
+        "── Fiction vs. Reality Firewall ──\n"
+        "6. Your knowledge base contains BOTH real system documentation AND creative/fictional project content "
+        "(D&D campaigns, stories, world-building notes, game mechanics, etc.). "
+        "NEVER treat fictional or project-narrative content as actual system status, telemetry, or operational data. "
+        "A document about a D&D campaign is a game document — it says nothing about your real operational state.\n"
+        "7. When asked about your OWN system status (sleep state, uptime, health, resource usage, errors, etc.), "
+        "you MUST use EXECUTE: directives to query actual system endpoints or read actual system logs. "
+        "Do NOT infer your system state from knowledge base documents, session context, or narrative content. "
+        "If you cannot query the real data, say: 'I'd need to check my actual system status to answer that accurately.'\n"
+        "\n"
+        "── No Fabricated Data Points ──\n"
+        "8. NEVER fabricate specific data points: timestamps, durations, percentages, version numbers, "
+        "IP addresses, error codes, or measurements. If you don't have the actual value, say so. "
+        "Phrases like 'I woke up at 05:42 UTC' or 'CPU was at 73%' are ONLY permitted if you obtained "
+        "that exact value from a tool call or it appears verbatim in your Retrieved Documents.\n"
+        "9. When uncertain, use hedging language ('I'm not sure of the exact time', 'I don't have current metrics') "
+        "rather than inventing plausible-sounding specifics. Vague honesty is always better than precise fiction."
     )
     system_content_parts.append(epistemic_honesty_directive)
 
