@@ -361,6 +361,45 @@ cmd_handoff() {
     esac
 }
 
+# Manage wiki service
+cmd_wiki() {
+    local action="${1:-status}"
+
+    case "$action" in
+        start)
+            log_info "Starting gaia-wiki..."
+            docker compose -f "$LIVE_COMPOSE" up -d gaia-wiki
+            log_success "Wiki started (internal only, proxied via gaia-web /wiki/)"
+            ;;
+        stop)
+            log_info "Stopping gaia-wiki..."
+            docker compose -f "$LIVE_COMPOSE" stop gaia-wiki
+            docker compose -f "$LIVE_COMPOSE" rm -f gaia-wiki
+            log_success "Wiki stopped"
+            ;;
+        build)
+            log_info "Building wiki image..."
+            docker compose -f "$LIVE_COMPOSE" build gaia-wiki
+            log_success "Wiki image built"
+            ;;
+        logs)
+            docker compose -f "$LIVE_COMPOSE" logs -f gaia-wiki
+            ;;
+        status)
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^gaia-wiki$"; then
+                echo -e "${GREEN}Wiki is running${NC} (access via gaia-web /wiki/)"
+            else
+                echo -e "${RED}Wiki is stopped${NC}"
+            fi
+            ;;
+        *)
+            log_error "Unknown action: $action"
+            echo "Usage: $0 wiki [start|stop|build|logs|status]"
+            exit 1
+            ;;
+    esac
+}
+
 # Main
 main() {
     cd "$PROJECT_ROOT"
@@ -387,6 +426,9 @@ main() {
         handoff)
             cmd_handoff "$@"
             ;;
+        wiki)
+            cmd_wiki "$@"
+            ;;
         status)
             show_status
             ;;
@@ -402,6 +444,7 @@ main() {
             echo "  orchestrator [start|stop|status|build|logs]  Manage orchestrator"
             echo "  gpu [status|release]             GPU management via orchestrator"
             echo "  handoff [prime-to-study|study-to-prime|status]  GPU handoff"
+            echo "  wiki [start|stop|build|logs|status]  Manage wiki docs"
             echo "  status                           Show all service status"
             echo ""
             echo "Services: prime, core, web, mcp, study"
@@ -415,6 +458,8 @@ main() {
             echo "  $0 orchestrator start      # Start orchestrator"
             echo "  $0 gpu status              # Check GPU ownership"
             echo "  $0 handoff prime-to-study  # Transfer GPU to Study"
+            echo "  $0 wiki start              # Start wiki docs"
+            echo "  $0 wiki build              # Rebuild wiki image"
             echo "  $0 status                  # Show all services"
             ;;
         *)

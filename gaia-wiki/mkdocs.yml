@@ -1,0 +1,65 @@
+site_name: GAIA Wiki
+site_description: Internal developer documentation for the GAIA project
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: purple
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - awesome-pages
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - gaia-core: architecture/gaia-core.md
+      - gaia-prime: architecture/gaia-prime.md
+      - gaia-web: architecture/gaia-web.md
+      - gaia-study: architecture/gaia-study.md
+      - gaia-mcp: architecture/gaia-mcp.md
+      - gaia-orchestrator: architecture/gaia-orchestrator.md
+      - gaia-wiki: architecture/gaia-wiki.md
+  - Systems:
+      - Blueprint System: systems/blueprint-system.md
+      - Sleep Cycle: systems/sleep-cycle.md
+      - Cognition Packets: systems/cognition-packets.md
+      - LoRA Adapters: systems/lora-adapters.md
+      - Warm Swap: systems/warm-swap.md
+  - Operations:
+      - Deployment: operations/deployment.md
+      - Candidate Pipeline: operations/candidate-pipeline.md
+      - GPU Management: operations/gpu-management.md
+      - Network Layout: operations/network-layout.md
+  - Decisions:
+      - Gateway Principle: decisions/gateway-principle.md
+      - prime.md over KV Cache: decisions/prime-md-over-kv-cache.md
+      - tmpfs Warm Swap: decisions/tmpfs-warm-swap.md
+      - Interface-Agnostic Core: decisions/interface-agnostic-core.md
+  - Dev:
+      - Getting Started: dev/getting-started.md
+      - Adding a Service: dev/adding-a-service.md
+      - Code Quality: dev/code-quality.md

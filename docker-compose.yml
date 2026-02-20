@@ -272,6 +272,8 @@ services:
       - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
       # HA failover — candidate-core as fallback (empty = disabled)
       - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-}
+      # Wiki proxy (internal, auto-resolves on gaia-net)
+      - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
@@ -422,7 +424,43 @@ services:
       retries: 3
       start_period: 30s
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-wiki: The Library - Internal developer documentation
+  # Accessible internally at http://gaia-wiki:8080
+  # Optionally proxied by gaia-web at /wiki
+  # NOT exposed publicly by default
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-wiki:
+    build:
+      context: .
+      dockerfile: ./gaia-wiki/Dockerfile
+    image: localhost:5000/gaia-wiki:local
+    container_name: gaia-wiki
+    hostname: gaia-wiki
+    restart: unless-stopped
 
+    volumes:
+      # Live reload: mount docs for edit-without-rebuild
+      - ./gaia-wiki/docs:/docs/docs:ro
+      - ./gaia-wiki/mkdocs.yml:/docs/mkdocs.yml:ro
+      # Knowledge base: accessible for future auto-generated docs
+      - ./knowledge:/knowledge:ro
+
+    environment:
+      - GAIA_SERVICE=wiki
+
+    # No ports: block — internal only.
+    # For local dev access, add temporarily: ports: ["8080:8080"]
+
+    networks:
+      - gaia-net
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 
 # ═══════════════════════════════════════════════════════════════════════════
