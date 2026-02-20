@@ -255,8 +255,13 @@ for svc in "${SERVICES[@]}"; do
     mypy_exit=$?
     set -e
 
+    # mypy: blocking for specified services, warn-only for others
+    MYPY_BLOCKING_SERVICES="gaia-core gaia-mcp gaia-study"
     if [ $mypy_exit -eq 0 ]; then
         mypy_status="pass"
+    elif echo "$MYPY_BLOCKING_SERVICES" | grep -qw "$svc"; then
+        mypy_status="FAIL"
+        [ $overall_exit -lt 4 ] && overall_exit=4
     else
         mypy_status="warn"
     fi

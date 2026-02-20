@@ -1,11 +1,11 @@
 # GAIA Code Generation Bootstrap Plan
 ## CC-Assisted Code Quality, Self-Review, and QLoRA Training Loop
 
-**Document status:** Implementation specification (Revision 5)
+**Document status:** Implementation specification (Revision 7)
 **Intended audience:** Claude Code (CC) for autonomous implementation
 **Date:** 2026-02-19
 **Author:** Seumas & Claude (Sonnet 4.6) via GAIA Project Chat
-**Revised by:** Claude (Opus 4.6) via Claude Code — Rev 2-5 (see revision log)
+**Revised by:** Claude (Opus 4.6) via Claude Code — Rev 2-7 (see revision log)
 
 ---
 
@@ -13,7 +13,7 @@
 
 ### The Problem
 
-GAIA's primary inference model (gaia-prime, currently Nanbeige4-3B) is a capable general reasoner but has no inherent knowledge of the GAIA codebase, service contracts, or architectural idioms. When used to generate code — especially through the planned Builder Panel — it will produce output that is syntactically reasonable but semantically adrift from the project's conventions.
+GAIA's primary inference model (gaia-prime, currently Qwen3-4B-Instruct, 8K context window) is a capable general reasoner but has no inherent knowledge of the GAIA codebase, service contracts, or architectural idioms. When used to generate code — especially through the planned Builder Panel — it will produce output that is syntactically reasonable but semantically adrift from the project's conventions.
 
 We have already observed this problem in miniature: prime's JSON output required a formatter extension to become reliable. Code is orders of magnitude more complex than JSON. The question is not whether prime will drift, but how we detect it, correct it, and close the loop so it drifts less over time.
 
@@ -257,6 +257,7 @@ class OpenQuestionUpdate(BaseModel):
 class ReviewResult(BaseModel):
     service_id: str
     reviewer: str                 # "cc" | "gaia-study" | "human"
+    review_direction: Literal["forward", "reverse"]  # forward: blueprint is truth; reverse: code is truth
     review_timestamp: datetime
     overall_fidelity_score: float # 0.0–1.0
     discrepancies: List[DiscrepancyItem]
@@ -267,7 +268,7 @@ class ReviewResult(BaseModel):
 
 #### 3.2.1 Token Budget Guard
 
-The assembled review prompt for a multi-file service can be large. For CC review sessions (Phase 2), this is manageable — Claude has ample context. But for Phase 5 sleep-cycle reviews where gaia-prime (3B, limited context window) runs autonomously, prompts must fit within the model's effective context.
+The assembled review prompt for a multi-file service can be large. For CC review sessions (Phase 2), this is manageable — Claude has ample context. But for Phase 5 sleep-cycle reviews where gaia-prime (Qwen3-4B, 8K context window, ~7424 usable tokens after response buffer) runs autonomously, prompts must fit within the model's effective context.
 
 The review prompt builder must accept a `max_prompt_tokens` parameter (default: `None` for CC, e.g. `3072` for gaia-prime) and enforce it via progressive truncation:
 
@@ -361,7 +362,7 @@ def run_blueprint_precheck(
 
 | Category | What it checks | Method |
 |----------|----------------|--------|
-| `endpoint` | Each interface endpoint path + HTTP method exists as a `@router.{method}("{path}")` decorator | Regex scan of source files |
+| `endpoint` | Each interface endpoint path + HTTP method exists as a `@router.{method}("{path}")` or `@app.websocket("{path}")` decorator | Regex scan of source files |
 | `enum_member` | Each enum declared in blueprint has matching `class(Enum)` with expected members | AST extraction |
 | `constant` | Each constant declared in blueprint exists as `UPPER_CASE = value` at module level | AST extraction |
 | `failure_mode` | Each failure mode ID has a matching exception handler or status code return | Regex scan for exception types + HTTP status codes |
@@ -371,7 +372,7 @@ def run_blueprint_precheck(
 
 | Category | Estimated accuracy | Why |
 |----------|-------------------|-----|
-| `endpoint` | ~95% | Decorator patterns are highly regular, few false negatives |
+| `endpoint` | ~95% | REST decorator patterns are highly regular; WebSocket endpoints matched via `@app.websocket()` or `@router.websocket()` patterns |
 | `dependency` | ~85% | Misses env-var-based URLs and indirect client construction |
 | `failure_mode` | ~50-60% | Misses middleware handlers, base class handlers, delegation to gaia-common utilities, retry/circuit-breaker patterns, conditional guards that aren't try/except |
 | `enum_member` | ~95% | AST extraction is deterministic for enum classes |
@@ -490,6 +491,64 @@ candidates/{service_id}/
 The blueprint seed YAML remains at its canonical location (`knowledge/blueprints/candidates/{service_id}.yaml`), NOT copied into the candidate directory. The review and generation scripts reference it from there.
 
 CC should also run `scripts/format_candidate.sh {service_id}` on its own output before marking generation complete.
+
+### 4.4 Reverse Blueprint Generation (Code → Blueprint)
+
+The standard flow is blueprint → code → review. But for existing services that were developed without a blueprint (e.g., gaia-audio), or for services whose code has drifted significantly from an outdated blueprint, we need the reverse: **code → blueprint → review**.
+
+This is a fundamentally different task from forward generation. It requires reading existing code and synthesizing a prescriptive specification that accurately captures what the code *does* and *intends*.
+
+#### 4.4.1 When to Use Reverse Generation
+
+- A candidate service exists with no blueprint (gaia-audio)
+- A live service's blueprint has drifted beyond repair (blueprint `confidence` scores all below 0.4)
+- A new service was organically developed (not from a blueprint seed) and needs to join the blueprint system
+
+#### 4.4.2 Reverse Generation Workflow
+
+| Step | Agent | Input | Output |
+|------|-------|-------|--------|
+| 1. Mechanical extraction | AST summarizer + pre-check | Full source code | Structured summary: endpoints, models, imports, error handlers, constants |
+| 2. Blueprint draft | CC (Claude Code) | AST summaries + BlueprintModel schema + 2-3 existing blueprints as exemplars | Candidate blueprint YAML |
+| 3. Structural validation | Pre-check validator | Draft blueprint + source code | PreCheckResult: which claims are structurally confirmed |
+| 4. Semantic review | CC (cold session) | Draft blueprint + AST summaries + pre-check results | ReviewResult: does the blueprint accurately describe the code? |
+| 5. Blueprint refinement | CC or human | ReviewResult discrepancies | Updated blueprint YAML addressing discrepancies |
+
+**Key difference from forward review:** In forward review, the blueprint is the source of truth and the code is evaluated against it. In reverse review, the *code* is the source of truth and the *blueprint* is evaluated against it. The review prompt must be modified for this inversion — the question is "does this blueprint accurately describe this code?" not "does this code implement this blueprint?"
+
+#### 4.4.3 Reverse Review Prompt Variant
+
+The review prompt builder (Section 3.2) must accept a `review_direction` parameter:
+
+- `review_direction="forward"` (default) — "Does the code implement the blueprint?"
+- `review_direction="reverse"` — "Does the blueprint accurately describe the code?"
+
+For reverse reviews, the prompt's SYSTEM instruction changes:
+
+```
+You are verifying that a DRAFT blueprint accurately captures the behavior of
+existing, working code. The code is the source of truth. Your task is to identify
+claims in the blueprint that are:
+- MISSING: behavior present in the code but absent from the blueprint
+- INACCURATE: claims that don't match the code's actual behavior
+- INCOMPLETE: claims that are directionally correct but lack specificity
+
+Do NOT evaluate code quality. The code works. Evaluate blueprint accuracy.
+```
+
+#### 4.4.4 Training Pair Generation from Reverse Reviews
+
+Reverse reviews produce training pairs with `pair_type: "reverse"` (distinct from "forward" and "retroactive"). These pairs teach a different skill: code comprehension and specification synthesis. They are valuable for a potential future `code-reviewer` adapter but are also useful for `code-architect` because they demonstrate the mapping between code patterns and blueprint specifications — the same mapping the architect needs to implement in the forward direction.
+
+Include reverse pairs in the training corpus with `pair_type: "reverse"`. They count toward the total corpus size but NOT toward the forward-pair minimum (Section 8.1).
+
+#### 4.4.5 GAIA's Role in Reverse Generation
+
+gaia-prime (Qwen3-4B, 8K context) cannot currently author a complete blueprint from scratch — the task requires seeing the full service source (1000+ lines across multiple files) plus the BlueprintModel schema plus exemplar blueprints, which exceeds the context window.
+
+However, GAIA can participate in **step 3 (structural validation)** and in **scoped section review** during step 4 — given a single AST summary file + the corresponding blueprint section, she can verify accuracy within her context budget. This iterative, section-at-a-time pattern is a realistic near-term capability.
+
+After the code-architect adapter is trained (Phase 4), GAIA's reverse generation capability should be re-evaluated — the adapter may provide enough architectural priors to compensate for the context limitation.
 
 ---
 
@@ -712,15 +771,20 @@ Retroactive pairs have different training signal from forward pairs:
 
 Both signals are complementary. The training pair schema (Section 7.1) includes a `pair_type` field to distinguish them so their effectiveness can be analyzed separately during validation.
 
-### 6.6 Corpus Size Estimate
+### 6.6 Corpus Size Estimate (All Sources)
 
-| Source | Estimated pairs |
-|--------|----------------|
-| 6 live services, per-service reviews | 6 |
-| ~8-12 source files per service, per-file reviews | 48-72 |
-| **Total retroactive** | **~54-78** |
+| Source | Type | Estimated pairs |
+|--------|------|----------------|
+| 6 live services, per-service reviews | retroactive | 6 |
+| ~8-12 source files per service, per-file reviews | retroactive | 48-72 |
+| 32 dev journals, patterns A+C only | journal | 40-70 |
+| gaia-audio reverse blueprint (per-service + per-file) | reverse | ~8 |
+| gaia-web GUI features (audio + sleep log, per sub-task with GAIA) | forward | ~6-10 |
+| **Total estimated corpus** | | **~108-166** |
 
-This is likely enough to **hit the 50-pair training threshold** from Phase 0-2 infrastructure alone, unblocking Phase 4 (QLoRA training) without waiting for months of organic forward-pair accumulation.
+This **substantially exceeds** the 50-pair training threshold. The three non-forward sources (retroactive + journal + reverse) provide volume, while the pilot project's forward pairs provide the error-correction signal the forward-pair minimum requires.
+
+**Forward-pair ratio concern:** With ~6-10 forward pairs out of ~108-166 total, the initial forward ratio is only ~4-6% — well below the 15% minimum (Section 8.1). This means the first QLoRA training cycle can proceed with the loss weight multiplier compensating for the imbalance (Section 8.1), but the 15% threshold for unweighted training will only be met after additional forward pairs accumulate from ongoing development. This is acceptable: the first training cycle is explicitly a calibration run (see calibration note in Section 8.1).
 
 ### 6.7 Retroactive Corpus Generation Script
 
@@ -805,11 +869,99 @@ knowledge/curricula/code-architect/
 └── ...
 ```
 
+### 6.9 Dev Journal Corpus Extraction (Historical Training Data)
+
+The retroactive approach (Section 6.1-6.8) generates training pairs by having CC review existing live code against existing blueprints. But the GAIA project has a second, richer source of structured training data: **32 dev journals** spanning January-February 2026, each following a consistent template and linked to specific git commits.
+
+#### 6.9.1 Why Dev Journals Are Valuable
+
+Dev journals contain information that retroactive reviews cannot capture:
+
+| Signal Type | Retroactive Review | Dev Journal |
+|---|---|---|
+| Final code state | Yes | Yes |
+| Blueprint alignment | Yes | Partial (journals reference blueprint sections) |
+| **Problem → fix narrative** | No | Yes (debugging journals) |
+| **Architectural rationale** | No | Yes (design decisions sections) |
+| **Test-driven cycles** | No | Yes (test summaries with pass/fail) |
+| **Promotion validation** | No | Yes (8 promotion journals with stage results) |
+| **Bug pattern recognition** | No | Yes (root cause → fix → verify tuples) |
+
+Retroactive pairs teach "what correct code looks like." Dev journal pairs teach "how to reason about code problems" — a different and complementary training signal.
+
+#### 6.9.2 Extractable Training Tuple Patterns
+
+**Included in code-architect training (generation-oriented):**
+
+**Pattern A: Blueprint-Anchored Change**
+- Input: Blueprint section + "the problem" from journal context
+- Output: The code change (from git diff via commit hash)
+- Signal: Promotion outcome (passed/failed/modified)
+- Example: Temporal awareness journal → `lite_journal.py` 306 lines → "20/20 tests PASS"
+- **Why included:** Directly teaches blueprint → code generation in a real-world context
+
+**Pattern C: Audit Finding → Remediation**
+- Input: Security/quality finding + severity
+- Output: Specific code change
+- Signal: Finding status (fixed/deferred/acknowledged)
+- Example: "Shell injection in mcp_client.py" → `shell=False` + `shlex.split()` → promoted
+- **Why included:** Teaches corrective code generation given a structured deficiency report — similar to the review → fix cycle in forward pairs
+
+**Deferred to future `code-reviewer` adapter:**
+
+**Pattern B: Bug Diagnosis → Fix** — This is a reasoning/diagnosis task, not a generation task. The input is a symptom and the expected output is a root cause analysis. Valuable for a reviewer/debugger adapter but doesn't fit code-architect's generation objective.
+
+**Pattern D: Promotion Sequence** — Operational knowledge about pipeline orchestration. Valuable for a future DevOps-aware adapter but orthogonal to blueprint-faithful code generation.
+
+#### 6.9.3 Extraction Script
+
+**Location:** `scripts/extract_journal_corpus.py`
+
+This script:
+1. Scans `knowledge/Dev_Notebook/*.md` for date-stamped dev journals
+2. Parses each journal's structured sections (Context, Implementation, Test Summary, Files Summary, Validation)
+3. Extracts commit hashes from journals and retrieves corresponding `git diff` data
+4. Cross-references blueprint sections mentioned in journal text
+5. Constructs training tuples with `pair_type: "journal"` and `journal_pattern: "A|B|C|D"`
+6. Outputs to `knowledge/curricula/code-architect/journal/` directory
+
+**Extraction is best-effort.** Journal formatting varies slightly across sessions. The script should parse what it can, log what it skips, and produce a manifest showing coverage. Human review of the manifest confirms pair quality before training inclusion.
+
+#### 6.9.4 Journal Pair Characteristics
+
+Journal pairs are distinct from both retroactive and forward pairs:
+
+| | Retroactive | Forward | Journal | Reverse |
+|---|---|---|---|---|
+| **Source** | Live service review | New code generation | Historical dev records | Code → blueprint |
+| **Signal** | "What good looks like" | "Mistakes + fixes" | "How to reason about changes" | "Code comprehension" |
+| **Volume** | ~54-78 | Unbounded | ~40-70 (patterns A+C from 32 journals) | Per new service |
+| **Quality** | Uniform (all promoted) | Variable (pre-review) | High (includes validation) | High (working code) |
+
+Journal pairs count toward the total corpus size but NOT toward the forward-pair minimum (Section 8.1). Like retroactive pairs, they represent already-validated work. The forward-pair minimum specifically targets error-correction learning that only comes from generating new code and having it reviewed.
+
+#### 6.9.5 Corpus Storage
+
+```
+knowledge/curricula/code-architect/
+├── journal/                              # NEW
+│   ├── {date}_{topic}/
+│   │   ├── journal_context.json          # parsed journal sections
+│   │   ├── git_diff.patch                # corresponding code changes
+│   │   ├── blueprint_context.json        # referenced blueprint sections
+│   │   └── training_tuples.json          # extracted (input, output, signal) tuples
+│   └── journal_manifest.json             # coverage tracking
+├── retroactive/                          # existing
+├── reviews/                              # existing
+├── pairs/                                # existing
+└── ...
+```
+
 ---
 
 ## 7. Phase 3: Training Corpus Construction
 
-Every CC review — whether from forward generation (Phase 2) or retroactive bootstrapping (Phase 2.5) — produces a training example. The corpus accumulates from both sources.
+Every CC review — whether from forward generation (Phase 2), retroactive bootstrapping (Phase 2.5), or journal extraction (Phase 2.5, Section 6.9) — produces a training example. The corpus accumulates from all sources.
 
 ### 7.1 Training Pair Schema
 
@@ -818,7 +970,7 @@ Each training pair captures a review cycle:
 ```json
 {
   "pair_id": "uuid",
-  "pair_type": "forward | retroactive",
+  "pair_type": "forward | retroactive | reverse | journal",
   "granularity": "service | file",
   "service_id": "gaia-example",
   "file_scope": "router.py | null",
@@ -883,7 +1035,7 @@ knowledge/curricula/code-architect/
     "gradient_accumulation_steps": 8,
     "learning_rate": 1e-4,
     "max_steps": 500,
-    "max_sequence_length": 2048
+    "max_sequence_length": 4096
   },
   "chat_template": "auto",
   "training_objective": "Given a blueprint specification and context, generate Python source code that achieves maximum blueprint fidelity (low divergence score).",
@@ -901,7 +1053,7 @@ knowledge/curricula/code-architect/
 
 Notes:
 - Rank 32 (vs json-architect's 16) because code generation requires more expressive capacity than JSON formatting.
-- `chat_template: "auto"` — derive the instruction format from the base model's tokenizer config rather than hardcoding `[INST]`/`<</SYS>>` tags, which are Llama-2-specific and may not match Nanbeige4-3B's expected format.
+- `chat_template: "auto"` — derive the instruction format from the base model's tokenizer config rather than hardcoding `[INST]`/`<</SYS>>` tags, which are Llama-2-specific and may not match Qwen3-4B's expected format.
 - `adapter_version` tracks training iterations. When retraining with an expanded corpus, increment the version. The `versioning.retention_count` keeps the last 3 adapter checkpoints for rollback.
 
 ### 7.4 Training Pair Generation Script
@@ -1073,36 +1225,154 @@ Phase 0 (Infrastructure)
 
 Phase 1 (CC Generation Workflow)
 ├── 4.x  Generation rubric + context                ← depends on 3.1, 3.2
-└── 4.3  Candidate directory structure               ← depends on generation rubric
+├── 4.3  Candidate directory structure               ← depends on generation rubric
+└── 4.4  Reverse blueprint generation workflow       ← depends on 3.1, 3.2, 3.5
 
 Phase 2 (CC Review Workflow)
-├── 5.2  Review prompt template                      ← depends on 3.2, 3.5
+├── 5.2  Review prompt template (+ reverse variant)  ← depends on 3.2, 3.5
 ├── 5.3  cc_review_candidate.sh (+ --live flag)      ← depends on 3.1, 3.5, 5.2
 └── 5.4  Result handling + routing                   ← depends on 5.3
 
-Phase 2.5 (Retroactive Corpus Bootstrapping)     ← NEW
-├── 6.1  generate_retroactive_corpus.sh           ← depends on Phase 0 + 2
-├── 6.2  Per-file blueprint scoping logic         ← depends on 3.2
-├── 6.3  CC reviews of all live services (batch)  ← depends on 6.1
-├── 6.4  Quality filtering (confidence ≥ 0.6)     ← depends on 6.3
-└── 6.5  If corpus ≥ 50: Phase 4 unblocked        ← depends on 6.4
+Phase 2.5 (Corpus Bootstrapping — 3 sources)
+├── 6.1  Retroactive: generate_retroactive_corpus.sh ← depends on Phase 0 + 2
+├── 6.2  Per-file blueprint scoping logic            ← depends on 3.2
+├── 6.3  CC reviews of all live services (batch)     ← depends on 6.1
+├── 6.4  Quality filtering (confidence ≥ 0.6)        ← depends on 6.3
+├── 6.9  Journal: extract_journal_corpus.py          ← depends on 7.1 schema
+├── 10.1 Pilot: gaia-audio reverse blueprint         ← depends on 4.4, Phase 0
+├── 10.1 Pilot: gaia-web GUI feature (forward pair)  ← depends on 10.1 blueprint
+└── 6.5  If corpus ≥ 50: Phase 4 unblocked           ← depends on 6.4 + 6.9
 
 Phase 3 (Forward Corpus Construction)
-├── 7.1  Training pair schema (+ pair_type tag)   ← depends on 5.4
+├── 7.1  Training pair schema (+ pair_type tag)      ← depends on 5.4
 ├── 7.3  Curriculum spec (+ versioning, auto template) ← depends on 7.1
-└── 7.4  generate_pairs.py (both pair types)      ← depends on 7.1, 7.3
+└── 7.4  generate_pairs.py (all pair types)          ← depends on 7.1, 7.3
 
 Phase 4 (Training & Validation)
-├── 8.1  Corpus size monitoring                   ← depends on Phase 3
-├── 8.2  BlueprintFidelityValidator class          ← depends on 7.3
-└── 8.3  Graduation tracking                      ← depends on 8.2
+├── 8.1  Corpus size monitoring                      ← depends on Phase 3
+├── 8.2  BlueprintFidelityValidator class             ← depends on 7.3
+└── 8.3  Graduation tracking                         ← depends on 8.2
 
 Phase 5 (Sleep Cycle Integration)
-├── 9.1  code_review sleep task                   ← depends on Phase 4 adapter
-└── 9.2  Review Queue integration                 ← depends on Blueprint System Phase 2
+├── 9.1  code_review sleep task                      ← depends on Phase 4 adapter
+└── 9.2  Review Queue integration                    ← depends on Blueprint System Phase 2
 ```
 
-**Critical path acceleration:** Phases 0 → 2 → 2.5 can be executed as a focused sprint. If retroactive bootstrapping yields ≥ 50 pairs, Phase 4 is immediately unblocked without waiting for forward pair accumulation. Forward pairs (Phase 3) continue accumulating in parallel and are folded into subsequent training cycles.
+**Critical path acceleration:** Three corpus sources run in parallel during Phase 2.5:
+1. Retroactive reviews of 6 live services (~54-78 pairs)
+2. Dev journal extraction — patterns A+C from 32 journals (~40-70 pairs)
+3. Pilot project forward + reverse pairs from gaia-audio + gaia-web GUI features (~14-18 pairs)
+
+Combined, these should yield **~108-166 training pairs** — well above the 50-pair minimum, with the journal and pilot sources providing richer signal than retroactive reviews alone. Forward pairs (Phase 3) continue accumulating organically.
+
+### 10.1 Pilot Project: gaia-audio Promotion + gaia-web GUI Features
+
+The bootstrap plan needs a concrete, bounded target to validate against before scaling. The pilot project serves this purpose: **promote gaia-audio to production** (exercising reverse blueprint generation) and **add audio service awareness to gaia-web** (exercising forward code generation with GAIA participation).
+
+#### 10.1.1 Pilot Part 1: gaia-audio Blueprint & Promotion
+
+gaia-audio is a complete candidate service (1,233 lines, 7 source files, 30 tests) with no blueprint. This makes it the ideal first exercise of Section 4.4 (Reverse Blueprint Generation).
+
+**Pilot workflow:**
+
+1. **Generate blueprint** — CC reads gaia-audio source and produces candidate blueprint YAML, covering:
+   - 12 HTTP endpoints (including WebSocket `/status/ws`)
+   - Dependencies: gaia-core (wake signal), gaia-orchestrator (service registration). Note: gaia-web calls gaia-audio (not the reverse) — gaia-web is a consumer, not a dependency
+   - Failure modes: GPU OOM, model load failure, muted-state rejection, audio format errors, cloud API fallback
+   - Intent: "GAIA's ears and mouth" — sensory perception and voice synthesis
+   - Source files: 7 files with role tags
+
+2. **Run Phase 0 infrastructure** — Use gaia-audio as the test target:
+   - AST summarizer → summarize all 7 source files (validates Section 3.1 against real code)
+   - Blueprint pre-check → validate code against the new blueprint (validates Section 3.5)
+   - Review prompt builder → assemble review prompt (validates Section 3.2)
+
+3. **CC review (cold session)** — Independent CC reviews code against blueprint:
+   - Uses reverse review variant (Section 4.4.3): "does this blueprint accurately describe this code?"
+   - Produces ReviewResult JSON → training pair (`pair_type: "reverse"`)
+
+4. **Fix discrepancies** — For reverse reviews, fix the blueprint (not the code — the code is working)
+
+5. **Promote** — Standard `promote_pipeline.sh` for gaia-audio
+
+**Special considerations for gaia-audio:**
+- First service using both `http_rest` AND `websocket` interface types → validates pre-check handling of WebSocket endpoints
+- GPU resource management → exercises failure mode coverage dimension beyond typical REST services
+- Half-duplex model swapping → complex state machine that tests intent coherence dimension
+
+**Training pair output:** 1 reverse pair (per-service) + 7 reverse pairs (per-file) = **~8 training pairs**
+
+#### 10.1.2 Pilot Part 2: gaia-web GUI Features (GAIA-Guided Forward Generation)
+
+With the gaia-audio blueprint now live, the next step is a **forward generation exercise** — adding audio service awareness to the web dashboard. This is where GAIA participates directly, making it a true test of the bootstrap plan's training loop.
+
+**Features to implement (scoped precisely):**
+
+**Feature Group A: Audio Service Awareness**
+
+| Feature | Backend Change | Frontend Change |
+|---------|---------------|-----------------|
+| gaia-audio in service registry | Add entry to `_SERVICE_REGISTRY` in `main.py` | Add `'gaia-audio': 'Audio'` to `SERVICE_LABELS` |
+| Audio proxy routes | Add `GET /api/hooks/audio/status`, `POST /api/hooks/audio/mute`, `POST /api/hooks/audio/unmute` to `hooks.py` | Update `audioWidget()` URLs to use proxy routes |
+| TTS/STT model status | (Data already exposed by gaia-audio `/status`) | Add `sttModel`, `ttsModel` fields to `audioWidget()` + HTML display |
+| Audio sleep/wake buttons | Add `POST /api/hooks/audio/sleep`, `POST /api/hooks/audio/wake` to `hooks.py` | Add Audio Control group to `hooksPanel()` with sleep/wake/mute/unmute buttons |
+
+**Feature Group B: Sleep Task Log Viewer**
+
+| Feature | Backend Change | Frontend Change |
+|---------|---------------|-----------------|
+| Task scheduler status endpoint | Add `GET /sleep/tasks` to `sleep_endpoints.py` — returns `SleepTaskScheduler.get_status()` (run counts, last run, errors per task) | — |
+| Task execution history endpoint | Add `GET /sleep/task-history?limit=50` to `sleep_endpoints.py` — queries TimelineStore for `task_exec` events | — |
+| Proxy routes for task data | Add `GET /api/hooks/sleep/tasks`, `GET /api/hooks/sleep/task-history` to `hooks.py` | — |
+| Sleep Task Log widget | — | New component in Commands view showing task list with priority, run count, last execution time, duration, and pass/fail status |
+
+**Why this belongs in the pilot:** Phase 5 (Section 9) adds a `code_review` sleep task. Without visibility into sleep task execution from the dashboard, there's no way to observe whether the bootstrap plan's autonomous review cycle is running, succeeding, or failing. The log viewer is operational infrastructure for the plan itself.
+
+**Data sources (already exist, just not surfaced):**
+- `SleepTaskScheduler.get_status()` — per-task metadata: `task_id`, `priority`, `run_count`, `last_run`, `last_error`
+- TimelineStore `task_exec` events — per-execution records: `task_id`, `duration_s`, `success`, `error` (written to `/shared/timeline/gaia_timeline_*.jsonl`)
+
+**GAIA's participation model:**
+
+The full feature set exceeds gaia-prime's context window. But individual tasks are small enough:
+
+1. **Service registry addition** (~5 lines of context) — GAIA can generate this
+2. **Single proxy endpoint** (~15 lines of code + 20 lines of context) — GAIA can generate each endpoint individually
+3. **Alpine.js field additions** (~10 lines) — GAIA can generate with the existing widget as exemplar
+4. **HTML template additions** (~20 lines) — GAIA can generate with existing hooks panel as exemplar
+5. **Sleep task status endpoint** (~20 lines of code) — GAIA can generate given the existing sleep endpoint file as exemplar
+6. **Sleep task log widget** (~30 lines of JS) — GAIA can generate with the hooks panel as exemplar
+
+For each sub-task:
+- CC provides the scoped blueprint section as context
+- GAIA generates the code
+- CC reviews the output (cold session) → produces a forward training pair
+- If GAIA's output needs correction, the correction itself becomes high-value training signal
+
+**Training pair output:** ~6-10 forward pairs (one per sub-task that GAIA attempts)
+
+#### 10.1.3 Pilot Training Pair Summary
+
+| Source | Type | Estimated Count |
+|--------|------|----------------|
+| gaia-audio blueprint (per-service + per-file) | reverse | ~8 |
+| gaia-web GUI features — audio awareness (per sub-task) | forward | ~4-6 |
+| gaia-web GUI features — sleep task log (per sub-task) | forward | ~2-4 |
+| **Pilot total** | | **~14-18** |
+
+These are high-quality pairs: the reverse pairs come from a real working service, and the forward pairs capture GAIA's actual generation patterns (including mistakes). Combined with retroactive reviews (~54-78) and journal extraction (~40-70), the pilot alone doesn't need to hit the 50-pair threshold — it's one of three parallel corpus sources.
+
+#### 10.1.4 Pilot Success Criteria
+
+The pilot is successful if:
+1. gaia-audio has a live blueprint that passes pre-check validation with ≥ 85% structural completeness
+2. gaia-audio is promoted to production via the standard pipeline
+3. gaia-web displays gaia-audio in the service health grid with correct status
+4. Audio model status (STT/TTS model names) is visible in the dashboard
+5. Sleep/wake/mute/unmute buttons for gaia-audio work from the hooks panel
+6. Sleep task log viewer shows task run history in the Commands view
+7. At least 12 training pairs are generated and stored in `knowledge/curricula/code-architect/`
+8. GAIA participated in at least 4 generation sub-tasks (regardless of output quality)
 
 ---
 
@@ -1126,9 +1396,12 @@ Phase 5 (Sleep Cycle Integration)
 | `scripts/build_review_prompt.py` | CLI wrapper for prompt construction | 2 |
 | `scripts/review_templates/cc_review_prompt.txt` | Review prompt template | 2 |
 | `scripts/generate_retroactive_corpus.sh` | Retroactive corpus bootstrapping | 2.5 |
+| `scripts/extract_journal_corpus.py` | Dev journal training data extraction | 2.5 |
+| `scripts/review_templates/cc_reverse_review_prompt.txt` | Reverse review prompt variant (code → blueprint) | 1 |
+| `knowledge/blueprints/candidates/gaia-audio.yaml` | gaia-audio blueprint (reverse-generated) | Pilot |
 | `candidates/gaia-study/scripts/validators/blueprint_fidelity.py` | BlueprintFidelityValidator (standalone module) | 4 |
 | `knowledge/curricula/code-architect/curriculum.json` | Adapter training spec (versioned) | 3 |
-| `knowledge/curricula/code-architect/generate_pairs.py` | Training pair generator (both types) | 3 |
+| `knowledge/curricula/code-architect/generate_pairs.py` | Training pair generator (all types) | 3 |
 
 ### Modified Files
 
@@ -1141,6 +1414,11 @@ Phase 5 (Sleep Cycle Integration)
 | `candidates/gaia-study/scripts/validate_adapter.py` | Add `--validator` routing to dispatch json_schema vs blueprint_fidelity | 4 |
 | `candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py` | Add code_review task (uses pre-check + code-architect adapter) | 5 |
 | `knowledge/blueprints/QLORA_SELF_STUDY.md` | Add code-architect adapter section | 3 |
+| `candidates/gaia-web/gaia_web/main.py` | Add gaia-audio to `_SERVICE_REGISTRY` | Pilot |
+| `candidates/gaia-web/gaia_web/routes/hooks.py` | Add audio proxy routes (status, mute, unmute, sleep, wake) + sleep task proxy routes (tasks, task-history) | Pilot |
+| `candidates/gaia-web/static/app.js` | Add `SERVICE_LABELS` entry, update `audioWidget()` model display, add `hooksPanel()` audio controls + sleep task log widget | Pilot |
+| `candidates/gaia-web/static/index.html` | Add model status row to audio widget, add Audio Control hook group, add Sleep Task Log section | Pilot |
+| `candidates/gaia-core/gaia_core/api/sleep_endpoints.py` | Add `GET /sleep/tasks` and `GET /sleep/task-history` endpoints | Pilot |
 
 ---
 
@@ -1150,7 +1428,7 @@ These are the architectural invariants CC must respect throughout implementation
 
 1. **CC reviews in a cold context.** Never review code you generated in the same session. The independence is what makes the review meaningful.
 
-2. **Blueprints are the spec, not the code.** The review always flows from blueprint → code, never from code → inferred intent. If the blueprint is wrong, fix the blueprint; don't bend the review.
+2. **Blueprints are the spec, not the code** (with one exception). In forward reviews, the review flows from blueprint → code. If the code doesn't match the blueprint, fix the code. In reverse reviews (Section 4.4), the code is the source of truth and the blueprint is evaluated against it — if the blueprint doesn't match the code, fix the blueprint. The direction must be explicitly set via `review_direction` and never mixed in a single review.
 
 3. **Mechanical pre-checks for structural completeness, LLM for semantic fidelity.** The refactored blueprint pre-check (Section 3.5) runs on full source, is fast and deterministic, and answers "is it there?" The LLM reviewer receives pre-check results + AST summaries and answers "does it do the right thing?" Never feed full source to the LLM reviewer. The targeted body extractions (Section 3.1.1) provide heuristic evidence; the pre-check provides ground truth for structural presence. Together they give the LLM reviewer near-complete coverage without context budget explosion.
 
@@ -1178,3 +1456,5 @@ These are the architectural invariants CC must respect throughout implementation
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 3: Added Section 3.5 (mechanical pre-check validator — refactored from sleep_task_scheduler). Adopted hybrid review architecture: pre-checks provide structural ground truth, LLM assesses semantic fidelity. Updated review prompt (3.2), prompt template (5.2), review script (5.3), session setup (5.1) to incorporate pre-check results. Reframed LLM reviewer role from "find what's missing" to "assess whether what's present implements intent." Updated Design Principle 3. Added blueprint_precheck.py, test_blueprint_precheck.py, run_blueprint_precheck.py to file manifest. |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 4: Calibrated pre-check accuracy estimates (failure_mode ~50-60%, honest per-dimension table). Added Section 3.2.1 token budget guard with progressive truncation priority for gaia-prime context limits. Pinned reference implementation selection (Section 7.4.1) to dependency+interface Jaccard overlap. Separated graduation criteria into generation quality vs review quality (Section 8.3) — review quality deferred to Phase 5 maturity. Added 15% minimum forward-pair ratio + 1.5x loss weight for forward pairs in skewed corpora (Section 8.1). Moved BlueprintFidelityValidator to standalone `validators/blueprint_fidelity.py` module. |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 5: Added calibration caveat to forward-pair ratio/weight thresholds — explicitly marked as initial estimates requiring post-first-cycle tuning (Section 8.1). Fixed per-file blueprint scoping (Section 6.2) to default to full blueprint for composite files, ambiguous roles, or missing role tags. Added Section 6.3 (retroactive review rejection handling) — defines the distinct result path for live services where rejection surfaces as blueprint open_questions + Review Queue items rather than looping back to generation. |
+| 2026-02-19 | Claude (Opus 4.6) via CC | Rev 6: Added Section 4.4 (Reverse Blueprint Generation), Section 6.9 (Dev Journal Corpus Extraction), Section 10.1 (Pilot Project). Updated model reference Nanbeige4-3B → Qwen3-4B-Instruct. Updated Design Principle 2 for reverse reviews. Added `reverse` and `journal` pair types. Updated corpus estimates, implementation order, file manifest. |
+| 2026-02-20 | Claude (Opus 4.6) via CC | Rev 7: Scoped journal pairs to patterns A+C only (generation-oriented), deferred B+D to future code-reviewer adapter. Added WebSocket decorator pattern (`@app.websocket()`) to pre-check validator. Fixed gaia-audio dependency direction (gaia-web is consumer, not dependency). Added `review_direction` field to ReviewResult schema. Added Sleep Task Log Viewer to pilot (Feature Group B) — surfaces existing TimelineStore `task_exec` events and `SleepTaskScheduler.get_status()` in dashboard Commands view. Added `sleep_endpoints.py` to modified files. Updated corpus estimates to ~108-166 total (~6-10 forward pairs). Updated pilot success criteria (8 items, ≥12 training pairs, ≥4 GAIA sub-tasks). Section numbering fix: 6.4 reference was cosmetic (confidence filter is inline in 6.1). |

@@ -188,11 +188,90 @@ class SleepTaskScheduler:
         ],
     }
 
-    def _run_blueprint_validation(self) -> None:
-        """Scan blueprints against source files and flag stale content."""
+    # Service IDs with known YAML blueprints that should use the structured
+    # pre-check path. The .md legacy path remains for blueprints without YAML.
+    _YAML_BLUEPRINT_SERVICES: List[str] = [
+        "gaia-core", "gaia-web", "gaia-mcp", "gaia-orchestrator",
+        "gaia-prime", "gaia-study",
+    ]
 
+    # Map YAML service IDs to their source directories (candidate preferred)
+    _SERVICE_SOURCE_DIRS: Dict[str, str] = {
+        "gaia-core": "/gaia/GAIA_Project/candidates/gaia-core/gaia_core",
+        "gaia-web": "/gaia/GAIA_Project/candidates/gaia-web/gaia_web",
+        "gaia-mcp": "/gaia/GAIA_Project/candidates/gaia-mcp/gaia_mcp",
+        "gaia-orchestrator": "/gaia/GAIA_Project/candidates/gaia-orchestrator/gaia_orchestrator",
+        "gaia-study": "/gaia/GAIA_Project/candidates/gaia-study/gaia_study",
+    }
+
+    def _run_blueprint_validation(self) -> None:
+        """Scan blueprints against source files and flag stale content.
+
+        Uses two paths:
+        1. YAML blueprints → structured pre-check via blueprint_precheck module
+        2. Legacy .md blueprints → inline regex extraction (fallback)
+        """
+        total_mismatches = 0
+
+        # ── Path 1: YAML blueprint pre-check (structured) ────────────────
+        total_mismatches += self._validate_yaml_blueprints()
+
+        # ── Path 2: Legacy .md blueprint validation (fallback) ────────────
+        total_mismatches += self._validate_legacy_blueprints()
+
+        logger.info(
+            "Blueprint validation complete: %d total mismatches",
+            total_mismatches,
+        )
+        self._rebuild_blueprint_embeddings()
+
+    def _validate_yaml_blueprints(self) -> int:
+        """Run structured pre-check on YAML blueprints. Returns mismatch count."""
+        try:
+            from gaia_common.utils.blueprint_io import load_blueprint
+            from gaia_common.utils.blueprint_precheck import run_blueprint_precheck
+        except ImportError:
+            logger.debug("blueprint_precheck not available, skipping YAML validation")
+            return 0
+
+        mismatches = 0
+        for service_id in self._YAML_BLUEPRINT_SERVICES:
+            bp = load_blueprint(service_id)
+            if bp is None:
+                logger.debug("No YAML blueprint for %s, skipping", service_id)
+                continue
+
+            source_dir = self._SERVICE_SOURCE_DIRS.get(service_id)
+            if source_dir is None or not Path(source_dir).exists():
+                # Try production path
+                source_dir = f"/gaia/GAIA_Project/{service_id.replace('-', '_')}"
+                if not Path(source_dir).exists():
+                    logger.debug("No source dir for %s, skipping", service_id)
+                    continue
+
+            result = run_blueprint_precheck(bp, source_dir)
+            missing_items = [i for i in result.items if i.status == "missing"]
+
+            if missing_items:
+                mismatches += len(missing_items)
+                missing_strs = [
+                    f"{i.category}:{i.blueprint_claim}" for i in missing_items
+                ]
+                logger.warning(
+                    "Blueprint %s.yaml has %d missing items: %s",
+                    service_id, len(missing_items), missing_strs,
+                )
+            else:
+                logger.info(
+                    "Blueprint %s.yaml pre-check passed (%d/%d found)",
+                    service_id, result.summary.found, result.summary.total,
+                )
+
+        return mismatches
+
+    def _validate_legacy_blueprints(self) -> int:
+        """Run legacy .md blueprint validation. Returns mismatch count."""
         blueprints_dir = Path("/gaia/GAIA_Project/knowledge/blueprints")
-        # Candidate sources preferred over live (they're the latest)
         source_roots = [
             Path("/gaia/GAIA_Project/candidates/gaia-core"),
             Path("/gaia/GAIA_Project/candidates/gaia-orchestrator"),
@@ -200,8 +279,7 @@ class SleepTaskScheduler:
             Path("/gaia/GAIA_Project/gaia-orchestrator"),
         ]
 
-        total_mismatches = 0
-
+        mismatches = 0
         for bp_name, source_files in self._BLUEPRINT_SOURCES.items():
             bp_path = blueprints_dir / bp_name
             if not bp_path.exists():
@@ -213,7 +291,7 @@ class SleepTaskScheduler:
             missing = self._check_facts(facts, bp_text)
 
             if missing:
-                total_mismatches += len(missing)
+                mismatches += len(missing)
                 logger.warning(
                     "Blueprint %s has %d stale references: %s",
                     bp_name, len(missing), missing,
@@ -222,12 +300,7 @@ class SleepTaskScheduler:
             else:
                 logger.info("Blueprint %s is up-to-date", bp_name)
 
-        logger.info(
-            "Blueprint validation complete: %d mismatches across %d blueprints",
-            total_mismatches, len(self._BLUEPRINT_SOURCES),
-        )
-
-        self._rebuild_blueprint_embeddings()
+        return mismatches
 
     @staticmethod
     def _extract_facts(
