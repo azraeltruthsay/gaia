@@ -385,9 +385,55 @@ def generate_json_report(report: ValidationReport,
     return result
 
 
+def _run_blueprint_fidelity(args) -> None:
+    """Route to the blueprint_fidelity validator for code-architect."""
+    # Import the blueprint fidelity validator
+    validators_dir = Path(__file__).parent / "validators"
+    if not validators_dir.exists():
+        print("ERROR: validators/ directory not found", file=sys.stderr)
+        sys.exit(2)
+
+    sys.path.insert(0, str(validators_dir.parent))
+    from validators.blueprint_fidelity import (
+        generate_fidelity_json_report,
+        print_fidelity_report,
+        run_fidelity_validation,
+    )
+
+    report = run_fidelity_validation(
+        adapter_name=args.adapter,
+        validation_file=args.validation_file,
+        endpoint=args.endpoint,
+        model=args.adapter,
+        max_examples=args.max_examples,
+        dry_run=args.dry_run,
+    )
+    print_fidelity_report(report, verbose=args.verbose)
+
+    if args.json_report:
+        report_data = generate_fidelity_json_report(report)
+        report_path = Path(args.json_report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, "w") as f:
+            json.dump(report_data, f, indent=2)
+        print(f"\nJSON report written to {report_path}")
+
+    threshold = args.threshold if args.threshold != 0.6 else 0.75  # code-architect default
+    passed = report.avg_score >= threshold
+    status = "PASS" if passed else "FAIL"
+    print(f"\n{'='*60}")
+    print(f"  RESULT: {status}  (score={report.avg_score:.3f}, threshold={threshold})")
+    print(f"{'='*60}")
+
+    sys.exit(0 if passed else 1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Validate a QLoRA adapter")
     parser.add_argument("--adapter", required=True, help="Adapter name")
+    parser.add_argument("--validator", choices=["json_schema", "blueprint_fidelity"],
+                        default="json_schema",
+                        help="Validator to use (default: json_schema)")
     parser.add_argument("--validation-file", required=True, help="Path to validation JSONL")
     parser.add_argument("--endpoint", default="http://localhost:7777",
                         help="vLLM or gaia-core endpoint (default: http://localhost:7777)")
@@ -405,7 +451,12 @@ def main():
                         help="Write JSON report to this path")
     args = parser.parse_args()
 
-    # Run adapter validation
+    # Route to appropriate validator
+    if args.validator == "blueprint_fidelity":
+        _run_blueprint_fidelity(args)
+        return  # _run_blueprint_fidelity calls sys.exit
+
+    # Default: json_schema validator (original logic)
     adapter_report = run_validation(
         adapter_name=args.adapter,
         validation_file=args.validation_file,

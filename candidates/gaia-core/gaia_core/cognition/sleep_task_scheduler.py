@@ -210,6 +210,7 @@ class SleepTaskScheduler:
         Uses two paths:
         1. YAML blueprints → structured pre-check via blueprint_precheck module
         2. Legacy .md blueprints → inline regex extraction (fallback)
+        3. Code-architect corpus readiness check
         """
         total_mismatches = 0
 
@@ -218,6 +219,9 @@ class SleepTaskScheduler:
 
         # ── Path 2: Legacy .md blueprint validation (fallback) ────────────
         total_mismatches += self._validate_legacy_blueprints()
+
+        # ── Path 3: Code-architect corpus readiness ──────────────────────
+        self._check_code_architect_corpus()
 
         logger.info(
             "Blueprint validation complete: %d total mismatches",
@@ -427,6 +431,83 @@ class SleepTaskScheduler:
             )
         except Exception:
             logger.error("Failed to rebuild blueprint embeddings", exc_info=True)
+
+    _CORPUS_DIR = "/knowledge/curricula/code-architect"
+    _PRIME_MD = "/shared/self_model/prime.md"
+    _MIN_CORPUS_SIZE = 50
+    _MIN_FORWARD_RATIO = 0.15
+
+    def _check_code_architect_corpus(self) -> None:
+        """Check code-architect training corpus readiness and log to prime.md."""
+        try:
+            pairs_dir = Path(self._CORPUS_DIR) / "pairs"
+            if not pairs_dir.exists():
+                return
+
+            import json as _json
+
+            pair_files = list(pairs_dir.glob("*.json"))
+            total = len(pair_files)
+            if total == 0:
+                return
+
+            forward_count = 0
+            for pf in pair_files:
+                try:
+                    data = _json.loads(pf.read_text(encoding="utf-8"))
+                    if data.get("pair_type") == "forward":
+                        forward_count += 1
+                except Exception:
+                    continue
+
+            forward_ratio = forward_count / total if total else 0.0
+
+            # Check if adapter already exists
+            adapter_dir = Path("/shared/adapters/code-architect")
+            adapter_exists = adapter_dir.exists() and any(adapter_dir.iterdir()) if adapter_dir.exists() else False
+
+            if total >= self._MIN_CORPUS_SIZE and forward_ratio >= self._MIN_FORWARD_RATIO:
+                if not adapter_exists:
+                    note = (
+                        f"code-architect corpus has reached training threshold "
+                        f"({total} pairs: {total - forward_count} retroactive, {forward_count} forward). "
+                        f"Forward pair ratio: {forward_ratio:.0%}. "
+                        f"Recommend triggering training via promote_pipeline.sh --qlora --adapter code-architect"
+                    )
+                    self._append_prime_note(note, high_priority=True)
+                    logger.info("Code-architect corpus ready: %s", note)
+            elif total >= self._MIN_CORPUS_SIZE and forward_ratio < self._MIN_FORWARD_RATIO:
+                needed = max(1, int(self._MIN_CORPUS_SIZE * self._MIN_FORWARD_RATIO) - forward_count)
+                note = (
+                    f"code-architect corpus size sufficient ({total} pairs) but forward pair ratio "
+                    f"too low ({forward_ratio:.0%} < 15%). Need {needed} more forward pairs before training."
+                )
+                self._append_prime_note(note, high_priority=False)
+                logger.info("Code-architect corpus: %s", note)
+            else:
+                logger.debug(
+                    "Code-architect corpus: %d/%d pairs (%d forward)",
+                    total, self._MIN_CORPUS_SIZE, forward_count,
+                )
+
+        except Exception:
+            logger.debug("Code-architect corpus check skipped", exc_info=True)
+
+    def _append_prime_note(self, note: str, high_priority: bool = False) -> None:
+        """Append a timestamped note to prime.md (best-effort)."""
+        try:
+            prime_path = Path(self._PRIME_MD)
+            if not prime_path.parent.exists():
+                return
+
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            prefix = "[HIGH PRIORITY] " if high_priority else ""
+            entry = f"\n\n### {prefix}Sleep Cycle Note ({timestamp})\n{note}\n"
+
+            with open(prime_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+        except Exception:
+            logger.debug("Failed to append to prime.md", exc_info=True)
 
     def _run_code_evolution(self) -> None:
         """Generate code evolution snapshot for temporal self-awareness."""
