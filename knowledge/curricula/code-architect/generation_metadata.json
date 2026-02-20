@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-02-20T23:42:44.652417Z",
+  "total_pairs": 1,
+  "train_count": 0,
+  "validation_count": 1,
+  "pair_type_counts": {
+    "forward": 1
+  },
+  "service_counts": {
+    "gaia-core": 1
+  },
+  "mean_fidelity": 0.85,
+  "min_corpus_size": 50,
+  "corpus_ready": false
+}

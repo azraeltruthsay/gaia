@@ -1,0 +1,36 @@
+{
+  "adapter_name": "code-architect",
+  "adapter_version": 1,
+  "tier": 1,
+  "pillar": "cognition",
+  "priority": "high",
+  "description": "Blueprint-faithful Python code generation for GAIA services",
+  "base_model": "gaia-prime",
+
+  "hyperparameters": {
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj"],
+    "batch_size": 1,
+    "gradient_accumulation_steps": 8,
+    "learning_rate": 1e-4,
+    "max_steps": 500,
+    "max_sequence_length": 4096
+  },
+
+  "chat_template": "auto",
+  "training_objective": "Given a blueprint specification and context, generate Python source code that achieves maximum blueprint fidelity (low divergence score).",
+
+  "minimum_corpus_size": 50,
+  "validation_split": 0.15,
+
+  "activation_triggers": ["builder_panel", "gaia_initiated"],
+  "routing_keywords": ["generate service", "implement blueprint", "write the code for"],
+
+  "versioning": {
+    "strategy": "incremental",
+    "retention_count": 3,
+    "rollback_supported": true
+  }
+}
