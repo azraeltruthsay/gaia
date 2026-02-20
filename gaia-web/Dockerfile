@@ -9,8 +9,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    build-essential \
+    libopus0 \
+    libopus-dev \
+    ffmpeg \
     libffi-dev \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for container execution (host UID mapping)

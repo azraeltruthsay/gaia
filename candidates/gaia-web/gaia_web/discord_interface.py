@@ -154,6 +154,47 @@ class DiscordInterface:
                 except Exception:
                     logger.error("Voice state update handler error", exc_info=True)
 
+        @bot.command(name="call")
+        async def voice_call(ctx):
+            """Join the caller's voice channel for a voice conversation."""
+            if _voice_manager is None:
+                await ctx.send("Voice isn't set up right now.")
+                return
+
+            if not ctx.author.voice or not ctx.author.voice.channel:
+                await ctx.send("Join a voice channel first, then try again.")
+                return
+
+            # Already connected?
+            if _voice_manager._vc and _voice_manager._vc.is_connected():
+                if _voice_manager._vc.channel == ctx.author.voice.channel:
+                    await ctx.send("I'm already here with you!")
+                else:
+                    await ctx.send(
+                        f"I'm in **{_voice_manager._channel_name}** right now. "
+                        "Use `!hangup` first if you want me to switch."
+                    )
+                return
+
+            channel = ctx.author.voice.channel
+            await ctx.send(f"Joining **{channel.name}**...")
+            _voice_manager._connected_user = ctx.author.display_name
+            await _voice_manager._join_channel(channel)
+
+        @bot.command(name="hangup")
+        async def voice_hangup(ctx):
+            """Disconnect GAIA from the current voice channel."""
+            if _voice_manager is None:
+                await ctx.send("Voice isn't set up right now.")
+                return
+
+            if not _voice_manager._vc or not _voice_manager._vc.is_connected():
+                await ctx.send("I'm not in a voice channel.")
+                return
+
+            await _voice_manager.disconnect()
+            await ctx.send("Disconnected. Talk to you later!")
+
         self._bot = bot
         global _bot
         _bot = bot

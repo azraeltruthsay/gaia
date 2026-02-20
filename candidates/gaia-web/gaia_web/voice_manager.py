@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import numpy as np
 
 if TYPE_CHECKING:
     import discord
@@ -217,6 +218,60 @@ class SimpleVAD:
 
 
 # ---------------------------------------------------------------------------
+# py-cord Voice Sink — real-time audio capture
+# ---------------------------------------------------------------------------
+
+try:
+    from discord.sinks import Sink as _DiscordSinkBase
+except ImportError:
+    _DiscordSinkBase = object  # type: ignore[assignment,misc]
+
+
+class GaiaVoiceSink(_DiscordSinkBase):  # type: ignore[misc]
+    """py-cord voice sink that streams decoded audio into an asyncio.Queue.
+
+    Each ``write()`` call from the voice receive thread is forwarded to an
+    asyncio.Queue via ``loop.call_soon_threadsafe``, allowing the async
+    processing loop to consume frames without blocking.
+    """
+
+    def __init__(
+        self,
+        queue: asyncio.Queue,
+        loop: asyncio.AbstractEventLoop,
+        target_user_id: int | None = None,
+    ) -> None:
+        if _DiscordSinkBase is not object:
+            super().__init__()
+        self._queue = queue
+        self._loop = loop
+        self._target_user_id = target_user_id
+        self.paused: bool = False
+
+    def _enqueue(self, data: bytes) -> None:
+        """Enqueue audio data (runs on the event-loop thread)."""
+        try:
+            self._queue.put_nowait(data)
+        except asyncio.QueueFull:
+            pass  # Drop frames to prevent backpressure
+
+    def write(self, data: bytes, user: int) -> None:  # type: ignore[override]
+        """Receive decoded PCM from py-cord's voice receiver thread."""
+        if self.paused:
+            return
+        if self._target_user_id is not None and user != self._target_user_id:
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._enqueue, data)
+        except RuntimeError:
+            pass  # Event loop closed
+
+    def cleanup(self) -> None:
+        """Called when stop_recording() is invoked."""
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Audio format conversion helpers
 # ---------------------------------------------------------------------------
 
@@ -241,6 +296,24 @@ def pcm_48k_stereo_to_16k_mono(pcm_data: bytes) -> bytes:
     except Exception:
         logger.error("PCM conversion failed", exc_info=True)
         return b""
+
+
+def pcm_48k_stereo_to_16k_mono_fast(pcm_data: bytes) -> bytes:
+    """Fast numpy-based 48 kHz stereo -> 16 kHz mono conversion.
+
+    Uses stereo averaging + 3x decimation.  Suitable for real-time VAD
+    frames.  The FFmpeg version above should be used for full utterances
+    sent to Whisper (higher quality resampling).
+    """
+    samples = np.frombuffer(pcm_data, dtype=np.int16)
+    if len(samples) < 6:  # Need at least 3 stereo samples
+        return b""
+    # Stereo -> mono: average L+R channels
+    stereo = samples[: len(samples) - len(samples) % 2].reshape(-1, 2)
+    mono = (stereo[:, 0].astype(np.int32) + stereo[:, 1].astype(np.int32)) // 2
+    # 48 kHz -> 16 kHz: take every 3rd sample
+    mono_16k = mono[::3].astype(np.int16)
+    return mono_16k.tobytes()
 
 
 def pcm_to_wav_base64(pcm_16k_mono: bytes, sample_rate: int = 16000) -> str:
@@ -283,8 +356,9 @@ class VoiceManager:
         self._max_utterance_s = cfg.get("max_utterance_seconds", 30)
 
         self._vc: discord.VoiceClient | None = None
+        self._sink: GaiaVoiceSink | None = None
+        self._audio_queue: asyncio.Queue | None = None
         self._listen_task: asyncio.Task | None = None
-        self._speaking = False
         self._state = "disconnected"  # disconnected | listening | transcribing | responding | speaking
         self._channel_name: str | None = None
         self._connected_since: float | None = None
@@ -344,10 +418,46 @@ class VoiceManager:
                     logger.info("No whitelisted users remain in %s — disconnecting", before.channel.name)
                     await self.disconnect()
 
+    # -- Core sleep-state integration --
+
+    async def _notify_core_voice_state(self, connected: bool) -> None:
+        """Tell gaia-core we joined/left voice (best-effort).
+
+        When connected=True, gaia-core sets voice_active and sends an implicit
+        wake signal so Prime starts booting while audio stays alive.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{self.core_endpoint}/sleep/voice-state",
+                    json={"connected": connected},
+                )
+        except Exception:
+            logger.debug("Voice state notification to core failed (non-fatal)", exc_info=True)
+
+    async def _get_core_state(self) -> str | None:
+        """Query gaia-core sleep state (best-effort)."""
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{self.core_endpoint}/sleep/status")
+                if resp.status_code == 200:
+                    return resp.json().get("state")
+        except Exception:
+            logger.debug("Core state check failed", exc_info=True)
+        return None
+
+    async def _send_wake_signal(self) -> None:
+        """Send wake signal to gaia-core (best-effort, idempotent)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(f"{self.core_endpoint}/sleep/wake")
+        except Exception:
+            logger.debug("Wake signal failed", exc_info=True)
+
     # -- Connection management --
 
     async def _join_channel(self, channel: discord.VoiceChannel) -> None:
-        """Join a voice channel and start listening."""
+        """Join a voice channel and start recording with py-cord sink."""
         try:
             self._vc = await channel.connect()
             self._channel_name = channel.name
@@ -355,8 +465,22 @@ class VoiceManager:
             self._state = "listening"
             logger.info("Connected to voice channel: %s", channel.name)
 
-            # Start the listen loop
-            self._listen_task = asyncio.create_task(self._listen_loop())
+            # Notify gaia-core so it keeps audio alive and starts waking Prime
+            await self._notify_core_voice_state(True)
+
+            # Set up py-cord sink → asyncio.Queue pipeline
+            self._audio_queue = asyncio.Queue(maxsize=500)  # ~10 s buffer
+            loop = asyncio.get_running_loop()
+            self._sink = GaiaVoiceSink(
+                queue=self._audio_queue,
+                loop=loop,
+            )
+
+            # Start recording — delivers decoded PCM to sink.write()
+            self._vc.start_recording(self._sink, self._recording_finished)
+
+            # Start async processing loop
+            self._listen_task = asyncio.create_task(self._process_audio_loop())
         except Exception:
             logger.error("Failed to join voice channel %s", channel.name, exc_info=True)
             self._vc = None
@@ -364,6 +488,17 @@ class VoiceManager:
 
     async def disconnect(self) -> None:
         """Disconnect from voice and clean up."""
+        # Notify gaia-core before teardown so deferred audio sleep can fire
+        await self._notify_core_voice_state(False)
+
+        # Stop py-cord recording first
+        if self._vc and hasattr(self._vc, "stop_recording"):
+            try:
+                self._vc.stop_recording()
+            except Exception:
+                logger.debug("stop_recording failed (may not be recording)")
+
+        # Cancel the processing loop
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
             try:
@@ -374,107 +509,78 @@ class VoiceManager:
 
         if self._vc and self._vc.is_connected():
             await self._vc.disconnect()
+
         self._vc = None
+        self._sink = None
+        self._audio_queue = None
         self._state = "disconnected"
         self._channel_name = None
         self._connected_since = None
         self._connected_user = None
         logger.info("Disconnected from voice")
 
-    # -- Listen loop (captures audio, segments via VAD, processes utterances) --
+    # -- Audio processing loop (reads from sink queue, runs VAD) --
 
-    async def _listen_loop(self) -> None:
-        """Continuously capture audio from Discord voice and process utterances.
+    async def _recording_finished(self, sink, *args) -> None:
+        """Callback invoked by py-cord when stop_recording() is called."""
+        logger.debug("Recording finished callback")
 
-        Discord delivers 20ms Opus frames. We use the VoiceClient's audio
-        receiver to get decoded PCM, downsample, run through VAD, and process
-        complete utterances.
+    async def _process_audio_loop(self) -> None:
+        """Read decoded PCM from the sink queue, convert, and feed to VAD.
+
+        py-cord's voice receiver delivers 48 kHz stereo PCM via the sink.
+        We convert to 16 kHz mono with numpy and segment utterances using VAD.
         """
         vad = SimpleVAD(
             silence_threshold_ms=self._silence_threshold_ms,
             min_speech_ms=self._min_speech_ms,
             max_utterance_seconds=self._max_utterance_s,
         )
-
-        # Accumulate raw PCM from the voice connection
         pcm_buffer = bytearray()
-        # Discord sends 20ms of 48kHz stereo = 3840 bytes per frame
-        frame_size_48k_stereo = 3840  # 20ms * 48000 * 2ch * 2bytes
+        frame_size = 640  # 20 ms of 16 kHz mono 16-bit PCM
 
-        logger.info("Voice listen loop started")
+        logger.info("Voice processing loop started")
 
         try:
             while self._vc and self._vc.is_connected():
-                if self._speaking:
-                    # Don't capture while GAIA is speaking (prevent echo)
-                    await asyncio.sleep(0.1)
-                    continue
-
-                # Read audio from voice connection
-                # discord.py uses a Sink or recv() depending on version
+                # Pull next chunk from the sink queue
                 try:
                     data = await asyncio.wait_for(
-                        self._read_voice_audio(),
-                        timeout=1.0,
+                        self._audio_queue.get(), timeout=1.0,
                     )
                 except asyncio.TimeoutError:
                     continue
 
                 if not data:
-                    await asyncio.sleep(0.02)
                     continue
 
-                pcm_buffer.extend(data)
+                # Fast numpy downsample: 48 kHz stereo -> 16 kHz mono
+                frame_16k = pcm_48k_stereo_to_16k_mono_fast(data)
+                if not frame_16k:
+                    continue
 
-                # Process in frame_size_48k_stereo chunks
-                while len(pcm_buffer) >= frame_size_48k_stereo:
-                    frame_48k = bytes(pcm_buffer[:frame_size_48k_stereo])
-                    del pcm_buffer[:frame_size_48k_stereo]
+                pcm_buffer.extend(frame_16k)
 
-                    # Downsample to 16kHz mono
-                    frame_16k = pcm_48k_stereo_to_16k_mono(frame_48k)
-                    if not frame_16k:
-                        continue
+                # Feed 20 ms frames to VAD
+                while len(pcm_buffer) >= frame_size:
+                    frame = bytes(pcm_buffer[:frame_size])
+                    del pcm_buffer[:frame_size]
 
-                    # Feed to VAD
-                    utterance = vad.feed_frame(frame_16k)
+                    utterance = vad.feed_frame(frame)
                     if utterance is not None:
-                        logger.info("Utterance detected (%d bytes)", len(utterance))
-                        # Process in background (don't block the listen loop)
+                        dur = len(utterance) / 32000  # 16 kHz x 2 bytes
+                        logger.info("Utterance detected (%d bytes, %.1fs)", len(utterance), dur)
                         asyncio.create_task(self._process_utterance(utterance))
 
         except asyncio.CancelledError:
-            logger.info("Voice listen loop cancelled")
+            logger.info("Voice processing loop cancelled")
         except Exception:
-            logger.error("Voice listen loop error", exc_info=True)
-
-    async def _read_voice_audio(self) -> bytes | None:
-        """Read raw PCM audio from the voice connection.
-
-        Uses discord.py's audio receive capabilities. Returns 20ms of
-        48kHz stereo PCM (3840 bytes) or None if no data available.
-        """
-        if not self._vc or not self._vc.is_connected():
-            return None
-
-        # discord.py 2.x: use the recv() method or listen with a sink
-        # The exact API depends on the discord.py version and whether
-        # we're using pycord or standard discord.py
-        try:
-            # Try the listen/recv pattern
-            if hasattr(self._vc, "recv"):
-                return self._vc.recv()
-            # Fallback: read from the underlying socket
-            if hasattr(self._vc, "ws") and self._vc.ws:
-                return await self._vc.ws.recv()
-        except Exception:
-            pass
-        return None
+            logger.error("Voice processing loop error", exc_info=True)
 
     # -- Utterance processing pipeline --
 
     async def _process_utterance(self, pcm_16k_mono: bytes) -> None:
-        """Transcribe → think → speak pipeline for a single utterance."""
+        """Transcribe -> think -> speak pipeline for a single utterance."""
         async with self._processing_lock:
             try:
                 # 1. Transcribe via gaia-audio
@@ -487,9 +593,22 @@ class VoiceManager:
 
                 logger.info("Transcribed: %s", text[:100])
 
-                # 2. Process via gaia-core
-                self._state = "responding"
-                response_text = await self._get_response(text)
+                # 2. Pause audio capture (echo prevention)
+                if self._sink:
+                    self._sink.paused = True
+
+                # 2.5. Check core state — if not active, use Lite stalling response
+                core_state = await self._get_core_state()
+                if core_state and core_state != "active":
+                    logger.info("Core state is '%s' — using Lite stalling response", core_state)
+                    # Fire wake signal in background (idempotent if already waking)
+                    asyncio.create_task(self._send_wake_signal())
+                    self._state = "responding"
+                    response_text = await self._get_lite_stalling_response(text)
+                else:
+                    # 3. Process via gaia-core (Prime)
+                    self._state = "responding"
+                    response_text = await self._get_response(text)
                 if not response_text:
                     logger.warning("No response from gaia-core")
                     self._state = "listening"
@@ -497,16 +616,24 @@ class VoiceManager:
 
                 logger.info("Response: %s", response_text[:100])
 
-                # 3. Synthesize via gaia-audio
+                # 4. Synthesize and play via Discord
                 self._state = "speaking"
-                self._speaking = True
                 await self._speak(response_text)
-                self._speaking = False
+
+                # 5. Drain queued echo audio before resuming capture
+                if self._audio_queue:
+                    while not self._audio_queue.empty():
+                        try:
+                            self._audio_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
 
             except Exception:
                 logger.error("Utterance processing failed", exc_info=True)
             finally:
-                self._speaking = False
+                # Always resume audio capture
+                if self._sink:
+                    self._sink.paused = False
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
@@ -600,6 +727,97 @@ class VoiceManager:
                 logger.error("Core response failed: %d", resp.status_code)
         except Exception:
             logger.error("Core request failed", exc_info=True)
+        return None
+
+    async def _get_lite_stalling_response(self, text: str) -> str | None:
+        """Get a quick Lite response while Prime boots.
+
+        Builds a minimal CognitionPacket targeting TargetEngine.LITE with
+        tight token/time budgets and a stalling system hint.
+        """
+        from gaia_common.protocols.cognition_packet import (
+            CognitionPacket, Header, Persona, Origin, OutputRouting,
+            DestinationTarget, Content, DataField, OutputDestination,
+            PersonaRole, Routing, Model, OperationalStatus, SystemTask,
+            Intent, Context, SessionHistoryRef, Constraints, Reasoning,
+            Response, Governance, Safety, Metrics, TokenUsage, Status,
+            PacketState, ToolRoutingState, TargetEngine,
+        )
+
+        packet_id = str(uuid.uuid4())
+        user_id = self._connected_user or "voice_user"
+        session_id = f"discord_voice_{user_id}"
+
+        packet = CognitionPacket(
+            version="0.2",
+            header=Header(
+                datetime=datetime.now().isoformat(),
+                session_id=session_id,
+                packet_id=packet_id,
+                sub_id="0",
+                persona=Persona(
+                    identity_id="default_user",
+                    persona_id="default_persona",
+                    role=PersonaRole.DEFAULT,
+                    tone_hint="conversational",
+                ),
+                origin=Origin.USER,
+                routing=Routing(target_engine=TargetEngine.LITE, priority=8),
+                model=Model(name="lite", provider="local", context_window_tokens=4096),
+                output_routing=OutputRouting(
+                    primary=DestinationTarget(
+                        destination=OutputDestination.AUDIO,
+                        metadata={"source": "discord_voice", "user": user_id},
+                    ),
+                    source_destination=OutputDestination.AUDIO,
+                    addressed_to_gaia=True,
+                ),
+                operational_status=OperationalStatus(status="initialized"),
+            ),
+            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
+            context=Context(
+                session_history_ref=SessionHistoryRef(type="discord_voice", value=session_id),
+                cheatsheets=[],
+                constraints=Constraints(max_tokens=128, time_budget_ms=5000, safety_mode="strict"),
+            ),
+            content=Content(
+                original_prompt=text,
+                data_fields=[
+                    DataField(key="user_message", value=text, type="text"),
+                    DataField(
+                        key="system_hint",
+                        value=(
+                            "You are waking up from sleep and not fully online yet. "
+                            "Give a brief, natural voice acknowledgment (1-2 sentences max). "
+                            "Be warm and present. Do NOT apologize or explain technical details."
+                        ),
+                        type="text",
+                    ),
+                ],
+            ),
+            reasoning=Reasoning(),
+            response=Response(candidate="", confidence=0.0, stream_proposal=False),
+            governance=Governance(safety=Safety(execution_allowed=False, dry_run=True)),
+            metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
+            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
+            tool_routing=ToolRoutingState(),
+        )
+        packet.compute_hashes()
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{self.core_endpoint}/process_packet",
+                    json=packet.to_serializable_dict(),
+                    headers={"Content-Type": "application/json"},
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    completed = CognitionPacket.from_dict(result)
+                    return completed.response.candidate or None
+                logger.error("Lite stalling response failed: %d", resp.status_code)
+        except Exception:
+            logger.error("Lite stalling request failed", exc_info=True)
         return None
 
     async def _speak(self, text: str) -> None:

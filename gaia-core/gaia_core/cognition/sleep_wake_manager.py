@@ -78,6 +78,7 @@ class SleepWakeManager:
         self.checkpoint_manager = PrimeCheckpointManager(config, timeline_store=timeline_store)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
+        self.voice_active: bool = False
 
         logger.info("SleepWakeManager initialized")
 
@@ -115,7 +116,11 @@ class SleepWakeManager:
         self._notify_audio_state(to_state)
 
     def _notify_audio_state(self, to_state: str) -> None:
-        """Notify gaia-audio to mute/unmute based on sleep state (best-effort)."""
+        """Notify gaia-audio to sleep/wake based on sleep state (best-effort).
+
+        Uses /sleep (GPU model unload) and /wake (eager GPU reload) for
+        ASLEEP/DREAMING/ACTIVE transitions.  Falls back silently on failure.
+        """
         try:
             constants = getattr(self.config, "constants", {})
             audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
@@ -125,14 +130,19 @@ class SleepWakeManager:
             audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
 
             if to_state in ("asleep", "dreaming"):
-                action = "mute"
+                if self.voice_active:
+                    logger.info("Skipping audio sleep — voice channel active")
+                    return
+                action = "sleep"
+                timeout = 15.0  # GPU model unload may take a few seconds
             elif to_state == "active":
-                action = "unmute"
+                action = "wake"
+                timeout = 5.0   # /wake returns immediately (reload is background)
             else:
                 return
 
             import httpx
-            with httpx.Client(timeout=3.0) as client:
+            with httpx.Client(timeout=timeout) as client:
                 client.post(f"{audio_endpoint}/{action}")
             logger.debug("Audio %s signal sent", action)
         except Exception:
@@ -233,6 +243,23 @@ class SleepWakeManager:
         elif self.state == GaiaState.ACTIVE:
             logger.debug("Wake signal received but already ACTIVE")
             self.wake_signal_pending = False
+
+    def set_voice_active(self, active: bool) -> None:
+        """Called by gaia-web when GAIA joins/leaves a Discord voice channel.
+
+        Joining voice triggers an implicit wake signal so Prime begins booting.
+        Leaving voice while sleeping triggers the deferred audio sleep signal.
+        """
+        prev = self.voice_active
+        self.voice_active = active
+        logger.info("Voice active: %s → %s (state: %s)", prev, active, self.state)
+
+        if active:
+            # Voice join = implicit wake signal
+            self.receive_wake_signal()
+        elif not active and self.state in (GaiaState.ASLEEP, GaiaState.DROWSY):
+            # Left voice while sleeping — now safe to mute audio
+            self._notify_audio_state(self.state.value)
 
     def transition_to_waking(self) -> None:
         """Move to internal WAKING phase. Begins parallel wake strategy."""
@@ -373,6 +400,7 @@ class SleepWakeManager:
             "last_state_change": self.last_state_change.isoformat(),
             "seconds_in_state": (now - self.last_state_change).total_seconds(),
         }
+        status["voice_active"] = self.voice_active
         if self.dreaming_handoff_id:
             status["dreaming_handoff_id"] = self.dreaming_handoff_id
         return status

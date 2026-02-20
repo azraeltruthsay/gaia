@@ -24,11 +24,11 @@ class AudioConfig:
     enabled: bool = True
     endpoint: str = "http://gaia-audio:8080"
     stt_model: str = "base.en"
-    tts_engine: str = "system"
+    tts_engine: str = "coqui"
     tts_voice: str | None = None
     sample_rate: int = 16000
     vram_budget_mb: int = 5600
-    half_duplex: bool = True
+    half_duplex: bool = False
     mute_on_sleep: bool = True
     cloud_fallback: CloudFallback = field(default_factory=CloudFallback)
 

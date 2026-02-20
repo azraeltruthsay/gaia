@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libportaudio2 \
     portaudio19-dev \
+    espeak-ng \
     libespeak-ng1 \
     libsndfile1 \
     libpulse0 \
@@ -44,8 +45,13 @@ COPY candidates/gaia-audio/ /app/
 # Install gaia-audio in editable mode
 RUN pip install -e /app/.[dev]
 
+# Pre-accept Coqui XTTS v2 TOS for headless operation
+RUN mkdir -p /home/gaia/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2 \
+    && echo "I have read, understood and agreed to the Terms and Conditions." \
+       > /home/gaia/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/tos_agreed.txt
+
 # Set ownership
-RUN chown -R gaia:gaia /app
+RUN chown -R gaia:gaia /app /home/gaia/.local
 
 EXPOSE 8080
 

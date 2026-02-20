@@ -139,7 +139,7 @@ class STTEngine:
         n_segments = 0
         for segment in segments:
             texts.append(segment.text.strip())
-            total_confidence += segment.avg_log_prob
+            total_confidence += segment.avg_logprob
             n_segments += 1
 
         text = " ".join(texts)
