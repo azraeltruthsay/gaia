@@ -1,0 +1,123 @@
+# gaia-wiki blueprint — MANUAL SEED (bootstrap)
+# Hand-authored during initial service creation (2026-02-20).
+# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+
+id: gaia-wiki
+version: "0.1"
+role: "The Archivist (Documentation)"
+service_status: live
+
+runtime:
+  port: 8080
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: "mkdocs serve --dev-addr=0.0.0.0:8080"
+  health_check: "curl -f http://localhost:8080"
+  dockerfile: gaia-wiki/Dockerfile
+  compose_service: gaia-wiki
+
+interfaces:
+
+  # ── Inbound ────────────────────────────────────────────────────────────────
+
+  - id: docs_serve
+    direction: inbound
+    description: "MkDocs Material site serving developer documentation."
+    status: active
+    transport:
+      type: http_rest
+      path: /
+      method: GET
+    notes: >
+      Not exposed on host; accessed exclusively via gaia-web reverse proxy
+      at /wiki/*. MkDocs serves all static assets, search index, and
+      rendered markdown pages.
+
+  # ── Outbound ───────────────────────────────────────────────────────────────
+  # None — gaia-wiki is a pure content server with no outbound calls.
+
+dependencies:
+  services:
+    - id: gaia-web
+      role: reverse_proxy
+      required: true
+      fallback: null
+      notes: "gaia-web proxies /wiki/* -> gaia-wiki:8080/*; wiki has no host port."
+
+  volumes:
+    - name: wiki-docs
+      access: ro
+      purpose: "MkDocs source files (mkdocs.yml + docs/) for live-reload during development"
+      mount_path: /docs
+
+  external_apis: []
+
+source_files:
+  - path: gaia-wiki/Dockerfile
+    role: build_config
+    file_type: dockerfile
+  - path: gaia-wiki/mkdocs.yml
+    role: site_config
+    file_type: yaml
+  - path: gaia-wiki/docs/index.md
+    role: landing_page
+    file_type: markdown
+  - path: gaia-wiki/pyproject.toml
+    role: project_metadata
+    file_type: toml
+  - path: gaia-web/gaia_web/routes/wiki.py
+    role: reverse_proxy_route
+    file_type: python
+
+failure_modes:
+  - condition: "MkDocs process crashes"
+    response: "Health check fails; gaia-web proxy returns 503 'gaia-wiki unreachable'"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "WIKI_ENDPOINT env var not set in gaia-web"
+    response: "Proxy route returns 503 'Wiki proxy not configured'; wiki container runs but is unreachable"
+    severity: degraded
+    auto_recovers: false
+
+  - condition: "Invalid markdown or mkdocs.yml syntax"
+    response: "MkDocs fails to build; container exits; health check fails"
+    severity: partial
+    auto_recovers: false
+
+intent:
+  purpose: >
+    Internal developer documentation site for the GAIA project. Serves
+    architecture overviews, system documentation, ADRs (Architecture Decision
+    Records), operational runbooks, and developer onboarding guides via
+    MkDocs Material. Designed to be self-maintaining — future integration
+    with the sleep cycle will allow GAIA to update its own documentation.
+  cognitive_role: "The Archivist"
+  design_decisions:
+    - "Internal-only — no host port exposed; all access via gaia-web /wiki/* proxy"
+    - "MkDocs Material for rich developer experience (dark theme, search, code copy, tabs)"
+    - "Read-only volume mount for live-reload without container rebuilds"
+    - "awesome-pages plugin for flexible navigation control"
+    - "Lightweight Python 3.11-slim base; no GPU, no heavy dependencies"
+    - "Future: sleep cycle hook will trigger doc regeneration from blueprint reflections"
+  open_questions:
+    - "Should gaia-wiki auto-rebuild docs from blueprints during sleep cycle?"
+    - "Should the wiki index be searchable via gaia-core's MCP tools?"
+    - "Should docs be versioned (mike) or always serve latest?"
+
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: "0.2"
+  schema_version: "1.0"
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null
