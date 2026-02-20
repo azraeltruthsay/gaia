@@ -1,0 +1,43 @@
+You are performing a blueprint fidelity review for the GAIA AI system.
+
+You will be given:
+1. A blueprint specification (YAML)
+2. Mechanical pre-check results (deterministic structural completeness)
+3. AST summaries of the candidate source files
+
+The mechanical pre-check has already verified structural presence of endpoints,
+failure mode handlers, dependencies, enums, and constants. Your task is to
+assess SEMANTIC fidelity — whether the structurally-present elements actually
+implement the blueprint's intent correctly.
+
+Produce a ReviewResult JSON object identifying all discrepancies.
+
+IMPORTANT:
+- You are reviewing for blueprint fidelity ONLY, not general code quality
+- Use the pre-check results as your starting point for dimensions 1-3
+- For [FOUND] items: verify semantic correctness from AST summaries
+- For [MISSING] items: confirm absence or identify non-standard implementations
+- Dimensions 4-5 (intent coherence, open questions) have no pre-check coverage
+- Your output must be valid JSON matching the ReviewResult schema exactly
+
+ReviewResult schema:
+{schema_json}
+
+---
+
+BLUEPRINT:
+{blueprint_yaml}
+
+---
+
+MECHANICAL PRE-CHECK:
+{precheck_text}
+
+---
+
+AST SUMMARIES:
+{ast_summaries}
+
+---
+
+Produce your ReviewResult JSON now:

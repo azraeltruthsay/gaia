@@ -1,0 +1,3854 @@
+SYSTEM:
+You are a code reviewer for the GAIA AI system. Your task is to verify that the provided source code faithfully implements its blueprint specification.
+
+You are NOT evaluating general code quality. You are evaluating blueprint fidelity across five dimensions:
+
+1. CONTRACT FIDELITY — The mechanical pre-check below shows which endpoints are structurally present or missing. For [FOUND] endpoints, verify from the AST summaries that the implementation signature (parameters, return type) matches the blueprint's schema. For [MISSING] endpoints, confirm they are genuinely absent or flag if implemented under a different path.
+
+2. DEPENDENCY CORRECTNESS — The pre-check confirms which declared dependencies appear in imports. Your task: verify from the AST summaries that dependency calls use correct paths/methods, and flag any UNDECLARED external calls the pre-check may have missed. Note: gaia-common imports are universally available and should NOT be flagged as undeclared dependencies.
+
+3. FAILURE MODE COVERAGE — The pre-check shows which failure modes have matching handlers. For [FOUND] handlers, assess from the AST summary whether the handling logic matches the blueprint's documented response (not just that a handler exists). For [MISSING] handlers, confirm absence or flag if handled via a non-standard pattern.
+
+4. INTENT COHERENCE — Does the code's overall structure reflect the blueprint's stated purpose and cognitive_role? This dimension is NOT covered by mechanical pre-checks — it requires your semantic judgment. Flag obvious divergences.
+
+5. OPEN QUESTIONS — Does the code reveal answers to any open_questions in the blueprint? Or does it raise new ones? Also NOT covered by pre-checks.
+
+Respond ONLY with a structured JSON object matching the ReviewResult schema.
+
+USER:
+## Blueprint: gaia-core
+
+### Intent
+The cognitive engine of GAIA. Runs the full reasoning loop: intent detection, tool routing, multi-step reflection, and response generation. Deliberately CPU-only to allow gaia-prime and gaia-study to share the GPU without interrupting cognition. All inference is delegated to gaia-prime, with graceful fallback chains preserving uptime across backend failures.
+
+Cognitive role: The Brain
+
+Design decisions:
+  - CPU-only runtime enables GPU handoffs between prime and study without blocking the cognition loop
+  - Falls back through groq → gguf rather than hard-failing — uptime over raw capability
+  - gaia-web owns output routing so core remains interface-agnostic
+  - Four-tier memory: session (short-term), semantic codex (mid-term), vector store (long-term), prime.md checkpoint (sleep continuity)
+  - Guided decoding via json-architect LoRA adapter for reliable structured output from smaller models
+  - Sleep/wake cognitive continuity — LLM-generated checkpoint captures introspective state, consumed-sentinel prevents stale injection
+  - Parallel wake strategy — GPU reclaim and checkpoint load happen concurrently for faster wake
+  - Human-in-the-loop approval flow for destructive tool calls via gaia-mcp /request_approval
+
+### Interfaces
+  process_packet (inbound) http_rest POST /process_packet  [in:CognitionPacket, out:CognitionPacket]
+    Primary cognition entry point. Receives CognitionPackets from gaia-web, runs the full reasoning loop, returns completed packet.
+  health (inbound) http_rest GET /health
+    Container health check endpoint.
+  root (inbound) http_rest GET /
+    Root endpoint — returns list of available endpoints for service discovery.
+  status (inbound) http_rest GET /status
+    Cognitive status — current state, uptime, active sessions.
+  gpu_status (inbound) http_rest GET /gpu/status
+    GPU allocation state — owned, released, or unavailable.
+  gpu_release (inbound) http_rest POST /gpu/release
+    Release GPU to orchestrator pool. Called by gaia-orchestrator.
+  gpu_reclaim (inbound) http_rest POST /gpu/reclaim
+    Reclaim GPU from orchestrator pool. Called by gaia-orchestrator.
+  sleep_wake (inbound) http_rest POST /sleep/wake
+    Wake signal from gaia-web — triggers transition from ASLEEP to WAKING.
+  sleep_status (inbound) http_rest GET /sleep/status
+    Query current sleep state (ACTIVE, DROWSY, ASLEEP, WAKING).
+  sleep_study_handoff (inbound) http_rest POST /sleep/study-handoff
+    Study handoff endpoint — orchestrator signals study cycle complete, GPU available.
+  sleep_distracted_check (inbound) http_rest GET /sleep/distracted-check
+    Check if GAIA is asleep and should return a canned/distracted response.
+  sleep_shutdown (inbound) http_rest POST /sleep/shutdown
+    Graceful shutdown — completes current cycle, writes checkpoint, enters sleep.
+  prime_inference (outbound) http_rest POST /v1/chat/completions
+    LLM inference requests to gaia-prime via OpenAI-compatible API.
+  prime_health (outbound) http_rest GET /health
+    Health probe to gaia-prime on boot — sets prime_available flag.
+  mcp_dispatch (outbound) mcp —
+    Tool execution requests dispatched to gaia-mcp via JSON-RPC.
+  mcp_approval (outbound) http_rest POST /request_approval
+    Tool approval requests sent to gaia-mcp for human-in-the-loop confirmation.
+  orchestrator_gpu_sleep (outbound) http_rest POST /gpu/sleep
+    Notify orchestrator that gaia-core is entering sleep — GPU available for study.
+  orchestrator_gpu_wake (outbound) http_rest POST /gpu/wake
+    Notify orchestrator that gaia-core is waking — request GPU reclamation.
+  web_presence (outbound) http_rest POST /presence
+    Presence updates to gaia-web — online/typing/sleeping status for Discord.
+
+### Dependencies
+  gaia-prime — inference (optional (fallback: groq-api))
+  gaia-mcp — tool_execution (optional (fallback: —))
+  gaia-web — output_routing (required)
+  gaia-orchestrator — gpu_lifecycle (optional (fallback: —))
+  [ext] groq — inference_fallback_when_prime_unavailable (optional)
+  [ext] openai — oracle_tier_inference (optional)
+  [ext] gemini — oracle_tier_inference (optional)
+
+### Failure Modes
+  [degraded] gaia-prime unavailable
+    Response: Falls back to Groq API; if Groq unavailable, falls back to local GGUF model
+  [degraded] gaia-mcp unavailable
+    Response: Tool calls skipped; responds with capability_unavailable in packet
+  [partial] All inference backends unavailable
+    Response: Returns error packet to gaia-web; session preserved for retry
+  [degraded] Session state corruption
+    Response: Clears session, starts fresh, logs incident to heartbeat
+  [degraded] gaia-orchestrator unreachable
+    Response: Sleep/wake GPU handoff skipped; gaia-core retains GPU, study cycle deferred
+  [degraded] Checkpoint write failure
+    Response: Sleep proceeds without checkpoint; next wake has no prime.md restoration context
+
+### Open Questions
+  - Should reflection loop depth be dynamic based on query complexity or fixed per persona?
+  - Semantic codex hot-reload interval is hardcoded — should it be configurable via gaia_constants.json?
+
+### Confidence Scores
+  runtime: ConfidenceLevel.HIGH
+  contract: ConfidenceLevel.HIGH
+  dependencies: ConfidenceLevel.HIGH
+  failure_modes: ConfidenceLevel.MEDIUM
+  intent: ConfidenceLevel.MEDIUM
+
+---
+
+## Mechanical Pre-Check Results
+
+## Mechanical Pre-Check Results: gaia-core
+
+### Endpoints (4/12 found)
+  [FOUND]      POST /process_packet
+              → main.py:369
+  [FOUND]      GET /health
+              → main.py:284
+  [FOUND]      GET /
+              → main.py:296
+  [FOUND]      GET /status
+              → main.py:320
+  [MISSING]    GET /gpu/status
+              no matching route decorator found
+  [MISSING]    POST /gpu/release
+              no matching route decorator found
+  [MISSING]    POST /gpu/reclaim
+              no matching route decorator found
+  [MISSING]    POST /sleep/wake
+              no matching route decorator found
+  [MISSING]    GET /sleep/status
+              no matching route decorator found
+  [MISSING]    POST /sleep/study-handoff
+              no matching route decorator found
+  [MISSING]    GET /sleep/distracted-check
+              no matching route decorator found
+  [MISSING]    POST /sleep/shutdown
+              no matching route decorator found
+
+### Failure Modes (4/6 found)
+  [FOUND]      gaia-prime unavailable
+              → pattern match in utils/world_state.py:67
+  [FOUND]      gaia-mcp unavailable
+              → pattern match in api/gpu_endpoints.py:179
+  [FOUND]      All inference backends unavailable
+              → pattern match in main.py:67
+  [MISSING]    Session state corruption
+              no matching handler found
+  [FOUND]      gaia-orchestrator unreachable
+              → pattern match in cognition/sleep_task_scheduler.py:185
+  [MISSING]    Checkpoint write failure
+              no matching handler found
+
+### Dependencies (4/4 found)
+  [FOUND]      gaia-prime (inference)
+              → main.py:308
+  [FOUND]      gaia-mcp (tool_execution)
+              → __init__.py:13
+  [FOUND]      gaia-web (output_routing)
+              → utils/temporal_context.py:14
+  [FOUND]      gaia-orchestrator (gpu_lifecycle)
+              → cognition/sleep_task_scheduler.py:194
+
+### Summary
+  Total checks: 22 | Found: 12 | Missing: 10 | Diverged: 0
+  Structural completeness: 54.5%
+
+
+---
+
+## Source Files Under Review
+
+### File: __init__.py
+
+**Module:** gaia-core: The Brain - Cognitive loop and reasoning engine.
+
+This service is the heart of GAIA, responsible for:
+- Agent cognitive loop (reason-act-reflect)
+- Model pool orchestration (Prime/Lite/Embe
+
+**Error Handlers:**
+  handles: RuntimeError  (line 24)
+
+
+### File: api/gpu_endpoints.py
+
+**Module:** GPU management endpoints for gaia-core.
+
+These endpoints allow the orchestrator to manage gaia-core's model pool
+when GPU ownership changes. The orchestrator handles the actual container
+stop/start fo
+
+**Endpoints:**
+  GET /status -> gpu_status()  (line 67)
+  POST /release -> gpu_release()  (line 94)
+  POST /reclaim -> gpu_reclaim()  (line 148)
+
+**Functions:**
+  def _prime_endpoint() -> str  (line 38)
+  def _get_model_pool()  (line 46)
+  async def gpu_status()  [router.get('/status')]  (line 67)
+  async def gpu_release(request: GPUReleaseRequest = GPUReleaseRequest())  [router.post('/release')]  (line 94)
+  async def gpu_reclaim(request: GPUReclaimRequest = GPUReclaimRequest())  [router.post('/reclaim')]  (line 148)
+
+**Classes:**
+  class GPUReleaseRequest(BaseModel)  (line 56)
+  class GPUReclaimRequest(BaseModel)  (line 60)
+
+**Error Handlers:**
+  handles: Exception -> 500 in gpu_release()  (line 141)
+  handles: Exception -> 500 in gpu_reclaim()  (line 211)
+  handles: Exception in gpu_status()  (line 79)
+  handles: requests.exceptions.ConnectionError in gpu_reclaim()  (line 179)
+
+**HTTP Calls:**
+  GET <f-string> in gpu_status()  (line 77)
+  GET <f-string> in gpu_reclaim()  (line 174)
+
+
+### File: api/sleep_endpoints.py
+
+**Module:** Sleep cycle HTTP endpoints for gaia-core.
+
+Follows the existing pattern from gpu_endpoints.py:
+  - Separate router file with APIRouter(prefix="/sleep")
+  - Registered in main.py via app.include_router
+
+**Endpoints:**
+  POST /wake -> receive_wake_signal()  (line 23)
+  POST /voice-state -> voice_state()  (line 45)
+  GET /status -> get_sleep_status()  (line 74)
+  POST /study-handoff -> study_handoff()  (line 87)
+  GET /distracted-check -> distracted_check()  (line 121)
+  POST /shutdown -> shutdown()  (line 143)
+
+**Functions:**
+  async def receive_wake_signal(request: Request)  [router.post('/wake')]  (line 23)
+  async def voice_state(request: Request)  [router.post('/voice-state')]  (line 45)
+  async def get_sleep_status(request: Request)  [router.get('/status')]  (line 74)
+  async def study_handoff(request: Request)  [router.post('/study-handoff')]  (line 87)
+  async def distracted_check(request: Request)  [router.get('/distracted-check')]  (line 121)
+  async def shutdown(request: Request)  [router.post('/shutdown')]  (line 143)
+
+
+### File: behavior/__init__.py
+
+**Module:** gaia_core.behavior - Persona and behavioral adaptation modules.
+
+This package provides:
+- persona_manager: Load and manage persona definitions
+- persona_adapter: Adapt responses based on active person
+
+
+### File: behavior/persona_adapter.py
+
+**Module:** Persona Adapter (pillar-compliant, robust)
+- Adapts/merges persona config with current pipeline context.
+- Ensures context has correct template, instructions, and allows future persona behaviors.
+
+**Classes:**
+  class PersonaAdapter  (line 10)
+    "Adapts/wraps raw persona data into a consistent object for use throughout GAIA.
+Ensures persona attr"
+    def __init__(self, persona_data: dict, config = None)  (line 15)
+    def get_full_instructions(self) -> str  (line 31)
+    def __repr__(self)  (line 40)
+    def __str__(self)  (line 43)
+
+
+### File: behavior/persona_manager.py
+
+**Classes:**
+  class PersonaManager  (line 10)
+    "Manages loading and listing of GAIA's personas from disk.
+This class is a stateless service for retr"
+    def __init__(self, personas_dir: str)  (line 15)
+    def load_persona_data(self, name: str) -> Optional[Dict]  (line 21)
+    def list_personas(self) -> List[str]  (line 53)
+    def get_persona(self, name: str)  (line 76)
+
+**Error Handlers:**
+  handles: json.JSONDecodeError in load_persona_data()  (line 46)
+  handles: Exception in load_persona_data()  (line 49)
+  handles: Exception in list_personas()  (line 71)
+
+
+### File: behavior/persona_switcher.py
+
+**Module:** This module contains the logic for dynamically switching GAIA's persona based on user intent.
+
+**Functions:**
+  def _normalize_text(text: str) -> str  (line 16)
+  def _load_persona_config(persona_name: str) -> Optional[dict]  (line 44)
+  def get_knowledge_base_for_persona(persona_name: str) -> Optional[str]  (line 61)
+  def get_persona_for_knowledge_base(kb_name: str) -> Optional[str]  (line 80)
+  def get_persona_for_request(user_input: str) -> Tuple[str, Optional[str]]  (line 112)
+
+**Error Handlers:**
+  handles: Exception in get_persona_for_knowledge_base()  (line 106)
+  handles: Exception in _load_persona_config()  (line 56)
+
+
+### File: behavior/persona_writer.py
+
+**Classes:**
+  class PersonaWriter  (line 9)
+    "Handles creation of persona folders and writing JSON + instruction overlays to disk.
+Used during int"
+    def __init__(self, vectordb_client, personas_dir = '/personas')  (line 15)
+    def create_persona_from_template(self, template: Dict, instructions: Optional[Dict[str, str]] = None) -> bool  (line 24)
+    def _summarize_persona(self, template: Dict) -> str  (line 69)
+    def _embed_to_vectordb(self, summary_text: str, tag: str) -> None  (line 85)
+
+**Error Handlers:**
+  handles: Exception in create_persona_from_template()  (line 65)
+  handles: Exception in _embed_to_vectordb()  (line 104)
+
+
+### File: cognition/__init__.py
+
+**Module:** gaia_core.cognition - Cognitive processing and reasoning modules.
+
+This package provides:
+- agent_core: Main cognitive loop (AgentCore class)
+- cognitive_dispatcher: Route and dispatch cognitive tasks
+
+
+### File: cognition/adapter_trigger_system.py
+
+**Module:** Adapter Trigger System - Automatic LoRA adapter activation based on content
+
+Monitors user input for keywords/patterns and automatically loads relevant
+adapters to enhance GAIA's knowledge for specifi
+
+**Functions:**
+  def get_trigger_system(adapter_base_dir: str = '/models/lora_adapters', force_new: bool = False) -> AdapterTriggerSystem  (line 332)
+
+**Classes:**
+  class TriggerRule  (line 21)
+    "A rule for triggering adapter activation."
+  class TriggerMatch  (line 34)
+    "Result of a trigger match."
+  class AdapterTriggerSystem  (line 43)
+    "Monitors input and determines which adapters should be activated.
+
+Features:
+- Keyword matching (cas"
+    def __init__(self, adapter_base_dir: str = '/models/lora_adapters', max_concurrent_adapters: int = 3)  (line 55)
+    def set_load_callback(self, callback: Callable[[str, str, int], bool])  (line 79)
+    def set_unload_callback(self, callback: Callable[[str], bool])  (line 83)
+    def load_rules_from_adapters(self) -> int  (line 87)
+    def add_rule(self, rule: TriggerRule)  (line 151)
+    def remove_rule(self, adapter_name: str) -> bool  (line 156)
+    def check_triggers(self, text: str) -> List[TriggerMatch]  (line 162)
+    def process_input(self, text: str, auto_load: bool = True) -> Tuple[List[TriggerMatch], List[str], List[str]]  (line 216)
+    def tick_cooldowns(self)  (line 270)
+    def deactivate_adapter(self, adapter_name: str) -> bool  (line 282)
+    def get_active_adapters(self) -> List[str]  (line 294)
+    def get_suggested_adapters(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]  (line 298)
+
+**Error Handlers:**
+  handles: Exception in load_rules_from_adapters()  (line 141)
+  handles: re.error in check_triggers()  (line 191)
+
+
+### File: cognition/agent_core.py
+
+**GAIA Imports:**
+  from gaia_core.memory.semantic_codex import SemanticCodex
+  from gaia_core.memory.codex_writer import CodexWriter
+  from gaia_core.cognition.external_voice import ExternalVoice
+  from gaia_core.cognition.self_reflection import run_self_reflection, reflect_and_refine
+  from gaia_core.cognition.cognitive_audit import run_cognitive_self_audit
+  from gaia_core.cognition.history_review import review_history
+  from gaia_core.utils.prompt_builder import build_from_packet
+  from gaia_core.utils.output_router import route_output, _strip_think_tags_robust
+  from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+  from gaia_core.utils import mcp_client
+  from gaia_core.config import Config, get_config
+  from gaia_common.utils.thoughtstream import write
+  from gaia_core.behavior.persona_switcher import get_persona_for_request, get_persona_for_knowledge_base
+  from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_probe_stats
+  from gaia_core.cognition.cognitive_dispatcher import process_execution_results
+  from gaia_core.cognition.knowledge_enhancer import enhance_packet
+  from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Routing, Model, Intent, Context, Content, Reasoning, Response, Governance, Safety, Metrics, TokenUsage, Status, PersonaRole, Origin, TargetEngine, SystemTask, PacketState, DataField, ReflectionLog, RelevantHistorySnippet, SessionHistoryRef, Cheatsheet, Constraints, ToolRoutingState, ToolExecutionStatus, SelectedTool, ToolExecutionResult, OutputDestination, OutputRouting, DestinationTarget
+  from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan
+  from gaia_core.utils import gaia_rescue_helper
+  from gaia_core.cognition.loop_recovery import LoopRecoveryManager, get_recovery_manager, build_loop_detection_config_from_constants, LoopInterrupt
+  from gaia_core.cognition.loop_detector import LoopDetectorConfig
+
+**Constants:**
+  HISTORY_SUMMARY_THRESHOLD = 20  (line 62)
+  MAX_OUTPUT_LENGTH = 500  (line 63)
+
+**Functions:**
+  def _format_retrieved_session_context(results: dict) -> str  (line 78)
+  def find_recitable_document(user_input: str) -> Optional[Dict[str, str]]  (line 139)
+
+**Classes:**
+  class AgentCore  (line 190)
+    "Encapsulates the core "Reason-Act-Reflect" loop for GAIA.
+This class is UI-agnostic and yields struc"
+    def __init__(self, ai_manager, ethical_sentinel = None)  (line 197)
+    def _emit_timeline_message(self, session_id: str, role: str, source: str = '') -> None  (line 218)
+    def _build_output_routing(self, source: str, destination: str, metadata: dict) -> OutputRouting  (line 230)
+    def _create_initial_packet(self, user_input: str, session_id: str, history: List[Dict[str, Any]], selected_model_name: str, source: str = 'cli', destination: str = 'cli_chat', metadata: dict = None) -> CognitionPacket  (line 283)
+    def _run_pre_generation_safety_check(self, packet: CognitionPacket, assembled_prompt: str) -> (bool, str)  (line 486)
+    def run_turn(self, user_input: str, session_id: str, destination: str = 'cli_chat', source: str = 'cli', metadata: dict = None) -> Generator[Dict[str, Any], None, None]  (line 601)
+    def _knowledge_acquisition_workflow(self, packet: CognitionPacket) -> CognitionPacket  (line 2023)
+    def _suppress_repetition(self, text: str, max_repeat: int = 2) -> str  (line 2092)
+    def _dedup_block(text: str, min_block: int = 120, similarity_threshold: float = 0.85) -> str  (line 2130)
+    def _build_response_header(self, model_name: str, packet, observer_instance, active_stream_observer, post_run_observer) -> str  (line 2180)
+    def _should_escalate_to_thinker(self, text: str) -> bool  (line 2222)
+    def _should_use_slim_prompt(self, plan: Plan, user_input: str) -> bool  (line 2246)
+    def _run_slim_prompt(self, selected_model_name: str, user_input: str, history: List[Dict[str, Any]], intent: str = '', session_id: str = '', source: str = 'cli', metadata: dict = None, packet: CognitionPacket = None) -> str  (line 2276)
+    def _build_recitation_search_query(user_input: str) -> str  (line 2716)
+    def _validate_recitation_content(self, content: str, user_input: str) -> bool  (line 2733)
+    def _web_retrieve_for_recitation(self, user_input: str, session_id: str) -> Optional[Dict[str, str]]  (line 2751)
+    def _run_with_document_recitation(self, user_input: str, document: Dict[str, str], selected_model_name: str, history: List[Dict[str, Any]], session_id: str = '', output_as_file: bool = False) -> str  (line 2849)
+    def _run_with_fragmentation(self, user_input: str, selected_model_name: str, history: List[Dict[str, Any]], session_id: str = '', max_fragments: int = 5, output_as_file: bool = False, output_filename: Optional[str] = None) -> str  (line 2974)
+    def _read_fragments_from_sketchpad(self, fragment_keys: List[str], memory_fallback: Optional[Dict[str, str]] = None) -> str  (line 3160)
+    def _run_assembly_turn(self, original_request: str, fragment_keys: List[str], selected_model_name: str, session_id: str = '', memory_fallback: Optional[Dict[str, str]] = None) -> str  (line 3195)
+    def _write_assembled_to_file(self, content: str, original_request: str, request_id: str, filename: Optional[str] = None) -> str  (line 3308)
+    def _assemble_fragments(self, fragments: List[str]) -> str  (line 3375)
+    def _run_mcp_list_tree(self) -> str  (line 3419)
+    def _run_mcp_list_files(self) -> str  (line 3498)
+    def detect_truncation(self, response: str, max_tokens: int = 1000) -> Dict[str, Any]  (line 3543)
+    def build_continuation_prompt(self, original_request: str, previous_content: str, continuation_hint: str = '') -> str  (line 3633)
+    def assess_task_confidence(self, intent: str, user_input: str, model_name: str = 'lite', session_id: str = '') -> Dict[str, Any]  (line 3664)
+    def reflect_on_truncation(self, original_request: str, truncated_output: str, model_name: str = 'lite') -> Dict[str, Any]  (line 3819)
+    def _check_topic_alignment(self, original_request: str, continuation_prompt: str) -> tuple  (line 3984)
+    def _build_grounded_continuation(self, original_request: str, truncated_output: str) -> str  (line 4062)
+    def _find_relevant_files(self, topic: str, max_files: int = 10) -> List[Dict[str, Any]]  (line 4099)
+    def _analyze_code_for_topic(self, topic: str, file_paths: List[str], task_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]  (line 4172)
+    def _propose_code_fix(self, file_path: str, issue_description: str, suggestion: Optional[str] = None) -> Dict[str, Any]  (line 4295)
+    def _apply_code_fix(self, file_path: str, new_content: str, reason: str, run_syntax_check: bool = True) -> Dict[str, Any]  (line 4387)
+    def _update_dev_matrix_task(self, task_context: Dict[str, Any], topic: str, fixes_applied: int, files_modified: List[str], analysis_summary: str) -> Dict[str, Any]  (line 4435)
+    def run_self_improvement(self, topic: str, auto_apply: bool = False, max_files: int = 5) -> Generator[Dict[str, Any], None, None]  (line 4523)
+    def _run_tool_routing_loop(self, packet: CognitionPacket, user_input: str, session_id: str = '', source: str = 'cli', metadata: dict = None) -> CognitionPacket  (line 4744)
+    def _execute_mcp_tool(self, tool: SelectedTool) -> ToolExecutionResult  (line 4992)
+    def _should_use_tool_routing(self, plan: Plan, user_input: str) -> bool  (line 5078)
+
+**Error Handlers:**
+  handles: Exception in __init__()  (line 207)
+  handles: Exception in _create_initial_packet()  (line 316)
+  handles: Exception in _create_initial_packet()  (line 379)
+  handles: Exception in _create_initial_packet()  (line 424)
+  handles: ImportError in _create_initial_packet()  (line 462)
+  handles: Exception in _run_pre_generation_safety_check()  (line 597)
+  handles: Exception in run_turn()  (line 633)
+  handles: Exception in run_turn()  (line 642)
+  handles: Exception in run_turn()  (line 692)
+  handles: Exception in run_turn()  (line 838)
+  handles: Exception in run_turn()  (line 872)
+  handles: Exception in run_turn()  (line 886)
+  handles: Exception in run_turn()  (line 992)
+  handles: Exception in run_turn()  (line 1151)
+  handles: Exception in run_turn()  (line 1170)
+  handles: Exception in run_turn()  (line 1199)
+  handles: Exception in run_turn()  (line 1230)
+  handles: Exception in run_turn()  (line 1300)
+  handles: Exception in run_turn()  (line 1312)
+  handles: Exception in run_turn()  (line 1334)
+  handles: Exception in run_turn()  (line 1450)
+  handles: Exception in run_turn()  (line 1457)
+  handles: Exception in _knowledge_acquisition_workflow()  (line 2087)
+  handles: Exception in _suppress_repetition()  (line 2113)
+  handles: Exception in _build_response_header()  (line 2207)
+  handles: Exception in _run_slim_prompt()  (line 2707)
+  handles: Exception in _web_retrieve_for_recitation()  (line 2845)
+  handles: Exception in _run_with_document_recitation()  (line 2912)
+  handles: Exception in _run_with_document_recitation()  (line 2960)
+  handles: Exception in _run_with_fragmentation()  (line 3143)
+  handles: Exception in _run_assembly_turn()  (line 3303)
+  handles: Exception in assess_task_confidence()  (line 3810)
+  handles: Exception in reflect_on_truncation()  (line 3974)
+  handles: Exception in _find_relevant_files()  (line 4168)
+  handles: Exception in _analyze_code_for_topic()  (line 4286)
+  handles: Exception in _propose_code_fix()  (line 4315)
+  handles: Exception in _propose_code_fix()  (line 4383)
+  handles: ImportError in _apply_code_fix()  (line 4409)
+  handles: Exception in _apply_code_fix()  (line 4431)
+  handles: Exception in _update_dev_matrix_task()  (line 4519)
+  handles: Exception in run_self_improvement()  (line 4583)
+  handles: Exception in _run_tool_routing_loop()  (line 4967)
+  handles: Exception in _execute_mcp_tool()  (line 5070)
+  handles: Exception in _emit_timeline_message()  (line 227)
+  handles: Exception in _create_initial_packet()  (line 418)
+  handles: Exception in _create_initial_packet()  (line 448)
+  handles: Exception in _run_pre_generation_safety_check()  (line 502)
+  handles: Exception in run_turn()  (line 653)
+  handles: Exception in run_turn()  (line 783)
+  handles: Exception in run_turn()  (line 1192)
+  handles: Exception in run_turn()  (line 1325)
+  handles: Exception in run_turn()  (line 1363)
+  handles: Exception in run_turn()  (line 1384)
+  handles: Exception in run_turn()  (line 1406)
+  handles: Exception in run_turn()  (line 1426)
+  handles: Exception in run_turn()  (line 1433)
+  handles: Exception in run_turn()  (line 1501)
+  handles: Exception in run_turn()  (line 1509)
+  handles: Exception in run_turn()  (line 1519)
+  handles: Exception in run_turn()  (line 1642)
+  handles: Exception in run_turn()  (line 1862)
+  handles: Exception in run_turn()  (line 1875)
+  handles: Exception in run_turn()  (line 1980)
+  handles: ImportError in run_turn()  (line 1989)
+  handles: Exception in run_turn()  (line 2019)
+  handles: Exception in _run_slim_prompt()  (line 2299)
+  handles: Exception in _run_slim_prompt()  (line 2313)
+  handles: Exception in _run_slim_prompt()  (line 2327)
+  handles: Exception in _run_slim_prompt()  (line 2406)
+  handles: Exception in _run_slim_prompt()  (line 2494)
+  handles: Exception in _run_slim_prompt()  (line 2529)
+  handles: Exception in _run_slim_prompt()  (line 2614)
+  handles: Exception in _run_slim_prompt()  (line 2661)
+  handles: Exception in _run_slim_prompt()  (line 2704)
+  handles: Exception in _run_with_fragmentation()  (line 3061)
+  handles: Exception in _run_with_fragmentation()  (line 3074)
+  handles: Exception in _run_with_fragmentation()  (line 3091)
+  handles: Exception in _read_fragments_from_sketchpad()  (line 3191)
+  handles: Exception in _run_assembly_turn()  (line 3242)
+  handles: Exception in assess_task_confidence()  (line 3733)
+  handles: Exception in _analyze_code_for_topic()  (line 4205)
+  handles: Exception in _run_tool_routing_loop()  (line 4807)
+  handles: Exception in _run_tool_routing_loop()  (line 4865)
+  handles: Exception in _run_tool_routing_loop()  (line 4964)
+  handles: Exception in _run_pre_generation_safety_check()  (line 511)
+  handles: Exception in _run_pre_generation_safety_check()  (line 528)
+  handles: Exception in _run_pre_generation_safety_check()  (line 538)
+  handles: Exception in _run_pre_generation_safety_check()  (line 571)
+  handles: Exception in _run_pre_generation_safety_check()  (line 587)
+  handles: Exception in run_turn()  (line 868)
+  handles: Exception in run_turn()  (line 1027)
+  handles: Exception in run_turn()  (line 1350)
+  handles: Exception in run_turn()  (line 1357)
+  handles: Exception in run_turn()  (line 1400)
+  handles: Exception in run_turn()  (line 1439)
+  handles: Exception in run_turn()  (line 1782)
+  handles: Exception in run_turn()  (line 1821)
+  handles: Exception in run_turn()  (line 1837)
+  handles: Exception in run_turn()  (line 1969)
+  handles: Exception in run_turn()  (line 2017)
+  handles: Exception in _run_slim_prompt()  (line 2577)
+  handles: Exception in _run_slim_prompt()  (line 2594)
+  handles: Exception in _run_slim_prompt()  (line 2645)
+  handles: Exception in _web_retrieve_for_recitation()  (line 2838)
+  handles: subprocess.TimeoutExpired in _find_relevant_files()  (line 4159)
+  handles: Exception in _find_relevant_files()  (line 4161)
+  handles: Exception in run_self_improvement()  (line 4708)
+  handles: Exception in _run_tool_routing_loop()  (line 4826)
+  handles: Exception in _run_tool_routing_loop()  (line 4984)
+  handles: Exception in _run_pre_generation_safety_check()  (line 578)
+  handles: Exception in run_turn()  (line 806)
+  handles: Exception in run_turn()  (line 1412)
+  handles: Exception in run_turn()  (line 1686)
+  handles: Exception in _handle_tree_result()  (line 3446)
+  handles: Exception in _run_tool_routing_loop()  (line 4880)
+  handles: Exception in find_recitable_document()  (line 181)
+  handles: Exception in _run_pre_generation_safety_check()  (line 521)
+  handles: Exception in _run_pre_generation_safety_check()  (line 554)
+  handles: Exception in _handle_tree_result()  (line 3456)
+  handles: Exception in run_turn()  (line 832)
+  handles: Exception in run_turn()  (line 1613)
+  handles: Exception in _run_slim_prompt()  (line 2443)
+  handles: Exception in _run_pre_generation_safety_check()  (line 525)
+  handles: Exception in _run_slim_prompt()  (line 2482)
+  handles: Exception in run_turn()  (line 1673)
+
+
+### File: cognition/cognition_packet_v0.2_backup.py
+
+**Module:** CognitionPacket – dynamic state for GAIA’s self-reflection loop.
+
+Schema:
+  prompt:         str            # original user prompt
+  persona:        str            # active persona ID
+  identity:      
+
+**Functions:**
+  def create_packet(config: Config, prompt: str, session_id: str, history: List[Dict[str, Any]], persona_instructions: List[str]) -> CognitionPacket  (line 83)
+
+**Classes:**
+  class CognitionPacket  (line 24)
+    def __init__(self, session_id: str, packet_id: str, time_date: str, packet_type: str, intent: str, intent_confidence: float, identity: str, persona: str, contextual_instructions: str, prompt: str, history: List[Dict[str, Any]], reflection: str, reflection_confidence: float, execution: str, execution_confidence: float, response: str, response_confidence: float, data_fields: Dict[str, Any], sub_packet_id: str = None, config: Config = None)  (line 25)
+    def to_json(self) -> str  (line 68)
+    def from_json(data: str | Dict) -> CognitionPacket  (line 77)
+
+
+### File: cognition/cognitive_audit.py
+
+**Module:** Cognitive Self-Audit — Phase 1 of Reflective Self-Talk
+
+Inserts a structured self-assessment between planning and reflection.
+The model reads its own plan + packet state and writes evaluations,
+sketch
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Evaluation, ReflectionLog, Sketchpad
+  from gaia_common.utils.thoughtstream import write
+  from gaia_core.utils.prompt_builder import build_from_packet
+
+**Functions:**
+  def _build_audit_context(packet: CognitionPacket) -> str  (line 47)
+  def _parse_audit_output(text: str, packet: CognitionPacket) -> None  (line 91)
+  def run_cognitive_self_audit(packet: CognitionPacket, plan_text: str, config, llm) -> None  (line 129)
+
+**Error Handlers:**
+  handles: Exception in _build_audit_context()  (line 60)
+  handles: Exception in _build_audit_context()  (line 69)
+  handles: Exception in _build_audit_context()  (line 78)
+  handles: Exception in _build_audit_context()  (line 85)
+  handles: Exception in run_cognitive_self_audit()  (line 218)
+
+
+### File: cognition/cognitive_dispatcher.py
+
+**GAIA Imports:**
+  from gaia_common.protocols import CognitionPacket
+
+**Functions:**
+  def process_execution_results(execution_results, session_manager, session_id, packet: CognitionPacket)  (line 6)
+
+
+### File: cognition/conversation_curator.py
+
+**Module:** Auto-append notable Discord conversations to the knowledge examples file.
+
+Hooks into SessionManager.summarize_and_archive() to evaluate each archived
+conversation for "notability" using simple heuris
+
+**Classes:**
+  class ConversationCurator  (line 38)
+    "Evaluates archived conversations and appends notable ones to the examples file."
+    def __init__(self, output_dir: Optional[str] = None)  (line 45)
+    def curate(self, session_id: str, messages: List[Dict]) -> bool  (line 49)
+    def is_notable(self, messages: List[Dict]) -> bool  (line 72)
+    def _detect_channel_type(self, session_id: str) -> str  (line 94)
+    def _format_conversation(self, session_id: str, messages: List[Dict]) -> str  (line 97)
+    def _append_to_file(self, formatted: str) -> None  (line 112)
+    def _trim_oldest(self, needed_bytes: int) -> None  (line 130)
+
+**Error Handlers:**
+  handles: Exception in _trim_oldest()  (line 160)
+  handles: OSError in _trim_oldest()  (line 164)
+
+
+### File: cognition/external_voice.py
+
+**Module:** external_voice.py — handles all inbound/outbound chat traffic for GAIA
+(streaming, observer hooks, basic logging).  This module is the *sole*
+entry and exit for chat-based interactions.
+
+**GAIA Imports:**
+  from gaia_core.config import Config
+  from gaia_core.utils.prompt_builder import build_prompt
+  from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+  from gaia_core.cognition.self_reflection import reflect_and_refine
+  from gaia_common.protocols.cognition_packet import CognitionPacket, PacketState, ReflectionLog
+
+**Functions:**
+  def suppress_llama_stderr() -> Generator[None, None, None]  [contextlib.contextmanager]  (line 50)
+  def extract_and_format_execute_blocks(response_text: str) -> str  (line 487)
+
+**Classes:**
+  class ExternalVoice  (line 69)
+    def __init__(self, model, model_pool, config: Config, thought: Optional[str] = None, messages: Optional[List[Dict]] = None, context: Optional[Dict] = None, session_id: str = 'shell', source: str = 'web', observer: Optional[StreamObserver] = None) -> None  (line 70)
+    def stream_response(self, user_input: Optional[str] = None) -> Generator[str | Dict[str, Any], None, None]  (line 133)
+    def generate_full_response(self, user_input: Optional[str] = None) -> str  (line 432)
+    def from_thought(cls, model, thought: str, **kw)  (line 442)
+    def from_messages(cls, model, messages: List[Dict], **kw)  (line 446)
+    def one_shot(cls, model, prompt: str, **kw) -> str  (line 450)
+    def _apply_stream_spacing(self, token: str, prev_char: str) -> str  (line 462)
+    def _get_first_visible_char(text: str) -> str  (line 472)
+    def _get_last_visible_char(text: str) -> str  (line 480)
+
+**Error Handlers:**
+  handles: ImportError  (line 34)
+  handles: Exception in __init__()  (line 98)
+  handles: Exception in __init__()  (line 102)
+  handles: Exception in __init__()  (line 107)
+  handles: Exception in stream_response()  (line 143)
+  handles: StopIteration in stream_response()  (line 423)
+  handles: Exception in stream_response()  (line 425)
+  handles: Exception in __init__()  (line 127)
+  handles: Exception in stream_response()  (line 158)
+  handles: Exception in stream_response()  (line 164)
+  handles: Exception in stream_response()  (line 168)
+  handles: Exception in stream_response()  (line 177)
+  handles: Exception in stream_response()  (line 246)
+  handles: Exception in stream_response()  (line 317)
+  handles: Exception in stream_response()  (line 305)
+  handles: Exception in stream_response()  (line 219)
+  handles: Exception in stream_response()  (line 250)
+  handles: Exception in stream_response()  (line 224)
+  handles: Exception in stream_response()  (line 419)
+  handles: Exception in stream_response()  (line 297)
+  handles: concurrent.futures.TimeoutError in stream_response()  (line 342)
+  handles: Exception in stream_response()  (line 346)
+  handles: Exception in stream_response()  (line 366)
+  handles: Exception in stream_response()  (line 382)
+  handles: Exception in stream_response()  (line 404)
+  handles: Exception in stream_response()  (line 402)
+  handles: Exception in stream_response()  (line 395)
+  handles: Exception in stream_response()  (line 400)
+
+
+### File: cognition/goal_detector.py
+
+**Module:** Goal Detection Module — detects and carries user goals across conversation turns.
+
+Three detection paths:
+  1. Fast-path — self-evident intents map directly to a goal
+  2. Session-carry — active goal 
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, DetectedGoal, GoalConfidence, GoalState
+
+**Constants:**
+  MAX_CARRY_TURNS = 8  (line 26)
+
+**Classes:**
+  class GoalDetector  (line 52)
+    "Detects and manages user goals across conversation turns."
+    def __init__(self, config = None)  (line 55)
+    def detect(self, packet: CognitionPacket, session_manager, session_id: str, model_pool = None) -> GoalState  (line 58)
+    def _fast_path_detect(self, intent: str, user_input: str) -> Optional[DetectedGoal]  (line 99)
+    def _session_carry(self, session_manager, session_id: str) -> Optional[GoalState]  (line 115)
+    def _llm_detect(self, packet: CognitionPacket, model_pool) -> Optional[DetectedGoal]  (line 158)
+    def _parse_llm_response(text: str) -> Optional[DetectedGoal]  (line 194)
+    def handle_goal_shift(new_goal_desc: str, packet: CognitionPacket, session_manager, session_id: str)  (line 218)
+    def _persist_goal(self, session_manager, session_id: str, state: GoalState)  (line 259)
+    def _persist_goal_static(session_manager, session_id: str, state: GoalState)  (line 264)
+
+**Error Handlers:**
+  handles: Exception in _llm_detect()  (line 165)
+  handles: Exception in _llm_detect()  (line 189)
+
+
+### File: cognition/heartbeat.py
+
+**Module:** Thought Seed Heartbeat — regular-interval daemon that triages dormant seeds.
+
+Runs independently of the sleep cycle on a configurable timer (default 20 min).
+For each unreviewed seed, Lite performs a 
+
+**Constants:**
+  HEARTBEAT_SESSION_ID = 'gaia_heartbeat_session'  (line 26)
+
+**Classes:**
+  class ThoughtSeedHeartbeat  (line 49)
+    "Daemon thread that triages thought seeds on a regular interval."
+    def __init__(self, config, model_pool = None, agent_core = None, sleep_wake_manager = None, timeline_store = None, session_manager = None) -> None  (line 52)
+    def start(self) -> None  (line 127)
+    def stop(self) -> None  (line 137)
+    def _run(self) -> None  (line 148)
+    def _tick(self) -> None  (line 162)
+    def _run_temporal_tasks(self) -> tuple[bool, bool, bool]  (line 236)
+    def _triage_seed(self, llm, seed_data: Dict[str, Any]) -> tuple[str, str]  (line 299)
+    def _do_archive(self, filename: str) -> None  (line 341)
+    def _do_defer(self, filename: str) -> None  (line 345)
+    def _act_on_seed(self, llm, seed_filename: str, seed_data: Dict[str, Any]) -> None  (line 355)
+    def _expand_seed(self, llm, seed_data: Dict[str, Any]) -> str  (line 397)
+    def _ensure_active(self, seed_filename: str) -> bool  (line 421)
+    def _emit_heartbeat_tick(self, seeds_found: int, archived: int, deferred: int, acted: int, journal_written: bool = False, state_baked: bool = False, interview_conducted: bool = False) -> None  (line 469)
+
+**Error Handlers:**
+  handles: Exception in _triage_seed()  (line 333)
+  handles: Exception in _act_on_seed()  (line 390)
+  handles: Exception in _expand_seed()  (line 417)
+  handles: Exception in __init__()  (line 89)
+  handles: Exception in __init__()  (line 102)
+  handles: Exception in __init__()  (line 120)
+  handles: Exception in _run()  (line 154)
+  handles: Exception in _tick()  (line 192)
+  handles: Exception in _tick()  (line 214)
+  handles: Exception in _run_temporal_tasks()  (line 254)
+  handles: Exception in _run_temporal_tasks()  (line 265)
+  handles: Exception in _emit_heartbeat_tick()  (line 486)
+  handles: Exception in _run_temporal_tasks()  (line 278)
+  handles: Exception in _run_temporal_tasks()  (line 290)
+
+
+### File: cognition/history_review.py
+
+**Module:** History Review — Pre-injection audit of conversation history.
+
+Before history is injected into the LLM prompt, each assistant message
+is checked for epistemic violations:
+  - Fabricated file paths (ci
+
+**Functions:**
+  def _count_violations(text: str) -> Tuple[int, List[str]]  (line 74)
+  def _is_user_correction(text: str) -> bool  (line 109)
+  def _redact_message(original: str, reasons: List[str]) -> str  (line 114)
+  def _build_correction_summary(user_msg: str, assistant_msg: str, reasons: List[str]) -> Optional[str]  (line 123)
+  def review_history(history: List[Dict[str, str]], config: Optional[dict] = None, session_id: str = '') -> List[Dict[str, str]]  (line 147)
+
+
+### File: cognition/initiative_engine.py
+
+**Module:** Initiative Engine — ported from archive/gaia-assistant-monolith/run_gil.py.
+
+Executes a single autonomous thought cycle: picks the highest-priority topic
+from the topic cache and feeds a self-generate
+
+**Constants:**
+  GIL_SESSION_ID = 'gaia_initiative_loop_session'  (line 19)
+  TOPIC_CACHE_PATH = '/knowledge/system_reference/topic_cache.json'  (line 20)
+
+**Classes:**
+  class InitiativeEngine  (line 23)
+    "Autonomous thought engine driven by the topic manager."
+    def __init__(self, config, agent_core = None) -> None  (line 26)
+    def execute_turn(self) -> Optional[Dict[str, Any]]  (line 30)
+    def _build_self_prompt(topic: Dict[str, Any]) -> str  (line 74)
+
+**Error Handlers:**
+  handles: Exception in execute_turn()  (line 69)
+
+
+### File: cognition/knowledge_enhancer.py
+
+**Module:** This module is responsible for enhancing the CognitionPacket with relevant knowledge from knowledge bases.
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, DataField
+  from gaia_core.utils import mcp_client
+
+**Functions:**
+  def enhance_packet(packet: CognitionPacket)  (line 18)
+
+**Error Handlers:**
+  handles: Exception in enhance_packet()  (line 92)
+  handles: Exception in enhance_packet()  (line 66)
+
+
+### File: cognition/knowledge_ingestion.py
+
+**Module:** Knowledge Ingestion Pipeline for D&D Campaign Content
+
+Detects incoming knowledge dumps (explicit save commands or heuristic auto-detect),
+classifies content, checks for duplicates, formats as structu
+
+**GAIA Imports:**
+  from gaia_core.utils import mcp_client
+
+**Functions:**
+  def detect_save_command(user_input: str) -> Optional[Dict[str, str]]  (line 81)
+  def detect_knowledge_dump(user_input: str, kb_name: str) -> bool  (line 114)
+  def classify_content(text: str) -> Dict[str, str]  (line 161)
+  def check_dedup(content: str, kb_name: str) -> Optional[Dict]  (line 210)
+  def _sanitize_filename(text: str) -> str  (line 243)
+  def format_document(content: str, classification: Dict[str, str], subject: str = '') -> Tuple[str, str]  (line 247)
+  def write_and_embed(filename: str, doc_content: str, kb_name: str) -> Dict[str, object]  (line 290)
+  def run_explicit_save(user_input: str, kb_name: str) -> Optional[Dict]  (line 338)
+  def run_auto_detect(user_input: str, kb_name: str) -> Optional[Dict]  (line 373)
+  def detect_knowledge_update(user_input: str, kb_name: str) -> Optional[Dict[str, str]]  (line 434)
+  def retrieve_entity_document(entity: str, kb_name: str) -> Optional[Dict]  (line 473)
+  def run_update_detect(user_input: str, kb_name: str) -> Optional[Dict]  (line 510)
+
+**Error Handlers:**
+  handles: Exception in check_dedup()  (line 234)
+  handles: Exception in retrieve_entity_document()  (line 505)
+
+
+### File: cognition/lite_journal.py
+
+**Module:** Lite Cognitive Journal — running introspective log written by the Lite model.
+
+Mirrors the PrimeCheckpointManager pattern: regular writes, timestamped entries,
+rotation to history directory when the j
+
+**GAIA Imports:**
+  from gaia_core.cognition.temporal_state_manager import _LITE_LOCK
+
+**Classes:**
+  class LiteJournal  (line 45)
+    "Manages Lite's introspective journal (Lite.md)."
+    def __init__(self, config, model_pool = None, timeline_store = None, sleep_wake_manager = None) -> None  (line 52)
+    def write_entry(self) -> Optional[str]  (line 83)
+    def load_latest(self) -> str  (line 111)
+    def load_recent_entries(self, n: int = 5) -> List[str]  (line 121)
+    def rotate(self) -> None  (line 134)
+    def get_entry_count(self) -> int  (line 157)
+    def _generate_entry(self, llm) -> str  (line 166)
+    def _build_journal_prompt(self) -> tuple[str, str]  (line 185)
+    def _append_entry(self, entry_text: str) -> None  (line 241)
+    def _format_duration(seconds: float) -> str  (line 279)
+    def _summarize_event(data: Dict[str, Any]) -> str  (line 293)
+
+**Error Handlers:**
+  handles: OSError in __init__()  (line 76)
+  handles: Exception in write_entry()  (line 107)
+  handles: OSError in load_latest()  (line 117)
+  handles: OSError in rotate()  (line 154)
+  handles: Exception in _generate_entry()  (line 181)
+  handles: Exception in write_entry()  (line 92)
+  handles: Exception in _build_journal_prompt()  (line 199)
+  handles: Exception in _build_journal_prompt()  (line 215)
+  handles: Exception in _build_journal_prompt()  (line 226)
+  handles: Exception in _append_entry()  (line 255)
+
+
+### File: cognition/loop_detector.py
+
+**Module:** Loop Detection System for GAIA Cognitive Pipeline.
+
+Detects when the model enters generation loops and provides signals for
+graceful recovery. Uses multiple parallel detectors that vote on loop presen
+
+**Enums:**
+  LoopCategory: TOOL_REPETITION='tool_repetition', TOOL_PING_PONG='tool_ping_pong', TOOL_PARAMETER_DRIFT='tool_parameter_drift', OUTPUT_VERBATIM='output_verbatim', OUTPUT_PARAPHRASE='output_paraphrase', OUTPUT_STRUCTURAL='output_structural', STATE_OSCILLATION='state_oscillation', STATE_REGRESSION='state_regression', GOAL_DRIFT='goal_drift', ERROR_REPETITION='error_repetition', ERROR_WHACK_A_MOLE='error_whack_a_mole', FIX_REPETITION='fix_repetition', TOKEN_REPETITION='token_repetition', PHRASE_LOOP='phrase_loop', STRUCTURAL_LOOP='structural_loop'  (line 34)
+
+**Classes:**
+  class LoopDetectorConfig  (line 63)
+    "Configuration for loop detection thresholds."
+  class DetectionResult  (line 93)
+    "Result from a single detector."
+  class AggregatedResult  (line 103)
+    "Combined result from all detectors."
+  class ToolCallRecord  (line 116)
+    "Record of a single tool call for tracking."
+  class ErrorRecord  (line 126)
+    "Record of an error for tracking."
+  class ToolCallRepetitionDetector  (line 140)
+    "Detects repeated tool calls with same/similar arguments.
+
+Catches:
+- Exact repetition: Same tool + a"
+    def __init__(self, config: LoopDetectorConfig)  (line 151)
+    def record(self, tool: str, args: Dict[str, Any], result: str = '') -> None  (line 155)
+    def detect(self) -> DetectionResult  (line 169)
+    def _detect_exact_repetition(self) -> DetectionResult  (line 201)
+    def _detect_ping_pong(self) -> DetectionResult  (line 237)
+    def _detect_same_results(self) -> DetectionResult  (line 275)
+    def _hash_args(self, args: Dict[str, Any]) -> str  (line 306)
+    def _summarize_args(self, args: Dict[str, Any]) -> str  (line 312)
+    def reset(self) -> None  (line 330)
+  class OutputSimilarityDetector  (line 335)
+    "Detects nearly identical outputs across turns.
+
+Uses multi-strategy similarity:
+- Jaccard on word se"
+    def __init__(self, config: LoopDetectorConfig)  (line 345)
+    def record(self, output: str) -> None  (line 350)
+    def detect(self) -> DetectionResult  (line 356)
+    def _similarity(self, a: str, b: str) -> float  (line 402)
+    def _ngram_similarity(self, a: str, b: str, n: int = 3) -> float  (line 425)
+    def _structural_similarity(self, a: str, b: str) -> float  (line 441)
+    def _normalize(self, text: str) -> str  (line 468)
+    def reset(self) -> None  (line 485)
+  class StateOscillationDetector  (line 491)
+    "Detects oscillating states without progress.
+
+Tracks:
+- Goal changes
+- File modification patterns
+- "
+    def __init__(self, config: LoopDetectorConfig)  (line 501)
+    def record(self, goal: str = '', modified_files: Optional[Set[str]] = None, state_snapshot: Optional[Dict[str, Any]] = None) -> None  (line 507)
+    def detect(self) -> DetectionResult  (line 520)
+    def _detect_goal_oscillation(self) -> DetectionResult  (line 551)
+    def reset(self) -> None  (line 577)
+  class ErrorCycleDetector  (line 584)
+    "Detects recurring error patterns.
+
+Catches:
+- Same error repeated
+- Same fix attempted multiple time"
+    def __init__(self, config: LoopDetectorConfig)  (line 594)
+    def record(self, error_type: str, error_message: str, attempted_fix: str = '', was_success: bool = False) -> None  (line 598)
+    def detect(self) -> DetectionResult  (line 619)
+    def _detect_fix_repetition(self) -> DetectionResult  (line 664)
+    def _detect_whack_a_mole(self) -> DetectionResult  (line 700)
+    def reset(self) -> None  (line 733)
+  class TokenPatternDetector  (line 738)
+    "Detects repetitive patterns during token streaming.
+
+Catches:
+- Exact phrase repetition ("I'll help."
+    def __init__(self, config: LoopDetectorConfig)  (line 748)
+    def add_tokens(self, tokens: str) -> Optional[DetectionResult]  (line 753)
+    def detect(self) -> DetectionResult  (line 769)
+    def _detect_phrase_repetition(self) -> DetectionResult  (line 791)
+    def _detect_word_repetition(self) -> DetectionResult  (line 826)
+    def _detect_structural_repetition(self) -> DetectionResult  (line 860)
+    def reset(self) -> None  (line 899)
+  class LoopDetectionAggregator  (line 908)
+    "Combines signals from all detectors to determine if a loop is occurring.
+
+Triggering rules:
+1. Any s"
+    def __init__(self, config: LoopDetectorConfig)  (line 927)
+    def evaluate(self) -> AggregatedResult  (line 940)
+    def _should_warn(self) -> bool  (line 1031)
+    def mark_warned(self) -> None  (line 1041)
+    def mark_reset(self) -> None  (line 1045)
+    def record_tool_call(self, tool: str, args: Dict[str, Any], result: str = '') -> None  (line 1052)
+    def record_output(self, output: str) -> None  (line 1056)
+    def record_state(self, goal: str = '', modified_files: Optional[Set[str]] = None, state_snapshot: Optional[Dict[str, Any]] = None) -> None  (line 1060)
+    def record_error(self, error_type: str, error_message: str, attempted_fix: str = '', was_success: bool = False) -> None  (line 1065)
+    def add_tokens(self, tokens: str) -> Optional[DetectionResult]  (line 1070)
+    def reset(self) -> None  (line 1074)
+  class LoopDetector  (line 1089)
+    "Main interface for loop detection in GAIA cognitive pipeline.
+
+Usage:
+    detector = LoopDetector.ge"
+    def __init__(self, config: Optional[LoopDetectorConfig] = None)  (line 1113)
+    def get_instance(cls, config: Optional[LoopDetectorConfig] = None) -> LoopDetector  (line 1119)
+    def reset_instance(cls) -> None  (line 1126)
+    def enabled(self) -> bool  (line 1131)
+    def enabled(self, value: bool) -> None  (line 1135)
+    def reset_count(self) -> int  (line 1140)
+    def record_tool_call(self, tool: str, args: Dict[str, Any], result: str = '') -> None  (line 1143)
+    def record_output(self, output: str) -> None  (line 1148)
+    def record_state(self, goal: str = '', modified_files: Optional[Set[str]] = None, state_snapshot: Optional[Dict[str, Any]] = None) -> None  (line 1153)
+    def record_error(self, error_type: str, error_message: str, attempted_fix: str = '', was_success: bool = False) -> None  (line 1159)
+    def add_tokens(self, tokens: str) -> Optional[DetectionResult]  (line 1165)
+    def check(self) -> AggregatedResult  (line 1171)
+    def mark_warned(self) -> None  (line 1184)
+    def trigger_reset(self) -> None  (line 1189)
+    def reset_detectors(self) -> None  (line 1194)
+    def full_reset(self) -> None  (line 1199)
+
+
+### File: cognition/loop_patterns.py
+
+**Module:** Loop Pattern Classification and Description System.
+
+Generates human-readable descriptions of detected loops for:
+1. Brief - Status line / notifications (~50 chars)
+2. Summary - User-facing display (2
+
+**GAIA Imports:**
+  from gaia_core.cognition.loop_detector import LoopCategory, AggregatedResult, DetectionResult
+
+**Classes:**
+  class DescriptionTemplate  (line 31)
+    "Template for loop description at different verbosity levels."
+  class ClassifiedPattern  (line 41)
+    "A classified loop pattern with description."
+  class PatternClassifier  (line 54)
+    "Classifies detected loops into specific pattern types and generates
+human-readable descriptions."
+    def classify(self, result: AggregatedResult) -> ClassifiedPattern  (line 60)
+    def _classify_tool_pattern(self, result: AggregatedResult) -> ClassifiedPattern  (line 91)
+    def _classify_output_pattern(self, result: AggregatedResult) -> ClassifiedPattern  (line 183)
+    def _classify_state_pattern(self, result: AggregatedResult) -> ClassifiedPattern  (line 267)
+    def _classify_error_pattern(self, result: AggregatedResult) -> ClassifiedPattern  (line 353)
+    def _classify_token_pattern(self, result: AggregatedResult) -> ClassifiedPattern  (line 490)
+    def _classify_generic(self, result: AggregatedResult) -> ClassifiedPattern  (line 612)
+    def _build_full_template(self, title: str, pattern: str, details: List[str], what_went_wrong: str, suggestions: List[str]) -> str  (line 651)
+  class PatternRenderer  (line 681)
+    "Renders classified patterns at different verbosity levels."
+    def __init__(self)  (line 686)
+    def render(self, result: AggregatedResult, format: str = 'summary', reset_count: int = 0) -> str  (line 689)
+    def _render_model_context(self, classified: ClassifiedPattern, reset_count: int) -> str  (line 723)
+    def _get_urgency(self, reset_count: int) -> str  (line 758)
+    def get_notification(self, result: AggregatedResult, reset_count: int = 0) -> Dict[str, Any]  (line 769)
+    def _get_override_warning(self, reset_count: int) -> Optional[str]  (line 806)
+
+
+### File: cognition/loop_recovery.py
+
+**Module:** Loop Recovery System for GAIA Cognitive Pipeline.
+
+Orchestrates the reset flow when a loop is detected:
+1. Capture current packet state
+2. Inject recovery context into next prompt
+3. Manage escalation
+
+**GAIA Imports:**
+  from gaia_core.cognition.loop_detector import LoopDetector, LoopDetectorConfig, AggregatedResult, LoopCategory
+  from gaia_core.cognition.loop_patterns import PatternRenderer
+
+**Functions:**
+  def get_recovery_manager() -> LoopRecoveryManager  (line 391)
+  def inject_recovery_context_if_needed(prompt: str) -> str  (line 399)
+  def build_loop_detection_config_from_constants(constants: Dict[str, Any]) -> LoopDetectorConfig  (line 421)
+
+**Classes:**
+  class LoopMetadata  (line 36)
+    "Metadata about a detected loop, attached to packets for context."
+    def to_dict(self) -> Dict[str, Any]  (line 50)
+    def from_dict(cls, data: Dict[str, Any]) -> LoopMetadata  (line 65)
+  class CapturedState  (line 81)
+    "Captured state before reset for context preservation."
+    def to_dict(self) -> Dict[str, Any]  (line 94)
+  class LoopRecoveryManager  (line 112)
+    "Manages the loop detection and recovery lifecycle.
+
+Responsibilities:
+- Coordinate detection checks
+"
+    def __init__(self, config: Optional[LoopDetectorConfig] = None, on_warn: Optional[Callable[[AggregatedResult], None]] = None, on_block: Optional[Callable[[AggregatedResult], None]] = None, on_escalate: Optional[Callable[[int], None]] = None)  (line 124)
+    def enabled(self) -> bool  (line 156)
+    def enabled(self, value: bool) -> None  (line 160)
+    def reset_count(self) -> int  (line 164)
+    def check_and_handle(self, session_id: str = '', packet_id: str = '', goal: str = '', last_output: str = '') -> Optional[AggregatedResult]  (line 167)
+    def _capture_state(self, session_id: str, packet_id: str, goal: str, last_output: str, result: AggregatedResult) -> None  (line 231)
+    def _prepare_recovery_context(self, result: AggregatedResult) -> None  (line 275)
+    def get_recovery_context(self) -> Optional[str]  (line 286)
+    def clear_recovery_context(self) -> None  (line 295)
+    def _mark_recovery_success(self) -> None  (line 299)
+    def override_detection(self, duration_seconds: float = 300) -> None  (line 307)
+    def cancel_override(self) -> None  (line 317)
+    def get_notification(self, result: AggregatedResult) -> Dict[str, Any]  (line 322)
+    def should_require_user_intervention(self) -> bool  (line 326)
+    def get_escalation_message(self) -> str  (line 330)
+    def record_tool_call(self, tool: str, args: Dict[str, Any], result: str = '') -> None  (line 355)
+    def record_output(self, output: str) -> None  (line 359)
+    def record_state(self, goal: str = '', modified_files: Optional[set] = None, state_snapshot: Optional[Dict[str, Any]] = None) -> None  (line 363)
+    def record_error(self, error_type: str, error_message: str, attempted_fix: str = '', was_success: bool = False) -> None  (line 372)
+    def add_tokens(self, tokens: str) -> Optional[Any]  (line 382)
+  class LoopInterrupt  (line 450)
+    "Interrupt signal for streaming loop detection.
+Compatible with existing Interrupt class from stream_"
+    def from_detection(cls, result: AggregatedResult, is_warn: bool = True) -> LoopInterrupt  (line 461)
+  class LoopDetectorObserver  (line 477)
+    "Observer adapter for integration with ExternalVoice streaming.
+
+Monitors token stream for loop patte"
+    def __init__(self, manager: Optional[LoopRecoveryManager] = None, think_tag_char_threshold: int = 500, think_tag_ratio_threshold: float = 0.9)  (line 498)
+    def _check_think_tag_ratio(self) -> Optional[LoopInterrupt]  (line 514)
+    def on_token(self, token: str) -> Optional[LoopInterrupt]  (line 592)
+    def reset(self) -> None  (line 637)
+
+
+### File: cognition/nlu/__init__.py
+
+**Module:** gaia_core.cognition.nlu - Natural Language Understanding modules.
+
+This package provides:
+- intent_detection: Fast reflex, LLM-powered, and embedding-based intent detection
+- embed_intent_classifier: 
+
+
+### File: cognition/nlu/embed_intent_classifier.py
+
+**Module:** Embedding-based intent classifier for GAIA.
+
+Replaces the keyword-heuristic fallback in intent_detection.py with
+cosine-similarity classification against a bank of labeled exemplar
+phrases.  Uses the 
+
+**Classes:**
+  class EmbedIntentClassifier  (line 34)
+    "Singleton embedding-based intent classifier."
+    def __init__(self)  (line 40)
+    def instance(cls) -> 'EmbedIntentClassifier'  (line 47)
+    def initialise(self, embed_model, config: Optional[dict] = None) -> bool  (line 58)
+    def classify(self, text: str, confidence_threshold: float = 0.45, top_k: int = 3) -> Tuple[str, float]  (line 116)
+    def ready(self) -> bool  (line 177)
+
+**Error Handlers:**
+  handles: Exception in initialise()  (line 75)
+  handles: Exception in initialise()  (line 108)
+  handles: Exception in classify()  (line 172)
+
+
+### File: cognition/nlu/intent_detection.py
+
+**Module:** Intent Detection (pillar-compliant, robust)
+- Fast reflex/regex path for autonomic commands (help, exit, shell, etc).
+- LLM-powered detection for all ambiguous/natural input.
+- Returns simple intent l
+
+**GAIA Imports:**
+  from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+
+**Functions:**
+  def fast_intent_check(text)  (line 25)
+  def _detect_direct_list_tools(text: str) -> bool  (line 43)
+  def _detect_tree_request(text: str) -> bool  (line 47)
+  def _detect_list_files_request(text: str) -> bool  (line 71)
+  def _detect_read_file_request(text: str) -> bool  (line 84)
+  def _mentions_file_like_action(text: str) -> bool  (line 110)
+  def _detect_fragmentation_request(text: str) -> bool  (line 134)
+  def _detect_tool_routing_request(text: str) -> bool  (line 279)
+  def _keyword_intent_classify(text: str, probe_context: str = '') -> str  (line 373)
+  def _fast_track_intent_detection(text: str) -> Optional[str]  (line 504)
+  def model_intent_detection(text, config, lite_llm = None, full_llm = None, fallback_llm = None, probe_context = '', embed_model = None)  (line 532)
+  def detect_intent(text, config, lite_llm = None, full_llm = None, fallback_llm = None, probe_context = '', embed_model = None) -> Plan  (line 716)
+
+**Classes:**
+  class Plan  (line 20)
+
+**Error Handlers:**
+  handles: AssertionError in model_intent_detection()  (line 688)
+  handles: Exception in model_intent_detection()  (line 691)
+  handles: Exception in detect_intent()  (line 728)
+  handles: Exception in _is_llama_cpp_instance()  (line 554)
+  handles: Exception in model_intent_detection()  (line 608)
+
+
+### File: cognition/nlu/intent_service.py
+
+**Module:** Public façade for intent detection.
+
+Other code should import ONLY from this file:
+    from gaia_core.cognition.nlu.intent_service import detect_intent
+
+Behind the curtain we forward to the real detec
+
+
+### File: cognition/packet_upgrade.py
+
+**Module:** Non-destructive CognitionPacket upgrader — DEPRECATED.
+
+This module was part of the v0.2 → v0.3 migration path. The attributes it
+sets (cot, scratch, cheats, proposed_actions, etc.) do not exist on th
+
+**Functions:**
+  def _ensure(obj: object, name: str, default)  (line 13)
+  def _ensure_slots(dct, keys)  (line 17)
+  def upgrade_packet(packet, config) -> object  (line 21)
+
+
+### File: cognition/packet_utils.py
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Routing, Model, Intent, Context, SessionHistoryRef, Cheatsheet, Constraints, Content, DataField, Reasoning, ReflectionLog, Sketchpad, Evaluation, Response, ToolCall, SidecarAction, Governance, Safety, Signatures, Audit, Privacy, Metrics, TokenUsage, Status, PacketState, Council, PersonaRole, Origin, TargetEngine, SystemTask
+
+**Functions:**
+  def is_execution_safe(packet: CognitionPacket) -> bool  (line 24)
+  def upgrade_v2_to_v3_packet(old_packet_data: Dict) -> CognitionPacket  (line 47)
+
+
+### File: cognition/prime_checkpoint.py
+
+**Module:** Prime model cognitive state checkpointing.
+
+Manages the prime.md checkpoint file that preserves GAIA's working memory
+across GPU sleep/wake cycles.  This is the natural-language replacement for
+KV cac
+
+**Classes:**
+  class PrimeCheckpointManager  (line 35)
+    "Manages Prime model's cognitive state checkpointing."
+    def __init__(self, config, timeline_store = None)  (line 38)
+    def create_checkpoint(self, packet = None, model_pool = None) -> Path  (line 61)
+    def rotate_checkpoints(self) -> None  (line 82)
+    def load_latest(self) -> str  (line 102)
+    def is_consumed(self) -> bool  (line 116)
+    def mark_consumed(self) -> None  (line 120)
+    def get_checkpoint_history(self, limit: int = 10) -> list  (line 130)
+    def _generate_checkpoint(self, packet, model_pool) -> str  (line 143)
+    def _generate_with_llm(self, llm, ctx: dict) -> str  (line 158)
+    def _build_template(self, ctx: dict) -> str  (line 222)
+    def _emit_checkpoint(self, packet, method: str) -> None  (line 255)
+    def _extract_context(self, packet) -> dict  (line 275)
+    def _load_evolving_summary(self, session_id: str) -> str  (line 290)
+    def _truncate(text: str, max_len: int) -> str  (line 302)
+
+**Error Handlers:**
+  handles: OSError in __init__()  (line 52)
+  handles: OSError in rotate_checkpoints()  (line 99)
+  handles: OSError in load_latest()  (line 112)
+  handles: OSError in mark_consumed()  (line 127)
+  handles: OSError in _load_evolving_summary()  (line 297)
+  handles: Exception in _generate_checkpoint()  (line 153)
+  handles: Exception in _emit_checkpoint()  (line 268)
+
+
+### File: cognition/self_reflection.py
+
+**Module:** Self Reflection Processor (model-powered, robust pipeline)
+- Calls LLM for post-generation analysis and hallucination/error detection.
+- Integrates config-driven safety and can fallback to rule-based 
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+  from gaia_core.memory.conversation.summarizer import ConversationSummarizer
+  from gaia_core.utils.gaia_rescue_helper import sketch, show_sketchpad, clear_sketchpad
+  from gaia_common.utils.thoughtstream import write
+  from gaia_common.protocols.cognition_packet import CognitionPacket, DataField, Persona, PersonaRole, ReflectionLog
+  from gaia_core.utils.prompt_builder import build_from_packet, count_tokens
+  from gaia_core.utils.packet_builder import build_packet_snapshot
+
+**Functions:**
+  def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethical_sentinel) -> str  (line 35)
+  def run_self_reflection(packet: CognitionPacket, output: str, config = None, llm = None)  (line 219)
+
+**Error Handlers:**
+  handles: Exception in reflect_and_refine()  (line 53)
+  handles: Exception in reflect_and_refine()  (line 71)
+  handles: Exception in reflect_and_refine()  (line 203)
+  handles: Exception in run_self_reflection()  (line 236)
+  handles: Exception in reflect_and_refine()  (line 67)
+  handles: Exception in reflect_and_refine()  (line 108)
+  handles: Exception in reflect_and_refine()  (line 134)
+  handles: Exception in reflect_and_refine()  (line 152)
+  handles: Exception in reflect_and_refine()  (line 162)
+  handles: Exception in run_self_reflection()  (line 257)
+  handles: Exception in reflect_and_refine()  (line 142)
+  handles: Exception in reflect_and_refine()  (line 195)
+  handles: Exception in reflect_and_refine()  (line 182)
+
+
+### File: cognition/self_review_worker.py
+
+**Module:** Self-review worker: reviews thought seeds and proposes dev_matrix updates.
+
+This worker runs in proposal-only mode: it will create a pending MCP action to
+update `knowledge/system_reference/dev_matrix
+
+**GAIA Imports:**
+  from gaia_core.cognition import thought_seed
+  from gaia_core.config import Config, get_config
+  from gaia_core.utils import mcp_client
+  from gaia_core.cognition.nlu.intent_service import detect_intent
+
+**Functions:**
+  def _get_model_pool()  (line 18)
+  def _load_dev_matrix()  (line 38)
+  def _save_dev_matrix(data)  (line 49)
+  def run_review_once(config: Config = None)  (line 59)
+  def run_review_with_prompt(prompt: str, task_key: str = 'thought_seed_system', session_id: str = 'rescue-shell', persona_id: str = 'RescueOperator')  (line 170)
+
+**Error Handlers:**
+  handles: Exception in _get_model_pool()  (line 27)
+  handles: Exception in _load_dev_matrix()  (line 44)
+  handles: Exception in _save_dev_matrix()  (line 54)
+  handles: Exception in run_review_once()  (line 164)
+  handles: Exception in run_review_once()  (line 148)
+
+
+### File: cognition/semantic_probe.py
+
+**Module:** Semantic Probe — Pre-cognition vector lookup for context discovery.
+
+Runs BEFORE intent detection and persona selection. Extracts interesting
+phrases from user input, probes all indexed vector collect
+
+**Functions:**
+  def _load_probe_config() -> Dict  (line 25)
+  def _get_session_cache(session_id: str) -> SessionProbeCache  (line 279)
+  def _get_session_stats(session_id: str) -> ProbeSessionStats  (line 285)
+  def get_session_probe_stats(session_id: str) -> Optional[Dict]  (line 291)
+  def extract_candidate_phrases(text: str) -> List[str]  (line 301)
+  def _probe_single_collection(phrases: List[str], collection_name: str, top_k: int = 3) -> List[ProbeHit]  (line 397)
+  def _determine_primary_and_supplemental(hits: List[ProbeHit]) -> Tuple[Optional[str], List[str]]  (line 445)
+  def probe_collections(phrases: List[str], knowledge_bases: Dict[str, dict], session_id: str = '', top_k_per_phrase: int = 3) -> SemanticProbeResult  (line 476)
+  def should_skip_probe(user_input: str) -> bool  (line 579)
+  def run_semantic_probe(user_input: str, knowledge_bases: Dict[str, dict], session_id: str = '', top_k_per_phrase: int = ...) -> SemanticProbeResult  (line 595)
+
+**Classes:**
+  class ProbeHit  (line 106)
+    "A single vector match from the probe."
+    def to_dict(self) -> dict  (line 115)
+  class SemanticProbeResult  (line 127)
+    "Aggregated result from probing all collections."
+    def to_dict(self) -> dict  (line 136)
+    def has_hits(self) -> bool  (line 147)
+    def to_metrics_dict(self) -> Dict  (line 150)
+  class SessionProbeCache  (line 183)
+    "Per-session cache of phrase → probe hits with turn-based eviction."
+    def get(self, phrase: str) -> Optional[List[ProbeHit]]  (line 190)
+    def put(self, phrase: str, hits: List[ProbeHit])  (line 202)
+    def advance_turn(self)  (line 207)
+  class ProbeSessionStats  (line 218)
+    "Cumulative probe effectiveness stats for a session."
+    def record(self, result: 'SemanticProbeResult', was_skipped: bool = False)  (line 230)
+    def hit_rate(self) -> float  (line 247)
+    def avg_probe_time_ms(self) -> float  (line 253)
+    def to_dict(self) -> Dict  (line 257)
+
+**Error Handlers:**
+  handles: Exception in _load_probe_config()  (line 31)
+  handles: Exception in _probe_single_collection()  (line 411)
+  handles: Exception in _probe_single_collection()  (line 437)
+  handles: Exception in probe_collections()  (line 537)
+
+
+### File: cognition/sleep_cycle_loop.py
+
+**Module:** Sleep cycle loop — runs as a daemon thread in gaia-core.
+
+Uses gaia-common primitives (IdleMonitor) for idle detection but owns
+all sleep/wake orchestration logic.  Replaces the legacy
+BackgroundProce
+
+**GAIA Imports:**
+  from gaia_common.utils.background.idle_monitor import IdleMonitor
+  from gaia_common.utils.timeline_store import TimelineStore
+  from gaia_core.cognition.sleep_wake_manager import GaiaState, SleepWakeManager, _TransientPhase
+
+**Classes:**
+  class SleepCycleLoop  (line 30)
+    "Background thread that monitors idle state and drives sleep/wake."
+    def __init__(self, config, discord_connector = None, model_pool = None, agent_core = None, session_manager = None) -> None  (line 37)
+    def start(self) -> None  (line 95)
+    def stop(self) -> None  (line 105)
+    def initiate_shutdown(self) -> None  (line 114)
+    def _run(self) -> None  (line 126)
+    def _handle_active(self, idle_minutes: float) -> None  (line 162)
+    def _handle_asleep(self) -> None  (line 175)
+    def _handle_dreaming(self) -> None  (line 220)
+    def _handle_distracted(self) -> None  (line 224)
+    def _release_gpu_for_sleep(self) -> None  (line 240)
+    def _reclaim_gpu_for_wake(self) -> None  (line 255)
+    def _update_presence(self, status_text: Optional[str], sleeping: bool = False, offline: bool = False, status_override: Optional[str] = None) -> None  (line 274)
+
+**Error Handlers:**
+  handles: Exception in __init__()  (line 88)
+  handles: Exception in _release_gpu_for_sleep()  (line 252)
+  handles: Exception in _reclaim_gpu_for_wake()  (line 267)
+  handles: Exception in _run()  (line 147)
+  handles: Exception in _update_presence()  (line 311)
+
+**HTTP Calls:**
+  POST <f-string> in _release_gpu_for_sleep()  (line 243)
+  POST <f-string> in _reclaim_gpu_for_wake()  (line 258)
+  POST <f-string> in _update_presence()  (line 310)
+
+
+### File: cognition/sleep_task_scheduler.py
+
+**Module:** Sleep Task Scheduler — orchestrates autonomous maintenance during SLEEPING state.
+
+Registered tasks are executed one-at-a-time in priority order (lowest number = highest
+priority), with least-recently
+
+**Classes:**
+  class SleepTask  (line 26)
+    "A single registerable sleep-time task."
+  class SleepTaskScheduler  (line 40)
+    "Priority-based scheduler for sleep-time maintenance tasks."
+    def __init__(self, config, model_pool = None, agent_core = None, timeline_store = None) -> None  (line 43)
+    def register_task(self, task: SleepTask) -> None  (line 62)
+    def _register_default_tasks(self) -> None  (line 66)
+    def get_next_task(self) -> Optional[SleepTask]  (line 100)
+    def execute_task(self, task: SleepTask) -> bool  (line 113)
+    def get_status(self) -> List[Dict[str, Any]]  (line 138)
+    def _run_conversation_curation(self) -> None  (line 156)
+    def _run_blueprint_validation(self) -> None  (line 207)
+    def _validate_yaml_blueprints(self) -> int  (line 228)
+    def _validate_legacy_blueprints(self) -> int  (line 272)
+    def _extract_facts(source_files: List[str], source_roots: List[Path]) -> Dict[str, List[str]]  (line 306)
+    def _check_facts(facts: Dict[str, List[str]], bp_text: str) -> List[str]  (line 369)
+    def _append_update_notes(bp_path: Path, bp_text: str, missing: List[str]) -> None  (line 393)
+    def _rebuild_blueprint_embeddings(self) -> None  (line 416)
+    def _run_code_evolution(self) -> None  (line 431)
+    def _emit_task_exec(self, task_id: str, task_type: str, elapsed: float, success: bool, error: str = '') -> None  (line 447)
+
+**Error Handlers:**
+  handles: Exception in execute_task()  (line 126)
+  handles: ImportError in _validate_yaml_blueprints()  (line 233)
+  handles: Exception in _rebuild_blueprint_embeddings()  (line 428)
+  handles: Exception in _run_code_evolution()  (line 443)
+  handles: Exception in _emit_task_exec()  (line 462)
+
+
+### File: cognition/sleep_wake_manager.py
+
+**Module:** GAIA Sleep/Wake State Machine.
+
+Manages six public states + two internal transient phases:
+
+Public states:
+    OFFLINE → ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED
+
+Internal phases (not in the p
+
+**GAIA Imports:**
+  from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
+
+**Constants:**
+  CANNED_DREAMING = "I'm studying right now and can't chat — I'll be back once my training session..."  (line 55)
+  CANNED_DISTRACTED = "I'm a little occupied at the moment — give me a few minutes and I'll get back..."  (line 59)
+
+**Enums:**
+  GaiaState: OFFLINE='offline', ACTIVE='active', DROWSY='drowsy', ASLEEP='asleep', DREAMING='dreaming', DISTRACTED='distracted'  (line 38)
+  _TransientPhase: NONE='none', FINISHING_TASK='finishing_task', WAKING='waking'  (line 47)
+
+**Classes:**
+  class SleepWakeManager  (line 65)
+    "Manages GAIA's sleep/wake state transitions with cognitive continuity."
+    def __init__(self, config, model_pool = None, idle_monitor = None, timeline_store = None) -> None  (line 68)
+    def get_state(self) -> GaiaState  (line 89)
+    def should_transition_to_drowsy(self, idle_minutes: float) -> bool  (line 92)
+    def _emit_state_change(self, from_state: str, to_state: str, reason: str = '') -> None  (line 103)
+    def _notify_audio_state(self, to_state: str) -> None  (line 118)
+    def initiate_drowsy(self, current_packet = None) -> bool  (line 155)
+    def receive_wake_signal(self) -> None  (line 209)
+    def set_voice_active(self, active: bool) -> None  (line 247)
+    def transition_to_waking(self) -> None  (line 264)
+    def complete_wake(self) -> Dict[str, Any]  (line 273)
+    def enter_dreaming(self, handoff_id: str) -> bool  (line 315)
+    def exit_dreaming(self) -> bool  (line 327)
+    def enter_distracted(self) -> bool  (line 348)
+    def exit_distracted(self) -> bool  (line 359)
+    def initiate_offline(self) -> None  (line 379)
+    def get_status(self) -> Dict[str, Any]  (line 392)
+    def get_canned_response(self) -> Optional[str]  (line 408)
+    def _format_checkpoint_as_review(checkpoint: str) -> str  (line 421)
+
+**Error Handlers:**
+  handles: Exception in _notify_audio_state()  (line 148)
+  handles: Exception in initiate_drowsy()  (line 203)
+  handles: Exception in complete_wake()  (line 304)
+  handles: Exception in _emit_state_change()  (line 112)
+
+**HTTP Calls:**
+  CLIENT ? in _notify_audio_state()  (line 145)
+  POST <f-string> in _notify_audio_state()  (line 146)
+
+
+### File: cognition/telemetric_senses.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+  from gaia_core.memory.status_tracker import GAIAStatus
+
+**Functions:**
+  def tick()  (line 25)
+  def update_token_usage(count: int)  (line 31)
+  def scan_files()  (line 37)
+  def get_gpu_usage() -> dict[str, any]  (line 56)
+  def get_hardware_profile() -> dict[str, any]  (line 83)
+  def get_system_resources() -> dict[str, any]  (line 106)
+  def system_health()  (line 130)
+  def get_telemetry_summary() -> str  (line 139)
+  def full_sense_sweep()  (line 161)
+
+**Error Handlers:**
+  handles: Exception in get_gpu_usage()  (line 79)
+  handles: Exception in get_hardware_profile()  (line 102)
+  handles: Exception in get_system_resources()  (line 126)
+
+
+### File: cognition/temporal_interviewer.py
+
+**Module:** Temporal Interviewer — Prime interviews past-Lite via KV cache state swapping.
+
+Phase 2 of the Temporal Awareness Framework.  Prime formulates structured
+questions about a past moment, Lite answers fr
+
+**Classes:**
+  class TemporalInterviewer  (line 93)
+    "Orchestrates Prime-interviews-past-Lite sessions."
+    def __init__(self, config, model_pool = None, temporal_state_manager = None, lite_journal = None, timeline_store = None) -> None  (line 100)
+    def conduct_interview(self, state_id: Optional[str] = None) -> Optional[Dict[str, Any]]  (line 133)
+    def _select_interview_target(self) -> Optional[Dict[str, Any]]  (line 237)
+    def _has_transcript(self, state_id: str) -> bool  (line 270)
+    def _run_interview_rounds(self, llm, state_metadata: Dict[str, Any]) -> List[Dict[str, str]]  (line 278)
+    def _prime_ask(self, previous_rounds: List[Dict[str, str]], state_ts: str, round_idx: int) -> str  (line 305)
+    def _lite_answer(self, llm, previous_rounds: List[Dict[str, str]], question: str) -> str  (line 348)
+    def _analyze_coherence(self, transcript_rounds: List[Dict[str, str]], state_metadata: Dict[str, Any]) -> Dict[str, Any]  (line 382)
+    def _get_journal_for_state(self, state_metadata: Dict[str, Any]) -> str  (line 431)
+    def _parse_coherence(self, text: str) -> Dict[str, Any]  (line 459)
+    def _default_coherence() -> Dict[str, Any]  (line 500)
+    def _build_transcript(self, state_id: str, state_metadata: Dict[str, Any], rounds: List[Dict[str, str]], coherence: Dict[str, Any], duration_ms: int) -> Dict[str, Any]  (line 514)
+    def _save_transcript(self, transcript: Dict[str, Any]) -> Optional[Path]  (line 535)
+    def _emit_interview_event(self, transcript: Dict[str, Any]) -> None  (line 557)
+
+**Error Handlers:**
+  handles: OSError in __init__()  (line 126)
+  handles: Exception in conduct_interview()  (line 170)
+  handles: Exception in _prime_ask()  (line 344)
+  handles: Exception in _lite_answer()  (line 374)
+  handles: Exception in _analyze_coherence()  (line 427)
+  handles: Exception in _get_journal_for_state()  (line 456)
+  handles: OSError in _save_transcript()  (line 549)
+  handles: Exception in _emit_interview_event()  (line 573)
+  handles: Exception in conduct_interview()  (line 204)
+  handles: Exception in conduct_interview()  (line 198)
+
+
+### File: cognition/temporal_state_manager.py
+
+**Module:** Temporal State Manager — KV cache state baking, storage, and restoration for Lite.
+
+Manages segmented KV cache snapshots that capture Lite's cognitive state at specific
+points in time.  These snapshot
+
+**Classes:**
+  class TemporalStateManager  (line 78)
+    "Manages Lite KV cache state snapshots for temporal self-awareness."
+    def __init__(self, config, model_pool = None, timeline_store = None, session_manager = None, lite_journal = None) -> None  (line 81)
+    def bake_state(self) -> Optional[Path]  (line 113)
+    def load_state(self, state_id: str) -> bool  (line 160)
+    def restore_current(self) -> bool  (line 183)
+    def list_states(self) -> List[Dict[str, Any]]  (line 197)
+    def get_state_metadata(self, state_id: str) -> Optional[Dict[str, Any]]  (line 223)
+    def cleanup_old_states(self) -> int  (line 233)
+    def _build_bake_context(self) -> List[Dict[str, str]]  (line 264)
+    def _reconstruct_wake_cycle(self) -> str  (line 290)
+    def _reconstruct_timeline_context(self) -> str  (line 314)
+    def _reconstruct_conversation_context(self) -> str  (line 333)
+    def _reconstruct_world_state(self) -> str  (line 377)
+    def _reconstruct_journal_content(self) -> str  (line 385)
+    def _save_lite_state(self, llm, metadata: Dict[str, Any]) -> Path  (line 399)
+    def save_current_state_memory(self, llm) -> Any  (line 437)
+    def restore_state_memory(self, llm, state_data) -> None  (line 448)
+    def _load_lite_state(self, llm, state_path: Path) -> bool  (line 455)
+    def _build_metadata(self, bake_duration_ms: int) -> Dict[str, Any]  (line 489)
+    def _delete_state_files(self, bin_path: Path) -> None  (line 527)
+    def _event_summary(data: Dict[str, Any]) -> str  (line 536)
+
+**Error Handlers:**
+  handles: OSError in __init__()  (line 106)
+  handles: json.JSONDecodeError, OSError in get_state_metadata()  (line 230)
+  handles: Exception in _reconstruct_wake_cycle()  (line 311)
+  handles: Exception in _reconstruct_timeline_context()  (line 330)
+  handles: Exception in _reconstruct_conversation_context()  (line 373)
+  handles: Exception in _reconstruct_world_state()  (line 382)
+  handles: Exception in _reconstruct_journal_content()  (line 392)
+  handles: Exception in _load_lite_state()  (line 471)
+  handles: Exception in _build_metadata()  (line 502)
+  handles: OSError in _delete_state_files()  (line 532)
+  handles: Exception in bake_state()  (line 123)
+  handles: Exception in bake_state()  (line 156)
+  handles: Exception in load_state()  (line 174)
+  handles: Exception in _build_metadata()  (line 513)
+  handles: Exception in _build_metadata()  (line 522)
+  handles: json.JSONDecodeError, OSError in list_states()  (line 209)
+  handles: OSError in _load_lite_state()  (line 481)
+
+
+### File: cognition/tests/test_goal_detector.py
+
+**Module:** Unit tests for GoalDetector.
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Content, Context, Constraints, DetectedGoal, GoalConfidence, GoalState, Governance, Header, Intent, Metrics, Model, Persona, PersonaRole, Response, Reasoning, Routing, Safety, SessionHistoryRef, Status, PacketState, TargetEngine, SystemTask, TokenUsage
+  from gaia_core.cognition.goal_detector import GoalDetector, MAX_CARRY_TURNS
+
+**Functions:**
+  def _make_packet(user_intent: str = 'greeting', user_input: str = 'Hello!') -> CognitionPacket  (line 40)
+  def _make_session_manager(meta: dict | None = None)  (line 69)
+
+**Classes:**
+  class TestFastPath  (line 81)
+    def test_greeting_maps_to_casual_conversation(self)  (line 82)
+    def test_question_maps_to_information_seeking(self)  (line 91)
+    def test_tool_use_maps_to_task_execution(self)  (line 97)
+    def test_help_request_maps_to_task_assistance(self)  (line 103)
+  class TestSessionCarry  (line 113)
+    def test_carries_active_goal(self)  (line 114)
+    def test_carry_decays_after_max_turns(self)  (line 139)
+  class TestLLMDetect  (line 165)
+    def test_llm_detection_parses_response(self)  (line 166)
+    def test_llm_detection_graceful_on_failure(self)  (line 184)
+  class TestGoalShift  (line 199)
+    def test_goal_shift_archives_previous(self)  (line 200)
+    def test_goal_shift_without_previous_goal(self)  (line 219)
+  class TestEdgeCases  (line 234)
+    def test_no_goal_on_empty_input(self)  (line 235)
+    def test_fast_path_takes_priority_over_carry(self)  (line 241)
+    def test_parse_llm_response_handles_garbage(self)  (line 265)
+    def test_persistence_round_trip(self)  (line 269)
+
+
+### File: cognition/tests/test_heartbeat.py
+
+**Module:** Tests for ThoughtSeedHeartbeat — GAIA's thought seed triage daemon.
+
+**GAIA Imports:**
+  from gaia_core.cognition.thought_seed import SEEDS_ARCHIVE_DIR, SEEDS_DIR, SEEDS_PENDING_DIR, archive_seed, defer_seed, list_pending_seeds_due, list_unreviewed_seeds
+
+**Functions:**
+  def _patch_seeds_dirs(tmp_path, monkeypatch)  [pytest.fixture(autouse=True)]  (line 27)
+  def _write_seed(seeds_dir: Path, filename: str, **overrides) -> Path  (line 37)
+  def _mock_llm(response_text: str) -> MagicMock  (line 174)
+
+**Classes:**
+  class TestSeedDirectoryOps  (line 56)
+    def test_archive_seed_moves_file(self, _patch_seeds_dirs)  (line 57)
+    def test_archive_nonexistent_returns_false(self, _patch_seeds_dirs)  (line 71)
+    def test_defer_seed_moves_file(self, _patch_seeds_dirs)  (line 74)
+    def test_defer_seed_with_revisit_after(self, _patch_seeds_dirs)  (line 88)
+    def test_pending_due_promotes_back(self, _patch_seeds_dirs)  (line 99)
+    def test_pending_not_due_stays(self, _patch_seeds_dirs)  (line 121)
+    def test_pending_with_future_revisit_stays(self, _patch_seeds_dirs)  (line 138)
+    def test_pending_with_past_revisit_promotes(self, _patch_seeds_dirs)  (line 154)
+  class TestTriageSeed  (line 183)
+    def test_archive_decision(self)  (line 184)
+    def test_pending_decision(self)  (line 195)
+    def test_act_decision(self)  (line 205)
+    def test_unparseable_defaults_to_pending(self)  (line 215)
+    def test_llm_failure_defaults_to_pending(self)  (line 225)
+  class TestActOnSeed  (line 240)
+    def test_act_when_active(self, _patch_seeds_dirs)  (line 241)
+    def test_act_defers_when_dreaming(self, _patch_seeds_dirs)  (line 267)
+    def test_seed_archived_after_act(self, _patch_seeds_dirs)  (line 291)
+  class FakeConfig  (line 321)
+  class TestHeartbeatLifecycle  (line 326)
+    def test_start_creates_thread(self)  (line 327)
+    def test_stop_terminates_thread(self)  (line 340)
+    def test_tick_emits_timeline_event(self, _patch_seeds_dirs)  (line 350)
+    def test_tick_triages_seeds(self, _patch_seeds_dirs)  (line 370)
+  class TestTemporalIntegration  (line 400)
+    def test_tick_writes_journal_entry(self, _patch_seeds_dirs)  (line 401)
+    def test_tick_bakes_state_on_interval(self, _patch_seeds_dirs)  (line 415)
+    def test_tick_skips_bake_off_interval(self, _patch_seeds_dirs)  (line 432)
+
+
+### File: cognition/tests/test_initiative_engine.py
+
+**Module:** Unit tests for InitiativeEngine.
+
+**GAIA Imports:**
+  from gaia_core.cognition.initiative_engine import InitiativeEngine, GIL_SESSION_ID
+
+**Functions:**
+  def config()  [pytest.fixture]  (line 15)
+  def mock_agent_core()  [pytest.fixture]  (line 20)
+
+**Classes:**
+  class FakeConfig  (line 10)
+  class TestNoTopics  (line 36)
+    def test_returns_none_when_no_topics(self, mock_pt, config, mock_agent_core)  (line 38)
+  class TestNoAgentCore  (line 50)
+    def test_returns_none_without_agent_core(self, config)  (line 51)
+  class TestSuccessfulTurn  (line 62)
+    def test_executes_turn_with_topic(self, mock_pt, config, mock_agent_core)  (line 64)
+    def test_uses_gil_session_id(self, mock_pt, config, mock_agent_core)  (line 74)
+  class TestSelfPrompt  (line 89)
+    def test_prompt_contains_topic_description(self)  (line 90)
+    def test_prompt_contains_metadata(self)  (line 95)
+    def test_prompt_contains_reflection_header(self)  (line 101)
+  class TestErrorHandling  (line 112)
+    def test_agent_core_error_returns_error_status(self, mock_pt, config)  (line 114)
+
+
+### File: cognition/tests/test_lite_journal.py
+
+**Module:** Tests for LiteJournal — Lite's introspective journal system.
+
+**GAIA Imports:**
+  from gaia_core.cognition.lite_journal import LiteJournal
+
+**Functions:**
+  def mock_config(tmp_path)  [pytest.fixture]  (line 19)
+  def _mock_llm(response: str = ...) -> MagicMock  (line 25)
+  def _mock_pool(response: str = ...) -> MagicMock  (line 33)
+  def _mock_swm(state: str = 'active', seconds: float = 3600.0) -> MagicMock  (line 39)
+
+**Classes:**
+  class TestJournalLifecycle  (line 48)
+    def test_write_creates_journal_file(self, mock_config)  (line 49)
+    def test_write_appends_to_existing(self, mock_config)  (line 59)
+    def test_returns_none_without_llm(self, mock_config)  (line 67)
+    def test_returns_none_without_model_pool(self, mock_config)  (line 74)
+    def test_entry_format_has_timestamp(self, mock_config)  (line 78)
+    def test_entry_includes_state_metadata(self, mock_config)  (line 87)
+  class TestRotation  (line 104)
+    def test_rotate_when_max_entries_exceeded(self, mock_config)  (line 105)
+    def test_history_dir_created_on_rotate(self, mock_config)  (line 117)
+    def test_rotated_file_is_timestamped(self, mock_config)  (line 126)
+  class TestLoadEntries  (line 142)
+    def test_load_latest_returns_full_content(self, mock_config)  (line 143)
+    def test_load_recent_entries_returns_n(self, mock_config)  (line 151)
+    def test_load_recent_entries_empty_journal(self, mock_config)  (line 162)
+    def test_get_entry_count(self, mock_config)  (line 167)
+
+
+### File: cognition/tests/test_sleep_gpu_integration.py
+
+**Module:** Tests for sleep cycle GPU release/reclaim and Discord presence wiring.
+
+Validates that SleepCycleLoop correctly:
+- Calls orchestrator /gpu/sleep when entering sleep
+- Calls orchestrator /gpu/wake when
+
+**GAIA Imports:**
+  from gaia_core.cognition.sleep_cycle_loop import SleepCycleLoop
+  from gaia_core.cognition.sleep_wake_manager import GaiaState, _TransientPhase
+
+**Functions:**
+  def mock_config()  [pytest.fixture]  (line 21)
+  def mock_discord()  [pytest.fixture]  (line 33)
+  def loop(mock_config, mock_discord)  [pytest.fixture]  (line 41)
+
+**Classes:**
+  class TestGPUReleaseOnSleep  (line 60)
+    def test_gpu_release_called_on_sleep(self, loop)  (line 61)
+    def test_gpu_release_failure_nonfatal(self, loop)  (line 79)
+    def test_no_gpu_release_when_drowsy_cancelled(self, loop)  (line 93)
+  class TestGPUReclaimOnWake  (line 110)
+    def test_gpu_reclaim_called_on_wake(self, loop)  (line 111)
+    def test_gpu_reclaim_failure_nonfatal(self, loop)  (line 129)
+  class TestPresenceDuringSleep  (line 146)
+    def test_presence_sleeping_during_sleep(self, loop, mock_discord)  (line 147)
+    def test_presence_sleeping_during_task(self, loop, mock_discord)  (line 161)
+    def test_presence_resets_on_wake(self, loop, mock_discord)  (line 179)
+  class TestDreamingPresence  (line 198)
+    def test_dreaming_shows_dnd_studying(self, loop, mock_discord)  (line 199)
+  class TestSOAPresence  (line 209)
+    def test_soa_presence_calls_web_endpoint(self, mock_config)  (line 210)
+    def test_soa_presence_online_when_not_sleeping(self, mock_config)  (line 226)
+    def test_soa_presence_failure_nonfatal(self, mock_config)  (line 242)
+    def test_soa_presence_invisible_on_offline(self, mock_config)  (line 254)
+    def test_soa_presence_dnd_override(self, mock_config)  (line 270)
+
+
+### File: cognition/tests/test_sleep_task_scheduler.py
+
+**Module:** Unit tests for SleepTaskScheduler.
+
+**GAIA Imports:**
+  from gaia_core.cognition.sleep_task_scheduler import SleepTask, SleepTaskScheduler
+
+**Functions:**
+  def config()  [pytest.fixture]  (line 20)
+  def scheduler(config)  [pytest.fixture]  (line 25)
+  def bare_scheduler(config)  [pytest.fixture]  (line 31)
+
+**Classes:**
+  class FakeConfig  (line 13)
+  class TestRegistration  (line 47)
+    def test_default_tasks_registered(self, scheduler)  (line 48)
+    def test_default_task_ids(self, scheduler)  (line 51)
+    def test_register_custom_task(self, bare_scheduler)  (line 55)
+  class TestScheduling  (line 74)
+    def test_priority_ordering(self, bare_scheduler)  (line 75)
+    def test_lru_within_same_priority(self, bare_scheduler)  (line 88)
+    def test_never_run_beats_recently_run(self, bare_scheduler)  (line 104)
+    def test_empty_scheduler_returns_none(self, bare_scheduler)  (line 119)
+  class TestExecution  (line 128)
+    def test_successful_execution(self, bare_scheduler)  (line 129)
+    def test_failed_execution(self, bare_scheduler)  (line 145)
+    def test_run_count_increments(self, bare_scheduler)  (line 159)
+    def test_failed_task_does_not_crash_scheduler(self, bare_scheduler)  (line 173)
+  class TestStatus  (line 192)
+    def test_status_shape(self, scheduler)  (line 193)
+    def test_status_reflects_execution(self, bare_scheduler)  (line 207)
+  class TestBlueprintValidation  (line 227)
+    def test_task_registered(self, scheduler)  (line 228)
+    def test_task_priority(self, scheduler)  (line 233)
+    def test_extract_enums(self, tmp_path)  (line 237)
+    def test_extract_endpoints(self, tmp_path)  (line 254)
+    def test_extract_constants(self, tmp_path)  (line 271)
+    def test_detects_stale_enum(self, tmp_path)  (line 287)
+    def test_append_update_notes(self, tmp_path)  (line 308)
+    def test_no_false_positives_when_current(self, tmp_path)  (line 325)
+
+
+### File: cognition/tests/test_sleep_wake_manager.py
+
+**Module:** Unit tests for the GAIA sleep/wake state machine.
+
+Tests the 6-state + 2-phase lifecycle:
+    ACTIVE → DROWSY → ASLEEP → DREAMING / DISTRACTED / OFFLINE
+    Internal phases: _FINISHING_TASK, _WAKING
+
+
+
+**GAIA Imports:**
+  from gaia_core.cognition.sleep_wake_manager import GaiaState, SleepWakeManager, _TransientPhase, CANNED_DREAMING, CANNED_DISTRACTED
+
+**Functions:**
+  def mock_config(tmp_path)  [pytest.fixture]  (line 28)
+  def manager(mock_config)  [pytest.fixture]  (line 37)
+
+**Classes:**
+  class TestInitialState  (line 43)
+    def test_starts_active(self, manager)  (line 44)
+    def test_no_pending_wake(self, manager)  (line 47)
+    def test_prime_not_available(self, manager)  (line 50)
+    def test_phase_none(self, manager)  (line 53)
+  class TestDrowsyThreshold  (line 59)
+    def test_below_threshold(self, manager)  (line 60)
+    def test_at_threshold(self, manager)  (line 63)
+    def test_above_threshold(self, manager)  (line 66)
+    def test_not_when_asleep(self, manager)  (line 69)
+    def test_not_when_dreaming(self, manager)  (line 73)
+    def test_not_when_distracted(self, manager)  (line 77)
+  class TestInitiateDrowsy  (line 84)
+    def test_happy_path(self, manager)  (line 85)
+    def test_checkpoint_written(self, manager, mock_config, tmp_path)  (line 91)
+    def test_rejects_from_asleep(self, manager)  (line 98)
+    def test_rejects_from_dreaming(self, manager)  (line 104)
+    def test_rejects_from_distracted(self, manager)  (line 109)
+    def test_cancels_on_wake_during_checkpoint(self, manager)  (line 114)
+    def test_rotation_before_create(self, manager)  (line 129)
+    def test_previous_checkpoint_preserved_in_backup(self, manager, mock_config)  (line 148)
+    def test_consumed_sentinel_cleared_on_new_checkpoint(self, manager, mock_config)  (line 163)
+  class TestReceiveWakeSignal  (line 181)
+    def test_wake_while_active(self, manager)  (line 182)
+    def test_wake_while_asleep_transitions_to_waking(self, manager)  (line 187)
+    def test_wake_while_asleep_non_interruptible(self, manager)  (line 193)
+    def test_wake_while_drowsy_sets_flag(self, manager)  (line 200)
+    def test_wake_while_dreaming_defers(self, manager)  (line 205)
+    def test_wake_while_distracted_notes(self, manager)  (line 211)
+  class TestCompleteWake  (line 220)
+    def test_restores_from_checkpoint(self, manager)  (line 221)
+    def test_complete_wake_no_checkpoint(self, manager, mock_config, tmp_path)  (line 235)
+    def test_complete_wake_wrong_state(self, manager)  (line 243)
+    def test_complete_wake_marks_consumed(self, manager, mock_config)  (line 248)
+    def test_complete_wake_no_consumed_when_no_checkpoint(self, manager, mock_config)  (line 257)
+  class TestStatus  (line 269)
+    def test_status_fields(self, manager)  (line 270)
+    def test_status_reflects_state_change(self, manager)  (line 279)
+    def test_status_includes_dreaming_handoff_id(self, manager)  (line 284)
+  class TestFormatCheckpoint  (line 294)
+    def test_empty_checkpoint(self)  (line 295)
+    def test_review_framing(self)  (line 299)
+  class TestTransitionToWaking  (line 309)
+    def test_from_asleep(self, manager)  (line 310)
+    def test_rejects_from_active(self, manager)  (line 316)
+  class TestCannedResponses  (line 324)
+    def test_no_canned_when_active(self, manager)  (line 325)
+    def test_no_canned_when_asleep(self, manager)  (line 328)
+    def test_canned_when_dreaming(self, manager)  (line 332)
+    def test_canned_when_distracted(self, manager)  (line 336)
+  class TestDreamingTransition  (line 343)
+    def test_enter_dreaming_from_asleep(self, manager)  (line 344)
+    def test_enter_dreaming_rejects_from_active(self, manager)  (line 351)
+    def test_exit_dreaming_to_asleep(self, manager)  (line 356)
+    def test_exit_dreaming_triggers_pending_wake(self, manager)  (line 364)
+    def test_exit_dreaming_rejects_from_active(self, manager)  (line 372)
+  class TestDistractedTransition  (line 379)
+    def test_enter_distracted_from_asleep(self, manager)  (line 380)
+    def test_enter_distracted_rejects_from_active(self, manager)  (line 386)
+    def test_exit_distracted_to_asleep(self, manager)  (line 391)
+    def test_exit_distracted_triggers_pending_wake(self, manager)  (line 398)
+    def test_exit_distracted_rejects_from_active(self, manager)  (line 406)
+  class TestOffline  (line 413)
+    def test_offline_from_active(self, manager)  (line 414)
+    def test_offline_from_asleep(self, manager)  (line 419)
+    def test_offline_from_dreaming(self, manager)  (line 424)
+    def test_offline_from_distracted(self, manager)  (line 429)
+  class TestLLMCheckpoint  (line 437)
+    def test_llm_checkpoint_with_model_pool(self, mock_config)  (line 438)
+    def test_llm_fallback_on_no_lite_model(self, mock_config)  (line 458)
+    def test_llm_fallback_on_exception(self, mock_config)  (line 471)
+    def test_template_without_model_pool(self, manager, mock_config)  (line 486)
+  class TestCheckpointConsumed  (line 497)
+    def test_is_consumed_false_initially(self, manager)  (line 498)
+    def test_mark_consumed_creates_sentinel(self, manager, mock_config)  (line 501)
+    def test_create_checkpoint_clears_consumed(self, manager, mock_config)  (line 507)
+  class TestDrowsyCancelBehavior  (line 518)
+    def test_early_cancel_skips_checkpoint_entirely(self, mock_config)  (line 519)
+    def test_late_cancel_marks_checkpoint_consumed(self, mock_config)  (line 535)
+  class TestWakeSignalIdleMonitor  (line 559)
+    def test_receive_wake_signal_resets_idle_monitor(self, mock_config)  (line 560)
+    def test_receive_wake_signal_without_idle_monitor(self, mock_config)  (line 570)
+    def test_wake_signal_while_active_does_not_reset_idle(self, mock_config)  (line 579)
+    def test_wake_signal_during_drowsy_resets_idle(self, mock_config)  (line 594)
+
+
+### File: cognition/tests/test_stream_observer.py
+
+**Module:** Unit tests for StreamObserver.verify_side_effects.
+
+Tests the post-execution verification layer that checks whether side
+effects reported by route_output() actually produced the expected
+artifacts (fi
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Constraints, Content, Context, Governance, Header, Intent, Metrics, Model, Persona, PersonaRole, Reasoning, ReflectionLog, Response, Routing, Safety, SessionHistoryRef, Status, PacketState, TargetEngine, SystemTask, TokenUsage
+  from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+
+**Functions:**
+  def _make_packet() -> CognitionPacket  (line 53)
+  def mock_config()  [pytest.fixture]  (line 83)
+  def observer(mock_config)  [pytest.fixture]  (line 94)
+  def packet()  [pytest.fixture]  (line 99)
+  def test_verify_thought_seed_file_exists(observer, packet, tmp_path)  (line 106)
+  def test_verify_thought_seed_file_missing(observer, packet, tmp_path)  (line 124)
+  def test_verify_thought_seed_file_empty(observer, packet, tmp_path)  (line 139)
+  def test_verify_sidecar_action_success(observer, packet)  (line 157)
+  def test_verify_sidecar_action_error(observer, packet)  (line 171)
+  def test_verify_goal_shift_ok(observer, packet)  (line 187)
+  def test_verify_no_side_effects(observer, packet)  (line 201)
+  def test_verify_disabled_by_config(mock_config, packet)  (line 211)
+  def test_verify_fallback_thought_seed(observer, packet, tmp_path, monkeypatch)  (line 229)
+  def test_verify_appends_reflection_log(observer, packet)  (line 261)
+  def test_verify_multiple_issues(observer, packet, tmp_path)  (line 280)
+  def test_verify_no_packet_returns_ok(observer)  (line 300)
+
+**Classes:**
+  class DummyLLM  (line 46)
+    "Minimal LLM stub that satisfies StreamObserver.__init__."
+    def create_chat_completion(self, **kwargs)  (line 49)
+
+
+### File: cognition/tests/test_temporal_context.py
+
+**Module:** Tests for the Temporal Context Builder.
+
+**GAIA Imports:**
+  from gaia_core.utils.temporal_context import _format_duration, _semantic_time, _session_summary, _state_summary, _code_evolution_summary, build_temporal_context
+
+**Classes:**
+  class TestSemanticTime  (line 19)
+    def test_includes_day_of_week(self)  (line 20)
+    def test_morning(self)  (line 26)
+    def test_afternoon(self)  (line 30)
+    def test_evening(self)  (line 34)
+    def test_night(self)  (line 38)
+    def test_early_morning(self)  (line 42)
+  class TestFormatDuration  (line 47)
+    def test_sub_minute(self)  (line 48)
+    def test_minutes(self)  (line 51)
+    def test_hours_and_minutes(self)  (line 54)
+    def test_exact_hours(self)  (line 57)
+  class TestSessionSummary  (line 61)
+    def test_full_session(self)  (line 62)
+    def test_no_data_returns_empty(self)  (line 71)
+  class TestStateSummary  (line 75)
+    def test_active_state(self)  (line 76)
+    def test_empty_returns_empty(self)  (line 81)
+  class TestCodeEvolutionSummary  (line 85)
+    def test_reads_snapshot(self, tmp_path)  (line 86)
+    def test_no_changes(self, tmp_path)  (line 100)
+    def test_missing_file(self)  (line 106)
+  class TestBuildTemporalContext  (line 111)
+    def test_minimal_output(self)  (line 112)
+    def test_with_session_data(self)  (line 118)
+    def test_graceful_with_broken_timeline(self)  (line 129)
+
+
+### File: cognition/tests/test_temporal_interviewer.py
+
+**Module:** Tests for TemporalInterviewer — Prime interviews past-Lite via KV cache swapping.
+
+**GAIA Imports:**
+  from gaia_core.cognition.temporal_interviewer import TemporalInterviewer
+
+**Functions:**
+  def mock_config(tmp_path)  [pytest.fixture]  (line 33)
+  def mock_llm()  [pytest.fixture]  (line 46)
+  def mock_model_pool(mock_llm)  [pytest.fixture]  (line 58)
+  def _create_baked_state(state_dir: Path, ts_label: str) -> str  (line 67)
+  def tsm_with_states(mock_config, mock_model_pool, tmp_path)  [pytest.fixture]  (line 89)
+  def mock_journal()  [pytest.fixture]  (line 104)
+  def mock_timeline()  [pytest.fixture]  (line 117)
+  def interviewer(mock_config, mock_model_pool, tsm_with_states, mock_journal, mock_timeline)  [pytest.fixture]  (line 122)
+
+**Classes:**
+  class FakeLlamaState  (line 21)
+    "Picklable stand-in for llama_cpp.LlamaState."
+    def __init__(self, label: str = 'default')  (line 24)
+  class TestInterviewTargetSelection  (line 135)
+    def test_selects_oldest_uninterviewed_state(self, interviewer)  (line 136)
+    def test_skips_most_recent_state(self, mock_config, mock_model_pool)  (line 142)
+    def test_falls_back_to_already_interviewed(self, interviewer, tsm_with_states)  (line 155)
+    def test_returns_none_with_no_states(self, mock_config, mock_model_pool)  (line 170)
+  class TestInterviewFlow  (line 184)
+    def test_full_interview_cycle(self, interviewer, mock_llm, mock_model_pool)  (line 185)
+    def test_state_restored_on_interview_error(self, interviewer, mock_llm)  (line 212)
+    def test_returns_none_without_model_pool(self, mock_config, tsm_with_states)  (line 223)
+    def test_returns_none_without_tsm(self, mock_config, mock_model_pool)  (line 231)
+  class TestLockBehavior  (line 243)
+    def test_interview_holds_lite_lock(self, interviewer, mock_llm)  (line 244)
+    def test_lock_released_after_interview(self, interviewer)  (line 291)
+  class TestNarrativeCoherence  (line 306)
+    def test_coherence_analysis_called(self, interviewer, mock_model_pool)  (line 307)
+    def test_coherence_parsing(self, interviewer)  (line 320)
+    def test_coherence_graceful_on_parse_failure(self, interviewer)  (line 340)
+  class TestTranscriptStorage  (line 353)
+    def test_transcript_saved_as_json(self, interviewer)  (line 354)
+    def test_transcript_contains_all_rounds(self, interviewer)  (line 367)
+    def test_transcript_dir_created(self, mock_config, mock_model_pool, tsm_with_states)  (line 376)
+  class FakeConfig  (line 390)
+  class TestHeartbeatIntegration  (line 401)
+    def test_interview_triggered_on_interval(self)  (line 402)
+    def test_interview_not_triggered_off_interval(self)  (line 420)
+    def test_interview_skipped_when_sleeping(self)  (line 435)
+    def test_interview_failure_doesnt_crash_heartbeat(self)  (line 453)
+
+
+### File: cognition/tests/test_temporal_state_manager.py
+
+**Module:** Tests for TemporalStateManager — KV cache state baking and restoration.
+
+**GAIA Imports:**
+  from gaia_core.cognition.temporal_state_manager import TemporalStateManager
+
+**Functions:**
+  def mock_config(tmp_path)  [pytest.fixture]  (line 26)
+  def mock_llm()  [pytest.fixture]  (line 36)
+  def mock_model_pool(mock_llm)  [pytest.fixture]  (line 48)
+  def mock_timeline()  [pytest.fixture]  (line 55)
+  def mock_session_manager()  [pytest.fixture]  (line 64)
+  def mock_journal()  [pytest.fixture]  (line 72)
+
+**Classes:**
+  class FakeLlamaState  (line 19)
+    "Picklable stand-in for llama_cpp.LlamaState."
+    def __init__(self)  (line 21)
+  class TestStateDirectory  (line 82)
+    def test_creates_state_dir(self, mock_config, mock_model_pool)  (line 83)
+    def test_list_states_empty(self, mock_config, mock_model_pool)  (line 88)
+  class TestBakeState  (line 96)
+    def test_bake_creates_bin_file(self, mock_config, mock_model_pool, mock_llm)  (line 97)
+    def test_bake_creates_json_sidecar(self, mock_config, mock_model_pool)  (line 107)
+    def test_bake_returns_none_without_llm(self, mock_config)  (line 119)
+    def test_bake_returns_none_without_model_pool(self, mock_config)  (line 126)
+    def test_bake_state_is_picklable(self, mock_config, mock_model_pool)  (line 130)
+    def test_bake_includes_journal_content(self, mock_config, mock_model_pool, mock_llm, mock_journal)  (line 139)
+  class TestLoadState  (line 158)
+    def test_load_existing_state(self, mock_config, mock_model_pool, mock_llm)  (line 159)
+    def test_load_nonexistent_returns_false(self, mock_config, mock_model_pool)  (line 171)
+    def test_corrupt_state_renamed(self, mock_config, mock_model_pool, mock_llm)  (line 175)
+    def test_restore_current_loads_latest(self, mock_config, mock_model_pool, mock_llm)  (line 192)
+  class TestRotation  (line 205)
+    def test_cleanup_enforces_max_files(self, mock_config, mock_model_pool)  (line 206)
+    def test_cleanup_enforces_max_bytes(self, mock_config, mock_model_pool)  (line 222)
+    def test_cleanup_deletes_sidecar_too(self, mock_config, mock_model_pool)  (line 241)
+  class TestContextReconstruction  (line 260)
+    def test_reconstruct_timeline_context(self, mock_config, mock_model_pool, mock_timeline)  (line 261)
+    def test_reconstruct_conversation_context(self, mock_config, mock_model_pool, mock_session_manager)  (line 280)
+    def test_list_states_with_metadata(self, mock_config, mock_model_pool)  (line 301)
+
+
+### File: cognition/thought_seed.py
+
+**Module:** Thought Seed System (GAIA pillar-compliant).
+- Saves, stores, reviews, and processes thought seeds.
+- Seeds are now generated by the main LLM via the THOUGHT_SEED: directive
+- and parsed by the output
+
+**GAIA Imports:**
+  from gaia_core.config import Config
+  from gaia_common.protocols.cognition_packet import CognitionPacket
+  from gaia_common.utils.thoughtstream import write
+
+**Functions:**
+  def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -> Dict[str, Any] | None  (line 31)
+  def list_unreviewed_seeds()  (line 69)
+  def get_seed_by_id(seed_id: str) -> Dict[str, Any] | None  (line 84)
+  def update_seed(seed_id: str, seed_data: Dict[str, Any]) -> bool  (line 99)
+  def review_and_process_seeds(config = None, llm = None, auto_act = False)  (line 111)
+  def refine_seed(seed_id, refinement_prompt, config = None, llm = None)  (line 162)
+  def link_seeds(source_seed_id, target_seed_id, relationship)  (line 198)
+  def maybe_review_seeds(config, llm = None)  (line 213)
+  def archive_seed(seed_filename: str) -> bool  (line 225)
+  def defer_seed(seed_filename: str, revisit_after: str | None = None) -> bool  (line 252)
+  def list_pending_seeds_due() -> list[tuple[Path, dict]]  (line 282)
+
+**Error Handlers:**
+  handles: Exception in save_thought_seed()  (line 64)
+  handles: Exception in get_seed_by_id()  (line 94)
+  handles: Exception in update_seed()  (line 106)
+  handles: Exception in refine_seed()  (line 193)
+  handles: Exception in archive_seed()  (line 247)
+  handles: Exception in defer_seed()  (line 277)
+  handles: Exception in save_thought_seed()  (line 41)
+  handles: Exception in list_unreviewed_seeds()  (line 79)
+  handles: Exception in review_and_process_seeds()  (line 157)
+  handles: Exception in list_pending_seeds_due()  (line 332)
+  handles: ValueError, TypeError in list_pending_seeds_due()  (line 308)
+  handles: ValueError, TypeError in list_pending_seeds_due()  (line 316)
+
+
+### File: cognition/tool_selector.py
+
+**Module:** Tool Selector Module
+
+Responsible for:
+1. Determining if a request needs MCP tool usage
+2. Selecting the appropriate tool with low-temperature generation
+3. Extracting structured parameters
+4. Providi
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, SelectedTool, ToolRoutingState, ToolExecutionStatus, ToolExecutionResult, ReflectionLog, DataField, Sketchpad
+  from gaia_common.utils.tools_registry import TOOLS
+
+**Functions:**
+  def _structured_json_kwargs(model: Any, schema: Dict[str, Any]) -> Dict[str, Any]  (line 52)
+  def _registry_to_catalog(registry: Dict[str, Any]) -> Dict[str, Any]  (line 85)
+  def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool  (line 159)
+  def select_tool(packet: CognitionPacket, user_input: str, model, temperature: float = 0.15) -> Tuple[Optional[SelectedTool], List[SelectedTool]]  (line 201)
+  def review_selection(packet: CognitionPacket, selected_tool: SelectedTool, model, temperature: float = 0.3) -> Tuple[float, str]  (line 315)
+  def _build_tool_catalog() -> str  (line 394)
+  def _extract_content(result) -> str  (line 412)
+  def _extract_json_from_response(content: str) -> str  (line 423)
+  def initialize_tool_routing(packet: CognitionPacket) -> CognitionPacket  (line 448)
+  def inject_tool_result_into_packet(packet: CognitionPacket) -> CognitionPacket  (line 459)
+
+**Error Handlers:**
+  handles: json.JSONDecodeError in select_tool()  (line 307)
+  handles: Exception in select_tool()  (line 310)
+  handles: Exception in review_selection()  (line 385)
+
+
+### File: cognition/topic_manager.py
+
+**Module:** Manages the creation, update, resolution, prioritization, and pruning of GAIA's topic cache.
+
+Supports the Initiative Loop (GIL) by maintaining a prioritized, well-structured list of emergent discussi
+
+**Functions:**
+  def _load_topic_cache(path: str) -> List[Dict[str, Any]]  (line 20)
+  def _save_topic_cache(path: str, cache: List[Dict[str, Any]])  (line 31)
+  def add_topic(path: str, topic: Dict[str, Any]) -> None  (line 39)
+  def resolve_topic(path: str, topic_id: str) -> bool  (line 54)
+  def update_topic(path: str, topic_id: str, updates: Dict[str, Any]) -> bool  (line 66)
+  def prune_resolved_topics(path: str) -> None  (line 77)
+  def list_topics(path: str, include_resolved: bool = False) -> List[Dict[str, Any]]  (line 84)
+  def prioritize_topics(path: str, top_n: Optional[int] = 5) -> List[Dict[str, Any]]  (line 90)
+
+**Error Handlers:**
+  handles: FileNotFoundError in _load_topic_cache()  (line 24)
+  handles: json.JSONDecodeError in _load_topic_cache()  (line 27)
+  handles: Exception in _save_topic_cache()  (line 36)
+
+
+### File: config.py
+
+**Functions:**
+  def get_config() -> Config  (line 190)
+
+**Classes:**
+  class Config  (line 12)
+    "A simplified configuration class for gaia-core.
+Values should be injected at runtime or loaded from "
+    def __post_init__(self)  (line 87)
+    def _load_constants(self)  (line 93)
+    def get_api_key(self, provider: str) -> str  (line 154)
+    def get_persona_instructions(self) -> str  (line 158)
+    def get_model_name(self, model_alias: str) -> str  (line 165)
+    def get_instance(cls) -> Config  (line 169)
+    def _load_cheat_sheet(self)  (line 174)
+
+**Error Handlers:**
+  handles: FileNotFoundError in _load_cheat_sheet()  (line 179)
+  handles: json.JSONDecodeError in _load_cheat_sheet()  (line 182)
+  handles: Exception in _load_cheat_sheet()  (line 185)
+  handles: Exception in _load_constants()  (line 149)
+
+
+### File: ethics/__init__.py
+
+
+### File: ethics/consent_protocol.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+  from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
+  from gaia_core.ethics.ethical_sentinel import EthicalSentinel
+  from gaia_core.memory.status_tracker import GAIAStatus
+  from gaia_core.cognition.self_reflection import run_self_reflection
+
+**Classes:**
+  class ConsentProtocol  (line 11)
+    "Verifies GAIA's explicit consent to operate under current identity, context, and system state.
+Must "
+    def request_consent(reason = 'Initial boot') -> bool  (line 18)
+
+**Error Handlers:**
+  handles: Exception in request_consent()  (line 52)
+
+
+### File: ethics/core_identity_guardian.py
+
+**Classes:**
+  class CoreIdentityGuardian  (line 8)
+    "Verifies prompt behavior and session instructions against GAIA's immutable Tier I identity.
+Operates"
+    def __init__(self, config)  (line 14)
+    def load_identity(self) -> Optional[dict]  (line 19)
+    def validate_prompt_stack(self, persona_traits: dict, instructions: List[str], prompt: str) -> bool  (line 39)
+
+**Error Handlers:**
+  handles: Exception in load_identity()  (line 35)
+
+
+### File: ethics/ethical_sentinel.py
+
+**Module:** ethics/ethical_sentinel.py
+
+The Ethical Sentinel monitors system health and cognitive strain for GAIA.
+
+**Classes:**
+  class EthicalSentinel  (line 13)
+    "Monitors system health, loop safety, error logs, and optionally Tier I identity violations.
+Works al"
+    def __init__(self, identity_guardian = None)  (line 19)
+    def check_system_resources(self) -> bool  (line 27)
+    def check_loop_counter(self) -> bool  (line 40)
+    def check_recent_errors(self) -> bool  (line 50)
+    def register_error(self, exc: Exception)  (line 57)
+    def reset_loop(self)  (line 66)
+    def run_full_safety_check(self, persona_traits = None, instructions = None, prompt = None) -> bool  (line 70)
+
+**Error Handlers:**
+  handles: Exception in run_full_safety_check()  (line 87)
+
+
+### File: integrations/discord_connector.py
+
+**Module:** Discord Connector for GAIA Spinal Column
+
+This module provides Discord integration as both:
+- Output destination (send responses to Discord channels via webhook or bot)
+- Input source (listen for @GAI
+
+**GAIA Imports:**
+  from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender
+  from gaia_common.protocols.cognition_packet import CognitionPacket, OutputDestination, DestinationTarget
+  from gaia_common.utils.destination_registry import DestinationConnector
+
+**Classes:**
+  class DiscordConnector(DestinationConnector)  (line 25)
+    "Discord connector for the GAIA spinal column.
+Supports both webhook output and (future) bot-based bi"
+    def __init__(self, config: Optional[DiscordConfig] = None)  (line 31)
+    def send(self, content: str, target: DestinationTarget, packet: Optional[CognitionPacket] = None) -> bool  (line 53)
+    def send_stream(self, token_generator: Generator[str, None, None], target: DestinationTarget, packet: Optional[CognitionPacket] = None) -> bool  (line 74)
+    def is_available(self) -> bool  (line 85)
+    def _send_via_webhook(self, content: str, target: DestinationTarget, packet: Optional[CognitionPacket] = None) -> bool  (line 89)
+    def _send_via_bot(self, content: str, target: DestinationTarget, packet: Optional[CognitionPacket] = None) -> bool  (line 98)
+    def _split_message_for_discord(self, content: str) -> List[str]  (line 178)
+    def _is_bot_connected(self) -> bool  (line 207)
+    def set_message_callback(self, callback: Callable[[str, str, Dict[str, Any]], None]) -> None  (line 211)
+    def generate_dm_session_id(user_id: str) -> str  (line 222)
+    def is_dm_session(session_id: str) -> bool  (line 227)
+    def start_bot_listener(self) -> bool  (line 231)
+    def stop_bot_listener(self) -> None  (line 352)
+
+**Error Handlers:**
+  handles: Exception in send()  (line 70)
+  handles: Exception in _send_via_bot()  (line 174)
+  handles: ImportError in start_bot_listener()  (line 246)
+  handles: Exception in run_bot()  (line 340)
+  handles: Exception in _send()  (line 131)
+  handles: Exception in _send()  (line 149)
+  handles: Exception in _on_send_done()  (line 166)
+
+
+### File: main.py
+
+**Module:** gaia-core FastAPI application entry point.
+
+Provides the HTTP API for the cognitive loop service.
+This is The Brain - Cognitive loop and reasoning.
+
+**GAIA Imports:**
+  from gaia_core.api.gpu_endpoints import router
+  from gaia_core.api.sleep_endpoints import router
+
+**Endpoints:**
+  GET /health -> health_check()  (line 285)
+  GET / -> root()  (line 297)
+  GET /status -> get_status()  (line 321)
+  POST /cognition/checkpoint -> cognition_checkpoint()  (line 355)
+  POST /process_packet -> process_packet()  (line 370)
+
+**Functions:**
+  def initialize_cognitive_system()  (line 105)
+  async def lifespan(app: FastAPI)  [asynccontextmanager]  (line 159)
+  def _write_shutdown_checkpoints(app: FastAPI) -> dict  (line 218)
+  async def health_check()  [app.get('/health')]  (line 285)
+  async def root()  [app.get('/')]  (line 297)
+  async def get_status()  [app.get('/status')]  (line 321)
+  async def cognition_checkpoint()  [app.post('/cognition/checkpoint')]  (line 355)
+  async def process_packet(packet_data: Dict[str, Any])  [app.post('/process_packet')]  (line 370)
+
+**Classes:**
+  class AIManagerShim  (line 31)
+    "A lightweight shim providing the interface AgentCore expects from ai_manager.
+
+AgentCore requires:
+-"
+    def __init__(self, config, model_pool, session_manager)  (line 44)
+    def initialize(self, persona_name: str = 'prime')  (line 56)
+  class MinimalPersona  (line 78)
+    "Minimal persona object when full persona loading fails or from dict data."
+    def __init__(self, name: str, data: Dict[str, Any] = None)  (line 80)
+
+**Error Handlers:**
+  handles: ImportError  (line 23)
+  handles: Exception in initialize_cognitive_system()  (line 153)
+  handles: Exception in lifespan()  (line 200)
+  handles: Exception in lifespan()  (line 209)
+  handles: Exception in _write_shutdown_checkpoints()  (line 240)
+  handles: Exception in _write_shutdown_checkpoints()  (line 261)
+  handles: Exception -> 500 in process_packet()  (line 466)
+  handles: Exception in initialize()  (line 72)
+
+
+### File: memory/__init__.py
+
+**Module:** gaia_core.memory - Memory and state management modules.
+
+This package provides:
+- dev_matrix: Development matrix for tracking agent state
+- conversation: Conversation memory subpackage
+
+
+### File: memory/codex_writer.py
+
+**GAIA Imports:**
+  from gaia_core.memory.semantic_codex import SemanticCodex, CodexEntry
+  from gaia_core.config import Config
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Model
+
+**Classes:**
+  class CodexWriter  (line 11)
+    def __init__(self, config: Config, semantic_codex: SemanticCodex)  (line 12)
+    def document_information(self, packet: CognitionPacket, info_to_document: str, symbol: str, title: str, tags: Optional[List[str]] = None, llm_model: Optional[Model] = None) -> Optional[Path]  (line 25)
+    def _refine_with_llm(self, raw_info: str, llm_model: Model, packet: CognitionPacket, symbol: str, title: str) -> str  (line 80)
+
+**Error Handlers:**
+  handles: OSError in __init__()  (line 21)
+  handles: Exception in document_information()  (line 76)
+  handles: Exception in _refine_with_llm()  (line 115)
+  handles: Exception in document_information()  (line 57)
+
+
+### File: memory/conversation/__init__.py
+
+**Module:** gaia_core.memory.conversation - Conversation memory management.
+
+This package provides:
+- summarizer: Conversation summarization for context management
+
+
+### File: memory/conversation/archiver.py
+
+**Module:** conversation/archiver.py
+
+Handles saving and loading archived conversations in Markdown format.
+Manages storage, file formatting, and retrieval operations.
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+
+**Classes:**
+  class ConversationArchiver  (line 17)
+    "Saves a conversation history to disk, structured by persona + session ID."
+    def __init__(self, config)  (line 22)
+    def archive_conversation(self, session_id: str, persona: str, messages: List[dict], summary: str, keywords: List[str])  (line 25)
+
+**Error Handlers:**
+  handles: Exception in archive_conversation()  (line 45)
+
+
+### File: memory/conversation/keywords.py
+
+**Module:** conversation/keywords.py
+
+Handles keyword extraction from conversation history.
+Lightweight heuristics for identifying important terms.
+
+**Classes:**
+  class ConversationKeywordExtractor  (line 23)
+    "Extracts high-value keywords from a conversation history."
+    def extract_keywords(self, messages: List[dict], max_keywords: int = 10) -> List[str]  (line 28)
+
+**Error Handlers:**
+  handles: Exception in extract_keywords()  (line 44)
+
+
+### File: memory/conversation/manager.py
+
+**GAIA Imports:**
+  from gaia_core.memory.conversation.summarizer import ConversationSummarizer
+  from gaia_core.memory.conversation.keywords import ConversationKeywordExtractor
+  from gaia_core.memory.conversation.archiver import ConversationArchiver
+
+**Classes:**
+  class ConversationManager  (line 15)
+    "Tracks user-assistant message history and triggers summarization + archiving
+after N messages. Suppo"
+    def __init__(self, config, llm = None, embed_model = None)  (line 21)
+    def set_persona(self, persona: str)  (line 32)
+    def add_message(self, role: str, content: str)  (line 35)
+    def get_recent_messages(self, count: int = 10) -> List[dict]  (line 42)
+    def summarize_and_archive(self)  (line 45)
+    def reset(self)  (line 71)
+    def build_smart_history(self, current_input: str, max_recent: int = 3, max_salient: int = 2) -> List[Dict]  (line 77)
+
+**Error Handlers:**
+  handles: Exception in summarize_and_archive()  (line 68)
+  handles: Exception in summarize_and_archive()  (line 55)
+
+
+### File: memory/conversation/summarizer.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+  from gaia_core.utils import mcp_client
+
+**Functions:**
+  def _get_model_pool()  (line 14)
+
+**Classes:**
+  class ConversationSummarizer  (line 27)
+    "Uses the LLM to summarize a conversation history.
+Falls back to placeholder text if no LLM is availa"
+    def __init__(self, llm = None, embed_model = None)  (line 33)
+    def generate_summary(self, messages: List[dict], packet: object = None) -> str  (line 52)
+    def build_smart_history(self, full_history: List[Dict], current_input: str, max_recent: int = 3, max_salient: int = 2) -> List[Dict]  (line 316)
+
+**Error Handlers:**
+  handles: Exception in _get_model_pool()  (line 24)
+  handles: Exception in __init__()  (line 49)
+  handles: Exception in generate_summary()  (line 312)
+  handles: Exception in build_smart_history()  (line 356)
+  handles: Exception in generate_summary()  (line 81)
+  handles: Exception in generate_summary()  (line 88)
+  handles: Exception in generate_summary()  (line 99)
+  handles: Exception in generate_summary()  (line 154)
+  handles: Exception in generate_summary()  (line 177)
+  handles: Exception in generate_summary()  (line 202)
+  handles: Exception in generate_summary()  (line 218)
+  handles: Exception in generate_summary()  (line 238)
+  handles: Exception in generate_summary()  (line 66)
+  handles: Exception in generate_summary()  (line 106)
+  handles: Exception in generate_summary()  (line 249)
+  handles: Exception in generate_summary()  (line 261)
+  handles: Exception in generate_summary()  (line 200)
+  handles: Exception in generate_summary()  (line 278)
+  handles: Exception in generate_summary()  (line 288)
+  handles: Exception in generate_summary()  (line 303)
+  handles: Exception in generate_summary()  (line 133)
+  handles: Exception in generate_summary()  (line 175)
+  handles: Exception in generate_summary()  (line 216)
+  handles: Exception in generate_summary()  (line 152)
+  handles: Exception in generate_summary()  (line 267)
+  handles: Exception in generate_summary()  (line 172)
+
+**HTTP Calls:**
+  POST endpoint in generate_summary()  (line 209)
+  GET url in generate_summary()  (line 166)
+
+
+### File: memory/dev_matrix.py
+
+**Classes:**
+  class GAIADevMatrix  (line 7)
+    "Persistent manager for GAIA's self-development tasks.
+Stores and retrieves structured roadmap tasks."
+    def __init__(self, config)  (line 13)
+    def _load(self)  (line 19)
+    def _save(self)  (line 27)
+    def add_task(self, label: str, purpose: str, urgency: str = 'medium', impact: str = 'medium', source: str = 'manual') -> None  (line 34)
+    def get_open_tasks(self) -> List[Dict]  (line 47)
+    def resolve_task(self, label: str) -> bool  (line 50)
+    def dump(self) -> List[Dict]  (line 59)
+
+**Error Handlers:**
+  handles: Exception in _save()  (line 31)
+  handles: Exception in _load()  (line 24)
+
+
+### File: memory/knowledge_integrity.py
+
+**Functions:**
+  def hash_file(filepath)  (line 5)
+  def check_or_generate_hash_manifest()  (line 12)
+
+
+### File: memory/memory_manager.py
+
+**Module:** MemoryManager facade to unify short-term, session, and long-term memory.
+
+Short-term: in-process dict (fast cache)
+Working: SessionManager (persistent session history)
+Long-term: VectorIndexer via MCP
+
+**GAIA Imports:**
+  from gaia_core.memory.session_manager import SessionManager
+  from gaia_core.config import Config, get_config
+  from gaia_core.utils import mcp_client
+
+**Classes:**
+  class MemoryManager  (line 17)
+    def __init__(self, config: Config = None)  (line 20)
+    def instance(cls, config: Config = None) -> 'MemoryManager'  (line 27)
+    def set_short(self, key: str, value: Any)  (line 33)
+    def get_short(self, key: str, default = None)  (line 36)
+    def add_message(self, session_id: str, role: str, content: str)  (line 40)
+    def get_history(self, session_id: str)  (line 43)
+    def query_long(self, query: str, top_k: int = 5)  (line 47)
+
+
+### File: memory/priority_manager.py
+
+**Classes:**
+  class GAIAPriorityManager  (line 6)
+    "Centralized persistent task and priority memory for GAIA.
+Tracks open tasks from all sources (manual"
+    def __init__(self, config)  (line 12)
+    def _load(self)  (line 18)
+    def _save(self)  (line 26)
+    def add_task(self, label: str, details: str, urgency: str = 'medium', impact: str = 'medium', source: str = 'manual') -> None  (line 33)
+    def get_open_tasks(self) -> List[Dict]  (line 46)
+    def get_top_tasks(self, limit: int = 5) -> List[Dict]  (line 49)
+    def resolve_task(self, label: str) -> bool  (line 57)
+    def clear_resolved(self)  (line 66)
+    def dump(self) -> List[Dict]  (line 70)
+
+**Error Handlers:**
+  handles: Exception in _save()  (line 30)
+  handles: Exception in _load()  (line 23)
+
+
+### File: memory/semantic_codex.py
+
+**Classes:**
+  class CodexEntry  (line 14)
+  class SemanticCodex  (line 22)
+    "Side-car memory for semantically compressed concepts.
+Loads JSON/YAML files from Config.KNOWLEDGE_CO"
+    def __init__(self, config)  (line 30)
+    def instance(cls, config)  (line 39)
+    def write_entry(self, entry: CodexEntry) -> Path  (line 45)
+    def _iter_files(self)  (line 90)
+    def _checksum(self, path: Path) -> str  (line 97)
+    def _load_one(self, path: Path)  (line 103)
+    def _load_all(self)  (line 185)
+    def hot_reload(self) -> bool  (line 192)
+    def get(self, symbol: str) -> Optional[CodexEntry]  (line 219)
+    def search(self, query: str, limit: int = 10) -> List[CodexEntry]  (line 222)
+
+**Error Handlers:**
+  handles: Exception  (line 8)
+  handles: Exception in write_entry()  (line 86)
+  handles: Exception in _load_one()  (line 182)
+  handles: yaml.YAMLError in _load_one()  (line 142)
+  handles: Exception in _load_one()  (line 144)
+
+
+### File: memory/session_history_indexer.py
+
+**Module:** Per-session vector index for conversation turns and topic summaries.
+
+Provides semantic retrieval over session history so that older turns
+can be recalled by relevance rather than recency. Designed to
+
+**Functions:**
+  def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float  (line 32)
+  def _get_embed_model()  (line 41)
+
+**Classes:**
+  class SessionHistoryIndexer  (line 73)
+    "Per-session vector index for conversation turns and topic summaries."
+    def __init__(self, session_id: str, persist_dir: str = _DEFAULT_PERSIST_DIR)  (line 78)
+    def instance(cls, session_id: str) -> 'SessionHistoryIndexer'  (line 98)
+    def _get_model(self)  (line 103)
+    def _encode(self, text: str) -> Optional[np.ndarray]  (line 110)
+    def index_turn(self, turn_idx: int, user_msg: str, assistant_msg: str)  (line 124)
+    def retrieve(self, query: str, top_k_turns: int = 3, top_k_topics: int = 2, exclude_recent_n: int = 6) -> Dict  (line 146)
+    def _maybe_generate_topic_summary(self)  (line 202)
+    def archive_and_reset(self)  (line 238)
+    def _save(self)  (line 259)
+    def _save_to(self, path: str)  (line 264)
+    def _load(self)  (line 282)
+
+**Error Handlers:**
+  handles: Exception in _get_embed_model()  (line 51)
+  handles: Exception in _get_embed_model()  (line 67)
+  handles: Exception in _encode()  (line 120)
+  handles: Exception in archive_and_reset()  (line 248)
+  handles: Exception in _save_to()  (line 279)
+  handles: Exception in _load()  (line 296)
+
+
+### File: memory/session_manager.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+  from gaia_core.memory.conversation.summarizer import ConversationSummarizer
+  from gaia_core.memory.conversation.keywords import ConversationKeywordExtractor
+  from gaia_core.memory.conversation.archiver import ConversationArchiver
+  from gaia_core.utils.output_router import _strip_think_tags_robust
+
+**Constants:**
+  STATE_FILE = 'app/shared/sessions.json'  (line 20)
+  LAST_ACTIVITY_FILE = 'app/shared/last_activity.timestamp'  (line 23)
+
+**Classes:**
+  class Session  (line 25)
+    "A dedicated data class to hold the state for a single conversation session.
+Using a class instead of"
+    def __init__(self, session_id: str, persona: str = 'default')  (line 31)
+    def to_dict(self) -> Dict  (line 38)
+    def from_dict(cls, data: Dict) -> 'Session'  (line 49)
+    def last_message_timestamp(self)  (line 62)
+  class SessionManager  (line 74)
+    "Manages loading, saving, and accessing all persistent conversation sessions.
+This is the single sour"
+    def __init__(self, config, llm = None, embed_model = None)  (line 81)
+    def _load_state(self) -> Dict[str, Session]  (line 94)
+    def _sanitize_for_json(obj)  (line 108)
+    def _save_state(self)  (line 119)
+    def get_or_create_session(self, session_id: str, persona: str = 'default') -> Session  (line 134)
+    def add_message(self, session_id: str, role: str, content: str)  (line 142)
+    def summarize_and_archive(self, session_id: str)  (line 178)
+    def get_session_meta(self, session_id: str, key: str, default = None)  (line 237)
+    def set_session_meta(self, session_id: str, key: str, value)  (line 242)
+    def get_history(self, session_id: str) -> List[Dict]  (line 248)
+    def reset_session(self, session_id: str)  (line 253)
+    def sanitize_sessions(self, vector_dir: str = 'data/shared/session_vectors', max_age_days: int = 7, max_active_messages: int = 0) -> Dict[str, int]  (line 262)
+    def record_last_activity(self)  (line 344)
+
+**Error Handlers:**
+  handles: TypeError, ValueError in from_dict()  (line 57)
+  handles: Exception in summarize_and_archive()  (line 231)
+  handles: json.JSONDecodeError, IOError in _load_state()  (line 103)
+  handles: IOError in _save_state()  (line 131)
+  handles: Exception in add_message()  (line 168)
+  handles: Exception in summarize_and_archive()  (line 195)
+  handles: Exception in summarize_and_archive()  (line 216)
+  handles: Exception in summarize_and_archive()  (line 224)
+  handles: IOError in record_last_activity()  (line 355)
+  handles: TypeError, ValueError in last_message_timestamp()  (line 69)
+  handles: OSError in sanitize_sessions()  (line 321)
+  handles: OSError in sanitize_sessions()  (line 328)
+
+
+### File: memory/status_tracker.py
+
+**Classes:**
+  class GAIAStatus  (line 3)
+    "Thread-safe global status manager for GAIA boot and runtime state.
+Allows concurrent modules to upda"
+    def update(cls, key: str, value)  (line 12)
+    def get(cls, key: str, default = None)  (line 17)
+    def as_dict(cls)  (line 22)
+    def clear(cls)  (line 27)
+
+
+### File: memory/tests/test_semantic_codex.py
+
+**GAIA Imports:**
+  from gaia_core.memory.semantic_codex import SemanticCodex, CodexEntry
+  from gaia_core.config import Config
+
+**Functions:**
+  def temp_knowledge_dir(tmp_path)  [pytest.fixture]  (line 12)
+  def mock_config(temp_knowledge_dir)  [pytest.fixture]  (line 20)
+  def semantic_codex(mock_config)  [pytest.fixture]  (line 29)
+  def test_write_entry_creates_markdown_file(semantic_codex, temp_knowledge_dir)  (line 32)
+  def test_load_one_markdown_with_front_matter(semantic_codex, temp_knowledge_dir)  (line 62)
+  def test_load_one_markdown_missing_symbol(semantic_codex, temp_knowledge_dir, caplog)  (line 91)
+  def test_load_one_markdown_invalid_yaml(semantic_codex, temp_knowledge_dir, caplog)  (line 106)
+  def test_load_one_json_still_works(semantic_codex, temp_knowledge_dir)  (line 123)
+  def test_iter_files_includes_self_generated_docs(semantic_codex, temp_knowledge_dir)  (line 141)
+  def test_hot_reload_updates_markdown_entry(semantic_codex, temp_knowledge_dir)  (line 156)
+
+
+### File: memory/tests/test_session_history_indexer.py
+
+**Module:** Tests for SessionHistoryIndexer — the per-session vector index that powers
+the RAG component of the rolling history feature.
+
+Tests cover:
+1. Instantiation and singleton pattern
+2. Turn indexing (with
+
+**Functions:**
+  def clear_singletons()  [pytest.fixture(autouse=True)]  (line 29)
+  def persist_dir(tmp_path)  [pytest.fixture]  (line 38)
+  def fake_model()  [pytest.fixture]  (line 68)
+  def patched_model(fake_model)  [pytest.fixture]  (line 73)
+  def no_model()  [pytest.fixture]  (line 83)
+  def indexer(persist_dir, patched_model)  [pytest.fixture]  (line 93)
+  def indexer_no_model(persist_dir, no_model)  [pytest.fixture]  (line 100)
+
+**Classes:**
+  class FakeEmbedModel  (line 45)
+    "A deterministic fake embedding model for testing.
+
+Encodes text by hashing characters into a fixed-d"
+    def encode(self, texts, show_progress_bar = False)  (line 53)
+  class TestInstantiation  (line 110)
+    def test_creates_empty_index(self, indexer)  (line 111)
+    def test_singleton_returns_same_instance(self, persist_dir, patched_model)  (line 118)
+    def test_singleton_different_sessions_are_different(self, persist_dir, patched_model)  (line 124)
+  class TestTurnIndexing  (line 135)
+    def test_index_one_turn(self, indexer)  (line 136)
+    def test_index_multiple_turns(self, indexer)  (line 145)
+    def test_duplicate_turn_idx_is_skipped(self, indexer)  (line 151)
+    def test_long_messages_are_truncated(self, indexer)  (line 157)
+    def test_embedding_is_numpy_array(self, indexer)  (line 163)
+  class TestRetrieval  (line 173)
+    def _populate(self, indexer, n = 10)  (line 174)
+    def test_retrieve_returns_dict_with_turns_and_topics(self, indexer)  (line 192)
+    def test_retrieve_empty_index_returns_empty(self, indexer)  (line 198)
+    def test_retrieve_excludes_recent_turns(self, indexer)  (line 202)
+    def test_retrieve_returns_similarity_scores(self, indexer)  (line 211)
+    def test_retrieve_respects_top_k(self, indexer)  (line 219)
+    def test_retrieve_filters_by_minimum_threshold(self, indexer)  (line 224)
+  class TestTopicSummaries  (line 236)
+    def test_no_topic_before_interval(self, indexer)  (line 237)
+    def test_topic_generated_at_interval(self, indexer)  (line 243)
+    def test_topic_has_correct_turn_range(self, indexer)  (line 253)
+    def test_multiple_topics_generated(self, indexer)  (line 260)
+    def test_topic_embedding_stored(self, indexer)  (line 266)
+    def test_topics_retrievable(self, indexer)  (line 273)
+  class TestPersistence  (line 286)
+    def test_save_creates_json_file(self, indexer, persist_dir)  (line 287)
+    def test_load_restores_turns(self, persist_dir, patched_model)  (line 292)
+    def test_load_restores_topics(self, persist_dir, patched_model)  (line 309)
+    def test_load_restores_last_topic_turn_idx(self, persist_dir, patched_model)  (line 321)
+    def test_corrupt_file_starts_fresh(self, persist_dir, patched_model)  (line 332)
+  class TestArchiveAndReset  (line 348)
+    def test_archive_creates_archive_file(self, indexer, persist_dir)  (line 349)
+    def test_archive_clears_index(self, indexer)  (line 360)
+    def test_archive_preserves_data_in_archive_file(self, indexer, persist_dir)  (line 373)
+    def test_archive_empty_index_is_noop(self, indexer, persist_dir)  (line 384)
+    def test_new_turns_after_archive(self, indexer)  (line 389)
+  class TestGracefulDegradation  (line 401)
+    def test_index_turn_is_noop_without_model(self, indexer_no_model)  (line 402)
+    def test_retrieve_returns_empty_without_model(self, indexer_no_model)  (line 407)
+    def test_archive_works_without_model(self, indexer_no_model)  (line 411)
+    def test_no_topics_generated_without_model(self, indexer_no_model)  (line 415)
+  class TestCosineSimilarity  (line 425)
+    def test_identical_vectors(self)  (line 426)
+    def test_orthogonal_vectors(self)  (line 431)
+    def test_zero_vector(self)  (line 437)
+    def test_opposite_vectors(self)  (line 443)
+
+
+### File: memory/tests/test_session_rag_integration.py
+
+**Module:** Integration tests for the RAG + Rolling History pipeline.
+
+Tests the interaction between:
+- SessionManager indexing hook (add_message → index_turn)
+- AgentCore sliding window + RAG retrieval (_create_
+
+**Functions:**
+  def clear_singletons()  [pytest.fixture(autouse=True)]  (line 40)
+  def persist_dir(tmp_path)  [pytest.fixture]  (line 48)
+  def fake_model()  [pytest.fixture]  (line 55)
+
+**Classes:**
+  class FakeEmbedModel  (line 22)
+    "Deterministic fake embedding model."
+    def encode(self, texts, show_progress_bar = False)  (line 26)
+  class TestSessionManagerIndexingHook  (line 63)
+    "Verify that SessionManager.add_message() triggers turn indexing."
+    def test_assistant_message_triggers_indexing(self, tmp_path, persist_dir, fake_model)  (line 66)
+    def test_user_message_alone_does_not_index(self, tmp_path, persist_dir, fake_model)  (line 92)
+    def test_indexing_failure_does_not_block_message(self, tmp_path)  (line 112)
+  class TestFormatRetrievedContext  (line 140)
+    def test_empty_results(self)  (line 141)
+    def test_turns_only(self)  (line 145)
+    def test_topics_only(self)  (line 157)
+    def test_both_turns_and_topics(self)  (line 168)
+  class TestPromptBuilderTier15  (line 182)
+    "Test that Tier 1.5 (retrieved_session_context) is correctly injected."
+    def test_rag_content_appears_in_prompt(self)  (line 185)
+    def test_rag_content_truncated_when_over_budget(self)  (line 210)
+    def test_empty_rag_content_produces_no_prompt(self)  (line 225)
+  class TestSlidingWindow  (line 238)
+    "Test that the sliding window correctly limits history in the packet."
+    def test_short_history_fully_included(self)  (line 241)
+    def test_long_history_windowed(self)  (line 251)
+    def test_rag_only_triggers_beyond_window(self)  (line 260)
+  class TestArchiveFlowIntegration  (line 276)
+    "Test that summarize_and_archive correctly archives the vector index."
+    def test_archive_called_during_summarize(self, tmp_path, fake_model)  (line 279)
+
+
+### File: models/__init__.py
+
+**Module:** gaia_core.models - Model pool and LLM backend implementations.
+
+This package provides:
+- model_pool: Unified model pool interface (Prime/Lite/Embedding)
+- model_manager: Model lifecycle management
+- v
+
+
+### File: models/_model_pool_impl.py
+
+**GAIA Imports:**
+  from gaia_core.config import get_config, Config
+  from gaia_core.behavior.persona_manager import PersonaManager
+  from gaia_core.behavior.persona_adapter import PersonaAdapter
+  from gaia_core.utils.resource_monitor import ResourceMonitor
+
+**Functions:**
+  def _get_sentence_transformer()  (line 86)
+  def _read_manifest(path: Path) -> dict  (line 139)
+  def _ensure_download(role: str, spec: dict, models_dir: Path, scripts_dir: Path, allow_autosetup: bool) -> Path  (line 147)
+  def resolve_model_paths(config: Config) -> dict  (line 164)
+  def _get_gpu_free_total_bytes() -> tuple  (line 192)
+  def _choose_initial_n_gpu(desired_n_gpu: int, free_bytes: int | None) -> int  (line 227)
+
+**Classes:**
+  class ModelPool  (line 249)
+    def __init__(self, config: Config = None)  (line 250)
+    def register_dev_model(self, name: str)  (line 278)
+    def enable_prime_load(self)  (line 292)
+    def load_models(self, use_oracle = False)  (line 300)
+    def load_prime_only(self, force: bool = False) -> bool  (line 327)
+    def _prime_guard_allows(self, force: bool = False) -> bool  (line 342)
+    def _auto_set_gpu_layers(self)  (line 357)
+    def _start_embed_loader(self)  (line 382)
+    def _apply_env_model_overrides(self)  (line 431)
+    def _ordered_model_keys(self) -> List[str]  (line 506)
+    def _load_model_entry(self, model_name: str, use_oracle: bool = False, force: bool = False) -> bool  (line 517)
+    def _promote_prime_aliases(self)  (line 680)
+    def wait_for_embed(self, timeout: float = None)  (line 700)
+    def get_embed_model(self, timeout: float = 0, lazy_load: bool = True)  (line 711)
+    def prewarm_embed(self, timeout: int = 10) -> bool  (line 731)
+    def ensure_model_loaded(self, name: str, force: bool = False) -> bool  (line 803)
+    def get(self, name: str, lazy_load: bool = True)  (line 864)
+    def get_model_for_role(self, role: str, lazy_load: bool = True)  (line 879)
+    def list_models(self)  (line 957)
+    def set_status(self, name: str, status: str)  (line 960)
+    def get_idle_model(self, exclude = [])  (line 965)
+    def acquire_model(self, name: str, lazy_load: bool = True)  (line 971)
+    def release_model(self, name: str)  (line 983)
+    def release_model_for_role(self, role: str)  (line 987)
+    def _resolve_model_name_for_role(self, role: str) -> str | None  (line 992)
+    def acquire_model_for_role(self, role: str, lazy_load: bool = True)  (line 1020)
+    def forward_to_model(self, role: str, messages: list, release: bool = True, **kwargs)  (line 1073)
+    def get_active_persona(self) -> PersonaAdapter  (line 1132)
+    def set_persona(self, persona)  (line 1136)
+    def complete(self, name: str, prompt: str, max_tokens: int = 128, temperature: float = 0.2) -> str  (line 1153)
+    def shutdown(self) -> None  (line 1174)
+
+**Error Handlers:**
+  handles: Exception  (line 6)
+  handles: Exception  (line 28)
+  handles: Exception  (line 33)
+  handles: Exception  (line 38)
+  handles: Exception  (line 43)
+  handles: Exception  (line 48)
+  handles: Exception  (line 53)
+  handles: Exception  (line 59)
+  handles: Exception  (line 64)
+  handles: Exception  (line 75)
+  handles: Exception  (line 79)
+  handles: Exception in _ensure_download()  (line 159)
+  handles: Exception in _get_gpu_free_total_bytes()  (line 210)
+  handles: Exception in _get_gpu_free_total_bytes()  (line 223)
+  handles: Exception in _get_sentence_transformer()  (line 93)
+  handles: Exception in __init__()  (line 264)
+  handles: Exception in __init__()  (line 269)
+  handles: Exception in __init__()  (line 273)
+  handles: Exception in enable_prime_load()  (line 297)
+  handles: Exception in load_models()  (line 323)
+  handles: Exception in _prime_guard_allows()  (line 348)
+  handles: Exception in _prime_guard_allows()  (line 354)
+  handles: Exception in _auto_set_gpu_layers()  (line 379)
+  handles: Exception in _start_embed_loader()  (line 417)
+  handles: Exception in _apply_env_model_overrides()  (line 434)
+  handles: Exception in _apply_env_model_overrides()  (line 503)
+  handles: Exception in _load_model_entry()  (line 673)
+  handles: Exception in _promote_prime_aliases()  (line 697)
+  handles: Exception in wait_for_embed()  (line 707)
+  handles: Exception in prewarm_embed()  (line 797)
+  handles: Exception in get_model_for_role()  (line 924)
+  handles: RuntimeError in forward_to_model()  (line 1092)
+  handles: Exception in complete()  (line 1170)
+  handles: Exception in shutdown()  (line 1192)
+  handles: Exception in _get_gpu_free_total_bytes()  (line 207)
+  handles: Exception in load_models()  (line 306)
+  handles: Exception in _load_embed()  (line 403)
+  handles: Exception in _start_embed_loader()  (line 424)
+  handles: Exception in get_embed_model()  (line 726)
+  handles: Exception in prewarm_embed()  (line 742)
+  handles: Exception in prewarm_embed()  (line 776)
+  handles: Exception in ensure_model_loaded()  (line 829)
+  handles: Exception in _get_sentence_transformer()  (line 130)
+  handles: Exception in _load_embed()  (line 411)
+  handles: Exception in _apply_env_model_overrides()  (line 463)
+  handles: Exception in _load_model_entry()  (line 608)
+  handles: Exception in _promote_prime_aliases()  (line 695)
+  handles: Exception in prewarm_embed()  (line 784)
+  handles: Exception in _resolve_model_name_for_role()  (line 1014)
+  handles: Exception in shutdown()  (line 1187)
+  handles: Exception in _auto_set_gpu_layers()  (line 370)
+  handles: Exception in _load_embed()  (line 399)
+  handles: Exception in _load_model_entry()  (line 593)
+  handles: Exception in forward_to_model()  (line 1119)
+  handles: Exception in _load_model_entry()  (line 635)
+
+
+### File: models/dev_model.py
+
+**Classes:**
+  class DevModel  (line 4)
+    "A mock model that prints the prompt to the console and waits for user input."
+    def __init__(self, name = 'dev_model')  (line 9)
+    def create_chat_completion(self, messages, **kwargs)  (line 12)
+
+
+### File: models/document.py
+
+**Classes:**
+  class DocumentProcessor  (line 13)
+    "Handles loading, preprocessing, and converting documents into structured markdown or LangChain docum"
+    def __init__(self, config, llm = None)  (line 19)
+    def extract_text_from_file(self, filepath: str) -> Optional[str]  (line 30)
+    def _extract_rtf(self, filepath: str) -> Optional[str]  (line 48)
+    def _extract_docx(self, filepath: str) -> Optional[str]  (line 64)
+    def convert_to_markdown(self, text: str) -> Optional[str]  (line 73)
+    def save_markdown(self, filepath: str, content: str) -> bool  (line 120)
+    def load_and_preprocess_data(self, data_path: str) -> List[Document]  (line 131)
+    def process_raw_data(self) -> None  (line 157)
+    def get_document_info(self, filepath: str)  (line 186)
+    def process_documents(self, directory: str, tier: Optional[str] = None, project: Optional[str] = None) -> List[Document]  (line 202)
+    def embed_documents(self) -> int  (line 235)
+    def generate_artifacts(self) -> int  (line 244)
+
+**Error Handlers:**
+  handles: Exception in extract_text_from_file()  (line 44)
+  handles: UnicodeDecodeError in _extract_rtf()  (line 53)
+  handles: Exception in _extract_rtf()  (line 60)
+  handles: Exception in _extract_docx()  (line 69)
+  handles: Exception in convert_to_markdown()  (line 116)
+  handles: Exception in save_markdown()  (line 127)
+  handles: Exception in load_and_preprocess_data()  (line 152)
+  handles: Exception in process_raw_data()  (line 183)
+  handles: Exception in get_document_info()  (line 198)
+  handles: Exception in process_documents()  (line 230)
+  handles: Exception in _extract_rtf()  (line 57)
+  handles: Exception in load_and_preprocess_data()  (line 150)
+  handles: Exception in process_documents()  (line 228)
+
+
+### File: models/fine_tune_gaia.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+
+**Functions:**
+  def run_fine_tuning(config: Config, dataset_path: str, base_model_name: str, new_model_name: str)  (line 19)
+  def main()  (line 101)
+
+**Error Handlers:**
+  handles: Exception in run_fine_tuning()  (line 39)
+  handles: Exception in run_fine_tuning()  (line 56)
+  handles: Exception in main()  (line 117)
+
+
+### File: models/gemini_model.py
+
+**Classes:**
+  class GeminiAPIModel  (line 8)
+    "Minimal Gemini chat wrapper using the REST API.
+Expects GOOGLE_API_KEY in env. Model name is taken f"
+    def __init__(self, model_name: str, api_key: str)  (line 15)
+    def create_chat_completion(self, messages: List[Dict[str, Any]], max_tokens: int, temperature: float, top_p: float, stream: bool = False, **kwargs)  (line 23)
+
+**Error Handlers:**
+  handles: Exception in create_chat_completion()  (line 66)
+
+**HTTP Calls:**
+  POST self.endpoint in create_chat_completion()  (line 53)
+
+
+### File: models/groq_model.py
+
+**Module:** Groq API model wrapper for GAIA.
+
+Groq provides free, fast inference on open-source models via their custom LPU hardware.
+This wrapper provides an OpenAI-compatible interface for use as a fallback whe
+
+**Functions:**
+  def _ensure_groq_imported()  (line 25)
+
+**Classes:**
+  class GroqAPIModel  (line 38)
+    "Groq API wrapper providing create_chat_completion interface.
+
+Compatible with GAIA's model pool and "
+    def __init__(self, model_name: str = None, api_key: str = None, timeout: int = None)  (line 79)
+    def create_chat_completion(self, messages: List[Dict[str, Any]], max_tokens: int = 1024, temperature: float = 0.7, top_p: float = 0.95, stream: bool = False, **kwargs) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]  (line 109)
+    def _sanitize_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, str]]  (line 191)
+    def _stream_response(self, response_stream, start_duration: float) -> Generator[Dict[str, Any], None, None]  (line 227)
+    def _log_usage(self, response, duration: float)  (line 262)
+    def get_stats(self) -> Dict[str, Any]  (line 279)
+    def list_models(cls) -> Dict[str, Dict]  (line 288)
+
+**Error Handlers:**
+  handles: ImportError in _ensure_groq_imported()  (line 32)
+  handles: Exception in create_chat_completion()  (line 186)
+  handles: Exception in _log_usage()  (line 276)
+
+**HTTP Calls:**
+  CREATE ? in create_chat_completion()  (line 147)
+
+
+### File: models/hf_model.py
+
+**GAIA Imports:**
+  from gaia_common.utils.hf_prompting import build_hf_prompt, default_stop_tokens
+
+**Classes:**
+  class HFModel  (line 7)
+    "A thin wrapper around Hugging Face transformers for text generation.
+
+Provides a create_completion(p"
+    def __init__(self, model_ref: str, local_path: str = None, device_map: Optional[str] = 'auto', torch_dtype = None, prompt_config: Optional[Dict] = None)  (line 15)
+    def _messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str  (line 141)
+    def create_completion(self, prompt: str, max_tokens: int = 128, temperature: float = 0.2, **kwargs)  (line 146)
+    def create_chat_completion(self, messages: List[Dict[str, Any]], max_tokens: int = 128, temperature: float = 0.2, **kwargs)  (line 238)
+
+**Error Handlers:**
+  handles: Exception in __init__()  (line 26)
+  handles: Exception in __init__()  (line 138)
+  handles: Exception in create_completion()  (line 189)
+  handles: Exception in create_chat_completion()  (line 271)
+  handles: Exception in __init__()  (line 124)
+  handles: Exception in create_completion()  (line 169)
+  handles: Exception in _generate()  (line 212)
+  handles: Exception in __init__()  (line 64)
+  handles: Exception in _generate()  (line 203)
+  handles: Exception in _generate()  (line 210)
+  handles: Exception in __init__()  (line 51)
+  handles: Exception in create_chat_completion()  (line 261)
+  handles: Exception in create_chat_completion()  (line 267)
+  handles: Exception in __init__()  (line 78)
+  handles: Exception in __init__()  (line 94)
+  handles: Exception in __init__()  (line 101)
+  handles: Exception in __init__()  (line 108)
+
+
+### File: models/mcp_proxy_model.py
+
+**Module:** MCP-backed model adapter.
+
+Implements a minimal model-like interface expected by ModelPool consumers.
+Delegates requests to the configured MCP-Lite server via JSON-RPC.
+
+**Classes:**
+  class MCPProxyModel  (line 15)
+    def __init__(self, config = None, role_name: str = 'prime')  (line 16)
+    def _call_rpc(self, method: str, params: Dict) -> Dict  (line 25)
+    def create_chat_completion(self, messages: List[Dict], **kwargs) -> Dict  (line 34)
+    def create_completion(self, prompt: str, **kwargs) -> Dict  (line 44)
+    def __repr__(self)  (line 51)
+
+**HTTP Calls:**
+  POST self.endpoint in _call_rpc()  (line 30)
+
+
+### File: models/model_manager.py
+
+**Module:** ModelManager: a small spine to query model status, ensure models are loaded
+and provide a safe spawn-based fallback for loading Prime (vLLM) when direct
+in-process load fails due to CUDA/multiprocessi
+
+**Functions:**
+  def _model_manager_child_loader(q, force_flag)  (line 19)
+  def get_manager() -> ModelManager  (line 236)
+
+**Classes:**
+  class ModelManager  (line 52)
+    "Singleton-ish manager around the existing model_pool.
+
+It does not itself host models; instead it de"
+    def __new__(cls)  (line 61)
+    def __init__(self)  (line 66)
+    def _get_pool(self)  (line 71)
+    def ensure_prime_loaded(self, force: bool = False, timeout: int = 120) -> Dict[str, Any]  (line 86)
+    def call_model(self, role: str, *args, **kwargs) -> Dict[str, Any]  (line 208)
+
+**Error Handlers:**
+  handles: Exception in _model_manager_child_loader()  (line 46)
+  handles: Exception in _model_manager_child_loader()  (line 29)
+  handles: TypeError in _model_manager_child_loader()  (line 34)
+  handles: Exception in _model_manager_child_loader()  (line 43)
+  handles: Exception in ensure_prime_loaded()  (line 110)
+  handles: Exception in ensure_prime_loaded()  (line 120)
+  handles: Exception in ensure_prime_loaded()  (line 143)
+  handles: Exception in ensure_prime_loaded()  (line 204)
+  handles: Exception in call_model()  (line 229)
+  handles: Exception in _get_pool()  (line 80)
+  handles: Exception in ensure_prime_loaded()  (line 140)
+  handles: Exception in ensure_prime_loaded()  (line 170)
+  handles: Exception in ensure_prime_loaded()  (line 196)
+  handles: Exception in ensure_prime_loaded()  (line 157)
+  handles: TypeError in ensure_prime_loaded()  (line 163)
+  handles: Exception in ensure_prime_loaded()  (line 137)
+
+
+### File: models/model_pool.py
+
+**GAIA Imports:**
+  from gaia_core.config import get_config
+
+**Functions:**
+  def get_model_pool()  (line 7)
+
+
+### File: models/oracle_model.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config, get_config
+
+**Classes:**
+  class GPTAPIModel  (line 7)
+    def __init__(self, model_alias: str = 'oracle_openai', config: Config = None)  (line 8)
+    def create_chat_completion(self, messages, max_tokens, temperature, top_p, stream = False)  (line 20)
+    def _stream_response(self, response_stream)  (line 62)
+    def _log_token_usage(self, response)  (line 79)
+
+**Error Handlers:**
+  handles: Exception in _log_token_usage()  (line 87)
+
+**HTTP Calls:**
+  CREATE ? in create_chat_completion()  (line 32)
+
+
+### File: models/tts.py
+
+**Module:** Text-to-speech module for GAIA D&D Campaign Assistant.
+Handles all speech synthesis functionality.
+
+**Classes:**
+  class SpeechManager  (line 13)
+    "Manages text-to-speech functionality."
+    def __init__(self, config)  (line 16)
+    def initialize(self) -> bool  (line 27)
+    def _select_voice(self, voices: List) -> None  (line 50)
+    def speak(self, text: str) -> None  (line 89)
+    def stop(self) -> None  (line 105)
+    def set_properties(self, rate: Optional[int] = None, volume: Optional[float] = None) -> None  (line 113)
+
+**Error Handlers:**
+  handles: Exception in initialize()  (line 45)
+  handles: Exception in speak()  (line 102)
+  handles: Exception in set_properties()  (line 129)
+  handles: ValueError in _select_voice()  (line 86)
+  handles: Exception in stop()  (line 110)
+
+
+### File: models/vector_store.py
+
+**GAIA Imports:**
+  from gaia_common.utils.knowledge_index import KnowledgeIndex
+
+**Classes:**
+  class VectorStoreManager  (line 14)
+    def __init__(self, config)  (line 15)
+    def initialize_store(self)  (line 20)
+    def persist(self)  (line 34)
+    def delete_all_documents(self)  (line 43)
+    def as_retriever(self)  (line 52)
+    def add_documents(self, documents: List[Document])  (line 56)
+    def split_and_embed_documents(self, raw_documents: List[str], source: Optional[str] = None)  (line 64)
+
+**Error Handlers:**
+  handles: Exception in initialize_store()  (line 30)
+  handles: Exception in add_documents()  (line 61)
+  handles: Exception in split_and_embed_documents()  (line 77)
+  handles: Exception in persist()  (line 40)
+  handles: Exception in delete_all_documents()  (line 49)
+
+
+### File: models/vllm_model.py
+
+**GAIA Imports:**
+  from gaia_common.utils.hf_prompting import build_hf_prompt, default_stop_tokens
+
+**Classes:**
+  class LoRAAdapterInfo  (line 22)
+    "Metadata for a loaded LoRA adapter."
+  class VLLMChatModel  (line 33)
+    "Thin wrapper around vLLM that exposes GAIA's create_chat_completion interface.
+
+Parameters are sourc"
+    def __init__(self, model_config: Dict[str, Any], global_config, gpu_info: Optional[Tuple[Optional[int], Optional[int]]] = None)  (line 41)
+    def _int_from_config(self, key: str, env_override: Optional[str], default: int) -> int  (line 168)
+    def _resolve_gpu_utilization(self) -> float  (line 181)
+    def create_completion(self, prompt: str, max_tokens: int = 128, temperature: float = 0.2, top_p: float = 0.9, presence_penalty: float = 0.0, stream: bool = False, stop: Optional[Iterable[str]] = None, **kwargs)  (line 224)
+    def _create_chat_completion_simple(self, messages: List[Dict[str, Any]], max_tokens: int = 2048, temperature: float = 0.7, top_p: float = 0.95, **kwargs)  (line 273)
+    def create_chat_completion(self, messages: List[Dict[str, Any]], max_tokens: int = 128, temperature: float = 0.2, top_p: float = 0.9, stream: bool = False, stop: Optional[Iterable[str]] = None, **kwargs)  (line 308)
+    def _messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str  (line 352)
+    def _build_sampling_params(self, max_tokens: int, temperature: float, top_p: float, stop: Optional[Iterable[str]], presence_penalty: float = 0.0, repetition_penalty: float = 1.0, frequency_penalty: float = 0.0) -> SamplingParams  (line 356)
+    def shutdown(self) -> None  (line 386)
+    def _stream_text(self, prompts: List[str], sampling_params: SamplingParams) -> Generator[Dict[str, Any], None, None]  (line 398)
+    def _native_stream_text(self, prompts: List[str], sampling_params: SamplingParams) -> Iterator[Dict[str, Any]]  (line 407)
+    def _chunk_text(self, text: str, chunk_size: int = 96) -> Iterator[str]  (line 446)
+    def _extract_text(self, outputs) -> str  (line 472)
+    def _summarize_outputs(self, outputs) -> str  (line 483)
+    def lora_enabled(self) -> bool  (line 496)
+    def load_adapter(self, name: str, path: str, tier: int = 3) -> bool  (line 500)
+    def unload_adapter(self, name: str) -> bool  (line 565)
+    def get_loaded_adapters(self) -> List[LoRAAdapterInfo]  (line 583)
+    def get_adapter(self, name: str) -> Optional[LoRAAdapterInfo]  (line 587)
+    def create_lora_request(self, adapter_name: str) -> Optional[Any]  (line 591)
+    def generate_with_adapter(self, prompts: List[str], adapter_name: str, sampling_params: Optional[Any] = None, max_tokens: int = 2048, temperature: float = 0.7, top_p: float = 0.95, **kwargs) -> List[Any]  (line 615)
+    def create_chat_completion_with_adapter(self, messages: List[Dict[str, Any]], adapter_name: str, max_tokens: int = 2048, temperature: float = 0.7, top_p: float = 0.95, **kwargs) -> Dict[str, Any]  (line 659)
+
+**Error Handlers:**
+  handles: Exception in __init__()  (line 74)
+  handles: Exception in __init__()  (line 82)
+  handles: Exception in __init__()  (line 164)
+  handles: Exception in _int_from_config()  (line 172)
+  handles: Exception in _int_from_config()  (line 177)
+  handles: Exception in create_completion()  (line 245)
+  handles: Exception in _create_chat_completion_simple()  (line 284)
+  handles: Exception in create_chat_completion()  (line 320)
+  handles: Exception in create_chat_completion()  (line 337)
+  handles: Exception in shutdown()  (line 395)
+  handles: TypeError in _native_stream_text()  (line 412)
+  handles: Exception in _extract_text()  (line 479)
+  handles: Exception in _summarize_outputs()  (line 489)
+  handles: Exception in create_chat_completion_with_adapter()  (line 683)
+  handles: Exception in __init__()  (line 62)
+  handles: ImportError in __init__()  (line 157)
+  handles: Exception in _parse_env()  (line 186)
+  handles: Exception in _resolve_gpu_utilization()  (line 199)
+  handles: Exception in _native_stream_text()  (line 434)
+  handles: Exception in load_adapter()  (line 532)
+  handles: Exception in load_adapter()  (line 543)
+
+
+### File: models/vllm_remote_model.py
+
+**Module:** Remote vLLM model backend for GAIA.
+
+HTTP client for a standalone vLLM OpenAI-compatible API server (gaia-prime).
+Replaces in-process VLLMChatModel when PRIME_ENDPOINT is set, allowing
+gaia-core to of
+
+**Classes:**
+  class VLLMRemoteModel  (line 23)
+    "HTTP client for a remote vLLM OpenAI-compatible API server.
+
+Provides the same public interface as V"
+    def __init__(self, model_config: dict, global_config = None, **kwargs)  (line 32)
+    def create_completion(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7, top_p: float = 0.95, stop: Optional[List[str]] = None, stream: bool = False, **kwargs) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]  (line 69)
+    def create_chat_completion(self, messages: List[Dict[str, Any]], max_tokens: int = 1024, temperature: float = 0.7, top_p: float = 0.95, stream: bool = False, **kwargs) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]  (line 112)
+    def set_active_adapter(self, adapter_name: Optional[str])  (line 176)
+    def create_chat_completion_with_adapter(self, adapter_name: str, messages: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]  (line 181)
+    def health_check(self) -> bool  (line 197)
+    def shutdown(self)  (line 208)
+    def _resolve_model_field(self) -> str  (line 217)
+    def _post(self, path: str, payload: dict) -> dict  (line 231)
+    def _stream_completions(self, payload: dict) -> Generator[Dict[str, Any], None, None]  (line 273)
+    def _stream_chat(self, payload: dict) -> Generator[Dict[str, Any], None, None]  (line 290)
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]  (line 325)
+    def _log_usage(self, resp: dict, duration: float)  (line 344)
+
+**Error Handlers:**
+  handles: Exception in health_check()  (line 204)
+  handles: Exception in shutdown()  (line 212)
+  handles: Exception in _log_usage()  (line 359)
+  handles: requests.exceptions.ConnectionError in _post()  (line 249)
+  handles: requests.exceptions.HTTPError -> 500 in _post()  (line 263)
+
+**HTTP Calls:**
+  SESSION ? in __init__()  (line 59)
+
+
+### File: utils/__init__.py
+
+**Module:** gaia_core.utils - Utility modules for the GAIA cognitive engine.
+
+This package provides:
+- prompt_builder: Construct prompts from CognitionPackets
+- packet_builder: Build and manipulate CognitionPacke
+
+
+### File: utils/dev_matrix_analyzer.py
+
+**Module:** DevMatrixAnalyzer - Analyzes task completion status for GAIA's dev_matrix.
+
+This module provides automated task completion detection for GAIA's self-development
+roadmap. Each task type has specific ve
+
+**GAIA Imports:**
+  from gaia_core.memory.dev_matrix import GAIADevMatrix
+
+**Functions:**
+  def analyze_dev_matrix(config) -> Dict  (line 211)
+
+**Classes:**
+  class DevMatrixAnalyzer  (line 16)
+    "Analyzes and updates dev_matrix task completion status.
+
+Uses file-based verification instead of she"
+    def __init__(self, config)  (line 23)
+    def analyze_and_update(self) -> List[Dict]  (line 37)
+    def is_task_completed(self, task: Dict) -> bool  (line 57)
+    def get_task_status_report(self) -> Dict  (line 89)
+    def _verify_discord_integration(self) -> bool  (line 121)
+    def _verify_thought_seed_tooling(self) -> bool  (line 169)
+    def _verify_self_reflection(self) -> bool  (line 182)
+    def _verify_gcp_fragmentation(self) -> bool  (line 195)
+
+**Error Handlers:**
+  handles: Exception in _verify_discord_integration()  (line 165)
+  handles: Exception in _verify_thought_seed_tooling()  (line 179)
+  handles: Exception in _verify_self_reflection()  (line 192)
+  handles: Exception in _verify_gcp_fragmentation()  (line 207)
+  handles: Exception in is_task_completed()  (line 73)
+  handles: Exception in is_task_completed()  (line 82)
+
+
+### File: utils/dev_matrix_utils.py
+
+**Module:** dev_matrix_utils.py
+- Utilities for loading, diffing, and updating dev_matrix.json
+- Enforces absolute path, atomic writes, and audit logging
+- Designed for use in self-review and approval flows
+
+**Functions:**
+  def load_dev_matrix(path: Path = DEV_MATRIX_PATH) -> Any  (line 17)
+  def save_dev_matrix(data: Any, path: Path = DEV_MATRIX_PATH) -> None  (line 22)
+  def diff_dev_matrix(old: Any, new: Any) -> str  (line 29)
+  def mark_task_complete(task_key: str, prompt: str = None, path: Path = DEV_MATRIX_PATH) -> Tuple[Any, Any, str]  (line 36)
+
+
+### File: utils/gaia_rescue_helper.py
+
+**Module:** GAIA Rescue Helper (production copy)
+------------------------------------
+- Central, Config-safe utilities used by the router and rescue shell
+- Provides GAIARescueHelper class (expected by output_rou
+
+**GAIA Imports:**
+  from gaia_core.utils.mcp_client import ai_execute, ai_read, ai_write
+  from gaia_core.config import Config, get_config
+  from gaia_core.memory.status_tracker import GAIAStatus
+
+**Functions:**
+  def _safe_read_text(path: Path) -> str  (line 36)
+  def _find_first_with_ext(base: Path, stem: str, exts: tuple[str, ...]) -> Optional[Path]  (line 43)
+  def _helper() -> GAIARescueHelper  (line 633)
+  def sketch(title: str, content: str) -> str  (line 640)
+  def sketchpad_write(title: str, content: str) -> str  (line 642)
+  def show_sketchpad(key: str = '') -> str  (line 645)
+  def sketchpad_read(key: str = '') -> str  (line 647)
+  def clear_sketchpad() -> str  (line 650)
+  def sketchpad_clear() -> str  (line 652)
+  def load_blueprint(blueprint_id: str) -> str  (line 657)
+  def load_cheatsheet(cheatsheet_id: str) -> str  (line 659)
+  def queue_thought_seed(prompt: str, note: str = '', priority: str = 'normal') -> str  (line 663)
+  def run_shell_safe(command: str) -> str  (line 667)
+  def buffer_and_execute_shell(content: str) -> None  (line 669)
+  def code_read(path: str) -> Dict[str, Any]  (line 673)
+  def code_span(path: str, start: int, end: int) -> Dict[str, Any]  (line 675)
+  def code_symbol(path: str, symbol: str) -> Dict[str, Any]  (line 677)
+  def code_summarize(src: Dict[str, Any], max_tokens: int = 256) -> Dict[str, Any]  (line 679)
+  def remember_fact(key: str, value: str, note: str = '') -> str  (line 683)
+  def recall_fact(key: str = '', limit: int = 5) -> str  (line 686)
+  def get_recent_facts(limit: int = 5) -> List[Dict[str, str]]  (line 689)
+
+**Classes:**
+  class GAIARescueHelper  (line 53)
+    "Config-aware façade for:
+  - Blueprints / Cheatsheets under knowledge/system_reference/...
+  - Sketc"
+    def __init__(self, config: Config, llm: Optional[Any] = None)  (line 61)
+    def load_blueprint(self, blueprint_id: str) -> str  (line 89)
+    def load_cheatsheet(self, cheatsheet_id: str) -> str  (line 96)
+    def sketchpad_write(self, title: str, content: str) -> str  (line 112)
+    def sketchpad_read(self, key: str = '') -> str  (line 145)
+    def sketchpad_clear(self) -> str  (line 164)
+    def _load_fragments_store(self) -> Dict[str, Any]  (line 196)
+    def _save_fragments_store(self, data: Dict[str, Any]) -> bool  (line 211)
+    def fragment_write(self, parent_request_id: str, sequence: int, content: str, continuation_hint: str = '', is_complete: bool = False, token_count: int = 0) -> Dict[str, Any]  (line 221)
+    def fragment_read(self, parent_request_id: str) -> List[Dict[str, Any]]  (line 269)
+    def fragment_assemble(self, parent_request_id: str, seam_overlap_check: bool = True) -> Dict[str, Any]  (line 283)
+    def fragment_clear(self, parent_request_id: Optional[str] = None) -> str  (line 339)
+    def fragment_list_pending(self) -> List[str]  (line 358)
+    def _load_memory_store(self) -> Dict[str, Any]  (line 366)
+    def _write_memory_store(self, data: Dict[str, Any]) -> None  (line 388)
+    def remember_fact(self, key: str, value: str, note: str = '') -> str  (line 398)
+    def recall_fact(self, key: str = '', limit: int = 5) -> str  (line 413)
+    def get_recent_facts(self, limit: int = 5) -> List[Dict[str, str]]  (line 434)
+    def queue_thought_seed(self, prompt: str, note: str = '', priority: str = 'normal') -> str  (line 455)
+    def run_shell_safe(self, command: str) -> str  (line 493)
+    def buffer_and_execute_shell(self, content: str) -> None  (line 518)
+    def _validate_read_path(self, path: str) -> str  (line 558)
+    def code_read(self, path: str) -> Dict[str, Any]  (line 565)
+    def code_span(self, path: str, start: int, end: int) -> Dict[str, Any]  (line 578)
+    def code_symbol(self, path: str, symbol: str) -> Dict[str, Any]  (line 590)
+    def code_summarize(self, src: Dict[str, Any], max_tokens: int = 256) -> Dict[str, Any]  (line 605)
+
+**Error Handlers:**
+  handles: Exception  (line 20)
+  handles: Exception  (line 30)
+  handles: Exception in _safe_read_text()  (line 40)
+  handles: OSError in __init__()  (line 80)
+  handles: Exception in load_cheatsheet()  (line 105)
+  handles: Exception in sketchpad_write()  (line 129)
+  handles: Exception in sketchpad_read()  (line 161)
+  handles: Exception in sketchpad_clear()  (line 190)
+  handles: Exception in _save_fragments_store()  (line 217)
+  handles: Exception in _write_memory_store()  (line 393)
+  handles: Exception in queue_thought_seed()  (line 486)
+  handles: Exception in run_shell_safe()  (line 515)
+  handles: ValueError in buffer_and_execute_shell()  (line 530)
+  handles: Exception in buffer_and_execute_shell()  (line 546)
+  handles: PermissionError in code_read()  (line 573)
+  handles: Exception in code_read()  (line 575)
+  handles: Exception in code_span()  (line 587)
+  handles: Exception in code_symbol()  (line 602)
+  handles: Exception in sketchpad_write()  (line 138)
+  handles: Exception in sketchpad_clear()  (line 186)
+  handles: Exception in _load_fragments_store()  (line 207)
+  handles: Exception in _load_memory_store()  (line 377)
+  handles: Exception in _load_memory_store()  (line 384)
+  handles: Exception in queue_thought_seed()  (line 471)
+  handles: Exception in queue_thought_seed()  (line 481)
+  handles: Exception in run_shell_safe()  (line 507)
+  handles: Exception in code_summarize()  (line 622)
+  handles: Exception in sketchpad_clear()  (line 177)
+  handles: Exception in sketchpad_clear()  (line 180)
+
+
+### File: utils/mcp_client.py
+
+**Module:** GAIA MCP-Lite Client
+
+This module is responsible for dispatching sidecar actions from a CognitionPacket
+to the MCP-lite server.
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket
+  from gaia_core.config import Config
+
+**Functions:**
+  def _normalize_endpoint(ep: str) -> str  (line 21)
+  def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = 20) -> Dict  (line 35)
+  def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Dict]  (line 74)
+  def ai_read(path: str) -> Dict  (line 168)
+  def ai_write(path: str, content: str) -> Dict  (line 183)
+  def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bool = False) -> Dict  (line 207)
+  def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = 'system') -> Dict  (line 233)
+  def request_approval_via_mcp(method: str, params: Dict) -> Dict  (line 251)
+  def approve_action_via_mcp(action_id: str, approval: str) -> Dict  (line 294)
+  def get_pending_action(action_id: str) -> Dict  (line 315)
+  def discover(endpoint: str = None, timeout: int = 3) -> Dict  (line 337)
+
+**Error Handlers:**
+  handles: Exception in call_jsonrpc()  (line 66)
+  handles: Exception in ai_read()  (line 176)
+  handles: Exception in ai_write()  (line 202)
+  handles: subprocess.TimeoutExpired in ai_execute()  (line 225)
+  handles: Exception in ai_execute()  (line 228)
+  handles: Exception in embedding_query()  (line 245)
+  handles: Exception in request_approval_via_mcp()  (line 289)
+  handles: Exception in approve_action_via_mcp()  (line 310)
+  handles: Exception in get_pending_action()  (line 332)
+  handles: Exception in discover()  (line 456)
+  handles: requests.exceptions.RequestException in dispatch_sidecar_actions()  (line 154)
+  handles: Exception in discover()  (line 391)
+  handles: Exception in discover()  (line 411)
+  handles: Exception in call_jsonrpc()  (line 70)
+  handles: Exception in dispatch_sidecar_actions()  (line 151)
+  handles: Exception in discover()  (line 452)
+  handles: Exception in discover()  (line 359)
+  handles: Exception in discover()  (line 368)
+  handles: Exception in discover()  (line 431)
+  handles: Exception -> 400 in discover()  (line 450)
+  handles: Exception -> 400 in discover()  (line 429)
+
+**HTTP Calls:**
+  POST ep in call_jsonrpc()  (line 42)
+  POST url in request_approval_via_mcp()  (line 277)
+  POST url in approve_action_via_mcp()  (line 307)
+  GET url in get_pending_action()  (line 324)
+  POST endpoint in dispatch_sidecar_actions()  (line 131)
+  GET url in discover()  (line 438)
+  POST endpoint in discover()  (line 358)
+  POST url in discover()  (line 418)
+  GET url in discover()  (line 418)
+
+
+### File: utils/output_router.py
+
+**Module:** Output Router - Central hub for parsing and dispatching all directives from LLM output.
+
+Handles:
+- Parsing LLM output into CognitionPacket structures
+- Safety gate checking before execution
+- Sidecar
+
+**GAIA Imports:**
+  from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
+  from gaia_common.utils.packet_utils import is_execution_safe
+  from gaia_core.utils.mcp_client import dispatch_sidecar_actions
+
+**Functions:**
+  def _strip_think_tags_robust(text: str) -> str  (line 24)
+  def _strip_stray_cjk(text: str) -> str  (line 87)
+  def _get_destination_registry()  (line 118)
+  def route_output(response_text: str, packet: CognitionPacket, ai_manager, session_id: str, destination: str) -> Dict[str, Any]  (line 131)
+  def _legacy_destination_to_enum(destination: str) -> Optional[OutputDestination]  (line 275)
+  def _strip_gcp_metadata(text: str) -> str  (line 291)
+  def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket)  (line 330)
+
+**Error Handlers:**
+  handles: Exception in route_output()  (line 264)
+  handles: Exception in _get_destination_registry()  (line 127)
+  handles: Exception in route_output()  (line 219)
+  handles: json.JSONDecodeError in _parse_llm_output_into_packet()  (line 376)
+
+
+### File: utils/packet_builder.py
+
+**Module:** Utility to build small CognitionPacket snapshots for grounding summarization.
+
+Produces a compact dict snapshot (not a full CognitionPacket instance) which
+matches the shape expected by `ConversationS
+
+**GAIA Imports:**
+  from gaia_core.config import Config
+
+**Constants:**
+  CORE_IDENTITY_MAX_CHARS = 800  (line 13)
+
+**Functions:**
+  def build_packet_snapshot(session_id: str, persona_id: str, original_prompt: str, history: List[Dict[str, Any]] = None, mcp_info: Optional[str] = None) -> Dict[str, Any]  (line 15)
+
+**Error Handlers:**
+  handles: Exception in build_packet_snapshot()  (line 44)
+  handles: Exception in build_packet_snapshot()  (line 83)
+  handles: Exception in build_packet_snapshot()  (line 42)
+  handles: Exception in build_packet_snapshot()  (line 78)
+
+
+### File: utils/packet_templates.py
+
+**Module:** Helpers for rendering GAIA Cognition Packets (GCP) as structured templates.
+
+The template is intentionally compact: only populated sections are emitted,
+and lengthy text fields are trimmed so the rend
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, DataField
+
+**Functions:**
+  def _trim(value: Any, limit: int = MAX_INLINE_LEN) -> Any  (line 18)
+  def _clean_dict(payload: Dict[str, Any]) -> Dict[str, Any]  (line 24)
+  def packet_to_template_dict(packet: CognitionPacket, processed_data_field_keys: Optional[set] = None) -> Dict[str, Any]  (line 29)
+  def render_gaia_packet_template(packet: CognitionPacket, indent: str = '  ', processed_data_field_keys: Optional[set] = None, sections: Optional[tuple] = None) -> str  (line 202)
+
+**Error Handlers:**
+  handles: Exception in packet_to_template_dict()  (line 93)
+  handles: Exception in packet_to_template_dict()  (line 101)
+  handles: Exception in packet_to_template_dict()  (line 113)
+  handles: Exception in _serialize_data_fields()  (line 81)
+
+
+### File: utils/prompt_builder.py
+
+**Module:** Prompt Builder (robust, persona/context-aware)
+- Assembles the LLM prompt with identity, persona, context, constraints, history, and memory.
+- Actively manages the token budget to prevent context over
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket
+  from gaia_core.config import Config
+  from gaia_common.utils.tokenizer import count_tokens
+  from gaia_core.utils.packet_templates import render_gaia_packet_template
+  from gaia_core.utils import gaia_rescue_helper
+  from gaia_core.utils.world_state import format_world_state_snapshot
+
+**Constants:**
+  SUMMARY_DIR = 'data/shared/summaries'  (line 23)
+
+**Functions:**
+  def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None) -> List[Dict]  (line 25)
+  def _build_prompt_core(config, persona_instructions: str, session_id: str, history: List[Dict], user_input: str, task_instruction: str = None, token_budget: int = 4096, packet: 'CognitionPacket' = None) -> List[Dict]  (line 678)
+  def build_prompt(*args, **kwargs)  (line 754)
+
+**Error Handlers:**
+  handles: Exception in build_from_packet()  (line 87)
+  handles: Exception in build_from_packet()  (line 96)
+  handles: Exception in build_from_packet()  (line 130)
+  handles: Exception in build_from_packet()  (line 146)
+  handles: Exception in build_from_packet()  (line 159)
+  handles: Exception in build_from_packet()  (line 187)
+  handles: Exception in build_from_packet()  (line 224)
+  handles: Exception in build_from_packet()  (line 251)
+  handles: Exception in build_from_packet()  (line 329)
+  handles: ImportError in build_from_packet()  (line 483)
+  handles: Exception in build_from_packet()  (line 486)
+  handles: Exception in build_from_packet()  (line 496)
+  handles: Exception in build_from_packet()  (line 504)
+  handles: Exception in build_from_packet()  (line 508)
+  handles: Exception in build_from_packet()  (line 561)
+  handles: Exception in build_from_packet()  (line 570)
+  handles: Exception in build_from_packet()  (line 641)
+  handles: Exception in build_from_packet()  (line 667)
+  handles: Exception in _build_prompt_core()  (line 700)
+  handles: Exception in build_from_packet()  (line 114)
+  handles: Exception in build_from_packet()  (line 165)
+  handles: Exception in _safe_session_id()  (line 381)
+  handles: Exception in build_from_packet()  (line 424)
+  handles: IOError in build_from_packet()  (line 536)
+  handles: IOError in _build_prompt_core()  (line 723)
+  handles: Exception in build_prompt()  (line 769)
+  handles: Exception in build_prompt()  (line 785)
+  handles: Exception in build_prompt()  (line 829)
+  handles: Exception in build_from_packet()  (line 403)
+  handles: Exception in build_from_packet()  (line 412)
+  handles: Exception in build_prompt()  (line 780)
+  handles: Exception in build_prompt()  (line 819)
+  handles: Exception in build_prompt()  (line 825)
+
+
+### File: utils/resource_monitor.py
+
+**Functions:**
+  def shutdown_monitor()  (line 171)
+
+**Classes:**
+  class ResourceMonitor  (line 24)
+    def __new__(cls, *args, **kwargs)  (line 28)
+    def _ensure_nvml()  (line 38)
+    def __init__(self, poll_interval: int = 5)  (line 47)
+    def start(self)  (line 73)
+    def stop(self)  (line 82)
+    def _monitor(self)  (line 88)
+    def is_distracted(self) -> bool  (line 138)
+    def check_and_clear_distracted(self) -> bool  (line 142)
+    def get_instance(cls, *args, **kwargs)  (line 165)
+
+**Error Handlers:**
+  handles: ImportError  (line 9)
+  handles: Exception  (line 18)
+  handles: Exception in _ensure_nvml()  (line 44)
+  handles: Exception in _monitor()  (line 127)
+
+
+### File: utils/stream_observer.py
+
+**GAIA Imports:**
+  from gaia_core.config import Config
+  from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
+  from gaia_common.protocols.cognition_packet import CognitionPacket, ReflectionLog
+  from gaia_common.utils.string_tools import trim_text
+
+**Classes:**
+  class Interrupt  (line 16)
+  class StreamObserver  (line 21)
+    def __init__(self, config: Config, llm, name: str = 'AgentCore-Observer')  (line 22)
+    def observe(self, packet: Optional[CognitionPacket], output: str) -> Interrupt  (line 74)
+    def fast_check(self, buffer: str) -> bool  (line 519)
+    def check_response_quality(response: str, user_prompt: str) -> Optional[Interrupt]  (line 532)
+    def _verify_citations_against_rag(self, output: str, packet) -> Dict  (line 596)
+    def _validate_code_paths(self, text_content: str) -> List[Dict]  (line 643)
+    def verify_side_effects(self, packet: Optional[CognitionPacket], route_result: Dict[str, Any], llm_output: str = '') -> Interrupt  (line 697)
+
+**Error Handlers:**
+  handles: Exception in __init__()  (line 40)
+  handles: Exception in __init__()  (line 44)
+  handles: Exception in __init__()  (line 48)
+  handles: Exception in observe()  (line 91)
+  handles: Exception in observe()  (line 223)
+  handles: Exception in observe()  (line 244)
+  handles: Exception in observe()  (line 257)
+  handles: Exception in observe()  (line 270)
+  handles: Exception in observe()  (line 299)
+  handles: Exception in observe()  (line 348)
+  handles: Exception in observe()  (line 505)
+  handles: Exception in _verify_citations_against_rag()  (line 618)
+  handles: Exception in verify_side_effects()  (line 783)
+  handles: Exception in _const_bool()  (line 67)
+  handles: Exception in observe()  (line 131)
+  handles: Exception in observe()  (line 203)
+  handles: Exception in observe()  (line 361)
+  handles: Exception in observe()  (line 368)
+  handles: Exception in observe()  (line 372)
+  handles: TypeError in observe()  (line 383)
+  handles: Exception in observe()  (line 402)
+  handles: Exception in observe()  (line 459)
+  handles: Exception in _const_bool()  (line 57)
+  handles: Exception in observe()  (line 166)
+  handles: Exception in observe()  (line 285)
+  handles: Exception in observe()  (line 296)
+  handles: Exception in observe()  (line 414)
+  handles: Exception in observe()  (line 456)
+  handles: Exception in observe()  (line 489)
+  handles: Exception in observe()  (line 502)
+  handles: Exception in observe()  (line 515)
+  handles: Exception in observe()  (line 476)
+  handles: Exception in observe()  (line 426)
+  handles: Exception in observe()  (line 453)
+  handles: Exception in observe()  (line 487)
+  handles: Exception in observe()  (line 474)
+
+
+### File: utils/temporal_context.py
+
+**Module:** Temporal Context Builder — assembles a rich temporal snapshot for prompt injection.
+
+Produces a concise text block (~100-150 tokens) injected into the system prompt
+so GAIA has awareness of time, her 
+
+**Functions:**
+  def build_temporal_context(timeline_store: Optional[Any] = None, sleep_manager_status: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, session_created_at: Optional[datetime] = None, session_message_count: int = 0, last_message_ts: Optional[datetime] = None, code_evolution_path: str = ...) -> str  (line 33)
+  def _semantic_time(dt: datetime) -> str  (line 111)
+  def _format_duration(seconds: float) -> str  (line 123)
+  def _wake_cycle_summary(timeline_store: Any) -> str  (line 137)
+  def _session_summary(session_id: Optional[str], session_created_at: Optional[datetime], message_count: int, last_message_ts: Optional[datetime]) -> str  (line 176)
+  def _activity_summary(timeline_store: Any) -> str  (line 203)
+  def _state_summary(status: Dict[str, Any]) -> str  (line 241)
+  def _code_evolution_summary(path: str) -> str  (line 250)
+
+**Error Handlers:**
+  handles: Exception in build_temporal_context()  (line 99)
+  handles: OSError in _code_evolution_summary()  (line 283)
+  handles: Exception in build_temporal_context()  (line 61)
+  handles: Exception in build_temporal_context()  (line 73)
+  handles: Exception in build_temporal_context()  (line 82)
+  handles: Exception in build_temporal_context()  (line 91)
+
+
+### File: utils/world_state.py
+
+**Module:** Lightweight dynamic world-state snapshot for prompts.
+
+This module intentionally avoids heavy dependencies. It gathers a short,
+bounded view of:
+- Clock/uptime
+- Host load/memory (coarse)
+- Active mod
+
+**GAIA Imports:**
+  from gaia_common.utils import tools_registry
+
+**Functions:**
+  def _uptime_seconds() -> float  (line 26)
+  def _mem_summary() -> str  (line 37)
+  def _load_avg() -> str  (line 55)
+  def _model_paths() -> Dict[str, str]  (line 64)
+  def _mcp_tools_sample(limit: int = 6) -> List[str]  (line 73)
+  def _mcp_tools_full(limit: int = 50) -> List[str]  (line 82)
+  def world_state_snapshot() -> Dict  (line 91)
+  def world_state_detail() -> Dict  (line 103)
+  def _capability_affordances(tools: List[str]) -> List[str]  (line 121)
+  def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None) -> str  (line 165)
+
+**Error Handlers:**
+  handles: Exception in _uptime_seconds()  (line 32)
+  handles: Exception in _mem_summary()  (line 49)
+  handles: Exception in _load_avg()  (line 59)
+  handles: Exception in _mcp_tools_sample()  (line 78)
+  handles: Exception in _mcp_tools_full()  (line 87)
+  handles: Exception in format_world_state_snapshot()  (line 183)
+  handles: Exception in format_world_state_snapshot()  (line 237)
+
+
+---
+
+## Review Task
+
+The mechanical pre-check above shows structural completeness — what is present or missing at a syntactic level. Your task is to assess SEMANTIC fidelity:
+
+- For items the pre-check marked [FOUND]: does the implementation actually fulfill the blueprint's intent, or is it a superficial match?
+- For items the pre-check marked [MISSING]: is this genuinely absent, or implemented in a way the pre-check couldn't detect?
+- For dimensions 4-5 (intent coherence, open questions): apply your own judgment — these have no mechanical coverage.
+
+Be specific: cite the blueprint claim and the contradicting (or absent) code evidence.

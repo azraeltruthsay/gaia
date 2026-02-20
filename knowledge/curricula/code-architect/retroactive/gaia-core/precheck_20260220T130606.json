@@ -1,0 +1,167 @@
+{
+  "service_id": "gaia-core",
+  "timestamp": "2026-02-20T21:06:07.818568+00:00",
+  "items": [
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /process_packet",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:369"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /health",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:284"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:296"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /status",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:320"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /gpu/status",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /gpu/release",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /gpu/reclaim",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /sleep/wake",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /sleep/status",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /sleep/study-handoff",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /sleep/distracted-check",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /sleep/shutdown",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching route decorator found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "gaia-prime unavailable",
+      "status": "found",
+      "source_file": "utils/world_state.py",
+      "detail": "\u2192 pattern match in utils/world_state.py:67"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "gaia-mcp unavailable",
+      "status": "found",
+      "source_file": "api/gpu_endpoints.py",
+      "detail": "\u2192 pattern match in api/gpu_endpoints.py:179"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "All inference backends unavailable",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 pattern match in main.py:67"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Session state corruption",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "gaia-orchestrator unreachable",
+      "status": "found",
+      "source_file": "cognition/sleep_task_scheduler.py",
+      "detail": "\u2192 pattern match in cognition/sleep_task_scheduler.py:185"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Checkpoint write failure",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-prime (inference)",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:308"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-mcp (tool_execution)",
+      "status": "found",
+      "source_file": "__init__.py",
+      "detail": "\u2192 __init__.py:13"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-web (output_routing)",
+      "status": "found",
+      "source_file": "utils/temporal_context.py",
+      "detail": "\u2192 utils/temporal_context.py:14"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-orchestrator (gpu_lifecycle)",
+      "status": "found",
+      "source_file": "cognition/sleep_task_scheduler.py",
+      "detail": "\u2192 cognition/sleep_task_scheduler.py:194"
+    }
+  ],
+  "summary": {
+    "total": 22,
+    "found": 12,
+    "missing": 10,
+    "diverged": 0
+  },
+  "prompt_text": "## Mechanical Pre-Check Results: gaia-core\n\n### Endpoints (4/12 found)\n  [FOUND]      POST /process_packet\n              \u2192 main.py:369\n  [FOUND]      GET /health\n              \u2192 main.py:284\n  [FOUND]      GET /\n              \u2192 main.py:296\n  [FOUND]      GET /status\n              \u2192 main.py:320\n  [MISSING]    GET /gpu/status\n              no matching route decorator found\n  [MISSING]    POST /gpu/release\n              no matching route decorator found\n  [MISSING]    POST /gpu/reclaim\n              no matching route decorator found\n  [MISSING]    POST /sleep/wake\n              no matching route decorator found\n  [MISSING]    GET /sleep/status\n              no matching route decorator found\n  [MISSING]    POST /sleep/study-handoff\n              no matching route decorator found\n  [MISSING]    GET /sleep/distracted-check\n              no matching route decorator found\n  [MISSING]    POST /sleep/shutdown\n              no matching route decorator found\n\n### Failure Modes (4/6 found)\n  [FOUND]      gaia-prime unavailable\n              \u2192 pattern match in utils/world_state.py:67\n  [FOUND]      gaia-mcp unavailable\n              \u2192 pattern match in api/gpu_endpoints.py:179\n  [FOUND]      All inference backends unavailable\n              \u2192 pattern match in main.py:67\n  [MISSING]    Session state corruption\n              no matching handler found\n  [FOUND]      gaia-orchestrator unreachable\n              \u2192 pattern match in cognition/sleep_task_scheduler.py:185\n  [MISSING]    Checkpoint write failure\n              no matching handler found\n\n### Dependencies (4/4 found)\n  [FOUND]      gaia-prime (inference)\n              \u2192 main.py:308\n  [FOUND]      gaia-mcp (tool_execution)\n              \u2192 __init__.py:13\n  [FOUND]      gaia-web (output_routing)\n              \u2192 utils/temporal_context.py:14\n  [FOUND]      gaia-orchestrator (gpu_lifecycle)\n              \u2192 cognition/sleep_task_scheduler.py:194\n\n### Summary\n  Total checks: 22 | Found: 12 | Missing: 10 | Diverged: 0\n  Structural completeness: 54.5%\n"
+}

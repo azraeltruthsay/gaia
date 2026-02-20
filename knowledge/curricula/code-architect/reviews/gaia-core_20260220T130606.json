@@ -1,0 +1,20 @@
+{
+  "service_id": "gaia-core",
+  "reviewer": "cc",
+  "review_direction": "forward",
+  "review_timestamp": "2026-02-20T13:06:06Z",
+  "overall_fidelity_score": 0.72,
+  "discrepancies": [
+    {
+      "dimension": "contract",
+      "severity": "major",
+      "blueprint_claim": "GET /gpu/status endpoint",
+      "code_evidence": "Endpoint exists in gpu_endpoints.py but mounted via sub-router",
+      "recommendation": "Update blueprint to reflect sub-router mount path",
+      "affected_file": "api/gpu_endpoints.py"
+    }
+  ],
+  "open_question_updates": [],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "Core service largely conforms."
+}
