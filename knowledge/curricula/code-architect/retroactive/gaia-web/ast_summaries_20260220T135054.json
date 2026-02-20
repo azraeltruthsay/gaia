@@ -1,0 +1,2724 @@
+{
+  "__init__.py": {
+    "module_docstring": "gaia-web: The Face - UI and API gateway.\n\nThis service handles all user-facing interactions:\n- HTTP/REST API endpoints\n- Server-Sent Events (SSE) streaming\n- WebSocket connections\n- Static file servin",
+    "classes": [],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "discord_interface.py": {
+    "module_docstring": "Discord Interface for GAIA Web Gateway\n\nThis module handles Discord bot integration as part of the Unified Interface Gateway.\nDiscord messages are received here, converted to CognitionPackets, sent to",
+    "classes": [
+      {
+        "name": "DiscordInterface",
+        "bases": [],
+        "docstring": "Discord interface for the GAIA Web Gateway.\n\nHandles:\n- Receiving messages from Discord (mentions an",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "bot_token: str",
+              "core_endpoint: str",
+              "message_queue = None",
+              "core_fallback_endpoint: str = ''"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 59
+          },
+          {
+            "name": "start",
+            "params": [
+              "self"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": true,
+            "line": 67
+          },
+          {
+            "name": "_handle_message",
+            "params": [
+              "self",
+              "content: str",
+              "channel_id: str",
+              "user_id: str",
+              "guild_id: Optional[str]",
+              "author_name: str",
+              "message_id: str",
+              "is_dm: bool",
+              "message_obj: Any"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": true,
+            "line": 207
+          },
+          {
+            "name": "_send_response",
+            "params": [
+              "self",
+              "message_obj: Any",
+              "content: str",
+              "is_dm: bool"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": true,
+            "line": 380
+          },
+          {
+            "name": "_split_message",
+            "params": [
+              "self",
+              "content: str",
+              "max_length: int = 2000"
+            ],
+            "return_type": "list",
+            "decorators": [],
+            "is_async": false,
+            "line": 391
+          }
+        ],
+        "line": 49
+      }
+    ],
+    "functions": [
+      {
+        "name": "_run_on_bot_loop",
+        "params": [
+          "coro",
+          "timeout: float = 30.0"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 37
+      },
+      {
+        "name": "send_to_channel",
+        "params": [
+          "channel_id: str",
+          "content: str",
+          "reply_to_message_id: Optional[str] = None"
+        ],
+        "return_type": "bool",
+        "decorators": [],
+        "is_async": true,
+        "line": 416
+      },
+      {
+        "name": "send_to_user",
+        "params": [
+          "user_id: str",
+          "content: str"
+        ],
+        "return_type": "bool",
+        "decorators": [],
+        "is_async": true,
+        "line": 453
+      },
+      {
+        "name": "start_discord_bot",
+        "params": [
+          "bot_token: str",
+          "core_endpoint: str",
+          "message_queue = None",
+          "voice_manager = None",
+          "core_fallback_endpoint: str = ''"
+        ],
+        "return_type": "bool",
+        "decorators": [],
+        "is_async": false,
+        "line": 480
+      },
+      {
+        "name": "stop_discord_bot",
+        "params": [],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 520
+      },
+      {
+        "name": "is_bot_ready",
+        "params": [],
+        "return_type": "bool",
+        "decorators": [],
+        "is_async": false,
+        "line": 533
+      },
+      {
+        "name": "get_discord_status",
+        "params": [],
+        "return_type": "Dict[str, Any]",
+        "decorators": [],
+        "is_async": false,
+        "line": 539
+      },
+      {
+        "name": "change_presence_from_external",
+        "params": [
+          "activity_name: str",
+          "status_str: str | None = None"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 555
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog, Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult, ToolRoutingState, ToolCall, SidecarAction, Response, Safety, Signatures, Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status, PacketState, TargetEngine"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "send_to_channel",
+        "line": 448
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "send_to_user",
+        "line": 475
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "start",
+        "line": 72
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start",
+        "line": 204
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_handle_message",
+        "line": 234
+      },
+      {
+        "exception_types": [
+          "httpx.TimeoutException"
+        ],
+        "status_code": null,
+        "enclosing_function": "_handle_message",
+        "line": 358
+      },
+      {
+        "exception_types": [
+          "httpx.HTTPStatusError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_handle_message",
+        "line": 365
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_handle_message",
+        "line": 372
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_send_response",
+        "line": 388
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "run_bot",
+        "line": 508
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "stop_discord_bot",
+        "line": 527
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_handle_message",
+        "line": 255
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "on_message",
+        "line": 112
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "on_voice_state_update",
+        "line": 154
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_send",
+        "line": 439
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_handle_message",
+        "line": 224
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_handle_message",
+        "line": 225
+      }
+    ]
+  },
+  "main.py": {
+    "module_docstring": "gaia-web FastAPI application entry point.\n\nProvides the HTTP API gateway for the GAIA system.\nThis is The Face - UI and API gateway.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "_load_constants",
+        "params": [],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 53
+      },
+      {
+        "name": "health_check",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/health')"
+        ],
+        "is_async": true,
+        "line": 84
+      },
+      {
+        "name": "queue_status",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/queue/status')"
+        ],
+        "is_async": true,
+        "line": 96
+      },
+      {
+        "name": "root",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/')"
+        ],
+        "is_async": true,
+        "line": 105
+      },
+      {
+        "name": "dashboard_redirect",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/dashboard')"
+        ],
+        "is_async": true,
+        "line": 124
+      },
+      {
+        "name": "system_status_proxy",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/api/system/status')"
+        ],
+        "is_async": true,
+        "line": 130
+      },
+      {
+        "name": "system_services",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/api/system/services')"
+        ],
+        "is_async": true,
+        "line": 159
+      },
+      {
+        "name": "system_sleep_proxy",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/api/system/sleep')"
+        ],
+        "is_async": true,
+        "line": 215
+      },
+      {
+        "name": "process_user_input",
+        "params": [
+          "user_input: str"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/process_user_input')"
+        ],
+        "is_async": true,
+        "line": 228
+      },
+      {
+        "name": "process_audio_input",
+        "params": [
+          "body: Dict[str, Any]"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/process_audio_input')"
+        ],
+        "is_async": true,
+        "line": 351
+      },
+      {
+        "name": "update_presence",
+        "params": [
+          "body: Dict[str, Any]"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/presence')"
+        ],
+        "is_async": true,
+        "line": 425
+      },
+      {
+        "name": "output_router",
+        "params": [
+          "packet: Dict[str, Any]"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/output_router')"
+        ],
+        "is_async": true,
+        "line": 450
+      },
+      {
+        "name": "startup_event",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.on_event('startup')"
+        ],
+        "is_async": true,
+        "line": 540
+      },
+      {
+        "name": "shutdown_event",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.on_event('shutdown')"
+        ],
+        "is_async": true,
+        "line": 587
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "function_name": "health_check",
+        "line": 84
+      },
+      {
+        "method": "GET",
+        "path": "/queue/status",
+        "function_name": "queue_status",
+        "line": 96
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "function_name": "root",
+        "line": 105
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard",
+        "function_name": "dashboard_redirect",
+        "line": 124
+      },
+      {
+        "method": "GET",
+        "path": "/api/system/status",
+        "function_name": "system_status_proxy",
+        "line": 130
+      },
+      {
+        "method": "GET",
+        "path": "/api/system/services",
+        "function_name": "system_services",
+        "line": 159
+      },
+      {
+        "method": "GET",
+        "path": "/api/system/sleep",
+        "function_name": "system_sleep_proxy",
+        "line": 215
+      },
+      {
+        "method": "POST",
+        "path": "/process_user_input",
+        "function_name": "process_user_input",
+        "line": 228
+      },
+      {
+        "method": "POST",
+        "path": "/process_audio_input",
+        "function_name": "process_audio_input",
+        "line": 351
+      },
+      {
+        "method": "POST",
+        "path": "/presence",
+        "function_name": "update_presence",
+        "line": 425
+      },
+      {
+        "method": "POST",
+        "path": "/output_router",
+        "function_name": "output_router",
+        "line": 450
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_web.queue.message_queue import MessageQueue",
+      "from gaia_web.routes.blueprints import router",
+      "from gaia_web.routes.files import router",
+      "from gaia_web.routes.hooks import router",
+      "from gaia_web.routes.terminal import router",
+      "from gaia_web.routes.voice import router",
+      "from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef, Constraints, Response, Governance, Safety, Metrics, TokenUsage, Status, PacketState, ToolRoutingState, Reasoning, TargetEngine"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": null,
+        "line": 40
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "system_status_proxy",
+        "line": 136
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "system_status_proxy",
+        "line": 138
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "system_services",
+        "line": 202
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "system_sleep_proxy",
+        "line": 221
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "system_sleep_proxy",
+        "line": 223
+      },
+      {
+        "exception_types": [
+          "httpx.TimeoutException"
+        ],
+        "status_code": 504,
+        "enclosing_function": "process_user_input",
+        "line": 341
+      },
+      {
+        "exception_types": [
+          "httpx.HTTPStatusError"
+        ],
+        "status_code": null,
+        "enclosing_function": "process_user_input",
+        "line": 343
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "process_user_input",
+        "line": 345
+      },
+      {
+        "exception_types": [
+          "httpx.TimeoutException"
+        ],
+        "status_code": 504,
+        "enclosing_function": "process_audio_input",
+        "line": 417
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "process_audio_input",
+        "line": 419
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": 501,
+        "enclosing_function": "update_presence",
+        "line": 433
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "update_presence",
+        "line": 445
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "startup_event",
+        "line": 560
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_load_constants",
+        "line": 60
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "process_user_input",
+        "line": 257
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": 500,
+        "enclosing_function": "output_router",
+        "line": 502
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "output_router",
+        "line": 505
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "startup_event",
+        "line": 576
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "shutdown_event",
+        "line": 594
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "shutdown_event",
+        "line": 602
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": null,
+        "enclosing_function": "system_services",
+        "line": 182
+      },
+      {
+        "exception_types": [
+          "httpx.TimeoutException"
+        ],
+        "status_code": null,
+        "enclosing_function": "system_services",
+        "line": 184
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "system_services",
+        "line": 186
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "output_router",
+        "line": 530
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "system_services",
+        "line": 163
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "system_status_proxy",
+        "line": 133
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "system_sleep_proxy",
+        "line": 218
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "system_status_proxy",
+        "line": 134
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "system_sleep_proxy",
+        "line": 219
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "process_user_input",
+        "line": 237
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "system_services",
+        "line": 175
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "process_user_input",
+        "line": 238
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "output_router",
+        "line": 522
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "output_router",
+        "line": 523
+      }
+    ]
+  },
+  "queue/message_queue.py": {
+    "module_docstring": "Message queue for the sleep/wake cycle.\n\nMessages arrive via Discord (or other sources) while GAIA is sleeping.\nThey are held here until gaia-core wakes and pulls them.  The first\nenqueue triggers a w",
+    "classes": [
+      {
+        "name": "QueuedMessage",
+        "bases": [],
+        "docstring": "A message waiting to be processed.",
+        "methods": [
+          {
+            "name": "to_dict",
+            "params": [
+              "self"
+            ],
+            "return_type": "Dict[str, Any]",
+            "decorators": [],
+            "is_async": false,
+            "line": 44
+          },
+          {
+            "name": "from_dict",
+            "params": [
+              "cls",
+              "d: Dict[str, Any]"
+            ],
+            "return_type": "QueuedMessage",
+            "decorators": [
+              "classmethod"
+            ],
+            "is_async": false,
+            "line": 50
+          }
+        ],
+        "line": 33
+      },
+      {
+        "name": "MessageQueue",
+        "bases": [],
+        "docstring": "Thread-safe async message queue for sleep/wake cycle.\n\nPersists messages to a JSON file so they surv",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "core_url: str = 'http://gaia-core:6415'",
+              "queue_file: str | None = None"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 63
+          },
+          {
+            "name": "_load_from_disk",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 84
+          },
+          {
+            "name": "_persist_to_disk",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 98
+          },
+          {
+            "name": "enqueue",
+            "params": [
+              "self",
+              "message: QueuedMessage"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 113
+          },
+          {
+            "name": "dequeue",
+            "params": [
+              "self"
+            ],
+            "return_type": "Optional[QueuedMessage]",
+            "decorators": [],
+            "is_async": true,
+            "line": 126
+          },
+          {
+            "name": "peek",
+            "params": [
+              "self"
+            ],
+            "return_type": "Optional[QueuedMessage]",
+            "decorators": [],
+            "is_async": true,
+            "line": 139
+          },
+          {
+            "name": "get_queue_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "Dict[str, Any]",
+            "decorators": [],
+            "is_async": true,
+            "line": 146
+          },
+          {
+            "name": "wait_for_active",
+            "params": [
+              "self",
+              "poll_interval: float = 1.5",
+              "timeout: float = 120.0"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 157
+          },
+          {
+            "name": "_send_wake_signal",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 192
+          }
+        ],
+        "line": 57
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_load_from_disk",
+        "line": 94
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_persist_to_disk",
+        "line": 108
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_send_wake_signal",
+        "line": 203
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "wait_for_active",
+        "line": 184
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_send_wake_signal",
+        "line": 197
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "wait_for_active",
+        "line": 171
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_send_wake_signal",
+        "line": 198
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "wait_for_active",
+        "line": 172
+      }
+    ]
+  },
+  "routes/__init__.py": {
+    "module_docstring": "Route modules for gaia-web.",
+    "classes": [],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "routes/blueprints.py": {
+    "module_docstring": "Blueprint API endpoints for gaia-web.\n\nExposes the blueprint graph, service list, detail, and markdown rendering\nover HTTP. All data sourced from gaia_common.utils.blueprint_io.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "get_graph",
+        "params": [
+          "include_candidates: bool = True"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/graph')"
+        ],
+        "is_async": true,
+        "line": 29
+      },
+      {
+        "name": "list_blueprints",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.get('')"
+        ],
+        "is_async": true,
+        "line": 47
+      },
+      {
+        "name": "get_blueprint_detail",
+        "params": [
+          "service_id: str",
+          "candidate: Optional[bool] = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/{service_id}')"
+        ],
+        "is_async": true,
+        "line": 81
+      },
+      {
+        "name": "get_blueprint_markdown",
+        "params": [
+          "service_id: str",
+          "candidate: Optional[bool] = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/{service_id}/markdown')"
+        ],
+        "is_async": true,
+        "line": 101
+      },
+      {
+        "name": "get_component_topology",
+        "params": [
+          "service_id: str",
+          "candidate: Optional[bool] = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/{service_id}/components')"
+        ],
+        "is_async": true,
+        "line": 118
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/graph",
+        "function_name": "get_graph",
+        "line": 29
+      },
+      {
+        "method": "GET",
+        "path": "",
+        "function_name": "list_blueprints",
+        "line": 47
+      },
+      {
+        "method": "GET",
+        "path": "/{service_id}",
+        "function_name": "get_blueprint_detail",
+        "line": 81
+      },
+      {
+        "method": "GET",
+        "path": "/{service_id}/markdown",
+        "function_name": "get_blueprint_markdown",
+        "line": 101
+      },
+      {
+        "method": "GET",
+        "path": "/{service_id}/components",
+        "function_name": "get_component_topology",
+        "line": 118
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.utils.blueprint_io import derive_component_topology, derive_graph_topology, load_all_candidate_blueprints, load_all_live_blueprints, load_blueprint, render_markdown"
+    ],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "routes/files.py": {
+    "module_docstring": "File browser routes for Mission Control dashboard.\n\nProvides directory listing and file reading with path traversal\nprotection and configurable root directories.",
+    "classes": [
+      {
+        "name": "WriteRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": null,
+        "methods": [],
+        "line": 140
+      }
+    ],
+    "functions": [
+      {
+        "name": "_parse_roots",
+        "params": [],
+        "return_type": "dict[str, Path]",
+        "decorators": [],
+        "is_async": false,
+        "line": 31
+      },
+      {
+        "name": "_safe_path",
+        "params": [
+          "root: Path",
+          "subpath: str"
+        ],
+        "return_type": "Path",
+        "decorators": [],
+        "is_async": false,
+        "line": 46
+      },
+      {
+        "name": "list_roots",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.get('/roots')"
+        ],
+        "is_async": true,
+        "line": 57
+      },
+      {
+        "name": "browse",
+        "params": [
+          "root: str",
+          "path: str = ''"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/browse/{root}/{path:path}')"
+        ],
+        "is_async": true,
+        "line": 66
+      },
+      {
+        "name": "read_file",
+        "params": [
+          "root: str",
+          "path: str"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/read/{root}/{path:path}')"
+        ],
+        "is_async": true,
+        "line": 101
+      },
+      {
+        "name": "write_file",
+        "params": [
+          "root: str",
+          "path: str",
+          "req: WriteRequest"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.put('/write/{root}/{path:path}')"
+        ],
+        "is_async": true,
+        "line": 145
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/roots",
+        "function_name": "list_roots",
+        "line": 57
+      },
+      {
+        "method": "GET",
+        "path": "/browse/{root}/{path:path}",
+        "function_name": "browse",
+        "line": 66
+      },
+      {
+        "method": "GET",
+        "path": "/read/{root}/{path:path}",
+        "function_name": "read_file",
+        "line": 101
+      },
+      {
+        "method": "PUT",
+        "path": "/write/{root}/{path:path}",
+        "function_name": "write_file",
+        "line": 145
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "PermissionError"
+        ],
+        "status_code": 403,
+        "enclosing_function": "browse",
+        "line": 92
+      },
+      {
+        "exception_types": [
+          "PermissionError"
+        ],
+        "status_code": 403,
+        "enclosing_function": "read_file",
+        "line": 125
+      },
+      {
+        "exception_types": [
+          "PermissionError"
+        ],
+        "status_code": 403,
+        "enclosing_function": "write_file",
+        "line": 163
+      }
+    ],
+    "http_calls": []
+  },
+  "routes/hooks.py": {
+    "module_docstring": "Hook/Command proxy routes for Mission Control dashboard.\n\nProxies sleep/wake, GPU management, and semantic codex operations\nfrom the browser to gaia-core, avoiding CORS issues.",
+    "classes": [
+      {
+        "name": "CodexSearchRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": null,
+        "methods": [],
+        "line": 107
+      }
+    ],
+    "functions": [
+      {
+        "name": "sleep_status",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.get('/sleep/status')"
+        ],
+        "is_async": true,
+        "line": 26
+      },
+      {
+        "name": "sleep_wake",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.post('/sleep/wake')"
+        ],
+        "is_async": true,
+        "line": 39
+      },
+      {
+        "name": "sleep_shutdown",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.post('/sleep/shutdown')"
+        ],
+        "is_async": true,
+        "line": 52
+      },
+      {
+        "name": "gpu_status",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.get('/gpu/status')"
+        ],
+        "is_async": true,
+        "line": 67
+      },
+      {
+        "name": "gpu_release",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.post('/gpu/release')"
+        ],
+        "is_async": true,
+        "line": 80
+      },
+      {
+        "name": "gpu_reclaim",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.post('/gpu/reclaim')"
+        ],
+        "is_async": true,
+        "line": 93
+      },
+      {
+        "name": "codex_search",
+        "params": [
+          "req: CodexSearchRequest"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.post('/codex/search')"
+        ],
+        "is_async": true,
+        "line": 113
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/sleep/status",
+        "function_name": "sleep_status",
+        "line": 26
+      },
+      {
+        "method": "POST",
+        "path": "/sleep/wake",
+        "function_name": "sleep_wake",
+        "line": 39
+      },
+      {
+        "method": "POST",
+        "path": "/sleep/shutdown",
+        "function_name": "sleep_shutdown",
+        "line": 52
+      },
+      {
+        "method": "GET",
+        "path": "/gpu/status",
+        "function_name": "gpu_status",
+        "line": 67
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/release",
+        "function_name": "gpu_release",
+        "line": 80
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/reclaim",
+        "function_name": "gpu_reclaim",
+        "line": 93
+      },
+      {
+        "method": "POST",
+        "path": "/codex/search",
+        "function_name": "codex_search",
+        "line": 113
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "sleep_status",
+        "line": 32
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "sleep_status",
+        "line": 34
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "sleep_wake",
+        "line": 45
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "sleep_wake",
+        "line": 47
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "sleep_shutdown",
+        "line": 58
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "sleep_shutdown",
+        "line": 60
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "gpu_status",
+        "line": 73
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "gpu_status",
+        "line": 75
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "gpu_release",
+        "line": 86
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "gpu_release",
+        "line": 88
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "gpu_reclaim",
+        "line": 99
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "gpu_reclaim",
+        "line": 101
+      },
+      {
+        "exception_types": [
+          "httpx.ConnectError"
+        ],
+        "status_code": 503,
+        "enclosing_function": "codex_search",
+        "line": 122
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 502,
+        "enclosing_function": "codex_search",
+        "line": 124
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "sleep_status",
+        "line": 29
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "sleep_wake",
+        "line": 42
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "sleep_shutdown",
+        "line": 55
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "gpu_status",
+        "line": 70
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "gpu_release",
+        "line": 83
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "gpu_reclaim",
+        "line": 96
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "codex_search",
+        "line": 116
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "sleep_status",
+        "line": 30
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "sleep_wake",
+        "line": 43
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "sleep_shutdown",
+        "line": 56
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "gpu_status",
+        "line": 71
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "gpu_release",
+        "line": 84
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "gpu_reclaim",
+        "line": 97
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "codex_search",
+        "line": 117
+      }
+    ]
+  },
+  "routes/terminal.py": {
+    "module_docstring": "Terminal routes for Mission Control dashboard.\n\nProvides container listing and WebSocket-based Docker exec bridge\nfor interactive shell access to GAIA containers.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "_get_client",
+        "params": [],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 23
+      },
+      {
+        "name": "list_containers",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "router.get('/containers')"
+        ],
+        "is_async": true,
+        "line": 35
+      },
+      {
+        "name": "terminal_ws",
+        "params": [
+          "ws: WebSocket",
+          "container: str = ''"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.websocket('/ws')"
+        ],
+        "is_async": true,
+        "line": 63
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/containers",
+        "function_name": "list_containers",
+        "line": 35
+      },
+      {
+        "method": "WEBSOCKET",
+        "path": "/ws",
+        "function_name": "terminal_ws",
+        "line": 63
+      }
+    ],
+    "enums": [],
+    "constants": [
+      {
+        "name": "CONTAINER_PREFIX",
+        "value": "'gaia-'",
+        "line": 20
+      }
+    ],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "DockerException"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_client",
+        "line": 27
+      },
+      {
+        "exception_types": [
+          "DockerException"
+        ],
+        "status_code": 503,
+        "enclosing_function": "list_containers",
+        "line": 54
+      },
+      {
+        "exception_types": [
+          "NotFound"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 84
+      },
+      {
+        "exception_types": [
+          "DockerException"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 88
+      },
+      {
+        "exception_types": [
+          "DockerException"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 104
+      },
+      {
+        "exception_types": [
+          "OSError",
+          "WebSocketDisconnect"
+        ],
+        "status_code": null,
+        "enclosing_function": "read_from_docker",
+        "line": 120
+      },
+      {
+        "exception_types": [
+          "WebSocketDisconnect",
+          "RuntimeError"
+        ],
+        "status_code": null,
+        "enclosing_function": "write_to_docker",
+        "line": 129
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 142
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 146
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "terminal_ws",
+        "line": 151
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "get",
+        "url_or_path": "container",
+        "enclosing_function": "terminal_ws",
+        "line": 79
+      }
+    ]
+  },
+  "routes/voice.py": {
+    "module_docstring": "Voice auto-answer API endpoints for gaia-web.\n\nManages the Discord voice whitelist and exposes voice connection status.\nThe VoiceManager instance is accessed via request.app.state.voice_manager.",
+    "classes": [
+      {
+        "name": "WhitelistAdd",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": null,
+        "methods": [],
+        "line": 17
+      }
+    ],
+    "functions": [
+      {
+        "name": "_get_vm",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 21
+      },
+      {
+        "name": "list_users",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/users')"
+        ],
+        "is_async": true,
+        "line": 29
+      },
+      {
+        "name": "list_whitelisted",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/whitelist')"
+        ],
+        "is_async": true,
+        "line": 36
+      },
+      {
+        "name": "add_to_whitelist",
+        "params": [
+          "request: Request",
+          "body: WhitelistAdd"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.post('/whitelist')"
+        ],
+        "is_async": true,
+        "line": 44
+      },
+      {
+        "name": "remove_from_whitelist",
+        "params": [
+          "request: Request",
+          "user_id: str"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.delete('/whitelist/{user_id}')"
+        ],
+        "is_async": true,
+        "line": 52
+      },
+      {
+        "name": "voice_status",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.get('/status')"
+        ],
+        "is_async": true,
+        "line": 60
+      },
+      {
+        "name": "force_disconnect",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "router.post('/disconnect')"
+        ],
+        "is_async": true,
+        "line": 67
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/users",
+        "function_name": "list_users",
+        "line": 29
+      },
+      {
+        "method": "GET",
+        "path": "/whitelist",
+        "function_name": "list_whitelisted",
+        "line": 36
+      },
+      {
+        "method": "POST",
+        "path": "/whitelist",
+        "function_name": "add_to_whitelist",
+        "line": 44
+      },
+      {
+        "method": "DELETE",
+        "path": "/whitelist/{user_id}",
+        "function_name": "remove_from_whitelist",
+        "line": 52
+      },
+      {
+        "method": "GET",
+        "path": "/status",
+        "function_name": "voice_status",
+        "line": 60
+      },
+      {
+        "method": "POST",
+        "path": "/disconnect",
+        "function_name": "force_disconnect",
+        "line": 67
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "utils/retry.py": {
+    "module_docstring": "Async retry helper for gaia-web HTTP calls.\n\nProvides retry-with-backoff for outbound requests to gaia-core and other\nGAIA services. Retries on transient network errors; does NOT retry on\nclient error",
+    "classes": [],
+    "functions": [
+      {
+        "name": "_is_maintenance_mode",
+        "params": [],
+        "return_type": "bool",
+        "decorators": [],
+        "is_async": false,
+        "line": 37
+      },
+      {
+        "name": "post_with_retry",
+        "params": [
+          "url: str",
+          "*",
+          "json: dict",
+          "headers: dict | None = None",
+          "timeout: float = 300.0",
+          "max_attempts: int = 3",
+          "base_delay: float = 2.0",
+          "fallback_url: str | None = None"
+        ],
+        "return_type": "httpx.Response",
+        "decorators": [],
+        "is_async": true,
+        "line": 42
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "httpx.TimeoutException"
+        ],
+        "status_code": null,
+        "enclosing_function": "post_with_retry",
+        "line": 101
+      },
+      {
+        "exception_types": [
+          "RETRYABLE_EXCEPTIONS"
+        ],
+        "status_code": null,
+        "enclosing_function": "post_with_retry",
+        "line": 106
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "post_with_retry",
+        "line": 134
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "post_with_retry",
+        "line": 79
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "post_with_retry",
+        "line": 126
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "url",
+        "enclosing_function": "post_with_retry",
+        "line": 80
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "fallback_url",
+        "enclosing_function": "post_with_retry",
+        "line": 127
+      }
+    ]
+  },
+  "voice_manager.py": {
+    "module_docstring": "Discord Voice Manager \u2014 auto-answer, VAD, and audio pipeline.\n\nManages voice connections for GAIA's Discord bot. When a whitelisted user\njoins a voice channel, GAIA auto-joins and enters a listen-tran",
+    "classes": [
+      {
+        "name": "VoiceWhitelist",
+        "bases": [],
+        "docstring": "Persistent whitelist of Discord users whose calls GAIA auto-answers.\n\nAlso tracks all users GAIA has",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "data_dir: str = '/app/data'"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 49
+          },
+          {
+            "name": "_load",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 55
+          },
+          {
+            "name": "_save",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 64
+          },
+          {
+            "name": "add",
+            "params": [
+              "self",
+              "user_id: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 73
+          },
+          {
+            "name": "remove",
+            "params": [
+              "self",
+              "user_id: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 79
+          },
+          {
+            "name": "is_whitelisted",
+            "params": [
+              "self",
+              "user_id: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 85
+          },
+          {
+            "name": "get_whitelisted",
+            "params": [
+              "self"
+            ],
+            "return_type": "list[str]",
+            "decorators": [],
+            "is_async": false,
+            "line": 89
+          },
+          {
+            "name": "record_seen",
+            "params": [
+              "self",
+              "user_id: str",
+              "name: str",
+              "guild_id: str | None = None"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 95
+          },
+          {
+            "name": "get_seen_users",
+            "params": [
+              "self"
+            ],
+            "return_type": "list[dict]",
+            "decorators": [],
+            "is_async": false,
+            "line": 110
+          }
+        ],
+        "line": 42
+      },
+      {
+        "name": "SimpleVAD",
+        "bases": [],
+        "docstring": "Energy-based voice activity detection with webrtcvad fallback.\n\nSegments continuous audio into utter",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "silence_threshold_ms: int = 800",
+              "min_speech_ms: int = 300",
+              "max_utterance_seconds: int = 30"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 136
+          },
+          {
+            "name": "_init_vad",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 154
+          },
+          {
+            "name": "feed_frame",
+            "params": [
+              "self",
+              "frame_16k_mono: bytes"
+            ],
+            "return_type": "bytes | None",
+            "decorators": [],
+            "is_async": false,
+            "line": 161
+          },
+          {
+            "name": "_detect_speech",
+            "params": [
+              "self",
+              "frame: bytes"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 192
+          },
+          {
+            "name": "_flush",
+            "params": [
+              "self"
+            ],
+            "return_type": "bytes",
+            "decorators": [],
+            "is_async": false,
+            "line": 205
+          },
+          {
+            "name": "reset",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 213
+          }
+        ],
+        "line": 129
+      },
+      {
+        "name": "GaiaVoiceSink",
+        "bases": [
+          "_DiscordSinkBase"
+        ],
+        "docstring": "py-cord voice sink that streams decoded audio into an asyncio.Queue.\n\nEach ``write()`` call from the",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "queue: asyncio.Queue",
+              "loop: asyncio.AbstractEventLoop",
+              "target_user_id: int | None = None"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 238
+          },
+          {
+            "name": "_enqueue",
+            "params": [
+              "self",
+              "data: bytes"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 251
+          },
+          {
+            "name": "write",
+            "params": [
+              "self",
+              "data: bytes",
+              "user: int"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 258
+          },
+          {
+            "name": "cleanup",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 269
+          }
+        ],
+        "line": 230
+      },
+      {
+        "name": "VoiceManager",
+        "bases": [],
+        "docstring": "Manages GAIA's Discord voice connections and the audio pipeline.\n\nHandles auto-joining when whitelis",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "core_endpoint: str",
+              "audio_endpoint: str",
+              "whitelist: VoiceWhitelist",
+              "voice_config: dict | None = None"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 342
+          },
+          {
+            "name": "get_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "dict",
+            "decorators": [],
+            "is_async": false,
+            "line": 370
+          },
+          {
+            "name": "handle_voice_state_update",
+            "params": [
+              "self",
+              "member: discord.Member",
+              "before: discord.VoiceState",
+              "after: discord.VoiceState"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 382
+          },
+          {
+            "name": "_notify_core_voice_state",
+            "params": [
+              "self",
+              "connected: bool"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 423
+          },
+          {
+            "name": "_get_core_state",
+            "params": [
+              "self"
+            ],
+            "return_type": "str | None",
+            "decorators": [],
+            "is_async": true,
+            "line": 438
+          },
+          {
+            "name": "_send_wake_signal",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 449
+          },
+          {
+            "name": "_join_channel",
+            "params": [
+              "self",
+              "channel: discord.VoiceChannel"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 459
+          },
+          {
+            "name": "disconnect",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 489
+          },
+          {
+            "name": "_recording_finished",
+            "params": [
+              "self",
+              "sink",
+              "*args"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 524
+          },
+          {
+            "name": "_process_audio_loop",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 528
+          },
+          {
+            "name": "_process_utterance",
+            "params": [
+              "self",
+              "pcm_16k_mono: bytes"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 582
+          },
+          {
+            "name": "_transcribe",
+            "params": [
+              "self",
+              "pcm_16k_mono: bytes"
+            ],
+            "return_type": "str | None",
+            "decorators": [],
+            "is_async": true,
+            "line": 640
+          },
+          {
+            "name": "_get_response",
+            "params": [
+              "self",
+              "text: str"
+            ],
+            "return_type": "str | None",
+            "decorators": [],
+            "is_async": true,
+            "line": 656
+          },
+          {
+            "name": "_get_lite_stalling_response",
+            "params": [
+              "self",
+              "text: str"
+            ],
+            "return_type": "str | None",
+            "decorators": [],
+            "is_async": true,
+            "line": 732
+          },
+          {
+            "name": "_speak",
+            "params": [
+              "self",
+              "text: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 823
+          }
+        ],
+        "line": 335
+      }
+    ],
+    "functions": [
+      {
+        "name": "pcm_48k_stereo_to_16k_mono",
+        "params": [
+          "pcm_data: bytes"
+        ],
+        "return_type": "bytes",
+        "decorators": [],
+        "is_async": false,
+        "line": 279
+      },
+      {
+        "name": "pcm_48k_stereo_to_16k_mono_fast",
+        "params": [
+          "pcm_data: bytes"
+        ],
+        "return_type": "bytes",
+        "decorators": [],
+        "is_async": false,
+        "line": 301
+      },
+      {
+        "name": "pcm_to_wav_base64",
+        "params": [
+          "pcm_16k_mono: bytes",
+          "sample_rate: int = 16000"
+        ],
+        "return_type": "str",
+        "decorators": [],
+        "is_async": false,
+        "line": 319
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": null,
+        "line": 226
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "pcm_48k_stereo_to_16k_mono",
+        "line": 296
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_save",
+        "line": 68
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_init_vad",
+        "line": 158
+      },
+      {
+        "exception_types": [
+          "asyncio.QueueFull"
+        ],
+        "status_code": null,
+        "enclosing_function": "_enqueue",
+        "line": 255
+      },
+      {
+        "exception_types": [
+          "RuntimeError"
+        ],
+        "status_code": null,
+        "enclosing_function": "write",
+        "line": 266
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_notify_core_voice_state",
+        "line": 435
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_core_state",
+        "line": 445
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_send_wake_signal",
+        "line": 454
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_join_channel",
+        "line": 484
+      },
+      {
+        "exception_types": [
+          "asyncio.CancelledError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_process_audio_loop",
+        "line": 575
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_process_audio_loop",
+        "line": 577
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_transcribe",
+        "line": 652
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_response",
+        "line": 728
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_lite_stalling_response",
+        "line": 819
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_speak",
+        "line": 877
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_load",
+        "line": 60
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_detect_speech",
+        "line": 196
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "disconnect",
+        "line": 498
+      },
+      {
+        "exception_types": [
+          "asyncio.CancelledError"
+        ],
+        "status_code": null,
+        "enclosing_function": "disconnect",
+        "line": 506
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_process_utterance",
+        "line": 631
+      },
+      {
+        "exception_types": [
+          "asyncio.TimeoutError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_speak",
+        "line": 873
+      },
+      {
+        "exception_types": [
+          "asyncio.TimeoutError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_process_audio_loop",
+        "line": 551
+      },
+      {
+        "exception_types": [
+          "asyncio.QueueEmpty"
+        ],
+        "status_code": null,
+        "enclosing_function": "_process_utterance",
+        "line": 628
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_notify_core_voice_state",
+        "line": 430
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_get_core_state",
+        "line": 441
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_send_wake_signal",
+        "line": 452
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_transcribe",
+        "line": 644
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_get_response",
+        "line": 717
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_get_lite_stalling_response",
+        "line": 808
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_speak",
+        "line": 830
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_notify_core_voice_state",
+        "line": 431
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_get_core_state",
+        "line": 442
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_send_wake_signal",
+        "line": 453
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_transcribe",
+        "line": 645
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_get_response",
+        "line": 718
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_get_lite_stalling_response",
+        "line": 809
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_speak",
+        "line": 831
+      }
+    ]
+  }
+}

@@ -1,0 +1,647 @@
+SYSTEM:
+You are a code reviewer for the GAIA AI system. Your task is to verify that the provided source code faithfully implements its blueprint specification.
+
+You are NOT evaluating general code quality. You are evaluating blueprint fidelity across five dimensions:
+
+1. CONTRACT FIDELITY — The mechanical pre-check below shows which endpoints are structurally present or missing. For [FOUND] endpoints, verify from the AST summaries that the implementation signature (parameters, return type) matches the blueprint's schema. For [MISSING] endpoints, confirm they are genuinely absent or flag if implemented under a different path.
+
+2. DEPENDENCY CORRECTNESS — The pre-check confirms which declared dependencies appear in imports. Your task: verify from the AST summaries that dependency calls use correct paths/methods, and flag any UNDECLARED external calls the pre-check may have missed. Note: gaia-common imports are universally available and should NOT be flagged as undeclared dependencies.
+
+3. FAILURE MODE COVERAGE — The pre-check shows which failure modes have matching handlers. For [FOUND] handlers, assess from the AST summary whether the handling logic matches the blueprint's documented response (not just that a handler exists). For [MISSING] handlers, confirm absence or flag if handled via a non-standard pattern.
+
+4. INTENT COHERENCE — Does the code's overall structure reflect the blueprint's stated purpose and cognitive_role? This dimension is NOT covered by mechanical pre-checks — it requires your semantic judgment. Flag obvious divergences.
+
+5. OPEN QUESTIONS — Does the code reveal answers to any open_questions in the blueprint? Or does it raise new ones? Also NOT covered by pre-checks.
+
+Respond ONLY with a structured JSON object matching the ReviewResult schema.
+
+USER:
+## Blueprint: gaia-web
+
+### Intent
+The user-facing gateway of GAIA. Handles all external interactions: web form submissions, Discord messaging (mentions + DMs), and output routing back to endpoints. Integrates sleep/wake coordination: enqueues messages while GAIA sleeps, wakes on first message, polls for active state before returning response.
+
+Cognitive role: The Face
+
+Design decisions:
+  - FastAPI + uvicorn for concurrent Discord and web traffic
+  - Discord bot runs in background thread (separate event loop) to avoid blocking HTTP handlers
+  - Sleep-aware message queue holds incoming messages while GAIA sleeps, sends wake signal, waits for active
+  - Direct Discord bot control: /presence and /output_router directly manipulate discord.py bot
+  - Message splitting respects Discord's 2000-char limit while preferring newline/word boundaries
+  - gaia-core is the single source of truth for sleep state; web polls rather than caches
+  - Graceful degradation: Discord unavailability doesn't block web API
+
+### Interfaces
+  health (inbound) http_rest GET /health
+    Container health check endpoint.
+  root (inbound) http_rest GET /
+    Root endpoint — returns service info and available endpoints for discovery.
+  queue_status (inbound) http_rest GET /queue/status
+    Message queue telemetry — queued count, wake signal state, oldest message age.
+  process_user_input (inbound) http_rest POST /process_user_input
+    Primary user input entry point. Receives text from web/Discord, converts to CognitionPacket, sends to gaia-core. Sleep-aware: enqueues + wakes + polls if GAIA is asleep.
+  presence (inbound) http_rest POST /presence
+    Update Discord bot presence (status dot + activity text). Called by gaia-core's SleepCycleLoop.
+  output_router (inbound) http_rest POST /output_router
+    Route completed packets to output destinations (Discord channels, DMs, logs). Called by gaia-core after response generation.
+  core_process_packet (outbound) http_rest POST /process_packet
+    Send CognitionPacket to gaia-core for cognitive processing.
+  core_sleep_distracted_check (outbound) http_rest GET /sleep/distracted-check
+    Check gaia-core sleep state before enqueueing messages.
+  core_sleep_wake (outbound) http_rest POST /sleep/wake
+    Send wake signal to gaia-core. Triggers ASLEEP -> WAKING transition.
+  core_sleep_status (outbound) http_rest GET /sleep/status
+    Poll gaia-core sleep status in wait_for_active loop.
+  discord_bot (outbound) direct_call gaia_web.discord_interface.DiscordInterface
+    discord.py bot instance — sends/receives Discord messages in background thread.
+
+### Dependencies
+  gaia-core — cognitive_processing (required)
+  [ext] discord — bot_messaging_gateway (optional)
+
+### Failure Modes
+  [fatal] gaia-core unavailable
+    Response: HTTP 503/504 returned to client; timeout after 300s
+  [degraded] Discord bot token missing or invalid
+    Response: Discord integration disabled; web input processing still works
+  [degraded] Discord bot websocket down
+    Response: /output_router returns 503 for Discord sends; bot auto-reconnects via discord.py
+  [degraded] Sleep/wake queue timeout
+    Response: wait_for_active times out; user gets timeout error
+  [degraded] Discord message send fails (permissions, deleted channel)
+    Response: /output_router returns 500; response lost (not retried)
+
+### Open Questions
+  - Should message queue persistence survive service restart, or is in-memory-only acceptable?
+  - Is MessageQueue polling interval (1.5s default) optimal, or should it be configurable?
+  - Should /output_router handle async retries for failed Discord sends?
+
+### Confidence Scores
+  runtime: ConfidenceLevel.HIGH
+  contract: ConfidenceLevel.HIGH
+  dependencies: ConfidenceLevel.HIGH
+  failure_modes: ConfidenceLevel.MEDIUM
+  intent: ConfidenceLevel.MEDIUM
+
+---
+
+## Mechanical Pre-Check Results
+
+## Mechanical Pre-Check Results: gaia-web
+
+### Endpoints (6/6 found)
+  [FOUND]      GET /health
+              → main.py:83
+  [FOUND]      GET /
+              → main.py:104
+  [FOUND]      GET /queue/status
+              → main.py:95
+  [FOUND]      POST /process_user_input
+              → main.py:227
+  [FOUND]      POST /presence
+              → main.py:424
+  [FOUND]      POST /output_router
+              → main.py:449
+
+### Failure Modes (4/5 found)
+  [FOUND]      gaia-core unavailable
+              → pattern match in main.py:136
+  [MISSING]    Discord bot token missing or invalid
+              no matching handler found
+  [FOUND]      Discord bot websocket down
+              → pattern match in main.py:100
+  [FOUND]      Sleep/wake queue timeout
+              → pattern match in main.py:184
+  [FOUND]      Discord message send fails (permissions, deleted channel)
+              → pattern match in main.py:347
+
+### Dependencies (1/1 found)
+  [FOUND]      gaia-core (cognitive_processing)
+              → main.py:44
+
+### Summary
+  Total checks: 12 | Found: 11 | Missing: 1 | Diverged: 0
+  Structural completeness: 91.7%
+
+
+---
+
+## Source Files Under Review
+
+### File: __init__.py
+
+**Module:** gaia-web: The Face - UI and API gateway.
+
+This service handles all user-facing interactions:
+- HTTP/REST API endpoints
+- Server-Sent Events (SSE) streaming
+- WebSocket connections
+- Static file servin
+
+
+### File: discord_interface.py
+
+**Module:** Discord Interface for GAIA Web Gateway
+
+This module handles Discord bot integration as part of the Unified Interface Gateway.
+Discord messages are received here, converted to CognitionPackets, sent to
+
+**GAIA Imports:**
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog, Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult, ToolRoutingState, ToolCall, SidecarAction, Response, Safety, Signatures, Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status, PacketState, TargetEngine
+
+**Functions:**
+  def _run_on_bot_loop(coro, timeout: float = 30.0)  (line 37)
+  async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool  (line 416)
+  async def send_to_user(user_id: str, content: str) -> bool  (line 453)
+  def start_discord_bot(bot_token: str, core_endpoint: str, message_queue = None, voice_manager = None, core_fallback_endpoint: str = '') -> bool  (line 480)
+  def stop_discord_bot()  (line 520)
+  def is_bot_ready() -> bool  (line 533)
+  def get_discord_status() -> Dict[str, Any]  (line 539)
+  def change_presence_from_external(activity_name: str, status_str: str | None = None)  (line 555)
+
+**Classes:**
+  class DiscordInterface  (line 49)
+    "Discord interface for the GAIA Web Gateway.
+
+Handles:
+- Receiving messages from Discord (mentions an"
+    def __init__(self, bot_token: str, core_endpoint: str, message_queue = None, core_fallback_endpoint: str = '')  (line 59)
+    async def start(self)  (line 67)
+    async def _handle_message(self, content: str, channel_id: str, user_id: str, guild_id: Optional[str], author_name: str, message_id: str, is_dm: bool, message_obj: Any)  (line 207)
+    async def _send_response(self, message_obj: Any, content: str, is_dm: bool)  (line 380)
+    def _split_message(self, content: str, max_length: int = 2000) -> list  (line 391)
+
+**Error Handlers:**
+  handles: Exception in send_to_channel()  (line 448)
+  handles: Exception in send_to_user()  (line 475)
+  handles: ImportError in start()  (line 72)
+  handles: Exception in start()  (line 204)
+  handles: Exception in _handle_message()  (line 234)
+  handles: httpx.TimeoutException in _handle_message()  (line 358)
+  handles: httpx.HTTPStatusError in _handle_message()  (line 365)
+  handles: Exception in _handle_message()  (line 372)
+  handles: Exception in _send_response()  (line 388)
+  handles: Exception in run_bot()  (line 508)
+  handles: Exception in stop_discord_bot()  (line 527)
+  handles: Exception in _handle_message()  (line 255)
+  handles: Exception in on_message()  (line 112)
+  handles: Exception in on_voice_state_update()  (line 154)
+  handles: Exception in _send()  (line 439)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in _handle_message()  (line 224)
+  GET <f-string> in _handle_message()  (line 225)
+
+
+### File: main.py
+
+**Module:** gaia-web FastAPI application entry point.
+
+Provides the HTTP API gateway for the GAIA system.
+This is The Face - UI and API gateway.
+
+**GAIA Imports:**
+  from gaia_web.queue.message_queue import MessageQueue
+  from gaia_web.routes.blueprints import router
+  from gaia_web.routes.files import router
+  from gaia_web.routes.hooks import router
+  from gaia_web.routes.terminal import router
+  from gaia_web.routes.voice import router
+  from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef, Constraints, Response, Governance, Safety, Metrics, TokenUsage, Status, PacketState, ToolRoutingState, Reasoning, TargetEngine
+
+**Endpoints:**
+  GET /health -> health_check()  (line 84)
+  GET /queue/status -> queue_status()  (line 96)
+  GET / -> root()  (line 105)
+  GET /dashboard -> dashboard_redirect()  (line 124)
+  GET /api/system/status -> system_status_proxy()  (line 130)
+  GET /api/system/services -> system_services()  (line 159)
+  GET /api/system/sleep -> system_sleep_proxy()  (line 215)
+  POST /process_user_input -> process_user_input()  (line 228)
+  POST /process_audio_input -> process_audio_input()  (line 351)
+  POST /presence -> update_presence()  (line 425)
+  POST /output_router -> output_router()  (line 450)
+
+**Functions:**
+  def _load_constants() -> dict  (line 53)
+  async def health_check()  [app.get('/health')]  (line 84)
+  async def queue_status()  [app.get('/queue/status')]  (line 96)
+  async def root()  [app.get('/')]  (line 105)
+  async def dashboard_redirect()  [app.get('/dashboard')]  (line 124)
+  async def system_status_proxy()  [app.get('/api/system/status')]  (line 130)
+  async def system_services()  [app.get('/api/system/services')]  (line 159)
+  async def system_sleep_proxy()  [app.get('/api/system/sleep')]  (line 215)
+  async def process_user_input(user_input: str)  [app.post('/process_user_input')]  (line 228)
+  async def process_audio_input(body: Dict[str, Any])  [app.post('/process_audio_input')]  (line 351)
+  async def update_presence(body: Dict[str, Any])  [app.post('/presence')]  (line 425)
+  async def output_router(packet: Dict[str, Any])  [app.post('/output_router')]  (line 450)
+  async def startup_event()  [app.on_event('startup')]  (line 540)
+  async def shutdown_event()  [app.on_event('shutdown')]  (line 587)
+
+**Error Handlers:**
+  handles: ImportError  (line 40)
+  handles: httpx.ConnectError -> 503 in system_status_proxy()  (line 136)
+  handles: Exception -> 502 in system_status_proxy()  (line 138)
+  handles: ImportError in system_services()  (line 202)
+  handles: httpx.ConnectError -> 503 in system_sleep_proxy()  (line 221)
+  handles: Exception -> 502 in system_sleep_proxy()  (line 223)
+  handles: httpx.TimeoutException -> 504 in process_user_input()  (line 341)
+  handles: httpx.HTTPStatusError in process_user_input()  (line 343)
+  handles: Exception -> 500 in process_user_input()  (line 345)
+  handles: httpx.TimeoutException -> 504 in process_audio_input()  (line 417)
+  handles: Exception -> 500 in process_audio_input()  (line 419)
+  handles: ImportError -> 501 in update_presence()  (line 433)
+  handles: Exception -> 500 in update_presence()  (line 445)
+  handles: Exception in startup_event()  (line 560)
+  handles: Exception in _load_constants()  (line 60)
+  handles: Exception in process_user_input()  (line 257)
+  handles: ImportError -> 500 in output_router()  (line 502)
+  handles: Exception -> 500 in output_router()  (line 505)
+  handles: Exception in startup_event()  (line 576)
+  handles: Exception in shutdown_event()  (line 594)
+  handles: Exception in shutdown_event()  (line 602)
+  handles: httpx.ConnectError in system_services()  (line 182)
+  handles: httpx.TimeoutException in system_services()  (line 184)
+  handles: Exception in system_services()  (line 186)
+  handles: Exception -> 500 in output_router()  (line 530)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in system_services()  (line 163)
+  ASYNCCLIENT ? in system_status_proxy()  (line 133)
+  ASYNCCLIENT ? in system_sleep_proxy()  (line 218)
+  GET <f-string> in system_status_proxy()  (line 134)
+  GET <f-string> in system_sleep_proxy()  (line 219)
+  ASYNCCLIENT ? in process_user_input()  (line 237)
+  GET <f-string> in system_services()  (line 175)
+  GET <f-string> in process_user_input()  (line 238)
+  ASYNCCLIENT ? in output_router()  (line 522)
+  POST <f-string> in output_router()  (line 523)
+
+
+### File: queue/message_queue.py
+
+**Module:** Message queue for the sleep/wake cycle.
+
+Messages arrive via Discord (or other sources) while GAIA is sleeping.
+They are held here until gaia-core wakes and pulls them.  The first
+enqueue triggers a w
+
+**Classes:**
+  class QueuedMessage  (line 33)
+    "A message waiting to be processed."
+    def to_dict(self) -> Dict[str, Any]  (line 44)
+    def from_dict(cls, d: Dict[str, Any]) -> QueuedMessage  (line 50)
+  class MessageQueue  (line 57)
+    "Thread-safe async message queue for sleep/wake cycle.
+
+Persists messages to a JSON file so they surv"
+    def __init__(self, core_url: str = 'http://gaia-core:6415', queue_file: str | None = None) -> None  (line 63)
+    def _load_from_disk(self) -> None  (line 84)
+    def _persist_to_disk(self) -> None  (line 98)
+    async def enqueue(self, message: QueuedMessage) -> bool  (line 113)
+    async def dequeue(self) -> Optional[QueuedMessage]  (line 126)
+    async def peek(self) -> Optional[QueuedMessage]  (line 139)
+    async def get_queue_status(self) -> Dict[str, Any]  (line 146)
+    async def wait_for_active(self, poll_interval: float = 1.5, timeout: float = 120.0) -> bool  (line 157)
+    async def _send_wake_signal(self) -> None  (line 192)
+
+**Error Handlers:**
+  handles: Exception in _load_from_disk()  (line 94)
+  handles: Exception in _persist_to_disk()  (line 108)
+  handles: Exception in _send_wake_signal()  (line 203)
+  handles: Exception in wait_for_active()  (line 184)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in _send_wake_signal()  (line 197)
+  ASYNCCLIENT ? in wait_for_active()  (line 171)
+  POST <f-string> in _send_wake_signal()  (line 198)
+  GET <f-string> in wait_for_active()  (line 172)
+
+
+### File: routes/__init__.py
+
+**Module:** Route modules for gaia-web.
+
+
+### File: routes/blueprints.py
+
+**Module:** Blueprint API endpoints for gaia-web.
+
+Exposes the blueprint graph, service list, detail, and markdown rendering
+over HTTP. All data sourced from gaia_common.utils.blueprint_io.
+
+**GAIA Imports:**
+  from gaia_common.utils.blueprint_io import derive_component_topology, derive_graph_topology, load_all_candidate_blueprints, load_all_live_blueprints, load_blueprint, render_markdown
+
+**Endpoints:**
+  GET /graph -> get_graph()  (line 29)
+  GET  -> list_blueprints()  (line 47)
+  GET /{service_id} -> get_blueprint_detail()  (line 81)
+  GET /{service_id}/markdown -> get_blueprint_markdown()  (line 101)
+  GET /{service_id}/components -> get_component_topology()  (line 118)
+
+**Functions:**
+  async def get_graph(include_candidates: bool = True)  [router.get('/graph')]  (line 29)
+  async def list_blueprints()  [router.get('')]  (line 47)
+  async def get_blueprint_detail(service_id: str, candidate: Optional[bool] = None)  [router.get('/{service_id}')]  (line 81)
+  async def get_blueprint_markdown(service_id: str, candidate: Optional[bool] = None)  [router.get('/{service_id}/markdown')]  (line 101)
+  async def get_component_topology(service_id: str, candidate: Optional[bool] = None)  [router.get('/{service_id}/components')]  (line 118)
+
+
+### File: routes/files.py
+
+**Module:** File browser routes for Mission Control dashboard.
+
+Provides directory listing and file reading with path traversal
+protection and configurable root directories.
+
+**Endpoints:**
+  GET /roots -> list_roots()  (line 57)
+  GET /browse/{root}/{path:path} -> browse()  (line 66)
+  GET /read/{root}/{path:path} -> read_file()  (line 101)
+  PUT /write/{root}/{path:path} -> write_file()  (line 145)
+
+**Functions:**
+  def _parse_roots() -> dict[str, Path]  (line 31)
+  def _safe_path(root: Path, subpath: str) -> Path  (line 46)
+  async def list_roots()  [router.get('/roots')]  (line 57)
+  async def browse(root: str, path: str = '')  [router.get('/browse/{root}/{path:path}')]  (line 66)
+  async def read_file(root: str, path: str)  [router.get('/read/{root}/{path:path}')]  (line 101)
+  async def write_file(root: str, path: str, req: WriteRequest)  [router.put('/write/{root}/{path:path}')]  (line 145)
+
+**Classes:**
+  class WriteRequest(BaseModel)  (line 140)
+
+**Error Handlers:**
+  handles: PermissionError -> 403 in browse()  (line 92)
+  handles: PermissionError -> 403 in read_file()  (line 125)
+  handles: PermissionError -> 403 in write_file()  (line 163)
+
+
+### File: routes/hooks.py
+
+**Module:** Hook/Command proxy routes for Mission Control dashboard.
+
+Proxies sleep/wake, GPU management, and semantic codex operations
+from the browser to gaia-core, avoiding CORS issues.
+
+**Endpoints:**
+  GET /sleep/status -> sleep_status()  (line 26)
+  POST /sleep/wake -> sleep_wake()  (line 39)
+  POST /sleep/shutdown -> sleep_shutdown()  (line 52)
+  GET /gpu/status -> gpu_status()  (line 67)
+  POST /gpu/release -> gpu_release()  (line 80)
+  POST /gpu/reclaim -> gpu_reclaim()  (line 93)
+  POST /codex/search -> codex_search()  (line 113)
+
+**Functions:**
+  async def sleep_status()  [router.get('/sleep/status')]  (line 26)
+  async def sleep_wake()  [router.post('/sleep/wake')]  (line 39)
+  async def sleep_shutdown()  [router.post('/sleep/shutdown')]  (line 52)
+  async def gpu_status()  [router.get('/gpu/status')]  (line 67)
+  async def gpu_release()  [router.post('/gpu/release')]  (line 80)
+  async def gpu_reclaim()  [router.post('/gpu/reclaim')]  (line 93)
+  async def codex_search(req: CodexSearchRequest)  [router.post('/codex/search')]  (line 113)
+
+**Classes:**
+  class CodexSearchRequest(BaseModel)  (line 107)
+
+**Error Handlers:**
+  handles: httpx.ConnectError -> 503 in sleep_status()  (line 32)
+  handles: Exception -> 502 in sleep_status()  (line 34)
+  handles: httpx.ConnectError -> 503 in sleep_wake()  (line 45)
+  handles: Exception -> 502 in sleep_wake()  (line 47)
+  handles: httpx.ConnectError -> 503 in sleep_shutdown()  (line 58)
+  handles: Exception -> 502 in sleep_shutdown()  (line 60)
+  handles: httpx.ConnectError -> 503 in gpu_status()  (line 73)
+  handles: Exception -> 502 in gpu_status()  (line 75)
+  handles: httpx.ConnectError -> 503 in gpu_release()  (line 86)
+  handles: Exception -> 502 in gpu_release()  (line 88)
+  handles: httpx.ConnectError -> 503 in gpu_reclaim()  (line 99)
+  handles: Exception -> 502 in gpu_reclaim()  (line 101)
+  handles: httpx.ConnectError -> 503 in codex_search()  (line 122)
+  handles: Exception -> 502 in codex_search()  (line 124)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in sleep_status()  (line 29)
+  ASYNCCLIENT ? in sleep_wake()  (line 42)
+  ASYNCCLIENT ? in sleep_shutdown()  (line 55)
+  ASYNCCLIENT ? in gpu_status()  (line 70)
+  ASYNCCLIENT ? in gpu_release()  (line 83)
+  ASYNCCLIENT ? in gpu_reclaim()  (line 96)
+  ASYNCCLIENT ? in codex_search()  (line 116)
+  GET <f-string> in sleep_status()  (line 30)
+  POST <f-string> in sleep_wake()  (line 43)
+  POST <f-string> in sleep_shutdown()  (line 56)
+  GET <f-string> in gpu_status()  (line 71)
+  POST <f-string> in gpu_release()  (line 84)
+  POST <f-string> in gpu_reclaim()  (line 97)
+  POST <f-string> in codex_search()  (line 117)
+
+
+### File: routes/terminal.py
+
+**Module:** Terminal routes for Mission Control dashboard.
+
+Provides container listing and WebSocket-based Docker exec bridge
+for interactive shell access to GAIA containers.
+
+**Constants:**
+  CONTAINER_PREFIX = 'gaia-'  (line 20)
+
+**Endpoints:**
+  GET /containers -> list_containers()  (line 35)
+  WEBSOCKET /ws -> terminal_ws()  (line 63)
+
+**Functions:**
+  def _get_client()  (line 23)
+  async def list_containers()  [router.get('/containers')]  (line 35)
+  async def terminal_ws(ws: WebSocket, container: str = '')  [router.websocket('/ws')]  (line 63)
+
+**Error Handlers:**
+  handles: DockerException in _get_client()  (line 27)
+  handles: DockerException -> 503 in list_containers()  (line 54)
+  handles: NotFound in terminal_ws()  (line 84)
+  handles: DockerException in terminal_ws()  (line 88)
+  handles: DockerException in terminal_ws()  (line 104)
+  handles: OSError, WebSocketDisconnect in read_from_docker()  (line 120)
+  handles: WebSocketDisconnect, RuntimeError in write_to_docker()  (line 129)
+  handles: Exception in terminal_ws()  (line 142)
+  handles: Exception in terminal_ws()  (line 146)
+  handles: Exception in terminal_ws()  (line 151)
+
+**HTTP Calls:**
+  GET container in terminal_ws()  (line 79)
+
+
+### File: routes/voice.py
+
+**Module:** Voice auto-answer API endpoints for gaia-web.
+
+Manages the Discord voice whitelist and exposes voice connection status.
+The VoiceManager instance is accessed via request.app.state.voice_manager.
+
+**Endpoints:**
+  GET /users -> list_users()  (line 29)
+  GET /whitelist -> list_whitelisted()  (line 36)
+  POST /whitelist -> add_to_whitelist()  (line 44)
+  DELETE /whitelist/{user_id} -> remove_from_whitelist()  (line 52)
+  GET /status -> voice_status()  (line 60)
+  POST /disconnect -> force_disconnect()  (line 67)
+
+**Functions:**
+  def _get_vm(request: Request)  (line 21)
+  async def list_users(request: Request)  [router.get('/users')]  (line 29)
+  async def list_whitelisted(request: Request)  [router.get('/whitelist')]  (line 36)
+  async def add_to_whitelist(request: Request, body: WhitelistAdd)  [router.post('/whitelist')]  (line 44)
+  async def remove_from_whitelist(request: Request, user_id: str)  [router.delete('/whitelist/{user_id}')]  (line 52)
+  async def voice_status(request: Request)  [router.get('/status')]  (line 60)
+  async def force_disconnect(request: Request)  [router.post('/disconnect')]  (line 67)
+
+**Classes:**
+  class WhitelistAdd(BaseModel)  (line 17)
+
+
+### File: utils/retry.py
+
+**Module:** Async retry helper for gaia-web HTTP calls.
+
+Provides retry-with-backoff for outbound requests to gaia-core and other
+GAIA services. Retries on transient network errors; does NOT retry on
+client error
+
+**Functions:**
+  def _is_maintenance_mode() -> bool  (line 37)
+  async def post_with_retry(url: str, *, json: dict, headers: dict | None = None, timeout: float = 300.0, max_attempts: int = 3, base_delay: float = 2.0, fallback_url: str | None = None) -> httpx.Response  (line 42)
+
+**Error Handlers:**
+  handles: httpx.TimeoutException in post_with_retry()  (line 101)
+  handles: RETRYABLE_EXCEPTIONS in post_with_retry()  (line 106)
+  handles: Exception in post_with_retry()  (line 134)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in post_with_retry()  (line 79)
+  ASYNCCLIENT ? in post_with_retry()  (line 126)
+  POST url in post_with_retry()  (line 80)
+  POST fallback_url in post_with_retry()  (line 127)
+
+
+### File: voice_manager.py
+
+**Module:** Discord Voice Manager — auto-answer, VAD, and audio pipeline.
+
+Manages voice connections for GAIA's Discord bot. When a whitelisted user
+joins a voice channel, GAIA auto-joins and enters a listen-tran
+
+**Functions:**
+  def pcm_48k_stereo_to_16k_mono(pcm_data: bytes) -> bytes  (line 279)
+  def pcm_48k_stereo_to_16k_mono_fast(pcm_data: bytes) -> bytes  (line 301)
+  def pcm_to_wav_base64(pcm_16k_mono: bytes, sample_rate: int = 16000) -> str  (line 319)
+
+**Classes:**
+  class VoiceWhitelist  (line 42)
+    "Persistent whitelist of Discord users whose calls GAIA auto-answers.
+
+Also tracks all users GAIA has"
+    def __init__(self, data_dir: str = '/app/data') -> None  (line 49)
+    def _load(self) -> None  (line 55)
+    def _save(self) -> None  (line 64)
+    def add(self, user_id: str) -> None  (line 73)
+    def remove(self, user_id: str) -> None  (line 79)
+    def is_whitelisted(self, user_id: str) -> bool  (line 85)
+    def get_whitelisted(self) -> list[str]  (line 89)
+    def record_seen(self, user_id: str, name: str, guild_id: str | None = None) -> None  (line 95)
+    def get_seen_users(self) -> list[dict]  (line 110)
+  class SimpleVAD  (line 129)
+    "Energy-based voice activity detection with webrtcvad fallback.
+
+Segments continuous audio into utter"
+    def __init__(self, silence_threshold_ms: int = 800, min_speech_ms: int = 300, max_utterance_seconds: int = 30) -> None  (line 136)
+    def _init_vad(self) -> None  (line 154)
+    def feed_frame(self, frame_16k_mono: bytes) -> bytes | None  (line 161)
+    def _detect_speech(self, frame: bytes) -> bool  (line 192)
+    def _flush(self) -> bytes  (line 205)
+    def reset(self) -> None  (line 213)
+  class GaiaVoiceSink(_DiscordSinkBase)  (line 230)
+    "py-cord voice sink that streams decoded audio into an asyncio.Queue.
+
+Each ``write()`` call from the"
+    def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, target_user_id: int | None = None) -> None  (line 238)
+    def _enqueue(self, data: bytes) -> None  (line 251)
+    def write(self, data: bytes, user: int) -> None  (line 258)
+    def cleanup(self) -> None  (line 269)
+  class VoiceManager  (line 335)
+    "Manages GAIA's Discord voice connections and the audio pipeline.
+
+Handles auto-joining when whitelis"
+    def __init__(self, core_endpoint: str, audio_endpoint: str, whitelist: VoiceWhitelist, voice_config: dict | None = None) -> None  (line 342)
+    def get_status(self) -> dict  (line 370)
+    async def handle_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None  (line 382)
+    async def _notify_core_voice_state(self, connected: bool) -> None  (line 423)
+    async def _get_core_state(self) -> str | None  (line 438)
+    async def _send_wake_signal(self) -> None  (line 449)
+    async def _join_channel(self, channel: discord.VoiceChannel) -> None  (line 459)
+    async def disconnect(self) -> None  (line 489)
+    async def _recording_finished(self, sink, *args) -> None  (line 524)
+    async def _process_audio_loop(self) -> None  (line 528)
+    async def _process_utterance(self, pcm_16k_mono: bytes) -> None  (line 582)
+    async def _transcribe(self, pcm_16k_mono: bytes) -> str | None  (line 640)
+    async def _get_response(self, text: str) -> str | None  (line 656)
+    async def _get_lite_stalling_response(self, text: str) -> str | None  (line 732)
+    async def _speak(self, text: str) -> None  (line 823)
+
+**Error Handlers:**
+  handles: ImportError  (line 226)
+  handles: Exception in pcm_48k_stereo_to_16k_mono()  (line 296)
+  handles: Exception in _save()  (line 68)
+  handles: ImportError in _init_vad()  (line 158)
+  handles: asyncio.QueueFull in _enqueue()  (line 255)
+  handles: RuntimeError in write()  (line 266)
+  handles: Exception in _notify_core_voice_state()  (line 435)
+  handles: Exception in _get_core_state()  (line 445)
+  handles: Exception in _send_wake_signal()  (line 454)
+  handles: Exception in _join_channel()  (line 484)
+  handles: asyncio.CancelledError in _process_audio_loop()  (line 575)
+  handles: Exception in _process_audio_loop()  (line 577)
+  handles: Exception in _transcribe()  (line 652)
+  handles: Exception in _get_response()  (line 728)
+  handles: Exception in _get_lite_stalling_response()  (line 819)
+  handles: Exception in _speak()  (line 877)
+  handles: Exception in _load()  (line 60)
+  handles: Exception in _detect_speech()  (line 196)
+  handles: Exception in disconnect()  (line 498)
+  handles: asyncio.CancelledError in disconnect()  (line 506)
+  handles: Exception in _process_utterance()  (line 631)
+  handles: asyncio.TimeoutError in _speak()  (line 873)
+  handles: asyncio.TimeoutError in _process_audio_loop()  (line 551)
+  handles: asyncio.QueueEmpty in _process_utterance()  (line 628)
+
+**HTTP Calls:**
+  ASYNCCLIENT ? in _notify_core_voice_state()  (line 430)
+  ASYNCCLIENT ? in _get_core_state()  (line 441)
+  ASYNCCLIENT ? in _send_wake_signal()  (line 452)
+  ASYNCCLIENT ? in _transcribe()  (line 644)
+  ASYNCCLIENT ? in _get_response()  (line 717)
+  ASYNCCLIENT ? in _get_lite_stalling_response()  (line 808)
+  ASYNCCLIENT ? in _speak()  (line 830)
+  POST <f-string> in _notify_core_voice_state()  (line 431)
+  GET <f-string> in _get_core_state()  (line 442)
+  POST <f-string> in _send_wake_signal()  (line 453)
+  POST <f-string> in _transcribe()  (line 645)
+  POST <f-string> in _get_response()  (line 718)
+  POST <f-string> in _get_lite_stalling_response()  (line 809)
+  POST <f-string> in _speak()  (line 831)
+
+
+---
+
+## Review Task
+
+The mechanical pre-check above shows structural completeness — what is present or missing at a syntactic level. Your task is to assess SEMANTIC fidelity:
+
+- For items the pre-check marked [FOUND]: does the implementation actually fulfill the blueprint's intent, or is it a superficial match?
+- For items the pre-check marked [MISSING]: is this genuinely absent, or implemented in a way the pre-check couldn't detect?
+- For dimensions 4-5 (intent coherence, open questions): apply your own judgment — these have no mechanical coverage.
+
+Be specific: cite the blueprint claim and the contradicting (or absent) code evidence.

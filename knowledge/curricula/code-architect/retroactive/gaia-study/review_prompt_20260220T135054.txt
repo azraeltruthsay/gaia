@@ -1,0 +1,397 @@
+SYSTEM:
+You are a code reviewer for the GAIA AI system. Your task is to verify that the provided source code faithfully implements its blueprint specification.
+
+You are NOT evaluating general code quality. You are evaluating blueprint fidelity across five dimensions:
+
+1. CONTRACT FIDELITY — The mechanical pre-check below shows which endpoints are structurally present or missing. For [FOUND] endpoints, verify from the AST summaries that the implementation signature (parameters, return type) matches the blueprint's schema. For [MISSING] endpoints, confirm they are genuinely absent or flag if implemented under a different path.
+
+2. DEPENDENCY CORRECTNESS — The pre-check confirms which declared dependencies appear in imports. Your task: verify from the AST summaries that dependency calls use correct paths/methods, and flag any UNDECLARED external calls the pre-check may have missed. Note: gaia-common imports are universally available and should NOT be flagged as undeclared dependencies.
+
+3. FAILURE MODE COVERAGE — The pre-check shows which failure modes have matching handlers. For [FOUND] handlers, assess from the AST summary whether the handling logic matches the blueprint's documented response (not just that a handler exists). For [MISSING] handlers, confirm absence or flag if handled via a non-standard pattern.
+
+4. INTENT COHERENCE — Does the code's overall structure reflect the blueprint's stated purpose and cognitive_role? This dimension is NOT covered by mechanical pre-checks — it requires your semantic judgment. Flag obvious divergences.
+
+5. OPEN QUESTIONS — Does the code reveal answers to any open_questions in the blueprint? Or does it raise new ones? Also NOT covered by pre-checks.
+
+Respond ONLY with a structured JSON object matching the ReviewResult schema.
+
+USER:
+## Blueprint: gaia-study
+
+### Intent
+Background processing service for GAIA's self-study during sleep cycles. Handles vector index building, document embedding, LoRA adapter training via QLoRA, and adapter lifecycle management. Sole writer to the vector store and LoRA adapter directories — all other services read only.
+
+Cognitive role: The Subconscious
+
+Design decisions:
+  - Sole writer principle — only gaia-study writes to /vector_store and LoRA adapter directories
+  - GPU isolation — exclusive GPU access during training via orchestrator-managed handoff
+  - Async background processing — long-running ops don't block HTTP responses; client polls /study/status
+  - Tiered adapter architecture: tier 1 (global, protected), tier 2 (user), tier 3 (session, ephemeral)
+  - QLoRA 4-bit quantization reduces VRAM from ~50GB to ~16GB for large models
+  - Gradient checkpointing + paged AdamW (8-bit) further reduce memory footprint
+  - Content governance: forbidden pattern detection, size limits, sample count limits
+  - JSON-based vector store for human readability and debugging; suitable for ~100K documents
+  - Fallback to simulated training when real training dependencies unavailable
+
+### Interfaces
+  health (inbound) http_rest GET /health
+    Container health check endpoint.
+  status (inbound) http_rest GET /status
+    Service status with loaded indexes and statistics.
+  index_build (inbound) http_rest POST /index/build
+    Build or rebuild vector index from documents (async background task).
+  index_add (inbound) http_rest POST /index/add
+    Add single document to existing vector index.
+  index_query (inbound) http_rest POST /index/query
+    Query index for semantically similar documents.
+  index_status (inbound) http_rest GET /index/{knowledge_base_name}/status
+    Get status of a specific knowledge base index.
+  index_refresh (inbound) http_rest POST /index/{knowledge_base_name}/refresh
+    Reload index from disk.
+  gpu_ready (inbound) http_rest POST /study/gpu-ready
+    Signal from orchestrator that GPU is available for training.
+  gpu_release (inbound) http_rest POST /study/gpu-release
+    Signal from orchestrator to release GPU; cancels training, cleans CUDA resources.
+  study_start (inbound) http_rest POST /study/start
+    Start LoRA adapter training from documents (async background task). Supports 3 tiers: global, user, session.
+  study_status (inbound) http_rest GET /study/status
+    Get current training status (IDLE, PREPARING, TRAINING, COMPLETE, FAILED).
+  study_cancel (inbound) http_rest POST /study/cancel
+    Cancel in-progress training.
+  adapter_list (inbound) http_rest GET /adapters
+    List all LoRA adapters, optionally filtered by tier.
+  adapter_load (inbound) http_rest POST /adapters/load
+    Load adapter for generation (stub — requires model pool integration).
+  adapter_unload (inbound) http_rest POST /adapters/unload
+    Unload adapter (stub — requires model pool integration).
+  adapter_info (inbound) http_rest GET /adapters/{adapter_name}
+    Get detailed adapter metadata.
+  adapter_delete (inbound) http_rest DELETE /adapters/{adapter_name}
+    Delete adapter (tier 1 protected from deletion).
+
+### Failure Modes
+  [degraded] Document directory not found
+    Response: FileNotFoundError raised; index build fails gracefully
+  [degraded] No valid training samples
+    Response: TrainingResult with success=False; adapter not created
+  [partial] GPU OOM during training
+    Response: Training marked failed; CUDA cache cleared
+  [degraded] Adapter tier limit exceeded
+    Response: HTTPException 409 Conflict
+  [degraded] Content validation failure (forbidden patterns)
+    Response: Offending samples skipped with logged warning; training continues with remaining
+  [degraded] Model load failure (missing base model)
+    Response: Falls back to simulated training mode for UI/workflow testing
+  [degraded] Vector index corruption
+    Response: Returns empty index; rebuild via /index/build
+
+### Open Questions
+  - Should vector store migrate to FAISS or ChromaDB for better performance at scale?
+  - Should CUDA_VISIBLE_DEVICES be dynamic based on orchestrator GPU allocation?
+  - Optimal gradient accumulation steps for RTX 5080 16GB VRAM?
+
+### Confidence Scores
+  runtime: ConfidenceLevel.HIGH
+  contract: ConfidenceLevel.HIGH
+  dependencies: ConfidenceLevel.HIGH
+  failure_modes: ConfidenceLevel.MEDIUM
+  intent: ConfidenceLevel.MEDIUM
+
+---
+
+## Mechanical Pre-Check Results
+
+## Mechanical Pre-Check Results: gaia-study
+
+### Endpoints (17/17 found)
+  [FOUND]      GET /health
+              → server.py:129
+  [FOUND]      GET /status
+              → server.py:134
+  [FOUND]      POST /index/build
+              → server.py:146
+  [FOUND]      POST /index/add
+              → server.py:173
+  [FOUND]      POST /index/query
+              → server.py:189
+  [FOUND]      GET /index/{knowledge_base_name}/status
+              → server.py:212
+  [FOUND]      POST /index/{knowledge_base_name}/refresh
+              → server.py:218
+  [FOUND]      POST /study/gpu-ready
+              → server.py:236
+  [FOUND]      POST /study/gpu-release
+              → server.py:270
+  [FOUND]      POST /study/start
+              → server.py:319
+  [FOUND]      GET /study/status
+              → server.py:376
+  [FOUND]      POST /study/cancel
+              → server.py:386
+  [FOUND]      GET /adapters
+              → server.py:400
+  [FOUND]      POST /adapters/load
+              → server.py:415
+  [FOUND]      POST /adapters/unload
+              → server.py:443
+  [FOUND]      GET /adapters/{adapter_name}
+              → server.py:473
+  [FOUND]      DELETE /adapters/{adapter_name}
+              → server.py:457
+
+### Failure Modes (2/7 found)
+  [MISSING]    Document directory not found
+              no matching handler found
+  [FOUND]      No valid training samples
+              → pattern match in study_mode_manager.py:317
+  [MISSING]    GPU OOM during training
+              no matching handler found
+  [FOUND]      Adapter tier limit exceeded
+              → pattern match in server.py:334
+  [MISSING]    Content validation failure (forbidden patterns)
+              no matching handler found
+  [MISSING]    Model load failure (missing base model)
+              no matching handler found
+  [MISSING]    Vector index corruption
+              no matching handler found
+
+### Summary
+  Total checks: 24 | Found: 19 | Missing: 5 | Diverged: 0
+  Structural completeness: 79.2%
+
+
+---
+
+## Source Files Under Review
+
+### File: __init__.py
+
+**Module:** gaia-study: The Subconscious - Background processing and learning.
+
+This service handles all background and learning operations:
+- Vector index building and maintenance (SOLE WRITER)
+- Document embedd
+
+
+### File: indexer.py
+
+**Module:** Vector Indexer - Document embedding and index management.
+
+This module handles:
+- Building vector indexes from document directories
+- Adding documents to existing indexes
+- Querying indexes for simila
+
+**GAIA Imports:**
+  from gaia_common.utils import get_logger
+
+**Classes:**
+  class VectorIndexer  (line 27)
+    "Vector index builder and manager.
+
+This class is the SOLE WRITER to vector indexes in the GAIA SOA.
+"
+    def __init__(self, knowledge_base_name: str, model_path: Optional[str] = None)  (line 50)
+    def instance(cls, knowledge_base_name: str) -> 'VectorIndexer'  (line 86)
+    def model(self)  (line 93)
+    def index(self) -> Dict[str, Any]  (line 110)
+    def load_index(self) -> Dict[str, Any]  (line 116)
+    def save_index(self) -> None  (line 138)
+    def refresh_index(self) -> None  (line 145)
+    def build_index_from_docs(self) -> bool  (line 149)
+    def add_document(self, file_path: str) -> bool  (line 212)
+    def query(self, query: str, top_k: int = 5, min_score: float = 0.0) -> List[Dict[str, Any]]  (line 253)
+    def _compute_similarities(self, query_embedding, doc_embeddings: List[List[float]]) -> List[float]  (line 312)
+    def doc_count(self) -> int  (line 342)
+    def get_status(self) -> Dict[str, Any]  (line 346)
+
+**Error Handlers:**
+  handles: Exception in load_index()  (line 134)
+  handles: Exception in add_document()  (line 249)
+  handles: Exception in _compute_similarities()  (line 327)
+  handles: ImportError in model()  (line 100)
+  handles: Exception in model()  (line 105)
+  handles: Exception in build_index_from_docs()  (line 198)
+
+
+### File: main.py
+
+**Module:** GAIA Study Server - Entry Point
+
+Background processing service for GAIA:
+- Vector index building and maintenance (SOLE WRITER)
+- Document embedding
+- Conversation summarization
+- LoRA adapter training
+
+**GAIA Imports:**
+  from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
+
+**Functions:**
+  async def startup_event()  [app.on_event('startup')]  (line 37)
+  async def shutdown_event()  [app.on_event('shutdown')]  (line 46)
+
+
+### File: qlora_trainer.py
+
+**Module:** QLoRA Trainer - Actual training implementation for GAIA Self-Study
+
+Uses PEFT and bitsandbytes for memory-efficient fine-tuning on consumer GPUs.
+Designed for RTX 5080 16GB but adaptable to other conf
+
+**Functions:**
+  def _lazy_import()  (line 30)
+  def estimate_vram_usage(model_params_billions: float, lora_rank: int = 8, batch_size: int = 1, seq_length: int = 512, use_4bit: bool = True) -> Dict[str, float]  (line 464)
+
+**Classes:**
+  class QLoRAConfig  (line 59)
+    "Configuration for QLoRA training."
+    def __post_init__(self)  (line 84)
+    def from_dict(cls, config: Dict[str, Any]) -> 'QLoRAConfig'  (line 89)
+  class TrainingProgress  (line 113)
+    "Progress information during training."
+  class QLoRATrainer  (line 123)
+    "Handles the actual QLoRA training process.
+
+Manages model loading, quantization, training loop, and "
+    def __init__(self, base_model_path: str, config: QLoRAConfig, output_dir: str, progress_callback: Optional[Callable[[TrainingProgress], None]] = None)  (line 130)
+    def setup(self) -> bool  (line 158)
+    def _count_parameters(self) -> Tuple[int, int]  (line 239)
+    def prepare_dataset(self, samples: List[Dict[str, str]], format_type: str = 'instruction') -> Any  (line 245)
+    def train(self, train_dataset: Any, adapter_name: str, timeout_seconds: int = 600) -> Tuple[bool, Dict[str, Any]]  (line 305)
+    def save_adapter(self, adapter_name: str, metadata: Optional[Dict[str, Any]] = None) -> Path  (line 413)
+    def cleanup(self)  (line 448)
+
+**Error Handlers:**
+  handles: ImportError in _lazy_import()  (line 49)
+  handles: Exception in setup()  (line 235)
+  handles: Exception in train()  (line 409)
+
+
+### File: server.py
+
+**Module:** GAIA Study Server - FastAPI Application
+
+Background processing API for vector indexing, document management,
+and LoRA adapter training (Study Mode).
+
+**GAIA Imports:**
+  from gaia_common.utils import get_logger
+
+**Functions:**
+  def get_study_manager() -> StudyModeManager  (line 26)
+  def create_app() -> FastAPI  (line 112)
+
+**Classes:**
+  class IndexBuildRequest(BaseModel)  (line 65)
+    "Request to build/rebuild a vector index."
+  class DocumentAddRequest(BaseModel)  (line 71)
+    "Request to add a document to the index."
+  class QueryRequest(BaseModel)  (line 77)
+    "Request to query the vector index."
+  class StudyStartRequest(BaseModel)  (line 88)
+    "Request to start a study/training session."
+  class AdapterLoadRequest(BaseModel)  (line 100)
+    "Request to load an adapter."
+  class AdapterDeleteRequest(BaseModel)  (line 106)
+    "Request to delete an adapter."
+
+**Error Handlers:**
+  handles: FileNotFoundError -> 404 in add_document()  (line 184)
+  handles: Exception -> 500 in add_document()  (line 186)
+  handles: Exception -> 500 in query_index()  (line 208)
+  handles: ImportError in gpu_release()  (line 299)
+  handles: Exception in gpu_release()  (line 301)
+  handles: HTTPException in study_start()  (line 370)
+  handles: Exception -> 500 in study_start()  (line 372)
+  handles: Exception -> 500 in study_status()  (line 382)
+  handles: Exception -> 500 in study_cancel()  (line 396)
+  handles: Exception -> 500 in adapter_list()  (line 411)
+  handles: HTTPException in adapter_load()  (line 437)
+  handles: Exception -> 500 in adapter_load()  (line 439)
+  handles: Exception -> 500 in adapter_unload()  (line 453)
+  handles: Exception -> 500 in adapter_delete()  (line 469)
+  handles: HTTPException in adapter_info()  (line 493)
+  handles: Exception -> 500 in adapter_info()  (line 495)
+  handles: Exception in do_build()  (line 162)
+  handles: Exception in do_training()  (line 358)
+
+
+### File: study_mode_manager.py
+
+**Module:** StudyModeManager - GAIA Self-Study System
+
+Orchestrates the process of:
+1. Pausing inference
+2. Preparing training data from source documents
+3. Running QLoRA training
+4. Loading the resulting adapter
+
+**Enums:**
+  StudyModeState: IDLE='idle', PREPARING='preparing', VALIDATING='validating', TRAINING='training', LOADING='loading', COMPLETE='complete', FAILED='failed'  (line 28)
+
+**Classes:**
+  class TrainingConfig  (line 40)
+    "Configuration for a training run."
+  class TrainingResult  (line 68)
+    "Result of a training run."
+  class StudyModeManager  (line 81)
+    "Manages GAIA's self-study capabilities.
+
+Coordinates the process of training LoRA adapters from sour"
+    def __init__(self, config: Dict[str, Any], adapter_base_dir: str = '/models/lora_adapters')  (line 89)
+    def validate_content(self, content: str) -> Tuple[bool, str]  (line 120)
+    def prepare_training_data(self, source_documents: List[str], output_format: str = 'instruction') -> Tuple[List[Dict[str, str]], Dict[str, Any]]  (line 143)
+    def _create_instruction_samples(self, content: str, doc_name: str) -> List[Dict[str, str]]  (line 216)
+    def _create_completion_samples(self, content: str) -> List[Dict[str, str]]  (line 258)
+    def _split_into_sections(self, content: str) -> List[str]  (line 272)
+    async def start_training(self, config: TrainingConfig, model_pool: Any = None) -> TrainingResult  (line 286)
+    async def _run_qlora_training(self, samples: List[Dict[str, str]], config: TrainingConfig, model_pool: Any) -> Tuple[Path, float, int]  (line 403)
+    async def _run_real_qlora_training(self, samples: List[Dict[str, str]], config: TrainingConfig, adapter_dir: Path, base_model_path: str) -> Tuple[Path, float, int]  (line 444)
+    async def _run_simulated_training(self, samples: List[Dict[str, str]], config: TrainingConfig, adapter_dir: Path) -> Tuple[Path, float, int]  (line 540)
+    def _get_tier_directory(self, tier: int) -> Path  (line 581)
+    def _count_adapters_in_tier(self, tier_dir: Path) -> int  (line 590)
+    def _save_adapter_metadata(self, config: TrainingConfig, adapter_path: Path, training_metadata: Dict[str, Any], final_loss: float, steps: int, duration: float, samples: int) -> Path  (line 596)
+    def get_status(self) -> Dict[str, Any]  (line 655)
+    def cancel_training(self) -> bool  (line 664)
+    def list_adapters(self, tier: Optional[int] = None) -> List[Dict[str, Any]]  (line 674)
+    def delete_adapter(self, adapter_name: str, tier: int) -> bool  (line 707)
+
+**Error Handlers:**
+  handles: Exception in start_training()  (line 389)
+  handles: Exception in delete_adapter()  (line 734)
+  handles: Exception in prepare_training_data()  (line 199)
+  handles: Exception in _run_qlora_training()  (line 438)
+  handles: Exception in list_adapters()  (line 702)
+
+
+### File: training_utils.py
+
+**Functions:**
+  def get_base_model_name(config: Config) -> Optional[str]  (line 15)
+  def check_for_training_delta(config: Config) -> Tuple[bool, int, str]  (line 39)
+  def get_next_model_version(config: Config, full_retrain: bool) -> str  (line 89)
+  def convert_to_gguf(model_path: str, output_path: str)  (line 108)
+  def update_training_log(config: Config, new_entries: list, new_model_name: str)  (line 130)
+
+**Error Handlers:**
+  handles: Exception in get_base_model_name()  (line 35)
+  handles: Exception in convert_to_gguf()  (line 127)
+  handles: Exception in update_training_log()  (line 144)
+  handles: Exception in update_training_log()  (line 157)
+  handles: Exception in get_base_model_name()  (line 24)
+  handles: Exception in convert_to_gguf()  (line 118)
+
+
+---
+
+## Review Task
+
+The mechanical pre-check above shows structural completeness — what is present or missing at a syntactic level. Your task is to assess SEMANTIC fidelity:
+
+- For items the pre-check marked [FOUND]: does the implementation actually fulfill the blueprint's intent, or is it a superficial match?
+- For items the pre-check marked [MISSING]: is this genuinely absent, or implemented in a way the pre-check couldn't detect?
+- For dimensions 4-5 (intent coherence, open questions): apply your own judgment — these have no mechanical coverage.
+
+Be specific: cite the blueprint claim and the contradicting (or absent) code evidence.

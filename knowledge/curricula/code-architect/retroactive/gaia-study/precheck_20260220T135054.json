@@ -1,0 +1,181 @@
+{
+  "service_id": "gaia-study",
+  "timestamp": "2026-02-20T21:50:57.463950+00:00",
+  "items": [
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /health",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:129"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /status",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:134"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /index/build",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:146"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /index/add",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:173"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /index/query",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:189"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /index/{knowledge_base_name}/status",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:212"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /index/{knowledge_base_name}/refresh",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:218"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /study/gpu-ready",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:236"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /study/gpu-release",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:270"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /study/start",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:319"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /study/status",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:376"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /study/cancel",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:386"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /adapters",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:400"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /adapters/load",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:415"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /adapters/unload",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:443"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /adapters/{adapter_name}",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:473"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "DELETE /adapters/{adapter_name}",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:457"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Document directory not found",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "No valid training samples",
+      "status": "found",
+      "source_file": "study_mode_manager.py",
+      "detail": "\u2192 pattern match in study_mode_manager.py:317"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "GPU OOM during training",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Adapter tier limit exceeded",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 pattern match in server.py:334"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Content validation failure (forbidden patterns)",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Model load failure (missing base model)",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Vector index corruption",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    }
+  ],
+  "summary": {
+    "total": 24,
+    "found": 19,
+    "missing": 5,
+    "diverged": 0
+  },
+  "prompt_text": "## Mechanical Pre-Check Results: gaia-study\n\n### Endpoints (17/17 found)\n  [FOUND]      GET /health\n              \u2192 server.py:129\n  [FOUND]      GET /status\n              \u2192 server.py:134\n  [FOUND]      POST /index/build\n              \u2192 server.py:146\n  [FOUND]      POST /index/add\n              \u2192 server.py:173\n  [FOUND]      POST /index/query\n              \u2192 server.py:189\n  [FOUND]      GET /index/{knowledge_base_name}/status\n              \u2192 server.py:212\n  [FOUND]      POST /index/{knowledge_base_name}/refresh\n              \u2192 server.py:218\n  [FOUND]      POST /study/gpu-ready\n              \u2192 server.py:236\n  [FOUND]      POST /study/gpu-release\n              \u2192 server.py:270\n  [FOUND]      POST /study/start\n              \u2192 server.py:319\n  [FOUND]      GET /study/status\n              \u2192 server.py:376\n  [FOUND]      POST /study/cancel\n              \u2192 server.py:386\n  [FOUND]      GET /adapters\n              \u2192 server.py:400\n  [FOUND]      POST /adapters/load\n              \u2192 server.py:415\n  [FOUND]      POST /adapters/unload\n              \u2192 server.py:443\n  [FOUND]      GET /adapters/{adapter_name}\n              \u2192 server.py:473\n  [FOUND]      DELETE /adapters/{adapter_name}\n              \u2192 server.py:457\n\n### Failure Modes (2/7 found)\n  [MISSING]    Document directory not found\n              no matching handler found\n  [FOUND]      No valid training samples\n              \u2192 pattern match in study_mode_manager.py:317\n  [MISSING]    GPU OOM during training\n              no matching handler found\n  [FOUND]      Adapter tier limit exceeded\n              \u2192 pattern match in server.py:334\n  [MISSING]    Content validation failure (forbidden patterns)\n              no matching handler found\n  [MISSING]    Model load failure (missing base model)\n              no matching handler found\n  [MISSING]    Vector index corruption\n              no matching handler found\n\n### Summary\n  Total checks: 24 | Found: 19 | Missing: 5 | Diverged: 0\n  Structural completeness: 79.2%\n"
+}

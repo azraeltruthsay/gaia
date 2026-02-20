@@ -1,0 +1,434 @@
+SYSTEM:
+You are a code reviewer for the GAIA AI system. Your task is to verify that the provided source code faithfully implements its blueprint specification.
+
+You are NOT evaluating general code quality. You are evaluating blueprint fidelity across five dimensions:
+
+1. CONTRACT FIDELITY — The mechanical pre-check below shows which endpoints are structurally present or missing. For [FOUND] endpoints, verify from the AST summaries that the implementation signature (parameters, return type) matches the blueprint's schema. For [MISSING] endpoints, confirm they are genuinely absent or flag if implemented under a different path.
+
+2. DEPENDENCY CORRECTNESS — The pre-check confirms which declared dependencies appear in imports. Your task: verify from the AST summaries that dependency calls use correct paths/methods, and flag any UNDECLARED external calls the pre-check may have missed. Note: gaia-common imports are universally available and should NOT be flagged as undeclared dependencies.
+
+3. FAILURE MODE COVERAGE — The pre-check shows which failure modes have matching handlers. For [FOUND] handlers, assess from the AST summary whether the handling logic matches the blueprint's documented response (not just that a handler exists). For [MISSING] handlers, confirm absence or flag if handled via a non-standard pattern.
+
+4. INTENT COHERENCE — Does the code's overall structure reflect the blueprint's stated purpose and cognitive_role? This dimension is NOT covered by mechanical pre-checks — it requires your semantic judgment. Flag obvious divergences.
+
+5. OPEN QUESTIONS — Does the code reveal answers to any open_questions in the blueprint? Or does it raise new ones? Also NOT covered by pre-checks.
+
+Respond ONLY with a structured JSON object matching the ReviewResult schema.
+
+USER:
+## Blueprint: gaia-mcp
+
+### Intent
+Sandboxed execution layer enforcing security boundaries around GAIA's tool calls. Acts as both a security perimeter (preventing unauthorized file/shell access via path allowlisting) and an approval gate (requiring human confirmation for destructive operations). Delegation to a separate service allows gaia-core to remain interface-agnostic and CPU-only.
+
+Cognitive role: The Hands
+
+Design decisions:
+  - Separate service decouples tool execution from cognition, keeping gaia-core CPU-only
+  - Path allowlisting restricts file ops to /knowledge, /sandbox, /models; symlink traversal blocked via .resolve()
+  - Approval flow enforces human-in-the-loop via 5-char challenge reversal; time-boxed to configurable TTL
+  - Domain allowlisting gates web research to trusted/reliable tiers; blocked list prevents social media leakage
+  - Rate limiting (20 searches/hr, 50 fetches/hr) via in-memory sliding window prevents abuse
+  - Study gateway pattern (async await) enables LoRA adapter management while preserving tool isolation
+  - Fragment assembly with overlap checking enables long responses split across token limits
+  - JSON-RPC 2.0 for lightweight tool dispatch without REST overhead
+  - Graceful degradation: missing study, blocked domains, rate limits return structured errors not exceptions
+
+### Interfaces
+  health (inbound) http_rest GET /health
+    Container health check endpoint.
+  root (inbound) http_rest GET /
+    Root endpoint — returns running status message.
+  jsonrpc_dispatch (inbound) http_rest POST /jsonrpc
+    Primary tool dispatch via JSON-RPC 2.0. Handles ~30 tool methods: file I/O (read_file, write_file, ai_write), shell (run_shell), memory/vector (memory_query, memory_rebuild_index), web research (web_search, web_fetch), fragments, study gateway, Discord messaging.
+  request_approval (inbound) http_rest POST /request_approval
+    Create pending approval for sensitive tool (ai_write, write_file, run_shell, memory_rebuild_index). Returns action_id + 5-char challenge.
+  pending_approvals (inbound) http_rest GET /pending_approvals
+    List all pending approvals awaiting human confirmation.
+  approve_action (inbound) http_rest POST /approve_action
+    Approve pending action by providing reversed 5-char challenge. Dispatches underlying tool on success.
+  study_gateway (outbound) http_rest POST /study/start
+    Async HTTP gateway to gaia-study for LoRA training and adapter management.
+  web_research (outbound) http_rest GET /
+    External web research via DuckDuckGo (ddgs library with Instant Answer API fallback). Rate-limited: 20 searches/hr, 50 fetches/hr.
+  discord_webhook (outbound) http_rest POST /
+    Optional Discord webhook for send_discord_message tool. Requires DISCORD_WEBHOOK_URL env var.
+
+### Dependencies
+  gaia-study — lora_training_and_adapter_management (optional (fallback: —))
+  [ext] duckduckgo — web_search_and_fetch (optional)
+  [ext] discord — webhook_messaging (optional)
+
+### Failure Modes
+  [degraded] Tool execution error
+    Response: JSON-RPC error response with code -32603 and traceback in data field
+  [degraded] Approval timeout (>900s default TTL)
+    Response: Pending action expires; client must request approval again
+  [degraded] File path not in allowlist
+    Response: ValueError; JSON-RPC error -32603 'Path not allowed'
+  [degraded] Rate limit exceeded (web_search/web_fetch)
+    Response: Returns ok=false with remaining count; auto-recovers after sliding window
+  [degraded] Blocked or unknown domain in web_fetch
+    Response: Returns ok=false with domain policy error
+  [degraded] gaia-study unavailable
+    Response: study_* and adapter_* tools return ok=false with error message
+  [degraded] Sensitive tool without prior approval
+    Response: HTTP 403 with JSON-RPC error directing to /request_approval
+
+### Open Questions
+  - Should approval TTL be configurable per-tool (e.g., ai_write longer than run_shell)?
+  - Should rate limits be per-minute with burst allowance instead of per-hour?
+  - Should approval store persist to disk across container restarts for auditability?
+
+### Confidence Scores
+  runtime: ConfidenceLevel.HIGH
+  contract: ConfidenceLevel.HIGH
+  dependencies: ConfidenceLevel.HIGH
+  failure_modes: ConfidenceLevel.MEDIUM
+  intent: ConfidenceLevel.MEDIUM
+
+---
+
+## Mechanical Pre-Check Results
+
+## Mechanical Pre-Check Results: gaia-mcp
+
+### Endpoints (6/6 found)
+  [FOUND]      GET /health
+              → server.py:69
+  [FOUND]      GET /
+              → server.py:751
+  [FOUND]      POST /jsonrpc
+              → server.py:703
+  [FOUND]      POST /request_approval
+              → server.py:756
+  [FOUND]      GET /pending_approvals
+              → server.py:810
+  [FOUND]      POST /approve_action
+              → server.py:816
+
+### Failure Modes (3/7 found)
+  [FOUND]      Tool execution error
+              → pattern match in web_tools.py:265
+  [FOUND]      Approval timeout (>900s default TTL)
+              → pattern match in web_tools.py:288
+  [MISSING]    File path not in allowlist
+              no matching handler found
+  [MISSING]    Rate limit exceeded (web_search/web_fetch)
+              no matching handler found
+  [MISSING]    Blocked or unknown domain in web_fetch
+              no matching handler found
+  [MISSING]    gaia-study unavailable
+              no matching handler found
+  [FOUND]      Sensitive tool without prior approval
+              → pattern match in server.py:721
+
+### Dependencies (1/1 found)
+  [FOUND]      gaia-study (lora_training_and_adapter_management)
+              → tools.py:511
+
+### Summary
+  Total checks: 14 | Found: 10 | Missing: 4 | Diverged: 0
+  Structural completeness: 71.4%
+
+
+---
+
+## Source Files Under Review
+
+### File: __init__.py
+
+
+### File: approval.py
+
+**Module:** Approval Store for MCP sensitive actions.
+
+Manages pending actions that require human approval before execution.
+
+**GAIA Imports:**
+  from gaia_common.utils import get_logger
+
+**Classes:**
+  class ApprovalStore  (line 20)
+    "In-memory store for pending actions that require human approval.
+
+Each pending action is stored as:
+"
+    def __init__(self, ttl_seconds: int = 900)  (line 40)
+    def _gen_challenge(self) -> str  (line 51)
+    def create_pending(self, method: str, params: Dict[str, Any], proposal: Optional[str] = None, allow_pending: bool = False) -> Tuple[str, str, float, float]  (line 55)
+    def list_pending(self) -> List[Dict[str, Any]]  (line 134)
+    def approve(self, action_id: str, provided_challenge: str) -> Dict[str, Any]  (line 166)
+    def cancel(self, action_id: str) -> bool  (line 206)
+    def cleanup_expired(self) -> int  (line 223)
+
+**Error Handlers:**
+  handles: Exception in create_pending()  (line 84)
+
+
+### File: main.py
+
+**Module:** GAIA MCP-Lite Server - Entry Point
+
+Exposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.
+This provides a secure and audited boundary between cognition and action.
+
+Usage:
+    uvico
+
+**GAIA Imports:**
+  from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
+
+**Functions:**
+  async def startup_event()  [app.on_event('startup')]  (line 56)
+  async def shutdown_event()  [app.on_event('shutdown')]  (line 64)
+
+
+### File: server.py
+
+**Module:** GAIA MCP-Lite Server
+
+Exposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.
+This provides a secure and audited boundary between cognition and action.
+
+**GAIA Imports:**
+  from gaia_common.config import Config
+  from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
+  from gaia_common.utils.safe_execution import run_shell_safe
+  from gaia_common.utils.tools_registry import TOOLS
+  from gaia_common.utils.vector_indexer import VectorIndexer
+  from gaia_common.utils.world_state import world_state_detail
+  from gaia_common.utils.service_client import get_study_client
+  from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender
+
+**Endpoints:**
+  GET /health -> health_check()  (line 70)
+  POST /jsonrpc -> jsonrpc_endpoint()  (line 704)
+  GET / -> read_root()  (line 752)
+  POST /request_approval -> request_approval()  (line 757)
+  GET /pending_approvals -> pending_approvals()  (line 811)
+  POST /approve_action -> approve_action()  (line 817)
+
+**Functions:**
+  def get_study_service()  (line 39)
+  async def health_check()  [app.get('/health')]  (line 70)
+  def create_app() -> FastAPI  (line 75)
+  async def dispatch_tool(tool_name: str, params: dict) -> any  (line 87)
+  def _send_discord_message_impl(params: dict) -> dict  (line 161)
+  def _ai_write_impl(params: dict) -> dict  (line 176)
+  def _list_dir_impl(params: dict)  (line 218)
+  def _list_files_impl(params: dict)  (line 228)
+  def _list_tree_impl(params: dict)  (line 268)
+  def _read_file_impl(params: dict)  (line 317)
+  def _write_file_impl(params: dict) -> dict  (line 342)
+  def _memory_status_impl(params: dict)  (line 379)
+  def _memory_query_impl(params: dict)  (line 393)
+  def _memory_rebuild_index_impl(params: dict)  (line 402)
+  def _find_files_impl(params: dict)  (line 414)
+  def _find_relevant_documents(params: dict)  (line 456)
+  def _fragment_write_impl(params: dict) -> dict  (line 514)
+  def _fragment_read_impl(params: dict) -> dict  (line 536)
+  def _fragment_assemble_impl(params: dict) -> dict  (line 546)
+  def _fragment_list_pending_impl(params: dict) -> dict  (line 556)
+  def _fragment_clear_impl(params: dict) -> dict  (line 562)
+  async def _study_start_impl(params: dict) -> dict  (line 571)
+  async def _study_status_impl(params: dict) -> dict  (line 600)
+  async def _study_cancel_impl(params: dict) -> dict  (line 610)
+  async def _adapter_list_impl(params: dict) -> dict  (line 620)
+  async def _adapter_load_impl(params: dict) -> dict  (line 632)
+  async def _adapter_unload_impl(params: dict) -> dict  (line 651)
+  async def _adapter_delete_impl(params: dict) -> dict  (line 669)
+  async def _adapter_info_impl(params: dict) -> dict  (line 685)
+  async def jsonrpc_endpoint(request: Request)  [app.post('/jsonrpc')]  (line 704)
+  def read_root()  [app.get('/')]  (line 752)
+  async def request_approval(request: Request)  [app.post('/request_approval')]  (line 757)
+  async def pending_approvals()  [app.get('/pending_approvals')]  (line 811)
+  async def approve_action(request: Request)  [app.post('/approve_action')]  (line 817)
+
+**Error Handlers:**
+  handles: Exception in dispatch_tool()  (line 92)
+  handles: Exception in dispatch_tool()  (line 155)
+  handles: Exception in _ai_write_impl()  (line 213)
+  handles: Exception in _read_file_impl()  (line 338)
+  handles: subprocess.CalledProcessError in _find_relevant_documents()  (line 504)
+  handles: Exception in _study_start_impl()  (line 595)
+  handles: Exception in _study_status_impl()  (line 605)
+  handles: Exception in _study_cancel_impl()  (line 615)
+  handles: Exception in _adapter_list_impl()  (line 627)
+  handles: Exception in _adapter_load_impl()  (line 646)
+  handles: Exception in _adapter_unload_impl()  (line 664)
+  handles: Exception in _adapter_delete_impl()  (line 680)
+  handles: Exception in _adapter_info_impl()  (line 696)
+  handles: Exception -> 400 in jsonrpc_endpoint()  (line 707)
+  handles: Exception -> 500 in jsonrpc_endpoint()  (line 743)
+  handles: Exception -> 400 in request_approval()  (line 765)
+  handles: Exception in request_approval()  (line 797)
+  handles: Exception -> 400 in approve_action()  (line 825)
+  handles: KeyError -> 404 in approve_action()  (line 835)
+  handles: ValueError -> 403 in approve_action()  (line 837)
+  handles: ValueError in approve_action()  (line 862)
+  handles: Exception -> 500 in approve_action()  (line 868)
+  handles: Exception in _ai_write_impl()  (line 207)
+  handles: Exception in walk()  (line 250)
+  handles: Exception in walk()  (line 438)
+  handles: ValidationError -> 400 in jsonrpc_endpoint()  (line 728)
+  handles: Exception -> 500 in request_approval()  (line 782)
+  handles: Exception in approve_action()  (line 858)
+  handles: Exception in _ai_write_impl()  (line 195)
+  handles: Exception in walk()  (line 262)
+  handles: Exception in walk()  (line 450)
+
+**HTTP Calls:**
+  POST /study/start in _study_start_impl()  (line 584)
+  GET /study/status in _study_status_impl()  (line 604)
+  POST /study/cancel in _study_cancel_impl()  (line 614)
+  GET /adapters in _adapter_list_impl()  (line 626)
+  POST /adapters/load in _adapter_load_impl()  (line 642)
+  POST /adapters/unload in _adapter_unload_impl()  (line 660)
+  DELETE <f-string> in _adapter_delete_impl()  (line 679)
+  GET <f-string> in _adapter_info_impl()  (line 695)
+
+
+### File: tools.py
+
+**Module:** GAIA MCP Tools - Tool Dispatcher and Implementations.
+
+**GAIA Imports:**
+  from gaia_common.utils import get_logger
+  from gaia_common.config import Config
+  from gaia_common.utils.safe_execution import run_shell_safe
+  from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
+  from gaia_common.utils.vector_indexer import VectorIndexer
+  from gaia_common.utils.world_state import world_state_detail
+  from gaia_common.utils.service_client import get_study_client
+  from gaia_common.utils.tools_registry import TOOLS
+
+**Functions:**
+  def list_tools() -> List[str]  (line 36)
+  def describe_tool(tool_name: str) -> Dict[str, Any]  (line 41)
+  async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore, pre_approved: bool = False) -> Any  (line 46)
+  def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict  (line 112)
+  def _write_file_impl(params: dict) -> dict  (line 154)
+  def _list_dir_impl(params: dict)  (line 189)
+  def _list_files_impl(params: dict)  (line 199)
+  def _list_tree_impl(params: dict)  (line 240)
+  def _read_file_impl(params: dict)  (line 290)
+  def _memory_status_impl(params: dict)  (line 317)
+  def _memory_query_impl(params: dict)  (line 332)
+  def _memory_rebuild_index_impl(params: dict)  (line 341)
+  def _find_files_impl(params: dict)  (line 355)
+  def _find_relevant_documents(params: dict)  (line 397)
+  def _fragment_write_impl(params: dict) -> dict  (line 456)
+  def _fragment_read_impl(params: dict) -> dict  (line 478)
+  def _fragment_assemble_impl(params: dict) -> dict  (line 488)
+  def _fragment_list_pending_impl(params: dict) -> dict  (line 498)
+  def _fragment_clear_impl(params: dict) -> dict  (line 504)
+  def _get_study_client()  (line 516)
+  async def _study_start_impl(params: dict) -> dict  (line 524)
+  async def _study_status_impl(params: dict) -> dict  (line 551)
+  async def _study_cancel_impl(params: dict) -> dict  (line 561)
+  async def _adapter_list_impl(params: dict) -> dict  (line 571)
+  async def _adapter_load_impl(params: dict) -> dict  (line 583)
+  async def _adapter_unload_impl(params: dict) -> dict  (line 602)
+  async def _adapter_delete_impl(params: dict) -> dict  (line 620)
+  async def _adapter_info_impl(params: dict) -> dict  (line 636)
+
+**Error Handlers:**
+  handles: Exception in _ai_write_impl()  (line 149)
+  handles: Exception in _read_file_impl()  (line 307)
+  handles: subprocess.CalledProcessError in _find_relevant_documents()  (line 445)
+  handles: Exception in _study_start_impl()  (line 546)
+  handles: Exception in _study_status_impl()  (line 556)
+  handles: Exception in _study_cancel_impl()  (line 566)
+  handles: Exception in _adapter_list_impl()  (line 578)
+  handles: Exception in _adapter_load_impl()  (line 597)
+  handles: Exception in _adapter_unload_impl()  (line 615)
+  handles: Exception in _adapter_delete_impl()  (line 631)
+  handles: Exception in _adapter_info_impl()  (line 647)
+  handles: Exception in _ai_write_impl()  (line 143)
+  handles: Exception in walk()  (line 221)
+  handles: Exception in walk()  (line 379)
+  handles: Exception in _ai_write_impl()  (line 131)
+  handles: Exception in walk()  (line 233)
+  handles: Exception in walk()  (line 391)
+
+**HTTP Calls:**
+  POST /study/start in _study_start_impl()  (line 536)
+  GET /study/status in _study_status_impl()  (line 555)
+  POST /study/cancel in _study_cancel_impl()  (line 565)
+  GET /adapters in _adapter_list_impl()  (line 577)
+  POST /adapters/load in _adapter_load_impl()  (line 593)
+  POST /adapters/unload in _adapter_unload_impl()  (line 611)
+  DELETE <f-string> in _adapter_delete_impl()  (line 630)
+  GET <f-string> in _adapter_info_impl()  (line 646)
+
+
+### File: web_tools.py
+
+**Module:** GAIA MCP Web Tools — web_search and web_fetch
+
+Read-only tools that give GAIA access to real, verifiable web sources.
+Safety via domain allowlist + rate limits (not SENSITIVE_TOOLS).
+
+**GAIA Imports:**
+  from gaia_common.config import Config
+
+**Functions:**
+  def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]  (line 161)
+  def web_search(params: dict) -> dict  (line 188)
+  def _ddg_search(query: str, max_results: int) -> List[dict]  (line 256)
+  def web_fetch(params: dict) -> dict  (line 320)
+  def _extract_content(html: str, url: str) -> Tuple[str, str]  (line 409)
+  def _extract_title_bs4(html: str) -> str  (line 457)
+  def _domain_from_url(url: str) -> str  (line 472)
+
+**Classes:**
+  class SourceTrustConfig  (line 22)
+    "Tiered domain classification: trusted / reliable / blocked / unknown.
+
+Loads overrides from gaia_con"
+    def __init__(self, config_override: Optional[Dict] = None)  (line 73)
+    def tier_for_domain(self, domain: str) -> str  (line 86)
+    def is_allowed(self, domain: str) -> bool  (line 97)
+    def is_blocked(self, domain: str) -> bool  (line 102)
+    def domains_for_content_type(self, content_type: str) -> List[str]  (line 106)
+    def _base_domain(domain: str) -> str  (line 112)
+  class _RateLimiter  (line 124)
+    "Simple per-tool sliding-window rate limiter.
+
+Resets on container restart (in-memory only — no Redis"
+    def __init__(self, max_calls: int, window_seconds: int)  (line 130)
+    def allow(self) -> bool  (line 135)
+    def remaining(self) -> int  (line 145)
+
+**Error Handlers:**
+  handles: ImportError in _ddg_search()  (line 265)
+  handles: Exception in _ddg_search()  (line 267)
+  handles: ImportError in _ddg_search()  (line 277)
+  handles: Exception in _ddg_search()  (line 279)
+  handles: Exception in _ddg_search()  (line 307)
+  handles: Exception in web_fetch()  (line 378)
+  handles: ImportError in _extract_content()  (line 426)
+  handles: Exception in _extract_content()  (line 428)
+  handles: ImportError in _extract_content()  (line 442)
+  handles: Exception in _extract_content()  (line 444)
+  handles: Exception in _extract_title_bs4()  (line 463)
+  handles: Exception in _domain_from_url()  (line 476)
+  handles: Exception in _get_config()  (line 167)
+
+**HTTP Calls:**
+  GET https://api.duckduckgo.com/ in _ddg_search()  (line 285)
+  GET url in web_fetch()  (line 372)
+
+
+---
+
+## Review Task
+
+The mechanical pre-check above shows structural completeness — what is present or missing at a syntactic level. Your task is to assess SEMANTIC fidelity:
+
+- For items the pre-check marked [FOUND]: does the implementation actually fulfill the blueprint's intent, or is it a superficial match?
+- For items the pre-check marked [MISSING]: is this genuinely absent, or implemented in a way the pre-check couldn't detect?
+- For dimensions 4-5 (intent coherence, open questions): apply your own judgment — these have no mechanical coverage.
+
+Be specific: cite the blueprint claim and the contradicting (or absent) code evidence.

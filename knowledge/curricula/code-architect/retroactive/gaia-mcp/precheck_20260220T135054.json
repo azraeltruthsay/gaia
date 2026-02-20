@@ -1,0 +1,111 @@
+{
+  "service_id": "gaia-mcp",
+  "timestamp": "2026-02-20T21:50:56.398066+00:00",
+  "items": [
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /health",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:69"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:751"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /jsonrpc",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:703"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /request_approval",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:756"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /pending_approvals",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:810"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /approve_action",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 server.py:816"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Tool execution error",
+      "status": "found",
+      "source_file": "web_tools.py",
+      "detail": "\u2192 pattern match in web_tools.py:265"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Approval timeout (>900s default TTL)",
+      "status": "found",
+      "source_file": "web_tools.py",
+      "detail": "\u2192 pattern match in web_tools.py:288"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "File path not in allowlist",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Rate limit exceeded (web_search/web_fetch)",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Blocked or unknown domain in web_fetch",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "gaia-study unavailable",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Sensitive tool without prior approval",
+      "status": "found",
+      "source_file": "server.py",
+      "detail": "\u2192 pattern match in server.py:721"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-study (lora_training_and_adapter_management)",
+      "status": "found",
+      "source_file": "tools.py",
+      "detail": "\u2192 tools.py:511"
+    }
+  ],
+  "summary": {
+    "total": 14,
+    "found": 10,
+    "missing": 4,
+    "diverged": 0
+  },
+  "prompt_text": "## Mechanical Pre-Check Results: gaia-mcp\n\n### Endpoints (6/6 found)\n  [FOUND]      GET /health\n              \u2192 server.py:69\n  [FOUND]      GET /\n              \u2192 server.py:751\n  [FOUND]      POST /jsonrpc\n              \u2192 server.py:703\n  [FOUND]      POST /request_approval\n              \u2192 server.py:756\n  [FOUND]      GET /pending_approvals\n              \u2192 server.py:810\n  [FOUND]      POST /approve_action\n              \u2192 server.py:816\n\n### Failure Modes (3/7 found)\n  [FOUND]      Tool execution error\n              \u2192 pattern match in web_tools.py:265\n  [FOUND]      Approval timeout (>900s default TTL)\n              \u2192 pattern match in web_tools.py:288\n  [MISSING]    File path not in allowlist\n              no matching handler found\n  [MISSING]    Rate limit exceeded (web_search/web_fetch)\n              no matching handler found\n  [MISSING]    Blocked or unknown domain in web_fetch\n              no matching handler found\n  [MISSING]    gaia-study unavailable\n              no matching handler found\n  [FOUND]      Sensitive tool without prior approval\n              \u2192 pattern match in server.py:721\n\n### Dependencies (1/1 found)\n  [FOUND]      gaia-study (lora_training_and_adapter_management)\n              \u2192 tools.py:511\n\n### Summary\n  Total checks: 14 | Found: 10 | Missing: 4 | Diverged: 0\n  Structural completeness: 71.4%\n"
+}

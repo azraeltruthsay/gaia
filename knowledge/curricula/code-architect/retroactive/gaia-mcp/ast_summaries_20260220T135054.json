@@ -1,0 +1,1662 @@
+{
+  "__init__.py": {
+    "module_docstring": null,
+    "classes": [],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "approval.py": {
+    "module_docstring": "Approval Store for MCP sensitive actions.\n\nManages pending actions that require human approval before execution.",
+    "classes": [
+      {
+        "name": "ApprovalStore",
+        "bases": [],
+        "docstring": "In-memory store for pending actions that require human approval.\n\nEach pending action is stored as:\n",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "ttl_seconds: int = 900"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 40
+          },
+          {
+            "name": "_gen_challenge",
+            "params": [
+              "self"
+            ],
+            "return_type": "str",
+            "decorators": [],
+            "is_async": false,
+            "line": 51
+          },
+          {
+            "name": "create_pending",
+            "params": [
+              "self",
+              "method: str",
+              "params: Dict[str, Any]",
+              "proposal: Optional[str] = None",
+              "allow_pending: bool = False"
+            ],
+            "return_type": "Tuple[str, str, float, float]",
+            "decorators": [],
+            "is_async": false,
+            "line": 55
+          },
+          {
+            "name": "list_pending",
+            "params": [
+              "self"
+            ],
+            "return_type": "List[Dict[str, Any]]",
+            "decorators": [],
+            "is_async": false,
+            "line": 134
+          },
+          {
+            "name": "approve",
+            "params": [
+              "self",
+              "action_id: str",
+              "provided_challenge: str"
+            ],
+            "return_type": "Dict[str, Any]",
+            "decorators": [],
+            "is_async": false,
+            "line": 166
+          },
+          {
+            "name": "cancel",
+            "params": [
+              "self",
+              "action_id: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 206
+          },
+          {
+            "name": "cleanup_expired",
+            "params": [
+              "self"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": false,
+            "line": 223
+          }
+        ],
+        "line": 20
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.utils import get_logger"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "create_pending",
+        "line": 84
+      }
+    ],
+    "http_calls": []
+  },
+  "main.py": {
+    "module_docstring": "GAIA MCP-Lite Server - Entry Point\n\nExposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.\nThis provides a secure and audited boundary between cognition and action.\n\nUsage:\n    uvico",
+    "classes": [],
+    "functions": [
+      {
+        "name": "startup_event",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.on_event('startup')"
+        ],
+        "is_async": true,
+        "line": 56
+      },
+      {
+        "name": "shutdown_event",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.on_event('shutdown')"
+        ],
+        "is_async": true,
+        "line": 64
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.utils import setup_logging, get_logger, install_health_check_filter"
+    ],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "server.py": {
+    "module_docstring": "GAIA MCP-Lite Server\n\nExposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.\nThis provides a secure and audited boundary between cognition and action.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "get_study_service",
+        "params": [],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 39
+      },
+      {
+        "name": "health_check",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/health')"
+        ],
+        "is_async": true,
+        "line": 70
+      },
+      {
+        "name": "create_app",
+        "params": [],
+        "return_type": "FastAPI",
+        "decorators": [],
+        "is_async": false,
+        "line": 75
+      },
+      {
+        "name": "dispatch_tool",
+        "params": [
+          "tool_name: str",
+          "params: dict"
+        ],
+        "return_type": "any",
+        "decorators": [],
+        "is_async": true,
+        "line": 87
+      },
+      {
+        "name": "_send_discord_message_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 161
+      },
+      {
+        "name": "_ai_write_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 176
+      },
+      {
+        "name": "_list_dir_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 218
+      },
+      {
+        "name": "_list_files_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 228
+      },
+      {
+        "name": "_list_tree_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 268
+      },
+      {
+        "name": "_read_file_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 317
+      },
+      {
+        "name": "_write_file_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 342
+      },
+      {
+        "name": "_memory_status_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 379
+      },
+      {
+        "name": "_memory_query_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 393
+      },
+      {
+        "name": "_memory_rebuild_index_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 402
+      },
+      {
+        "name": "_find_files_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 414
+      },
+      {
+        "name": "_find_relevant_documents",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 456
+      },
+      {
+        "name": "_fragment_write_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 514
+      },
+      {
+        "name": "_fragment_read_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 536
+      },
+      {
+        "name": "_fragment_assemble_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 546
+      },
+      {
+        "name": "_fragment_list_pending_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 556
+      },
+      {
+        "name": "_fragment_clear_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 562
+      },
+      {
+        "name": "_study_start_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 571
+      },
+      {
+        "name": "_study_status_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 600
+      },
+      {
+        "name": "_study_cancel_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 610
+      },
+      {
+        "name": "_adapter_list_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 620
+      },
+      {
+        "name": "_adapter_load_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 632
+      },
+      {
+        "name": "_adapter_unload_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 651
+      },
+      {
+        "name": "_adapter_delete_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 669
+      },
+      {
+        "name": "_adapter_info_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 685
+      },
+      {
+        "name": "jsonrpc_endpoint",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/jsonrpc')"
+        ],
+        "is_async": true,
+        "line": 704
+      },
+      {
+        "name": "read_root",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/')"
+        ],
+        "is_async": false,
+        "line": 752
+      },
+      {
+        "name": "request_approval",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/request_approval')"
+        ],
+        "is_async": true,
+        "line": 757
+      },
+      {
+        "name": "pending_approvals",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/pending_approvals')"
+        ],
+        "is_async": true,
+        "line": 811
+      },
+      {
+        "name": "approve_action",
+        "params": [
+          "request: Request"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/approve_action')"
+        ],
+        "is_async": true,
+        "line": 817
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "function_name": "health_check",
+        "line": 70
+      },
+      {
+        "method": "POST",
+        "path": "/jsonrpc",
+        "function_name": "jsonrpc_endpoint",
+        "line": 704
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "function_name": "read_root",
+        "line": 752
+      },
+      {
+        "method": "POST",
+        "path": "/request_approval",
+        "function_name": "request_approval",
+        "line": 757
+      },
+      {
+        "method": "GET",
+        "path": "/pending_approvals",
+        "function_name": "pending_approvals",
+        "line": 811
+      },
+      {
+        "method": "POST",
+        "path": "/approve_action",
+        "function_name": "approve_action",
+        "line": 817
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.config import Config",
+      "from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper",
+      "from gaia_common.utils.safe_execution import run_shell_safe",
+      "from gaia_common.utils.tools_registry import TOOLS",
+      "from gaia_common.utils.vector_indexer import VectorIndexer",
+      "from gaia_common.utils.world_state import world_state_detail",
+      "from gaia_common.utils.service_client import get_study_client",
+      "from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "dispatch_tool",
+        "line": 92
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "dispatch_tool",
+        "line": 155
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 213
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_read_file_impl",
+        "line": 338
+      },
+      {
+        "exception_types": [
+          "subprocess.CalledProcessError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_find_relevant_documents",
+        "line": 504
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_start_impl",
+        "line": 595
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_status_impl",
+        "line": 605
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_cancel_impl",
+        "line": 615
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_list_impl",
+        "line": 627
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_load_impl",
+        "line": 646
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_unload_impl",
+        "line": 664
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_delete_impl",
+        "line": 680
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_info_impl",
+        "line": 696
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 400,
+        "enclosing_function": "jsonrpc_endpoint",
+        "line": 707
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "jsonrpc_endpoint",
+        "line": 743
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 400,
+        "enclosing_function": "request_approval",
+        "line": 765
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "request_approval",
+        "line": 797
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 400,
+        "enclosing_function": "approve_action",
+        "line": 825
+      },
+      {
+        "exception_types": [
+          "KeyError"
+        ],
+        "status_code": 404,
+        "enclosing_function": "approve_action",
+        "line": 835
+      },
+      {
+        "exception_types": [
+          "ValueError"
+        ],
+        "status_code": 403,
+        "enclosing_function": "approve_action",
+        "line": 837
+      },
+      {
+        "exception_types": [
+          "ValueError"
+        ],
+        "status_code": null,
+        "enclosing_function": "approve_action",
+        "line": 862
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "approve_action",
+        "line": 868
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 207
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 250
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 438
+      },
+      {
+        "exception_types": [
+          "ValidationError"
+        ],
+        "status_code": 400,
+        "enclosing_function": "jsonrpc_endpoint",
+        "line": 728
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "request_approval",
+        "line": 782
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "approve_action",
+        "line": 858
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 195
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 262
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 450
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "post",
+        "url_or_path": "/study/start",
+        "enclosing_function": "_study_start_impl",
+        "line": 584
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "/study/status",
+        "enclosing_function": "_study_status_impl",
+        "line": 604
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/study/cancel",
+        "enclosing_function": "_study_cancel_impl",
+        "line": 614
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "/adapters",
+        "enclosing_function": "_adapter_list_impl",
+        "line": 626
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/adapters/load",
+        "enclosing_function": "_adapter_load_impl",
+        "line": 642
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/adapters/unload",
+        "enclosing_function": "_adapter_unload_impl",
+        "line": 660
+      },
+      {
+        "call_method": "delete",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_adapter_delete_impl",
+        "line": 679
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_adapter_info_impl",
+        "line": 695
+      }
+    ]
+  },
+  "tools.py": {
+    "module_docstring": "GAIA MCP Tools - Tool Dispatcher and Implementations.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "list_tools",
+        "params": [],
+        "return_type": "List[str]",
+        "decorators": [],
+        "is_async": false,
+        "line": 36
+      },
+      {
+        "name": "describe_tool",
+        "params": [
+          "tool_name: str"
+        ],
+        "return_type": "Dict[str, Any]",
+        "decorators": [],
+        "is_async": false,
+        "line": 41
+      },
+      {
+        "name": "execute_tool",
+        "params": [
+          "method: str",
+          "params: Dict",
+          "approval_store: ApprovalStore",
+          "pre_approved: bool = False"
+        ],
+        "return_type": "Any",
+        "decorators": [],
+        "is_async": true,
+        "line": 46
+      },
+      {
+        "name": "_ai_write_impl",
+        "params": [
+          "params: dict",
+          "gaia_helper: GAIARescueHelper"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 112
+      },
+      {
+        "name": "_write_file_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 154
+      },
+      {
+        "name": "_list_dir_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 189
+      },
+      {
+        "name": "_list_files_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 199
+      },
+      {
+        "name": "_list_tree_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 240
+      },
+      {
+        "name": "_read_file_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 290
+      },
+      {
+        "name": "_memory_status_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 317
+      },
+      {
+        "name": "_memory_query_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 332
+      },
+      {
+        "name": "_memory_rebuild_index_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 341
+      },
+      {
+        "name": "_find_files_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 355
+      },
+      {
+        "name": "_find_relevant_documents",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 397
+      },
+      {
+        "name": "_fragment_write_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 456
+      },
+      {
+        "name": "_fragment_read_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 478
+      },
+      {
+        "name": "_fragment_assemble_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 488
+      },
+      {
+        "name": "_fragment_list_pending_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 498
+      },
+      {
+        "name": "_fragment_clear_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 504
+      },
+      {
+        "name": "_get_study_client",
+        "params": [],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 516
+      },
+      {
+        "name": "_study_start_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 524
+      },
+      {
+        "name": "_study_status_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 551
+      },
+      {
+        "name": "_study_cancel_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 561
+      },
+      {
+        "name": "_adapter_list_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 571
+      },
+      {
+        "name": "_adapter_load_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 583
+      },
+      {
+        "name": "_adapter_unload_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 602
+      },
+      {
+        "name": "_adapter_delete_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 620
+      },
+      {
+        "name": "_adapter_info_impl",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": true,
+        "line": 636
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.utils import get_logger",
+      "from gaia_common.config import Config",
+      "from gaia_common.utils.safe_execution import run_shell_safe",
+      "from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper",
+      "from gaia_common.utils.vector_indexer import VectorIndexer",
+      "from gaia_common.utils.world_state import world_state_detail",
+      "from gaia_common.utils.service_client import get_study_client",
+      "from gaia_common.utils.tools_registry import TOOLS"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 149
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_read_file_impl",
+        "line": 307
+      },
+      {
+        "exception_types": [
+          "subprocess.CalledProcessError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_find_relevant_documents",
+        "line": 445
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_start_impl",
+        "line": 546
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_status_impl",
+        "line": 556
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_study_cancel_impl",
+        "line": 566
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_list_impl",
+        "line": 578
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_load_impl",
+        "line": 597
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_unload_impl",
+        "line": 615
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_delete_impl",
+        "line": 631
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_adapter_info_impl",
+        "line": 647
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 143
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 221
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 379
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ai_write_impl",
+        "line": 131
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 233
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "walk",
+        "line": 391
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "post",
+        "url_or_path": "/study/start",
+        "enclosing_function": "_study_start_impl",
+        "line": 536
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "/study/status",
+        "enclosing_function": "_study_status_impl",
+        "line": 555
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/study/cancel",
+        "enclosing_function": "_study_cancel_impl",
+        "line": 565
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "/adapters",
+        "enclosing_function": "_adapter_list_impl",
+        "line": 577
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/adapters/load",
+        "enclosing_function": "_adapter_load_impl",
+        "line": 593
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "/adapters/unload",
+        "enclosing_function": "_adapter_unload_impl",
+        "line": 611
+      },
+      {
+        "call_method": "delete",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_adapter_delete_impl",
+        "line": 630
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_adapter_info_impl",
+        "line": 646
+      }
+    ]
+  },
+  "web_tools.py": {
+    "module_docstring": "GAIA MCP Web Tools \u2014 web_search and web_fetch\n\nRead-only tools that give GAIA access to real, verifiable web sources.\nSafety via domain allowlist + rate limits (not SENSITIVE_TOOLS).",
+    "classes": [
+      {
+        "name": "SourceTrustConfig",
+        "bases": [],
+        "docstring": "Tiered domain classification: trusted / reliable / blocked / unknown.\n\nLoads overrides from gaia_con",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "config_override: Optional[Dict] = None"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 73
+          },
+          {
+            "name": "tier_for_domain",
+            "params": [
+              "self",
+              "domain: str"
+            ],
+            "return_type": "str",
+            "decorators": [],
+            "is_async": false,
+            "line": 86
+          },
+          {
+            "name": "is_allowed",
+            "params": [
+              "self",
+              "domain: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 97
+          },
+          {
+            "name": "is_blocked",
+            "params": [
+              "self",
+              "domain: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 102
+          },
+          {
+            "name": "domains_for_content_type",
+            "params": [
+              "self",
+              "content_type: str"
+            ],
+            "return_type": "List[str]",
+            "decorators": [],
+            "is_async": false,
+            "line": 106
+          },
+          {
+            "name": "_base_domain",
+            "params": [
+              "domain: str"
+            ],
+            "return_type": "str",
+            "decorators": [
+              "staticmethod"
+            ],
+            "is_async": false,
+            "line": 112
+          }
+        ],
+        "line": 22
+      },
+      {
+        "name": "_RateLimiter",
+        "bases": [],
+        "docstring": "Simple per-tool sliding-window rate limiter.\n\nResets on container restart (in-memory only \u2014 no Redis",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "max_calls: int",
+              "window_seconds: int"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 130
+          },
+          {
+            "name": "allow",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 135
+          },
+          {
+            "name": "remaining",
+            "params": [
+              "self"
+            ],
+            "return_type": "int",
+            "decorators": [
+              "property"
+            ],
+            "is_async": false,
+            "line": 145
+          }
+        ],
+        "line": 124
+      }
+    ],
+    "functions": [
+      {
+        "name": "_get_config",
+        "params": [],
+        "return_type": "Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]",
+        "decorators": [],
+        "is_async": false,
+        "line": 161
+      },
+      {
+        "name": "web_search",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 188
+      },
+      {
+        "name": "_ddg_search",
+        "params": [
+          "query: str",
+          "max_results: int"
+        ],
+        "return_type": "List[dict]",
+        "decorators": [],
+        "is_async": false,
+        "line": 256
+      },
+      {
+        "name": "web_fetch",
+        "params": [
+          "params: dict"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 320
+      },
+      {
+        "name": "_extract_content",
+        "params": [
+          "html: str",
+          "url: str"
+        ],
+        "return_type": "Tuple[str, str]",
+        "decorators": [],
+        "is_async": false,
+        "line": 409
+      },
+      {
+        "name": "_extract_title_bs4",
+        "params": [
+          "html: str"
+        ],
+        "return_type": "str",
+        "decorators": [],
+        "is_async": false,
+        "line": 457
+      },
+      {
+        "name": "_domain_from_url",
+        "params": [
+          "url: str"
+        ],
+        "return_type": "str",
+        "decorators": [],
+        "is_async": false,
+        "line": 472
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [
+      "from gaia_common.config import Config"
+    ],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ddg_search",
+        "line": 265
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ddg_search",
+        "line": 267
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ddg_search",
+        "line": 277
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ddg_search",
+        "line": 279
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ddg_search",
+        "line": 307
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "web_fetch",
+        "line": 378
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_extract_content",
+        "line": 426
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_extract_content",
+        "line": 428
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_extract_content",
+        "line": 442
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_extract_content",
+        "line": 444
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_extract_title_bs4",
+        "line": 463
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_domain_from_url",
+        "line": 476
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_config",
+        "line": 167
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "get",
+        "url_or_path": "https://api.duckduckgo.com/",
+        "enclosing_function": "_ddg_search",
+        "line": 285
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "url",
+        "enclosing_function": "web_fetch",
+        "line": 372
+      }
+    ]
+  }
+}

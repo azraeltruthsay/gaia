@@ -1,0 +1,97 @@
+{
+  "service_id": "gaia-web",
+  "timestamp": "2026-02-20T21:50:58.556113+00:00",
+  "items": [
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /health",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:83"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:104"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "GET /queue/status",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:95"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /process_user_input",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:227"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /presence",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:424"
+    },
+    {
+      "category": "endpoint",
+      "blueprint_claim": "POST /output_router",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:449"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "gaia-core unavailable",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 pattern match in main.py:136"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Discord bot token missing or invalid",
+      "status": "missing",
+      "source_file": null,
+      "detail": "no matching handler found"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Discord bot websocket down",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 pattern match in main.py:100"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Sleep/wake queue timeout",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 pattern match in main.py:184"
+    },
+    {
+      "category": "failure_mode",
+      "blueprint_claim": "Discord message send fails (permissions, deleted channel)",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 pattern match in main.py:347"
+    },
+    {
+      "category": "dependency",
+      "blueprint_claim": "gaia-core (cognitive_processing)",
+      "status": "found",
+      "source_file": "main.py",
+      "detail": "\u2192 main.py:44"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "found": 11,
+    "missing": 1,
+    "diverged": 0
+  },
+  "prompt_text": "## Mechanical Pre-Check Results: gaia-web\n\n### Endpoints (6/6 found)\n  [FOUND]      GET /health\n              \u2192 main.py:83\n  [FOUND]      GET /\n              \u2192 main.py:104\n  [FOUND]      GET /queue/status\n              \u2192 main.py:95\n  [FOUND]      POST /process_user_input\n              \u2192 main.py:227\n  [FOUND]      POST /presence\n              \u2192 main.py:424\n  [FOUND]      POST /output_router\n              \u2192 main.py:449\n\n### Failure Modes (4/5 found)\n  [FOUND]      gaia-core unavailable\n              \u2192 pattern match in main.py:136\n  [MISSING]    Discord bot token missing or invalid\n              no matching handler found\n  [FOUND]      Discord bot websocket down\n              \u2192 pattern match in main.py:100\n  [FOUND]      Sleep/wake queue timeout\n              \u2192 pattern match in main.py:184\n  [FOUND]      Discord message send fails (permissions, deleted channel)\n              \u2192 pattern match in main.py:347\n\n### Dependencies (1/1 found)\n  [FOUND]      gaia-core (cognitive_processing)\n              \u2192 main.py:44\n\n### Summary\n  Total checks: 12 | Found: 11 | Missing: 1 | Diverged: 0\n  Structural completeness: 91.7%\n"
+}
