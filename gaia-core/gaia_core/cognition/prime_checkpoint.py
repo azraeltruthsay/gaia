@@ -16,6 +16,7 @@ across container restarts via Docker named volume.
 """
 
 import os
+import re
 import shutil
 import logging
 from pathlib import Path
@@ -136,6 +137,26 @@ class PrimeCheckpointManager:
             for p in sorted(self.history_dir.glob("*.md"), reverse=True)[:limit]
         ]
 
+    def get_sleep_timestamp(self) -> Optional[datetime]:
+        """Parse the Sleep Started timestamp from the current checkpoint."""
+        content = self.load_latest()
+        if not content:
+            return None
+        match = re.search(r'\*\*Sleep Started:\*\*\s*(.+)', content)
+        if match:
+            try:
+                return datetime.fromisoformat(match.group(1).strip())
+            except ValueError:
+                pass
+        # Fallback to Generated timestamp
+        match = re.search(r'\*\*Generated:\*\*\s*(.+)', content)
+        if match:
+            try:
+                return datetime.fromisoformat(match.group(1).strip())
+            except ValueError:
+                pass
+        return None
+
     # ------------------------------------------------------------------
     # Checkpoint generation (Phase 2: LLM-backed)
     # ------------------------------------------------------------------
@@ -204,6 +225,7 @@ class PrimeCheckpointManager:
         return (
             f"# Prime Cognitive State Checkpoint\n"
             f"**Generated:** {now}\n"
+            f"**Sleep Started:** {now}\n"
             f"**Session:** {ctx['session_id']}\n"
             f"**Persona:** {ctx['persona']}\n"
             f"**Method:** LLM introspection (CPU Lite)\n"
@@ -226,6 +248,7 @@ class PrimeCheckpointManager:
         return (
             f"# Prime Cognitive State Checkpoint\n"
             f"**Last Updated:** {now}\n"
+            f"**Sleep Started:** {now}\n"
             f"**Session ID:** {ctx['session_id']}\n"
             f"**State:** SLEEP_INITIATED\n"
             f"**Method:** static template (no LLM available)\n"
