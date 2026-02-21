@@ -46,11 +46,14 @@ def bare_scheduler(config):
 
 class TestRegistration:
     def test_default_tasks_registered(self, scheduler):
-        assert len(scheduler._tasks) == 3
+        assert len(scheduler._tasks) == 5
 
     def test_default_task_ids(self, scheduler):
         ids = {t.task_id for t in scheduler._tasks}
-        assert ids == {"conversation_curation", "blueprint_validation", "code_evolution"}
+        assert ids == {
+            "conversation_curation", "blueprint_validation", "code_evolution",
+            "code_review", "wiki_doc_regen",
+        }
 
     def test_register_custom_task(self, bare_scheduler):
         task = SleepTask(
@@ -193,7 +196,7 @@ class TestStatus:
     def test_status_shape(self, scheduler):
         status = scheduler.get_status()
         assert isinstance(status, list)
-        assert len(status) == 3
+        assert len(status) == 5
 
         for entry in status:
             assert "task_id" in entry
@@ -336,3 +339,287 @@ class TestBlueprintValidation:
         missing = SleepTaskScheduler._check_facts(facts, bp_text)
 
         assert missing == []
+
+
+# ------------------------------------------------------------------
+# Wiki Doc Regen
+# ------------------------------------------------------------------
+
+
+SAMPLE_BLUEPRINT_YAML = """\
+id: test-svc
+version: "0.1"
+role: "The Tester"
+service_status: live
+
+runtime:
+  port: 9999
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: "python -m test_svc"
+  health_check: "curl -f http://localhost:9999"
+  dockerfile: test-svc/Dockerfile
+
+interfaces:
+  - id: hello
+    direction: inbound
+    description: "A greeting endpoint."
+    status: active
+    transport:
+      type: http_rest
+      path: /hello
+      method: GET
+
+  - id: notify_peer
+    direction: outbound
+    description: "Notify a peer service."
+    status: active
+    transport:
+      type: http_rest
+      path: /notify
+      method: POST
+      target_service: peer-svc
+
+dependencies:
+  services:
+    - id: peer-svc
+      role: notification
+      required: false
+      fallback: null
+  volumes:
+    - name: data-vol
+      access: rw
+      purpose: "Persistent data"
+      mount_path: /data
+  external_apis: []
+
+failure_modes:
+  - condition: "Peer unavailable"
+    response: "Notification skipped gracefully"
+    severity: degraded
+    auto_recovers: true
+
+intent:
+  purpose: "A test service for unit testing wiki doc regen."
+  design_decisions:
+    - "Keep it simple"
+    - "No GPU required"
+  open_questions:
+    - "Is this enough?"
+"""
+
+
+class TestWikiDocRegen:
+    def test_task_registered_with_correct_priority(self, scheduler):
+        task = next(
+            (t for t in scheduler._tasks if t.task_id == "wiki_doc_regen"),
+            None,
+        )
+        assert task is not None
+        assert task.priority == 5
+        assert task.task_type == "DOC_GENERATION"
+        assert task.interruptible is True
+
+    def test_render_service_wiki_page_sections(self):
+        """Rendered page should contain all expected section headers."""
+        import yaml
+
+        data = yaml.safe_load(SAMPLE_BLUEPRINT_YAML)
+        page = SleepTaskScheduler._render_service_wiki_page("test-svc", data)
+
+        assert "# test-svc" in page
+        assert "**Role:** The Tester" in page
+        assert "## Purpose" in page
+        assert "## Design Decisions" in page
+        assert "## Runtime" in page
+        assert "## Inbound Endpoints" in page
+        assert "## Outbound Connections" in page
+        assert "## Service Dependencies" in page
+        assert "## Volume Mounts" in page
+        assert "## Failure Modes" in page
+        assert "Auto-generated from" in page
+
+    def test_render_service_wiki_page_endpoint_data(self):
+        """Endpoint tables should contain actual data from the blueprint."""
+        import yaml
+
+        data = yaml.safe_load(SAMPLE_BLUEPRINT_YAML)
+        page = SleepTaskScheduler._render_service_wiki_page("test-svc", data)
+
+        # Inbound
+        assert "`/hello`" in page
+        assert "GET" in page
+        assert "A greeting endpoint." in page
+
+        # Outbound
+        assert "notify_peer" in page
+        assert "http_rest" in page
+
+    def test_render_service_wiki_page_failure_admonitions(self):
+        """Failure modes should render as MkDocs admonitions."""
+        import yaml
+
+        data = yaml.safe_load(SAMPLE_BLUEPRINT_YAML)
+        page = SleepTaskScheduler._render_service_wiki_page("test-svc", data)
+
+        assert '!!! warning "Peer unavailable"' in page
+        assert "**Severity:** degraded" in page
+
+    def test_render_wiki_index(self):
+        """Index page should have a table with service links."""
+        rows = [
+            {"service_id": "svc-a", "role": "Role A", "port": 1111, "gpu": False, "status": "live"},
+            {"service_id": "svc-b", "role": "Role B", "port": 2222, "gpu": True, "status": "candidate"},
+        ]
+        index = SleepTaskScheduler._render_wiki_index(rows)
+
+        assert "# Auto-Generated Service Map" in index
+        assert "[svc-a](svc-a.md)" in index
+        assert "[svc-b](svc-b.md)" in index
+        assert "Role A" in index
+        assert "Role B" in index
+
+    def test_index_row_from_data(self):
+        """_index_row_from_data extracts the correct fields."""
+        import yaml
+
+        data = yaml.safe_load(SAMPLE_BLUEPRINT_YAML)
+        row = SleepTaskScheduler._index_row_from_data("test-svc", data)
+
+        assert row["service_id"] == "test-svc"
+        assert row["role"] == "The Tester"
+        assert row["port"] == 9999
+        assert row["gpu"] is False
+        assert row["status"] == "live"
+
+    def test_atomic_write_no_residue(self, tmp_path):
+        """_atomic_write should leave no .tmp file on success."""
+        target = tmp_path / "output.md"
+        SleepTaskScheduler._atomic_write(target, "hello world")
+
+        assert target.read_text() == "hello world"
+        assert not (tmp_path / "output.tmp").exists()
+
+    def test_atomic_write_content_correct(self, tmp_path):
+        """Written content should match input exactly."""
+        target = tmp_path / "test.md"
+        content = "# Header\n\nSome **bold** content.\n"
+        SleepTaskScheduler._atomic_write(target, content)
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_malformed_yaml_skipped(self, tmp_path):
+        """Malformed YAML files should be skipped without crashing."""
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir()
+        out_dir = tmp_path / "wiki_auto"
+        out_dir.mkdir()
+
+        bad_file = bp_dir / "broken.yaml"
+        bad_file.write_text("{{{{invalid yaml: [[[")
+
+        # Patch paths and run handler
+        scheduler = SleepTaskScheduler.__new__(SleepTaskScheduler)
+        scheduler.config = FakeConfig()
+        scheduler.model_pool = None
+        scheduler.agent_core = None
+        scheduler._timeline = None
+        scheduler._tasks = []
+
+        with patch.object(
+            SleepTaskScheduler, "_BLUEPRINTS_DIR", str(bp_dir)
+        ), patch.object(
+            SleepTaskScheduler, "_WIKI_AUTO_DIR", str(out_dir)
+        ), patch.object(
+            SleepTaskScheduler, "_REGEN_MANIFEST", str(out_dir / "_manifest.json")
+        ):
+            # Should not raise
+            scheduler._run_wiki_doc_regen()
+
+        # No output file for the broken blueprint
+        assert not (out_dir / "broken.md").exists()
+
+    def test_full_regen_cycle(self, tmp_path):
+        """End-to-end: YAML blueprint → markdown page + index."""
+        import yaml
+
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir()
+        out_dir = tmp_path / "wiki_auto"
+        out_dir.mkdir()
+
+        # Write a valid blueprint
+        (bp_dir / "test-svc.yaml").write_text(SAMPLE_BLUEPRINT_YAML)
+
+        scheduler = SleepTaskScheduler.__new__(SleepTaskScheduler)
+        scheduler.config = FakeConfig()
+        scheduler.model_pool = None
+        scheduler.agent_core = None
+        scheduler._timeline = None
+        scheduler._tasks = []
+
+        with patch.object(
+            SleepTaskScheduler, "_BLUEPRINTS_DIR", str(bp_dir)
+        ), patch.object(
+            SleepTaskScheduler, "_WIKI_AUTO_DIR", str(out_dir)
+        ), patch.object(
+            SleepTaskScheduler, "_REGEN_MANIFEST", str(out_dir / "_manifest.json")
+        ):
+            scheduler._run_wiki_doc_regen()
+
+        # Service page generated
+        svc_page = out_dir / "test-svc.md"
+        assert svc_page.exists()
+        content = svc_page.read_text()
+        assert "# test-svc" in content
+
+        # Index page generated
+        index_page = out_dir / "index.md"
+        assert index_page.exists()
+        assert "test-svc" in index_page.read_text()
+
+        # Manifest written
+        manifest_path = out_dir / "_manifest.json"
+        assert manifest_path.exists()
+
+    def test_incremental_skip(self, tmp_path):
+        """Second run with unchanged blueprints should skip regeneration."""
+        import json
+        import yaml
+
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir()
+        out_dir = tmp_path / "wiki_auto"
+        out_dir.mkdir()
+
+        bp_file = bp_dir / "test-svc.yaml"
+        bp_file.write_text(SAMPLE_BLUEPRINT_YAML)
+
+        scheduler = SleepTaskScheduler.__new__(SleepTaskScheduler)
+        scheduler.config = FakeConfig()
+        scheduler.model_pool = None
+        scheduler.agent_core = None
+        scheduler._timeline = None
+        scheduler._tasks = []
+
+        patches = [
+            patch.object(SleepTaskScheduler, "_BLUEPRINTS_DIR", str(bp_dir)),
+            patch.object(SleepTaskScheduler, "_WIKI_AUTO_DIR", str(out_dir)),
+            patch.object(SleepTaskScheduler, "_REGEN_MANIFEST", str(out_dir / "_manifest.json")),
+        ]
+        for p in patches:
+            p.start()
+
+        try:
+            # First run — generates files
+            scheduler._run_wiki_doc_regen()
+            first_content = (out_dir / "test-svc.md").read_text()
+
+            # Second run — should skip (same mtime)
+            scheduler._run_wiki_doc_regen()
+            second_content = (out_dir / "test-svc.md").read_text()
+
+            # Content unchanged (timestamp embedded, but file not rewritten)
+            assert first_content == second_content
+        finally:
+            for p in patches:
+                p.stop()

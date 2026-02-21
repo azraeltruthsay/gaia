@@ -63,3 +63,12 @@ nav:
       - Getting Started: dev/getting-started.md
       - Adding a Service: dev/adding-a-service.md
       - Code Quality: dev/code-quality.md
+  - Auto-Generated:
+      - Service Map: auto/index.md
+      - gaia-core: auto/gaia-core.md
+      - gaia-prime: auto/gaia-prime.md
+      - gaia-web: auto/gaia-web.md
+      - gaia-study: auto/gaia-study.md
+      - gaia-mcp: auto/gaia-mcp.md
+      - gaia-orchestrator: auto/gaia-orchestrator.md
+      - gaia-wiki: auto/gaia-wiki.md
