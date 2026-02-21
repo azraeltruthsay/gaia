@@ -254,6 +254,8 @@ services:
       - ./gaia-web/static:/app/static:ro
       # Docker socket for terminal access
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Logs (consolidated service logs)
+      - ./logs:/logs:rw
 
     environment:
       - PYTHONPATH=/app:/gaia-common
@@ -386,6 +388,8 @@ services:
       - ./gaia-models:/models:ro
       # Sandboxed workspace (isolated)
       - gaia-sandbox:/sandbox:rw
+      # Logs (for introspect_logs tool + own log persistence)
+      - ./logs:/logs:rw
 
     environment:
       - GAIA_SERVICE=mcp
@@ -395,6 +399,7 @@ services:
       - SANDBOX_ROOT=/sandbox
       - KNOWLEDGE_DIR=/knowledge
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - GAIA_LOG_DIR=/logs
       # Security
       - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
       - MCP_APPROVAL_TTL=900

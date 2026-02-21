@@ -88,6 +88,8 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Promotion & blueprint tools
         "generate_blueprint": lambda p: _generate_blueprint_impl(p),
         "assess_promotion": lambda p: _assess_promotion_impl(p),
+        # Self-introspection tools
+        "introspect_logs": lambda p: _introspect_logs_impl(p),
     }
 
     async_tool_map = {
@@ -650,6 +652,92 @@ async def _adapter_info_impl(params: dict) -> dict:
     except Exception as e:
         logger.error(f"Failed to get adapter info via gateway: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# ── Self-Introspection Tools ────────────────────────────────────────────────
+
+# Map service names to their log file paths inside the container
+_LOG_FILE_MAP = {
+    "gaia-core": "/logs/gaia-core.log",
+    "gaia-web": "/logs/gaia-web.log",
+    "gaia-mcp": "/logs/gaia-mcp.log",
+    "gaia-study": "/logs/gaia-study.log",
+    "discord": "/logs/discord_bot.log",
+}
+
+# Severity levels in ascending order
+_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+
+
+def _introspect_logs_impl(params: dict) -> dict:
+    """View recent service logs for self-diagnosis."""
+    service = params.get("service")
+    if not service:
+        raise ValueError("service is required")
+
+    lines_requested = min(int(params.get("lines", 50)), 200)
+    search = (params.get("search") or "").strip().lower()
+    level = (params.get("level") or "").strip().upper()
+
+    log_path = _LOG_FILE_MAP.get(service)
+    if not log_path:
+        return {"ok": False, "error": f"Unknown service: {service}. Valid: {list(_LOG_FILE_MAP.keys())}"}
+
+    p = Path(log_path)
+    if not p.is_file():
+        return {"ok": False, "error": f"Log file not found: {log_path}. Service may not have started yet or logging is not configured."}
+
+    # Read efficiently: for files > 2MB, only read the tail
+    max_read = 2 * 1024 * 1024  # 2MB
+    file_size = p.stat().st_size
+
+    try:
+        if file_size > max_read:
+            with open(p, "rb") as f:
+                f.seek(-max_read, 2)
+                raw = f.read().decode("utf-8", errors="replace")
+            # Drop the first (likely partial) line
+            all_lines = raw.split("\n")[1:]
+        else:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.read().split("\n")
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to read log file: {e}"}
+
+    # Remove trailing empty line from split
+    if all_lines and all_lines[-1] == "":
+        all_lines = all_lines[:-1]
+
+    total_in_file = len(all_lines)
+
+    # Apply severity filter
+    if level and level in _LEVEL_ORDER:
+        min_level = _LEVEL_ORDER[level]
+        filtered = []
+        for line in all_lines:
+            for lv, lv_num in _LEVEL_ORDER.items():
+                if lv_num >= min_level and (f" {lv}:" in line or f" {lv} " in line):
+                    filtered.append(line)
+                    break
+        all_lines = filtered
+
+    # Apply search filter
+    if search:
+        all_lines = [line for line in all_lines if search in line.lower()]
+
+    # Take the last N lines
+    result_lines = all_lines[-lines_requested:]
+
+    return {
+        "ok": True,
+        "service": service,
+        "log_file": log_path,
+        "file_size_bytes": file_size,
+        "total_lines_in_file": total_in_file,
+        "lines_after_filter": len(all_lines),
+        "lines_returned": len(result_lines),
+        "content": "\n".join(result_lines),
+    }
 
 
 # ── Promotion & Blueprint Tools ─────────────────────────────────────────────

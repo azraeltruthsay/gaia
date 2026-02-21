@@ -328,5 +328,33 @@ TOOLS = {
             },
             "required": ["url"]
         }
+    },
+    # --- Self-Introspection Tools ---
+    "introspect_logs": {
+        "description": "View recent service logs for self-diagnosis. Returns the last N lines from a GAIA service log, optionally filtered by search pattern or severity level. Use this to diagnose issues with your own behavior, state transitions, sleep/wake state, response routing, or model selection.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "enum": ["gaia-core", "gaia-web", "gaia-mcp", "gaia-study", "discord"],
+                    "description": "Which service's logs to view."
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of recent lines to return (default: 50, max: 200)."
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Filter to lines containing this substring (case-insensitive)."
+                },
+                "level": {
+                    "type": "string",
+                    "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+                    "description": "Minimum severity level to include."
+                }
+            },
+            "required": ["service"]
+        }
     }
 }
