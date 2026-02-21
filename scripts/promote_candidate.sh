@@ -100,6 +100,7 @@ declare -A SERVICE_CONFIG=(
     ["gaia-study"]="8766:8768:yes"
     ["gaia-web"]="6414::yes"
     ["gaia-orchestrator"]="6410:6411:yes"
+    ["gaia-audio"]="8080:8081:yes"
     ["gaia-common"]=":::no"
 )
 
