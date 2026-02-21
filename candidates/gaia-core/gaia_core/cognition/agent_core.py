@@ -80,10 +80,10 @@ strip_think_tags = _strip_think_tags_robust
 
 @dataclass
 class ComplexityAssessment:
-    """Result of assessing whether a prompt exceeds Lite's natural depth."""
+    """Result of prompt complexity analysis."""
     should_escalate: bool
     reason: str
-    confidence: float  # 0.0–1.0
+    confidence: float
 
 
 def _format_retrieved_session_context(results: dict) -> str:
@@ -749,15 +749,35 @@ class AgentCore:
                 elif backend_env in self.model_pool.models:
                     selected_model_name = backend_env
 
-        # 3. Council routing: Prime when awake, Lite when sleeping
+        # 3. Council routing with thinker override
         if not selected_model_name:
-            if not _gpu_sleeping:
+            text_lower = user_input.lower()
+            force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
+            wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
+
+            if "oracle" in text_lower and self.config.use_oracle:
+                selected_model_name = "oracle"
+            elif not _gpu_sleeping:
+                # Prime is awake -- default to Prime for all prompts
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
-            else:
-                selected_model_name = "lite"
+            elif wants_thinker:
+                # Explicit thinker request while Prime is sleeping -- try anyway
+                for cand in ["prime", "cpu_prime"]:
+                    if cand in self.model_pool.models:
+                        selected_model_name = cand
+                        break
+
+            # Fallback: Lite when Prime is sleeping (or unavailable)
+            if not selected_model_name:
+                if "lite" in self.model_pool.models:
+                    selected_model_name = "lite"
+                elif "prime" in self.model_pool.models:
+                    selected_model_name = "prime"
+                else:
+                    selected_model_name = "gpu_prime" if "gpu_prime" in self.model_pool.models else "cpu_prime"
 
         # 4. Lazy loading + fallback chain if selected model not available
         if selected_model_name not in self.model_pool.models:
@@ -1774,7 +1794,8 @@ class AgentCore:
                     if review.suggestion:
                         note += f" | Suggestion: {review.suggestion}"
                     logger.info("Post-stream observer review: %s", note)
-                    yield {"type": "token", "value": f"\n\n{note}\n"}
+                    if self.config.constants.get("OBSERVER_SHOW_IN_RESPONSE", True):
+                        yield {"type": "token", "value": f"\n\n{note}\n"}
 
                     # Scrub confabulated file references from the response.
                     # The observer catches fake paths at CAUTION level — strip
@@ -1818,6 +1839,7 @@ class AgentCore:
 
             # Epistemic citation check — warn user if fabricated citations detected
             epistemic_warning = ""
+            _show_observer = self.config.constants.get("OBSERVER_SHOW_IN_RESPONSE", True)
             try:
                 eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
                 if eg_config.get("annotate_unverified_citations", True):
@@ -1829,12 +1851,15 @@ class AgentCore:
                         if step in ('observer_path_validation', 'observer_citation_verification'):
                             warning_count = summary.count('does not exist') + summary.count('Unverified')
                             if warning_count >= max_before_warn:
-                                epistemic_warning = (
-                                    f"\n\n---\n*[Observer: Some file references in this response "
-                                    f"could not be verified against the knowledge base. "
-                                    f"Information may be from general knowledge rather than "
-                                    f"retrieved documents.]*\n---\n"
-                                )
+                                if _show_observer:
+                                    epistemic_warning = (
+                                        f"\n\n---\n*[Observer: Some file references in this response "
+                                        f"could not be verified against the knowledge base. "
+                                        f"Information may be from general knowledge rather than "
+                                        f"retrieved documents.]*\n---\n"
+                                    )
+                                else:
+                                    logger.info("Epistemic warning suppressed (OBSERVER_SHOW_IN_RESPONSE=false): %d unverified citations", warning_count)
                                 break
             except Exception:
                 logger.debug("Epistemic citation check failed", exc_info=True)
@@ -2223,80 +2248,77 @@ class AgentCore:
 
         return self.MIND_TAG_FORMAT.format(mind=mind_label) + "\n\n"
 
-    # Non-escalation markers — Lite handles these well
-    _NO_ESCALATE_MARKERS = [
-        "recite", "poem", "verse", "lyrics", "quote", "memorize", "memorised", "cite",
-    ]
-    # Technical depth markers
-    _TECHNICAL_MARKERS = [
-        "code", "script", "function", "class", "api", "stack trace", "traceback",
-        "debug", "optimiz", "profile", "benchmark", "architecture", "design",
-        "plan", "steps", "multistep", "algorithm", "performance", "latency",
-        "concurrency", "thread", "process", "gpu", "cuda", "memory leak",
-    ]
-    # Emotional / philosophical depth markers
-    _DEPTH_MARKERS = [
-        "meaning of", "purpose of", "ethics", "moral", "philosophy", "existential",
-        "advice", "should i", "struggling with", "help me understand",
-        "what do you think about", "how do you feel",
-    ]
-    # System internals (GAIA self-reference)
-    _SYSTEM_MARKERS = [
-        "gaia", "your code", "your system", "your architecture", "sleep wake",
-        "checkpoint", "prime", "lite model", "council", "observer",
-    ]
+    def _should_escalate_to_thinker(self, text: str) -> bool:
+        """Backwards-compatible wrapper around _assess_complexity."""
+        return self._assess_complexity(text).should_escalate
 
-    def _assess_complexity(self, user_input: str) -> 'ComplexityAssessment':
+    def _assess_complexity(self, text: str) -> "ComplexityAssessment":
         """Assess whether a prompt exceeds Lite's natural depth.
 
-        Returns a ComplexityAssessment with escalation decision, reason, and confidence.
+        Escalation signals:
+        - Long/complex asks (>120 words)
+        - Architecture, design, debugging, multi-step planning
+        - Emotional/philosophical depth (advice, meaning, ethics)
+        - System internals (GAIA self-reference, infrastructure)
+
+        Non-escalation signals (Lite handles well):
+        - Greetings, casual chat, quick facts
+        - Simple questions, one-liners
+        - Recitation, quotes, creative short-form
         """
-        if not user_input:
-            return ComplexityAssessment(should_escalate=False, reason="", confidence=1.0)
+        if not text:
+            return ComplexityAssessment(False, "empty input", 1.0)
 
-        t = user_input.lower()
+        t = text.lower()
 
-        # Non-escalation: recitation/quotes stay on Lite
-        if any(m in t for m in self._NO_ESCALATE_MARKERS):
-            return ComplexityAssessment(should_escalate=False, reason="recitation-style", confidence=0.9)
+        # Recitation/quote-style asks stay on Lite for stability
+        recite_markers = [
+            "recite", "poem", "verse", "lyrics", "quote",
+            "memorize", "memorised", "cite",
+        ]
+        if any(m in t for m in recite_markers):
+            return ComplexityAssessment(False, "recitation/creative short-form", 0.9)
 
-        # Very long prompts → escalate
+        # Very long => escalate
         word_count = len(t.split())
         if word_count > 120:
-            return ComplexityAssessment(
-                should_escalate=True,
-                reason=f"long prompt ({word_count} words)",
-                confidence=0.85,
-            )
+            return ComplexityAssessment(True, f"long prompt ({word_count} words)", 0.85)
 
-        # Technical depth
-        hit = next((m for m in self._TECHNICAL_MARKERS if m in t), None)
-        if hit:
-            return ComplexityAssessment(
-                should_escalate=True,
-                reason=f"technical depth ({hit})",
-                confidence=0.8,
-            )
+        # Technical/architecture markers
+        tech_markers = [
+            "code", "script", "function", "class", "api",
+            "stack trace", "traceback", "debug", "optimiz",
+            "profile", "benchmark", "architecture", "design",
+            "plan", "steps", "multistep", "algorithm",
+            "performance", "latency", "concurrency", "thread",
+            "process", "gpu", "cuda", "memory leak",
+        ]
+        for marker in tech_markers:
+            if marker in t:
+                return ComplexityAssessment(True, f"technical depth ({marker})", 0.7)
 
-        # Emotional / philosophical depth
-        hit = next((m for m in self._DEPTH_MARKERS if m in t), None)
-        if hit:
-            return ComplexityAssessment(
-                should_escalate=True,
-                reason=f"emotional/philosophical depth ({hit})",
-                confidence=0.7,
-            )
+        # Emotional/philosophical depth
+        depth_markers = [
+            "meaning of", "ethics", "moral", "philosophy",
+            "what should i do about", "advice on",
+            "help me understand", "explain why",
+            "how do you feel", "what do you think about",
+        ]
+        for marker in depth_markers:
+            if marker in t:
+                return ComplexityAssessment(True, f"needs reflective depth ({marker})", 0.6)
 
-        # System internals
-        hit = next((m for m in self._SYSTEM_MARKERS if m in t), None)
-        if hit:
-            return ComplexityAssessment(
-                should_escalate=True,
-                reason=f"system internals ({hit})",
-                confidence=0.75,
-            )
+        # GAIA self-reference / infrastructure
+        self_markers = [
+            "gaia", "your system", "your architecture",
+            "how do you work", "your memory", "your sleep",
+            "prime", "checkpoint",
+        ]
+        for marker in self_markers:
+            if marker in t:
+                return ComplexityAssessment(True, f"system introspection ({marker})", 0.65)
 
-        return ComplexityAssessment(should_escalate=False, reason="", confidence=0.9)
+        return ComplexityAssessment(False, "within Lite's natural depth", 0.7)
 
     def _escalate_to_prime(self, user_input: str, lite_response: str,
                            reason: str, session_id: str) -> None:
