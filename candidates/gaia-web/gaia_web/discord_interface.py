@@ -338,11 +338,14 @@ class DiscordInterface:
             from gaia_web.utils.retry import post_with_retry
 
             fallback = f"{self.core_fallback_endpoint}/process_packet" if self.core_fallback_endpoint else None
-            response = await post_with_retry(
-                f"{self.core_endpoint}/process_packet",
-                json=packet.to_serializable_dict(),
-                fallback_url=fallback,
-            )
+
+            # Show typing indicator while GAIA processes the request
+            async with message_obj.channel.typing():
+                response = await post_with_retry(
+                    f"{self.core_endpoint}/process_packet",
+                    json=packet.to_serializable_dict(),
+                    fallback_url=fallback,
+                )
 
             # Expect a full CognitionPacket back
             completed_packet_dict = response.json()
