@@ -93,6 +93,15 @@ class SleepTaskScheduler:
             handler=self._run_code_evolution,
         ))
 
+        self.register_task(SleepTask(
+            task_id="code_review",
+            task_type="SELF_MODEL_UPDATE",
+            priority=4,
+            interruptible=True,
+            estimated_duration_seconds=120,
+            handler=self._run_code_review,
+        ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -508,6 +517,290 @@ class SleepTaskScheduler:
                 f.write(entry)
         except Exception:
             logger.debug("Failed to append to prime.md", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # code_review (SELF_MODEL_UPDATE) — autonomous blueprint fidelity review
+    # ------------------------------------------------------------------
+
+    _CODE_REVIEW_ADAPTER = "code-architect"
+    _PRIME_ENDPOINT = "http://gaia-prime:7777"
+    _REVIEW_QUEUE_PATH = "/knowledge/curricula/code-architect/review_queue.json"
+
+    def _run_code_review(self) -> None:
+        """
+        Autonomous code review using the code-architect adapter.
+
+        For each live service blueprint:
+        1. Run AST summarizer on live source files
+        2. Run mechanical pre-check
+        3. Build review prompt
+        4. Query gaia-prime with code-architect adapter
+        5. Parse ReviewResult and surface discrepancies
+        """
+        try:
+            from gaia_common.utils.ast_summarizer import summarize_file
+            from gaia_common.utils.blueprint_io import load_blueprint, save_blueprint
+            from gaia_common.utils.blueprint_precheck import run_blueprint_precheck
+            from gaia_common.utils.review_prompt_builder import ReviewResult, build_review_prompt
+        except ImportError:
+            logger.debug("Code review dependencies not available, skipping")
+            return
+
+        # Check if adapter exists (no point running review without it)
+        if not self._adapter_available():
+            logger.debug("code-architect adapter not available, skipping code review")
+            return
+
+        all_discrepancies: list[dict] = []
+        services_reviewed = 0
+        review_queue_items: list[dict] = []
+
+        for service_id in self._YAML_BLUEPRINT_SERVICES:
+            bp = load_blueprint(service_id)
+            if bp is None:
+                continue
+
+            source_dir = self._SERVICE_SOURCE_DIRS.get(service_id)
+            if source_dir is None or not Path(source_dir).exists():
+                source_dir = f"/app/{service_id.replace('-', '_')}"
+                if not Path(source_dir).exists():
+                    continue
+
+            try:
+                result = self._review_service(service_id, bp, source_dir)
+                if result is None:
+                    continue
+
+                services_reviewed += 1
+
+                # Process discrepancies
+                critical_major = [
+                    d for d in result.discrepancies
+                    if d.severity in ("critical", "major")
+                ]
+
+                if critical_major:
+                    # Append to blueprint open_questions
+                    self._append_review_findings(service_id, bp, critical_major)
+
+                    # Collect for queue
+                    for d in critical_major:
+                        item = {
+                            "service_id": service_id,
+                            "dimension": d.dimension,
+                            "severity": d.severity,
+                            "blueprint_claim": d.blueprint_claim,
+                            "code_evidence": d.code_evidence,
+                            "recommendation": d.recommendation,
+                            "affected_file": d.affected_file,
+                            "review_timestamp": result.review_timestamp.isoformat(),
+                        }
+                        review_queue_items.append(item)
+                        all_discrepancies.append(item)
+
+                logger.info(
+                    "Code review %s: fidelity=%.0f%% discrepancies=%d (critical/major=%d)",
+                    service_id, result.overall_fidelity_score * 100,
+                    len(result.discrepancies), len(critical_major),
+                )
+
+            except Exception:
+                logger.warning("Code review failed for %s", service_id, exc_info=True)
+
+        # Write review queue for Web UI consumption
+        if review_queue_items:
+            self._write_review_queue(review_queue_items)
+
+        # Summary to prime.md
+        if services_reviewed > 0:
+            disc_summary = ""
+            if all_discrepancies:
+                # Group by service for summary
+                by_svc: dict[str, list[str]] = {}
+                for d in all_discrepancies:
+                    by_svc.setdefault(d["service_id"], []).append(
+                        f"[{d['severity']}] {d['blueprint_claim']}"
+                    )
+                parts = [f"{svc}: {items[0]}" for svc, items in by_svc.items()]
+                disc_summary = " " + "; ".join(parts[:3])
+
+            note = (
+                f"Code review cycle complete. {len(all_discrepancies)} discrepancies found "
+                f"across {services_reviewed} services.{disc_summary}"
+            )
+            self._append_prime_note(note, high_priority=bool(all_discrepancies))
+
+        logger.info(
+            "Code review complete: %d services, %d critical/major discrepancies",
+            services_reviewed, len(all_discrepancies),
+        )
+
+    def _adapter_available(self) -> bool:
+        """Check if the code-architect adapter is available."""
+        # Check via model pool if available
+        if self.model_pool is not None:
+            model = getattr(self.model_pool, "_primary_model", None)
+            if model is not None and hasattr(model, "health_check"):
+                try:
+                    return model.health_check()
+                except Exception:
+                    pass
+
+        # Fallback: check if adapter directory exists
+        adapter_dir = Path("/shared/adapters/code-architect")
+        return adapter_dir.exists() and any(adapter_dir.iterdir()) if adapter_dir.exists() else False
+
+    def _review_service(self, service_id: str, bp, source_dir: str):
+        """Run a full review cycle for one service. Returns ReviewResult or None."""
+        import json as _json
+
+        from gaia_common.utils.ast_summarizer import summarize_file
+        from gaia_common.utils.blueprint_precheck import run_blueprint_precheck
+        from gaia_common.utils.review_prompt_builder import ReviewResult, build_review_prompt
+
+        # Step 1: AST summaries
+        source_path = Path(source_dir)
+        ast_summaries = {}
+        for py_file in sorted(source_path.rglob("*.py")):
+            if py_file.name.startswith("_") and py_file.name != "__init__.py":
+                continue
+            try:
+                summary = summarize_file(str(py_file))
+                rel_name = str(py_file.relative_to(source_path))
+                ast_summaries[rel_name] = summary
+            except Exception:
+                continue
+
+        if not ast_summaries:
+            return None
+
+        # Step 2: Pre-check
+        precheck_result = run_blueprint_precheck(bp, source_dir)
+
+        # Step 3: Build prompt
+        prompt = build_review_prompt(
+            bp, ast_summaries, precheck_result,
+            review_direction="forward",
+            max_prompt_tokens=8000,  # conservative for sleep-cycle review
+        )
+
+        # Step 4: Call gaia-prime with adapter
+        response_text = self._call_prime_with_adapter(prompt)
+        if not response_text:
+            return None
+
+        # Step 5: Parse ReviewResult
+        try:
+            # Extract JSON from response (may be wrapped in markdown)
+            json_text = response_text.strip()
+            if json_text.startswith("```"):
+                lines = json_text.split("\n")
+                lines = [ln for ln in lines if not ln.strip().startswith("```")]
+                json_text = "\n".join(lines).strip()
+
+            data = _json.loads(json_text)
+            return ReviewResult.model_validate(data)
+        except Exception:
+            logger.warning("Failed to parse review result for %s", service_id, exc_info=True)
+            return None
+
+    def _call_prime_with_adapter(self, prompt: str) -> str:
+        """Call gaia-prime with the code-architect adapter. Returns response text."""
+        # Try model pool first
+        if self.model_pool is not None:
+            model = getattr(self.model_pool, "_primary_model", None)
+            if model is not None and hasattr(model, "create_chat_completion_with_adapter"):
+                try:
+                    result = model.create_chat_completion_with_adapter(
+                        adapter_name=self._CODE_REVIEW_ADAPTER,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=2048,
+                        temperature=0.0,
+                    )
+                    return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                except Exception:
+                    logger.warning("Model pool adapter call failed, trying direct HTTP", exc_info=True)
+
+        # Fallback: direct HTTP call
+        try:
+            import requests
+
+            endpoint = os.getenv("PRIME_ENDPOINT", self._PRIME_ENDPOINT)
+            resp = requests.post(
+                f"{endpoint}/v1/chat/completions",
+                json={
+                    "model": self._CODE_REVIEW_ADAPTER,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 2048,
+                    "temperature": 0.0,
+                },
+                timeout=90,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception:
+            logger.warning("Direct HTTP adapter call failed", exc_info=True)
+            return ""
+
+    def _append_review_findings(self, service_id: str, bp, discrepancies: list) -> None:
+        """Append critical/major review findings to a service blueprint's open_questions."""
+        try:
+            from gaia_common.utils.blueprint_io import load_blueprint, save_blueprint
+            from gaia_common.models.blueprint import Intent
+
+            # Load fresh copy (may have been updated)
+            fresh_bp = load_blueprint(service_id, candidate=False)
+            if fresh_bp is None:
+                fresh_bp = load_blueprint(service_id, candidate=True)
+            if fresh_bp is None:
+                return
+
+            # Ensure intent exists
+            if fresh_bp.intent is None:
+                fresh_bp.intent = Intent(purpose="(auto-populated by code review)")
+
+            # Append findings as open questions
+            existing = set(fresh_bp.intent.open_questions or [])
+            for d in discrepancies:
+                question = f"[{d.severity}] {d.dimension}: {d.blueprint_claim} — {d.recommendation}"
+                if question not in existing:
+                    fresh_bp.intent.open_questions.append(question)
+
+            # Save as candidate (sleep cycle cannot write to live)
+            save_blueprint(fresh_bp, candidate=True)
+            logger.info("Appended %d findings to %s blueprint open_questions", len(discrepancies), service_id)
+
+        except Exception:
+            logger.debug("Failed to append review findings for %s", service_id, exc_info=True)
+
+    def _write_review_queue(self, items: list) -> None:
+        """Write review queue items for Web UI consumption."""
+        import json as _json
+
+        queue_path = Path(self._REVIEW_QUEUE_PATH)
+        try:
+            # Merge with existing queue
+            existing: list = []
+            if queue_path.exists():
+                existing = _json.loads(queue_path.read_text(encoding="utf-8"))
+
+            # Deduplicate by (service_id, blueprint_claim)
+            seen = {(e["service_id"], e["blueprint_claim"]) for e in existing}
+            for item in items:
+                key = (item["service_id"], item["blueprint_claim"])
+                if key not in seen:
+                    existing.append(item)
+                    seen.add(key)
+
+            queue_path.parent.mkdir(parents=True, exist_ok=True)
+            queue_path.write_text(
+                _json.dumps(existing, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info("Review queue updated: %d items", len(existing))
+        except Exception:
+            logger.debug("Failed to write review queue", exc_info=True)
 
     def _run_code_evolution(self) -> None:
         """Generate code evolution snapshot for temporal self-awareness."""
