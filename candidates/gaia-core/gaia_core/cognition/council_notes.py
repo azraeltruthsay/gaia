@@ -73,7 +73,7 @@ class CouncilNoteManager:
         self._enforce_cap()
 
         now = datetime.now(timezone.utc)
-        ts_str = now.strftime("%Y%m%dT%H%M%SZ")
+        ts_str = now.strftime("%Y%m%dT%H%M%S") + f"{now.microsecond:06d}Z"
         filename = f"{ts_str}{self.NOTE_SUFFIX}"
         note_path = self.notes_dir / filename
 
@@ -240,14 +240,15 @@ class CouncilNoteManager:
         return result
 
     def _parse_timestamp_from_filename(self, filename):
-        """Extract datetime from filename like 20260221T143200Z-council.md."""
+        """Extract datetime from filename like 20260221T143200123456Z-council.md."""
         ts_part = filename.replace(self.NOTE_SUFFIX, "")
-        try:
-            return datetime.strptime(
-                ts_part, "%Y%m%dT%H%M%SZ"
-            ).replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
+        # Try microsecond-precision format first, then second-precision fallback
+        for fmt in ("%Y%m%dT%H%M%S%fZ", "%Y%m%dT%H%M%SZ"):
+            try:
+                return datetime.strptime(ts_part, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
 
     def _is_expired(self, ts):
         age_hours = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
