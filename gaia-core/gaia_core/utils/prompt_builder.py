@@ -252,6 +252,51 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         logger.error(f"Error processing retrieved_documents: {e}", exc_info=True)
         retrieved_docs_content = "" # Ensure it's cleared on error
 
+    # Tool execution results (web_search, web_fetch, etc.)
+    tool_result_content = ""
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'tool_result':
+                processed_data_field_keys.add('tool_result')
+                tr = getattr(df, 'value', None)
+                if tr and isinstance(tr, dict) and tr.get('success'):
+                    tool_name = tr.get('tool', 'unknown')
+                    output = tr.get('output', {})
+                    # Format web_search results clearly
+                    if tool_name == 'web_search' and isinstance(output, dict):
+                        results = output.get('results', [])
+                        if results:
+                            lines = [f"--- Web Search Results (query: {output.get('query', '?')}) ---"]
+                            for r in results[:5]:
+                                lines.append(f"  [{r.get('trust_tier', '?')}] {r.get('title', 'Untitled')}")
+                                lines.append(f"    URL: {r.get('url', '')}")
+                                lines.append(f"    {r.get('snippet', '')}")
+                            lines.append("--- End of Web Search Results ---")
+                            tool_result_content = "\n".join(lines)
+                    # Format web_fetch results clearly
+                    elif tool_name == 'web_fetch' and isinstance(output, dict):
+                        content_text = output.get('content', '')
+                        if content_text:
+                            if len(content_text) > 4000:
+                                content_text = content_text[:4000] + "\n[...truncated...]"
+                            tool_result_content = (
+                                f"--- Web Page Content (title: {output.get('title', '?')}, "
+                                f"domain: {output.get('domain', '?')}) ---\n"
+                                f"{content_text}\n"
+                                "--- End of Web Page Content ---"
+                            )
+                    # Generic tool result
+                    elif output:
+                        out_str = str(output)
+                        if len(out_str) > 3000:
+                            out_str = out_str[:3000] + "...[truncated]"
+                        tool_result_content = (
+                            f"--- Tool Result ({tool_name}) ---\n{out_str}\n--- End of Tool Result ---"
+                        )
+                break
+    except Exception:
+        logger.debug("Could not extract tool_result from packet.content.data_fields")
+
     system_content_parts = []
 
     # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
@@ -456,6 +501,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
             "Never invent facts, dates, names, or statistics."
         )
         system_content_parts.append(epistemic_directive)
+
+    # 7.5. Tool Execution Results (web_search, web_fetch, etc.)
+    # Rendered prominently so even small models can't miss them.
+    if tool_result_content:
+        system_content_parts.append(tool_result_content)
+        system_content_parts.append(
+            "INSTRUCTION: The system already executed a tool on your behalf and the "
+            "results are shown above. Use these results to answer the user's question. "
+            "Do NOT say you cannot search the web or fetch content — it has already been done. "
+            "Summarize and present the results helpfully."
+        )
 
     # 8. Memory Guidance & Snapshot
     if memory_guidance_block_content:
