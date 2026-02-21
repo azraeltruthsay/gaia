@@ -2177,6 +2177,16 @@ class AgentCore:
 
         return text
 
+    # Mind tag constants for [Lite] / [Prime] response tagging
+    MIND_TAG_FORMAT = "[{mind}]"
+    _MIND_ALIASES = {
+        "gpu_prime": "Prime",
+        "cpu_prime": "Prime",
+        "prime": "Prime",
+        "lite": "Lite",
+        "oracle": "Oracle",
+    }
+
     def _build_response_header(
         self,
         model_name: str,
@@ -2186,28 +2196,17 @@ class AgentCore:
         post_run_observer,
     ) -> str:
         """
-        Build a concise status header prepended to user-facing responses.
-        Shows model, packet state, and observer activity at a glance.
+        Build a mind tag prepended to user-facing responses.
+        Shows [Lite] or [Prime] so the user knows which depth is speaking.
         """
-        # Model display name
         model_display = model_name or "unknown"
-        # Friendly aliases
-        model_aliases = {
-            "gpu_prime": "Thinker (GPU)",
-            "cpu_prime": "Thinker (CPU)",
-            "prime": "Thinker",
-            "lite": "Operator",
-            "oracle": "Oracle",
-        }
-        model_label = model_aliases.get(model_display, model_display)
+        mind_label = self._MIND_ALIASES.get(model_display, model_display)
 
-        # Packet state
+        # Log verbose debug info that used to be in the header
         try:
             state_val = packet.status.state.value if packet and packet.status else "unknown"
         except Exception:
             state_val = "unknown"
-
-        # Observer status
         if observer_instance is None:
             obs_status = "disabled"
         elif active_stream_observer is not None:
@@ -2216,8 +2215,9 @@ class AgentCore:
             obs_status = "post-stream"
         else:
             obs_status = "idle"
+        logger.debug("Response header: model=%s state=%s observer=%s", mind_label, state_val, obs_status)
 
-        return f"[Model: {model_label} | State: {state_val} | Observer: {obs_status}]\n\n"
+        return self.MIND_TAG_FORMAT.format(mind=mind_label) + "\n\n"
 
     def _should_escalate_to_thinker(self, text: str) -> bool:
         """
