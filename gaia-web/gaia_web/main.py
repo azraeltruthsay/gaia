@@ -32,14 +32,16 @@ from gaia_common.protocols.cognition_packet import (
     PacketState, ToolRoutingState, Reasoning, TargetEngine
 )
 
-logger = logging.getLogger("GAIA.Web.API")
-
-# Suppress health check access log spam
+# Persistent file logging — writes to /logs/gaia-web.log (mounted volume)
 try:
-    from gaia_common.utils import install_health_check_filter
+    from gaia_common.utils import setup_logging, install_health_check_filter
+    _log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    setup_logging(log_dir="/logs", level=_log_level, service_name="gaia-web")
     install_health_check_filter()
 except ImportError:
-    pass  # gaia_common not available
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger("GAIA.Web.API")
 
 # Configuration from environment
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
