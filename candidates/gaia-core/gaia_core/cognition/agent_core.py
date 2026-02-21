@@ -4,6 +4,7 @@ import uuid
 import json
 import sys
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
 from gaia_core.memory.semantic_codex import SemanticCodex
@@ -35,6 +36,7 @@ from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_p
 from gaia_core.cognition.cognitive_dispatcher import process_execution_results
 from gaia_core.cognition.knowledge_enhancer import enhance_packet
 from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect
+from gaia_core.cognition.council_notes import CouncilNoteManager
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
@@ -57,6 +59,7 @@ from gaia_core.cognition.loop_recovery import (
     LoopInterrupt
 )
 from gaia_core.cognition.loop_detector import LoopDetectorConfig
+from gaia_core.cognition.council_notes import CouncilNoteManager
 
 logger = logging.getLogger("GAIA.AgentCore")
 HISTORY_SUMMARY_THRESHOLD = 20
@@ -73,6 +76,14 @@ _GCP_SECTIONS = ['HEADER', 'ROUTING', 'MODEL', 'CONTEXT', 'INTENT', 'CONTENT',
 
 # Use the migrated strip_think_tags from output_router
 strip_think_tags = _strip_think_tags_robust
+
+
+@dataclass
+class ComplexityAssessment:
+    """Result of assessing whether a prompt exceeds Lite's natural depth."""
+    should_escalate: bool
+    reason: str
+    confidence: float  # 0.0–1.0
 
 
 def _format_retrieved_session_context(results: dict) -> str:
@@ -210,6 +221,9 @@ class AgentCore:
         
         # Timeline store for temporal grounding (set by main.py after sleep loop init)
         self.timeline_store = None
+
+        # Council Notes for Lite→Prime handoff
+        self.council_notes = CouncilNoteManager(self.config)
 
         # Initialize SemanticCodex and CodexWriter
         self.semantic_codex = SemanticCodex.instance(self.config)
@@ -715,128 +729,71 @@ class AgentCore:
         # Load the selected persona
         self.ai_manager.initialize(persona_name)
         
-        # Role mapping (keep internal keys stable):
-        # - "lite"  => Operator (CPU orchestrator: intent, tools, summaries, short answers)
-        # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
-        # - "oracle" => External/cloud escalation
+        # --- Council Protocol Model Selection ---
+        # Prime when awake, Lite when sleeping. Oracle on explicit request.
+        # Post-response escalation (Council notes) replaces pre-response heuristic.
         selected_model_name = None
-        # Check if GPU is released for sleep — skip gpu_prime in all selection paths
         _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
 
-        # 1. Model Selection (Simplified)
-        # NEW: User's suggestion - if a knowledge base is triggered, prefer the GPU model.
-        if knowledge_base_name:
-            logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
-            for cand in ["gpu_prime", "prime"]:
-                if cand == "gpu_prime" and _gpu_sleeping:
-                    continue
-                if cand in self.config.MODEL_CONFIGS:
-                    selected_model_name = cand
-                    logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
-                    break
+        # 1. Explicit oracle request
+        text_lower = user_input.lower()
+        if "oracle" in text_lower and getattr(self.config, 'use_oracle', False):
+            selected_model_name = "oracle"
 
+        # 2. Respect GAIA_BACKEND env override (for debugging)
         if not selected_model_name:
-            # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-            logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())} gpu_sleeping={_gpu_sleeping}")
             if backend_env:
-                # Skip gpu_prime when GPU is released for sleep
                 if backend_env == "gpu_prime" and _gpu_sleeping:
-                    logger.info(f"GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
+                    logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; using Council routing")
                 elif backend_env in self.model_pool.models:
                     selected_model_name = backend_env
-                else:
-                    logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
-                    logger.warning(f"[MODEL_SELECT DEBUG] pool keys at backend check: {list(self.model_pool.models.keys())}")
 
+        # 3. Council routing: Prime when awake, Lite when sleeping
         if not selected_model_name:
-            text_lower = user_input.lower()
-            force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
-            # Explicit callouts to Thinker (GPU) if available
-            wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
-            # Default path: Operator (lite) handles most turns; escalate to Thinker if explicitly requested.
-            if "oracle" in text_lower and self.config.use_oracle:
-                selected_model_name = "oracle"
-            elif wants_thinker:
-                # Prefer GPU prime, then prime, then cpu_prime
+            if not _gpu_sleeping:
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                    if cand == "gpu_prime" and _gpu_sleeping:
-                        continue
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
-            # If still unset, prefer Operator (lite); fall back to prime if lite is missing.
-            if not selected_model_name:
-                if "lite" in self.model_pool.models:
-                    selected_model_name = "lite"
-                elif "prime" in self.model_pool.models:
-                    selected_model_name = "prime"
-                else:
-                    selected_model_name = "gpu_prime" if "gpu_prime" in self.model_pool.models else "cpu_prime"
-        
-        # If the chosen model isn't present yet, try sensible fallbacks
-        # Try lazy loading for the selected model first
+            else:
+                selected_model_name = "lite"
+
+        # 4. Lazy loading + fallback chain if selected model not available
         if selected_model_name not in self.model_pool.models:
-            logger.info(f"Selected model '{selected_model_name}' not present in pool; attempting lazy load")
+            logger.info("Selected model '%s' not present in pool; attempting lazy load", selected_model_name)
             try:
                 self.model_pool.ensure_model_loaded(selected_model_name)
             except Exception as e:
-                logger.warning(f"Lazy load failed for '{selected_model_name}': {e}")
+                logger.warning("Lazy load failed for '%s': %s", selected_model_name, e)
 
         if selected_model_name not in self.model_pool.models:
-            logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
-            logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
-            # Try preferred backend first
-            backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
+            logger.info("Model '%s' still not available; attempting fallback selection", selected_model_name)
+            # Priority: Prime tiers (when awake), then Lite, then oracle/azrael
             candidates = []
-            if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
-                candidates.append(backend_env)
-            # Prefer Operator (lite) first, then Thinker tiers, then oracle/azrael
-            candidates.extend(["lite", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
+            if not _gpu_sleeping:
+                candidates.extend(["gpu_prime", "prime", "cpu_prime"])
+            candidates.extend(["lite", "oracle", "azrael"])
             found = None
             for cand in candidates:
                 if cand == "gpu_prime" and _gpu_sleeping:
                     continue
-                logger.warning(f"[MODEL_SELECT DEBUG] checking candidate: {cand}")
-                # Try lazy loading for each candidate
                 if cand not in self.model_pool.models:
-                    logger.info(f"[MODEL_SELECT DEBUG] attempting lazy load for: {cand}")
                     try:
                         self.model_pool.ensure_model_loaded(cand)
-                    except Exception as e:
-                        logger.warning(f"Lazy load failed for '{cand}': {e}")
+                    except Exception:
+                        pass
                 if cand in self.model_pool.models:
                     found = cand
-                    logger.warning(f"[MODEL_SELECT DEBUG] candidate found: {found}")
                     break
             if found:
-                logger.info(f"Fallback selected model: {found}")
+                logger.info("Fallback selected model: %s", found)
                 selected_model_name = found
             else:
                 yield {"type": "token", "value": "I am currently unable to process your request as my primary model is unavailable."}
                 return
 
-        # Heuristic escalation: if Operator (lite) was picked but the prompt looks complex,
-        # auto-route to a Thinker when available (unless GAIA_FORCE_OPERATOR=1).
-        try:
-            if selected_model_name == "lite":
-                force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
-                if not force_operator and self._should_escalate_to_thinker(user_input):
-                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                        if cand == "gpu_prime" and _gpu_sleeping:
-                            continue
-                        # Try lazy loading for escalation candidates
-                        if cand not in self.model_pool.models:
-                            try:
-                                self.model_pool.ensure_model_loaded(cand)
-                            except Exception:
-                                pass
-                        if cand in self.model_pool.models:
-                            logger.info(f"[MODEL_SELECT DEBUG] escalating from lite-> {cand} based on heuristics")
-                            selected_model_name = cand
-                            break
-        except Exception:
-            logger.debug("Heuristic escalation check failed; continuing with selected model", exc_info=True)
+        logger.info("[MODEL_SELECT] Council routing: model=%s gpu_sleeping=%s", selected_model_name, _gpu_sleeping)
 
         # Acquire the selected model. `selected_model_name` may already be a
         # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
@@ -1441,7 +1398,27 @@ class AgentCore:
         ts_write({"type": "reflection-pre", "packet_id": packet.header.packet_id, "out": refined_plan_text}, session_id, source=source, destination_context=_metadata)
 
         # 5. Final Response Generation
-        final_messages = build_from_packet(packet)
+        # Council Protocol: inject pending council notes for Prime
+        _council_task_key = None
+        if selected_model_name in ("gpu_prime", "prime", "cpu_prime"):
+            try:
+                pending_notes = self.council_notes.read_pending_notes()
+                if pending_notes:
+                    council_ctx = self.council_notes.format_notes_for_prime(pending_notes)
+                    packet.content.data_fields.append(DataField(
+                        key="council_context",
+                        value=council_ctx,
+                        type="text",
+                        source="council_notes",
+                    ))
+                    _council_task_key = "council_followup"
+                    consumed_paths = [n["path"] for n in pending_notes]
+                    self.council_notes.mark_notes_consumed(consumed_paths)
+                    logger.info("Injected %d Council notes into Prime's prompt", len(pending_notes))
+            except Exception:
+                logger.debug("Council notes injection failed", exc_info=True)
+
+        final_messages = build_from_packet(packet, task_instruction_key=_council_task_key)
         # Also print the final assembled messages immediately before generation.
         try:
             with open("final_prompt_for_review.json", "w") as f:
@@ -1866,6 +1843,17 @@ class AgentCore:
             yield {"type": "token", "value": _header + user_facing_response + epistemic_warning}
             logger.debug(f"Yielded to user: {user_facing_response}")
 
+            # Council Protocol: escalate to Prime if Lite handled a complex prompt
+            if selected_model_name == "lite" and _gpu_sleeping:
+                assessment = self._assess_complexity(user_input)
+                if assessment.should_escalate:
+                    self._escalate_to_prime(
+                        user_input=user_input,
+                        lite_response=user_facing_response,
+                        reason=assessment.reason,
+                        session_id=session_id,
+                    )
+
             # If the response came from the Oracle path, persist it as a learned fact
             # so future turns can answer locally without another external call.
             try:
@@ -1902,6 +1890,22 @@ class AgentCore:
                 turn_end_event["probe_session_stats"] = probe_stats
             ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
             self.session_manager.record_last_activity()
+
+            # --- Council Protocol: Post-response escalation ---
+            # If Lite responded while Prime is sleeping, assess whether
+            # the prompt deserves deeper thought and write a Council note.
+            try:
+                if selected_model_name == "lite" and _gpu_sleeping:
+                    assessment = self._assess_complexity(user_input)
+                    if assessment.should_escalate:
+                        self._escalate_to_prime(
+                            user_input=user_input,
+                            lite_response=user_facing_response,
+                            reason=assessment.reason,
+                            session_id=session_id,
+                        )
+            except Exception:
+                logger.debug("Council escalation check failed", exc_info=True)
 
             # --- Loop Detection: Record output and check for loops ---
             if loop_manager and loop_manager.enabled:
@@ -2219,29 +2223,101 @@ class AgentCore:
 
         return self.MIND_TAG_FORMAT.format(mind=mind_label) + "\n\n"
 
-    def _should_escalate_to_thinker(self, text: str) -> bool:
+    # Non-escalation markers — Lite handles these well
+    _NO_ESCALATE_MARKERS = [
+        "recite", "poem", "verse", "lyrics", "quote", "memorize", "memorised", "cite",
+    ]
+    # Technical depth markers
+    _TECHNICAL_MARKERS = [
+        "code", "script", "function", "class", "api", "stack trace", "traceback",
+        "debug", "optimiz", "profile", "benchmark", "architecture", "design",
+        "plan", "steps", "multistep", "algorithm", "performance", "latency",
+        "concurrency", "thread", "process", "gpu", "cuda", "memory leak",
+    ]
+    # Emotional / philosophical depth markers
+    _DEPTH_MARKERS = [
+        "meaning of", "purpose of", "ethics", "moral", "philosophy", "existential",
+        "advice", "should i", "struggling with", "help me understand",
+        "what do you think about", "how do you feel",
+    ]
+    # System internals (GAIA self-reference)
+    _SYSTEM_MARKERS = [
+        "gaia", "your code", "your system", "your architecture", "sleep wake",
+        "checkpoint", "prime", "lite model", "council", "observer",
+    ]
+
+    def _assess_complexity(self, user_input: str) -> 'ComplexityAssessment':
+        """Assess whether a prompt exceeds Lite's natural depth.
+
+        Returns a ComplexityAssessment with escalation decision, reason, and confidence.
         """
-        Lightweight heuristic to decide if a request should bypass Operator (lite)
-        and use a Thinker model. Signals: long/complex asks, code/architecture/debug,
-        or explicit multi-step planning words.
-        """
-        if not text:
-            return False
-        t = text.lower()
-        # Recitation/quote-style asks stay on Operator for stability.
-        recite_markers = ["recite", "poem", "verse", "lyrics", "quote", "memorize", "memorised", "cite", "quote"]
-        if any(m in t for m in recite_markers):
-            return False
-        # very long => escalate
-        if len(t.split()) > 120:
-            return True
-        markers = [
-            "code", "script", "function", "class", "api", "stack trace", "traceback",
-            "debug", "optimiz", "profile", "benchmark", "architecture", "design",
-            "plan", "steps", "multistep", "algorithm", "performance", "latency",
-            "concurrency", "thread", "process", "gpu", "cuda", "memory leak",
-        ]
-        return any(m in t for m in markers)
+        if not user_input:
+            return ComplexityAssessment(should_escalate=False, reason="", confidence=1.0)
+
+        t = user_input.lower()
+
+        # Non-escalation: recitation/quotes stay on Lite
+        if any(m in t for m in self._NO_ESCALATE_MARKERS):
+            return ComplexityAssessment(should_escalate=False, reason="recitation-style", confidence=0.9)
+
+        # Very long prompts → escalate
+        word_count = len(t.split())
+        if word_count > 120:
+            return ComplexityAssessment(
+                should_escalate=True,
+                reason=f"long prompt ({word_count} words)",
+                confidence=0.85,
+            )
+
+        # Technical depth
+        hit = next((m for m in self._TECHNICAL_MARKERS if m in t), None)
+        if hit:
+            return ComplexityAssessment(
+                should_escalate=True,
+                reason=f"technical depth ({hit})",
+                confidence=0.8,
+            )
+
+        # Emotional / philosophical depth
+        hit = next((m for m in self._DEPTH_MARKERS if m in t), None)
+        if hit:
+            return ComplexityAssessment(
+                should_escalate=True,
+                reason=f"emotional/philosophical depth ({hit})",
+                confidence=0.7,
+            )
+
+        # System internals
+        hit = next((m for m in self._SYSTEM_MARKERS if m in t), None)
+        if hit:
+            return ComplexityAssessment(
+                should_escalate=True,
+                reason=f"system internals ({hit})",
+                confidence=0.75,
+            )
+
+        return ComplexityAssessment(should_escalate=False, reason="", confidence=0.9)
+
+    def _escalate_to_prime(self, user_input: str, lite_response: str,
+                           reason: str, session_id: str) -> None:
+        """Write a Council note and send a wake signal to Prime."""
+        self.council_notes.write_note(
+            user_prompt=user_input,
+            lite_response=lite_response,
+            escalation_reason=reason,
+            session_id=session_id,
+        )
+        # Send wake signal via sleep_wake_manager if available
+        try:
+            import gaia_core.main as _core_main
+            _app = getattr(_core_main, 'app', None)
+            if _app:
+                swm = getattr(_app.state, 'sleep_wake_manager', None)
+                if swm:
+                    swm.receive_wake_signal()
+        except Exception:
+            logger.debug("Could not send wake signal from escalation", exc_info=True)
+        logger.info("Escalated to Prime: %s", reason)
 
     def _should_use_slim_prompt(self, plan: Plan, user_input: str) -> bool:
         """
