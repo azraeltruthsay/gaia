@@ -1,0 +1,76 @@
+{
+  "service_id": "gaia-mcp",
+  "reviewer": "cc",
+  "review_direction": "forward",
+  "review_timestamp": "2026-02-21T00:15:00Z",
+  "overall_fidelity_score": 0.90,
+  "discrepancies": [
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "File path not in allowlist → ValueError; JSON-RPC error -32603 'Path not allowed'",
+      "code_evidence": "Path allowlisting logic is embedded within _read_file_impl, _write_file_impl, _ai_write_impl, _list_dir_impl etc. (tools.py lines 189-355). Each file op validates paths internally rather than via a named handler, but all raise ValueError with descriptive messages. The pre-check missed this because it is inline validation, not a structured except clause.",
+      "recommendation": "No code change needed. Blueprint accurately describes the behavior; the pre-check pattern matcher simply cannot detect inline validation. Consider adding a dedicated _validate_path() helper to consolidate the checks for clarity.",
+      "affected_file": "tools.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Rate limit exceeded (web_search/web_fetch) → Returns ok=false with remaining count",
+      "code_evidence": "_RateLimiter class (web_tools.py:124-145) implements sliding-window rate limiting with allow() and remaining() methods. web_search() (line 188) and web_fetch() (line 320) both check the rate limiter and return ok=false dicts with remaining count when limit is exceeded. Pre-check missed this because the limiter is called procedurally, not in an except clause.",
+      "recommendation": "No code change needed. Blueprint matches implementation precisely. The pre-check pattern matcher needs enhancement to detect non-exception-based failure handling.",
+      "affected_file": "web_tools.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Blocked or unknown domain in web_fetch → Returns ok=false with domain policy error",
+      "code_evidence": "SourceTrustConfig class (web_tools.py:22-112) provides tier_for_domain(), is_allowed(), is_blocked() methods. web_fetch() checks domain policy before fetching and returns ok=false with descriptive error when domain is blocked or unknown. This is procedural validation, not exception-based.",
+      "recommendation": "No code change needed. Blueprint accurately describes behavior.",
+      "affected_file": "web_tools.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "gaia-study unavailable → study_* and adapter_* tools return ok=false with error message",
+      "code_evidence": "All study_* and adapter_* functions in tools.py (lines 524-647) wrap their HTTP calls in try/except Exception blocks that return {'ok': False, 'error': str(e)} dicts. The same pattern exists in server.py (lines 571-696). The pre-check found the gaia-study dependency import but missed the individual error handlers because they are generic Exception catches.",
+      "recommendation": "No code change needed. Behavior matches blueprint.",
+      "affected_file": "tools.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "observation",
+      "blueprint_claim": "web_research (outbound) http_rest GET / — External web research via DuckDuckGo",
+      "code_evidence": "web_tools.py:_ddg_search() (line 256) implements DuckDuckGo search with dual path: ddgs library (primary) and Instant Answer API fallback (line 285, GET https://api.duckduckgo.com/). The blueprint path '/' is a simplification — actual path is api.duckduckgo.com with query params.",
+      "recommendation": "Consider updating the blueprint's web_research interface path to reflect the actual DuckDuckGo API endpoint for precision.",
+      "affected_file": "web_tools.py"
+    },
+    {
+      "dimension": "dependencies",
+      "severity": "observation",
+      "blueprint_claim": "Dependencies list shows gaia-study, duckduckgo, discord as the only dependencies",
+      "code_evidence": "server.py imports gaia_common.config.Config, gaia_common.utils.safe_execution.run_shell_safe, gaia_common.utils.tools_registry.TOOLS, gaia_common.utils.vector_indexer.VectorIndexer, gaia_common.integrations.discord.DiscordConfig/DiscordWebhookSender. These are all gaia-common imports (universally available, correctly not declared). The external deps (httpx, ddgs, beautifulsoup4) are runtime libraries, not GAIA service dependencies.",
+      "recommendation": "No change needed. Dependency declarations are correct per the blueprint schema conventions.",
+      "affected_file": null
+    }
+  ],
+  "open_question_updates": [
+    {
+      "question": "Should approval TTL be configurable per-tool (e.g., ai_write longer than run_shell)?",
+      "status": "new",
+      "evidence": "ApprovalStore.__init__(self, ttl_seconds: int = 900) uses a single TTL for all tools. The create_pending() method does not accept a per-tool TTL override. Current architecture would require adding a ttl_overrides dict keyed by method name."
+    },
+    {
+      "question": "Should rate limits be per-minute with burst allowance instead of per-hour?",
+      "status": "new",
+      "evidence": "_RateLimiter uses a sliding window (max_calls, window_seconds). Currently configured as 20 searches/3600s and 50 fetches/3600s. Changing to per-minute would be a simple config change, but burst allowance would require a token-bucket algorithm."
+    },
+    {
+      "question": "Should approval store persist to disk across container restarts for auditability?",
+      "status": "new",
+      "evidence": "ApprovalStore is entirely in-memory (self._pending dict). No disk persistence mechanism exists. Adding persistence would require serialization of pending actions and TTL restoration on startup."
+    }
+  ],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "gaia-mcp demonstrates high blueprint fidelity (90%). All 6 inbound endpoints are correctly implemented. All 4 'missing' failure modes from the pre-check are actually present via inline validation and procedural checks rather than exception handlers. The approval system, rate limiting, path allowlisting, and domain tiering all match blueprint specifications. The 4 minor discrepancies are false negatives from the mechanical pre-check, not actual implementation gaps. The 2 observations are documentation precision issues only."
+}

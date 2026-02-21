@@ -1,0 +1,2349 @@
+{
+  "__init__.py": {
+    "module_docstring": "GAIA Orchestrator - GPU and Container Lifecycle Coordination Service.\n\nProvides centralized control for:\n- GPU ownership and handoff between services\n- Container lifecycle management (live/candidate s",
+    "classes": [],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "config.py": {
+    "module_docstring": "Configuration management for GAIA Orchestrator.\n\nLoads settings from environment variables and optional YAML config file.",
+    "classes": [
+      {
+        "name": "OrchestratorConfig",
+        "bases": [
+          "BaseSettings"
+        ],
+        "docstring": "Configuration for the GAIA Orchestrator service.",
+        "methods": [],
+        "line": 15
+      }
+    ],
+    "functions": [
+      {
+        "name": "load_yaml_config",
+        "params": [
+          "config_path: Optional[Path] = None"
+        ],
+        "return_type": "dict",
+        "decorators": [],
+        "is_async": false,
+        "line": 117
+      },
+      {
+        "name": "get_config",
+        "params": [],
+        "return_type": "OrchestratorConfig",
+        "decorators": [],
+        "is_async": false,
+        "line": 131
+      },
+      {
+        "name": "reset_config",
+        "params": [],
+        "return_type": "None",
+        "decorators": [],
+        "is_async": false,
+        "line": 150
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "docker_manager.py": {
+    "module_docstring": "Docker management for GAIA Orchestrator.\n\nWraps the Docker SDK to provide container lifecycle operations\nfor live and candidate stacks.",
+    "classes": [
+      {
+        "name": "DockerManager",
+        "bases": [],
+        "docstring": "Manages Docker container lifecycle for GAIA services.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "state_manager: StateManager"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 43
+          },
+          {
+            "name": "client",
+            "params": [
+              "self"
+            ],
+            "return_type": "docker.DockerClient",
+            "decorators": [
+              "property"
+            ],
+            "is_async": false,
+            "line": 49
+          },
+          {
+            "name": "_get_container_state_sync",
+            "params": [
+              "self",
+              "container_name: str"
+            ],
+            "return_type": "ContainerState",
+            "decorators": [],
+            "is_async": false,
+            "line": 59
+          },
+          {
+            "name": "_get_container_state",
+            "params": [
+              "self",
+              "container_name: str"
+            ],
+            "return_type": "ContainerState",
+            "decorators": [],
+            "is_async": true,
+            "line": 82
+          },
+          {
+            "name": "_check_service_health",
+            "params": [
+              "self",
+              "container_name: str",
+              "port: int"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 87
+          },
+          {
+            "name": "get_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "ContainerStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 99
+          },
+          {
+            "name": "_run_compose",
+            "params": [
+              "self",
+              "compose_file: Path",
+              "command: List[str]",
+              "env: Optional[Dict[str, str]] = None"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 139
+          },
+          {
+            "name": "stop_live",
+            "params": [
+              "self"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 175
+          },
+          {
+            "name": "start_live",
+            "params": [
+              "self",
+              "gpu_enabled: bool = True"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 183
+          },
+          {
+            "name": "stop_candidate",
+            "params": [
+              "self"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 197
+          },
+          {
+            "name": "start_candidate",
+            "params": [
+              "self",
+              "gpu_enabled: bool = True"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 205
+          },
+          {
+            "name": "swap_service",
+            "params": [
+              "self",
+              "service: str",
+              "target: str"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": true,
+            "line": 219
+          },
+          {
+            "name": "stop_container",
+            "params": [
+              "self",
+              "container_name: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 285
+          },
+          {
+            "name": "start_container",
+            "params": [
+              "self",
+              "container_name: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 305
+          }
+        ],
+        "line": 24
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "NotFound"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_container_state_sync",
+        "line": 76
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_get_container_state_sync",
+        "line": 78
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_check_service_health",
+        "line": 96
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "stop_container",
+        "line": 301
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start_container",
+        "line": 321
+      },
+      {
+        "exception_types": [
+          "DockerException"
+        ],
+        "status_code": null,
+        "enclosing_function": "client",
+        "line": 54
+      },
+      {
+        "exception_types": [
+          "NotFound"
+        ],
+        "status_code": null,
+        "enclosing_function": "_stop",
+        "line": 295
+      },
+      {
+        "exception_types": [
+          "NotFound"
+        ],
+        "status_code": null,
+        "enclosing_function": "_start",
+        "line": 315
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "get",
+        "url_or_path": "container_name",
+        "enclosing_function": "_get_container_state_sync",
+        "line": 62
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_check_service_health",
+        "line": 93
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "container_name",
+        "enclosing_function": "_stop",
+        "line": 291
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "container_name",
+        "enclosing_function": "_start",
+        "line": 311
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "url",
+        "enclosing_function": "_check_service_health",
+        "line": 94
+      }
+    ]
+  },
+  "gpu_manager.py": {
+    "module_docstring": "GPU management for GAIA Orchestrator.\n\nMonitors GPU state via pynvml and coordinates GPU ownership\nbetween services. Uses Docker container stop/start for VRAM\nrelease/reclaim since vLLM sleep mode can",
+    "classes": [
+      {
+        "name": "GPUManager",
+        "bases": [],
+        "docstring": "Manages GPU resources and monitors VRAM usage.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "state_manager: StateManager"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 48
+          },
+          {
+            "name": "_ensure_nvml",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": false,
+            "line": 54
+          },
+          {
+            "name": "get_memory_info",
+            "params": [
+              "self"
+            ],
+            "return_type": "Optional[GPUMemoryInfo]",
+            "decorators": [],
+            "is_async": true,
+            "line": 69
+          },
+          {
+            "name": "is_gpu_free",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 88
+          },
+          {
+            "name": "wait_for_gpu_cleanup",
+            "params": [
+              "self",
+              "timeout: Optional[float] = None"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 102
+          },
+          {
+            "name": "_get_docker_client",
+            "params": [
+              "self"
+            ],
+            "return_type": "'docker.DockerClient'",
+            "decorators": [],
+            "is_async": false,
+            "line": 158
+          },
+          {
+            "name": "stop_prime_container",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 166
+          },
+          {
+            "name": "start_prime_container",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 195
+          },
+          {
+            "name": "request_release_from_core",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 243
+          },
+          {
+            "name": "request_reclaim_by_core",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 274
+          },
+          {
+            "name": "signal_study_gpu_ready",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 305
+          },
+          {
+            "name": "signal_study_gpu_release",
+            "params": [
+              "self"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 333
+          },
+          {
+            "name": "shutdown",
+            "params": [
+              "self"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 357
+          }
+        ],
+        "line": 43
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": null,
+        "line": 30
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": null,
+        "line": 38
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "get_memory_info",
+        "line": 84
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "stop_prime_container",
+        "line": 191
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start_prime_container",
+        "line": 239
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "request_release_from_core",
+        "line": 270
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "request_reclaim_by_core",
+        "line": 301
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "signal_study_gpu_ready",
+        "line": 328
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "signal_study_gpu_release",
+        "line": 353
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_ensure_nvml",
+        "line": 63
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "wait_for_gpu_cleanup",
+        "line": 135
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "shutdown",
+        "line": 363
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start_prime_container",
+        "line": 231
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "get",
+        "url_or_path": "self.PRIME_CONTAINER_NAME",
+        "enclosing_function": "stop_prime_container",
+        "line": 180
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "self.PRIME_CONTAINER_NAME",
+        "enclosing_function": "start_prime_container",
+        "line": 203
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "self.PRIME_CONTAINER_NAME",
+        "enclosing_function": "wait_for_gpu_cleanup",
+        "line": 127
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "request_release_from_core",
+        "line": 260
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "request_reclaim_by_core",
+        "line": 291
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "signal_study_gpu_ready",
+        "line": 317
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "signal_study_gpu_release",
+        "line": 343
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "url",
+        "enclosing_function": "request_release_from_core",
+        "line": 261
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "url",
+        "enclosing_function": "request_reclaim_by_core",
+        "line": 292
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "url",
+        "enclosing_function": "signal_study_gpu_ready",
+        "line": 318
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "url",
+        "enclosing_function": "signal_study_gpu_release",
+        "line": 344
+      },
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "start_prime_container",
+        "line": 226
+      }
+    ]
+  },
+  "handoff_manager.py": {
+    "module_docstring": "Handoff manager for GAIA Orchestrator.\n\nCoordinates GPU handoff between services:\n- Prime (Core) <-> Study for training sessions\n- Live <-> Candidate for testing",
+    "classes": [
+      {
+        "name": "HandoffManager",
+        "bases": [],
+        "docstring": "Manages GPU handoff operations between services.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "state_manager: StateManager",
+              "gpu_manager: Optional[GPUManager] = None"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 35
+          },
+          {
+            "name": "_update_handoff_phase",
+            "params": [
+              "self",
+              "handoff: HandoffStatus",
+              "phase: HandoffPhase",
+              "progress: int",
+              "error: Optional[str] = None"
+            ],
+            "return_type": "HandoffStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 41
+          },
+          {
+            "name": "start_prime_to_study",
+            "params": [
+              "self",
+              "request: HandoffRequest"
+            ],
+            "return_type": "HandoffStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 57
+          },
+          {
+            "name": "start_study_to_prime",
+            "params": [
+              "self",
+              "request: HandoffRequest"
+            ],
+            "return_type": "HandoffStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 147
+          },
+          {
+            "name": "_notify_study_handoff",
+            "params": [
+              "self",
+              "direction: str",
+              "handoff_id: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 237
+          },
+          {
+            "name": "cancel_handoff",
+            "params": [
+              "self",
+              "handoff_id: str"
+            ],
+            "return_type": "HandoffStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 252
+          }
+        ],
+        "line": 32
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start_prime_to_study",
+        "line": 136
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "start_study_to_prime",
+        "line": 226
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_notify_study_handoff",
+        "line": 249
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_notify_study_handoff",
+        "line": 240
+      },
+      {
+        "call_method": "post",
+        "url_or_path": "<f-string>",
+        "enclosing_function": "_notify_study_handoff",
+        "line": 241
+      }
+    ]
+  },
+  "health_watchdog.py": {
+    "module_docstring": "Health Watchdog for GAIA Orchestrator \u2014 HA-aware edition.\n\nBackground asyncio task that monitors both live and candidate service health.\nTracks consecutive failures, derives an HA status, and broadcas",
+    "classes": [
+      {
+        "name": "HealthWatchdog",
+        "bases": [],
+        "docstring": "Monitors live + candidate service health, derives HA status.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "notification_manager = None"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": false,
+            "line": 69
+          },
+          {
+            "name": "start",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 86
+          },
+          {
+            "name": "stop",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 98
+          },
+          {
+            "name": "_poll_loop",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 113
+          },
+          {
+            "name": "_poll_service",
+            "params": [
+              "self",
+              "name: str",
+              "url: str",
+              "registry: Dict[str, bool]"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 133
+          },
+          {
+            "name": "_check_health",
+            "params": [
+              "self",
+              "name: str",
+              "url: str"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 161
+          },
+          {
+            "name": "_evaluate_ha_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 175
+          },
+          {
+            "name": "_run_session_sync",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 208
+          },
+          {
+            "name": "_broadcast_state_change",
+            "params": [
+              "self",
+              "service_name: str",
+              "old_state: str",
+              "new_state: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 237
+          },
+          {
+            "name": "_broadcast_ha_change",
+            "params": [
+              "self",
+              "old_status: HAStatus",
+              "new_status: HAStatus"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 260
+          },
+          {
+            "name": "_is_maintenance_mode",
+            "params": [],
+            "return_type": "bool",
+            "decorators": [
+              "staticmethod"
+            ],
+            "is_async": false,
+            "line": 293
+          },
+          {
+            "name": "get_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "Dict",
+            "decorators": [],
+            "is_async": false,
+            "line": 297
+          }
+        ],
+        "line": 66
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [
+      {
+        "name": "HAStatus",
+        "members": [
+          [
+            "ACTIVE",
+            "'active'"
+          ],
+          [
+            "DEGRADED",
+            "'degraded'"
+          ],
+          [
+            "FAILOVER_ACTIVE",
+            "'failover_active'"
+          ],
+          [
+            "FAILED",
+            "'failed'"
+          ]
+        ],
+        "line": 35
+      }
+    ],
+    "constants": [
+      {
+        "name": "POLL_INTERVAL",
+        "value": "30",
+        "line": 54
+      },
+      {
+        "name": "FAILURE_THRESHOLD",
+        "value": "2",
+        "line": 57
+      }
+    ],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_check_health",
+        "line": 167
+      },
+      {
+        "exception_types": [
+          "asyncio.TimeoutError"
+        ],
+        "status_code": null,
+        "enclosing_function": "_run_session_sync",
+        "line": 228
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_run_session_sync",
+        "line": 230
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_broadcast_state_change",
+        "line": 257
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "_broadcast_ha_change",
+        "line": 285
+      },
+      {
+        "exception_types": [
+          "asyncio.CancelledError"
+        ],
+        "status_code": null,
+        "enclosing_function": "stop",
+        "line": 104
+      }
+    ],
+    "http_calls": [
+      {
+        "call_method": "AsyncClient",
+        "url_or_path": null,
+        "enclosing_function": "_check_health",
+        "line": 164
+      },
+      {
+        "call_method": "get",
+        "url_or_path": "url",
+        "enclosing_function": "_check_health",
+        "line": 165
+      }
+    ]
+  },
+  "main.py": {
+    "module_docstring": "GAIA Orchestrator - FastAPI Application.\n\nCentral coordination service for GPU resources and container lifecycle.",
+    "classes": [],
+    "functions": [
+      {
+        "name": "lifespan",
+        "params": [
+          "app: FastAPI"
+        ],
+        "return_type": null,
+        "decorators": [
+          "asynccontextmanager"
+        ],
+        "is_async": true,
+        "line": 59
+      },
+      {
+        "name": "health_check",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/health')"
+        ],
+        "is_async": true,
+        "line": 132
+      },
+      {
+        "name": "root",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/')"
+        ],
+        "is_async": true,
+        "line": 144
+      },
+      {
+        "name": "get_status",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.get('/status')"
+        ],
+        "is_async": true,
+        "line": 184
+      },
+      {
+        "name": "get_gpu_status",
+        "params": [],
+        "return_type": "GPUStatus",
+        "decorators": [
+          "app.get('/gpu/status')"
+        ],
+        "is_async": true,
+        "line": 205
+      },
+      {
+        "name": "_acquire_gpu_inner",
+        "params": [
+          "request: GPUAcquireRequest"
+        ],
+        "return_type": "GPUAcquireResponse",
+        "decorators": [],
+        "is_async": true,
+        "line": 223
+      },
+      {
+        "name": "acquire_gpu",
+        "params": [
+          "request: GPUAcquireRequest"
+        ],
+        "return_type": "GPUAcquireResponse",
+        "decorators": [
+          "app.post('/gpu/acquire')"
+        ],
+        "is_async": true,
+        "line": 251
+      },
+      {
+        "name": "release_gpu",
+        "params": [
+          "lease_id: Optional[str] = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/gpu/release')"
+        ],
+        "is_async": true,
+        "line": 261
+      },
+      {
+        "name": "wait_for_gpu",
+        "params": [
+          "request: GPUAcquireRequest"
+        ],
+        "return_type": "GPUAcquireResponse",
+        "decorators": [
+          "app.post('/gpu/wait')"
+        ],
+        "is_async": true,
+        "line": 295
+      },
+      {
+        "name": "get_container_status",
+        "params": [],
+        "return_type": "ContainerStatus",
+        "decorators": [
+          "app.get('/containers/status')"
+        ],
+        "is_async": true,
+        "line": 338
+      },
+      {
+        "name": "stop_live_stack",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.post('/containers/live/stop')"
+        ],
+        "is_async": true,
+        "line": 356
+      },
+      {
+        "name": "start_live_stack",
+        "params": [
+          "request: ContainerStartRequest"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/containers/live/start')"
+        ],
+        "is_async": true,
+        "line": 371
+      },
+      {
+        "name": "stop_candidate_stack",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.post('/containers/candidate/stop')"
+        ],
+        "is_async": true,
+        "line": 392
+      },
+      {
+        "name": "start_candidate_stack",
+        "params": [
+          "request: ContainerStartRequest"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/containers/candidate/start')"
+        ],
+        "is_async": true,
+        "line": 410
+      },
+      {
+        "name": "swap_service",
+        "params": [
+          "request: ContainerSwapRequest"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/containers/swap')"
+        ],
+        "is_async": true,
+        "line": 431
+      },
+      {
+        "name": "handoff_prime_to_study",
+        "params": [
+          "request: HandoffRequest = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/handoff/prime-to-study')"
+        ],
+        "is_async": true,
+        "line": 449
+      },
+      {
+        "name": "handoff_study_to_prime",
+        "params": [
+          "request: HandoffRequest = None"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/handoff/study-to-prime')"
+        ],
+        "is_async": true,
+        "line": 466
+      },
+      {
+        "name": "get_handoff_status",
+        "params": [
+          "handoff_id: str"
+        ],
+        "return_type": "HandoffStatus",
+        "decorators": [
+          "app.get('/handoff/{handoff_id}/status')"
+        ],
+        "is_async": true,
+        "line": 483
+      },
+      {
+        "name": "gpu_sleep",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.post('/gpu/sleep')"
+        ],
+        "is_async": true,
+        "line": 500
+      },
+      {
+        "name": "gpu_wake",
+        "params": [],
+        "return_type": null,
+        "decorators": [
+          "app.post('/gpu/wake')"
+        ],
+        "is_async": true,
+        "line": 528
+      },
+      {
+        "name": "notify_oracle_fallback",
+        "params": [
+          "notification: OracleNotification"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.post('/notify/oracle-fallback')"
+        ],
+        "is_async": true,
+        "line": 563
+      },
+      {
+        "name": "websocket_notifications",
+        "params": [
+          "websocket: WebSocket"
+        ],
+        "return_type": null,
+        "decorators": [
+          "app.websocket('/ws/notifications')"
+        ],
+        "is_async": true,
+        "line": 583
+      },
+      {
+        "name": "main",
+        "params": [],
+        "return_type": null,
+        "decorators": [],
+        "is_async": false,
+        "line": 604
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "function_name": "health_check",
+        "line": 132
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "function_name": "root",
+        "line": 144
+      },
+      {
+        "method": "GET",
+        "path": "/status",
+        "function_name": "get_status",
+        "line": 184
+      },
+      {
+        "method": "GET",
+        "path": "/gpu/status",
+        "function_name": "get_gpu_status",
+        "line": 205
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/acquire",
+        "function_name": "acquire_gpu",
+        "line": 251
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/release",
+        "function_name": "release_gpu",
+        "line": 261
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/wait",
+        "function_name": "wait_for_gpu",
+        "line": 295
+      },
+      {
+        "method": "GET",
+        "path": "/containers/status",
+        "function_name": "get_container_status",
+        "line": 338
+      },
+      {
+        "method": "POST",
+        "path": "/containers/live/stop",
+        "function_name": "stop_live_stack",
+        "line": 356
+      },
+      {
+        "method": "POST",
+        "path": "/containers/live/start",
+        "function_name": "start_live_stack",
+        "line": 371
+      },
+      {
+        "method": "POST",
+        "path": "/containers/candidate/stop",
+        "function_name": "stop_candidate_stack",
+        "line": 392
+      },
+      {
+        "method": "POST",
+        "path": "/containers/candidate/start",
+        "function_name": "start_candidate_stack",
+        "line": 410
+      },
+      {
+        "method": "POST",
+        "path": "/containers/swap",
+        "function_name": "swap_service",
+        "line": 431
+      },
+      {
+        "method": "POST",
+        "path": "/handoff/prime-to-study",
+        "function_name": "handoff_prime_to_study",
+        "line": 449
+      },
+      {
+        "method": "POST",
+        "path": "/handoff/study-to-prime",
+        "function_name": "handoff_study_to_prime",
+        "line": 466
+      },
+      {
+        "method": "GET",
+        "path": "/handoff/{handoff_id}/status",
+        "function_name": "get_handoff_status",
+        "line": 483
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/sleep",
+        "function_name": "gpu_sleep",
+        "line": 500
+      },
+      {
+        "method": "POST",
+        "path": "/gpu/wake",
+        "function_name": "gpu_wake",
+        "line": 528
+      },
+      {
+        "method": "POST",
+        "path": "/notify/oracle-fallback",
+        "function_name": "notify_oracle_fallback",
+        "line": 563
+      },
+      {
+        "method": "WEBSOCKET",
+        "path": "/ws/notifications",
+        "function_name": "websocket_notifications",
+        "line": 583
+      }
+    ],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": null,
+        "line": 45
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "lifespan",
+        "line": 75
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "lifespan",
+        "line": 82
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "lifespan",
+        "line": 89
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "lifespan",
+        "line": 96
+      },
+      {
+        "exception_types": [
+          "ImportError"
+        ],
+        "status_code": null,
+        "enclosing_function": "lifespan",
+        "line": 105
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "stop_live_stack",
+        "line": 365
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "start_live_stack",
+        "line": 386
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "stop_candidate_stack",
+        "line": 404
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "start_candidate_stack",
+        "line": 425
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "swap_service",
+        "line": 439
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "handoff_prime_to_study",
+        "line": 460
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "handoff_study_to_prime",
+        "line": 477
+      },
+      {
+        "exception_types": [
+          "HTTPException"
+        ],
+        "status_code": null,
+        "enclosing_function": "gpu_sleep",
+        "line": 520
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "gpu_sleep",
+        "line": 522
+      },
+      {
+        "exception_types": [
+          "HTTPException"
+        ],
+        "status_code": null,
+        "enclosing_function": "gpu_wake",
+        "line": 551
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": 500,
+        "enclosing_function": "gpu_wake",
+        "line": 553
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "get_gpu_status",
+        "line": 217
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "get_container_status",
+        "line": 349
+      },
+      {
+        "exception_types": [
+          "WebSocketDisconnect"
+        ],
+        "status_code": null,
+        "enclosing_function": "websocket_notifications",
+        "line": 594
+      }
+    ],
+    "http_calls": []
+  },
+  "models/__init__.py": {
+    "module_docstring": "Pydantic models for request/response validation.",
+    "classes": [],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "models/schemas.py": {
+    "module_docstring": "Pydantic models for the GAIA Orchestrator API.\n\nDefines request/response schemas for GPU management, container lifecycle,\nhandoff protocol, and notifications.",
+    "classes": [
+      {
+        "name": "GPUAcquireRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Request to acquire GPU ownership.",
+        "methods": [],
+        "line": 28
+      },
+      {
+        "name": "GPUAcquireResponse",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Response to GPU acquire request.",
+        "methods": [],
+        "line": 36
+      },
+      {
+        "name": "GPUMemoryInfo",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "GPU memory status.",
+        "methods": [],
+        "line": 44
+      },
+      {
+        "name": "GPUStatus",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Current GPU ownership and state.",
+        "methods": [],
+        "line": 51
+      },
+      {
+        "name": "ServiceHealth",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Health status of a single service.",
+        "methods": [],
+        "line": 75
+      },
+      {
+        "name": "ContainerStatus",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Status of all containers in a stack.",
+        "methods": [],
+        "line": 84
+      },
+      {
+        "name": "ContainerStartRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Request to start containers.",
+        "methods": [],
+        "line": 90
+      },
+      {
+        "name": "ContainerSwapRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Request to swap a service from live to candidate.",
+        "methods": [],
+        "line": 96
+      },
+      {
+        "name": "HandoffRequest",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Request to initiate a GPU handoff.",
+        "methods": [],
+        "line": 126
+      },
+      {
+        "name": "HandoffStatus",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Status of a handoff operation.",
+        "methods": [],
+        "line": 133
+      },
+      {
+        "name": "OracleNotification",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Notification when Oracle fallback is used.",
+        "methods": [],
+        "line": 163
+      },
+      {
+        "name": "Notification",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Generic notification message.",
+        "methods": [],
+        "line": 171
+      },
+      {
+        "name": "OrchestratorState",
+        "bases": [
+          "BaseModel"
+        ],
+        "docstring": "Complete orchestrator state for persistence.",
+        "methods": [],
+        "line": 185
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [
+      {
+        "name": "GPUOwner",
+        "members": [
+          [
+            "NONE",
+            "'none'"
+          ],
+          [
+            "CORE",
+            "'gaia-core'"
+          ],
+          [
+            "CORE_CANDIDATE",
+            "'gaia-core-candidate'"
+          ],
+          [
+            "STUDY",
+            "'gaia-study'"
+          ],
+          [
+            "STUDY_CANDIDATE",
+            "'gaia-study-candidate'"
+          ]
+        ],
+        "line": 19
+      },
+      {
+        "name": "ContainerState",
+        "members": [
+          [
+            "RUNNING",
+            "'running'"
+          ],
+          [
+            "STOPPED",
+            "'stopped'"
+          ],
+          [
+            "STARTING",
+            "'starting'"
+          ],
+          [
+            "STOPPING",
+            "'stopping'"
+          ],
+          [
+            "ERROR",
+            "'error'"
+          ],
+          [
+            "UNKNOWN",
+            "'unknown'"
+          ]
+        ],
+        "line": 65
+      },
+      {
+        "name": "HandoffPhase",
+        "members": [
+          [
+            "INITIATED",
+            "'initiated'"
+          ],
+          [
+            "RELEASING_GPU",
+            "'releasing_gpu'"
+          ],
+          [
+            "WAITING_CUDA_CLEANUP",
+            "'waiting_cuda_cleanup'"
+          ],
+          [
+            "TRANSFERRING_OWNERSHIP",
+            "'transferring_ownership'"
+          ],
+          [
+            "SIGNALING_RECIPIENT",
+            "'signaling_recipient'"
+          ],
+          [
+            "COMPLETED",
+            "'completed'"
+          ],
+          [
+            "FAILED",
+            "'failed'"
+          ],
+          [
+            "CANCELLED",
+            "'cancelled'"
+          ]
+        ],
+        "line": 106
+      },
+      {
+        "name": "HandoffType",
+        "members": [
+          [
+            "PRIME_TO_STUDY",
+            "'prime_to_study'"
+          ],
+          [
+            "STUDY_TO_PRIME",
+            "'study_to_prime'"
+          ],
+          [
+            "LIVE_TO_CANDIDATE",
+            "'live_to_candidate'"
+          ],
+          [
+            "CANDIDATE_TO_LIVE",
+            "'candidate_to_live'"
+          ]
+        ],
+        "line": 118
+      },
+      {
+        "name": "NotificationType",
+        "members": [
+          [
+            "ORACLE_FALLBACK",
+            "'oracle_fallback'"
+          ],
+          [
+            "GPU_RELEASED",
+            "'gpu_released'"
+          ],
+          [
+            "GPU_ACQUIRED",
+            "'gpu_acquired'"
+          ],
+          [
+            "HANDOFF_STARTED",
+            "'handoff_started'"
+          ],
+          [
+            "HANDOFF_COMPLETED",
+            "'handoff_completed'"
+          ],
+          [
+            "HANDOFF_FAILED",
+            "'handoff_failed'"
+          ],
+          [
+            "SERVICE_ERROR",
+            "'service_error'"
+          ],
+          [
+            "SERVICE_HEALTH_CHANGE",
+            "'service_health_change'"
+          ],
+          [
+            "HA_STATUS_CHANGE",
+            "'ha_status_change'"
+          ]
+        ],
+        "line": 150
+      }
+    ],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [],
+    "http_calls": []
+  },
+  "notification_manager.py": {
+    "module_docstring": "Notification manager for GAIA Orchestrator.\n\nManages WebSocket connections and broadcasts notifications\nto connected clients (gaia-web, Discord bot, etc.).",
+    "classes": [
+      {
+        "name": "NotificationManager",
+        "bases": [],
+        "docstring": "Manages WebSocket connections and notification broadcasting.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 23
+          },
+          {
+            "name": "connect",
+            "params": [
+              "self",
+              "websocket: WebSocket"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 29
+          },
+          {
+            "name": "disconnect",
+            "params": [
+              "self",
+              "websocket: WebSocket"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 35
+          },
+          {
+            "name": "broadcast",
+            "params": [
+              "self",
+              "notification: Notification"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 41
+          },
+          {
+            "name": "send_to",
+            "params": [
+              "self",
+              "websocket: WebSocket",
+              "notification: Notification"
+            ],
+            "return_type": "bool",
+            "decorators": [],
+            "is_async": true,
+            "line": 79
+          },
+          {
+            "name": "get_history",
+            "params": [
+              "self",
+              "limit: int = 50"
+            ],
+            "return_type": "List[Notification]",
+            "decorators": [],
+            "is_async": false,
+            "line": 89
+          },
+          {
+            "name": "connection_count",
+            "params": [
+              "self"
+            ],
+            "return_type": "int",
+            "decorators": [
+              "property"
+            ],
+            "is_async": false,
+            "line": 94
+          },
+          {
+            "name": "notify_oracle_fallback",
+            "params": [
+              "self",
+              "fallback_model: str",
+              "original_role: str",
+              "reason: str = ''"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 100
+          },
+          {
+            "name": "notify_gpu_released",
+            "params": [
+              "self",
+              "previous_owner: str",
+              "reason: str = ''"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 119
+          },
+          {
+            "name": "notify_gpu_acquired",
+            "params": [
+              "self",
+              "new_owner: str",
+              "reason: str = ''"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 132
+          },
+          {
+            "name": "notify_handoff_started",
+            "params": [
+              "self",
+              "handoff_id: str",
+              "handoff_type: str",
+              "source: str",
+              "destination: str"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 145
+          },
+          {
+            "name": "notify_handoff_completed",
+            "params": [
+              "self",
+              "handoff_id: str",
+              "handoff_type: str",
+              "source: str",
+              "destination: str"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 166
+          },
+          {
+            "name": "notify_handoff_failed",
+            "params": [
+              "self",
+              "handoff_id: str",
+              "error: str"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 187
+          },
+          {
+            "name": "notify_service_error",
+            "params": [
+              "self",
+              "service: str",
+              "error: str"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 204
+          }
+        ],
+        "line": 20
+      }
+    ],
+    "functions": [],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "send_to",
+        "line": 85
+      },
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "broadcast",
+        "line": 64
+      }
+    ],
+    "http_calls": []
+  },
+  "state.py": {
+    "module_docstring": "State persistence for GAIA Orchestrator.\n\nManages saving/loading orchestrator state to disk for crash recovery\nand state inspection.",
+    "classes": [
+      {
+        "name": "StateManager",
+        "bases": [],
+        "docstring": "Manages orchestrator state with disk persistence.",
+        "methods": [
+          {
+            "name": "__init__",
+            "params": [
+              "self",
+              "state_dir: Optional[Path] = None"
+            ],
+            "return_type": null,
+            "decorators": [],
+            "is_async": false,
+            "line": 31
+          },
+          {
+            "name": "initialize",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 42
+          },
+          {
+            "name": "_reconcile_stale_handoff",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 68
+          },
+          {
+            "name": "_load_state",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 109
+          },
+          {
+            "name": "_save_state",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 116
+          },
+          {
+            "name": "save",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 129
+          },
+          {
+            "name": "modify",
+            "params": [
+              "self"
+            ],
+            "return_type": null,
+            "decorators": [
+              "asynccontextmanager"
+            ],
+            "is_async": true,
+            "line": 135
+          },
+          {
+            "name": "state",
+            "params": [
+              "self"
+            ],
+            "return_type": "OrchestratorState",
+            "decorators": [
+              "property"
+            ],
+            "is_async": false,
+            "line": 142
+          },
+          {
+            "name": "get_gpu_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "GPUStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 150
+          },
+          {
+            "name": "set_gpu_owner",
+            "params": [
+              "self",
+              "owner: GPUOwner",
+              "lease_id: str",
+              "reason: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 154
+          },
+          {
+            "name": "release_gpu",
+            "params": [
+              "self"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 167
+          },
+          {
+            "name": "add_to_gpu_queue",
+            "params": [
+              "self",
+              "requester: str"
+            ],
+            "return_type": "int",
+            "decorators": [],
+            "is_async": true,
+            "line": 175
+          },
+          {
+            "name": "remove_from_gpu_queue",
+            "params": [
+              "self",
+              "requester: str"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 182
+          },
+          {
+            "name": "get_container_status",
+            "params": [
+              "self"
+            ],
+            "return_type": "ContainerStatus",
+            "decorators": [],
+            "is_async": true,
+            "line": 192
+          },
+          {
+            "name": "update_container_status",
+            "params": [
+              "self",
+              "status: ContainerStatus"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 196
+          },
+          {
+            "name": "get_active_handoff",
+            "params": [
+              "self"
+            ],
+            "return_type": "Optional[HandoffStatus]",
+            "decorators": [],
+            "is_async": true,
+            "line": 205
+          },
+          {
+            "name": "start_handoff",
+            "params": [
+              "self",
+              "handoff: HandoffStatus"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 209
+          },
+          {
+            "name": "update_handoff",
+            "params": [
+              "self",
+              "handoff: HandoffStatus"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 214
+          },
+          {
+            "name": "complete_handoff",
+            "params": [
+              "self",
+              "handoff: HandoffStatus"
+            ],
+            "return_type": "None",
+            "decorators": [],
+            "is_async": true,
+            "line": 219
+          },
+          {
+            "name": "get_handoff_by_id",
+            "params": [
+              "self",
+              "handoff_id: str"
+            ],
+            "return_type": "Optional[HandoffStatus]",
+            "decorators": [],
+            "is_async": true,
+            "line": 230
+          }
+        ],
+        "line": 28
+      }
+    ],
+    "functions": [
+      {
+        "name": "get_state_manager",
+        "params": [],
+        "return_type": "StateManager",
+        "decorators": [],
+        "is_async": true,
+        "line": 246
+      },
+      {
+        "name": "reset_state_manager",
+        "params": [],
+        "return_type": "None",
+        "decorators": [],
+        "is_async": true,
+        "line": 255
+      }
+    ],
+    "endpoints": [],
+    "enums": [],
+    "constants": [],
+    "gaia_imports": [],
+    "error_handlers": [
+      {
+        "exception_types": [
+          "Exception"
+        ],
+        "status_code": null,
+        "enclosing_function": "initialize",
+        "line": 57
+      }
+    ],
+    "http_calls": []
+  }
+}

@@ -1,15 +1,20 @@
 {
-  "generated_at": "2026-02-20T23:42:44.652417Z",
-  "total_pairs": 1,
-  "train_count": 0,
-  "validation_count": 1,
+  "generated_at": "2026-02-21T15:55:35.943197Z",
+  "total_pairs": 6,
+  "train_count": 4,
+  "validation_count": 2,
   "pair_type_counts": {
-    "forward": 1
+    "forward": 1,
+    "retroactive": 5
   },
   "service_counts": {
-    "gaia-core": 1
+    "gaia-core": 2,
+    "gaia-mcp": 1,
+    "gaia-orchestrator": 1,
+    "gaia-study": 1,
+    "gaia-web": 1
   },
-  "mean_fidelity": 0.85,
+  "mean_fidelity": 0.7000000000000001,
   "min_corpus_size": 50,
   "corpus_ready": false
 }

@@ -443,6 +443,8 @@ services:
       # Live reload: mount docs for edit-without-rebuild
       - ./gaia-wiki/docs:/docs/docs:ro
       - ./gaia-wiki/mkdocs.yml:/docs/mkdocs.yml:ro
+      # Auto-generated docs from blueprint YAML (written by gaia-core sleep task)
+      - ./knowledge/wiki_auto:/docs/docs/auto:ro
       # Knowledge base: accessible for future auto-generated docs
       - ./knowledge:/knowledge:ro
 

@@ -1,0 +1,84 @@
+{
+  "service_id": "gaia-study",
+  "reviewer": "cc",
+  "review_direction": "forward",
+  "review_timestamp": "2026-02-21T00:15:00Z",
+  "overall_fidelity_score": 0.85,
+  "discrepancies": [
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Document directory not found → FileNotFoundError raised; index build fails gracefully",
+      "code_evidence": "server.py:add_document() (line 173) has explicit 'handles: FileNotFoundError -> 404' (line 184). indexer.py:build_index_from_docs() (line 149) has a general Exception handler (line 198) that would catch FileNotFoundError during directory traversal. The pre-check missed this because the pattern matcher didn't connect the FileNotFoundError handler to the blueprint's failure mode description.",
+      "recommendation": "No code change needed. The failure mode is handled. Consider adding an explicit FileNotFoundError catch in build_index_from_docs() for clearer intent documentation.",
+      "affected_file": "server.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "major",
+      "blueprint_claim": "GPU OOM during training → Training marked failed; CUDA cache cleared",
+      "code_evidence": "qlora_trainer.py:train() (line 305) has a general Exception handler (line 409) that would catch torch.cuda.OutOfMemoryError. However, qlora_trainer.py:cleanup() (line 448) exists for CUDA cleanup but is not shown to be called from the Exception handler in train(). The blueprint claims 'CUDA cache cleared' on OOM, but the AST summary does not confirm torch.cuda.empty_cache() is called in the OOM path specifically.",
+      "recommendation": "Add explicit torch.cuda.OutOfMemoryError handling in QLoRATrainer.train() that calls self.cleanup() or torch.cuda.empty_cache() before re-raising or returning failure. This ensures the blueprint's 'CUDA cache cleared' claim is verifiably true.",
+      "affected_file": "qlora_trainer.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Content validation failure (forbidden patterns) → Offending samples skipped with logged warning; training continues with remaining",
+      "code_evidence": "study_mode_manager.py:validate_content() (line 120) exists and prepare_training_data() (line 143) has error handling (line 199). The content validation and sample skipping logic is present in the preparation pipeline. The pre-check missed this because the pattern doesn't match a standard exception handler.",
+      "recommendation": "No code change needed. Content validation is implemented as designed.",
+      "affected_file": "study_mode_manager.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Model load failure (missing base model) → Falls back to simulated training mode",
+      "code_evidence": "study_mode_manager.py:_run_qlora_training() (line 403) has Exception handling (line 438). _run_simulated_training() (line 540) exists as the fallback path. qlora_trainer.py:setup() (line 158) has Exception handling (line 235) for model load failures. The fallback chain from real training to simulated training is architecturally present.",
+      "recommendation": "No code change needed. The simulated training fallback is correctly implemented.",
+      "affected_file": "study_mode_manager.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Vector index corruption → Returns empty index; rebuild via /index/build",
+      "code_evidence": "indexer.py:load_index() (line 116) has Exception handler (line 134) that catches corrupt JSON. On failure, it returns a default empty index structure. The /index/build endpoint (server.py:146) provides the rebuild path. The full graceful degradation chain is present.",
+      "recommendation": "No code change needed. Blueprint claim is accurate.",
+      "affected_file": "indexer.py"
+    },
+    {
+      "dimension": "intent",
+      "severity": "observation",
+      "blueprint_claim": "Cognitive role: The Subconscious — background processing and learning",
+      "code_evidence": "Code structure strongly matches this role: background async task execution (study_mode_manager.py), vector index management (indexer.py), QLoRA training (qlora_trainer.py), sole-writer principle enforced in indexer.py docstring. The __init__.py explicitly states 'The Subconscious'. All processing is async/background with status polling.",
+      "recommendation": "No change needed. Intent coherence is excellent.",
+      "affected_file": null
+    },
+    {
+      "dimension": "contract",
+      "severity": "observation",
+      "blueprint_claim": "17 inbound endpoints documented in blueprint",
+      "code_evidence": "All 17 endpoints are present and correctly implemented in server.py. The endpoint signatures match the blueprint's interface descriptions. Request/response models (IndexBuildRequest, StudyStartRequest, AdapterLoadRequest, etc.) provide proper input validation.",
+      "recommendation": "No change needed. Contract fidelity is complete.",
+      "affected_file": "server.py"
+    }
+  ],
+  "open_question_updates": [
+    {
+      "question": "Should vector store migrate to FAISS or ChromaDB for better performance at scale?",
+      "status": "new",
+      "evidence": "indexer.py uses a fully custom JSON-based vector store with cosine similarity computed via numpy. VectorIndexer.query() (line 253) performs brute-force similarity search. For the current scale (~100K docs as noted in the blueprint), this is adequate, but scaling beyond would require an index structure."
+    },
+    {
+      "question": "Should CUDA_VISIBLE_DEVICES be dynamic based on orchestrator GPU allocation?",
+      "status": "new",
+      "evidence": "No dynamic CUDA_VISIBLE_DEVICES configuration found in the AST summaries. GPU management is handled at the container level via orchestrator stop/start rather than per-process device selection."
+    },
+    {
+      "question": "Optimal gradient accumulation steps for RTX 5080 16GB VRAM?",
+      "status": "new",
+      "evidence": "QLoRAConfig (qlora_trainer.py:59) has gradient_accumulation_steps as a configurable field with a default. The estimate_vram_usage() function (line 464) provides VRAM estimation but does not auto-tune accumulation steps based on available memory."
+    }
+  ],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "gaia-study demonstrates strong blueprint fidelity (85%). All 17 endpoints are correctly implemented. Of the 5 'missing' failure modes from the pre-check, 4 are actually present through general exception handlers and validation patterns. The one genuine gap is the GPU OOM handling — while OOM would be caught by the general Exception handler in train(), the blueprint's specific claim about CUDA cache clearing is not verifiably implemented in the error path. This is a major note but not a rejection-level issue since the training would still be marked as failed."
+}

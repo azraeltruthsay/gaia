@@ -1,0 +1,1758 @@
+{
+  "pair_id": "062782a1-7648-42de-951f-9d8bff2a4822",
+  "pair_type": "retroactive",
+  "granularity": "service",
+  "service_id": "gaia-mcp",
+  "file_scope": null,
+  "created_at": "2026-02-21T02:25:13.237286Z",
+  "blueprint_yaml": "architecture:\n  components:\n  - consumes_interfaces: []\n    description: 'FastAPI application implementing the MCP (Model Context Protocol)\n      JSON-RPC dispatch. Receives tool call requests from gaia-core, validates parameters,\n      routes to the appropriate tool implementation, and returns structured results.\n      Implements the /jsonrpc POST endpoint and root discovery endpoint.\n\n      '\n    exposes_interfaces:\n    - jsonrpc\n    - health\n    - root\n    id: jsonrpc_server\n    key_classes: []\n    key_functions:\n    - create_app()\n    - read_root()\n    label: JSON-RPC Server\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/server.py\n    - candidates/gaia-mcp/gaia_mcp/main.py\n  - consumes_interfaces: []\n    description: 'Tool catalog and implementations. Provides list_tools() for discovery\n      and describe_tool() for schema inspection. Implements file I/O tools (read,\n      write, list, find), memory tools (query, status, rebuild_index), fragment assembly\n      tools (write, read, assemble, list_pending, clear), and the AI-assisted write\n      tool that uses the rescue helper for context-aware file operations.\n\n      '\n    exposes_interfaces: []\n    id: tool_registry\n    key_classes: []\n    key_functions:\n    - list_tools()\n    - describe_tool()\n    - _ai_write_impl()\n    - _read_file_impl()\n    - _write_file_impl()\n    - _memory_query_impl()\n    - _find_relevant_documents()\n    - _fragment_assemble_impl()\n    label: Tool Registry\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/tools.py\n  - consumes_interfaces: []\n    description: 'Security-critical action approval workflow. Generates time-limited\n      challenges for sensitive operations (file writes, shell execution). ApprovalStore\n      tracks pending actions with TTL-based expiry. Challenge-response pattern prevents\n      automated bypass of the approval requirement.\n\n      '\n    exposes_interfaces:\n    - request_approval\n    - approval_status\n    id: approval_gate\n    key_classes:\n    - ApprovalStore\n    key_functions:\n    - ApprovalStore.create_pending()\n    - ApprovalStore.approve()\n    - ApprovalStore.cancel()\n    - ApprovalStore.cleanup_expired()\n    label: Approval Gate\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/approval.py\n  - consumes_interfaces: []\n    description: 'Web access tools with domain trust tier system. SourceTrustConfig\n      classifies domains into trust tiers (trusted, standard, blocked). Rate limiter\n      prevents abuse. Implements DuckDuckGo search and HTTP content fetching with\n      HTML-to-text extraction. Content is filtered by domain trust level before returning\n      to the caller.\n\n      '\n    exposes_interfaces: []\n    id: web_tools\n    key_classes:\n    - SourceTrustConfig\n    - _RateLimiter\n    key_functions:\n    - web_search()\n    - web_fetch()\n    - SourceTrustConfig.tier_for_domain()\n    - SourceTrustConfig.is_allowed()\n    label: Web Search & Fetch\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/web_tools.py\n  edges:\n  - data_flow: \"method name + params \\u2192 result\"\n    from_component: jsonrpc_server\n    label: dispatches tool calls to\n    to_component: tool_registry\n    transport: function_call\n  - data_flow: action_type, description, params\n    from_component: jsonrpc_server\n    label: checks approval for sensitive operations\n    to_component: approval_gate\n    transport: function_call\n  - data_flow: \"pending action \\u2192 challenge\"\n    from_component: tool_registry\n    label: requests approval before write/execute\n    to_component: approval_gate\n    transport: function_call\n  - data_flow: \"search query or URL \\u2192 content\"\n    from_component: tool_registry\n    label: delegates web_search/web_fetch calls\n    to_component: web_tools\n    transport: function_call\ndependencies:\n  external_apis:\n  - name: duckduckgo\n    purpose: web_search_and_fetch\n    required: false\n  - name: discord\n    purpose: webhook_messaging\n    required: false\n  services:\n  - fallback: null\n    id: gaia-study\n    required: false\n    role: lora_training_and_adapter_management\n  volumes:\n  - access: ro\n    mount_path: /gaia-common\n    name: gaia-common\n    purpose: Shared library (tools registry, config, utils)\n  - access: rw\n    mount_path: /knowledge\n    name: knowledge\n    purpose: Tool reference docs, system knowledge base, vector index\n  - access: ro\n    mount_path: /models\n    name: gaia-models\n    purpose: LoRA adapters, embedding models\n  - access: rw\n    mount_path: /sandbox\n    name: gaia-sandbox\n    purpose: Isolated workspace for tool execution\nfailure_modes:\n- auto_recovers: false\n  condition: Tool execution error\n  response: JSON-RPC error response with code -32603 and traceback in data field\n  severity: degraded\n- auto_recovers: true\n  condition: Approval timeout (>900s default TTL)\n  response: Pending action expires; client must request approval again\n  severity: degraded\n- auto_recovers: false\n  condition: File path not in allowlist\n  response: ValueError; JSON-RPC error -32603 'Path not allowed'\n  severity: degraded\n- auto_recovers: true\n  condition: Rate limit exceeded (web_search/web_fetch)\n  response: Returns ok=false with remaining count; auto-recovers after sliding window\n  severity: degraded\n- auto_recovers: false\n  condition: Blocked or unknown domain in web_fetch\n  response: Returns ok=false with domain policy error\n  severity: degraded\n- auto_recovers: false\n  condition: gaia-study unavailable\n  response: study_* and adapter_* tools return ok=false with error message\n  severity: degraded\n- auto_recovers: false\n  condition: Sensitive tool without prior approval\n  response: HTTP 403 with JSON-RPC error directing to /request_approval\n  severity: degraded\nid: gaia-mcp\nintent:\n  cognitive_role: The Hands\n  design_decisions:\n  - Separate service decouples tool execution from cognition, keeping gaia-core CPU-only\n  - Path allowlisting restricts file ops to /knowledge, /sandbox, /models; symlink\n    traversal blocked via .resolve()\n  - Approval flow enforces human-in-the-loop via 5-char challenge reversal; time-boxed\n    to configurable TTL\n  - Domain allowlisting gates web research to trusted/reliable tiers; blocked list\n    prevents social media leakage\n  - Rate limiting (20 searches/hr, 50 fetches/hr) via in-memory sliding window prevents\n    abuse\n  - Study gateway pattern (async await) enables LoRA adapter management while preserving\n    tool isolation\n  - Fragment assembly with overlap checking enables long responses split across token\n    limits\n  - JSON-RPC 2.0 for lightweight tool dispatch without REST overhead\n  - 'Graceful degradation: missing study, blocked domains, rate limits return structured\n    errors not exceptions'\n  open_questions:\n  - Should approval TTL be configurable per-tool (e.g., ai_write longer than run_shell)?\n  - Should rate limits be per-minute with burst allowance instead of per-hour?\n  - Should approval store persist to disk across container restarts for auditability?\n  purpose: 'Sandboxed execution layer enforcing security boundaries around GAIA''s\n    tool calls. Acts as both a security perimeter (preventing unauthorized file/shell\n    access via path allowlisting) and an approval gate (requiring human confirmation\n    for destructive operations). Delegation to a separate service allows gaia-core\n    to remain interface-agnostic and CPU-only.\n\n    '\ninterfaces:\n- description: Container health check endpoint.\n  direction: inbound\n  id: health\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /health\n    type: http_rest\n- description: \"Root endpoint \\u2014 returns running status message.\"\n  direction: inbound\n  id: root\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /\n    type: http_rest\n- description: 'Primary tool dispatch via JSON-RPC 2.0. Handles ~30 tool methods:\n    file I/O (read_file, write_file, ai_write), shell (run_shell), memory/vector (memory_query,\n    memory_rebuild_index), web research (web_search, web_fetch), fragments, study\n    gateway, Discord messaging.'\n  direction: inbound\n  id: jsonrpc_dispatch\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /jsonrpc\n    type: http_rest\n- description: Create pending approval for sensitive tool (ai_write, write_file, run_shell,\n    memory_rebuild_index). Returns action_id + 5-char challenge.\n  direction: inbound\n  id: request_approval\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /request_approval\n    type: http_rest\n- description: List all pending approvals awaiting human confirmation.\n  direction: inbound\n  id: pending_approvals\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /pending_approvals\n    type: http_rest\n- description: Approve pending action by providing reversed 5-char challenge. Dispatches\n    underlying tool on success.\n  direction: inbound\n  id: approve_action\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /approve_action\n    type: http_rest\n- description: Async HTTP gateway to gaia-study for LoRA training and adapter management.\n  direction: outbound\n  id: study_gateway\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /study/start\n    type: http_rest\n- description: 'External web research via DuckDuckGo (ddgs library with Instant Answer\n    API fallback). Rate-limited: 20 searches/hr, 50 fetches/hr.'\n  direction: outbound\n  id: web_research\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /\n    type: http_rest\n- description: Optional Discord webhook for send_discord_message tool. Requires DISCORD_WEBHOOK_URL\n    env var.\n  direction: outbound\n  id: discord_webhook\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /\n    type: http_rest\nmeta:\n  blueprint_version: '0.2'\n  confidence:\n    contract: high\n    dependencies: high\n    failure_modes: medium\n    intent: medium\n    runtime: high\n  created_at: '2026-02-21T02:25:13.167559Z'\n  divergence_score: null\n  generated_by: manual_seed\n  genesis: true\n  last_reflected: null\n  promoted_at: null\n  reflection_notes: null\n  schema_version: '1.0'\n  status: candidate\nrole: The Hands (Tool Execution)\nruntime:\n  base_image: python:3.11-slim\n  compose_service: gaia-mcp\n  dockerfile: gaia-mcp/Dockerfile\n  gpu: false\n  gpu_count: null\n  health_check: curl -f http://localhost:8765/health\n  port: 8765\n  security: null\n  startup_cmd: uvicorn gaia_mcp.main:app --host 0.0.0.0 --port 8765\n  user: ${UID}:${GID}\nservice_status: live\nsource_files:\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/main.py\n  role: entrypoint\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/server.py\n  role: core_dispatcher\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/approval.py\n  role: approval_gate\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/web_tools.py\n  role: web_research\n- file_type: dockerfile\n  path: candidates/gaia-mcp/Dockerfile\n  role: build_config\nversion: '0.5'\n",
+  "blueprint_scoped": "architecture:\n  components:\n  - consumes_interfaces: []\n    description: 'FastAPI application implementing the MCP (Model Context Protocol)\n      JSON-RPC dispatch. Receives tool call requests from gaia-core, validates parameters,\n      routes to the appropriate tool implementation, and returns structured results.\n      Implements the /jsonrpc POST endpoint and root discovery endpoint.\n\n      '\n    exposes_interfaces:\n    - jsonrpc\n    - health\n    - root\n    id: jsonrpc_server\n    key_classes: []\n    key_functions:\n    - create_app()\n    - read_root()\n    label: JSON-RPC Server\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/server.py\n    - candidates/gaia-mcp/gaia_mcp/main.py\n  - consumes_interfaces: []\n    description: 'Tool catalog and implementations. Provides list_tools() for discovery\n      and describe_tool() for schema inspection. Implements file I/O tools (read,\n      write, list, find), memory tools (query, status, rebuild_index), fragment assembly\n      tools (write, read, assemble, list_pending, clear), and the AI-assisted write\n      tool that uses the rescue helper for context-aware file operations.\n\n      '\n    exposes_interfaces: []\n    id: tool_registry\n    key_classes: []\n    key_functions:\n    - list_tools()\n    - describe_tool()\n    - _ai_write_impl()\n    - _read_file_impl()\n    - _write_file_impl()\n    - _memory_query_impl()\n    - _find_relevant_documents()\n    - _fragment_assemble_impl()\n    label: Tool Registry\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/tools.py\n  - consumes_interfaces: []\n    description: 'Security-critical action approval workflow. Generates time-limited\n      challenges for sensitive operations (file writes, shell execution). ApprovalStore\n      tracks pending actions with TTL-based expiry. Challenge-response pattern prevents\n      automated bypass of the approval requirement.\n\n      '\n    exposes_interfaces:\n    - request_approval\n    - approval_status\n    id: approval_gate\n    key_classes:\n    - ApprovalStore\n    key_functions:\n    - ApprovalStore.create_pending()\n    - ApprovalStore.approve()\n    - ApprovalStore.cancel()\n    - ApprovalStore.cleanup_expired()\n    label: Approval Gate\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/approval.py\n  - consumes_interfaces: []\n    description: 'Web access tools with domain trust tier system. SourceTrustConfig\n      classifies domains into trust tiers (trusted, standard, blocked). Rate limiter\n      prevents abuse. Implements DuckDuckGo search and HTTP content fetching with\n      HTML-to-text extraction. Content is filtered by domain trust level before returning\n      to the caller.\n\n      '\n    exposes_interfaces: []\n    id: web_tools\n    key_classes:\n    - SourceTrustConfig\n    - _RateLimiter\n    key_functions:\n    - web_search()\n    - web_fetch()\n    - SourceTrustConfig.tier_for_domain()\n    - SourceTrustConfig.is_allowed()\n    label: Web Search & Fetch\n    source_files:\n    - candidates/gaia-mcp/gaia_mcp/web_tools.py\n  edges:\n  - data_flow: \"method name + params \\u2192 result\"\n    from_component: jsonrpc_server\n    label: dispatches tool calls to\n    to_component: tool_registry\n    transport: function_call\n  - data_flow: action_type, description, params\n    from_component: jsonrpc_server\n    label: checks approval for sensitive operations\n    to_component: approval_gate\n    transport: function_call\n  - data_flow: \"pending action \\u2192 challenge\"\n    from_component: tool_registry\n    label: requests approval before write/execute\n    to_component: approval_gate\n    transport: function_call\n  - data_flow: \"search query or URL \\u2192 content\"\n    from_component: tool_registry\n    label: delegates web_search/web_fetch calls\n    to_component: web_tools\n    transport: function_call\ndependencies:\n  external_apis:\n  - name: duckduckgo\n    purpose: web_search_and_fetch\n    required: false\n  - name: discord\n    purpose: webhook_messaging\n    required: false\n  services:\n  - fallback: null\n    id: gaia-study\n    required: false\n    role: lora_training_and_adapter_management\n  volumes:\n  - access: ro\n    mount_path: /gaia-common\n    name: gaia-common\n    purpose: Shared library (tools registry, config, utils)\n  - access: rw\n    mount_path: /knowledge\n    name: knowledge\n    purpose: Tool reference docs, system knowledge base, vector index\n  - access: ro\n    mount_path: /models\n    name: gaia-models\n    purpose: LoRA adapters, embedding models\n  - access: rw\n    mount_path: /sandbox\n    name: gaia-sandbox\n    purpose: Isolated workspace for tool execution\nfailure_modes:\n- auto_recovers: false\n  condition: Tool execution error\n  response: JSON-RPC error response with code -32603 and traceback in data field\n  severity: degraded\n- auto_recovers: true\n  condition: Approval timeout (>900s default TTL)\n  response: Pending action expires; client must request approval again\n  severity: degraded\n- auto_recovers: false\n  condition: File path not in allowlist\n  response: ValueError; JSON-RPC error -32603 'Path not allowed'\n  severity: degraded\n- auto_recovers: true\n  condition: Rate limit exceeded (web_search/web_fetch)\n  response: Returns ok=false with remaining count; auto-recovers after sliding window\n  severity: degraded\n- auto_recovers: false\n  condition: Blocked or unknown domain in web_fetch\n  response: Returns ok=false with domain policy error\n  severity: degraded\n- auto_recovers: false\n  condition: gaia-study unavailable\n  response: study_* and adapter_* tools return ok=false with error message\n  severity: degraded\n- auto_recovers: false\n  condition: Sensitive tool without prior approval\n  response: HTTP 403 with JSON-RPC error directing to /request_approval\n  severity: degraded\nid: gaia-mcp\nintent:\n  cognitive_role: The Hands\n  design_decisions:\n  - Separate service decouples tool execution from cognition, keeping gaia-core CPU-only\n  - Path allowlisting restricts file ops to /knowledge, /sandbox, /models; symlink\n    traversal blocked via .resolve()\n  - Approval flow enforces human-in-the-loop via 5-char challenge reversal; time-boxed\n    to configurable TTL\n  - Domain allowlisting gates web research to trusted/reliable tiers; blocked list\n    prevents social media leakage\n  - Rate limiting (20 searches/hr, 50 fetches/hr) via in-memory sliding window prevents\n    abuse\n  - Study gateway pattern (async await) enables LoRA adapter management while preserving\n    tool isolation\n  - Fragment assembly with overlap checking enables long responses split across token\n    limits\n  - JSON-RPC 2.0 for lightweight tool dispatch without REST overhead\n  - 'Graceful degradation: missing study, blocked domains, rate limits return structured\n    errors not exceptions'\n  open_questions:\n  - Should approval TTL be configurable per-tool (e.g., ai_write longer than run_shell)?\n  - Should rate limits be per-minute with burst allowance instead of per-hour?\n  - Should approval store persist to disk across container restarts for auditability?\n  purpose: 'Sandboxed execution layer enforcing security boundaries around GAIA''s\n    tool calls. Acts as both a security perimeter (preventing unauthorized file/shell\n    access via path allowlisting) and an approval gate (requiring human confirmation\n    for destructive operations). Delegation to a separate service allows gaia-core\n    to remain interface-agnostic and CPU-only.\n\n    '\ninterfaces:\n- description: Container health check endpoint.\n  direction: inbound\n  id: health\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /health\n    type: http_rest\n- description: \"Root endpoint \\u2014 returns running status message.\"\n  direction: inbound\n  id: root\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /\n    type: http_rest\n- description: 'Primary tool dispatch via JSON-RPC 2.0. Handles ~30 tool methods:\n    file I/O (read_file, write_file, ai_write), shell (run_shell), memory/vector (memory_query,\n    memory_rebuild_index), web research (web_search, web_fetch), fragments, study\n    gateway, Discord messaging.'\n  direction: inbound\n  id: jsonrpc_dispatch\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /jsonrpc\n    type: http_rest\n- description: Create pending approval for sensitive tool (ai_write, write_file, run_shell,\n    memory_rebuild_index). Returns action_id + 5-char challenge.\n  direction: inbound\n  id: request_approval\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /request_approval\n    type: http_rest\n- description: List all pending approvals awaiting human confirmation.\n  direction: inbound\n  id: pending_approvals\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /pending_approvals\n    type: http_rest\n- description: Approve pending action by providing reversed 5-char challenge. Dispatches\n    underlying tool on success.\n  direction: inbound\n  id: approve_action\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /approve_action\n    type: http_rest\n- description: Async HTTP gateway to gaia-study for LoRA training and adapter management.\n  direction: outbound\n  id: study_gateway\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /study/start\n    type: http_rest\n- description: 'External web research via DuckDuckGo (ddgs library with Instant Answer\n    API fallback). Rate-limited: 20 searches/hr, 50 fetches/hr.'\n  direction: outbound\n  id: web_research\n  status: active\n  transport:\n    input_schema: null\n    method: GET\n    output_schema: null\n    path: /\n    type: http_rest\n- description: Optional Discord webhook for send_discord_message tool. Requires DISCORD_WEBHOOK_URL\n    env var.\n  direction: outbound\n  id: discord_webhook\n  status: active\n  transport:\n    input_schema: null\n    method: POST\n    output_schema: null\n    path: /\n    type: http_rest\nmeta:\n  blueprint_version: '0.2'\n  confidence:\n    contract: high\n    dependencies: high\n    failure_modes: medium\n    intent: medium\n    runtime: high\n  created_at: '2026-02-21T02:25:13.167559Z'\n  divergence_score: null\n  generated_by: manual_seed\n  genesis: true\n  last_reflected: null\n  promoted_at: null\n  reflection_notes: null\n  schema_version: '1.0'\n  status: candidate\nrole: The Hands (Tool Execution)\nruntime:\n  base_image: python:3.11-slim\n  compose_service: gaia-mcp\n  dockerfile: gaia-mcp/Dockerfile\n  gpu: false\n  gpu_count: null\n  health_check: curl -f http://localhost:8765/health\n  port: 8765\n  security: null\n  startup_cmd: uvicorn gaia_mcp.main:app --host 0.0.0.0 --port 8765\n  user: ${UID}:${GID}\nservice_status: live\nsource_files:\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/main.py\n  role: entrypoint\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/server.py\n  role: core_dispatcher\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/approval.py\n  role: approval_gate\n- file_type: python\n  path: candidates/gaia-mcp/gaia_mcp/web_tools.py\n  role: web_research\n- file_type: dockerfile\n  path: candidates/gaia-mcp/Dockerfile\n  role: build_config\nversion: '0.5'\n",
+  "ast_summaries": {
+    "__init__.py": {
+      "module_docstring": null,
+      "classes": [],
+      "functions": [],
+      "endpoints": [],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [],
+      "error_handlers": [],
+      "http_calls": []
+    },
+    "approval.py": {
+      "module_docstring": "Approval Store for MCP sensitive actions.\n\nManages pending actions that require human approval before execution.",
+      "classes": [
+        {
+          "name": "ApprovalStore",
+          "bases": [],
+          "docstring": "In-memory store for pending actions that require human approval.\n\nEach pending action is stored as:\n",
+          "methods": [
+            {
+              "name": "__init__",
+              "params": [
+                "self",
+                "ttl_seconds: int = 900"
+              ],
+              "return_type": null,
+              "decorators": [],
+              "is_async": false,
+              "line": 40
+            },
+            {
+              "name": "_gen_challenge",
+              "params": [
+                "self"
+              ],
+              "return_type": "str",
+              "decorators": [],
+              "is_async": false,
+              "line": 51
+            },
+            {
+              "name": "create_pending",
+              "params": [
+                "self",
+                "method: str",
+                "params: Dict[str, Any]",
+                "proposal: Optional[str] = None",
+                "allow_pending: bool = False"
+              ],
+              "return_type": "Tuple[str, str, float, float]",
+              "decorators": [],
+              "is_async": false,
+              "line": 55
+            },
+            {
+              "name": "list_pending",
+              "params": [
+                "self"
+              ],
+              "return_type": "List[Dict[str, Any]]",
+              "decorators": [],
+              "is_async": false,
+              "line": 134
+            },
+            {
+              "name": "approve",
+              "params": [
+                "self",
+                "action_id: str",
+                "provided_challenge: str"
+              ],
+              "return_type": "Dict[str, Any]",
+              "decorators": [],
+              "is_async": false,
+              "line": 166
+            },
+            {
+              "name": "cancel",
+              "params": [
+                "self",
+                "action_id: str"
+              ],
+              "return_type": "bool",
+              "decorators": [],
+              "is_async": false,
+              "line": 206
+            },
+            {
+              "name": "cleanup_expired",
+              "params": [
+                "self"
+              ],
+              "return_type": "int",
+              "decorators": [],
+              "is_async": false,
+              "line": 223
+            }
+          ],
+          "line": 20
+        }
+      ],
+      "functions": [],
+      "endpoints": [],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [
+        "from gaia_common.utils import get_logger"
+      ],
+      "error_handlers": [
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "create_pending",
+          "line": 84
+        }
+      ],
+      "http_calls": []
+    },
+    "main.py": {
+      "module_docstring": "GAIA MCP-Lite Server - Entry Point\n\nExposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.\nThis provides a secure and audited boundary between cognition and action.\n\nUsage:\n    uvico",
+      "classes": [],
+      "functions": [
+        {
+          "name": "startup_event",
+          "params": [],
+          "return_type": null,
+          "decorators": [
+            "app.on_event('startup')"
+          ],
+          "is_async": true,
+          "line": 56
+        },
+        {
+          "name": "shutdown_event",
+          "params": [],
+          "return_type": null,
+          "decorators": [
+            "app.on_event('shutdown')"
+          ],
+          "is_async": true,
+          "line": 64
+        }
+      ],
+      "endpoints": [],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [
+        "from gaia_common.utils import setup_logging, get_logger, install_health_check_filter"
+      ],
+      "error_handlers": [],
+      "http_calls": []
+    },
+    "server.py": {
+      "module_docstring": "GAIA MCP-Lite Server\n\nExposes GAIA's tools and primitives over a local JSON-RPC 2.0 interface.\nThis provides a secure and audited boundary between cognition and action.",
+      "classes": [],
+      "functions": [
+        {
+          "name": "get_study_service",
+          "params": [],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 39
+        },
+        {
+          "name": "health_check",
+          "params": [],
+          "return_type": null,
+          "decorators": [
+            "app.get('/health')"
+          ],
+          "is_async": true,
+          "line": 70
+        },
+        {
+          "name": "create_app",
+          "params": [],
+          "return_type": "FastAPI",
+          "decorators": [],
+          "is_async": false,
+          "line": 75
+        },
+        {
+          "name": "dispatch_tool",
+          "params": [
+            "tool_name: str",
+            "params: dict"
+          ],
+          "return_type": "any",
+          "decorators": [],
+          "is_async": true,
+          "line": 87
+        },
+        {
+          "name": "_send_discord_message_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 161
+        },
+        {
+          "name": "_ai_write_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 176
+        },
+        {
+          "name": "_list_dir_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 218
+        },
+        {
+          "name": "_list_files_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 228
+        },
+        {
+          "name": "_list_tree_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 268
+        },
+        {
+          "name": "_read_file_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 317
+        },
+        {
+          "name": "_write_file_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 342
+        },
+        {
+          "name": "_memory_status_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 379
+        },
+        {
+          "name": "_memory_query_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 393
+        },
+        {
+          "name": "_memory_rebuild_index_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 402
+        },
+        {
+          "name": "_find_files_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 414
+        },
+        {
+          "name": "_find_relevant_documents",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 456
+        },
+        {
+          "name": "_fragment_write_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 514
+        },
+        {
+          "name": "_fragment_read_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 536
+        },
+        {
+          "name": "_fragment_assemble_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 546
+        },
+        {
+          "name": "_fragment_list_pending_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 556
+        },
+        {
+          "name": "_fragment_clear_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 562
+        },
+        {
+          "name": "_study_start_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 571
+        },
+        {
+          "name": "_study_status_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 600
+        },
+        {
+          "name": "_study_cancel_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 610
+        },
+        {
+          "name": "_adapter_list_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 620
+        },
+        {
+          "name": "_adapter_load_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 632
+        },
+        {
+          "name": "_adapter_unload_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 651
+        },
+        {
+          "name": "_adapter_delete_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 669
+        },
+        {
+          "name": "_adapter_info_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 685
+        },
+        {
+          "name": "jsonrpc_endpoint",
+          "params": [
+            "request: Request"
+          ],
+          "return_type": null,
+          "decorators": [
+            "app.post('/jsonrpc')"
+          ],
+          "is_async": true,
+          "line": 704
+        },
+        {
+          "name": "read_root",
+          "params": [],
+          "return_type": null,
+          "decorators": [
+            "app.get('/')"
+          ],
+          "is_async": false,
+          "line": 752
+        },
+        {
+          "name": "request_approval",
+          "params": [
+            "request: Request"
+          ],
+          "return_type": null,
+          "decorators": [
+            "app.post('/request_approval')"
+          ],
+          "is_async": true,
+          "line": 757
+        },
+        {
+          "name": "pending_approvals",
+          "params": [],
+          "return_type": null,
+          "decorators": [
+            "app.get('/pending_approvals')"
+          ],
+          "is_async": true,
+          "line": 811
+        },
+        {
+          "name": "approve_action",
+          "params": [
+            "request: Request"
+          ],
+          "return_type": null,
+          "decorators": [
+            "app.post('/approve_action')"
+          ],
+          "is_async": true,
+          "line": 817
+        }
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "function_name": "health_check",
+          "line": 70
+        },
+        {
+          "method": "POST",
+          "path": "/jsonrpc",
+          "function_name": "jsonrpc_endpoint",
+          "line": 704
+        },
+        {
+          "method": "GET",
+          "path": "/",
+          "function_name": "read_root",
+          "line": 752
+        },
+        {
+          "method": "POST",
+          "path": "/request_approval",
+          "function_name": "request_approval",
+          "line": 757
+        },
+        {
+          "method": "GET",
+          "path": "/pending_approvals",
+          "function_name": "pending_approvals",
+          "line": 811
+        },
+        {
+          "method": "POST",
+          "path": "/approve_action",
+          "function_name": "approve_action",
+          "line": 817
+        }
+      ],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [
+        "from gaia_common.config import Config",
+        "from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper",
+        "from gaia_common.utils.safe_execution import run_shell_safe",
+        "from gaia_common.utils.tools_registry import TOOLS",
+        "from gaia_common.utils.vector_indexer import VectorIndexer",
+        "from gaia_common.utils.world_state import world_state_detail",
+        "from gaia_common.utils.service_client import get_study_client",
+        "from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender"
+      ],
+      "error_handlers": [
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "dispatch_tool",
+          "line": 92
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "dispatch_tool",
+          "line": 155
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 213
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_read_file_impl",
+          "line": 338
+        },
+        {
+          "exception_types": [
+            "subprocess.CalledProcessError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_find_relevant_documents",
+          "line": 504
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_start_impl",
+          "line": 595
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_status_impl",
+          "line": 605
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_cancel_impl",
+          "line": 615
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_list_impl",
+          "line": 627
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_load_impl",
+          "line": 646
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_unload_impl",
+          "line": 664
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_delete_impl",
+          "line": 680
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_info_impl",
+          "line": 696
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 400,
+          "enclosing_function": "jsonrpc_endpoint",
+          "line": 707
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 500,
+          "enclosing_function": "jsonrpc_endpoint",
+          "line": 743
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 400,
+          "enclosing_function": "request_approval",
+          "line": 765
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "request_approval",
+          "line": 797
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 400,
+          "enclosing_function": "approve_action",
+          "line": 825
+        },
+        {
+          "exception_types": [
+            "KeyError"
+          ],
+          "status_code": 404,
+          "enclosing_function": "approve_action",
+          "line": 835
+        },
+        {
+          "exception_types": [
+            "ValueError"
+          ],
+          "status_code": 403,
+          "enclosing_function": "approve_action",
+          "line": 837
+        },
+        {
+          "exception_types": [
+            "ValueError"
+          ],
+          "status_code": null,
+          "enclosing_function": "approve_action",
+          "line": 862
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 500,
+          "enclosing_function": "approve_action",
+          "line": 868
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 207
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 250
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 438
+        },
+        {
+          "exception_types": [
+            "ValidationError"
+          ],
+          "status_code": 400,
+          "enclosing_function": "jsonrpc_endpoint",
+          "line": 728
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": 500,
+          "enclosing_function": "request_approval",
+          "line": 782
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "approve_action",
+          "line": 858
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 195
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 262
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 450
+        }
+      ],
+      "http_calls": [
+        {
+          "call_method": "post",
+          "url_or_path": "/study/start",
+          "enclosing_function": "_study_start_impl",
+          "line": 584
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "/study/status",
+          "enclosing_function": "_study_status_impl",
+          "line": 604
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/study/cancel",
+          "enclosing_function": "_study_cancel_impl",
+          "line": 614
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "/adapters",
+          "enclosing_function": "_adapter_list_impl",
+          "line": 626
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/adapters/load",
+          "enclosing_function": "_adapter_load_impl",
+          "line": 642
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/adapters/unload",
+          "enclosing_function": "_adapter_unload_impl",
+          "line": 660
+        },
+        {
+          "call_method": "delete",
+          "url_or_path": "<f-string>",
+          "enclosing_function": "_adapter_delete_impl",
+          "line": 679
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "<f-string>",
+          "enclosing_function": "_adapter_info_impl",
+          "line": 695
+        }
+      ]
+    },
+    "tools.py": {
+      "module_docstring": "GAIA MCP Tools - Tool Dispatcher and Implementations.",
+      "classes": [],
+      "functions": [
+        {
+          "name": "list_tools",
+          "params": [],
+          "return_type": "List[str]",
+          "decorators": [],
+          "is_async": false,
+          "line": 36
+        },
+        {
+          "name": "describe_tool",
+          "params": [
+            "tool_name: str"
+          ],
+          "return_type": "Dict[str, Any]",
+          "decorators": [],
+          "is_async": false,
+          "line": 41
+        },
+        {
+          "name": "execute_tool",
+          "params": [
+            "method: str",
+            "params: Dict",
+            "approval_store: ApprovalStore",
+            "pre_approved: bool = False"
+          ],
+          "return_type": "Any",
+          "decorators": [],
+          "is_async": true,
+          "line": 46
+        },
+        {
+          "name": "_ai_write_impl",
+          "params": [
+            "params: dict",
+            "gaia_helper: GAIARescueHelper"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 112
+        },
+        {
+          "name": "_write_file_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 154
+        },
+        {
+          "name": "_list_dir_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 189
+        },
+        {
+          "name": "_list_files_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 199
+        },
+        {
+          "name": "_list_tree_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 240
+        },
+        {
+          "name": "_read_file_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 290
+        },
+        {
+          "name": "_memory_status_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 317
+        },
+        {
+          "name": "_memory_query_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 332
+        },
+        {
+          "name": "_memory_rebuild_index_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 341
+        },
+        {
+          "name": "_find_files_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 355
+        },
+        {
+          "name": "_find_relevant_documents",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 397
+        },
+        {
+          "name": "_fragment_write_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 456
+        },
+        {
+          "name": "_fragment_read_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 478
+        },
+        {
+          "name": "_fragment_assemble_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 488
+        },
+        {
+          "name": "_fragment_list_pending_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 498
+        },
+        {
+          "name": "_fragment_clear_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 504
+        },
+        {
+          "name": "_get_study_client",
+          "params": [],
+          "return_type": null,
+          "decorators": [],
+          "is_async": false,
+          "line": 516
+        },
+        {
+          "name": "_study_start_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 524
+        },
+        {
+          "name": "_study_status_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 551
+        },
+        {
+          "name": "_study_cancel_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 561
+        },
+        {
+          "name": "_adapter_list_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 571
+        },
+        {
+          "name": "_adapter_load_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 583
+        },
+        {
+          "name": "_adapter_unload_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 602
+        },
+        {
+          "name": "_adapter_delete_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 620
+        },
+        {
+          "name": "_adapter_info_impl",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": true,
+          "line": 636
+        }
+      ],
+      "endpoints": [],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [
+        "from gaia_common.utils import get_logger",
+        "from gaia_common.config import Config",
+        "from gaia_common.utils.safe_execution import run_shell_safe",
+        "from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper",
+        "from gaia_common.utils.vector_indexer import VectorIndexer",
+        "from gaia_common.utils.world_state import world_state_detail",
+        "from gaia_common.utils.service_client import get_study_client",
+        "from gaia_common.utils.tools_registry import TOOLS"
+      ],
+      "error_handlers": [
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 149
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_read_file_impl",
+          "line": 307
+        },
+        {
+          "exception_types": [
+            "subprocess.CalledProcessError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_find_relevant_documents",
+          "line": 445
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_start_impl",
+          "line": 546
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_status_impl",
+          "line": 556
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_study_cancel_impl",
+          "line": 566
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_list_impl",
+          "line": 578
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_load_impl",
+          "line": 597
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_unload_impl",
+          "line": 615
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_delete_impl",
+          "line": 631
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_adapter_info_impl",
+          "line": 647
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 143
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 221
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 379
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ai_write_impl",
+          "line": 131
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 233
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "walk",
+          "line": 391
+        }
+      ],
+      "http_calls": [
+        {
+          "call_method": "post",
+          "url_or_path": "/study/start",
+          "enclosing_function": "_study_start_impl",
+          "line": 536
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "/study/status",
+          "enclosing_function": "_study_status_impl",
+          "line": 555
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/study/cancel",
+          "enclosing_function": "_study_cancel_impl",
+          "line": 565
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "/adapters",
+          "enclosing_function": "_adapter_list_impl",
+          "line": 577
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/adapters/load",
+          "enclosing_function": "_adapter_load_impl",
+          "line": 593
+        },
+        {
+          "call_method": "post",
+          "url_or_path": "/adapters/unload",
+          "enclosing_function": "_adapter_unload_impl",
+          "line": 611
+        },
+        {
+          "call_method": "delete",
+          "url_or_path": "<f-string>",
+          "enclosing_function": "_adapter_delete_impl",
+          "line": 630
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "<f-string>",
+          "enclosing_function": "_adapter_info_impl",
+          "line": 646
+        }
+      ]
+    },
+    "web_tools.py": {
+      "module_docstring": "GAIA MCP Web Tools — web_search and web_fetch\n\nRead-only tools that give GAIA access to real, verifiable web sources.\nSafety via domain allowlist + rate limits (not SENSITIVE_TOOLS).",
+      "classes": [
+        {
+          "name": "SourceTrustConfig",
+          "bases": [],
+          "docstring": "Tiered domain classification: trusted / reliable / blocked / unknown.\n\nLoads overrides from gaia_con",
+          "methods": [
+            {
+              "name": "__init__",
+              "params": [
+                "self",
+                "config_override: Optional[Dict] = None"
+              ],
+              "return_type": null,
+              "decorators": [],
+              "is_async": false,
+              "line": 73
+            },
+            {
+              "name": "tier_for_domain",
+              "params": [
+                "self",
+                "domain: str"
+              ],
+              "return_type": "str",
+              "decorators": [],
+              "is_async": false,
+              "line": 86
+            },
+            {
+              "name": "is_allowed",
+              "params": [
+                "self",
+                "domain: str"
+              ],
+              "return_type": "bool",
+              "decorators": [],
+              "is_async": false,
+              "line": 97
+            },
+            {
+              "name": "is_blocked",
+              "params": [
+                "self",
+                "domain: str"
+              ],
+              "return_type": "bool",
+              "decorators": [],
+              "is_async": false,
+              "line": 102
+            },
+            {
+              "name": "domains_for_content_type",
+              "params": [
+                "self",
+                "content_type: str"
+              ],
+              "return_type": "List[str]",
+              "decorators": [],
+              "is_async": false,
+              "line": 106
+            },
+            {
+              "name": "_base_domain",
+              "params": [
+                "domain: str"
+              ],
+              "return_type": "str",
+              "decorators": [
+                "staticmethod"
+              ],
+              "is_async": false,
+              "line": 112
+            }
+          ],
+          "line": 22
+        },
+        {
+          "name": "_RateLimiter",
+          "bases": [],
+          "docstring": "Simple per-tool sliding-window rate limiter.\n\nResets on container restart (in-memory only — no Redis",
+          "methods": [
+            {
+              "name": "__init__",
+              "params": [
+                "self",
+                "max_calls: int",
+                "window_seconds: int"
+              ],
+              "return_type": null,
+              "decorators": [],
+              "is_async": false,
+              "line": 130
+            },
+            {
+              "name": "allow",
+              "params": [
+                "self"
+              ],
+              "return_type": "bool",
+              "decorators": [],
+              "is_async": false,
+              "line": 135
+            },
+            {
+              "name": "remaining",
+              "params": [
+                "self"
+              ],
+              "return_type": "int",
+              "decorators": [
+                "property"
+              ],
+              "is_async": false,
+              "line": 145
+            }
+          ],
+          "line": 124
+        }
+      ],
+      "functions": [
+        {
+          "name": "_get_config",
+          "params": [],
+          "return_type": "Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]",
+          "decorators": [],
+          "is_async": false,
+          "line": 161
+        },
+        {
+          "name": "web_search",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 188
+        },
+        {
+          "name": "_ddg_search",
+          "params": [
+            "query: str",
+            "max_results: int"
+          ],
+          "return_type": "List[dict]",
+          "decorators": [],
+          "is_async": false,
+          "line": 256
+        },
+        {
+          "name": "web_fetch",
+          "params": [
+            "params: dict"
+          ],
+          "return_type": "dict",
+          "decorators": [],
+          "is_async": false,
+          "line": 320
+        },
+        {
+          "name": "_extract_content",
+          "params": [
+            "html: str",
+            "url: str"
+          ],
+          "return_type": "Tuple[str, str]",
+          "decorators": [],
+          "is_async": false,
+          "line": 409
+        },
+        {
+          "name": "_extract_title_bs4",
+          "params": [
+            "html: str"
+          ],
+          "return_type": "str",
+          "decorators": [],
+          "is_async": false,
+          "line": 457
+        },
+        {
+          "name": "_domain_from_url",
+          "params": [
+            "url: str"
+          ],
+          "return_type": "str",
+          "decorators": [],
+          "is_async": false,
+          "line": 472
+        }
+      ],
+      "endpoints": [],
+      "enums": [],
+      "constants": [],
+      "gaia_imports": [
+        "from gaia_common.config import Config"
+      ],
+      "error_handlers": [
+        {
+          "exception_types": [
+            "ImportError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ddg_search",
+          "line": 265
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ddg_search",
+          "line": 267
+        },
+        {
+          "exception_types": [
+            "ImportError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ddg_search",
+          "line": 277
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ddg_search",
+          "line": 279
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_ddg_search",
+          "line": 307
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "web_fetch",
+          "line": 378
+        },
+        {
+          "exception_types": [
+            "ImportError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_extract_content",
+          "line": 426
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_extract_content",
+          "line": 428
+        },
+        {
+          "exception_types": [
+            "ImportError"
+          ],
+          "status_code": null,
+          "enclosing_function": "_extract_content",
+          "line": 442
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_extract_content",
+          "line": 444
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_extract_title_bs4",
+          "line": 463
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_domain_from_url",
+          "line": 476
+        },
+        {
+          "exception_types": [
+            "Exception"
+          ],
+          "status_code": null,
+          "enclosing_function": "_get_config",
+          "line": 167
+        }
+      ],
+      "http_calls": [
+        {
+          "call_method": "get",
+          "url_or_path": "https://api.duckduckgo.com/",
+          "enclosing_function": "_ddg_search",
+          "line": 285
+        },
+        {
+          "call_method": "get",
+          "url_or_path": "url",
+          "enclosing_function": "web_fetch",
+          "line": 372
+        }
+      ]
+    }
+  },
+  "reference_services": [
+    "gaia-orchestrator",
+    "gaia-prime",
+    "gaia-study"
+  ],
+  "cc_review": {
+    "service_id": "gaia-mcp",
+    "reviewer": "cc",
+    "review_direction": "forward",
+    "review_timestamp": "2026-02-21T00:15:00Z",
+    "overall_fidelity_score": 0.9,
+    "discrepancies": [
+      {
+        "dimension": "failure_modes",
+        "severity": "minor",
+        "blueprint_claim": "File path not in allowlist → ValueError; JSON-RPC error -32603 'Path not allowed'",
+        "code_evidence": "Path allowlisting logic is embedded within _read_file_impl, _write_file_impl, _ai_write_impl, _list_dir_impl etc. (tools.py lines 189-355). Each file op validates paths internally rather than via a named handler, but all raise ValueError with descriptive messages. The pre-check missed this because it is inline validation, not a structured except clause.",
+        "recommendation": "No code change needed. Blueprint accurately describes the behavior; the pre-check pattern matcher simply cannot detect inline validation. Consider adding a dedicated _validate_path() helper to consolidate the checks for clarity.",
+        "affected_file": "tools.py"
+      },
+      {
+        "dimension": "failure_modes",
+        "severity": "minor",
+        "blueprint_claim": "Rate limit exceeded (web_search/web_fetch) → Returns ok=false with remaining count",
+        "code_evidence": "_RateLimiter class (web_tools.py:124-145) implements sliding-window rate limiting with allow() and remaining() methods. web_search() (line 188) and web_fetch() (line 320) both check the rate limiter and return ok=false dicts with remaining count when limit is exceeded. Pre-check missed this because the limiter is called procedurally, not in an except clause.",
+        "recommendation": "No code change needed. Blueprint matches implementation precisely. The pre-check pattern matcher needs enhancement to detect non-exception-based failure handling.",
+        "affected_file": "web_tools.py"
+      },
+      {
+        "dimension": "failure_modes",
+        "severity": "minor",
+        "blueprint_claim": "Blocked or unknown domain in web_fetch → Returns ok=false with domain policy error",
+        "code_evidence": "SourceTrustConfig class (web_tools.py:22-112) provides tier_for_domain(), is_allowed(), is_blocked() methods. web_fetch() checks domain policy before fetching and returns ok=false with descriptive error when domain is blocked or unknown. This is procedural validation, not exception-based.",
+        "recommendation": "No code change needed. Blueprint accurately describes behavior.",
+        "affected_file": "web_tools.py"
+      },
+      {
+        "dimension": "failure_modes",
+        "severity": "minor",
+        "blueprint_claim": "gaia-study unavailable → study_* and adapter_* tools return ok=false with error message",
+        "code_evidence": "All study_* and adapter_* functions in tools.py (lines 524-647) wrap their HTTP calls in try/except Exception blocks that return {'ok': False, 'error': str(e)} dicts. The same pattern exists in server.py (lines 571-696). The pre-check found the gaia-study dependency import but missed the individual error handlers because they are generic Exception catches.",
+        "recommendation": "No code change needed. Behavior matches blueprint.",
+        "affected_file": "tools.py"
+      },
+      {
+        "dimension": "contract",
+        "severity": "observation",
+        "blueprint_claim": "web_research (outbound) http_rest GET / — External web research via DuckDuckGo",
+        "code_evidence": "web_tools.py:_ddg_search() (line 256) implements DuckDuckGo search with dual path: ddgs library (primary) and Instant Answer API fallback (line 285, GET https://api.duckduckgo.com/). The blueprint path '/' is a simplification — actual path is api.duckduckgo.com with query params.",
+        "recommendation": "Consider updating the blueprint's web_research interface path to reflect the actual DuckDuckGo API endpoint for precision.",
+        "affected_file": "web_tools.py"
+      },
+      {
+        "dimension": "dependencies",
+        "severity": "observation",
+        "blueprint_claim": "Dependencies list shows gaia-study, duckduckgo, discord as the only dependencies",
+        "code_evidence": "server.py imports gaia_common.config.Config, gaia_common.utils.safe_execution.run_shell_safe, gaia_common.utils.tools_registry.TOOLS, gaia_common.utils.vector_indexer.VectorIndexer, gaia_common.integrations.discord.DiscordConfig/DiscordWebhookSender. These are all gaia-common imports (universally available, correctly not declared). The external deps (httpx, ddgs, beautifulsoup4) are runtime libraries, not GAIA service dependencies.",
+        "recommendation": "No change needed. Dependency declarations are correct per the blueprint schema conventions.",
+        "affected_file": null
+      }
+    ],
+    "open_question_updates": [
+      {
+        "question": "Should approval TTL be configurable per-tool (e.g., ai_write longer than run_shell)?",
+        "status": "new",
+        "evidence": "ApprovalStore.__init__(self, ttl_seconds: int = 900) uses a single TTL for all tools. The create_pending() method does not accept a per-tool TTL override. Current architecture would require adding a ttl_overrides dict keyed by method name."
+      },
+      {
+        "question": "Should rate limits be per-minute with burst allowance instead of per-hour?",
+        "status": "new",
+        "evidence": "_RateLimiter uses a sliding window (max_calls, window_seconds). Currently configured as 20 searches/3600s and 50 fetches/3600s. Changing to per-minute would be a simple config change, but burst allowance would require a token-bucket algorithm."
+      },
+      {
+        "question": "Should approval store persist to disk across container restarts for auditability?",
+        "status": "new",
+        "evidence": "ApprovalStore is entirely in-memory (self._pending dict). No disk persistence mechanism exists. Adding persistence would require serialization of pending actions and TTL restoration on startup."
+      }
+    ],
+    "promotion_recommendation": "approve_with_notes",
+    "summary_note": "gaia-mcp demonstrates high blueprint fidelity (90%). All 6 inbound endpoints are correctly implemented. All 4 'missing' failure modes from the pre-check are actually present via inline validation and procedural checks rather than exception handlers. The approval system, rate limiting, path allowlisting, and domain tiering all match blueprint specifications. The 4 minor discrepancies are false negatives from the mechanical pre-check, not actual implementation gaps. The 2 observations are documentation precision issues only."
+  },
+  "promotion_outcome": "passed",
+  "modifications_before_promotion": [],
+  "divergence_score_final": 0.19999999999999996,
+  "ground_truth_fidelity": 0.8,
+  "total_checkpoints": 6
+}

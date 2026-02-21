@@ -1,0 +1,71 @@
+{
+  "service_id": "gaia-core",
+  "reviewer": "cc",
+  "review_direction": "forward",
+  "review_timestamp": "2026-02-21T00:15:00Z",
+  "overall_fidelity_score": 0.80,
+  "discrepancies": [
+    {
+      "dimension": "contract",
+      "severity": "major",
+      "blueprint_claim": "8 endpoints marked [MISSING] by pre-check: GET /gpu/status, POST /gpu/release, POST /gpu/reclaim, POST /sleep/wake, GET /sleep/status, POST /sleep/study-handoff, GET /sleep/distracted-check, POST /sleep/shutdown",
+      "code_evidence": "ALL 8 endpoints are actually implemented in separate router files with prefix routing. api/gpu_endpoints.py defines GET /status, POST /release, POST /reclaim (lines 67, 94, 148) under an APIRouter with prefix='/gpu'. api/sleep_endpoints.py defines POST /wake, GET /status, POST /study-handoff, GET /distracted-check, POST /shutdown (lines 23, 74, 87, 121, 143) under prefix='/sleep'. Both routers are registered in main.py via app.include_router(). The pre-check's 54.5% structural completeness is a false alarm — actual completeness is 12/12 (100%).",
+      "recommendation": "No code change needed. The pre-check pattern matcher needs enhancement to follow include_router() prefix composition. All blueprint endpoints are fully implemented.",
+      "affected_file": "api/gpu_endpoints.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Session state corruption → Clears session, starts fresh, logs incident to heartbeat",
+      "code_evidence": "Session management is handled through gaia_core's session infrastructure. agent_core.py:run_turn() has extensive Exception handling throughout (lines 633-2019) which would catch corrupt session state. However, there is no explicit 'clear session and start fresh' handler for session corruption specifically — corruption would be caught by general exception handlers which may not always clear the corrupt session cleanly.",
+      "recommendation": "Consider adding explicit session corruption detection (e.g., JSON decode errors when loading sessions.json) with a dedicated recovery path that clears the affected session and logs to the heartbeat timeline.",
+      "affected_file": "cognition/agent_core.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Checkpoint write failure → Sleep proceeds without checkpoint; next wake has no prime.md restoration context",
+      "code_evidence": "prime_checkpoint.py:create_checkpoint() (line 61) and the internal _generate_checkpoint() (line 143) have Exception handling (line 153). The OSError handlers in __init__ (line 52) and rotate_checkpoints (line 99) suggest file I/O failures are anticipated. However, the specific claim that 'sleep proceeds without checkpoint' when write fails is an architectural property of sleep_cycle_loop.py — the checkpoint write is called during drowsy transition but the sleep state machine continues regardless of checkpoint success.",
+      "recommendation": "The behavior is correct by design — checkpoint failure is non-fatal. Consider adding a log warning when checkpoint write fails to make this graceful degradation explicit in operational logs.",
+      "affected_file": "cognition/prime_checkpoint.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "observation",
+      "blueprint_claim": "Blueprint documents 12 inbound endpoints + 7 outbound interfaces",
+      "code_evidence": "main.py additionally exposes endpoints not in the blueprint: voice-state endpoint (sleep_endpoints.py line 45). The outbound interfaces are well-matched: prime inference via OpenAI-compatible API (external_voice.py HTTP calls), MCP dispatch (mcp_client imports), orchestrator GPU signals (sleep_cycle_loop.py HTTP calls), web presence updates (sleep_cycle_loop.py:_update_presence). The service also has additional autonomous features not documented as interfaces: ThoughtSeedHeartbeat, InitiativeEngine, ConversationCurator, SleepTaskScheduler with multiple task types.",
+      "recommendation": "Consider documenting the voice-state endpoint and the autonomous background subsystems (heartbeat, initiative engine, sleep task scheduler) in the blueprint, even if they are internal-only.",
+      "affected_file": "api/sleep_endpoints.py"
+    },
+    {
+      "dimension": "intent",
+      "severity": "observation",
+      "blueprint_claim": "Cognitive role: The Brain — runs the full reasoning loop: intent detection, tool routing, multi-step reflection, and response generation",
+      "code_evidence": "The code strongly matches this intent. agent_core.py implements the complete reason-act-reflect loop via run_turn() (5000+ lines). Intent detection (nlu/intent_detection.py), tool routing (_run_tool_routing_loop, _execute_mcp_tool), self-reflection (self_reflection.py), cognitive audit (cognitive_audit.py), and response generation (external_voice.py) are all present. Additional cognitive capabilities include: loop detection/recovery (loop_detector.py, loop_recovery.py), goal tracking (goal_detector.py), semantic probing (semantic_probe.py), knowledge enhancement (knowledge_enhancer.py), and persona management (behavior/ package). CPU-only design is confirmed by GPU endpoint delegation to orchestrator.",
+      "recommendation": "No change needed. Intent coherence is excellent. The service is unmistakably The Brain.",
+      "affected_file": null
+    },
+    {
+      "dimension": "dependencies",
+      "severity": "observation",
+      "blueprint_claim": "Dependencies: gaia-prime (optional, fallback groq), gaia-mcp (optional), gaia-web (required), gaia-orchestrator (optional), groq (optional), openai (optional), gemini (optional)",
+      "code_evidence": "All declared dependencies are confirmed by imports and HTTP calls. gaia-prime: external_voice.py uses OpenAI-compatible API. gaia-mcp: mcp_client module handles JSON-RPC dispatch. gaia-web: output routing via HTTP. gaia-orchestrator: GPU sleep/wake signals in sleep_cycle_loop.py. External APIs (groq, openai, gemini) are used as fallback inference backends. No undeclared dependencies detected beyond gaia-common (universally available).",
+      "recommendation": "No change needed. Dependency declarations are complete and accurate.",
+      "affected_file": null
+    }
+  ],
+  "open_question_updates": [
+    {
+      "question": "Should reflection loop depth be dynamic based on query complexity or fixed per persona?",
+      "status": "new",
+      "evidence": "agent_core.py:run_turn() implements reflection via reflect_and_refine() and run_self_reflection(). The reflection depth appears to be fixed per invocation (single pass) rather than dynamic based on complexity. The _should_escalate_to_thinker() method (line 2222) provides some complexity-based routing but this controls model selection, not reflection depth."
+    },
+    {
+      "question": "Semantic codex hot-reload interval is hardcoded — should it be configurable via gaia_constants.json?",
+      "status": "new",
+      "evidence": "SemanticCodex is imported in agent_core.py but the hot-reload interval configuration was not visible in the AST summaries. The codex writer and reader modules exist but reload timing appears hardcoded."
+    }
+  ],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "gaia-core demonstrates strong blueprint fidelity (80%). The alarming 54.5% pre-check score is entirely due to the pattern matcher's inability to follow APIRouter prefix composition — all 12 endpoints are fully implemented across main.py, api/gpu_endpoints.py, and api/sleep_endpoints.py. All 4 declared dependencies are correctly integrated with appropriate fallback chains. The cognitive loop (reason-act-reflect) is comprehensively implemented in agent_core.py with extensive supporting subsystems (loop detection, goal tracking, semantic probing, knowledge enhancement). Two failure modes (session corruption, checkpoint failure) lack explicit dedicated handlers but have general exception coverage. The service has grown substantially with autonomous background systems (heartbeat, initiative engine, sleep tasks, conversation curation) that should be reflected in an updated blueprint."
+}

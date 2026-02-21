@@ -4,6 +4,8 @@
 
 `gaia-prime` is the dedicated GPU inference server within the GAIA ecosystem. It runs vLLM as a standalone OpenAI-compatible API server, providing LLM inference to `gaia-core` via HTTP. This decouples GPU-intensive inference from CPU-based cognition, enabling independent scaling and eliminating CUDA/vLLM dependency conflicts in the cognition container.
 
+**Current model**: Qwen3-4B-Instruct-2507-heretic (live) / Qwen3-8B-AWQ (candidate). The model path is configurable via `PRIME_MODEL_PATH` environment variable.
+
 ## Build and Image
 
 **Base Image**: `nvcr.io/nvidia/pytorch:25.03-py3` (NGC with CUDA 12.8, pre-compiled PyTorch)
@@ -60,12 +62,12 @@ The container runs vLLM with these parameters:
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `--model /models/Claude` | Model path | Loads model from mounted volume |
-| `--gpu-memory-utilization 0.65` | 65% VRAM | Conservative allocation for stability |
+| `--model` | `${PRIME_MODEL_PATH:-/models/Qwen3-4B-Instruct-2507-heretic}` | Loads model from mounted volume |
+| `--gpu-memory-utilization 0.70` | 70% VRAM | Allocation for model + KV cache |
 | `--max-model-len 8192` | 8K context | Context window size |
 | `--max-num-seqs 4` | 4 concurrent | Concurrent sequence limit |
 | `--dtype auto` | Automatic | Dtype selection based on hardware |
-| `--enforce-eager` | No CUDA graphs | Eager execution mode |
+| `--enforce-eager` | No CUDA graphs | Eager execution mode (required for Blackwell) |
 | `--enable-lora` | LoRA support | Dynamic adapter loading |
 | `--max-loras 4` | 4 adapters | Maximum concurrent LoRA adapters |
 | `--max-lora-rank 64` | Rank 64 | Maximum LoRA rank |
@@ -104,7 +106,7 @@ The container runs vLLM with these parameters:
 
 ## Troubleshooting
 
-- **Won't start**: Check `docker logs gaia-prime` — common issues: model not found at `/models/Claude`, CUDA OOM, GPU driver mismatch
+- **Won't start**: Check `docker logs gaia-prime` — common issues: model not found at the configured path, CUDA OOM, GPU driver mismatch
 - **Model loading slow**: 120s start_period may need increase for very large models
 - **GPU contention**: If gaia-study is also running with GPU, may cause OOM. Check `nvidia-smi`
 - **Health check failing**: Verify model is loaded: `curl http://localhost:7777/v1/models`

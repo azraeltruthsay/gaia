@@ -1,0 +1,89 @@
+{
+  "service_id": "gaia-web",
+  "reviewer": "cc",
+  "review_direction": "forward",
+  "review_timestamp": "2026-02-21T00:15:00Z",
+  "overall_fidelity_score": 0.75,
+  "discrepancies": [
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Discord bot token missing or invalid → Discord integration disabled; web input processing still works",
+      "code_evidence": "discord_interface.py:start() (line 67) has handles: ImportError (line 72) and handles: Exception (line 204) which would catch invalid token errors from discord.py. start_discord_bot() (line 480) returns False on failure, and the main startup (main.py startup_event, line 540) handles Exception (line 560) during Discord init, allowing the web server to continue without Discord. The pre-check missed this because the token validation is handled by discord.py's login() call internally.",
+      "recommendation": "No code change needed. The graceful degradation path exists and web input continues to work when Discord is unavailable.",
+      "affected_file": "discord_interface.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "major",
+      "blueprint_claim": "Blueprint documents 6 inbound endpoints: health, root, queue_status, process_user_input, presence, output_router",
+      "code_evidence": "main.py actually exposes 11+ endpoints: GET /health, GET /, GET /queue/status, GET /dashboard, GET /api/system/status, GET /api/system/services, GET /api/system/sleep, POST /process_user_input, POST /process_audio_input, POST /presence, POST /output_router. Plus 5 route module routers: blueprints (5 endpoints), files (4 endpoints), hooks (7 endpoints), terminal (2 endpoints), voice (6 endpoints). The blueprint significantly under-documents the actual API surface.",
+      "recommendation": "Update the blueprint to document the additional endpoints, especially the route modules (blueprints, files, hooks, terminal, voice) and system proxy endpoints (/api/system/*). These represent significant capabilities that the blueprint currently omits.",
+      "affected_file": "main.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "major",
+      "blueprint_claim": "Blueprint lists POST /process_user_input as the primary user input entry point",
+      "code_evidence": "main.py also exposes POST /process_audio_input (line 351) for voice/audio input processing. This is a distinct input path with different parameters (audio data vs text) that the blueprint does not document. The audio input endpoint is called from VoiceManager._get_response() for voice-to-text-to-response pipeline.",
+      "recommendation": "Add process_audio_input as an additional inbound interface in the blueprint with appropriate schema documentation.",
+      "affected_file": "main.py"
+    },
+    {
+      "dimension": "dependencies",
+      "severity": "major",
+      "blueprint_claim": "Dependencies: gaia-core (required), discord (optional). No other dependencies listed.",
+      "code_evidence": "voice_manager.py makes HTTP calls to an audio service endpoint (lines 644-645 _transcribe, line 831 _speak) indicating a dependency on gaia-audio. routes/terminal.py imports docker library for container management. routes/hooks.py proxies to gaia-core for sleep/wake, GPU management, and semantic codex operations. These represent undeclared service dependencies: gaia-audio (optional, for voice) and Docker socket (for terminal access).",
+      "recommendation": "Add gaia-audio as an optional dependency (for voice pipeline: STT/TTS). Document the Docker socket dependency if terminal access is a core feature.",
+      "affected_file": "voice_manager.py"
+    },
+    {
+      "dimension": "intent",
+      "severity": "minor",
+      "blueprint_claim": "Cognitive role: The Face — handles all external interactions: web form submissions, Discord messaging, and output routing",
+      "code_evidence": "The service has evolved well beyond 'The Face' description. It now includes: file browsing (routes/files.py), terminal access to containers (routes/terminal.py), blueprint visualization (routes/blueprints.py), hook/command proxying (routes/hooks.py), voice call management (routes/voice.py, voice_manager.py), and a full Mission Control dashboard. The intent description should be broadened to 'user-facing gateway AND operations dashboard'.",
+      "recommendation": "Update the blueprint intent to reflect the Mission Control dashboard capabilities and voice pipeline functionality.",
+      "affected_file": null
+    },
+    {
+      "dimension": "open_questions",
+      "severity": "observation",
+      "blueprint_claim": "Should message queue persistence survive service restart, or is in-memory-only acceptable?",
+      "code_evidence": "This question is ANSWERED by the code. MessageQueue (queue/message_queue.py) implements disk persistence via _load_from_disk() (line 84) and _persist_to_disk() (line 98). Messages survive container restarts via a JSON file. The blueprint's open question is resolved.",
+      "recommendation": "Move this from open_questions to a design decision in the blueprint: 'Message queue persists to JSON file for restart survival'.",
+      "affected_file": "queue/message_queue.py"
+    },
+    {
+      "dimension": "open_questions",
+      "severity": "observation",
+      "blueprint_claim": "Should /output_router handle async retries for failed Discord sends?",
+      "code_evidence": "utils/retry.py implements post_with_retry() with configurable max_attempts and exponential backoff. However, the output_router endpoint in main.py does not currently use retry.py for Discord sends — it calls discord_interface functions directly which have their own error handling. So retries exist for outbound HTTP calls to gaia-core but not for Discord message sends specifically.",
+      "recommendation": "This question remains open. The retry infrastructure exists (retry.py) but is not applied to Discord sends in the output router.",
+      "affected_file": "utils/retry.py"
+    }
+  ],
+  "open_question_updates": [
+    {
+      "question": "Should message queue persistence survive service restart, or is in-memory-only acceptable?",
+      "status": "answered",
+      "evidence": "MessageQueue in queue/message_queue.py implements JSON file persistence via _load_from_disk() and _persist_to_disk(). Messages survive restarts."
+    },
+    {
+      "question": "Is MessageQueue polling interval (1.5s default) optimal, or should it be configurable?",
+      "status": "new",
+      "evidence": "wait_for_active() accepts poll_interval as a parameter (default 1.5s), making it configurable per-call. However, it is not exposed as a service-level configuration option."
+    },
+    {
+      "question": "Should /output_router handle async retries for failed Discord sends?",
+      "status": "new",
+      "evidence": "retry.py provides post_with_retry() but it is used for gaia-core HTTP calls, not for Discord sends. Discord sends fail silently with error logging."
+    },
+    {
+      "question": "Should the blueprint document the Mission Control dashboard endpoints (file browser, terminal, blueprint viewer)?",
+      "status": "new",
+      "evidence": "routes/files.py, routes/terminal.py, routes/blueprints.py, routes/hooks.py, routes/voice.py together add 24+ endpoints not documented in the blueprint."
+    }
+  ],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "gaia-web has moderate blueprint fidelity (75%). All 6 documented endpoints are correctly implemented, and the 1 'missing' failure mode (Discord token) is actually handled via exception chains. However, the blueprint significantly under-documents the service's actual capabilities: the Mission Control dashboard (file browser, terminal, blueprint viewer, hooks proxy, voice management), audio input endpoint, and gaia-audio dependency are all absent from the blueprint. The core gateway functionality (input processing, output routing, sleep/wake, Discord integration) matches the blueprint well, but the service has grown substantially beyond what the blueprint describes."
+}

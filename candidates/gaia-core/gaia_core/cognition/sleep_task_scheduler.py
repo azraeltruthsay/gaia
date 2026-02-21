@@ -10,6 +10,7 @@ daemon thread, not an asyncio event loop.
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
 import re
@@ -100,6 +101,15 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_code_review,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="wiki_doc_regen",
+            task_type="DOC_GENERATION",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=30,
+            handler=self._run_wiki_doc_regen,
         ))
 
     # ------------------------------------------------------------------
@@ -453,8 +463,6 @@ class SleepTaskScheduler:
             if not pairs_dir.exists():
                 return
 
-            import json as _json
-
             pair_files = list(pairs_dir.glob("*.json"))
             total = len(pair_files)
             if total == 0:
@@ -652,7 +660,6 @@ class SleepTaskScheduler:
 
     def _review_service(self, service_id: str, bp, source_dir: str):
         """Run a full review cycle for one service. Returns ReviewResult or None."""
-        import json as _json
 
         from gaia_common.utils.ast_summarizer import summarize_file
         from gaia_common.utils.blueprint_precheck import run_blueprint_precheck
@@ -665,7 +672,7 @@ class SleepTaskScheduler:
             if py_file.name.startswith("_") and py_file.name != "__init__.py":
                 continue
             try:
-                summary = summarize_file(str(py_file))
+                summary = summarize_file(py_file.read_text(), filename=str(py_file))
                 rel_name = str(py_file.relative_to(source_path))
                 ast_summaries[rel_name] = summary
             except Exception:
@@ -776,7 +783,6 @@ class SleepTaskScheduler:
 
     def _write_review_queue(self, items: list) -> None:
         """Write review queue items for Web UI consumption."""
-        import json as _json
 
         queue_path = Path(self._REVIEW_QUEUE_PATH)
         try:
@@ -801,6 +807,299 @@ class SleepTaskScheduler:
             logger.info("Review queue updated: %d items", len(existing))
         except Exception:
             logger.debug("Failed to write review queue", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # wiki_doc_regen (DOC_GENERATION) — blueprint YAML → wiki markdown
+    # ------------------------------------------------------------------
+
+    _BLUEPRINTS_DIR = "/knowledge/blueprints"
+    _WIKI_AUTO_DIR = "/knowledge/wiki_auto"
+    _REGEN_MANIFEST = "/knowledge/wiki_auto/_last_regen_manifest.json"
+
+    def _run_wiki_doc_regen(self) -> None:
+        """Generate wiki markdown pages from blueprint YAML files.
+
+        Pure YAML → Markdown transformation. No LLM inference required.
+        Skips unchanged blueprints (mtime tracking via manifest).
+        Writes atomically (tmp + os.replace) to prevent partial files.
+        """
+        import yaml
+
+        bp_dir = Path(self._BLUEPRINTS_DIR)
+        out_dir = Path(self._WIKI_AUTO_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load manifest of last-processed mtimes
+        manifest = self._load_regen_manifest()
+
+        index_rows: list[dict] = []
+        generated = 0
+        skipped = 0
+
+        for bp_path in sorted(bp_dir.glob("*.yaml")):
+            service_id = bp_path.stem
+            mtime = bp_path.stat().st_mtime
+
+            # Skip if unchanged since last regen
+            if manifest.get(service_id) == mtime:
+                # Still need index row from cached output
+                out_path = out_dir / f"{service_id}.md"
+                if out_path.exists():
+                    try:
+                        data = yaml.safe_load(bp_path.read_text(encoding="utf-8"))
+                        if data:
+                            index_rows.append(self._index_row_from_data(service_id, data))
+                    except Exception:
+                        pass
+                skipped += 1
+                continue
+
+            try:
+                raw = bp_path.read_text(encoding="utf-8")
+                data = yaml.safe_load(raw)
+                if not data or not isinstance(data, dict):
+                    logger.debug("Skipping %s: empty or non-dict YAML", bp_path.name)
+                    continue
+            except Exception:
+                logger.warning("Skipping %s: malformed YAML", bp_path.name, exc_info=True)
+                continue
+
+            # Render and write
+            page = self._render_service_wiki_page(service_id, data)
+            self._atomic_write(out_dir / f"{service_id}.md", page)
+            index_rows.append(self._index_row_from_data(service_id, data))
+            manifest[service_id] = mtime
+            generated += 1
+
+        # Write index page
+        if index_rows:
+            index_page = self._render_wiki_index(index_rows)
+            self._atomic_write(out_dir / "index.md", index_page)
+
+        # Persist manifest
+        self._save_regen_manifest(manifest)
+
+        logger.info(
+            "Wiki doc regen: %d generated, %d skipped (unchanged)",
+            generated, skipped,
+        )
+
+    @staticmethod
+    def _render_service_wiki_page(service_id: str, data: dict) -> str:
+        """Render a single service's blueprint data into a wiki markdown page."""
+        lines: list[str] = []
+        role = data.get("role", service_id)
+        lines.append(f"# {service_id}")
+        lines.append(f"**Role:** {role}")
+        lines.append("")
+
+        # Purpose
+        intent = data.get("intent", {})
+        if isinstance(intent, dict) and intent.get("purpose"):
+            lines.append("## Purpose")
+            lines.append("")
+            lines.append(str(intent["purpose"]).strip())
+            lines.append("")
+
+        # Design Decisions
+        decisions = intent.get("design_decisions", []) if isinstance(intent, dict) else []
+        if decisions:
+            lines.append("## Design Decisions")
+            lines.append("")
+            for d in decisions:
+                lines.append(f"- {d}")
+            lines.append("")
+
+        # Runtime
+        runtime = data.get("runtime", {})
+        if runtime and isinstance(runtime, dict):
+            lines.append("## Runtime")
+            lines.append("")
+            lines.append("| Property | Value |")
+            lines.append("|----------|-------|")
+            for key in ["port", "base_image", "gpu", "startup_cmd", "health_check", "dockerfile"]:
+                val = runtime.get(key)
+                if val is not None:
+                    lines.append(f"| {key} | `{val}` |")
+            lines.append("")
+
+        # Interfaces — Inbound
+        interfaces = data.get("interfaces", [])
+        if interfaces and isinstance(interfaces, list):
+            inbound = [i for i in interfaces if isinstance(i, dict) and i.get("direction") == "inbound"]
+            outbound = [i for i in interfaces if isinstance(i, dict) and i.get("direction") == "outbound"]
+
+            if inbound:
+                lines.append("## Inbound Endpoints")
+                lines.append("")
+                lines.append("| ID | Method | Path | Description |")
+                lines.append("|----|--------|------|-------------|")
+                for ep in inbound:
+                    transport = ep.get("transport", {})
+                    method = transport.get("method", "—") if isinstance(transport, dict) else "—"
+                    path = transport.get("path", "—") if isinstance(transport, dict) else "—"
+                    desc = ep.get("description", "")
+                    lines.append(f"| {ep.get('id', '—')} | {method} | `{path}` | {desc} |")
+                lines.append("")
+
+            if outbound:
+                lines.append("## Outbound Connections")
+                lines.append("")
+                lines.append("| ID | Transport | Target | Description |")
+                lines.append("|----|-----------|--------|-------------|")
+                for ep in outbound:
+                    transport = ep.get("transport", {})
+                    if isinstance(transport, dict):
+                        t_type = transport.get("type", "—")
+                        target = transport.get("target_service", transport.get("path", "—"))
+                    else:
+                        t_type = "—"
+                        target = "—"
+                    desc = ep.get("description", "")
+                    lines.append(f"| {ep.get('id', '—')} | {t_type} | {target} | {desc} |")
+                lines.append("")
+
+        # Dependencies — Services
+        deps = data.get("dependencies", {})
+        if isinstance(deps, dict):
+            svc_deps = deps.get("services", [])
+            if svc_deps and isinstance(svc_deps, list):
+                lines.append("## Service Dependencies")
+                lines.append("")
+                lines.append("| Service | Role | Required | Fallback |")
+                lines.append("|---------|------|----------|----------|")
+                for s in svc_deps:
+                    if isinstance(s, dict):
+                        lines.append(
+                            f"| {s.get('id', '—')} | {s.get('role', '—')} "
+                            f"| {s.get('required', '—')} | {s.get('fallback', 'none')} |"
+                        )
+                lines.append("")
+
+            # Volumes
+            volumes = deps.get("volumes", [])
+            if volumes and isinstance(volumes, list):
+                lines.append("## Volume Mounts")
+                lines.append("")
+                lines.append("| Name | Access | Mount Path | Purpose |")
+                lines.append("|------|--------|------------|---------|")
+                for v in volumes:
+                    if isinstance(v, dict):
+                        lines.append(
+                            f"| {v.get('name', '—')} | {v.get('access', '—')} "
+                            f"| `{v.get('mount_path', '—')}` | {v.get('purpose', '—')} |"
+                        )
+                lines.append("")
+
+            # External APIs
+            ext_apis = deps.get("external_apis", [])
+            if ext_apis and isinstance(ext_apis, list):
+                lines.append("## External APIs")
+                lines.append("")
+                lines.append("| Name | Purpose | Required |")
+                lines.append("|------|---------|----------|")
+                for api in ext_apis:
+                    if isinstance(api, dict):
+                        lines.append(
+                            f"| {api.get('name', '—')} | {api.get('purpose', '—')} "
+                            f"| {api.get('required', '—')} |"
+                        )
+                lines.append("")
+
+        # Failure Modes
+        failures = data.get("failure_modes", [])
+        if failures and isinstance(failures, list):
+            lines.append("## Failure Modes")
+            lines.append("")
+            for fm in failures:
+                if not isinstance(fm, dict):
+                    continue
+                severity = fm.get("severity", "unknown")
+                condition = fm.get("condition", "Unknown condition")
+                response = fm.get("response", "No response defined")
+                auto = fm.get("auto_recovers", False)
+
+                admonition = "warning" if severity in ("degraded", "partial") else "danger"
+                lines.append(f'!!! {admonition} "{condition}"')
+                lines.append(f"    **Severity:** {severity} | **Auto-recovers:** {'yes' if auto else 'no'}")
+                lines.append(f"    {response}")
+                lines.append("")
+
+        # Footer
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines.append("---")
+        lines.append(f"*Auto-generated from `{service_id}.yaml` by wiki_doc_regen sleep task at {timestamp}.*")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_wiki_index(rows: list[dict]) -> str:
+        """Render the auto-generated service map index page."""
+        lines: list[str] = []
+        lines.append("# Auto-Generated Service Map")
+        lines.append("")
+        lines.append("This page is regenerated automatically from blueprint YAML files")
+        lines.append("during GAIA's sleep cycle. Do not edit manually.")
+        lines.append("")
+        lines.append("| Service | Role | Port | GPU | Status |")
+        lines.append("|---------|------|------|-----|--------|")
+        for row in sorted(rows, key=lambda r: r.get("service_id", "")):
+            sid = row.get("service_id", "—")
+            lines.append(
+                f"| [{sid}]({sid}.md) | {row.get('role', '—')} "
+                f"| {row.get('port', '—')} | {row.get('gpu', '—')} "
+                f"| {row.get('status', '—')} |"
+            )
+        lines.append("")
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines.append("---")
+        lines.append(f"*Auto-generated by wiki_doc_regen sleep task at {timestamp}.*")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _index_row_from_data(service_id: str, data: dict) -> dict:
+        """Extract a summary row from blueprint data for the index page."""
+        runtime = data.get("runtime", {}) if isinstance(data.get("runtime"), dict) else {}
+        return {
+            "service_id": service_id,
+            "role": data.get("role", "—"),
+            "port": runtime.get("port", "—"),
+            "gpu": runtime.get("gpu", "—"),
+            "status": data.get("service_status", "—"),
+        }
+
+    @staticmethod
+    def _atomic_write(path: Path, content: str) -> None:
+        """Write content atomically via tmp file + os.replace."""
+        tmp_path = path.with_suffix(".tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            os.replace(str(tmp_path), str(path))
+        except Exception:
+            # Clean up tmp on failure
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            raise
+
+    def _load_regen_manifest(self) -> dict:
+        """Load the mtime manifest for incremental regen."""
+        manifest_path = Path(self._REGEN_MANIFEST)
+        if manifest_path.exists():
+            try:
+                return _json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _save_regen_manifest(self, manifest: dict) -> None:
+        """Save the mtime manifest for incremental regen."""
+        manifest_path = Path(self._REGEN_MANIFEST)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write(manifest_path, _json.dumps(manifest, indent=2))
 
     def _run_code_evolution(self) -> None:
         """Generate code evolution snapshot for temporal self-awareness."""

@@ -1,0 +1,83 @@
+{
+  "service_id": "gaia-orchestrator",
+  "reviewer": "claude-code",
+  "review_direction": "reverse",
+  "review_timestamp": "2026-02-21T00:15:00Z",
+  "overall_fidelity_score": 0.78,
+  "discrepancies": [
+    {
+      "dimension": "intent",
+      "severity": "major",
+      "blueprint_claim": "Blueprint documents GPU management, container lifecycle, handoff protocol, state persistence, and WebSocket notifications as the 5 core components",
+      "code_evidence": "health_watchdog.py (312 lines) implements a full HA-aware health monitoring system with 4 HA states (ACTIVE, DEGRADED, FAILOVER_ACTIVE, FAILED), session sync, and consecutive failure tracking \u2014 completely undocumented in blueprint",
+      "recommendation": "Add HealthWatchdog as a 6th component in the architecture section with its HA state machine, session sync behavior, and failure thresholds",
+      "affected_file": "gaia_orchestrator/health_watchdog.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "minor",
+      "blueprint_claim": "Blueprint lists 20 inbound interfaces",
+      "code_evidence": "All 20 endpoints confirmed present in main.py. However, the HealthWatchdog start/stop lifecycle is managed in the lifespan context manager (lines 40-75) and exposes no additional endpoints but runs as a background task affecting system behavior",
+      "recommendation": "Document the HealthWatchdog background task in the architecture section as an internal component with side effects on HA state",
+      "affected_file": "gaia_orchestrator/main.py"
+    },
+    {
+      "dimension": "failure_modes",
+      "severity": "minor",
+      "blueprint_claim": "Blueprint documents 7 failure modes including 'gpu_cleanup_timeout' with 30s default",
+      "code_evidence": "config.py confirms cleanup_timeout_seconds=30.0, cleanup_threshold_mb=3000, cleanup_poll_interval=1.0. gpu_manager.py wait_for_gpu_cleanup() implements both NVML polling path and Docker fallback. All 7 failure modes have corresponding error handling. However, HealthWatchdog failures (e.g., cascading health check failures causing HA state transitions) are not in the failure modes list",
+      "recommendation": "Add a failure mode for 'health_watchdog_cascade' covering consecutive health check failures leading to DEGRADED/FAILED HA states",
+      "affected_file": "gaia_orchestrator/health_watchdog.py"
+    },
+    {
+      "dimension": "dependencies",
+      "severity": "minor",
+      "blueprint_claim": "Blueprint lists pynvml, docker, aiohttp, fastapi, uvicorn as dependencies",
+      "code_evidence": "All listed dependencies confirmed in imports. Additionally, asyncio.Lock is used extensively for concurrent access protection in state.py and handoff_manager.py, and pathlib for atomic file operations. These are stdlib so not critical, but docker-compose CLI is invoked as a subprocess in docker_manager.py (line 45: subprocess call) which is an unlisted external dependency",
+      "recommendation": "Add docker-compose CLI as an external runtime dependency in the blueprint",
+      "affected_file": "gaia_orchestrator/docker_manager.py"
+    },
+    {
+      "dimension": "open_questions",
+      "severity": "observation",
+      "blueprint_claim": "Open question: 'Should GPU cleanup timeout be configurable per-service?'",
+      "code_evidence": "config.py has a single cleanup_timeout_seconds=30.0 setting. gpu_manager.py applies this uniformly. No per-service configuration exists. The open question remains unresolved.",
+      "recommendation": "Keep open question as-is; current uniform timeout is reasonable for the 2-service GPU sharing model",
+      "affected_file": "gaia_orchestrator/config.py"
+    },
+    {
+      "dimension": "open_questions",
+      "severity": "observation",
+      "blueprint_claim": "Open question: 'How should concurrent handoff requests be handled?'",
+      "code_evidence": "handoff_manager.py lines 85-90: checks self._active_handoff and raises RuntimeError('Handoff already in progress') if one is active. This is a simple mutex \u2014 concurrent requests are rejected, not queued.",
+      "recommendation": "Close this open question: concurrent handoffs are rejected with RuntimeError. Consider documenting whether queuing would be desirable.",
+      "affected_file": "gaia_orchestrator/handoff_manager.py"
+    },
+    {
+      "dimension": "contract",
+      "severity": "observation",
+      "blueprint_claim": "Blueprint architecture section lists 8 edges between components",
+      "code_evidence": "All 8 documented edges verified in code. Additionally, HealthWatchdog \u2192 DockerManager edge exists (health checks query container status) and HealthWatchdog \u2192 NotificationManager edge exists (broadcasts HA state changes). These 2 edges are undocumented.",
+      "recommendation": "Add HealthWatchdog edges to the architecture graph when the component is documented",
+      "affected_file": "gaia_orchestrator/health_watchdog.py"
+    }
+  ],
+  "open_question_updates": [
+    {
+      "question_id": "oq-orch-concurrent-handoff",
+      "question": "Should concurrent handoff requests queue, or immediately fail with 409 Conflict?",
+      "status": "answered",
+      "evidence": "handoff_manager.py lines 85-90: checks self._active_handoff and raises RuntimeError('Handoff already in progress'). Simple mutex pattern — no queuing.",
+      "resolution": "Concurrent handoffs are rejected with RuntimeError. Active handoff check acts as a mutex."
+    },
+    {
+      "question_id": "oq-orch-health-polling",
+      "question": "Is prime health polling sufficient, or should orchestrator have explicit ownership tracking?",
+      "status": "answered",
+      "evidence": "health_watchdog.py: health_check_interval configurable setting, consecutive_failures_threshold=2 before marking unhealthy. HA state machine tracks ACTIVE/DEGRADED/FAILOVER_ACTIVE/FAILED states.",
+      "resolution": "Health polling interval is configurable via health_check_interval setting. Default 30s with consecutive_failures_threshold=2 before declaring unhealthy."
+    }
+  ],
+  "promotion_recommendation": "approve_with_notes",
+  "summary_note": "gaia-orchestrator implementation is solid with all 20 inbound and 6 outbound interfaces present. The most significant gap is the undocumented HealthWatchdog subsystem (312 lines, HA state machine with 4 states, session sync). Blueprint accurately describes the core GPU/container/handoff architecture but needs updating to reflect the HA monitoring capability. Two of three open questions are now answerable from the codebase."
+}

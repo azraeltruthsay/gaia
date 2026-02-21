@@ -103,6 +103,7 @@ FILE_LIST=$(
         -path '*/tests' -prune -o \
         -path '*/candidates' -prune -o \
         -path 'knowledge/projects' -prune -o \
+        -path 'knowledge/curricula' -prune -o \
         -path '*/session_vectors' -prune -o \
         -path '*/archive' -prune -o \
         -path '*/.mypy_cache' -prune -o \
@@ -115,7 +116,8 @@ FILE_LIST=$(
             -name 'Dockerfile' \
         \) -print | \
     grep -vE '__init__\.py$|_backup\.py$|\.py\.new$|\(backup\)|\.egg-info/|\.pyc$|\.lock$|\.map$|index_store\.json$|embeddings\.json$|final_prompt_for_review\.json$|last_activity\.timestamp$|sessions\.json$|/e2e_.*\.py$|/test_.*\.py$|/conftest\.py$|/README\.md$|/dev_matrix\.json$|/sketchpad\.json$|/response_fragments\.json$|\.claude/' | \
-    grep -vE 'Dev_Notebook/2026-01-1[0-9]|Dev_Notebook/2026-01-2[0-5]|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.'
+    grep -vE 'Dev_Notebook/2026-01-1[0-9]|Dev_Notebook/2026-01-2[0-5]|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.' | \
+    grep -vE 'blueprints/gaia-(core|web|mcp|study|prime|orchestrator)\.md$'
 )
 
 # 2. ADD ROOT LEVEL FILES
