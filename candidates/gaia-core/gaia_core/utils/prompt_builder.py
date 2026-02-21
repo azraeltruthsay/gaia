@@ -703,6 +703,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         final_prompt.append(summary_prompt)        # Tier 1
     if sleep_context_prompt:
         final_prompt.append(sleep_context_prompt)  # Tier 1 (sleep restoration)
+    # Council notes context (injected alongside sleep restoration)
+    council_ctx = None
+    for df in getattr(packet.content, 'data_fields', []) or []:
+        if getattr(df, 'key', '') == 'council_context' and getattr(df, 'value', None):
+            council_ctx = df.value
+            break
+    if council_ctx:
+        final_prompt.append({"role": "system", "content": council_ctx})
     if session_rag_prompt:
         final_prompt.append(session_rag_prompt)     # Tier 1.5
 

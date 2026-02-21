@@ -31,6 +31,7 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
+from gaia_core.cognition.council_notes import CouncilNoteManager
 
 logger = logging.getLogger("GAIA.SleepWake")
 
@@ -76,6 +77,7 @@ class SleepWakeManager:
         self.model_pool = model_pool
         self.idle_monitor = idle_monitor
         self.checkpoint_manager = PrimeCheckpointManager(config, timeline_store=timeline_store)
+        self._council_notes = CouncilNoteManager(config, timeline_store=timeline_store)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
         self.voice_active: bool = False
@@ -288,6 +290,16 @@ class SleepWakeManager:
             if checkpoint:
                 self.checkpoint_manager.mark_consumed()
 
+            # Load Council notes written since last sleep
+            council_context = ""
+            consumed_note_paths = []
+            sleep_timestamp = self.checkpoint_manager.get_sleep_timestamp()
+            pending = self._council_notes.read_pending_notes(since=sleep_timestamp)
+            if pending:
+                council_context = self._council_notes.format_notes_for_prime(pending)
+                consumed_note_paths = [n["path"] for n in pending]
+                logger.info("Loaded %d Council notes for Prime", len(pending))
+
             self.state = GaiaState.ACTIVE
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
@@ -299,6 +311,9 @@ class SleepWakeManager:
             return {
                 "checkpoint_loaded": bool(checkpoint),
                 "context": review_context,
+                "council_context": council_context,
+                "council_note_paths": consumed_note_paths,
+                "council_notes_count": len(consumed_note_paths),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception:
@@ -307,6 +322,21 @@ class SleepWakeManager:
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
             return {"checkpoint_loaded": False}
+
+    def get_pending_council_context(self):
+        """Return pending council context without consuming notes.
+
+        Used by agent_core to check for council notes on Prime's first
+        response after waking.
+        """
+        sleep_timestamp = self.checkpoint_manager.get_sleep_timestamp()
+        pending = self._council_notes.read_pending_notes(since=sleep_timestamp)
+        if not pending:
+            return None
+        return {
+            "council_context": self._council_notes.format_notes_for_prime(pending),
+            "council_note_paths": [n["path"] for n in pending],
+        }
 
     # ------------------------------------------------------------------
     # DREAMING transitions (orchestrator-driven)
