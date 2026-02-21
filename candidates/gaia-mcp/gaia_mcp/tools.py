@@ -85,6 +85,9 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        # Promotion & blueprint tools
+        "generate_blueprint": lambda p: _generate_blueprint_impl(p),
+        "assess_promotion": lambda p: _assess_promotion_impl(p),
     }
 
     async_tool_map = {
@@ -646,4 +649,73 @@ async def _adapter_info_impl(params: dict) -> dict:
         return await client.get(f"/adapters/{adapter_name}", params={"tier": tier})
     except Exception as e:
         logger.error(f"Failed to get adapter info via gateway: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ── Promotion & Blueprint Tools ─────────────────────────────────────────────
+
+
+def _generate_blueprint_impl(params: Dict) -> Dict:
+    """Generate a candidate blueprint for a service from source analysis."""
+    service_id = params.get("service_id")
+    source_dir = params.get("source_dir")
+    role_hint = params.get("role_hint", "")
+
+    if not service_id:
+        raise ValueError("service_id is required")
+
+    # Auto-detect source_dir if not provided
+    if not source_dir:
+        pkg_name = service_id.replace("-", "_")
+        candidates = [
+            f"/gaia/GAIA_Project/candidates/{service_id}/{pkg_name}",
+            f"/gaia/GAIA_Project/{service_id}/{pkg_name}",
+        ]
+        source_dir = next((p for p in candidates if Path(p).exists()), None)
+        if not source_dir:
+            return {"ok": False, "error": f"Could not find source directory for {service_id}"}
+
+    try:
+        from gaia_common.utils.blueprint_generator import generate_candidate_blueprint
+        from gaia_common.utils.blueprint_io import save_blueprint
+
+        bp = generate_candidate_blueprint(
+            service_id=service_id,
+            source_dir=source_dir,
+            role_hint=role_hint,
+        )
+        path = save_blueprint(bp, candidate=True)
+
+        return {
+            "ok": True,
+            "service_id": service_id,
+            "path": str(path),
+            "interfaces": len(bp.interfaces),
+            "inbound": len(bp.inbound_interfaces()),
+            "outbound": len(bp.outbound_interfaces()),
+            "dependencies": len(bp.dependencies.services),
+            "failure_modes": len(bp.failure_modes),
+            "source_files": len(bp.source_files),
+            "intent": bp.intent.purpose if bp.intent else None,
+        }
+    except Exception as e:
+        logger.error("Blueprint generation failed for %s: %s", service_id, e, exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+
+def _assess_promotion_impl(params: Dict) -> Dict:
+    """Run promotion readiness assessment for a candidate service."""
+    service_id = params.get("service_id")
+    if not service_id:
+        raise ValueError("service_id is required")
+
+    try:
+        from gaia_common.utils.promotion_readiness import assess_promotion_readiness
+        report = assess_promotion_readiness(service_id)
+        return {
+            "ok": True,
+            **report.to_dict(),
+        }
+    except Exception as e:
+        logger.error("Promotion assessment failed for %s: %s", service_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}

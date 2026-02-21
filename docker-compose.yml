@@ -425,6 +425,55 @@ services:
       start_period: 30s
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-audio: The Ears & Mouth - Half-duplex STT/TTS sensory service
+  # GPU-capable container for Whisper STT and RealtimeTTS
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-audio:
+    build:
+      context: .
+      dockerfile: ./gaia-audio/Dockerfile
+    image: localhost:5000/gaia-audio:local
+    container_name: gaia-audio
+    hostname: gaia-audio
+    restart: unless-stopped
+
+    volumes:
+      - ./gaia-audio:/app:rw
+      - ./gaia-common:/app/gaia_common:ro
+      - ./gaia-models/voice:/models/voice:ro
+
+    environment:
+      - PYTHONPATH=/app
+      - GAIA_SERVICE=audio
+      - GAIA_ENV=${GAIA_ENV:-production}
+      - GAIA_CONSTANTS_PATH=/app/gaia_common/constants/gaia_constants.json
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "8080:8080"
+
+    networks:
+      - gaia-net
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # gaia-wiki: The Library - Internal developer documentation
   # Accessible internally at http://gaia-wiki:8080
   # Optionally proxied by gaia-web at /wiki

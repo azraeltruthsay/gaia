@@ -95,6 +95,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="promotion_readiness",
+            task_type="PROMOTION_READINESS",
+            priority=3,
+            interruptible=True,
+            estimated_duration_seconds=90,
+            handler=self._run_promotion_readiness,
+        ))
+
+        self.register_task(SleepTask(
             task_id="code_review",
             task_type="SELF_MODEL_UPDATE",
             priority=4,
@@ -211,7 +220,7 @@ class SleepTaskScheduler:
     # pre-check path. The .md legacy path remains for blueprints without YAML.
     _YAML_BLUEPRINT_SERVICES: List[str] = [
         "gaia-core", "gaia-web", "gaia-mcp", "gaia-orchestrator",
-        "gaia-prime", "gaia-study",
+        "gaia-prime", "gaia-study", "gaia-audio",
     ]
 
     # Map YAML service IDs to their source directories (candidate preferred)
@@ -221,7 +230,110 @@ class SleepTaskScheduler:
         "gaia-mcp": "/gaia/GAIA_Project/candidates/gaia-mcp/gaia_mcp",
         "gaia-orchestrator": "/gaia/GAIA_Project/candidates/gaia-orchestrator/gaia_orchestrator",
         "gaia-study": "/gaia/GAIA_Project/candidates/gaia-study/gaia_study",
+        "gaia-audio": "/gaia/GAIA_Project/candidates/gaia-audio/gaia_audio",
     }
+
+    def _run_promotion_readiness(self) -> None:
+        """Assess promotion readiness for candidate services.
+
+        For each service in _YAML_BLUEPRINT_SERVICES:
+        - If candidate source exists but no live directory → assess readiness
+        - If candidate source is newer than live → assess readiness
+        - Auto-generate blueprints for services missing them
+        - Write reports and council notes for promotable services
+        """
+        try:
+            from gaia_common.utils.promotion_readiness import assess_promotion_readiness
+            from gaia_common.utils.blueprint_generator import generate_candidate_blueprint
+            from gaia_common.utils.blueprint_io import load_blueprint, save_blueprint
+            from gaia_common.utils.promotion_request import (
+                create_promotion_request,
+                load_pending_request,
+            )
+        except ImportError:
+            logger.debug("Promotion readiness modules not available, skipping")
+            return
+
+        project_root = "/gaia/GAIA_Project"
+        reports_dir = Path(project_root) / "knowledge" / "promotion_reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        for service_id in self._YAML_BLUEPRINT_SERVICES:
+            candidate_dir = Path(project_root) / "candidates" / service_id
+            live_dir = Path(project_root) / service_id
+
+            # Only assess services with candidates that differ from live
+            if not candidate_dir.exists():
+                continue
+            if live_dir.exists():
+                # Skip if live directory exists (already promoted)
+                # Future: compare mtimes for re-promotion
+                continue
+
+            logger.info("Assessing promotion readiness for %s", service_id)
+
+            # Auto-generate blueprint if missing
+            bp = load_blueprint(service_id, candidate=True)
+            if bp is None:
+                bp = load_blueprint(service_id, candidate=False)
+            if bp is None:
+                source_dir = self._SERVICE_SOURCE_DIRS.get(service_id)
+                if source_dir and Path(source_dir).exists():
+                    try:
+                        bp = generate_candidate_blueprint(service_id, source_dir)
+                        save_blueprint(bp, candidate=True)
+                        logger.info("Auto-generated blueprint for %s", service_id)
+                    except Exception:
+                        logger.warning("Blueprint generation failed for %s", service_id, exc_info=True)
+
+            # Run readiness assessment
+            try:
+                report = assess_promotion_readiness(service_id, project_root)
+            except Exception:
+                logger.warning("Readiness assessment failed for %s", service_id, exc_info=True)
+                continue
+
+            # Save report
+            import json as _json_mod
+            report_path = reports_dir / f"{service_id}.json"
+            report_path.write_text(
+                _json_mod.dumps(report.to_dict(), indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                "Promotion readiness for %s: %s (%d/%d checks pass)",
+                service_id, report.verdict,
+                report.pass_count, len(report.checks),
+            )
+
+            # Create promotion request if service is ready and no pending request exists
+            if report.verdict in ("ready", "ready_with_warnings"):
+                existing = load_pending_request(service_id)
+                if existing is None:
+                    try:
+                        req = create_promotion_request(
+                            service_id=service_id,
+                            verdict=report.verdict,
+                            recommendation=report.recommendation,
+                            pipeline_cmd=report.pipeline_cmd,
+                            check_summary=report.to_markdown(),
+                        )
+                        logger.info("Created promotion request %s for %s", req.request_id, service_id)
+
+                        # Write council note
+                        try:
+                            from gaia_core.cognition.council_notes import CouncilNoteManager
+                            cn = CouncilNoteManager(self.config)
+                            cn.write_note(
+                                user_prompt=f"[System] Promotion readiness: {service_id}",
+                                lite_response=report.to_markdown(),
+                                escalation_reason=f"Service {service_id} is {report.verdict} for promotion",
+                                session_id="sleep-promotion-readiness",
+                            )
+                        except Exception:
+                            logger.debug("Could not write council note for promotion readiness", exc_info=True)
+                    except Exception:
+                        logger.warning("Could not create promotion request for %s", service_id, exc_info=True)
 
     def _run_blueprint_validation(self) -> None:
         """Scan blueprints against source files and flag stale content.

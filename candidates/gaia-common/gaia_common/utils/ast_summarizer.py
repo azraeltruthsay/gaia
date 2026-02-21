@@ -592,7 +592,16 @@ def _extract_http_calls(
             if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
                 url = first_arg.value
             elif isinstance(first_arg, ast.JoinedStr):
-                url = "<f-string>"
+                # Extract static parts + variable hints from f-string
+                # e.g. f"{config.core_endpoint}/sleep/wake" → "{core_endpoint}/sleep/wake"
+                parts = []
+                for val in first_arg.values:
+                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                        parts.append(val.value)
+                    elif isinstance(val, ast.FormattedValue):
+                        inner = ast.unparse(val.value) if hasattr(ast, "unparse") else ""
+                        parts.append(f"{{{inner}}}")
+                url = "".join(parts) if parts else "<f-string>"
             else:
                 url = ast.unparse(first_arg)
                 if len(url) > 60:

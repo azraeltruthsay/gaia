@@ -1,0 +1,282 @@
+id: gaia-audio
+version: '0.1'
+role: The Ears & Mouth (Audio)
+service_status: candidate
+runtime:
+  port: 8080
+  base_image: python:3.11-slim
+  gpu: true
+  startup_cmd: uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080 --log-level
+    info
+  health_check: null
+  gpu_count: null
+  user: gaia
+  dockerfile: candidates/gaia-audio/Dockerfile
+  compose_service: gaia-audio
+  security: null
+interfaces:
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GET /health (from main.py:100)
+  status: active
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GET /status (from main.py:106)
+  status: active
+- id: status-ws
+  direction: inbound
+  transport:
+    type: websocket
+    path: /status/ws
+    protocol: null
+  description: WEBSOCKET /status/ws (from main.py:132)
+  status: active
+- id: transcribe
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /transcribe
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /transcribe (from main.py:161)
+  status: active
+- id: synthesize
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /synthesize
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /synthesize (from main.py:218)
+  status: active
+- id: list-voices
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /voices
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GET /voices (from main.py:269)
+  status: active
+- id: get-config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GET /config (from main.py:281)
+  status: active
+- id: mute
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /mute
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /mute (from main.py:300)
+  status: active
+- id: unmute
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /unmute
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /unmute (from main.py:309)
+  status: active
+- id: sleep-mode
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /sleep (from main.py:321)
+  status: active
+- id: wake-mode
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: POST /wake (from main.py:340)
+  status: active
+- id: out--signal-wake
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /sleep/wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Outbound POST call from _signal_wake() in main.py
+  status: active
+- id: out--register-with-orchestrator
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /register
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Outbound POST call from _register_with_orchestrator() in main.py
+  status: active
+dependencies:
+  services:
+  - id: gaia-core
+    role: cognition
+    required: false
+    fallback: null
+  - id: gaia-orchestrator
+    role: orchestration
+    required: false
+    fallback: null
+  volumes: []
+  external_apis: []
+source_files:
+- path: candidates/gaia-audio/gaia_audio/__init__.py
+  role: package_init
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/config.py
+  role: config
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/gpu_manager.py
+  role: core_logic
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/main.py
+  role: entrypoint
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/models.py
+  role: models
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/status.py
+  role: core_logic
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/stt_engine.py
+  role: core_logic
+  file_type: python
+- path: candidates/gaia-audio/gaia_audio/tts_engine.py
+  role: core_logic
+  file_type: python
+- path: candidates/gaia-audio/Dockerfile
+  role: dockerfile
+  file_type: dockerfile
+failure_modes:
+- condition: FileNotFoundError in from_constants()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in from_constants()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: WebSocketDisconnect in status_ws()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in status_ws()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in transcribe() (HTTP 500)
+  response: Returns HTTP 500
+  severity: fatal
+  auto_recovers: true
+- condition: Exception in synthesize() (HTTP 500)
+  response: Returns HTTP 500
+  severity: fatal
+  auto_recovers: true
+- condition: Exception in _background_reload()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in _signal_wake()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in _register_with_orchestrator()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: asyncio.TimeoutError in status_ws()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: asyncio.QueueFull in emit()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in audio_bytes_to_array()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in load()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: ImportError in unload()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: ImportError in transcribe_sync()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: FileNotFoundError, subprocess.CalledProcessError in _load_system()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in unload()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+- condition: Exception in synthesize_sync()
+  response: Error logged and handled
+  severity: degraded
+  auto_recovers: true
+intent:
+  purpose: 'gaia-audio: GAIA sensory service for speech-to-text and text-to-speech.'
+  design_decisions: []
+  open_questions:
+  - Blueprint auto-generated by discovery — human review recommended.
+  cognitive_role: The Ears & Mouth (Audio)
+architecture: null
+meta:
+  status: candidate
+  genesis: true
+  generated_by: discovery
+  blueprint_version: '0.1'
+  schema_version: '1.0'
+  created_at: 2026-02-21 20:00:10.989531+00:00
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: medium
+    failure_modes: medium
+    intent: low
+  reflection_notes: null
+  divergence_score: null

@@ -28,7 +28,7 @@ GAIA_ROOT="/gaia/GAIA_Project"
 KNOWLEDGE_DIR="$GAIA_ROOT/knowledge"
 
 # All candidate services
-ALL_SERVICES="gaia-common gaia-core gaia-web gaia-mcp gaia-study gaia-orchestrator"
+ALL_SERVICES="gaia-common gaia-core gaia-web gaia-mcp gaia-study gaia-orchestrator gaia-audio"
 
 # Services with no Dockerfile (need inline build)
 NO_DOCKERFILE_SERVICES="gaia-common"
@@ -48,6 +48,7 @@ declare -A PYTEST_PATHS=(
     ["gaia-mcp"]="/app/gaia-mcp/tests"
     ["gaia-study"]="/app/gaia-study/tests"
     ["gaia-orchestrator"]="/app/tests"
+    ["gaia-audio"]="/app/tests"
 )
 
 # Ruff paths per service (absolute in-container paths)
@@ -58,6 +59,7 @@ declare -A RUFF_PATHS=(
     ["gaia-mcp"]="/app/gaia-mcp"
     ["gaia-study"]="/app/gaia-study"
     ["gaia-orchestrator"]="/app/gaia_orchestrator"
+    ["gaia-audio"]="/app/gaia_audio"
 )
 
 # Common environment variables for test containers

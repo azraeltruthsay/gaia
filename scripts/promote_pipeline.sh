@@ -67,11 +67,13 @@ declare -A CANDIDATE_PORTS=(
     ["gaia-core"]="6416"
     ["gaia-mcp"]="8767"
     ["gaia-study"]="8768"
+    ["gaia-audio"]="8081"
 )
 declare -A LIVE_PORTS=(
     ["gaia-core"]="6415"
     ["gaia-mcp"]="8765"
     ["gaia-study"]="8766"
+    ["gaia-audio"]="8080"
 )
 
 # ═══════════════════════════════════════════════════════════════════════════

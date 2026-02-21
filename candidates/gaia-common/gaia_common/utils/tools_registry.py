@@ -328,5 +328,27 @@ TOOLS = {
             },
             "required": ["url"]
         }
+    },
+    "generate_blueprint": {
+        "description": "Generate a candidate blueprint YAML for a service from source code analysis. Extracts endpoints, dependencies, failure modes, and runtime config. Use this when a service needs a blueprint for the first time.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier (e.g. 'gaia-audio')."},
+                "source_dir": {"type": "string", "description": "Path to the service's Python source directory. Auto-detected if omitted."},
+                "role_hint": {"type": "string", "description": "Optional human-readable role (e.g. 'The Ears & Mouth')."}
+            },
+            "required": ["service_id"]
+        }
+    },
+    "assess_promotion": {
+        "description": "Run promotion readiness assessment for a candidate service. Checks blueprint, Dockerfile, tests, lint, dependencies, and compose config. Returns a structured report with pass/fail/warn for each check.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier to assess (e.g. 'gaia-audio')."}
+            },
+            "required": ["service_id"]
+        }
     }
 }
