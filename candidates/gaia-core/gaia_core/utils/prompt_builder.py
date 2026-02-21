@@ -312,7 +312,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     # 3.7. Tool Calling Convention — only when tools are visible
     tool_calling_convention = ""
     try:
-        if "MCP tools:" in (world_state_block_content or ""):
+        if "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or ""):
             tool_calling_convention = (
                 "TOOL CALLING CONVENTION:\n"
                 "To use a tool, emit a directive on its own line in this exact format:\n"
