@@ -5121,6 +5121,9 @@ Start your response with the first line of the file."""
         web_indicators = [
             "web search", "search the web", "search online",
             "search the internet", "look up online", "google ",
+            "look up ", "look them up", "look it up", "look this up",
+            "look that up", "can you find ",
+            "download ", "fetch ", "grab from the web",
         ]
 
         # Knowledge save indicators

@@ -70,23 +70,52 @@ def _model_paths() -> Dict[str, str]:
         "embed": os.getenv("EMBEDDING_MODEL_PATH") or "",
     }
 
-def _mcp_tools_sample(limit: int = 6) -> List[str]:
+def _get_registry() -> Dict:
+    """Resolve the tools registry, handling both module and dict re-export."""
+    if isinstance(tools_registry, dict):
+        return tools_registry
+    return getattr(tools_registry, "TOOLS", {})
+
+# Tools that MUST always appear in the system prompt so the model knows
+# its core capabilities.  Keep this list tight (≤10) — it's injected
+# into every turn.
+ESSENTIAL_TOOLS = [
+    "web_search",       # search the web via DuckDuckGo
+    "web_fetch",        # fetch + extract text from a trusted URL
+    "read_file",        # read a file's contents
+    "write_file",       # write / create a file (requires approval)
+    "list_dir",         # list directory contents
+    "memory_query",     # semantic search over indexed memory
+    "query_knowledge",  # semantic search over a knowledge base
+    "embed_documents",  # embed docs into vector store
+]
+
+def _mcp_essential_tools() -> List[str]:
+    """Return only the essential tools that exist in the registry."""
     try:
-        registry = getattr(tools_registry, "TOOLS", {})
-        names = sorted(registry.keys())
-        return names[:limit]
+        registry = _get_registry()
+        return [t for t in ESSENTIAL_TOOLS if t in registry]
     except Exception:
-        logger.exception("Failed to get mcp_tools_sample")
+        logger.exception("Failed to get essential tools")
         return []
 
 def _mcp_tools_full(limit: int = 50) -> List[str]:
     try:
-        registry = getattr(tools_registry, "TOOLS", {})
+        registry = _get_registry()
         names = sorted(registry.keys())
         return names[:limit]
     except Exception:
         logger.exception("Failed to get mcp_tools_full")
         return []
+
+def _mcp_extra_tool_count() -> int:
+    """Return how many non-essential tools exist (for the discovery hint)."""
+    try:
+        registry = _get_registry()
+        essential = set(ESSENTIAL_TOOLS)
+        return sum(1 for t in registry if t not in essential)
+    except Exception:
+        return 0
 
 def world_state_snapshot() -> Dict:
     """Return a compact, serializable snapshot."""
@@ -97,7 +126,8 @@ def world_state_snapshot() -> Dict:
         "load": _load_avg(),
         "mem": _mem_summary(),
         "models": _model_paths(),
-        "mcp_tools": _mcp_tools_sample(),
+        "mcp_tools": _mcp_essential_tools(),
+        "mcp_extra_count": _mcp_extra_tool_count(),
     }
 
 def world_state_detail() -> Dict:
@@ -155,8 +185,10 @@ def _capability_affordances(tools: List[str]) -> List[str]:
     web_tools = [t for t in tools if any(w in t.lower() for w in ['web', 'search', 'fetch'])]
     if web_tools:
         affordances.append(
-            "You can search the web and fetch content from trusted sources "
-            "to find real, verifiable information (poems, facts, documentation)."
+            "You can search the web (web_search) and fetch pages (web_fetch) "
+            "from trusted sources to find real, verifiable information — "
+            "rules references, poems, documentation, facts. "
+            "When a user asks you to 'look something up', USE these tools."
         )
 
     return affordances
@@ -193,8 +225,14 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
         lines.append("Models: " + "; ".join(model_bits))
 
     tools = snap.get("mcp_tools") or []
+    extra_count = snap.get("mcp_extra_count", 0)
     if tools:
-        lines.append("MCP tools: " + ", ".join(tools))
+        lines.append("Essential MCP tools: " + ", ".join(tools))
+        if extra_count > 0:
+            lines.append(
+                f"{extra_count} more tools available. "
+                "Use EXECUTE: list_tools {{}} to discover them."
+            )
 
     # Add capability affordances - natural language hints about what GAIA can do
     affordances = _capability_affordances(tools)
