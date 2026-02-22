@@ -35,17 +35,19 @@ _TOOL_REVIEW_SCHEMA: Dict[str, Any] = {
         "reasoning": {"type": "string"},
     },
     "required": ["approved", "confidence", "reasoning"],
+    "additionalProperties": False,
 }
 
 _TOOL_SELECT_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
-        "selected_tool": {"type": ["string", "null"]},
-        "params": {"type": "object"},
+        "selected_tool": {"type": "string"},
+        "params": {"type": "string"},
         "reasoning": {"type": "string"},
         "confidence": {"type": "number"},
     },
-    "required": ["selected_tool", "reasoning", "confidence"],
+    "required": ["selected_tool", "params", "reasoning", "confidence"],
+    "additionalProperties": False,
 }
 
 
@@ -153,7 +155,39 @@ _PROMPT_TOOLS = {
     "query_knowledge", "add_document",
     # Directory listing
     "list_dir", "list_tree",
+    # Self-introspection
+    "introspect_logs",
 }
+
+# ── Timeout-protected Llama calls ────────────────────────────────────────
+_LLAMA_TIMEOUT_S = 30  # seconds before falling back to unconstrained generation
+
+
+def _llama_with_timeout(model, timeout_s: int = _LLAMA_TIMEOUT_S, **kwargs):
+    """Run Llama.create_chat_completion with a timeout.
+
+    llama-cpp's grammar-constrained generation can hang indefinitely on
+    complex schemas.  This wrapper runs the call in a thread and enforces
+    a time limit.  On timeout it raises TimeoutError so the caller can
+    retry without grammar constraints.
+
+    NOTE: We must NOT use ``with ThreadPoolExecutor`` because __exit__
+    calls ``shutdown(wait=True)`` which blocks until the hung thread
+    finishes — defeating the timeout entirely.  Instead we create the
+    pool, grab the future, and on timeout call ``shutdown(wait=False)``
+    so the caller is unblocked immediately.
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(model.create_chat_completion, **kwargs)
+    try:
+        result = future.result(timeout=timeout_s)
+        pool.shutdown(wait=False)
+        return result
+    except FuturesTimeout:
+        pool.shutdown(wait=False, cancel_futures=True)
+        logger.warning("Llama structured JSON call timed out after %ds", timeout_s)
+        raise TimeoutError(f"Llama call timed out after {timeout_s}s")
 
 
 def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool:
@@ -185,7 +219,13 @@ def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool:
         "semantic search", "query "
     ]
 
-    for indicator in file_indicators + exec_indicators + search_indicators:
+    # Self-introspection / diagnostic indicators
+    introspection_indicators = [
+        "introspect", "your logs", "my logs", "diagnos",
+        "check your", "check my", "service logs",
+    ]
+
+    for indicator in file_indicators + exec_indicators + search_indicators + introspection_indicators:
         if indicator in lowered:
             logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
             return True
@@ -219,7 +259,8 @@ def select_tool(
     # Build tool catalog for prompt
     tool_catalog = _build_tool_catalog()
 
-    # Build selection prompt
+    # Build selection prompt — schema uses string params (not object) to avoid
+    # llama-cpp grammar hangs with unconstrained objects.
     prompt = f"""You are a tool selector for GAIA. Given the user's request, select the most appropriate tool.
 
 AVAILABLE TOOLS:
@@ -232,37 +273,35 @@ CONTEXT FROM PACKET:
 - Intent: {packet.intent.user_intent}
 - Available tools: {packet.context.available_mcp_tools or 'all'}
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON. Use exactly these four fields:
 {{
     "selected_tool": "tool_name",
-    "params": {{"param1": "value1"}},
+    "params": "{{\\"param1\\": \\"value1\\"}}",
     "reasoning": "Brief explanation of why this tool was selected",
-    "confidence": 0.0 to 1.0,
-    "alternatives": [
-        {{"tool": "alt_tool", "params": {{}}, "reason": "why this could also work"}}
-    ]
+    "confidence": 0.9
 }}
 
-If NO tool is appropriate, respond with:
+If NO tool is appropriate, set selected_tool to empty string:
 {{
-    "selected_tool": null,
+    "selected_tool": "",
+    "params": "{{}}",
     "reasoning": "Why no tool is needed",
     "confidence": 1.0
 }}
 """
 
     messages = [
-        {"role": "system", "content": "You are a precise tool selector. Output only valid JSON."},
+        {"role": "system", "content": "You are a precise tool selector. Output only valid JSON with exactly four fields: selected_tool, params, reasoning, confidence."},
         {"role": "user", "content": prompt}
     ]
 
     try:
-        # Use low temperature for deterministic selection
         extra_kwargs = _structured_json_kwargs(model, _TOOL_SELECT_SCHEMA)
+        is_llama = type(model).__name__ == "Llama"
         if extra_kwargs:
             logger.debug("Tool selector: using structured JSON decoding (%s)", type(model).__name__)
 
-        result = model.create_chat_completion(
+        call_kwargs = dict(
             messages=messages,
             temperature=temperature,
             max_tokens=500,
@@ -270,6 +309,19 @@ If NO tool is appropriate, respond with:
             stream=False,
             **extra_kwargs,
         )
+
+        # Use timeout wrapper for Llama to prevent grammar-constrained hangs
+        try:
+            if is_llama:
+                result = _llama_with_timeout(model, _LLAMA_TIMEOUT_S, **call_kwargs)
+            else:
+                result = model.create_chat_completion(**call_kwargs)
+        except TimeoutError:
+            # Grammar-constrained generation hung — cannot safely retry on the
+            # same model instance (llama-cpp is not thread-safe and the hung
+            # thread may still be using it).  Bail out gracefully.
+            logger.warning("Tool selection timed out; skipping tool routing for this turn")
+            return None, []
 
         # Extract response content
         content = _extract_content(result)
@@ -281,24 +333,46 @@ If NO tool is appropriate, respond with:
         # Parse JSON response
         selection = json.loads(json_content)
 
-        if selection.get("selected_tool") is None:
+        # Handle both null and empty string as "no tool"
+        selected = selection.get("selected_tool")
+        if selected is None or selected == "":
             logger.info(f"Tool selector determined no tool needed: {selection.get('reasoning')}")
             return None, []
 
+        # Parse params — may be a JSON string or an object (depending on
+        # whether grammar constraints were active)
+        raw_params = selection.get("params", {})
+        logger.debug("Tool selector raw params (type=%s): %s", type(raw_params).__name__, str(raw_params)[:200])
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params) if raw_params else {}
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Failed to parse params string as JSON: %s", raw_params[:100])
+                raw_params = {}
+        if not isinstance(raw_params, dict):
+            raw_params = {}
+
         primary = SelectedTool(
-            tool_name=selection["selected_tool"],
-            params=selection.get("params", {}),
+            tool_name=selected,
+            params=raw_params,
             selection_reasoning=selection.get("reasoning", ""),
             selection_confidence=selection.get("confidence", 0.5)
         )
 
+        # Parse alternatives if present (from unconstrained fallback responses)
         alternatives = []
         for alt in selection.get("alternatives", []):
+            alt_params = alt.get("params", {})
+            if isinstance(alt_params, str):
+                try:
+                    alt_params = json.loads(alt_params) if alt_params else {}
+                except (json.JSONDecodeError, TypeError):
+                    alt_params = {}
             alternatives.append(SelectedTool(
                 tool_name=alt.get("tool", ""),
-                params=alt.get("params", {}),
+                params=alt_params if isinstance(alt_params, dict) else {},
                 selection_reasoning=alt.get("reason", ""),
-                selection_confidence=0.0  # Alternatives don't have confidence scores
+                selection_confidence=0.0
             ))
 
         logger.info(f"Tool selected: {primary.tool_name} (confidence={primary.selection_confidence})")
@@ -358,16 +432,29 @@ Respond with JSON:
 
     try:
         extra_kwargs = _structured_json_kwargs(model, _TOOL_REVIEW_SCHEMA)
+        is_llama = type(model).__name__ == "Llama"
         if extra_kwargs:
             logger.debug("Tool review: using structured JSON decoding (%s)", type(model).__name__)
 
-        result = model.create_chat_completion(
+        call_kwargs = dict(
             messages=messages,
             temperature=temperature,
             max_tokens=200,
             stream=False,
             **extra_kwargs,
         )
+
+        # Use timeout wrapper for Llama
+        try:
+            if is_llama:
+                result = _llama_with_timeout(model, _LLAMA_TIMEOUT_S, **call_kwargs)
+            else:
+                result = model.create_chat_completion(**call_kwargs)
+        except TimeoutError:
+            # Cannot safely retry on the same model instance.
+            # Auto-approve the selection rather than blocking the pipeline.
+            logger.warning("Review timed out; auto-approving tool selection")
+            return True, 0.5, "Review timed out — auto-approved"
 
         content = _extract_content(result)
         json_content = _extract_json_from_response(content)

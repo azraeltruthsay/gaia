@@ -1,5 +1,5 @@
 import logging
-from gaia_common.protocols import CognitionPacket
+from gaia_common.protocols import CognitionPacket, ReflectionLog
 
 logger = logging.getLogger("GAIA.CognitiveDispatcher")
 
@@ -8,8 +8,6 @@ def process_execution_results(execution_results, session_manager, session_id, pa
         return
 
     for result in execution_results:
-        # FIX: The 'result' dict from the executor has 'op', 'label', 'ok', 'detail', 'raw' keys, not 'command' or 'result'.
-        # This change correctly and safely extracts the information.
         command = result.get("raw") or f"ai.{result.get('op')}('{result.get('label')}')"
         outcome = {
             "returncode": 0 if result.get("ok") else 1,
@@ -25,5 +23,12 @@ def process_execution_results(execution_results, session_manager, session_id, pa
         if outcome['stderr']:
             formatted_result += f"Errors:\n{outcome['stderr']}\n"
 
-        packet.append_thought(f"Execution Result:\n{formatted_result}")
+        # Record execution in packet's reasoning log
+        packet.reasoning.reflection_log.append(
+            ReflectionLog(
+                step="execution_result",
+                summary=formatted_result.strip(),
+                confidence=1.0 if result.get("ok") else 0.0,
+            )
+        )
         session_manager.add_message(session_id, "assistant", formatted_result)
