@@ -88,6 +88,7 @@ ESSENTIAL_TOOLS = [
     "memory_query",     # semantic search over indexed memory
     "query_knowledge",  # semantic search over a knowledge base
     "embed_documents",  # embed docs into vector store
+    "introspect_logs",  # view own service logs for self-diagnosis
 ]
 
 def _mcp_essential_tools() -> List[str]:
@@ -189,6 +190,15 @@ def _capability_affordances(tools: List[str]) -> List[str]:
             "from trusted sources to find real, verifiable information — "
             "rules references, poems, documentation, facts. "
             "When a user asks you to 'look something up', USE these tools."
+        )
+
+    # Self-introspection capabilities
+    if "introspect_logs" in tools:
+        affordances.append(
+            'You can view your own service logs for self-diagnosis using '
+            'introspect_logs with params: service (gaia-core|gaia-web|gaia-mcp|gaia-study|discord), '
+            'lines (int, default 50), search (substring filter), level (DEBUG|INFO|WARNING|ERROR). '
+            'Use this when debugging your own behavior, sleep/wake state, or response routing.'
         )
 
     return affordances

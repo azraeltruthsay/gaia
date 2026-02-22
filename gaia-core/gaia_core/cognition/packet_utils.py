@@ -18,6 +18,7 @@ SAFE_SIDECAR_TOOLS = {
     "query_knowledge", "embed_documents", "add_document",
     "fragment_write", "fragment_read", "fragment_assemble",
     "fragment_list_pending", "fragment_clear",
+    "introspect_logs",
 }
 
 
