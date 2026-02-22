@@ -218,8 +218,27 @@ class SleepCycleLoop:
             self.sleep_wake_manager.transition_to_waking()
 
     def _handle_dreaming(self) -> None:
-        """DREAMING is driven by orchestrator API calls — nothing to do here."""
+        """DREAMING state handler.
+
+        Normally just shows 'studying...' presence. But if a wake signal
+        arrives, initiates GPU preemption: asks the orchestrator to run
+        the study-to-prime handoff protocol, which cancels Study's training,
+        frees CUDA, boots Prime, and transitions us back to ASLEEP -> WAKING.
+        """
         self._update_presence("studying...", status_override="dnd")
+
+        if not self.sleep_wake_manager.wake_signal_pending:
+            return
+
+        # Guard: only initiate preemption once per dreaming session
+        if self.sleep_wake_manager._preemption_initiated:
+            logger.debug("Preemption already initiated — waiting for handoff to complete")
+            return
+
+        logger.info("Wake signal during DREAMING — initiating GPU preemption")
+        self.sleep_wake_manager._preemption_initiated = True
+        self._update_presence("waking up (preempting study)...", status_override="dnd")
+        self._preempt_study_for_wake()
 
     def _handle_distracted(self) -> None:
         """Periodically recheck if system load has dropped."""
@@ -266,6 +285,41 @@ class SleepCycleLoop:
                 logger.warning("GPU wake failed: %s — staying CPU-only", resp.status_code)
         except Exception:
             logger.warning("Orchestrator unreachable — waking without GPU", exc_info=True)
+
+    def _preempt_study_for_wake(self) -> None:
+        """Ask orchestrator to run study-to-prime handoff protocol.
+
+        The orchestrator performs the full protocol:
+          1. Signal Study to release GPU (/study/gpu-release)
+          2. Wait for CUDA cleanup
+          3. Transfer GPU ownership to Core
+          4. Start Prime container, wait for health
+          5. Notify Core /sleep/study-handoff direction=study_to_prime
+             -> exit_dreaming() -> ASLEEP + WAKING phase
+          6. Next _handle_asleep() loop picks up WAKING and completes wake
+
+        On failure, resets _preemption_initiated so the next poll retries.
+        """
+        try:
+            resp = httpx.post(
+                f"{self._orchestrator_url}/handoff/study-to-prime",
+                json={},
+                timeout=300.0,  # Study cleanup + CUDA clear + Prime boot + buffer
+            )
+            if resp.status_code == 200:
+                logger.info("GPU preemption initiated — orchestrator handling study-to-prime handoff")
+            else:
+                logger.warning(
+                    "GPU preemption request failed: %s — study will complete naturally",
+                    resp.status_code,
+                )
+                self.sleep_wake_manager._preemption_initiated = False
+        except Exception:
+            logger.warning(
+                "Orchestrator unreachable for preemption — study will complete naturally",
+                exc_info=True,
+            )
+            self.sleep_wake_manager._preemption_initiated = False
 
     # ------------------------------------------------------------------
     # Discord presence helper

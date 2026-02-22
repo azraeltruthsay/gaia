@@ -322,7 +322,8 @@
   "EMBED_INTENT": {
     "enabled": true,
     "confidence_threshold": 0.45,
-    "top_k": 3
+    "top_k": 3,
+    "other_penalty": 0.10
   },
   "WEB_RESEARCH": {
     "trusted_domains": [

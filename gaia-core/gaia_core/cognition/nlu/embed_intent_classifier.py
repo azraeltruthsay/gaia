@@ -67,6 +67,7 @@ class EmbedIntentClassifier:
             return True
 
         cfg = config or {}
+        self._other_penalty = cfg.get("other_penalty", 0.10)
         exemplars_path = cfg.get("exemplars_path") or str(_EXEMPLARS_FILE)
 
         try:
@@ -148,10 +149,14 @@ class EmbedIntentClassifier:
             best_intent = "other"
             best_score = 0.0
 
+            other_penalty = getattr(self, '_other_penalty', 0.10)
             for label, scores in intent_scores.items():
                 # Use the mean of the top-k scores for this intent
                 top_scores = sorted(scores, reverse=True)[:top_k]
                 avg = sum(top_scores) / len(top_scores)
+                # Penalize "other" so close calls prefer a specific intent
+                if label == "other":
+                    avg -= other_penalty
                 if avg > best_score:
                     best_score = avg
                     best_intent = label
