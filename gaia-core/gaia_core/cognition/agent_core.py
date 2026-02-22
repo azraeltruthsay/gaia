@@ -5023,10 +5023,12 @@ Start your response with the first line of the file."""
         try:
             result = self._execute_mcp_tool(primary_tool)
             packet.tool_routing.execution_result = result
-            packet.tool_routing.execution_status = (
-                ToolExecutionStatus.EXECUTED if result.success
-                else ToolExecutionStatus.FAILED
-            )
+            if result.success:
+                packet.tool_routing.execution_status = ToolExecutionStatus.EXECUTED
+            elif isinstance(result.output, dict) and result.output.get("pending_approval"):
+                packet.tool_routing.execution_status = ToolExecutionStatus.AWAITING_APPROVAL
+            else:
+                packet.tool_routing.execution_status = ToolExecutionStatus.FAILED
 
             # Add result to reasoning log
             packet.reasoning.reflection_log.append(ReflectionLog(
@@ -5149,6 +5151,20 @@ Start your response with the first line of the file."""
                         error=actual_result.get("error") if isinstance(actual_result, dict) else None,
                         execution_time_ms=elapsed_ms
                     )
+                elif rpc_result.get("pending_approval"):
+                    # Sensitive tool requires human approval — preserve metadata
+                    return ToolExecutionResult(
+                        success=False,
+                        output={
+                            "pending_approval": True,
+                            "action_id": rpc_result.get("action_id"),
+                            "challenge": rpc_result.get("challenge"),
+                            "proposal": rpc_result.get("proposal", ""),
+                            "tool_name": tool.tool_name,
+                        },
+                        error="Requires human approval",
+                        execution_time_ms=elapsed_ms,
+                    )
                 else:
                     return ToolExecutionResult(
                         success=False,
@@ -5232,7 +5248,13 @@ Start your response with the first line of the file."""
             "save the following to",
         ]
 
-        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators:
+        # Self-introspection / diagnostic indicators
+        introspection_indicators = [
+            "introspect", "your logs", "my logs", "diagnos",
+            "check your", "check my", "service logs",
+        ]
+
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators + introspection_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True
