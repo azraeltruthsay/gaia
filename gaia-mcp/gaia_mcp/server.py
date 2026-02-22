@@ -6,10 +6,6 @@ This provides a secure and audited boundary between cognition and action.
 """
 
 import logging
-import uuid
-import random
-import string
-import threading
 import time
 import traceback
 from datetime import datetime
@@ -29,7 +25,6 @@ from .web_tools import web_search, web_fetch
 import json
 from pathlib import Path
 import os
-import asyncio
 import subprocess
 
 # Study service client for gateway pattern

@@ -49,6 +49,7 @@ class ToolExecutionStatus(Enum):
     FAILED = "failed"                     # Tool execution failed
     SKIPPED = "skipped"                   # Low confidence, skipped
     USER_DENIED = "user_denied"           # User rejected tool use
+    AWAITING_APPROVAL = "awaiting_approval"  # Pending human approval via challenge-response
 
 class PacketState(Enum):
     INITIALIZED = "initialized"
@@ -71,6 +72,7 @@ class OutputDestination(Enum):
     WEBHOOK = "webhook"           # Outbound webhook
     LOG = "log"                    # Logging only (no user-facing output)
     BROADCAST = "broadcast"       # All registered destinations
+    AUDIO = "audio"               # Audio synthesis output (gaia-audio)
 
 # --- Header ---
 @dataclass_json

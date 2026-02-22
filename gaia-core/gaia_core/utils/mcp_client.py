@@ -57,6 +57,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
                     "pending_approval": True,
                     "action_id": approval_result.get("action_id"),
                     "challenge": approval_result.get("challenge"),
+                    "proposal": approval_result.get("proposal", ""),
                     "error": f"'{method}' requires approval. Challenge: {approval_result.get('challenge')}"
                 }
             else:

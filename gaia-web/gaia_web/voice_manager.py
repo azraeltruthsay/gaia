@@ -669,7 +669,7 @@ class VoiceManager:
         session_id = f"discord_voice_{user_id}"
 
         packet = CognitionPacket(
-            version="0.2",
+            version="0.3",
             header=Header(
                 datetime=datetime.now().isoformat(),
                 session_id=session_id,
@@ -749,7 +749,7 @@ class VoiceManager:
         session_id = f"discord_voice_{user_id}"
 
         packet = CognitionPacket(
-            version="0.2",
+            version="0.3",
             header=Header(
                 datetime=datetime.now().isoformat(),
                 session_id=session_id,

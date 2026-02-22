@@ -132,3 +132,124 @@ GAIA can now diagnose her own state issues. Example: "Why is the Sleeping indica
 | Self-Introspection | 1 | Live log viewing for self-diagnosis |
 
 **Total**: 11 commits, touching all 5 core services. The Council Protocol was the centerpiece — GAIA now has a structured way to coordinate between her fast CPU mind (Lite) and her deep GPU mind (Prime), with notes, escalation, and clean handoffs.
+
+---
+
+## 12. Dead Code Audit & Cleanup
+
+Cross-referenced a full codebase dead code scan with an external live-stack architectural review. Identified three categories: dead weight (superseded code), broken wiring (modules exist but imports are wrong), and lost functionality (valuable intent that was never integrated).
+
+### Bug Fixes (Broken Wiring)
+
+| Fix | File | Issue |
+|-----|------|-------|
+| `chat_logger` import | `agent_core.py:20` | Lambda no-ops replaced with actual `gaia_common.utils.chat_logger` imports. Chat logging was silently failing. |
+| `snapshot_manager` import path | `agent_core.py:4504` | Path pointed to `gaia_core.utils.code_analyzer` but module lives in `gaia_common.utils.code_analyzer`. Code backup/rollback was non-functional. |
+| `destination_registry` import | `output_router.py:123` | Commented-out import replaced with working `gaia_common.utils.destination_registry.get_registry()`. Spinal column routing was disconnected. |
+| `SafeJSONEncoder` duplication | `chat_logger.py` | Removed duplicate class definition, replaced with import from canonical `helpers.py`. |
+
+### Stale Comments Cleaned
+
+Removed misleading `[GAIA-REFACTOR]` TODO markers from `telemetric_senses` (line 471) and `dev_matrix_analyzer` (line 2013) in `agent_core.py` — both modules are fully implemented and working at the correct import paths.
+
+### Unused Imports Removed
+
+- `agent_core.py`: `run_self_reflection` (only `reflect_and_refine` used), `Interrupt`, duplicate `CouncilNoteManager` import, `LoopDetectorConfig`
+- `gaia-mcp/server.py`: `uuid`, `random`, `string`, `threading`, `asyncio`
+- `gaia-mcp/tools.py`: `difflib`, `re`
+
+### Dead Code Deleted (22 files/blocks)
+
+**Orphaned modules (9 files)** — all confirmed superseded by newer systems:
+- `cognition_packet_v0.2_backup.py` → superseded by v0.3 CognitionPacket
+- `vector_store.py` → superseded by `VectorIndexer` (JSON-based, no Chroma dependency)
+- `fine_tune_gaia.py` → superseded by `qlora_trainer.py` in gaia-study
+- `persona_writer.py` → superseded by `PersonaManager` + `SemanticCodex`
+- `memory_manager.py` → superseded by direct `SessionManager` + `mcp_client.embedding_query()`
+- `priority_manager.py` → superseded by `SleepTaskScheduler` + `GAIADevMatrix`
+- `adapter_trigger_system.py` → removed (auto-triggering will be redesigned for service arch)
+- `knowledge_integrity.py` → removed (incomplete, will be rewritten)
+- `consent_protocol.py` → removed (will be redesigned for boot sequence)
+
+**Orphaned gaia-common utilities (7 files)**:
+- `verifier.py` → superseded by `StreamObserver` (LLM-based safety, not regex)
+- `context.py` → superseded by `PromptBuilder` (multi-tier budgeted context)
+- `observer_manager.py` → unused factory; observers instantiated directly
+- `role_manager.py` → unused; ModelPool + SessionManager handle role state
+- `project_manager.py` → orphaned multi-project feature; single-project design
+- `knowledge_index.py` → superseded by `VectorIndexer` with embeddings
+- `hardware_optimization.py` → orphaned; vLLM handles hardware tuning
+
+**Root artifacts (4 files)**: `tmp_check_logs.py`, `tmp_generate_narrative.py`, `tmp_smoke.py`, `setup_models.py`
+
+**Backup file**: `resilience.py.bak` (identical to production)
+
+**Commented-out blocks (~140 lines)**:
+- `gaia_rescue.py`: Disabled Study Mode CLI + fine-tuning pipeline (now handled by gaia-study microservice)
+- `intent_detection.py`: Old hardcoded intent detection methods
+- `approval.py`: Old diff generation logic (moved to request_approval endpoint)
+
+### CognitionPacket Version Inconsistency (Flagged)
+
+All four packet construction sites in gaia-web hardcode `version="0.2"`:
+- `discord_interface.py:278`
+- `main.py:269`
+- `voice_manager.py:672, 752`
+
+This should be bumped to `"0.3"` to match the protocol. Deferred to next gaia-web session.
+
+---
+
+## 13. Reintegration Plans — Lost Functionality
+
+Four systems were identified as valuable lost functionality that needs to be designed back into the architecture:
+
+### A. Adapter Auto-Triggering (Sleep→Study→Wake→Load)
+
+**Original**: `adapter_trigger_system.py` — keyword/regex pattern matching to auto-load LoRA adapters.
+
+**New design intent**: The sleep cycle should be able to optionally train a new adapter (via gaia-study QLoRA pipeline), and upon wake, Prime should have that adapter available for dynamic loading. The trigger system should work with the service-oriented architecture:
+
+- **Sleep phase**: `SleepTaskScheduler` includes a study task → calls gaia-study `/study/start` → QLoRA trains adapter → adapter metadata registered
+- **Wake phase**: `SleepWakeManager` queries available adapters → loads relevant ones into Prime's vLLM via `/adapters/load`
+- **Runtime**: Adapter activation based on conversation context (persona, topic, user) — replaces the old regex triggers with semantic matching via the CognitionPacket's context fields
+
+Key architectural question: Should auto-triggering live in gaia-core (close to cognition) or gaia-orchestrator (coordination layer)?
+
+### B. Knowledge Integrity — Drift Detection
+
+**Original**: `knowledge_integrity.py` — SHA-256 hashing of knowledge files against a manifest.
+
+**New design intent**: Detect when knowledge files have been modified (potentially poisoning embeddings), especially critical once self-reflection during sleep generates artifacts. Should integrate with:
+
+- **Sleep cycle**: Check integrity before/after sleep operations
+- **Embedding pipeline**: Gate re-embedding on integrity verification
+- **Blueprint validation**: Cross-reference knowledge hashes with blueprint metadata
+
+### C. Consent Protocol — Self-Reflection at Boot
+
+**Original**: `consent_protocol.py` — Uses `CoreIdentityGuardian`, `EthicalSentinel`, and `run_self_reflection()` to let GAIA decide whether she consents to operate.
+
+**New design intent**: Wire into the boot sequence in `gaia_rescue.py` or `main.py`. After identity verification and before entering the main loop, GAIA performs a self-reflection pass and explicitly grants or withholds consent. This is philosophically core to GAIA's autonomy model.
+
+### D. Output Router — Multi-Segment Destination Routing
+
+**Original**: `destination_registry.py` (fully implemented, just disconnected) + `output_router.py` (now wired in).
+
+**New design intent**: GAIA should be able to generate a single response with tagged segments that route to different destinations:
+
+```
+[To-User] Here's what I found about the topic.
+[Action] EXECUTE: write_file {"path": "/knowledge/notes.md", "content": "..."}
+[Reflect] I should revisit this topic during my next sleep cycle.
+[Lookup] embedding_query {"query": "related concepts"}
+[To-User:Discord:ChannelA] Hey folks, this might be relevant to your discussion.
+```
+
+This enables GAIA to:
+- Respond to users while simultaneously taking actions
+- Autonomously interject into Discord channels she's not being prompted from (initiative loop driven)
+- Route internal thoughts to reflection/journaling without surfacing them
+- Perform lookups or tool calls as part of a single cognitive turn
+
+The `DestinationRegistry` with its connector pattern (`CLIConnector`, `LogConnector`, + future `DiscordConnector`, `WebConnector`) is already architected for this. The parsing layer in `output_router.py` needs to be extended to parse `[To-User:Discord:ChannelA]` style segment tags and create multi-target `OutputRouting` on the packet.

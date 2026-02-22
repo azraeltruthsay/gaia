@@ -120,10 +120,8 @@ def _get_destination_registry():
     global _destination_registry
     if _destination_registry is None:
         try:
-            # TODO: [GAIA-REFACTOR] destination_registry.py module not yet migrated.
-            # from gaia_core.utils.destination_registry import get_registry
-            # _destination_registry = get_registry()
-            _destination_registry = None  # Placeholder
+            from gaia_common.utils.destination_registry import get_registry
+            _destination_registry = get_registry()
         except Exception as e:
             logger.warning(f"Could not load destination registry: {e}")
     return _destination_registry
