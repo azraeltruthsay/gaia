@@ -49,6 +49,7 @@ class ToolExecutionStatus(Enum):
     FAILED = "failed"                     # Tool execution failed
     SKIPPED = "skipped"                   # Low confidence, skipped
     USER_DENIED = "user_denied"           # User rejected tool use
+    AWAITING_APPROVAL = "awaiting_approval"  # Pending human approval via challenge-response
 
 class PacketState(Enum):
     INITIALIZED = "initialized"

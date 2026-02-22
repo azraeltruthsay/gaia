@@ -84,37 +84,6 @@ class ApprovalStore:
                 except Exception:
                     proposal = str(params)
 
-            # This part for ai_write diff should go into the request_approval endpoint where `params` is parsed.
-            # Not in the core approval store logic.
-            # If this is an ai_write we can generate a unified diff between
-            # the existing file (if any) and the proposed content.
-            # if method == "ai_write" and isinstance(params, dict):
-            #     path = params.get("path")
-            #     content = params.get("content")
-            #     if path and content is not None:
-            #         try:
-            #             from pathlib import Path
-            #             import difflib
-            #             p = Path(path)
-            #             if p.exists():
-            #                 with open(p, "r", encoding="utf-8", errors="replace") as fh:
-            #                     old_lines = fh.read().splitlines()
-            #             else:
-            #                 old_lines = []
-            #             new_lines = str(content).splitlines()
-            #             diff_lines = list(difflib.unified_diff(old_lines, new_lines, fromfile=str(p), tofile=f"{str(p)} (proposed)"))
-            #             if diff_lines:
-            #                 proposal = "\n".join(diff_lines)
-            #             else:
-            #                 # No diff (identical) — show a short preview
-            #                 proposal = f"(no changes detected for {path})"
-            #         except Exception:
-            #             proposal = json.dumps(params, indent=2, ensure_ascii=False)
-            # # Fallback: pretty-print params for human review
-            # if not proposal:
-            #     proposal = json.dumps(params or {}, indent=2, ensure_ascii=False)
-
-
             self._store[action_id] = {
                 "method": method,
                 "params": params,

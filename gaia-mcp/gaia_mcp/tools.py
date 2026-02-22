@@ -7,8 +7,6 @@ import json
 import os
 import asyncio
 import subprocess
-import difflib
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 

@@ -7,12 +7,13 @@ for processing, and responses are routed back to Discord.
 """
 
 import os
+import time
 import uuid
 import asyncio
 import logging
 import threading
 from datetime import datetime
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
 # Import all necessary dataclasses for CognitionPacket
@@ -21,8 +22,9 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
     SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog,
     Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult,
-    ToolRoutingState, ToolCall, SidecarAction, Response, Safety, Signatures, Audit, Privacy,
-    Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status, PacketState, TargetEngine
+    ToolRoutingState, ToolExecutionStatus, ToolCall, SidecarAction, Response, Safety, Signatures,
+    Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status,
+    PacketState, TargetEngine
 )
 
 logger = logging.getLogger("GAIA.Web.Discord")
@@ -32,6 +34,11 @@ _bot = None
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
 _message_handler: Optional[Callable] = None
 _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
+
+# Pending approval waiters: (channel_id, user_id) -> waiter context dict
+_pending_approvals: Dict[Tuple[str, str], dict] = {}
+_MCP_BASE_URL = os.getenv("MCP_ENDPOINT", "http://gaia-mcp:8765/jsonrpc").rsplit("/", 1)[0]
+_APPROVAL_STALE_SECONDS = 960  # 16 minutes (MCP TTL is 15 min)
 
 
 def _run_on_bot_loop(coro, timeout: float = 30.0):
@@ -113,6 +120,18 @@ class DiscordInterface:
                     pass
 
             is_dm = message.guild is None
+
+            # Check for pending approval waiter before normal processing
+            waiter_key = (str(message.channel.id), str(message.author.id))
+            if waiter_key in _pending_approvals:
+                await self._handle_approval_response(
+                    content=message.content.strip(),
+                    waiter_key=waiter_key,
+                    message_obj=message,
+                    is_dm=is_dm,
+                )
+                return
+
             should_respond = False
 
             if is_dm:
@@ -351,6 +370,18 @@ class DiscordInterface:
             completed_packet_dict = response.json()
             completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
+            # Check for pending tool approval before sending normal response
+            approval_info = self._extract_pending_approval(completed_packet)
+            if approval_info:
+                await self._send_approval_prompt(
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    message_obj=message_obj,
+                    is_dm=is_dm,
+                    approval_info=approval_info,
+                )
+                return
+
             gaia_response_text = completed_packet.response.candidate
             if not gaia_response_text:
                 gaia_response_text = "GAIA processed your request but did not generate a text response."
@@ -414,6 +445,195 @@ class DiscordInterface:
             remaining = remaining[split_point:].lstrip()
 
         return messages
+
+    # --- Approval Flow ---
+
+    def _extract_pending_approval(self, packet: CognitionPacket) -> Optional[dict]:
+        """Check if a completed packet contains a pending approval request."""
+        if not packet.tool_routing or not packet.tool_routing.execution_result:
+            return None
+        result = packet.tool_routing.execution_result
+        output = result.output
+        if isinstance(output, dict) and output.get("pending_approval"):
+            return {
+                "action_id": output.get("action_id"),
+                "challenge": output.get("challenge"),
+                "proposal": output.get("proposal", ""),
+                "tool_name": output.get("tool_name", "unknown"),
+            }
+        return None
+
+    async def _send_approval_prompt(
+        self,
+        channel_id: str,
+        user_id: str,
+        message_obj: Any,
+        is_dm: bool,
+        approval_info: dict,
+    ):
+        """Send a challenge-response approval prompt to Discord and register a waiter."""
+        tool_name = approval_info["tool_name"]
+        challenge = approval_info["challenge"]
+        proposal = approval_info.get("proposal", "")
+
+        # Truncate proposal for Discord display
+        if len(proposal) > 1200:
+            proposal = proposal[:1200] + "\n... [truncated]"
+
+        prompt_text = (
+            f"**Tool Approval Required** \u2014 `{tool_name}`\n\n"
+        )
+        if proposal:
+            prompt_text += f"```\n{proposal}\n```\n"
+        prompt_text += (
+            f"**Challenge:** `{challenge}`\n"
+            f"Reply with the challenge **reversed** to approve, or say **cancel** to deny.\n"
+            f"_This request expires in 15 minutes._"
+        )
+
+        await self._send_response(message_obj, prompt_text, is_dm)
+
+        # Register waiter
+        waiter_key = (channel_id, user_id)
+        _pending_approvals[waiter_key] = {
+            "action_id": approval_info["action_id"],
+            "challenge": challenge,
+            "tool_name": tool_name,
+            "registered_at": time.time(),
+        }
+        logger.info(f"Discord: Registered approval waiter for {waiter_key}, tool={tool_name}")
+
+        # Cleanup stale waiters while we're here
+        self._cleanup_stale_approvals()
+
+    async def _handle_approval_response(
+        self,
+        content: str,
+        waiter_key: Tuple[str, str],
+        message_obj: Any,
+        is_dm: bool,
+    ):
+        """Handle a user's response to an approval challenge."""
+        waiter = _pending_approvals.get(waiter_key)
+        if not waiter:
+            return
+
+        normalized = content.strip().lower()
+
+        # Cancel / deny
+        if normalized in ("cancel", "deny", "no", "abort"):
+            del _pending_approvals[waiter_key]
+            logger.info(f"Discord: User cancelled approval for {waiter.get('tool_name')}")
+            await self._send_response(
+                message_obj,
+                f"Cancelled `{waiter.get('tool_name')}` approval. The action will expire on the server.",
+                is_dm,
+            )
+            return
+
+        # Check challenge (case-insensitive)
+        expected = waiter["challenge"][::-1]
+        if content.strip().upper() != expected:
+            # Wrong answer — re-register waiter for retry
+            logger.info(f"Discord: Wrong challenge response for {waiter.get('tool_name')}")
+            await self._send_response(
+                message_obj,
+                f"That's not right. The challenge is `{waiter['challenge']}` \u2014 reply with it **reversed** (e.g., `{expected}`), or say **cancel**.",
+                is_dm,
+            )
+            return
+
+        # Correct challenge — submit approval to MCP
+        del _pending_approvals[waiter_key]
+        action_id = waiter["action_id"]
+
+        try:
+            result = await self._submit_mcp_approval(action_id, content.strip().upper())
+        except Exception as e:
+            logger.error(f"Discord: MCP approval submission failed: {e}", exc_info=True)
+            await self._send_response(
+                message_obj,
+                f"Approval submitted but MCP returned an error: {e}",
+                is_dm,
+            )
+            return
+
+        if result.get("ok"):
+            summary = self._summarize_tool_result(result.get("result"))
+            await self._send_response(
+                message_obj,
+                f"Approved. `{waiter['tool_name']}` executed successfully.\n{summary}",
+                is_dm,
+            )
+        elif result.get("error") == "action not found or expired":
+            await self._send_response(
+                message_obj,
+                f"This approval has expired. Please trigger the action again.",
+                is_dm,
+            )
+        elif result.get("error") == "invalid approval string":
+            await self._send_response(
+                message_obj,
+                f"The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
+                is_dm,
+            )
+        else:
+            error_msg = result.get("error", "unknown error")
+            await self._send_response(
+                message_obj,
+                f"Approved, but `{waiter['tool_name']}` failed: {error_msg}",
+                is_dm,
+            )
+
+    async def _submit_mcp_approval(self, action_id: str, approval: str) -> dict:
+        """Submit an approval to MCP's /approve_action endpoint."""
+        url = f"{_MCP_BASE_URL}/approve_action"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json={"action_id": action_id, "approval": approval})
+            if resp.status_code == 404:
+                return {"error": "action not found or expired"}
+            if resp.status_code == 403:
+                return {"error": "invalid approval string"}
+            resp.raise_for_status()
+            return resp.json()
+
+    def _cleanup_stale_approvals(self):
+        """Remove approval waiters older than _APPROVAL_STALE_SECONDS."""
+        now = time.time()
+        stale_keys = [
+            k for k, v in _pending_approvals.items()
+            if now - v.get("registered_at", 0) > _APPROVAL_STALE_SECONDS
+        ]
+        for k in stale_keys:
+            del _pending_approvals[k]
+        if stale_keys:
+            logger.info(f"Discord: Cleaned up {len(stale_keys)} stale approval waiter(s)")
+
+    @staticmethod
+    def _summarize_tool_result(result: Any) -> str:
+        """Format a tool execution result for Discord display."""
+        if result is None:
+            return ""
+        if isinstance(result, dict):
+            if result.get("ok") and result.get("result"):
+                inner = result["result"]
+                if isinstance(inner, str):
+                    summary = inner[:500]
+                else:
+                    import json
+                    summary = json.dumps(inner, indent=2, ensure_ascii=False)[:500]
+            elif result.get("error"):
+                summary = f"Error: {result['error']}"
+            else:
+                import json
+                summary = json.dumps(result, indent=2, ensure_ascii=False)[:500]
+        elif isinstance(result, str):
+            summary = result[:500]
+        else:
+            summary = str(result)[:500]
+        if summary:
+            return f"```\n{summary}\n```"
+        return ""
 
 
 async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool:

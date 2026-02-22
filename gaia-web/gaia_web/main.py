@@ -266,7 +266,7 @@ async def process_user_input(user_input: str):
     current_time = datetime.now().isoformat()
 
     packet = CognitionPacket(
-        version="0.2",
+        version="0.3",
         header=Header(
             datetime=current_time,
             session_id=session_id,
