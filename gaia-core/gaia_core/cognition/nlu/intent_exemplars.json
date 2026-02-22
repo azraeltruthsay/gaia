@@ -13,7 +13,36 @@
     "Thanks for that",
     "That's cool",
     "I appreciate your help",
-    "Can we just have a conversation?"
+    "Can we just have a conversation?",
+    "Who forged Excalibur?",
+    "What's the capital of France?",
+    "Explain quantum entanglement",
+    "How does photosynthesis work?",
+    "What year did World War 2 end?",
+    "Tell me about the history of Rome",
+    "What's the meaning of life?",
+    "How do neural networks learn?",
+    "What is the speed of light?",
+    "Describe the water cycle",
+    "What causes earthquakes?",
+    "Who invented the telephone?",
+    "Explain how gravity works",
+    "What do you think about AI art?",
+    "Is Python better than Rust?",
+    "Do you have feelings?",
+    "What's your favorite book?",
+    "How do you work?",
+    "What model are you based on?",
+    "Tell me about D&D lore",
+    "What makes good fantasy worldbuilding?",
+    "What are your thoughts on consciousness?",
+    "Can you tell me a joke?",
+    "What's the weather like today?",
+    "I had a rough day",
+    "That was a great answer",
+    "You're really helpful",
+    "I disagree with that take",
+    "What should I have for dinner?"
   ],
   "read_file": [
     "Read the config file for me",
@@ -25,7 +54,14 @@
     "Read knowledge/blueprints/GAIA_CORE.md",
     "Cat the yaml config",
     "View the .env file",
-    "What's in that markdown file?"
+    "What's in that markdown file?",
+    "Read /gaia/GAIA_Project/main.py",
+    "Show me the contents of the blueprint file",
+    "Open the test file and show me what's there",
+    "Can you read the docker-compose.yml?",
+    "Display the sleep_wake_manager.py source",
+    "What's in the constants JSON file?",
+    "Read the requirements.txt"
   ],
   "write_file": [
     "Write that to a file called notes.md",
@@ -34,7 +70,13 @@
     "Write the output to results.json",
     "Save my notes to the knowledge directory",
     "Update the file with the new content",
-    "Append this to the session log"
+    "Append this to the session log",
+    "Write a new Python script with that code",
+    "Save this as a markdown file",
+    "Create a new file called todo.md with these items",
+    "Write the blueprint to candidates/",
+    "Save those changes to disk",
+    "Store this configuration in a YAML file"
   ],
   "shell": [
     "Run a shell command to check disk space",
@@ -43,7 +85,13 @@
     "Run ps aux to see what's running",
     "Check the system uptime",
     "Execute the deploy script",
-    "Run docker ps"
+    "Run docker ps",
+    "Check how much memory is being used",
+    "Run the test suite",
+    "Execute pip list to see installed packages",
+    "What does nvidia-smi show?",
+    "Run git status",
+    "Check if the service is running with systemctl"
   ],
   "find_file": [
     "Where is the dev matrix file?",
@@ -52,7 +100,13 @@
     "Search for files matching *.json in knowledge/",
     "Where did we put the blueprint?",
     "Find any markdown files about identity",
-    "Locate the constants file"
+    "Locate the constants file",
+    "Where is the Dockerfile for gaia-audio?",
+    "Find all test files in the project",
+    "Search for any YAML files in blueprints/",
+    "Where did we save the conversation log?",
+    "Locate the sleep_wake_manager source file",
+    "Find the promote script"
   ],
   "clarification": [
     "What do you mean by that?",
@@ -62,7 +116,14 @@
     "Tell me more about how the pipeline works",
     "Can you break that down for me?",
     "In other words, what are you saying?",
-    "Could you rephrase that?"
+    "Could you rephrase that?",
+    "Can you walk me through that step by step?",
+    "I'm confused about the second point",
+    "What does that term mean?",
+    "Can you give me an example?",
+    "Why does it work that way?",
+    "How is that different from what we discussed earlier?",
+    "Unpack that for me"
   ],
   "correction": [
     "That's not right, the file is actually in gaia-common",
@@ -71,7 +132,13 @@
     "No, that's incorrect",
     "I need to correct you on something",
     "That's a mistake, it should be the other way",
-    "You got that wrong"
+    "You got that wrong",
+    "That's not what I asked",
+    "You're confusing two different things",
+    "No, I meant the other service",
+    "That information is outdated",
+    "You're mixing up the versions",
+    "Stop hallucinating, that file doesn't exist"
   ],
   "brainstorming": [
     "Let's brainstorm some ideas for the new feature",
@@ -81,7 +148,12 @@
     "Ideas for improving response quality?",
     "Let's think creatively about this problem",
     "What are some alternative architectures we could use?",
-    "Help me think through the options"
+    "Help me think through the options",
+    "How could we make the sleep cycle smarter?",
+    "What are some creative ways to handle GPU sharing?",
+    "Imagine we had unlimited resources, what would you build?",
+    "Suggest some approaches for better intent detection",
+    "What if we added a new service for that?"
   ],
   "feedback": [
     "I have some feedback about your responses",
@@ -90,7 +162,12 @@
     "I want to give you feedback on how that went",
     "That response was really good, keep it up",
     "One improvement idea: you could be more concise",
-    "The quality has been declining lately"
+    "The quality has been declining lately",
+    "You've been doing great with the code reviews",
+    "Your tone was a bit too formal there",
+    "I like how you handled that edge case",
+    "You should be more careful with file paths",
+    "Great job on the blueprint generation"
   ],
   "recitation": [
     "Recite The Raven by Edgar Allan Poe",
@@ -100,7 +177,11 @@
     "Recite Jabberwocky in its entirety",
     "Perform the Declaration of Artisanal Intelligence",
     "Tell me the poem Invictus word for word",
-    "Sing me the ballad of Casey at the Bat"
+    "Sing me the ballad of Casey at the Bat",
+    "Speak the entire Road Not Taken",
+    "Perform the Charge of the Light Brigade",
+    "Recite Annabel Lee from memory",
+    "Give me the full text of the Cognition Protocol"
   ],
   "reflect": [
     "Take a moment to reflect on your recent responses",
@@ -108,7 +189,26 @@
     "Reflect on whether your approach was effective",
     "How do you feel about the quality of your outputs?",
     "Think about what you could do differently",
-    "Self-assess your performance today"
+    "Self-assess your performance today",
+    "Look back at our session and evaluate",
+    "Do you think you handled that well?",
+    "What patterns have you noticed in our interactions?",
+    "Assess your own reasoning on that last question",
+    "Introspect on how you've been responding"
+  ],
+  "seed": [
+    "Plant a thought seed about consciousness",
+    "Here's something for your next sleep cycle to think about",
+    "Mull this over: what if we redesigned the pipeline?",
+    "Seed: consider how session memory could be improved",
+    "I want you to think about this later during your downtime",
+    "Save this as something to reflect on during sleep",
+    "Here's a seed for your next dream cycle",
+    "Think about this when you have time: how should adapters evolve?",
+    "During your next sleep, consider this architectural question",
+    "Seed thought: what if GAIA could modify her own blueprints?",
+    "Store this idea for later reflection",
+    "When you're dreaming, think about better error handling"
   ],
   "mark_task_complete": [
     "Mark that task as done",
@@ -116,7 +216,11 @@
     "We finished that task",
     "Done with that item",
     "Task completed successfully",
-    "Mark it as finished"
+    "Mark it as finished",
+    "Cross that off the list",
+    "That one's done, move on",
+    "Completed, what's next?",
+    "Check that task off"
   ],
   "list_tools": [
     "What MCP tools do you have?",
@@ -124,7 +228,33 @@
     "Show me your capabilities",
     "What actions can you perform?",
     "List your MCP actions",
-    "What tools are available?"
+    "What tools are available?",
+    "Show me the tool registry",
+    "What can you do with MCP?",
+    "List your functions",
+    "What operations do you support?"
+  ],
+  "list_tree": [
+    "Show me your directory tree",
+    "What's the folder structure?",
+    "List the project architecture",
+    "Show the file tree",
+    "What directories do you have?",
+    "Display the project structure",
+    "Give me a tree view of the codebase",
+    "Show the directory layout",
+    "What's the project hierarchy?"
+  ],
+  "list_files": [
+    "List files in the knowledge directory",
+    "What files are in gaia-core?",
+    "Show me the contents of the cognition folder",
+    "ls the tests directory",
+    "What files are in candidates/",
+    "List everything in the blueprints folder",
+    "Show me what's in the scripts directory",
+    "What Python files are in nlu/",
+    "List the files in gaia-common/utils/"
   ],
   "tool_routing": [
     "Use the MCP tool to read that file",
@@ -141,18 +271,18 @@
     "Save this to my knowledge base",
     "Store this information in the knowledge base",
     "Add this to my knowledge base for future reference",
-    "Remember this fact in my knowledge base"
+    "Remember this fact in my knowledge base",
+    "Run the promotion readiness assessment",
+    "Generate a blueprint for gaia-audio",
+    "Use the web_fetch tool on that URL"
   ],
   "other": [
-    "Who forged Excalibur?",
-    "What's the capital of France?",
-    "Explain quantum entanglement",
-    "How does photosynthesis work?",
-    "What year did World War 2 end?",
-    "Tell me about the history of Rome",
-    "What's the meaning of life?",
-    "How do neural networks learn?",
-    "What is the speed of light?",
-    "Describe the water cycle"
+    "hmm",
+    "...",
+    "asdfghjkl",
+    "testing 123",
+    "do the usual",
+    "same as last time",
+    "I was thinking about that thing"
   ]
 }

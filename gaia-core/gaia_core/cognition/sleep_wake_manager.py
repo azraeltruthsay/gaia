@@ -54,8 +54,8 @@ class _TransientPhase(Enum):
 
 # Canned responses for states that don't forward to the model
 CANNED_DREAMING = (
-    "I'm studying right now and can't chat — "
-    "I'll be back once my training session wraps up!"
+    "I'm studying right now — give me a moment to wrap up "
+    "and I'll be right with you!"
 )
 CANNED_DISTRACTED = (
     "I'm a little occupied at the moment — "
@@ -80,6 +80,7 @@ class SleepWakeManager:
         self._council_notes = CouncilNoteManager(config, timeline_store=timeline_store)
         self.last_state_change = datetime.now(timezone.utc)
         self.dreaming_handoff_id: Optional[str] = None
+        self._preemption_initiated: bool = False
         self.voice_active: bool = False
 
         logger.info("SleepWakeManager initialized")
@@ -236,8 +237,9 @@ class SleepWakeManager:
                 self.transition_to_waking()
 
         elif self.state == GaiaState.DREAMING:
-            logger.info("Wake signal during DREAMING — deferred until study completes")
-            # Don't transition — let exit_dreaming() handle it
+            logger.info("Wake signal during DREAMING — preemption will be triggered by sleep cycle loop")
+            # Don't transition here — _handle_dreaming() in SleepCycleLoop
+            # will detect wake_signal_pending and initiate GPU preemption
 
         elif self.state == GaiaState.DISTRACTED:
             logger.info("Wake signal during DISTRACTED — noted, will check on recheck")
@@ -349,6 +351,7 @@ class SleepWakeManager:
             return False
         self.state = GaiaState.DREAMING
         self.dreaming_handoff_id = handoff_id
+        self._preemption_initiated = False
         self.last_state_change = datetime.now(timezone.utc)
         self._emit_state_change("asleep", "dreaming", f"handoff {handoff_id}")
         logger.info("Entering DREAMING (handoff %s)", handoff_id)
@@ -361,6 +364,7 @@ class SleepWakeManager:
             return False
         self.state = GaiaState.ASLEEP
         self.dreaming_handoff_id = None
+        self._preemption_initiated = False
         self.last_state_change = datetime.now(timezone.utc)
         self._emit_state_change("dreaming", "asleep", "study complete")
         logger.info("Exiting DREAMING — back to ASLEEP")
@@ -431,6 +435,7 @@ class SleepWakeManager:
             "seconds_in_state": (now - self.last_state_change).total_seconds(),
         }
         status["voice_active"] = self.voice_active
+        status["preemption_initiated"] = self._preemption_initiated
         if self.dreaming_handoff_id:
             status["dreaming_handoff_id"] = self.dreaming_handoff_id
         return status

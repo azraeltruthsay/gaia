@@ -262,6 +262,15 @@ def _detect_fragmentation_request(text: str) -> bool:
         return True
 
     if has_known_work:
+        # Don't trigger fragmentation for meta-questions ABOUT the work
+        meta_question_patterns = [
+            "who wrote", "who authored", "who created", "who composed",
+            "when was", "where was", "what year", "what is",
+            "who is the author", "who is the writer",
+        ]
+        if any(p in lowered for p in meta_question_patterns):
+            logger.debug("Known work reference but meta-question — skipping fragmentation")
+            return False
         logger.debug("Fragmentation detected: known work reference")
         return True
 
@@ -405,14 +414,18 @@ def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
 
     # --- Shell commands ---
     shell_markers = ["run command", "execute command", "run script", "shell command",
-                     "run the command", "execute the command"]
+                     "run the command", "execute the command", "run docker", "run git",
+                     "run pip", "run npm", "run pytest", "run ruff", "run the test",
+                     "run the script"]
     if first_word in {"shell", "bash", "terminal"} or any(m in lowered for m in shell_markers):
         return "shell"
 
     # --- Task completion ---
     if any(p in lowered for p in ["mark as done", "mark as complete", "task complete",
-                                   "mark complete", "mark done", "finished the task"]):
-        return "mark_task_complete"
+                                   "mark complete", "mark done", "finished the task",
+                                   "task as done", "that task"]):
+        if "mark" in lowered or "done" in lowered or "complete" in lowered or "finished" in lowered:
+            return "mark_task_complete"
     if first_word in {"complete", "done", "finished"} and word_count <= 5:
         return "mark_task_complete"
 
@@ -493,11 +506,26 @@ def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
         return "chat"
 
     # --- Fallback ---
-    # Short messages without complexity markers are likely casual chat
-    if word_count <= 4 and "?" not in lowered:
+    # Short messages are likely casual chat
+    if word_count <= 4:
         return "chat"
 
-    logger.debug("Keyword heuristic: no match, returning 'other'")
+    # Questions that didn't match any specific category are knowledge Q&A → chat
+    if "?" in lowered:
+        return "chat"
+
+    # Statements starting with question words are knowledge queries → chat
+    question_starters = {"what", "who", "where", "when", "why", "how", "is", "are",
+                         "can", "could", "would", "should", "does", "do", "will", "which"}
+    if first_word in question_starters:
+        return "chat"
+
+    # Medium-length statements without pattern match → likely conversational
+    if word_count <= 20:
+        return "chat"
+
+    # Only genuinely long, patternless input defaults to "other"
+    logger.debug("Keyword heuristic: no match on %d-word input, returning 'other'", word_count)
     return "other"
 
 
@@ -507,15 +535,16 @@ def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     lowered = (text or "").lower()
 
-    # Feedback patterns
-    feedback_keywords = ["feedback", "suggestion", "idea", "improvement"]
-    if any(keyword in lowered for keyword in feedback_keywords):
-        return "feedback"
-
-    # Brainstorming patterns
-    brainstorming_keywords = ["brainstorm", "ideas for", "what if", "how about"]
+    # Brainstorming patterns (check BEFORE feedback — "ideas" overlaps)
+    brainstorming_keywords = ["brainstorm", "ideas for", "what if we", "how about we"]
     if any(keyword in lowered for keyword in brainstorming_keywords):
         return "brainstorming"
+
+    # Feedback patterns (use word-boundary-safe phrases)
+    feedback_keywords = ["feedback", "suggestion", "give idea", "my idea", "an idea",
+                         "improvement", "propose"]
+    if any(keyword in lowered for keyword in feedback_keywords):
+        return "feedback"
 
     # Correction patterns
     correction_keywords = ["you're wrong", "that's not right", "actually,", "in fact,"]
@@ -529,66 +558,44 @@ def _fast_track_intent_detection(text: str) -> Optional[str]:
 
     return None
 
+_VALID_INTENTS = {
+    "read_file", "write_file", "mark_task_complete", "reflect", "seed",
+    "shell", "list_tools", "list_tree", "find_file", "list_files",
+    "recitation", "tool_routing", "clarification", "correction",
+    "brainstorming", "feedback", "chat", "other",
+}
+
+
 def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None):
     """
-    Uses an LLM (Lite if present, else Prime) to detect intent for natural language input.
-    Output should always be one of: read_file, write_file, mark_task_complete, reflect, seed, shell, list_tools, list_tree, tool_routing, other.
+    Multi-stage intent detection with graceful fallback.
+
+    Pipeline (each stage can short-circuit):
+      1. Fast-track keyword match (no model needed)
+      2. NLU heuristics: fragmentation, tool routing, file discovery (no model needed)
+      3. Embedding classifier (needs embed_model, not LLM)
+      4. LLM prompt classification (needs non-llama_cpp LLM)
+      5. Keyword heuristic fallback (no model needed)
 
     Args:
-        probe_context: Optional domain hint from semantic probe (e.g.
-            "Domain context: user references dnd_campaign entities (Rogue's End, Tower Faction)")
+        probe_context: Optional domain hint from semantic probe
+        embed_model: Optional SentenceTransformer for embedding classification
     """
-    # Fast-track conversational intents
+    # ── Stage 1: Fast-track conversational intents ──
     fast_track_intent = _fast_track_intent_detection(text)
     if fast_track_intent:
         logger.info(f"Fast-track intent detection: {fast_track_intent}")
         return fast_track_intent
 
-    # Prefer Lite for intent detection (lightweight, less failure-prone). Avoid
-    # Prime/vLLM here to reduce CUDA/multiprocessing errors during routing. If
-    # Lite is unavailable, fall back to "other" rather than touching heavier models.
-    def _is_llama_cpp_instance(m):
-        try:
-            mod = getattr(m.__class__, "__module__", "") or getattr(m, "__module__", "")
-            return isinstance(mod, str) and mod.startswith("llama_cpp")
-        except Exception:
-            return False
-
-    candidates = [
-        ("lite", lite_llm),
-    ]
-    model = None
-    for label, cand in candidates:
-        if cand is None:
-            continue
-        model = cand
-        logger.debug("Using %s_llm for intent detection.", label)
-        break
-    if model is None:
-        logger.warning("No lite model available for intent detection; falling back to 'other'.")
-        return "other"
-
-    # NLU-based fragmentation detection - check BEFORE model-specific paths
-    # This ensures consistent detection regardless of backend (llama_cpp or LLM)
+    # ── Stage 2: NLU heuristics (no model needed) ──
     if _detect_fragmentation_request(text):
         logger.info("NLU fragmentation detection: recitation intent detected")
         return "recitation"
 
-    # NLU-based tool routing detection - check for explicit MCP tool requests
     if _detect_tool_routing_request(text):
         logger.info("NLU tool routing detection: tool_routing intent detected")
         return "tool_routing"
 
-    # Hard override: user clearly asked to list MCP tools/actions.
-    # if _detect_direct_list_tools(text):
-    #     return "list_tools"
-    # if _detect_tree_request(text):
-    #     return "list_tree"
-    # if _detect_list_files_request(text):
-    #     return "list_files"
-    # if _detect_read_file_request(text):
-    #     return "read_file"
-    # Simple file-discovery heuristic: if user asks to find/locate a file (e.g., dev_matrix), route to find_file intent.
     lowered = (text or "").lower()
     if "find" in lowered or "locate" in lowered or "search" in lowered:
         if "file" in lowered or "dev_matrix" in lowered or ".md" in lowered or ".json" in lowered:
@@ -596,38 +603,54 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
     if "dev_matrix" in lowered:
         return "find_file"
 
-    # Defensive shortcut: if the selected model is backed by llama_cpp, avoid
-    # calling its create_chat_completion (thinking models burn tokens on
-    # <think> preamble).  Try embedding classification first, then fall back
-    # to keyword heuristics.
-    if _is_llama_cpp_instance(model):
-        # --- Embedding-based classification (preferred) ---
-        embed_intent_cfg = {}
-        try:
-            embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
-        except Exception:
-            pass
-        if embed_model is not None and embed_intent_cfg.get("enabled", True):
-            classifier = EmbedIntentClassifier.instance()
-            if not classifier.ready:
-                classifier.initialise(embed_model, config=embed_intent_cfg)
-            if classifier.ready:
-                threshold = embed_intent_cfg.get("confidence_threshold", 0.45)
-                intent, score = classifier.classify(text, confidence_threshold=threshold)
-                if intent != "other":
-                    # Apply the file-keyword guard for read/write intents
-                    if intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
-                        logger.info("Embed intent '%s' lacks file keywords; downgrading to 'other'.", intent)
-                        intent = "other"
-                    else:
-                        logger.info("Embed intent classification: %s (score=%.3f)", intent, score)
-                        return intent
-                # Embedding returned "other" — fall through to keyword heuristic
-                # which may still catch short chat patterns etc.
+    # ── Stage 3: Embedding classifier (needs embed_model, not LLM) ──
+    embed_intent_cfg = {}
+    try:
+        embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
+    except Exception:
+        pass
+    if embed_model is not None and embed_intent_cfg.get("enabled", True):
+        classifier = EmbedIntentClassifier.instance()
+        if not classifier.ready:
+            classifier.initialise(embed_model, config=embed_intent_cfg)
+        if classifier.ready:
+            threshold = embed_intent_cfg.get("confidence_threshold", 0.45)
+            intent, score = classifier.classify(text, confidence_threshold=threshold)
+            if intent != "other":
+                # File-keyword guard: downgrade to "chat" not "other"
+                if intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
+                    logger.info("Embed intent '%s' lacks file keywords; downgrading to 'chat'.", intent)
+                    return "chat"
+                logger.info("Embed intent classification: %s (score=%.3f)", intent, score)
+                return intent
+            # Embedding returned "other" — fall through to LLM or keyword heuristic
 
-        logger.info("llama_cpp backend: using keyword heuristic for intent.")
-        return _keyword_intent_classify(text, probe_context)
-    # Build context line from semantic probe (if available)
+    # ── Stage 4: LLM prompt classification (only if non-llama_cpp model available) ──
+    def _is_llama_cpp_instance(m):
+        try:
+            mod = getattr(m.__class__, "__module__", "") or getattr(m, "__module__", "")
+            return isinstance(mod, str) and mod.startswith("llama_cpp")
+        except Exception:
+            return False
+
+    model = lite_llm
+    if model is not None and not _is_llama_cpp_instance(model):
+        intent = _run_llm_intent_classification(model, text, probe_context)
+        if intent != "other":
+            logger.info(f"Model intent detection: {intent}")
+            return intent
+        # LLM also returned "other" — fall through to keyword heuristic
+
+    # ── Stage 5: Keyword heuristic fallback (always available) ──
+    if model is None:
+        logger.info("No lite model available; using keyword heuristic for intent.")
+    else:
+        logger.info("Falling through to keyword heuristic for intent.")
+    return _keyword_intent_classify(text, probe_context)
+
+
+def _run_llm_intent_classification(model, text: str, probe_context: str = "") -> str:
+    """Run LLM-based intent classification. Returns intent string."""
     context_line = ""
     if probe_context:
         context_line = f"Context: {probe_context}\n"
@@ -640,8 +663,8 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         "correction (the user is correcting a previous statement by GAIA), "
         "brainstorming (the user is in a creative or brainstorming mode), "
         "feedback (the user is providing feedback on GAIA's performance), "
-        "chat (a general conversational intent), "
-        "other.\n"
+        "chat (a general conversational intent — including factual questions, opinions, casual talk), "
+        "other (only if genuinely uncategorizable).\n"
         f"{context_line}"
         f"User: {text}\nIntent:"
     )
@@ -649,7 +672,6 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         {"role": "system", "content": "Intent detection agent."},
         {"role": "user", "content": prompt}
     ]
-    # Call the model in a minimal, non-streaming fashion; hard-fallback to 'other' on any error.
     content = None
     try:
         result = model.create_chat_completion(
@@ -686,31 +708,55 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
                     tokens.append(str(chunk))
             content = "".join(tokens)
     except AssertionError:
-        logger.exception("LLM backend assertion during intent detection; falling back to 'other'.")
+        logger.exception("LLM backend assertion during intent detection.")
         return "other"
     except Exception:
-        logger.exception("LLM call/iteration failed during intent detection; falling back to 'other'.")
+        logger.exception("LLM call/iteration failed during intent detection.")
         return "other"
-    # Accept only the first word or intent string; guard against whitespace-only content
-    tokens = (content or "").strip().split()
-    intent = tokens[0] if tokens else "other"
-    intent = intent if intent in {
-        "read_file", "write_file", "mark_task_complete", "reflect", "seed", "shell", "list_tools", "list_tree", "find_file", "list_files", "recitation", "tool_routing", "clarification", "correction", "brainstorming", "feedback", "chat", "other"
-    } else "other"
 
-    # Runtime heuristic: override spurious read/write classifications unless
-    # the user actually referenced files/logs.  This keeps ordinary questions
-    # (e.g., "Who forged Excalibur?") on the conversation track instead of
-    # forcing the operator to touch intent overrides.
+    # ── Robust intent parsing with fuzzy matching ──
+    intent = _parse_llm_intent_response(content)
+
+    # File-keyword guard: downgrade to "chat" not "other"
     if intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
-        logger.info("Intent heuristic override: '%s' lacks file keywords; downgrading to 'other'.", intent)
-        intent = "other"
+        logger.info("Intent heuristic override: '%s' lacks file keywords; downgrading to 'chat'.", intent)
+        intent = "chat"
 
     if intent == "other" and _detect_direct_list_tools(text):
         intent = "list_tools"
 
-    logger.info(f"Model intent detection: {intent}")
     return intent
+
+
+def _parse_llm_intent_response(content: str) -> str:
+    """Parse LLM intent response with normalization and fuzzy matching."""
+    import re as _re
+
+    raw = (content or "").strip()
+    # Remove common LLM formatting artifacts (punctuation, quotes, parens)
+    cleaned = _re.sub(r'[^a-z_\s]', '', raw.lower()).strip()
+    tokens = cleaned.split()
+    if not tokens:
+        return "other"
+
+    candidate = tokens[0]
+
+    # Exact match
+    if candidate in _VALID_INTENTS:
+        return candidate
+
+    # Prefix match (≥3 chars): e.g. "brain" → "brainstorming"
+    if len(candidate) >= 3:
+        matches = [v for v in _VALID_INTENTS if v.startswith(candidate)]
+        if len(matches) == 1:
+            return matches[0]
+
+    # Substring match: check if any valid intent appears in the full response
+    for v in _VALID_INTENTS:
+        if v in cleaned:
+            return v
+
+    return "other"
 
 # ---- Unified entrypoint ----
 def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None) -> Plan:
