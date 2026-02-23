@@ -115,6 +115,17 @@ TOOLS = {
             "required": []
         }
     },
+    "index_document": {
+        "description": "Index a document into the vector store for semantic retrieval. Call this after writing a knowledge file with ai_write to make it searchable via memory_query. Routes to gaia-study (the sole vector store writer).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the document file (e.g., /knowledge/research/topic.md)."},
+                "knowledge_base_name": {"type": "string", "description": "Knowledge base to index into (default: 'system'). Options: 'system', 'blueprints', 'dnd_campaign'."}
+            },
+            "required": ["file_path"]
+        }
+    },
     "find_files": {
         "description": "Search for files whose names contain a query (case-insensitive, bounded depth).",
         "params": {
@@ -320,11 +331,11 @@ TOOLS = {
         }
     },
     "web_fetch": {
-        "description": "Fetch and extract text content from a URL. Only works for allowlisted domains (trusted and reliable sources). Use web_search first to find URLs.",
+        "description": "Fetch and extract text content from a URL. Works for allowlisted domains (trusted/reliable sources) and authenticated API domains (e.g., Kanka.io). Authenticated domains have URLs auto-rewritten to API endpoints with auth headers injected. Use web_search to discover public URLs, or pass authenticated domain URLs directly.",
         "params": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The URL to fetch content from. Must be from a trusted or reliable domain."}
+                "url": {"type": "string", "description": "The URL to fetch. Supports trusted/reliable domains and authenticated API domains (e.g., app.kanka.io URLs are auto-rewritten to the Kanka API)."}
             },
             "required": ["url"]
         }
@@ -378,6 +389,42 @@ TOOLS = {
                 "service_id": {"type": "string", "description": "Service identifier to assess (e.g. 'gaia-audio')."}
             },
             "required": ["service_id"]
+        }
+    },
+    # --- Promotion Lifecycle Tools ---
+    "promotion_create_request": {
+        "description": "Create a promotion request for a candidate service after readiness assessment. Requires human approval (Gate 1) and confirmation (Gate 2) before execution. Will reject 'not_ready' verdicts and duplicate active requests.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier (e.g. 'gaia-audio')."},
+                "verdict": {"type": "string", "description": "Readiness verdict from assess_promotion (e.g. 'ready', 'ready_with_warnings')."},
+                "recommendation": {"type": "string", "description": "Human-readable recommendation text."},
+                "pipeline_cmd": {"type": "string", "description": "The promotion pipeline command to execute (e.g. './scripts/promote_pipeline.sh gaia-audio')."},
+                "check_summary": {"type": "string", "description": "Summary of readiness checks (pass/fail/warn counts)."}
+            },
+            "required": ["service_id", "verdict", "recommendation", "pipeline_cmd", "check_summary"]
+        }
+    },
+    "promotion_list_requests": {
+        "description": "List promotion requests, optionally filtered by service and/or status. Returns summary info for each request.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Optional: filter by service identifier."},
+                "status_filter": {"type": "string", "description": "Optional: filter by status (pending, approved, promoted, rejected, etc.)."}
+            },
+            "required": []
+        }
+    },
+    "promotion_request_status": {
+        "description": "Get full details of a specific promotion request by ID, including history and all metadata.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "request_id": {"type": "string", "description": "The promotion request ID to look up."}
+            },
+            "required": ["request_id"]
         }
     }
 }

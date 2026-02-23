@@ -5,7 +5,9 @@ Read-only tools that give GAIA access to real, verifiable web sources.
 Safety via domain allowlist + rate limits (not SENSITIVE_TOOLS).
 """
 
+import json as json_mod
 import logging
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -78,21 +80,36 @@ class SourceTrustConfig:
         self.content_type_sources: Dict[str, List[str]] = cfg.get(
             "content_type_sources", self._DEFAULT_CONTENT_TYPE_SOURCES
         )
-        # Build a flat allowlist (trusted + reliable) for fetch gating
+        # Authenticated domains: config-driven API key + header injection
+        self.authenticated_domains: Dict[str, Dict] = cfg.get("authenticated_domains", {})
+        # Build a flat allowlist (trusted + reliable + authenticated) for fetch gating
         self._allowlist = set(self.trusted) | set(self.reliable)
+        for domain in self.authenticated_domains:
+            self._allowlist.add(domain)
 
     # ---- public helpers ----
 
     def tier_for_domain(self, domain: str) -> str:
-        """Return 'trusted', 'reliable', 'blocked', or 'unknown'."""
+        """Return 'trusted', 'reliable', 'authenticated', 'blocked', or 'unknown'."""
         base = self._base_domain(domain)
         if base in self.trusted or domain in self.trusted:
             return "trusted"
         if base in self.reliable or domain in self.reliable:
             return "reliable"
+        if self.auth_config_for_domain(domain) is not None:
+            return "authenticated"
         if base in self.blocked or domain in self.blocked:
             return "blocked"
         return "unknown"
+
+    def auth_config_for_domain(self, domain: str) -> Optional[Dict]:
+        """Return auth config if domain matches an authenticated domain entry."""
+        base = self._base_domain(domain)
+        if domain in self.authenticated_domains:
+            return self.authenticated_domains[domain]
+        if base in self.authenticated_domains:
+            return self.authenticated_domains[base]
+        return None
 
     def is_allowed(self, domain: str) -> bool:
         """True if domain is trusted or reliable (fetchable)."""
@@ -318,7 +335,11 @@ _FETCH_TIMEOUT = 15  # seconds
 
 
 def web_fetch(params: dict) -> dict:
-    """Fetch and extract text from a URL (allowlisted domains only).
+    """Fetch and extract text from a URL.
+
+    Supports allowlisted domains (trusted/reliable) and authenticated API
+    domains configured in gaia_constants.json. Authenticated domains have
+    their URLs rewritten to API endpoints and auth headers injected.
 
     Params:
         url (str, required): The URL to fetch.
@@ -339,7 +360,7 @@ def web_fetch(params: dict) -> dict:
 
     trust, _, fetch_lim = _get_config()
 
-    # Domain gating: only fetch from allowlisted domains
+    # Domain gating
     if trust.is_blocked(domain):
         return {
             "ok": False,
@@ -347,7 +368,35 @@ def web_fetch(params: dict) -> dict:
             "domain": domain,
             "trust_tier": "blocked",
         }
-    if not trust.is_allowed(domain):
+
+    # Check for authenticated domain (API key + header injection)
+    auth_cfg = trust.auth_config_for_domain(domain)
+    auth_headers: Dict[str, str] = {}
+
+    if auth_cfg:
+        key_env = auth_cfg.get("api_key_env", "")
+        api_key = os.getenv(key_env, "").strip() if key_env else ""
+        if not api_key:
+            return {
+                "ok": False,
+                "error": (
+                    f"Authenticated domain '{domain}' requires {key_env} "
+                    "but it is not set or empty. Add it to .env and restart."
+                ),
+                "domain": domain,
+                "trust_tier": "authenticated",
+            }
+        # Apply URL rewrites (e.g., app.kanka.io → api.kanka.io)
+        url = _apply_url_rewrites(url, auth_cfg)
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        # Build auth headers
+        header_name = auth_cfg.get("auth_header", "Authorization")
+        header_value = auth_cfg.get("auth_format", "Bearer {key}").replace("{key}", api_key)
+        auth_headers[header_name] = header_value
+        for k, v in auth_cfg.get("extra_headers", {}).items():
+            auth_headers[k] = v
+    elif not trust.is_allowed(domain):
         return {
             "ok": False,
             "error": (
@@ -369,11 +418,9 @@ def web_fetch(params: dict) -> dict:
     # Fetch the page
     try:
         import requests
-        resp = requests.get(
-            url,
-            timeout=_FETCH_TIMEOUT,
-            headers={"User-Agent": "GAIA-Research/1.0 (educational AI assistant)"},
-        )
+        headers = {"User-Agent": "GAIA-Research/1.0 (educational AI assistant)"}
+        headers.update(auth_headers)
+        resp = requests.get(url, timeout=_FETCH_TIMEOUT, headers=headers)
         resp.raise_for_status()
     except Exception as e:
         return {"ok": False, "error": f"Failed to fetch URL: {e}", "domain": domain}
@@ -390,12 +437,20 @@ def web_fetch(params: dict) -> dict:
             "domain": domain,
         }
 
-    html = raw_bytes.decode("utf-8", errors="replace")
+    body_text = raw_bytes.decode("utf-8", errors="replace")
 
-    # Extract clean text via trafilatura → BeautifulSoup → regex fallback
-    title, text = _extract_content(html, url)
+    # JSON responses (typical for authenticated API domains) get formatted directly
+    if "json" in content_type:
+        try:
+            data = json_mod.loads(body_text)
+            title, text = _format_json_content(data)
+        except Exception:
+            title, text = "", body_text
+    else:
+        # HTML: extract clean text via trafilatura → BeautifulSoup → regex
+        title, text = _extract_content(body_text, url)
 
-    tier = trust.tier_for_domain(domain)
+    tier = "authenticated" if auth_cfg else trust.tier_for_domain(domain)
     return {
         "ok": True,
         "title": title,
@@ -403,6 +458,7 @@ def web_fetch(params: dict) -> dict:
         "domain": domain,
         "trust_tier": tier,
         "bytes": len(text),
+        "url": url,
     }
 
 
@@ -468,6 +524,47 @@ def _extract_title_bs4(html: str) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _apply_url_rewrites(url: str, auth_cfg: Dict) -> str:
+    """Apply URL rewrite rules from an authenticated domain config.
+
+    Returns the rewritten URL if a rule matches, or the original URL.
+    Capture groups are referenced as {1}, {2}, etc. in the replacement.
+    """
+    for rule in auth_cfg.get("url_rewrites", []):
+        pattern = rule.get("match", "")
+        replacement = rule.get("replace", "")
+        if not pattern:
+            continue
+        m = re.match(pattern, url)
+        if m:
+            result = replacement
+            for i, group in enumerate(m.groups(), 1):
+                result = result.replace(f"{{{i}}}", group)
+            logger.info("URL rewrite: %s -> %s", url, result)
+            return result
+    return url
+
+
+def _format_json_content(data: Any) -> Tuple[str, str]:
+    """Format a JSON API response as readable text.
+
+    Returns (title, formatted_text). Extracts title from common JSON
+    patterns (data.name, data.title) and pretty-prints the payload.
+    """
+    title = ""
+    if isinstance(data, dict):
+        inner = data.get("data", data)
+        if isinstance(inner, dict):
+            title = (
+                inner.get("name")
+                or inner.get("title")
+                or inner.get("label")
+                or ""
+            )
+    formatted = json_mod.dumps(data, indent=2, ensure_ascii=False, default=str)
+    return title, formatted
+
 
 def _domain_from_url(url: str) -> str:
     """Extract domain from a URL string."""

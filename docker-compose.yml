@@ -390,6 +390,10 @@ services:
       - gaia-sandbox:/sandbox:rw
       # Logs (for introspect_logs tool + own log persistence)
       - ./logs:/logs:rw
+      # Candidates (for promotion readiness assessment)
+      - ./candidates:/gaia/GAIA_Project/candidates:ro
+      # Docker compose file (for compose_service check)
+      - ./docker-compose.yml:/gaia/GAIA_Project/docker-compose.yml:ro
 
     environment:
       - GAIA_SERVICE=mcp
@@ -403,6 +407,8 @@ services:
       # Security
       - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
       - MCP_APPROVAL_TTL=900
+      # External API keys (authenticated web_fetch)
+      - KANKA_API_KEY=${KANKA_API_KEY:-}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
     return app
 
 # Tools that must go through approval (unless MCP_BYPASS is set)
-SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index"}
+SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request"}
 
 # --- Tool Dispatcher ---
 
@@ -128,6 +128,15 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        # Self-introspection tools
+        "introspect_logs": lambda p: _introspect_logs_impl(p),
+        # Promotion & blueprint tools
+        "generate_blueprint": lambda p: _generate_blueprint_impl(p),
+        "assess_promotion": lambda p: _assess_promotion_impl(p),
+        # Promotion lifecycle tools
+        "promotion_create_request": lambda p: _promotion_create_request_impl(p),
+        "promotion_list_requests": lambda p: _promotion_list_requests_impl(p),
+        "promotion_request_status": lambda p: _promotion_request_status_impl(p),
     }
 
     # Study mode / LoRA adapter tools are async (gateway calls to gaia-study)
@@ -140,6 +149,7 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
         "adapter_unload": _adapter_unload_impl,
         "adapter_delete": _adapter_delete_impl,
         "adapter_info": _adapter_info_impl,
+        "index_document": _index_document_impl,
     }
 
     if tool_name in async_tools:
@@ -509,6 +519,251 @@ def _find_relevant_documents(params: dict):
         logger.error(f"Grep failed with error: {e.stderr}")
         raise RuntimeError(f"Search command failed: {e.stderr}")
 
+# --- Self-Introspection Tools ---
+
+# Map service names to their log file paths inside the container
+_LOG_FILE_MAP = {
+    "gaia-core": "/logs/gaia-core.log",
+    "gaia-web": "/logs/gaia-web.log",
+    "gaia-mcp": "/logs/gaia-mcp.log",
+    "gaia-study": "/logs/gaia-study.log",
+    "discord": "/logs/discord_bot.log",
+}
+
+# Severity levels in ascending order
+_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+
+
+def _introspect_logs_impl(params: dict) -> dict:
+    """View recent service logs for self-diagnosis."""
+    service = params.get("service")
+    if not service:
+        raise ValueError("service is required")
+
+    lines_requested = min(int(params.get("lines", 50)), 200)
+    search = (params.get("search") or "").strip().lower()
+    level = (params.get("level") or "").strip().upper()
+
+    log_path = _LOG_FILE_MAP.get(service)
+    if not log_path:
+        return {"ok": False, "error": f"Unknown service: {service}. Valid: {list(_LOG_FILE_MAP.keys())}"}
+
+    p = Path(log_path)
+    if not p.is_file():
+        return {"ok": False, "error": f"Log file not found: {log_path}. Service may not have started yet or logging is not configured."}
+
+    # Read efficiently: for files > 2MB, only read the tail
+    max_read = 2 * 1024 * 1024  # 2MB
+    file_size = p.stat().st_size
+
+    try:
+        if file_size > max_read:
+            with open(p, "rb") as f:
+                f.seek(-max_read, 2)
+                raw = f.read().decode("utf-8", errors="replace")
+            # Drop the first (likely partial) line
+            all_lines = raw.split("\n")[1:]
+        else:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.read().split("\n")
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to read log file: {e}"}
+
+    # Remove trailing empty line from split
+    if all_lines and all_lines[-1] == "":
+        all_lines = all_lines[:-1]
+
+    total_in_file = len(all_lines)
+
+    # Apply severity filter
+    if level and level in _LEVEL_ORDER:
+        min_level = _LEVEL_ORDER[level]
+        filtered = []
+        for line in all_lines:
+            for lv, lv_num in _LEVEL_ORDER.items():
+                if lv_num >= min_level and (f" {lv}:" in line or f" {lv} " in line):
+                    filtered.append(line)
+                    break
+        all_lines = filtered
+
+    # Apply search filter
+    if search:
+        all_lines = [line for line in all_lines if search in line.lower()]
+
+    # Take the last N lines
+    result_lines = all_lines[-lines_requested:]
+
+    return {
+        "ok": True,
+        "service": service,
+        "log_file": log_path,
+        "file_size_bytes": file_size,
+        "total_lines_in_file": total_in_file,
+        "lines_after_filter": len(all_lines),
+        "lines_returned": len(result_lines),
+        "content": "\n".join(result_lines),
+    }
+
+
+# --- Promotion & Blueprint Tools ---
+
+def _generate_blueprint_impl(params: dict) -> dict:
+    """Generate a candidate blueprint for a service from source analysis."""
+    service_id = params.get("service_id")
+    source_dir = params.get("source_dir")
+    role_hint = params.get("role_hint", "")
+
+    if not service_id:
+        raise ValueError("service_id is required")
+
+    # Auto-detect source_dir if not provided
+    if not source_dir:
+        pkg_name = service_id.replace("-", "_")
+        candidates = [
+            f"/gaia/GAIA_Project/candidates/{service_id}/{pkg_name}",
+            f"/gaia/GAIA_Project/{service_id}/{pkg_name}",
+        ]
+        source_dir = next((p for p in candidates if Path(p).exists()), None)
+        if not source_dir:
+            return {"ok": False, "error": f"Could not find source directory for {service_id}"}
+
+    try:
+        from gaia_common.utils.blueprint_generator import generate_candidate_blueprint
+        from gaia_common.utils.blueprint_io import save_blueprint
+
+        bp = generate_candidate_blueprint(
+            service_id=service_id,
+            source_dir=source_dir,
+            role_hint=role_hint,
+        )
+        path = save_blueprint(bp, candidate=True)
+
+        return {
+            "ok": True,
+            "service_id": service_id,
+            "path": str(path),
+            "interfaces": len(bp.interfaces),
+            "inbound": len(bp.inbound_interfaces()),
+            "outbound": len(bp.outbound_interfaces()),
+            "dependencies": len(bp.dependencies.services),
+            "failure_modes": len(bp.failure_modes),
+            "source_files": len(bp.source_files),
+            "intent": bp.intent.purpose if bp.intent else None,
+        }
+    except Exception as e:
+        logger.error("Blueprint generation failed for %s: %s", service_id, e, exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+
+def _assess_promotion_impl(params: dict) -> dict:
+    """Run promotion readiness assessment for a candidate service."""
+    service_id = params.get("service_id")
+    if not service_id:
+        raise ValueError("service_id is required")
+
+    try:
+        from gaia_common.utils.promotion_readiness import assess_promotion_readiness
+        report = assess_promotion_readiness(service_id)
+        return {
+            "ok": True,
+            **report.to_dict(),
+        }
+    except Exception as e:
+        logger.error("Promotion assessment failed for %s: %s", service_id, e, exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+
+# --- Promotion Lifecycle Tools ---
+
+def _promotion_create_request_impl(params: dict) -> dict:
+    """Create a promotion request after readiness assessment."""
+    from gaia_common.utils.promotion_request import (
+        create_promotion_request, load_pending_request,
+    )
+
+    service_id = params.get("service_id")
+    verdict = params.get("verdict")
+    recommendation = params.get("recommendation")
+    pipeline_cmd = params.get("pipeline_cmd")
+    check_summary = params.get("check_summary")
+
+    if not all([service_id, verdict, recommendation, pipeline_cmd, check_summary]):
+        raise ValueError("All fields required: service_id, verdict, recommendation, pipeline_cmd, check_summary")
+
+    # Reject if assessment verdict is not_ready
+    if verdict == "not_ready":
+        return {
+            "ok": False,
+            "error": "Cannot create promotion request with verdict 'not_ready'. "
+                     "Fix issues and re-assess first.",
+        }
+
+    # Check for existing active request
+    existing = load_pending_request(service_id)
+    if existing:
+        return {
+            "ok": False,
+            "error": f"Active request already exists: {existing.request_id} (status={existing.status}). "
+                     "Resolve it before creating a new one.",
+        }
+
+    req = create_promotion_request(
+        service_id=service_id,
+        verdict=verdict,
+        recommendation=recommendation,
+        pipeline_cmd=pipeline_cmd,
+        check_summary=check_summary,
+    )
+    return {
+        "ok": True,
+        "request_id": req.request_id,
+        "status": req.status,
+        "message": f"Promotion request created. Awaiting human approval (Gate 1).",
+    }
+
+
+def _promotion_list_requests_impl(params: dict) -> dict:
+    """List promotion requests with optional filters."""
+    from gaia_common.utils.promotion_request import list_requests
+
+    service_id = params.get("service_id")
+    status_filter = params.get("status_filter")
+
+    requests = list_requests(service_id=service_id, status_filter=status_filter)
+    return {
+        "ok": True,
+        "count": len(requests),
+        "requests": [
+            {
+                "request_id": r.request_id,
+                "service_id": r.service_id,
+                "status": r.status,
+                "verdict": r.verdict,
+                "requested_at": r.requested_at,
+            }
+            for r in requests
+        ],
+    }
+
+
+def _promotion_request_status_impl(params: dict) -> dict:
+    """Get full details of a specific promotion request."""
+    from gaia_common.utils.promotion_request import load_request
+
+    request_id = params.get("request_id")
+    if not request_id:
+        raise ValueError("request_id is required")
+
+    req = load_request(request_id)
+    if req is None:
+        return {"ok": False, "error": f"Request not found: {request_id}"}
+
+    return {
+        "ok": True,
+        **req.to_dict(),
+    }
+
+
 # --- Response Fragmentation Tools ---
 
 def _fragment_write_impl(params: dict) -> dict:
@@ -615,6 +870,31 @@ async def _study_cancel_impl(params: dict) -> dict:
     except Exception as e:
         logger.error(f"Failed to cancel study via gateway: {e}")
         return {"ok": False, "message": str(e)}
+
+
+async def _index_document_impl(params: dict) -> dict:
+    """Index a document into the vector store (via gaia-study gateway).
+
+    This triggers gaia-study to embed the document and add it to the
+    specified knowledge base index. Use after writing a knowledge file
+    with ai_write to make it searchable via memory_query.
+    """
+    file_path = params.get("file_path")
+    knowledge_base_name = params.get("knowledge_base_name", "system")
+
+    if not file_path:
+        raise ValueError("file_path is required")
+
+    client = get_study_service()
+    try:
+        result = await client.post("/index/add", {
+            "knowledge_base_name": knowledge_base_name,
+            "file_path": file_path,
+        })
+        return {"ok": True, **result}
+    except Exception as e:
+        logger.error(f"Failed to index document via gaia-study: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 async def _adapter_list_impl(params: dict) -> dict:
