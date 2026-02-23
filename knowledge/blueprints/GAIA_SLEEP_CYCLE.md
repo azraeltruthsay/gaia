@@ -1,7 +1,7 @@
 # GAIA Sleep Cycle System - Blueprint
 
 **Date:** 2026-02-14 (original), 2026-02-15 (7-state refactor)
-**Author:** Claude Sonnet 4.5 / Seumas
+**Author:** Claude Sonnet 4.5 / Azrael
 **Reviewed by:** Claude Opus 4.6 (2026-02-14, 2026-02-15)
 **Status:** Implemented — Current
 **Target System:** gaia-host (RTX 5080 16GB / Ryzen 9 / 32GB RAM)
@@ -2305,7 +2305,7 @@ No new dependencies required:
 
 ## Approval & Next Steps
 
-**Approval Required From:** Seumas (System Architect)
+**Approval Required From:** Azrael (System Architect)
 
 **Upon Approval:**
 1. Begin Phase 1 implementation in candidates (standard candidate-only development)
@@ -2538,7 +2538,7 @@ CANNED_DISTRACTED = (
 **Persona:** default
 
 ## Active Context Summary
-We were discussing the GAIA sleep cycle implementation with Seumas.
+We were discussing the GAIA sleep cycle implementation with Azrael.
 Key discussion points included:
 - State machine architecture (ACTIVE/ASLEEP/DREAMING/DISTRACTED/OFFLINE)
 - Prime checkpoint strategy (prime.md file)
@@ -2552,7 +2552,7 @@ Key discussion points included:
 **Pending actions:** None
 
 ## Key Entities Referenced
-- Seumas (user, system architect, project lead)
+- Azrael (user, system architect, project lead)
 - gaia-prime (vLLM inference server, 16GB VRAM)
 - gaia-core (cognitive engine, processes packets)
 - gaia-web (REST API, Discord bot interface)

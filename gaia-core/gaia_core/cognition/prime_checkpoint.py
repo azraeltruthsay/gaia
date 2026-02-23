@@ -176,6 +176,11 @@ class PrimeCheckpointManager:
 
         return self._build_template(context)
 
+    # Default timeout for the LLM checkpoint call (seconds).  Prevents the
+    # DROWSY→ASLEEP transition from hanging indefinitely when the model backend
+    # is unreachable or deadlocked.
+    _CHECKPOINT_LLM_TIMEOUT: float = 30.0
+
     def _generate_with_llm(self, llm, ctx: dict) -> str:
         """Call CPU Lite to introspect on current cognitive state."""
         summary_snippet = self._load_evolving_summary(ctx["session_id"])
@@ -212,13 +217,29 @@ class PrimeCheckpointManager:
             {"role": "user", "content": user_prompt},
         ]
 
-        result = llm.create_chat_completion(
-            messages=messages,
-            max_tokens=512,
-            temperature=0.3,
-            top_p=0.7,
-            stream=False,
-        )
+        import concurrent.futures
+
+        def _call_llm():
+            return llm.create_chat_completion(
+                messages=messages,
+                max_tokens=512,
+                temperature=0.3,
+                top_p=0.7,
+                stream=False,
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_call_llm)
+            try:
+                result = future.result(timeout=self._CHECKPOINT_LLM_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "Checkpoint LLM call timed out after %.0fs — falling back to template",
+                    self._CHECKPOINT_LLM_TIMEOUT,
+                )
+                future.cancel()
+                return self._build_template(ctx)
+
         summary = result["choices"][0]["message"]["content"].strip()
 
         now = datetime.now(timezone.utc).isoformat()

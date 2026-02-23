@@ -144,6 +144,17 @@ class ExternalVoice:
             msg_count = 0
         logger.debug("[DEBUG] ExternalVoice stream start session_id=%s messages=%d", self.session_id, msg_count)
         t_start = time.perf_counter()
+
+        # ---- Generation stream logging ----
+        _gen_id = None
+        try:
+            from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
+            _gen_logger = _get_gen_logger()
+            _model_name = getattr(self.model, "model_name", None) or getattr(self.model, "_model_path", "unknown")
+            _gen_id = _gen_logger.start_generation(str(_model_name), self.source, "response")
+        except Exception:
+            _gen_logger = None
+
         try:
             kwargs = {
                 "messages": self.messages,
@@ -276,6 +287,13 @@ class ExternalVoice:
                             if sentence_counts[key] > max_sentence_repeat:
                                 logger.info("ExternalVoice: stopping generation after repeated sentence: %s", sentence.strip())
                                 raise StopIteration
+
+                # Log token to generation stream (fire-and-forget)
+                if _gen_logger and _gen_id and isinstance(token, str):
+                    try:
+                        _gen_logger.log_token(_gen_id, token)
+                    except Exception:
+                        pass
 
                 yield token
 
@@ -425,6 +443,13 @@ class ExternalVoice:
         except Exception as e:
             logger.error(f"Error during model stream: {e}", exc_info=True)
             raise
+        finally:
+            # Finalise generation stream log
+            if _gen_logger and _gen_id:
+                try:
+                    _gen_logger.end_generation(_gen_id)
+                except Exception:
+                    pass
 
     # --------------------------------------------------------------------- #
     # convenience helpers

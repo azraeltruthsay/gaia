@@ -5,7 +5,7 @@
 
 ## Context
 
-The user (Seumas) proposed a comprehensive sleep/wake cycle for GAIA. When idle for 5+ minutes, GAIA should enter a sleep state to perform maintenance tasks (conversation cleanup, thought seed reflection, vector store maintenance, eventually QLoRA training). Messages received during sleep are queued in gaia-web; the first message triggers a graceful wake-up. The concept of "prime.md" — a natural-language cognitive state checkpoint — replaces KV cache persistence (which is impossible across vLLM container restarts due to CUDA context binding).
+The user (Azrael) proposed a comprehensive sleep/wake cycle for GAIA. When idle for 5+ minutes, GAIA should enter a sleep state to perform maintenance tasks (conversation cleanup, thought seed reflection, vector store maintenance, eventually QLoRA training). Messages received during sleep are queued in gaia-web; the first message triggers a graceful wake-up. The concept of "prime.md" — a natural-language cognitive state checkpoint — replaces KV cache persistence (which is impossible across vLLM container restarts due to CUDA context binding).
 
 A full implementation plan was drafted in `GAIA_SLEEP_CYCLE_IMPLEMENTATION_PLAN.md`, reviewed, corrected (10 issues found including circular dependency, wrong checkpoint path, missing DROWSY state, missing CPU Lite parallel wake strategy), and approved. Phase 1 covers the core state machine, checkpoint system, API endpoints, message queue, and integration.
 

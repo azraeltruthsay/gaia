@@ -49,6 +49,28 @@ DESCRIPTION: <one sentence description>
 CONFIDENCE: high|medium|low"""
 
 
+def _parse_goal_confidence(raw: str) -> GoalConfidence:
+    """Parse a GoalConfidence from a stored string, handling both value
+    format (``"high"``) and repr format (``"GoalConfidence.HIGH"``).
+    """
+    if isinstance(raw, GoalConfidence):
+        return raw
+    s = str(raw).strip()
+    # Strip enum class prefix if present (e.g. "GoalConfidence.HIGH" → "HIGH")
+    if "." in s:
+        s = s.rsplit(".", 1)[-1]
+    # Try by member name first (HIGH/MEDIUM/LOW), then by value (high/medium/low)
+    try:
+        return GoalConfidence[s.upper()]
+    except KeyError:
+        pass
+    try:
+        return GoalConfidence(s.lower())
+    except ValueError:
+        logger.warning("Unrecognised GoalConfidence '%s' — defaulting to MEDIUM", raw)
+        return GoalConfidence.MEDIUM
+
+
 class GoalDetector:
     """Detects and manages user goals across conversation turns."""
 
@@ -128,7 +150,7 @@ class GoalDetector:
         if turn_count >= MAX_CARRY_TURNS:
             confidence = GoalConfidence.LOW
         else:
-            confidence = GoalConfidence(goal_data.get("confidence", "medium"))
+            confidence = _parse_goal_confidence(goal_data.get("confidence", "medium"))
 
         carried_goal = DetectedGoal(
             goal_id=goal_data["goal_id"],
@@ -138,10 +160,11 @@ class GoalDetector:
             source="session_carry",
         )
 
-        previous = [
-            DetectedGoal(**pg)
-            for pg in stored.get("previous_goals", [])
-        ]
+        previous = []
+        for pg in stored.get("previous_goals", []):
+            pg = dict(pg)  # shallow copy so we don't mutate the stored dict
+            pg["confidence"] = _parse_goal_confidence(pg.get("confidence", "medium"))
+            previous.append(DetectedGoal(**pg))
 
         state = GoalState(
             current_goal=carried_goal,

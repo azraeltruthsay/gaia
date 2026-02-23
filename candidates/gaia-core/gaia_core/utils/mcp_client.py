@@ -10,6 +10,7 @@ import logging
 import os
 import requests
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Dict, Any
 
 from gaia_common.protocols.cognition_packet import CognitionPacket
@@ -64,6 +65,21 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
                 return {"ok": False, "error": f"Approval request failed: {approval_result.get('error', 'unknown')}"}
         r.raise_for_status()
         return {"ok": True, "response": r.json()}
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
+        # HA fallback: try candidate MCP if configured and not in maintenance
+        fallback_ep = os.getenv("MCP_FALLBACK_ENDPOINT", "")
+        if fallback_ep and not Path("/shared/ha_maintenance").exists():
+            fb_ep = _normalize_endpoint(fallback_ep)
+            try:
+                logger.warning("MCP primary failed, attempting fallback: %s", fb_ep)
+                fb_r = requests.post(fb_ep, json=payload, timeout=timeout)
+                fb_r.raise_for_status()
+                logger.info("MCP fallback succeeded")
+                return {"ok": True, "response": fb_r.json()}
+            except Exception as fb_e:
+                logger.error("MCP fallback also failed: %s", fb_e)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
         logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
         try:

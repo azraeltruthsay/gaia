@@ -4,7 +4,7 @@
 **Document status:** Implementation specification (Revision 7)
 **Intended audience:** Claude Code (CC) for autonomous implementation
 **Date:** 2026-02-19
-**Author:** Seumas & Claude (Sonnet 4.6) via GAIA Project Chat
+**Author:** Azrael & Claude (Sonnet 4.6) via GAIA Project Chat
 **Revised by:** Claude (Opus 4.6) via Claude Code — Rev 2-7 (see revision log)
 
 ---
@@ -1451,7 +1451,7 @@ These are the architectural invariants CC must respect throughout implementation
 
 | Date | Author | Changes |
 |------|--------|---------|
-| 2026-02-19 | Seumas & Claude (Sonnet 4.6) | Original specification |
+| 2026-02-19 | Azrael & Claude (Sonnet 4.6) | Original specification |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 2: Added Phase 2.5 (retroactive corpus bootstrapping), Section 3.1.1 (targeted body extraction), Section 2.4 (code_analyzer reuse), adapter versioning, chat template parameterization, per-file blueprint scoping, gaia-common import exemption, blueprint path fix, fidelity formula normalization note, validate_adapter.py rework clarification, type-ignore diffing script, Design Principle 7 (extend don't duplicate) and 8 (model-derived templates) |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 3: Added Section 3.5 (mechanical pre-check validator — refactored from sleep_task_scheduler). Adopted hybrid review architecture: pre-checks provide structural ground truth, LLM assesses semantic fidelity. Updated review prompt (3.2), prompt template (5.2), review script (5.3), session setup (5.1) to incorporate pre-check results. Reframed LLM reviewer role from "find what's missing" to "assess whether what's present implements intent." Updated Design Principle 3. Added blueprint_precheck.py, test_blueprint_precheck.py, run_blueprint_precheck.py to file manifest. |
 | 2026-02-19 | Claude (Opus 4.6) via CC | Rev 4: Calibrated pre-check accuracy estimates (failure_mode ~50-60%, honest per-dimension table). Added Section 3.2.1 token budget guard with progressive truncation priority for gaia-prime context limits. Pinned reference implementation selection (Section 7.4.1) to dependency+interface Jaccard overlap. Separated graduation criteria into generation quality vs review quality (Section 8.3) — review quality deferred to Phase 5 maturity. Added 15% minimum forward-pair ratio + 1.5x loss weight for forward pairs in skewed corpora (Section 8.1). Moved BlueprintFidelityValidator to standalone `validators/blueprint_fidelity.py` module. |

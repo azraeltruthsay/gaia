@@ -47,7 +47,7 @@ require_user() {
 # Each entry: "session_name|command_or_empty"
 TMUX_SESSIONS=(
     "gaia_test|"
-    "gaia_notebooklm|bash -c 'cd ${PROJECT_ROOT} && ./flatten_soa.sh && python3 notebooklm_sync.py'"
+    "gaia_notebooklm|bash -c 'cd ${PROJECT_ROOT} && ./start_notebooklm_sync.sh'"
     "gaia_code_tunnel|/usr/local/bin/code tunnel"
     "gaia_gemini|${NODE_BIN}/happy gemini"
     "gaia_claude|${NODE_BIN}/happy claude"
@@ -104,11 +104,14 @@ start_docker_stack() {
         local all_healthy=true
         local unhealthy_list=""
         local created_list=""
+        local svc_count=0
 
         while IFS= read -r line; do
+            [ -z "$line" ] && continue
             local svc_name svc_status
             svc_name="$(echo "$line" | awk '{print $1}')"
             svc_status="$(echo "$line" | awk '{print $2}')"
+            (( svc_count++ )) || true
 
             case "$svc_status" in
                 healthy) ;;
@@ -127,6 +130,23 @@ start_docker_stack() {
             esac
         done < <(COMPOSE_FILE="$COMPOSE_FILE" docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null || true)
 
+        # Guard: if compose returned zero containers, something is fundamentally wrong
+        if (( svc_count == 0 )); then
+            if (( elapsed == 0 )); then
+                err "No containers found — compose up may have failed entirely"
+                log "Retrying compose up..."
+                COMPOSE_FILE="$COMPOSE_FILE" docker compose --env-file "$ENV_FILE" up -d || \
+                    err "Compose up retry also failed"
+                sleep "$HEALTH_INTERVAL"
+                (( elapsed += HEALTH_INTERVAL ))
+                continue
+            elif (( elapsed >= 30 )); then
+                err "Still no containers after ${elapsed}s — giving up on Docker stack"
+                COMPOSE_FILE="$COMPOSE_FILE" docker compose ps
+                return 1
+            fi
+        fi
+
         # Retry compose up once dependency-blocked containers exist and prime is healthy
         if [ -n "$created_list" ] && ! $retried; then
             # Check if prime is now healthy
@@ -140,8 +160,8 @@ start_docker_stack() {
             fi
         fi
 
-        if $all_healthy; then
-            ok "All services healthy after ${elapsed}s"
+        if $all_healthy && (( svc_count > 0 )); then
+            ok "All services healthy after ${elapsed}s (${svc_count} containers)"
             return 0
         fi
 
@@ -155,6 +175,72 @@ start_docker_stack() {
 
     warn "Health timeout (${HEALTH_TIMEOUT}s) — some services may still be starting:${unhealthy_list:-}${created_list:-}"
     COMPOSE_FILE="$COMPOSE_FILE" docker compose ps
+}
+
+# ─── HA Standby Services ──────────────────────────────────────────────────────
+start_ha_services() {
+    log "${BOLD}Starting HA hot standby services...${RESET}"
+
+    local ha_script="${PROJECT_ROOT}/scripts/ha_start.sh"
+    if [ ! -x "$ha_script" ]; then
+        warn "HA start script not found or not executable: $ha_script"
+        return 1
+    fi
+
+    if bash "$ha_script" 2>&1 | while IFS= read -r line; do log "  ${DIM}${line}${RESET}"; done; then
+        ok "HA standby services started"
+    else
+        warn "HA start returned non-zero — candidates may not be fully up yet"
+    fi
+
+    # Wait briefly for HA candidates to pass health checks
+    local ha_wait=0
+    local ha_timeout=90
+    while [ $ha_wait -lt $ha_timeout ]; do
+        local core_health mcp_health
+        core_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' gaia-core-candidate 2>/dev/null || echo "missing")
+        mcp_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' gaia-mcp-candidate 2>/dev/null || echo "missing")
+
+        if [ "$core_health" = "healthy" ] && [ "$mcp_health" = "healthy" ]; then
+            ok "HA candidates healthy (core: ${core_health}, mcp: ${mcp_health})"
+            return 0
+        fi
+
+        if (( ha_wait % 30 == 0 )) && [ $ha_wait -gt 0 ]; then
+            log "  ${DIM}${ha_wait}s — HA candidates: core=${core_health}, mcp=${mcp_health}${RESET}"
+        fi
+
+        sleep 10
+        (( ha_wait += 10 ))
+    done
+
+    warn "HA health timeout (${ha_timeout}s) — candidates may still be starting"
+}
+
+# ─── Doctor Verification ─────────────────────────────────────────────────────
+run_doctor_fix() {
+    log "${BOLD}Running GAIA Doctor (--fix mode)...${RESET}"
+
+    local doctor_script="${PROJECT_ROOT}/scripts/gaia_doctor.sh"
+    if [ ! -x "$doctor_script" ]; then
+        warn "Doctor script not found or not executable: $doctor_script"
+        return 1
+    fi
+
+    bash "$doctor_script" --fix 2>&1 | while IFS= read -r line; do
+        log "  ${line}"
+    done
+    local doctor_exit=${PIPESTATUS[0]}
+
+    case $doctor_exit in
+        0) ok "Doctor: all healthy" ;;
+        1) warn "Doctor: warnings detected (degraded but functional)" ;;
+        2) err "Doctor: failures detected — manual intervention may be needed" ;;
+        3) err "Doctor: pre-flight failed" ;;
+        *) warn "Doctor: unexpected exit code $doctor_exit" ;;
+    esac
+
+    return 0
 }
 
 # ─── Status ───────────────────────────────────────────────────────────────────
@@ -216,7 +302,11 @@ main() {
             echo ""
             start_docker_stack
             echo ""
-            ok "${BOLD}GAIA cluster startup complete${RESET}"
+            start_ha_services
+            echo ""
+            run_doctor_fix
+            echo ""
+            ok "${BOLD}GAIA cluster startup complete (production + HA + verified)${RESET}"
             ;;
         tmux)   create_tmux_sessions ;;
         docker) start_docker_stack ;;

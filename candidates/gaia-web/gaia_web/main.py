@@ -23,6 +23,9 @@ from gaia_web.routes.files import router as files_router
 from gaia_web.routes.hooks import router as hooks_router
 from gaia_web.routes.terminal import router as terminal_router
 from gaia_web.routes.voice import router as voice_router
+from gaia_web.routes.wiki import router as wiki_router
+from gaia_web.routes.generation import router as generation_router
+from gaia_web.routes.logs import router as logs_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -31,14 +34,16 @@ from gaia_common.protocols.cognition_packet import (
     PacketState, ToolRoutingState, Reasoning, TargetEngine
 )
 
-logger = logging.getLogger("GAIA.Web.API")
-
-# Suppress health check access log spam
+# Persistent file logging — writes to /logs/gaia-web.log (mounted volume)
 try:
-    from gaia_common.utils import install_health_check_filter
+    from gaia_common.utils import setup_logging, install_health_check_filter
+    _log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    setup_logging(log_dir="/logs", level=_log_level, service_name="gaia-web")
     install_health_check_filter()
 except ImportError:
-    pass  # gaia_common not available
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger("GAIA.Web.API")
 
 # Configuration from environment
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
@@ -73,6 +78,9 @@ app.include_router(files_router)
 app.include_router(hooks_router)
 app.include_router(terminal_router)
 app.include_router(voice_router)
+app.include_router(wiki_router)
+app.include_router(generation_router)
+app.include_router(logs_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
@@ -262,7 +270,7 @@ async def process_user_input(user_input: str):
     current_time = datetime.now().isoformat()
 
     packet = CognitionPacket(
-        version="0.2",
+        version="0.3",
         header=Header(
             datetime=current_time,
             session_id=session_id,

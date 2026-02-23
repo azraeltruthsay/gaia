@@ -1,6 +1,6 @@
 # Dev Journal — 2026-02-19: HA Failover + Network Resilience
 
-**Author:** Claude (Opus 4.6) via Claude Code, with Seumas
+**Author:** Claude (Opus 4.6) via Claude Code, with Azrael
 **Session scope:** Two major features — network resilience improvements and HA hot standby failover
 **Plan reference:** `knowledge/Dev_Notebook/2026-02-19_ha_failover_plan.md` (Rev 3)
 

@@ -24,6 +24,8 @@ from gaia_web.routes.hooks import router as hooks_router
 from gaia_web.routes.terminal import router as terminal_router
 from gaia_web.routes.voice import router as voice_router
 from gaia_web.routes.wiki import router as wiki_router
+from gaia_web.routes.generation import router as generation_router
+from gaia_web.routes.logs import router as logs_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -77,6 +79,8 @@ app.include_router(hooks_router)
 app.include_router(terminal_router)
 app.include_router(voice_router)
 app.include_router(wiki_router)
+app.include_router(generation_router)
+app.include_router(logs_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
