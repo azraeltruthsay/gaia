@@ -8,14 +8,24 @@ for processing, and responses are routed back to Discord.
 
 import os
 import time
+import uuid
 import asyncio
 import logging
 import threading
+from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
-from gaia_common.protocols.cognition_packet import CognitionPacket
-from gaia_common.utils.packet_factory import build_packet, PacketSource
+# Import all necessary dataclasses for CognitionPacket
+from gaia_common.protocols.cognition_packet import (
+    CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
+    OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
+    SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog,
+    Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult,
+    ToolRoutingState, ToolExecutionStatus, ToolCall, SidecarAction, Response, Safety, Signatures,
+    Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status,
+    PacketState, TargetEngine
+)
 
 logger = logging.getLogger("GAIA.Web.Discord")
 
@@ -24,6 +34,9 @@ _bot = None
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
 _message_handler: Optional[Callable] = None
 _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
+_dm_blocklist = None   # DMBlocklist instance (set by start_discord_bot)
+_core_endpoint = ""    # Core endpoint URL (set by start_discord_bot)
+_typing_wake_sent: Dict[str, float] = {}  # user_id -> last wake signal timestamp
 
 # Pending approval waiters: (channel_id, user_id) -> waiter context dict
 _pending_approvals: Dict[Tuple[str, str], dict] = {}
@@ -76,6 +89,7 @@ class DiscordInterface:
         intents.dm_messages = True
         intents.members = True
         intents.voice_states = True
+        intents.typing = True  # Receive typing events for speculative prime wake
 
         bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -110,6 +124,18 @@ class DiscordInterface:
                     pass
 
             is_dm = message.guild is None
+
+            # Blocklist: silently ignore DMs from blocked users
+            if is_dm and _dm_blocklist and _dm_blocklist.is_blocked(str(message.author.id)):
+                logger.info("Discord: blocked DM from user %s (%s)", message.author.id, message.author.display_name)
+                return
+
+            # Track DM user for blocklist dashboard
+            if is_dm and _dm_blocklist:
+                try:
+                    _dm_blocklist.record_dm(str(message.author.id), message.author.display_name)
+                except Exception:
+                    pass
 
             # Check for pending approval waiter before normal processing
             waiter_key = (str(message.channel.id), str(message.author.id))
@@ -162,6 +188,34 @@ class DiscordInterface:
                     await _voice_manager.handle_voice_state_update(member, before, after)
                 except Exception:
                     logger.error("Voice state update handler error", exc_info=True)
+
+        @bot.event
+        async def on_typing(channel, user, when):
+            """Speculative prime wake: typing in a recent DM triggers preload."""
+            if user == bot.user:
+                return
+            # Only DMs (DMChannel has no guild)
+            if not isinstance(channel, discord.DMChannel):
+                return
+            uid = str(user.id)
+            # Blocked users don't trigger wake
+            if _dm_blocklist and _dm_blocklist.is_blocked(uid):
+                return
+            # Only wake if GAIA replied to this user within 48h
+            if not (_dm_blocklist and _dm_blocklist.has_recent_gaia_reply(uid)):
+                return
+            # Debounce: one wake signal per 30s per user
+            now = time.time()
+            if now - _typing_wake_sent.get(uid, 0) < 30:
+                return
+            _typing_wake_sent[uid] = now
+            # Fire-and-forget wake signal
+            logger.info("Discord: typing wake trigger for DM user %s", uid)
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(f"{_core_endpoint}/sleep/wake")
+            except Exception:
+                logger.debug("Typing wake signal failed", exc_info=True)
 
         @bot.command(name="call")
         async def voice_call(ctx):
@@ -278,15 +332,73 @@ class DiscordInterface:
             logger.info("Discord: GAIA woke up — processing queued message %s", message_id)
             # Fall through to normal packet construction below
 
-        packet = build_packet(
-            PacketSource.DISCORD,
-            content,
-            user_id=user_id,
-            channel_id=channel_id,
-            reply_to_message_id=message_id,
-            is_dm=is_dm,
-            author_name=author_name,
+        # Show GAIA as online while processing this message
+        await self._set_presence("online", "Thinking...")
+
+        packet_id = str(uuid.uuid4())
+        session_id = f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}"
+        current_time = datetime.now().isoformat()
+
+        # Construct CognitionPacket
+        packet = CognitionPacket(
+            version="0.2", # Use appropriate version
+            header=Header(
+                datetime=current_time,
+                session_id=session_id,
+                packet_id=packet_id,
+                sub_id="0", # Initial sub_id
+                persona=Persona(
+                    identity_id="default_user", # Placeholder
+                    persona_id="default_persona", # Placeholder
+                    role=PersonaRole.DEFAULT, # PersonaRole.DEFAULT for user messages
+                    tone_hint="conversational"
+                ),
+                origin=Origin.USER,
+                routing=Routing(
+                    target_engine=TargetEngine.PRIME, # Default target
+                    priority=5
+                ),
+                model=Model( # Placeholder model info
+                    name="default_model",
+                    provider="default_provider",
+                    context_window_tokens=8192
+                ),
+                output_routing=OutputRouting(
+                    primary=DestinationTarget(
+                        destination=OutputDestination.DISCORD,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        reply_to_message_id=message_id,
+                        metadata={"is_dm": is_dm, "author_name": author_name}
+                    ),
+                    source_destination=OutputDestination.DISCORD,
+                    addressed_to_gaia=True, # Assuming direct address
+                ),
+                operational_status=OperationalStatus(status="initialized")
+            ),
+            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0), # Placeholder
+            context=Context(
+                session_history_ref=SessionHistoryRef(type="discord_channel", value=session_id),
+                cheatsheets=[],
+                constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="strict"),
+            ),
+            content=Content(
+                original_prompt=content,
+                data_fields=[DataField(key="user_message", value=content, type="text")]
+            ),
+            reasoning=Reasoning(), # Empty for initial packet
+            response=Response(candidate="", confidence=0.0, stream_proposal=False), # Empty response
+            governance=Governance(
+                safety=Safety(execution_allowed=False, dry_run=True) # Default
+            ),
+            metrics=Metrics(
+                token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+                latency_ms=0
+            ),
+            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
+            tool_routing=ToolRoutingState() # Empty for initial packet
         )
+        packet.compute_hashes() # Compute hashes for integrity
 
         try:
             from gaia_web.utils.retry import post_with_retry
@@ -324,6 +436,13 @@ class DiscordInterface:
             # Send response back to Discord
             await self._send_response(message_obj, gaia_response_text, is_dm)
 
+            # Record GAIA reply for typing-wake 48h gate
+            if is_dm and _dm_blocklist:
+                try:
+                    _dm_blocklist.record_gaia_reply(user_id)
+                except Exception:
+                    pass
+
         except httpx.TimeoutException:
             logger.error("Discord: Request to gaia-core timed out")
             await self._send_response(
@@ -345,6 +464,36 @@ class DiscordInterface:
                 "An unexpected error occurred. Please try again.",
                 is_dm
             )
+        finally:
+            # Return to idle presence after message processing completes
+            await self._set_presence("idle", "over the studio")
+
+    @staticmethod
+    async def _set_presence(status: str, activity: str):
+        """Update Discord bot presence directly from the bot event loop.
+
+        Unlike change_presence_from_external (which cross-thread schedules),
+        this is safe to await from on_message / _handle_message since we're
+        already on the bot's own loop.
+        """
+        import discord as _discord
+
+        if not _bot or not _bot.is_ready():
+            return
+        status_map = {
+            "idle": _discord.Status.idle,
+            "online": _discord.Status.online,
+            "dnd": _discord.Status.dnd,
+        }
+        try:
+            await _bot.change_presence(
+                status=status_map.get(status, _discord.Status.online),
+                activity=_discord.Activity(
+                    type=_discord.ActivityType.watching, name=activity
+                ),
+            )
+        except Exception:
+            logger.debug("Presence update failed", exc_info=True)
 
     async def _send_response(self, message_obj: Any, content: str, is_dm: bool):
         """Send response back to Discord."""
@@ -635,7 +784,7 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return False
 
 
-def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None, core_fallback_endpoint: str = "") -> bool:
+def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, voice_manager=None, dm_blocklist=None, core_fallback_endpoint: str = "") -> bool:
     """
     Start the Discord bot in a background thread.
 
@@ -644,13 +793,16 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
         core_endpoint: URL of gaia-core service (e.g., http://gaia-core:6415)
         message_queue: Optional MessageQueue instance for sleep/wake queueing
         voice_manager: Optional VoiceManager for voice auto-answer
+        dm_blocklist: Optional DMBlocklist for DM user blocking + typing wake
         core_fallback_endpoint: Optional HA fallback URL for gaia-core
 
     Returns:
         True if started successfully
     """
-    global _voice_manager
+    global _voice_manager, _dm_blocklist, _core_endpoint
     _voice_manager = voice_manager
+    _dm_blocklist = dm_blocklist
+    _core_endpoint = core_endpoint
 
     if not bot_token:
         logger.error("Cannot start Discord bot: no token provided")

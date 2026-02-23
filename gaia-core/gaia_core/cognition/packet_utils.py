@@ -19,6 +19,7 @@ SAFE_SIDECAR_TOOLS = {
     "fragment_write", "fragment_read", "fragment_assemble",
     "fragment_list_pending", "fragment_clear",
     "introspect_logs",
+    "web_fetch", "web_search",
 }
 
 

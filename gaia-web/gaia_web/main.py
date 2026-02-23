@@ -26,6 +26,7 @@ from gaia_web.routes.voice import router as voice_router
 from gaia_web.routes.wiki import router as wiki_router
 from gaia_web.routes.generation import router as generation_router
 from gaia_web.routes.logs import router as logs_router
+from gaia_web.routes.discord import router as discord_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -81,6 +82,7 @@ app.include_router(voice_router)
 app.include_router(wiki_router)
 app.include_router(generation_router)
 app.include_router(logs_router)
+app.include_router(discord_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
@@ -569,6 +571,17 @@ async def startup_event():
         print(f"[STARTUP] Voice manager init failed (non-fatal): {e}")
         app.state.voice_manager = None
 
+    # Initialize DM blocklist (persists to /app/data/)
+    dm_blocklist = None
+    try:
+        from gaia_web.dm_blocklist import DMBlocklist
+        dm_blocklist = DMBlocklist(data_dir=os.environ.get("DM_DATA_DIR", "/app/data"))
+        app.state.dm_blocklist = dm_blocklist
+        print("[STARTUP] DM blocklist initialized")
+    except Exception as e:
+        print(f"[STARTUP] DM blocklist init failed (non-fatal): {e}")
+        app.state.dm_blocklist = None
+
     print(f"[STARTUP] ENABLE_DISCORD={ENABLE_DISCORD}, TOKEN_SET={bool(DISCORD_BOT_TOKEN)}")
     if ENABLE_DISCORD and DISCORD_BOT_TOKEN:
         print("[STARTUP] Starting Discord bot...")
@@ -578,6 +591,7 @@ async def startup_event():
                 DISCORD_BOT_TOKEN, CORE_ENDPOINT,
                 message_queue=app.state.message_queue,
                 voice_manager=voice_manager,
+                dm_blocklist=dm_blocklist,
                 core_fallback_endpoint=CORE_FALLBACK_ENDPOINT,
             )
             print(f"[STARTUP] Discord bot startup result: {result}")

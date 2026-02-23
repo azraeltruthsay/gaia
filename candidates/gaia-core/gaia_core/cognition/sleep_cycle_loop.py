@@ -188,7 +188,7 @@ class SleepCycleLoop:
             restored = self.sleep_wake_manager.complete_wake()
             if restored.get("checkpoint_loaded"):
                 logger.info("Context restored from checkpoint")
-            self._update_presence(None)  # Reset to dynamic idle status
+            self._update_presence("ready")  # Stay online — message processing incoming
             return
 
         # Check for distracted state (sustained load)
