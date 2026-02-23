@@ -37,6 +37,7 @@ from .packet_utils import (
     is_execution_safe,
     upgrade_v2_to_v3_packet,
 )
+from .packet_factory import build_packet, PacketSource
 from .heartbeat_logger import HeartbeatLogger, HeartbeatLoggerProxy
 from .tools_registry import TOOLS as tools_registry
 
@@ -64,6 +65,9 @@ __all__ = [
     # Packet utils
     "is_execution_safe",
     "upgrade_v2_to_v3_packet",
+    # Packet factory
+    "build_packet",
+    "PacketSource",
     # Heartbeat logging
     "HeartbeatLogger",
     "HeartbeatLoggerProxy",

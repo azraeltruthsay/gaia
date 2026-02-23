@@ -27,12 +27,8 @@ from gaia_web.routes.wiki import router as wiki_router
 from gaia_web.routes.generation import router as generation_router
 from gaia_web.routes.logs import router as logs_router
 
-from gaia_common.protocols.cognition_packet import (
-    CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
-    OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
-    SessionHistoryRef, Constraints, Response, Governance, Safety, Metrics, TokenUsage, Status,
-    PacketState, ToolRoutingState, Reasoning, TargetEngine
-)
+from gaia_common.protocols.cognition_packet import CognitionPacket
+from gaia_common.utils.packet_factory import build_packet, PacketSource
 
 # Persistent file logging — writes to /logs/gaia-web.log (mounted volume)
 try:
@@ -265,68 +261,7 @@ async def process_user_input(user_input: str):
         except Exception:
             logger.debug("Sleep-check failed in /process_user_input — proceeding", exc_info=True)
 
-    packet_id = str(uuid.uuid4())
-    session_id = "web_ui_session" # Placeholder, can be dynamic
-    current_time = datetime.now().isoformat()
-
-    packet = CognitionPacket(
-        version="0.3",
-        header=Header(
-            datetime=current_time,
-            session_id=session_id,
-            packet_id=packet_id,
-            sub_id="0",
-            persona=Persona(
-                identity_id="default_user",
-                persona_id="default_web_user",
-                role=PersonaRole.DEFAULT,
-                tone_hint="neutral"
-            ),
-            origin=Origin.USER,
-            routing=Routing(
-                target_engine=TargetEngine.PRIME,
-                priority=5
-            ),
-            model=Model(
-                name="default_model",
-                provider="default_provider",
-                context_window_tokens=8192
-            ),
-            output_routing=OutputRouting(
-                primary=DestinationTarget(
-                    destination=OutputDestination.WEB,
-                    channel_id=session_id, # Placeholder for web session ID
-                    user_id="web_user", # Placeholder
-                    metadata={}
-                ),
-                source_destination=OutputDestination.WEB,
-                addressed_to_gaia=True,
-            ),
-            operational_status=OperationalStatus(status="initialized")
-        ),
-        intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
-        context=Context(
-            session_history_ref=SessionHistoryRef(type="web_session", value=session_id),
-            cheatsheets=[],
-            constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="strict"),
-        ),
-        content=Content(
-            original_prompt=user_input,
-            data_fields=[DataField(key="user_message", value=user_input, type="text")]
-        ),
-        reasoning=Reasoning(),
-        response=Response(candidate="", confidence=0.0, stream_proposal=False),
-        governance=Governance(
-            safety=Safety(execution_allowed=False, dry_run=True)
-        ),
-        metrics=Metrics(
-            token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-            latency_ms=0
-        ),
-        status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-        tool_routing=ToolRoutingState()
-    )
-    packet.compute_hashes()
+    packet = build_packet(PacketSource.WEB, user_input)
 
     try:
         from gaia_web.utils.retry import post_with_retry
@@ -367,41 +302,7 @@ async def process_audio_input(body: Dict[str, Any]):
     if not user_input:
         raise HTTPException(status_code=400, detail="'text' field required")
 
-    packet_id = f"pkt-audio-{uuid.uuid4().hex[:12]}"
-    now = datetime.now().isoformat()
-
-    packet = CognitionPacket(
-        version="0.3",
-        header=Header(
-            datetime=now,
-            session_id=session_id,
-            packet_id=packet_id,
-            sub_id="audio-web-gateway",
-            persona=Persona(identity_id="Prime", persona_id="Default", role=PersonaRole.DEFAULT),
-            origin=Origin(source="audio", source_destination=OutputDestination.AUDIO),
-            routing=Routing(target_engine=TargetEngine.PRIME),
-            model=Model(name="auto", provider="auto", context_window_tokens=8192),
-            output_routing=OutputRouting(
-                primary=DestinationTarget(destination=OutputDestination.AUDIO.value),
-            ),
-        ),
-        intent=Intent(
-            user_intent=user_input[:200],
-            system_task=SystemTask.CHAT,
-            confidence=0.9,
-        ),
-        context=Context(
-            session_history_ref=SessionHistoryRef(type="ref", value=session_id),
-            cheatsheets=[],
-            constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="standard"),
-        ),
-        content=Content(original_prompt=user_input),
-        reasoning=Reasoning(),
-        response=Response(candidate="", confidence=0.0, stream_proposal=False),
-        governance=Governance(safety=Safety(execution_allowed=False, dry_run=False)),
-        metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
-        status=Status(finalized=False, state=PacketState.PROCESSING),
-    )
+    packet = build_packet(PacketSource.AUDIO_GATEWAY, user_input, session_id=session_id)
 
     try:
         from gaia_web.utils.retry import post_with_retry

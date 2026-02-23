@@ -9,8 +9,42 @@
   "web_ui_session": {
     "session_id": "web_ui_session",
     "persona": "default",
-    "history": [],
-    "meta": {},
+    "history": [
+      {
+        "role": "user",
+        "content": "what time is it",
+        "timestamp": "2026-02-22T15:54:16.281981+00:00"
+      },
+      {
+        "role": "user",
+        "content": "ping",
+        "timestamp": "2026-02-22T16:03:12.384173+00:00"
+      },
+      {
+        "role": "user",
+        "content": "This is a failover test. Please say hello briefly.",
+        "timestamp": "2026-02-23T02:48:08.110682+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "It is currently Monday, 2026-02-23, 02:48 UTC. Hello! I'm active and ready to assist. \u2705 \n(Just completed a failover test \u2014 all systems are responsive.) \n\nLet me know how I can help!",
+        "timestamp": "2026-02-23T02:49:53.079766+00:00"
+      }
+    ],
+    "meta": {
+      "goal_state": {
+        "current_goal": {
+          "goal_id": "status_check",
+          "description": "The user is checking in to confirm system availability or responsiveness.",
+          "confidence": "GoalConfidence.HIGH",
+          "detected_at": "2026-02-22T16:03:16.098493+00:00",
+          "source": "session_carry"
+        },
+        "previous_goals": [],
+        "turn_count": 1,
+        "goal_shifts": 0
+      }
+    },
     "created_at": "2026-02-13T06:26:52.860099"
   },
   "smoke-test-5e7ba237": {
@@ -357,5 +391,97 @@
       }
     },
     "created_at": "2026-02-17T04:04:34.112884+00:00"
+  },
+  "gaia_heartbeat_session": {
+    "session_id": "gaia_heartbeat_session",
+    "persona": "default",
+    "history": [
+      {
+        "role": "user",
+        "content": "Expand and refine the thought seed into a clear, actionable prompt for GAIA's cognitive loop:\n\n\"Monitor and record all tool call decisions where confidence scores reach exactly 1.0. Analyze these instances across multiple interactions to identify patterns in tool selection, input context, and decision consistency. Evaluate whether the high-confidence routing reflects a stable internal logic or potential over-reliance on default behaviors. Flag any deviations from expected behavior or inconsistencies in tool usage. Document findings and suggest adjustments to internal logic or confidence thresholds if necessary to ensure balanced, reliable, and context-aware decision-making.\"",
+        "timestamp": "2026-02-22T15:25:48.916483+00:00"
+      },
+      {
+        "role": "user",
+        "content": "Expand and refine the thought seed into a clear, actionable prompt for GAIA's cognitive loop:\n\n\"Monitor and record all tool call decisions where confidence scores reach exactly 1.0. Analyze these instances across multiple interactions to identify patterns in tool selection, input context, and decision consistency. Evaluate whether the high-confidence routing reflects a stable internal logic or potential over-reliance on default behaviors. Flag any deviations from expected behavior or inconsistencies in tool usage. Document findings and suggest adjustments to internal logic or confidence thresholds if necessary to ensure balanced, reliable, and context-aware decision-making.\"",
+        "timestamp": "2026-02-22T15:39:39.424572+00:00"
+      },
+      {
+        "role": "user",
+        "content": "Monitor system responsiveness during failover by tracking consistency in response time across all interaction phases and verifying the accuracy of subsequent user queries and system outputs. Ensure that post-failover interactions maintain equivalent performance and correctness to pre-failover behavior, with specific attention to latency, error rates, and factual consistency in responses. Log and report any deviations exceeding predefined thresholds (e.g., >10% increase in response time or >1% error rate) for further analysis and remediation.",
+        "timestamp": "2026-02-23T02:35:31.152100+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "\"Establish a systematic monitoring and analysis loop to evaluate high-confidence tool call decisions (confidence = 1.0) across user interactions. This loop should: \n1. **Log every instance** where a tool is invoked with a confidence score of exactly 1.0, capturing the input context, tool name, user query, and decision rationale. 2. **Aggregate and analyze** these logs over multiple sessions to detect patterns in tool selection (e.g., recurring use of `read_file`, `web_search`, or `list_dir`), input context (e.g., technical vs. narrative queries), and consistency in decision-making. 3. **Assess stability** \u2014 determine whether high-confidence routing reflects a coherent, stable internal logic or indicates over-reliance on default behaviors (e.g",
+        "timestamp": "2026-02-23T02:38:59.232043+00:00"
+      },
+      {
+        "role": "user",
+        "content": "Expand the thought seed into a clear, actionable prompt for GAIA's cognitive loop:\n\n\"Establish a systematic monitoring and analysis loop to evaluate high-confidence tool call decisions (confidence = 1.0) across user interactions. For each interaction, log every instance where a tool is invoked with a confidence score of exactly 1.0. The log must capture: (1) the full user query, (2) the input context (including session metadata and persona), (3) the name of the invoked tool, and (4) the decision rationale provided by the model. Aggregate and analyze these logs across multiple sessions to identify recurring patterns in tool usage (e.g., frequent use of `read_file`, `web_search`, or `list_dir`), input context characteristics (e.g., technical vs. narrative tone, domain specificity), and consistency in decision-making behavior. Specifically, assess whether high-confidence routing reflects a stable, coherent internal logic that aligns with user intent, or instead indicates over-reliance on default behaviors (e.g., repetitive tool selection without contextual adaptation). Flag any anomalies or drifts in behavior that suggest potential biases, rigidity, or lack of contextual awareness. Generate a periodic report summarizing trends, stability metrics, and actionable insights for improving tool selection fidelity and user alignment.\"",
+        "timestamp": "2026-02-23T02:46:09.148737+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "I searched for that filename but found no matches under /knowledge.",
+        "timestamp": "2026-02-23T02:46:12.895259+00:00"
+      }
+    ],
+    "meta": {
+      "goal_state": {
+        "current_goal": {
+          "goal_id": "information_seeking",
+          "description": "Clarifying previously discussed information",
+          "confidence": "GoalConfidence.HIGH",
+          "detected_at": "2026-02-23T02:35:32.438979+00:00",
+          "source": "session_carry"
+        },
+        "previous_goals": [],
+        "turn_count": 1,
+        "goal_shifts": 0
+      }
+    },
+    "created_at": "2026-02-22T15:25:48.818320+00:00"
+  },
+  "ha-failover-test": {
+    "session_id": "ha-failover-test",
+    "persona": "default",
+    "history": [
+      {
+        "role": "user",
+        "content": "Hello, this is a failover test. Please respond briefly.",
+        "timestamp": "2026-02-23T02:26:20.748618+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! Yes, this is a failover test. I'm responsive and ready to assist. Brief response confirmed. THOUGHT_SEED: User is verifying system responsiveness during failover \u2014 should monitor for consistency in response time and accuracy in future interactions.",
+        "timestamp": "2026-02-23T02:28:30.469757+00:00"
+      },
+      {
+        "role": "user",
+        "content": "Hello, this is a failover test. Please respond briefly.",
+        "timestamp": "2026-02-23T02:29:23.286585+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! Received failover test \u2014 responding briefly and reliably. System is active and ready.",
+        "timestamp": "2026-02-23T02:30:51.549386+00:00"
+      }
+    ],
+    "meta": {
+      "goal_state": {
+        "current_goal": {
+          "goal_id": "failover_test",
+          "description": "The user is verifying system responsiveness during a failover scenario by requesting a brief response.",
+          "confidence": "GoalConfidence.HIGH",
+          "detected_at": "2026-02-23T02:26:24.788960+00:00",
+          "source": "session_carry"
+        },
+        "previous_goals": [],
+        "turn_count": 1,
+        "goal_shifts": 0
+      }
+    },
+    "created_at": "2026-02-23T02:26:20.706996+00:00"
   }
 }

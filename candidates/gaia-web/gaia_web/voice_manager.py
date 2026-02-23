@@ -20,7 +20,6 @@ import struct
 import subprocess
 import threading
 import time
-import uuid
 import wave
 from datetime import datetime
 from pathlib import Path
@@ -655,63 +654,11 @@ class VoiceManager:
 
     async def _get_response(self, text: str) -> str | None:
         """Send transcribed text to gaia-core as a CognitionPacket and get response."""
-        from gaia_common.protocols.cognition_packet import (
-            CognitionPacket, Header, Persona, Origin, OutputRouting,
-            DestinationTarget, Content, DataField, OutputDestination,
-            PersonaRole, Routing, Model, OperationalStatus, SystemTask,
-            Intent, Context, SessionHistoryRef, Constraints, Reasoning,
-            Response, Governance, Safety, Metrics, TokenUsage, Status,
-            PacketState, ToolRoutingState, TargetEngine,
-        )
+        from gaia_common.protocols.cognition_packet import CognitionPacket
+        from gaia_common.utils.packet_factory import build_packet, PacketSource
 
-        packet_id = str(uuid.uuid4())
         user_id = self._connected_user or "voice_user"
-        session_id = f"discord_voice_{user_id}"
-
-        packet = CognitionPacket(
-            version="0.2",
-            header=Header(
-                datetime=datetime.now().isoformat(),
-                session_id=session_id,
-                packet_id=packet_id,
-                sub_id="0",
-                persona=Persona(
-                    identity_id="default_user",
-                    persona_id="default_persona",
-                    role=PersonaRole.DEFAULT,
-                    tone_hint="conversational",
-                ),
-                origin=Origin.USER,
-                routing=Routing(target_engine=TargetEngine.PRIME, priority=5),
-                model=Model(name="default_model", provider="default_provider", context_window_tokens=8192),
-                output_routing=OutputRouting(
-                    primary=DestinationTarget(
-                        destination=OutputDestination.AUDIO,
-                        metadata={"source": "discord_voice", "user": user_id},
-                    ),
-                    source_destination=OutputDestination.AUDIO,
-                    addressed_to_gaia=True,
-                ),
-                operational_status=OperationalStatus(status="initialized"),
-            ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
-            context=Context(
-                session_history_ref=SessionHistoryRef(type="discord_voice", value=session_id),
-                cheatsheets=[],
-                constraints=Constraints(max_tokens=512, time_budget_ms=15000, safety_mode="strict"),
-            ),
-            content=Content(
-                original_prompt=text,
-                data_fields=[DataField(key="user_message", value=text, type="text")],
-            ),
-            reasoning=Reasoning(),
-            response=Response(candidate="", confidence=0.0, stream_proposal=False),
-            governance=Governance(safety=Safety(execution_allowed=False, dry_run=True)),
-            metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
-            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-            tool_routing=ToolRoutingState(),
-        )
-        packet.compute_hashes()
+        packet = build_packet(PacketSource.VOICE_PRIME, text, user_id=user_id)
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -735,74 +682,20 @@ class VoiceManager:
         Builds a minimal CognitionPacket targeting TargetEngine.LITE with
         tight token/time budgets and a stalling system hint.
         """
-        from gaia_common.protocols.cognition_packet import (
-            CognitionPacket, Header, Persona, Origin, OutputRouting,
-            DestinationTarget, Content, DataField, OutputDestination,
-            PersonaRole, Routing, Model, OperationalStatus, SystemTask,
-            Intent, Context, SessionHistoryRef, Constraints, Reasoning,
-            Response, Governance, Safety, Metrics, TokenUsage, Status,
-            PacketState, ToolRoutingState, TargetEngine,
-        )
+        from gaia_common.protocols.cognition_packet import CognitionPacket
+        from gaia_common.utils.packet_factory import build_packet, PacketSource
 
-        packet_id = str(uuid.uuid4())
         user_id = self._connected_user or "voice_user"
-        session_id = f"discord_voice_{user_id}"
-
-        packet = CognitionPacket(
-            version="0.2",
-            header=Header(
-                datetime=datetime.now().isoformat(),
-                session_id=session_id,
-                packet_id=packet_id,
-                sub_id="0",
-                persona=Persona(
-                    identity_id="default_user",
-                    persona_id="default_persona",
-                    role=PersonaRole.DEFAULT,
-                    tone_hint="conversational",
-                ),
-                origin=Origin.USER,
-                routing=Routing(target_engine=TargetEngine.LITE, priority=8),
-                model=Model(name="lite", provider="local", context_window_tokens=4096),
-                output_routing=OutputRouting(
-                    primary=DestinationTarget(
-                        destination=OutputDestination.AUDIO,
-                        metadata={"source": "discord_voice", "user": user_id},
-                    ),
-                    source_destination=OutputDestination.AUDIO,
-                    addressed_to_gaia=True,
-                ),
-                operational_status=OperationalStatus(status="initialized"),
+        packet = build_packet(
+            PacketSource.VOICE_LITE,
+            text,
+            user_id=user_id,
+            system_hint=(
+                "You are waking up from sleep and not fully online yet. "
+                "Give a brief, natural voice acknowledgment (1-2 sentences max). "
+                "Be warm and present. Do NOT apologize or explain technical details."
             ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
-            context=Context(
-                session_history_ref=SessionHistoryRef(type="discord_voice", value=session_id),
-                cheatsheets=[],
-                constraints=Constraints(max_tokens=128, time_budget_ms=5000, safety_mode="strict"),
-            ),
-            content=Content(
-                original_prompt=text,
-                data_fields=[
-                    DataField(key="user_message", value=text, type="text"),
-                    DataField(
-                        key="system_hint",
-                        value=(
-                            "You are waking up from sleep and not fully online yet. "
-                            "Give a brief, natural voice acknowledgment (1-2 sentences max). "
-                            "Be warm and present. Do NOT apologize or explain technical details."
-                        ),
-                        type="text",
-                    ),
-                ],
-            ),
-            reasoning=Reasoning(),
-            response=Response(candidate="", confidence=0.0, stream_proposal=False),
-            governance=Governance(safety=Safety(execution_allowed=False, dry_run=True)),
-            metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
-            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-            tool_routing=ToolRoutingState(),
         )
-        packet.compute_hashes()
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
