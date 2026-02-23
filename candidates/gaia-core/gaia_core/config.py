@@ -51,7 +51,7 @@ class Config:
 
     # Sleep cycle settings (loaded from gaia_constants.json SLEEP_CYCLE section)
     SLEEP_ENABLED: bool = True
-    SLEEP_IDLE_THRESHOLD_MINUTES: int = 5
+    SLEEP_IDLE_THRESHOLD_MINUTES: int = 30
     SLEEP_CHECKPOINT_DIR: str = "/shared/sleep_state"
     SLEEP_ENABLE_QLORA: bool = False
     SLEEP_ENABLE_DREAM: bool = False

@@ -773,7 +773,7 @@ def _build_prompt_core(
         if packet.data_fields.get("scaffolding"):
             injected_instruction_content += "\n\n" + "\n".join(packet.data_fields["scaffolding"])
         if packet.data_fields.get("read_only", False):
-            injected_instruction_content += "\n\nPolicy: For read/explain intents: DO NOT emit EXECUTE; read, quote lines, summarize."
+            injected_instruction_content += "\n\nPolicy: For read/explain intents: DO NOT emit EXECUTE for write tools (ai_write, edit_file, etc.); you MAY use EXECUTE for read-safe tools like web_fetch and memory_query. Otherwise read, quote lines, summarize."
     injected_instructions = {"role": "system", "content": injected_instruction_content}
 
     fixed_tokens = count_tokens(core_prompt['content']) + count_tokens(user_prompt['content'])

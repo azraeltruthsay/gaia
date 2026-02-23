@@ -7,7 +7,7 @@
 #   1. Graceful live shutdown (default; skip with --keep-live)
 #   2. Pre-flight checks (health, sync, git state)
 #   3. Validation (ruff, mypy, pytest per service)
-#   4. Cognitive smoke tests (16-test battery against candidate)
+#   4. Cognitive smoke tests (20-test battery against candidate)
 #   5. Service promotion (dependency-ordered, with backup + Docker rebuild)
 #   6. Post-promotion verification (restart live + health + quick smoke)
 #   7. Dev journal + flatten + commit
@@ -628,7 +628,7 @@ stage_header 4 "Cognitive Smoke Tests (Candidate)"
 if [ "$SKIP_SMOKE" = true ]; then
     stage_skip "Smoke Tests (Candidate)"
 else
-    log "  Running 16-test battery against candidate (port 6416)..."
+    log "  Running 20-test battery against candidate (port 6416)..."
     log "  Script: $SMOKE_SCRIPT"
     echo ""
 
