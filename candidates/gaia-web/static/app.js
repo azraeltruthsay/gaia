@@ -69,6 +69,7 @@ document.addEventListener('alpine:init', () => {
       { id: 'files', label: 'Files' },
       { id: 'knowledge', label: 'Knowledge' },
       { id: 'terminal', label: 'Terminal' },
+      { id: 'logs', label: 'Logs' },
     ],
     switchView(viewName) {
       this.currentView = viewName;
@@ -1339,6 +1340,215 @@ function terminalPanel() {
         this._ws = null;
       }
       this.connected = false;
+    },
+  };
+}
+
+/* ── Generation Stream Panel ────────────────────────────────────── */
+
+function generationPanel() {
+  return {
+    entries: [],          // ring buffer of display entries
+    maxEntries: 500,
+    currentGenId: null,
+    scrollLocked: true,   // auto-scroll to bottom
+    roleFilter: '',       // '' = all, 'prime', 'lite'
+    connected: false,
+    _es: null,            // EventSource
+    _currentBuf: '',      // accumulator for in-progress generation
+    _inThink: false,      // inside <think> block
+
+    init() {
+      this._connect();
+    },
+
+    destroy() {
+      if (this._es) { this._es.close(); this._es = null; }
+    },
+
+    _connect() {
+      const url = '/api/generation/stream' + (this.roleFilter ? `?role=${this.roleFilter}` : '');
+      if (this._es) this._es.close();
+      this._es = new EventSource(url);
+      this.connected = true;
+
+      this._es.onmessage = (ev) => {
+        try {
+          const rec = JSON.parse(ev.data);
+          this._handleRecord(rec);
+        } catch (_) {}
+      };
+
+      this._es.onerror = () => {
+        this.connected = false;
+        // reconnect after 2s
+        setTimeout(() => this._connect(), 2000);
+      };
+    },
+
+    _handleRecord(rec) {
+      if (rec.event === 'gen_start') {
+        // Flush any pending buffer
+        this._flushBuffer();
+        this.currentGenId = rec.gen_id;
+        this._currentBuf = '';
+        this._inThink = false;
+        this._push({
+          type: 'header',
+          genId: rec.gen_id,
+          model: rec.model || '?',
+          role: rec.role || '?',
+          phase: rec.phase || '',
+          ts: rec.ts,
+        });
+      } else if (rec.event === 'token') {
+        this._currentBuf += (rec.t || '');
+        // Re-render the current generation entry
+        this._updateCurrentEntry();
+      } else if (rec.event === 'gen_end') {
+        this._flushBuffer();
+        this._push({
+          type: 'summary',
+          genId: rec.gen_id,
+          tokens: rec.tokens || 0,
+          elapsed: rec.elapsed_ms || 0,
+          ts: rec.ts,
+        });
+        this.currentGenId = null;
+      }
+    },
+
+    _updateCurrentEntry() {
+      // Find or create the 'stream' entry for the current gen
+      const existing = this.entries.findIndex(e => e.type === 'stream' && e.genId === this.currentGenId);
+      const parsed = this._parseThinkTags(this._currentBuf);
+      if (existing >= 0) {
+        this.entries[existing] = { ...this.entries[existing], html: parsed };
+      } else {
+        this._push({ type: 'stream', genId: this.currentGenId, html: parsed });
+      }
+      this._autoScroll();
+    },
+
+    _flushBuffer() {
+      // nothing extra needed — buffer is rendered live
+      this._currentBuf = '';
+      this._inThink = false;
+    },
+
+    _parseThinkTags(text) {
+      // Render <think> blocks with special styling
+      return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/&lt;think&gt;/g, '<span class="gen-think">&lt;think&gt;')
+        .replace(/&lt;\/think&gt;/g, '&lt;/think&gt;</span>');
+    },
+
+    _push(entry) {
+      this.entries.push(entry);
+      if (this.entries.length > this.maxEntries) {
+        this.entries.splice(0, this.entries.length - this.maxEntries);
+      }
+      this._autoScroll();
+    },
+
+    _autoScroll() {
+      if (!this.scrollLocked) return;
+      this.$nextTick(() => {
+        const el = this.$refs.genOutput;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    clear() { this.entries = []; },
+
+    setFilter(role) {
+      this.roleFilter = role;
+      this.entries = [];
+      this._connect();
+    },
+
+    handleScroll() {
+      const el = this.$refs.genOutput;
+      if (!el) return;
+      // If user scrolled up, pause auto-scroll; if at bottom, resume
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      this.scrollLocked = atBottom;
+    },
+  };
+}
+
+/* ── Service Logs Panel (plain text log tail) ──────────────────── */
+
+function serviceLogsPanel() {
+  return {
+    lines: [],
+    maxLines: 1000,
+    scrollLocked: true,
+    connected: false,
+    service: 'core',
+    _es: null,
+
+    init() {
+      // Read initial service from parent scope if available
+      this.$nextTick(() => this._connect());
+    },
+
+    destroy() {
+      if (this._es) { this._es.close(); this._es = null; }
+    },
+
+    switchService(svc) {
+      if (svc === this.service && this.connected) return;
+      this.service = svc;
+      this.lines = [];
+      this._connect();
+    },
+
+    _connect() {
+      if (this._es) this._es.close();
+      this._es = new EventSource(`/api/logs/stream?service=${this.service}`);
+      this.connected = true;
+
+      this._es.onmessage = (ev) => {
+        try {
+          const rec = JSON.parse(ev.data);
+          this._pushLine(rec);
+        } catch (_) {}
+      };
+
+      this._es.onerror = () => {
+        this.connected = false;
+        setTimeout(() => this._connect(), 3000);
+      };
+    },
+
+    _pushLine(rec) {
+      this.lines.push({
+        text: rec.text || '',
+        level: rec.level || 'info',
+      });
+      if (this.lines.length > this.maxLines) {
+        this.lines.splice(0, this.lines.length - this.maxLines);
+      }
+      this._autoScroll();
+    },
+
+    _autoScroll() {
+      if (!this.scrollLocked) return;
+      this.$nextTick(() => {
+        const el = this.$refs.logsOutput;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    clear() { this.lines = []; },
+
+    handleScroll() {
+      const el = this.$refs.logsOutput;
+      if (!el) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      this.scrollLocked = atBottom;
     },
   };
 }

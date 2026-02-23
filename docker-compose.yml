@@ -200,8 +200,8 @@ services:
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-      # HA failover — candidate MCP as fallback (empty = disabled)
-      - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-}
+      # HA failover — candidate MCP as fallback
+      - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       # Model loading - disabled by default, models load on first use
       - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
       # Logging
@@ -272,8 +272,8 @@ services:
       # Discord integration (Unified Interface Gateway)
       # DISCORD_BOT_TOKEN loaded from env_file: .env.discord
       - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
-      # HA failover — candidate-core as fallback (empty = disabled)
-      - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-}
+      # HA failover — candidate-core as fallback
+      - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-http://gaia-core-candidate:6415}
       # Wiki proxy (internal, auto-resolves on gaia-net)
       - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
       # Logging
@@ -441,6 +441,9 @@ services:
     container_name: gaia-audio
     hostname: gaia-audio
     restart: unless-stopped
+
+    profiles:
+      - audio  # Not promoted yet — opt-in only
 
     volumes:
       - ./gaia-audio:/app:rw

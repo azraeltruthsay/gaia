@@ -246,6 +246,34 @@ def _choose_initial_n_gpu(desired_n_gpu: int, free_bytes: int | None) -> int:
     # >=8 GiB
     return min(desired_n_gpu, 4) if desired_n_gpu > 0 else 0
 
+class SafeModelProxy:
+    """Wraps a raw model backend (e.g. ``llama_cpp.Llama``) with pool-aware
+    metadata so downstream code can always rely on a uniform interface.
+
+    Forwards attribute access and call semantics to the underlying backend.
+    """
+
+    def __init__(self, backend, pool=None, role=None):
+        # Use object.__setattr__ to avoid triggering our own __setattr__
+        object.__setattr__(self, "_backend", backend)
+        object.__setattr__(self, "_pool", pool)
+        object.__setattr__(self, "_role", role)
+
+    # -- Explicit forwarding for the two hot-path methods --------------------
+    def create_chat_completion(self, **kwargs):
+        return self._backend.create_chat_completion(**kwargs)
+
+    def create_completion(self, **kwargs):
+        return self._backend.create_completion(**kwargs)
+
+    # -- Transparent proxy for everything else --------------------------------
+    def __getattr__(self, name):
+        return getattr(self._backend, name)
+
+    def __repr__(self):
+        return f"SafeModelProxy(role={self._role!r}, backend={self._backend!r})"
+
+
 class ModelPool:
     def __init__(self, config: Config = None):
         self.config = config or get_config()
@@ -1070,6 +1098,46 @@ class ModelPool:
     # Fallback chain for inference-level failures (model acquired but fails mid-call)
     _INFERENCE_FALLBACK_CHAIN = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
 
+    @staticmethod
+    def _tee_to_generation_log(result, model_name: str, role: str):
+        """Wrap a streaming result to log each chunk to the generation JSONL.
+
+        If the result is not a generator, returns it unchanged.
+        """
+        import types
+        if not isinstance(result, types.GeneratorType):
+            return result
+        try:
+            from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
+            gen_logger = _get_gen_logger()
+        except Exception:
+            return result  # logger unavailable — pass through unchanged
+
+        gen_id = gen_logger.start_generation(model_name, role, "forward")
+
+        def _logged_stream():
+            try:
+                for chunk in result:
+                    # Extract delta text from llama-cpp-style streaming chunks
+                    delta = ""
+                    if isinstance(chunk, dict):
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {}).get("content", "") or ""
+                    if delta:
+                        try:
+                            gen_logger.log_token(gen_id, delta)
+                        except Exception:
+                            pass
+                    yield chunk
+            finally:
+                try:
+                    gen_logger.end_generation(gen_id)
+                except Exception:
+                    pass
+
+        return _logged_stream()
+
     def forward_to_model(self, role: str, messages: list, release: bool = True, **kwargs):
         """Utility used by AgentCore/tests to run a short chat completion via role lookup.
 
@@ -1088,7 +1156,7 @@ class ModelPool:
                 result = model(messages)
             else:
                 raise ValueError(f"Model '{name}' does not support chat completions")
-            return result
+            return self._tee_to_generation_log(result, name, role)
         except RuntimeError as primary_exc:
             # Primary model failed during inference — try fallback chain
             logger.warning(
@@ -1115,7 +1183,7 @@ class ModelPool:
                     else:
                         continue
                     logger.info("Inference fallback to '%s' succeeded", fallback_name)
-                    return result
+                    return self._tee_to_generation_log(result, fallback_name, role)
                 except Exception as fb_exc:
                     logger.warning("Fallback '%s' also failed: %s", fallback_name, fb_exc)
                     continue

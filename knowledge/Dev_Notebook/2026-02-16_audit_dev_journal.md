@@ -7,7 +7,7 @@
 
 ## Context
 
-Seumas requested a full codebase evaluation focusing on dead code, bugs, feature failures, error handling, logging, code hygiene, and security. Four parallel audit agents were launched to analyze gaia-core, gaia-common, gaia-web, and gaia-orchestrator simultaneously.
+Azrael requested a full codebase evaluation focusing on dead code, bugs, feature failures, error handling, logging, code hygiene, and security. Four parallel audit agents were launched to analyze gaia-core, gaia-common, gaia-web, and gaia-orchestrator simultaneously.
 
 ## Audit Methodology
 

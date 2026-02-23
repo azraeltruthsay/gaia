@@ -1,0 +1,14 @@
+[Unit]
+Description=GAIA Flatten SOA — incremental codebase snapshot for NotebookLM
+After=gaia-cluster.service
+
+[Service]
+Type=oneshot
+User=azrael
+Group=azrael
+WorkingDirectory=/gaia/GAIA_Project
+ExecStart=/gaia/GAIA_Project/flatten_soa.sh
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gaia-flatten-soa

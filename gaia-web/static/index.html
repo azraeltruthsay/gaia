@@ -422,6 +422,80 @@
     </div>
   </section>
 
+  <!-- ── Logs View ── -->
+  <section class="view" x-data="{ logsTab: 'generation' }" x-show="$store.nav.currentView === 'logs'" x-cloak>
+    <!-- Sub-tab bar -->
+    <div class="logs-subtabs">
+      <button class="logs-subtab" :class="logsTab === 'generation' ? 'active' : ''" @click="logsTab = 'generation'">Generation</button>
+      <button class="logs-subtab" :class="logsTab === 'core' ? 'active' : ''" @click="logsTab = 'core'">Core</button>
+      <button class="logs-subtab" :class="logsTab === 'web' ? 'active' : ''" @click="logsTab = 'web'">Web</button>
+      <button class="logs-subtab" :class="logsTab === 'mcp' ? 'active' : ''" @click="logsTab = 'mcp'">MCP</button>
+      <button class="logs-subtab" :class="logsTab === 'study' ? 'active' : ''" @click="logsTab = 'study'">Study</button>
+      <button class="logs-subtab" :class="logsTab === 'discord' ? 'active' : ''" @click="logsTab = 'discord'">Discord</button>
+    </div>
+
+    <!-- Generation sub-tab (existing component, unchanged) -->
+    <div x-show="logsTab === 'generation'" x-data="generationPanel()" class="gen-panel">
+      <div class="gen-toolbar">
+        <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
+        <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'lite' ? 'active' : ''" @click="setFilter('lite')">Lite</button>
+        <div style="flex:1"></div>
+        <label class="gen-scroll-lock">
+          <input type="checkbox" x-model="scrollLocked"> Auto-scroll
+        </label>
+        <button class="gen-clear-btn" @click="clear()">Clear</button>
+      </div>
+      <div class="gen-output" x-ref="genOutput" @scroll="handleScroll()">
+        <template x-for="(entry, idx) in entries" :key="idx">
+          <div>
+            <template x-if="entry.type === 'header'">
+              <div class="gen-entry gen-header" :class="'gen-role-' + entry.role">
+                <span class="gen-model-badge" x-text="entry.role"></span>
+                <span class="gen-model-name" x-text="entry.model"></span>
+                <span class="gen-phase" x-text="entry.phase"></span>
+                <span class="gen-ts" x-text="entry.ts"></span>
+              </div>
+            </template>
+            <template x-if="entry.type === 'stream'">
+              <pre class="gen-entry gen-stream" x-html="entry.html"></pre>
+            </template>
+            <template x-if="entry.type === 'summary'">
+              <div class="gen-entry gen-summary">
+                <span x-text="entry.tokens + ' tokens'"></span>
+                <span x-text="(entry.elapsed / 1000).toFixed(1) + 's'"></span>
+                <span class="gen-tps" x-text="(entry.elapsed > 0 ? (entry.tokens / (entry.elapsed / 1000)).toFixed(1) : '?') + ' tok/s'"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+        <div class="gen-empty" x-show="entries.length === 0">Waiting for generation events...</div>
+      </div>
+    </div>
+
+    <!-- Service log sub-tabs -->
+    <template x-if="logsTab !== 'generation'">
+      <div class="logs-svc-panel" x-data="serviceLogsPanel()" x-init="switchService(logsTab)" x-effect="switchService(logsTab)">
+        <div class="gen-toolbar">
+          <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
+          <span class="logs-svc-label" x-text="service"></span>
+          <div style="flex:1"></div>
+          <label class="gen-scroll-lock">
+            <input type="checkbox" x-model="scrollLocked"> Auto-scroll
+          </label>
+          <button class="gen-clear-btn" @click="clear()">Clear</button>
+        </div>
+        <div class="logs-output" x-ref="logsOutput" @scroll="handleScroll()">
+          <template x-for="(line, idx) in lines" :key="idx">
+            <div class="logs-line" :class="'logs-level-' + line.level" x-text="line.text"></div>
+          </template>
+          <div class="gen-empty" x-show="lines.length === 0">Waiting for log events...</div>
+        </div>
+      </div>
+    </template>
+  </section>
+
   <script src="/static/app.js"></script>
 </body>
 </html>
