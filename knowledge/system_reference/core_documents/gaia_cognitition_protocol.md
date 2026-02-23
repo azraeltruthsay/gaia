@@ -111,26 +111,55 @@ Rules/Filters: no hallucinations • no unsafe shell exec • no privacy leaks.
 
 ---
 
-### 4.3 Example Packet Structure
+### 4.3 Example Packet Structure (v0.3)
+
+A CognitionPacket has **10 required top-level sections** plus optional extensions:
+
+| # | Section        | Purpose                                      |
+|---|----------------|----------------------------------------------|
+| 1 | `version`      | Protocol version (`"0.3"`)                   |
+| 2 | `header`       | Identity, routing, model, output destination |
+| 3 | `intent`       | User intent, system task, confidence         |
+| 4 | `context`      | Session ref, cheatsheets, constraints        |
+| 5 | `content`      | Original prompt + data fields                |
+| 6 | `reasoning`    | Reflection log, sketchpad, evaluations       |
+| 7 | `response`     | Candidate text, confidence, tool calls       |
+| 8 | `governance`   | Safety, signatures, audit, privacy           |
+| 9 | `metrics`      | Token usage, latency, cost                   |
+| 10| `status`       | Finalized flag, state, next steps            |
+
+Optional: `council`, `tool_routing`, `loop_state`, `goal_state`.
 
 ```jsonc
 {
-  "packet_id": "abc123",
-  "prompt": "Please review dev_matrix…",
-  "persona": "gaia-dev",
-  "identity": { /* as defined */ },
-  "instructions": ["Think step-by-step…"],
-  "history": [{"role":"user","text":"…"}],
-  "reflection_count": 2,
-  "thoughts": [
-    {"step":1,"text":"…"},
-    {"step":2,"text":"EXECUTE: ai.read('dev_matrix.json')"}
-  ],
-  "scratch": {"dataA":[…],"dataB":null,…},
-  "sketchpad_refs": ["plan_v1"],
-  "user_approval": false
+  "version": "0.3",
+  "header": {
+    "datetime": "2026-02-22T14:30:00",
+    "session_id": "web_ui_session",
+    "packet_id": "a1b2c3d4-...",
+    "sub_id": "0",
+    "persona": { "identity_id": "default_user", "role": "Default" },
+    "origin": "user",
+    "routing": { "target_engine": "Prime", "priority": 5 },
+    "model": { "name": "default_model", "context_window_tokens": 8192 },
+    "output_routing": {
+      "primary": { "destination": "web" },
+      "source_destination": "web"
+    }
+  },
+  "intent": { "user_intent": "chat", "system_task": "GenerateDraft" },
+  "context": { "constraints": { "max_tokens": 2048, "time_budget_ms": 30000 } },
+  "content": { "original_prompt": "Hello, GAIA.", "data_fields": [/*...*/] },
+  "reasoning": {},
+  "response": { "candidate": "", "confidence": 0.0 },
+  "governance": { "safety": { "dry_run": true } },
+  "metrics": { "token_usage": { "total_tokens": 0 } },
+  "status": { "finalized": false, "state": "initialized" }
 }
 ```
+
+> **Canonical construction:** Use `gaia_common.utils.packet_factory.build_packet()`
+> rather than hand-assembling packets. See `PacketSource` enum for source-specific defaults.
 
 ---
 

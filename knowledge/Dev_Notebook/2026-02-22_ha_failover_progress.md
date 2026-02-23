@@ -1,11 +1,11 @@
-# HA Mode Activation — Progress & Resume Point
+# HA Mode Activation — COMPLETE
 
-**Date:** 2026-02-22
-**Status:** Paused mid-failover-verification
+**Date:** 2026-02-22 → 2026-02-23
+**Status:** VERIFIED WORKING
 
 ## What's Done
 
-### Infrastructure (all committed/deployed)
+### Infrastructure (all committed in `9f07904`)
 1. **Fallback endpoints set** in `docker-compose.yml`:
    - `MCP_FALLBACK_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc` (gaia-core)
    - `CORE_FALLBACK_ENDPOINT=http://gaia-core-candidate:6415` (gaia-web)
@@ -21,44 +21,50 @@
 
 5. **Candidate shared volume dirs fixed**:
    - Created `/shared/{council,lite_journal,temporal_states,timeline}` with uid 1000 ownership
-   - Candidate no longer has permission denied on startup
 
 6. **HA services running** — `ha_start.sh` executed, candidates healthy
 
-## Where We Stopped — Failover Verification
+## Failover Verification — COMPLETE
 
-### Retry + routing: CONFIRMED WORKING
+### Retry + routing: CONFIRMED
 - `gaia-web/gaia_web/utils/retry.py` (`post_with_retry`) correctly:
-  - Retries 3x on primary with exponential backoff
+  - Retries 3x on primary with exponential backoff (2s, 4s)
   - Falls back to `fallback_url` after exhausting retries
   - Does NOT failover on timeouts (slow != down)
-- Tested directly from inside gaia-web container — logs show clean retry → fallover path
 
-### End-to-end failover: CANDIDATE CAN'T PROCESS PACKETS YET
-When gaia-core is stopped and a request is routed to gaia-core-candidate:
-- Candidate receives the request (HTTP connection established)
-- Candidate returns errors during processing:
-  - First test: `RemoteProtocolError` (connection dropped during processing)
-  - Second test (after fixing shared dirs): `ReadError` (connection dropped ~11s in)
-- Candidate logs need to be checked to see what's crashing during packet processing
+### Direct candidate packet processing: CONFIRMED
+- Sent well-formed CognitionPacket via `curl -X POST http://localhost:6416/process_packet`
+- Candidate deserialized, assembled prompt, ran Lite model inference, returned 200 OK
+- Response: coherent, finalized, complete
 
-### Likely candidate issues to investigate:
-1. **Embed model load failure** — "Failed to lazy load embed model: Artifact of type=precompile already registered in mega-cache artifact factory"
-2. **Model loading race** — candidate was lazy-loading `lite` model when request arrived
-3. **Possible missing session/state data** — candidate may not have session vectors or other state needed for processing
-4. **gaia-core DNS gone when stopped** — Docker removes DNS for stopped containers, so candidate trying to reach gaia-core for anything would fail
+### End-to-end failover: CONFIRMED
+- Stopped gaia-core (`docker compose stop gaia-core`)
+- Sent request through gaia-web (`/process_user_input`)
+- gaia-web logs show:
+  ```
+  POST http://gaia-core:6415/process_packet failed on attempt 1/3 (ConnectError), retrying in 2.0s...
+  POST http://gaia-core:6415/process_packet failed on attempt 2/3 (ConnectError), retrying in 4.0s...
+  Primary POST exhausted 3 attempts, attempting HA fallback to http://gaia-core-candidate:6415/process_packet
+  HA fallback POST http://gaia-core-candidate:6415/process_packet succeeded
+  ```
+- Response received successfully via candidate
+- Total failover latency: ~8s (retries) + ~105s (CPU inference) = ~113s
 
-## Resume Steps
-1. Start gaia-core stopped, send packet directly to candidate (`curl -X POST http://localhost:6416/process_packet ...`)
-2. Check candidate logs (`docker logs gaia-core-candidate --since 30s`) to find exact crash point
-3. Fix candidate processing issues
-4. Re-test full failover path
-5. Commit all HA work
+### Post-failover recovery: CONFIRMED
+- Restarted gaia-core, verified it processes requests normally again
 
-## Files Modified (Not Yet Committed)
-- `docker-compose.yml` — fallback endpoints
-- `gaia-core/gaia_core/utils/mcp_client.py` — sync fallback
-- `candidates/gaia-core/gaia_core/utils/mcp_client.py` — same
-- `candidates/gaia-common/gaia_common/utils/service_client.py` — synced from prod
-- `candidates/gaia-common/gaia_common/utils/resilience.py` — synced from prod
-- `scripts/gaia_doctor.sh` — new comprehensive health check
+## Root Cause of Previous Failures
+
+The candidate image was stale (built 2026-02-16, vs primary built 2026-02-21). It was missing:
+1. **`gaia` user in `/etc/passwd`** — caused `getpwuid(): uid not found: 1000` errors when PyTorch tried to create its cache directory
+2. This cascaded into the embed model failing to load (`Artifact of type=precompile already registered in mega-cache artifact factory`), which was actually a PyTorch `torch._dynamo.CacheArtifactFactory` double-registration triggered by the missing user
+3. Without the embed model, the candidate worked anyway (embed is non-critical, graceful degradation), but earlier test failures were from malformed manual curl payloads (`KeyError: 'version'`)
+
+**Fix:** Rebuilt candidate image from the existing Dockerfile (which already had the user creation). No code changes needed.
+
+## Architecture Notes
+
+- Candidates run on separate Docker volumes (`gaia-candidate-shared`) — isolated from production
+- Failover uses HTTP-level retry + fallback (no service mesh needed)
+- Candidate processes packets using the `lite` CPU model (~105s for simple responses)
+- Embed model is optional — system degrades gracefully to full-history mode without it

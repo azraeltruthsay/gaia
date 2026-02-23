@@ -81,7 +81,7 @@ def _structured_json_kwargs(model: Any, schema: Dict[str, Any]) -> Dict[str, Any
 from gaia_common.utils.tools_registry import TOOLS as _REGISTRY_TOOLS
 
 # Tools requiring approval (mirrors gaia-mcp SENSITIVE_TOOLS)
-_SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index"}
+_SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request"}
 
 
 def _registry_to_catalog(registry: Dict[str, Any]) -> Dict[str, Any]:
@@ -157,6 +157,10 @@ _PROMPT_TOOLS = {
     "list_dir", "list_tree",
     # Self-introspection
     "introspect_logs",
+    # Promotion & blueprint
+    "assess_promotion", "generate_blueprint",
+    "promotion_create_request", "promotion_list_requests",
+    "promotion_request_status",
 }
 
 # ── Timeout-protected Llama calls ────────────────────────────────────────
@@ -225,7 +229,13 @@ def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool:
         "check your", "check my", "service logs",
     ]
 
-    for indicator in file_indicators + exec_indicators + search_indicators + introspection_indicators:
+    # Promotion / blueprint indicators
+    promotion_indicators = [
+        "promot", "assess ", "readiness", "blueprint",
+        "candidate", "promotion request", "promote ",
+    ]
+
+    for indicator in file_indicators + exec_indicators + search_indicators + introspection_indicators + promotion_indicators:
         if indicator in lowered:
             logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
             return True

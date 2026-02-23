@@ -88,6 +88,10 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Promotion & blueprint tools
         "generate_blueprint": lambda p: _generate_blueprint_impl(p),
         "assess_promotion": lambda p: _assess_promotion_impl(p),
+        # Promotion lifecycle tools
+        "promotion_create_request": lambda p: _promotion_create_request_impl(p),
+        "promotion_list_requests": lambda p: _promotion_list_requests_impl(p),
+        "promotion_request_status": lambda p: _promotion_request_status_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
     }
@@ -807,3 +811,95 @@ def _assess_promotion_impl(params: Dict) -> Dict:
     except Exception as e:
         logger.error("Promotion assessment failed for %s: %s", service_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
+
+
+# ── Promotion Lifecycle Tools ────────────────────────────────────────────────
+
+
+def _promotion_create_request_impl(params: Dict) -> Dict:
+    """Create a promotion request after readiness assessment."""
+    from gaia_common.utils.promotion_request import (
+        create_promotion_request, load_pending_request,
+    )
+
+    service_id = params.get("service_id")
+    verdict = params.get("verdict")
+    recommendation = params.get("recommendation")
+    pipeline_cmd = params.get("pipeline_cmd")
+    check_summary = params.get("check_summary")
+
+    if not all([service_id, verdict, recommendation, pipeline_cmd, check_summary]):
+        raise ValueError("All fields required: service_id, verdict, recommendation, pipeline_cmd, check_summary")
+
+    # Reject if assessment verdict is not_ready
+    if verdict == "not_ready":
+        return {
+            "ok": False,
+            "error": "Cannot create promotion request with verdict 'not_ready'. "
+                     "Fix issues and re-assess first.",
+        }
+
+    # Check for existing active request
+    existing = load_pending_request(service_id)
+    if existing:
+        return {
+            "ok": False,
+            "error": f"Active request already exists: {existing.request_id} (status={existing.status}). "
+                     "Resolve it before creating a new one.",
+        }
+
+    req = create_promotion_request(
+        service_id=service_id,
+        verdict=verdict,
+        recommendation=recommendation,
+        pipeline_cmd=pipeline_cmd,
+        check_summary=check_summary,
+    )
+    return {
+        "ok": True,
+        "request_id": req.request_id,
+        "status": req.status,
+        "message": "Promotion request created. Awaiting human approval (Gate 1).",
+    }
+
+
+def _promotion_list_requests_impl(params: Dict) -> Dict:
+    """List promotion requests with optional filters."""
+    from gaia_common.utils.promotion_request import list_requests
+
+    service_id = params.get("service_id")
+    status_filter = params.get("status_filter")
+
+    requests = list_requests(service_id=service_id, status_filter=status_filter)
+    return {
+        "ok": True,
+        "count": len(requests),
+        "requests": [
+            {
+                "request_id": r.request_id,
+                "service_id": r.service_id,
+                "status": r.status,
+                "verdict": r.verdict,
+                "requested_at": r.requested_at,
+            }
+            for r in requests
+        ],
+    }
+
+
+def _promotion_request_status_impl(params: Dict) -> Dict:
+    """Get full details of a specific promotion request."""
+    from gaia_common.utils.promotion_request import load_request
+
+    request_id = params.get("request_id")
+    if not request_id:
+        raise ValueError("request_id is required")
+
+    req = load_request(request_id)
+    if req is None:
+        return {"ok": False, "error": f"Request not found: {request_id}"}
+
+    return {
+        "ok": True,
+        **req.to_dict(),
+    }

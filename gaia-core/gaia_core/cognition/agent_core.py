@@ -5254,7 +5254,13 @@ Start your response with the first line of the file."""
             "check your", "check my", "service logs",
         ]
 
-        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators + introspection_indicators:
+        # Promotion / blueprint indicators
+        promotion_indicators = [
+            "promot", "assess ", "readiness", "blueprint",
+            "candidate", "promotion request", "promote ",
+        ]
+
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators + introspection_indicators + promotion_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True

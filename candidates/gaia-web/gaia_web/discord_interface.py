@@ -8,24 +8,14 @@ for processing, and responses are routed back to Discord.
 
 import os
 import time
-import uuid
 import asyncio
 import logging
 import threading
-from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
-# Import all necessary dataclasses for CognitionPacket
-from gaia_common.protocols.cognition_packet import (
-    CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
-    OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
-    SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog,
-    Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult,
-    ToolRoutingState, ToolExecutionStatus, ToolCall, SidecarAction, Response, Safety, Signatures,
-    Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status,
-    PacketState, TargetEngine
-)
+from gaia_common.protocols.cognition_packet import CognitionPacket
+from gaia_common.utils.packet_factory import build_packet, PacketSource
 
 logger = logging.getLogger("GAIA.Web.Discord")
 
@@ -288,70 +278,15 @@ class DiscordInterface:
             logger.info("Discord: GAIA woke up — processing queued message %s", message_id)
             # Fall through to normal packet construction below
 
-        packet_id = str(uuid.uuid4())
-        session_id = f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}"
-        current_time = datetime.now().isoformat()
-
-        # Construct CognitionPacket
-        packet = CognitionPacket(
-            version="0.2", # Use appropriate version
-            header=Header(
-                datetime=current_time,
-                session_id=session_id,
-                packet_id=packet_id,
-                sub_id="0", # Initial sub_id
-                persona=Persona(
-                    identity_id="default_user", # Placeholder
-                    persona_id="default_persona", # Placeholder
-                    role=PersonaRole.DEFAULT, # PersonaRole.DEFAULT for user messages
-                    tone_hint="conversational"
-                ),
-                origin=Origin.USER,
-                routing=Routing(
-                    target_engine=TargetEngine.PRIME, # Default target
-                    priority=5
-                ),
-                model=Model( # Placeholder model info
-                    name="default_model",
-                    provider="default_provider",
-                    context_window_tokens=8192
-                ),
-                output_routing=OutputRouting(
-                    primary=DestinationTarget(
-                        destination=OutputDestination.DISCORD,
-                        channel_id=channel_id,
-                        user_id=user_id,
-                        reply_to_message_id=message_id,
-                        metadata={"is_dm": is_dm, "author_name": author_name}
-                    ),
-                    source_destination=OutputDestination.DISCORD,
-                    addressed_to_gaia=True, # Assuming direct address
-                ),
-                operational_status=OperationalStatus(status="initialized")
-            ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0), # Placeholder
-            context=Context(
-                session_history_ref=SessionHistoryRef(type="discord_channel", value=session_id),
-                cheatsheets=[],
-                constraints=Constraints(max_tokens=2048, time_budget_ms=30000, safety_mode="strict"),
-            ),
-            content=Content(
-                original_prompt=content,
-                data_fields=[DataField(key="user_message", value=content, type="text")]
-            ),
-            reasoning=Reasoning(), # Empty for initial packet
-            response=Response(candidate="", confidence=0.0, stream_proposal=False), # Empty response
-            governance=Governance(
-                safety=Safety(execution_allowed=False, dry_run=True) # Default
-            ),
-            metrics=Metrics(
-                token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-                latency_ms=0
-            ),
-            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-            tool_routing=ToolRoutingState() # Empty for initial packet
+        packet = build_packet(
+            PacketSource.DISCORD,
+            content,
+            user_id=user_id,
+            channel_id=channel_id,
+            reply_to_message_id=message_id,
+            is_dm=is_dm,
+            author_name=author_name,
         )
-        packet.compute_hashes() # Compute hashes for integrity
 
         try:
             from gaia_web.utils.retry import post_with_retry
