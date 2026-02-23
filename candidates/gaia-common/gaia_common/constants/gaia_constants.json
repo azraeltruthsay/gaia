@@ -285,11 +285,11 @@
     },
     "system": {
       "doc_dir": "system_reference",
-      "vector_store_dir": "vectordb/system"
+      "vector_store_dir": "vector_store/system"
     },
     "blueprints": {
       "doc_dir": "blueprints",
-      "vector_store_dir": "vectordb/blueprints"
+      "vector_store_dir": "vector_store/blueprints"
     }
   },
   "SEMANTIC_PROBE": {
@@ -371,6 +371,21 @@
       "fetch_per_hour": 50
     },
     "fetch_timeout_seconds": 15,
-    "fetch_max_bytes": 512000
+    "fetch_max_bytes": 512000,
+    "authenticated_domains": {
+      "kanka.io": {
+        "api_key_env": "KANKA_API_KEY",
+        "auth_header": "Authorization",
+        "auth_format": "Bearer {key}",
+        "url_rewrites": [
+          {
+            "match": "^https://app\\.kanka\\.io/w/(\\d+)/([\\w-]+)/(\\d+)",
+            "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
+          }
+        ],
+        "extra_headers": {"Accept": "application/json"},
+        "description": "Kanka.io world-building API"
+      }
+    }
   }
 }
