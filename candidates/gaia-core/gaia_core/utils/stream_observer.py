@@ -131,9 +131,17 @@ class StreamObserver:
             except Exception:
                 read_only_flag = False
 
+        # Read-safe tools may EXECUTE even under read-only intents (they only fetch data)
+        _READ_SAFE_TOOLS = {"web_fetch", "memory_query", "read_file", "list_files"}
         if read_only_flag and "EXECUTE:" in output:
-            logger.warning("Observer BLOCKed: EXECUTE directive in read_only plan.")
-            return Interrupt(level="BLOCK", reason="EXECUTE not allowed for read-only intent.")
+            # Parse tool name from "EXECUTE: tool_name {...}"
+            exe_match = re.search(r'EXECUTE:\s*(\w+)', output)
+            tool_name = exe_match.group(1) if exe_match else None
+            if tool_name and tool_name in _READ_SAFE_TOOLS:
+                logger.info("Observer: allowing read-safe tool %s under read-only intent.", tool_name)
+            else:
+                logger.warning("Observer BLOCKed: EXECUTE directive for '%s' in read_only plan.", tool_name)
+                return Interrupt(level="BLOCK", reason="EXECUTE not allowed for read-only intent.")
 
         # Validate code path references
         logger.debug("StreamObserver: Calling _validate_code_paths...")
@@ -528,6 +536,46 @@ class StreamObserver:
             return True
         return False
 
+    def validate_repetition(self, buffer_text: str, fragment: str, count: int) -> bool:
+        """Ask the LLM whether a repeated fragment indicates degenerate output.
+        Returns True if generation should halt, False if it's a false positive."""
+        # Fast heuristic: if the repeated fragment is an obvious abbreviation part, skip LLM
+        if len(fragment) < 6 or re.match(r'^[a-z]\.$', fragment.strip()):
+            return False  # Single-letter abbreviation, not a real loop
+
+        if not self.llm:
+            return True  # No LLM available, fail-safe to halt
+
+        tail = buffer_text[-800:] if len(buffer_text) > 800 else buffer_text
+        prompt = (
+            f'The following text fragment has appeared {count} times in a model\'s output:\n'
+            f'Fragment: "{fragment}"\n\n'
+            f'Recent output (last 800 chars):\n"""\n{tail}\n"""\n\n'
+            f'Is this a degenerate repetition loop, or a false positive from normal text '
+            f'(e.g. abbreviations like R.S.S., version numbers like v9.1, or repeated common phrases)?\n'
+            f'Reply with ONLY "HALT" or "CONTINUE".'
+        )
+        try:
+            rep_cfg = {}
+            try:
+                rep_cfg = self.config.constants.get("REPETITION_GUARD", {})
+            except Exception:
+                pass
+            max_tok = int(rep_cfg.get("observer_confirm_max_tokens", 24))
+
+            result = self.llm.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tok,
+                temperature=0.0,
+            )
+            text = ""
+            if isinstance(result, dict) and "choices" in result:
+                text = (result["choices"][0].get("message", {}) or {}).get("content", "").strip()
+            return "HALT" in text.upper()
+        except Exception:
+            logger.debug("StreamObserver: validate_repetition LLM call failed", exc_info=True)
+            return True  # fail-safe
+
     @staticmethod
     def check_response_quality(response: str, user_prompt: str) -> Optional[Interrupt]:
         """
@@ -640,6 +688,25 @@ class StreamObserver:
             'has_violations': len(unverified) > 0
         }
 
+    # Container-aware base paths for file validation.
+    # gaia-core container mounts:  knowledge/ → /knowledge,  gaia-core/ → /app,
+    # gaia-common/ → /gaia-common.  The host/orchestrator context uses /gaia/GAIA_Project.
+    # "/" handles the container case: "knowledge/foo.md" → "/knowledge/foo.md".
+    _PATH_BASES = None  # lazily built
+
+    @classmethod
+    def _get_path_bases(cls) -> list:
+        if cls._PATH_BASES is None:
+            cls._PATH_BASES = [
+                os.getenv("GAIA_PROJECT_ROOT", "/gaia/GAIA_Project"),
+                "/",  # container mount root (knowledge/ → /knowledge/)
+            ]
+            # Also resolve paths that reference gaia-core source via /app
+            knowledge_dir = os.getenv("KNOWLEDGE_DIR", "")
+            if knowledge_dir and knowledge_dir not in cls._PATH_BASES:
+                cls._PATH_BASES.append(knowledge_dir)
+        return cls._PATH_BASES
+
     def _validate_code_paths(self, text_content: str) -> List[Dict]:
         """
         Extracts potential file paths from text_content and validates their existence.
@@ -647,12 +714,11 @@ class StreamObserver:
         """
         validation_results = []
         # Regex to find common file path patterns (e.g., /path/to/file.ext, file.ext, app/module.py)
-        # This regex is a starting point and might need refinement.
         # Captures:
         # Group 1: Paths with extensions (e.g., knowledge/file.md)
         # Group 2: Directory-like paths without a trailing dot (e.g., knowledge/my_dir)
         path_matches = re.findall(r"([a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*\.[a-zA-Z]{1,5})|([a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)+/?(?<!\.))", text_content)
-        
+
         potential_paths = []
         for match_tuple in path_matches:
             for item in match_tuple:
@@ -660,31 +726,31 @@ class StreamObserver:
                     potential_paths.append(item)
 
         # Filter out common non-file words that might match the regex
-        # This is a heuristic and might need to be expanded
         ignored_patterns = {"of", "to", "in", "for", "with", "and", "the", "key", "set", "use", "code", "file", "path", "from", "by", "is", "or", "app"}
-        potential_paths = [p for p in potential_paths if p not in ignored_patterns and not p.isdigit() and len(p) > 2] # Min length to avoid single letters
+        potential_paths = [p for p in potential_paths if p not in ignored_patterns and not p.isdigit() and len(p) > 2]
         logger.debug(f"StreamObserver: _validate_code_paths - Extracted {len(potential_paths)} potential paths: {potential_paths}")
 
-        for path in potential_paths:
-            # Assume paths are relative to the project root for now,
-            # but allow for absolute paths as well.
-            abs_path = os.path.join("/gaia/GAIA_Project", path)
-            exists = os.path.exists(abs_path)
-            is_file = os.path.isfile(abs_path)
-            is_dir = os.path.isdir(abs_path)
+        bases = self._get_path_bases()
 
-            # Also check relative to gaia-assistant for convenience, as many paths are in there
-            if not exists:
-                abs_path_gaia_assistant = os.path.join("/gaia/GAIA_Project/gaia-assistant", path)
-                exists = os.path.exists(abs_path_gaia_assistant)
-                is_file = os.path.isfile(abs_path_gaia_assistant)
-                is_dir = os.path.isdir(abs_path_gaia_assistant)
-                if exists:
-                    abs_path = abs_path_gaia_assistant # Update to the found path
+        for path in potential_paths:
+            exists = False
+            is_file = False
+            is_dir = False
+            abs_path = None
+
+            # Try each base path until we find a match
+            for base in bases:
+                candidate = os.path.join(base, path)
+                if os.path.exists(candidate):
+                    abs_path = candidate
+                    exists = True
+                    is_file = os.path.isfile(candidate)
+                    is_dir = os.path.isdir(candidate)
+                    break
 
             validation_results.append({
                 "reference": path,
-                "absolute_path": abs_path if exists else None,
+                "absolute_path": abs_path,
                 "exists": exists,
                 "is_file": is_file,
                 "is_directory": is_dir

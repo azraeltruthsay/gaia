@@ -459,6 +459,10 @@ async def process_packet(packet_data: Dict[str, Any]):
 
         logger.info(f"Completed packet {packet.header.packet_id} with {len(full_response)} chars response")
 
+        # Reset idle timer after response completes (not just on arrival)
+        if idle_monitor:
+            idle_monitor.mark_active()
+
         # Return the completed packet
         return JSONResponse(
             status_code=200,

@@ -14,14 +14,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-logger = logging.getLogger("GAIA.Core.API")
-
-# Suppress health check access log spam
+# Persistent file logging — writes to /logs/gaia-core.log (mounted volume)
 try:
-    from gaia_common.utils import install_health_check_filter
+    from gaia_common.utils import setup_logging, install_health_check_filter
+    _log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    setup_logging(log_dir="/logs", level=_log_level, service_name="gaia-core")
     install_health_check_filter()
 except ImportError:
-    pass  # gaia_common not available
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger("GAIA.Core.API")
 
 # Global references for the cognitive system
 _agent_core = None
@@ -456,6 +458,10 @@ async def process_packet(packet_data: Dict[str, Any]):
         packet.compute_hashes()
 
         logger.info(f"Completed packet {packet.header.packet_id} with {len(full_response)} chars response")
+
+        # Reset idle timer after response completes (not just on arrival)
+        if idle_monitor:
+            idle_monitor.mark_active()
 
         # Return the completed packet
         return JSONResponse(
