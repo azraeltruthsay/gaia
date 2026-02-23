@@ -199,7 +199,10 @@ class ExternalVoice:
             last_visible_char = ""
             sentence_counts: Dict[str, int] = {}
             processed_idx = 0
-            max_sentence_repeat = int(os.getenv("MAX_SENTENCE_REPEAT") or self.config.constants.get("MAX_SENTENCE_REPEAT", 2))
+            rep_cfg = self.config.constants.get("REPETITION_GUARD", {})
+            max_sentence_repeat = int(os.getenv("MAX_SENTENCE_REPEAT") or rep_cfg.get("max_sentence_repeat", 3))
+            min_frag_len = int(rep_cfg.get("min_fragment_length", 10))
+            use_observer_confirm = bool(rep_cfg.get("observer_confirm", True))
             since_check = 0
 
             # Some backends (e.g., vLLM adapter) return the full response
@@ -281,11 +284,19 @@ class ExternalVoice:
                         processed_idx += sum(len(m) for m in matches)
                         for sentence in matches:
                             key = sentence.strip().lower()
-                            if not key:
-                                continue
+                            if not key or len(key) < min_frag_len:
+                                continue  # Skip abbreviation fragments
                             sentence_counts[key] = sentence_counts.get(key, 0) + 1
                             if sentence_counts[key] > max_sentence_repeat:
-                                logger.info("ExternalVoice: stopping generation after repeated sentence: %s", sentence.strip())
+                                if use_observer_confirm and self.observer:
+                                    halt = self._confirm_repetition_halt(
+                                        "".join(buffer), key, sentence_counts[key]
+                                    )
+                                    if not halt:
+                                        sentence_counts[key] = -999  # prevent re-triggering
+                                        logger.info("ExternalVoice: observer overrode repetition halt for: %s", key)
+                                        continue
+                                logger.info("ExternalVoice: stopping generation after repeated sentence: %s", key)
                                 raise StopIteration
 
                 # Log token to generation stream (fire-and-forget)
@@ -450,6 +461,22 @@ class ExternalVoice:
                     _gen_logger.end_generation(_gen_id)
                 except Exception:
                     pass
+
+    # --------------------------------------------------------------------- #
+    # repetition guard helper
+    # --------------------------------------------------------------------- #
+    def _confirm_repetition_halt(self, buffer_text: str, fragment: str, count: int) -> bool:
+        """Ask observer to confirm whether this repetition is a real loop.
+        Returns True if generation should halt, False if it's a false positive."""
+        try:
+            fut = self._observer_executor.submit(
+                self.observer.validate_repetition, buffer_text, fragment, count
+            )
+            result = fut.result(timeout=self._observer_call_timeout)
+            return result  # True = halt, False = continue
+        except Exception:
+            logger.debug("ExternalVoice: observer repetition check failed/timed out; defaulting to halt")
+            return True  # fail-safe: halt on error
 
     # --------------------------------------------------------------------- #
     # convenience helpers

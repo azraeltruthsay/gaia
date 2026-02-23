@@ -210,6 +210,12 @@
   "LOOP_DETECTION_HIGH_CONFIDENCE": 0.9,
   "LOOP_DETECTION_MEDIUM_CONFIDENCE": 0.7,
   "LOOP_DETECTION_WEIGHTED_THRESHOLD": 0.6,
+  "REPETITION_GUARD": {
+    "max_sentence_repeat": 3,
+    "min_fragment_length": 10,
+    "observer_confirm": true,
+    "observer_confirm_max_tokens": 24
+  },
   "THINK_TAG_CIRCUIT_BREAKER": {
     "enabled": true,
     "char_threshold": 500,
