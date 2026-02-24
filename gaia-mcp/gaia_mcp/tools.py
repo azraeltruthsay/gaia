@@ -26,6 +26,15 @@ from .kanka_tools import (
     kanka_list_campaigns, kanka_search, kanka_list_entities,
     kanka_get_entity, kanka_create_entity, kanka_update_entity,
 )
+from .notebooklm_tools import (
+    notebooklm_list_notebooks, notebooklm_get_notebook,
+    notebooklm_list_sources, notebooklm_list_notes,
+    notebooklm_list_artifacts, notebooklm_chat,
+    notebooklm_download_audio, notebooklm_create_note,
+)
+from .listener_tools import (
+    audio_listen_start, audio_listen_stop, audio_listen_status,
+)
 
 logger = get_logger(__name__)
 
@@ -103,12 +112,24 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "promotion_create_request": lambda p: _promotion_create_request_impl(p),
         "promotion_list_requests": lambda p: _promotion_list_requests_impl(p),
         "promotion_request_status": lambda p: _promotion_request_status_impl(p),
+        # Audio listener tools (sync — file-based control)
+        "audio_listen_start": lambda p: audio_listen_start(p),
+        "audio_listen_stop": lambda p: audio_listen_stop(p),
+        "audio_listen_status": lambda p: audio_listen_status(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
     }
 
     async_tool_map = {
-        # "study_start": _study_start_impl, # This is async
+        # NotebookLM tools (async httpx client)
+        "notebooklm_list_notebooks": notebooklm_list_notebooks,
+        "notebooklm_get_notebook": notebooklm_get_notebook,
+        "notebooklm_list_sources": notebooklm_list_sources,
+        "notebooklm_list_notes": notebooklm_list_notes,
+        "notebooklm_list_artifacts": notebooklm_list_artifacts,
+        "notebooklm_chat": notebooklm_chat,
+        "notebooklm_download_audio": notebooklm_download_audio,
+        "notebooklm_create_note": notebooklm_create_note,
     }
 
 
