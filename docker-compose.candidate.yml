@@ -80,6 +80,7 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - OBSERVER_MODE=warn
+      - GAIA_IS_CANDIDATE=1
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}

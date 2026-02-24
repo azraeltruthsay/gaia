@@ -538,10 +538,19 @@ class StreamObserver:
         """
         Performs fast, rule-based checks for obvious errors.
         Returns True if an interruption is needed.
+
+        Only triggers on patterns that indicate the LLM itself errored
+        (tracebacks, raw HTTP errors), NOT conversational mentions of
+        the word 'error' (e.g. 'no errors found', 'error handling').
         """
-        buffer_lower = buffer.lower()
-        if "error" in buffer_lower or "exception" in buffer_lower:
-            self.interrupt_reason = "Potential error detected in output."
+        # Check for Python tracebacks (strong signal of actual failure)
+        if "Traceback (most recent call last)" in buffer:
+            self.interrupt_reason = "Python traceback detected in output."
+            self.interrupted = True
+            return True
+        # Check for raw HTTP error dumps
+        if "Internal Server Error" in buffer and "500" in buffer:
+            self.interrupt_reason = "HTTP 500 error detected in output."
             self.interrupted = True
             return True
         return False
