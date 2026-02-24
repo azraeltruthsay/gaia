@@ -23,9 +23,7 @@ class StreamObserver:
         self.config = config
         self.identity_guardian = CoreIdentityGuardian(config)
         self.source = name
-        if llm is None:
-            raise ValueError("StreamObserver requires a model (llm) from the model pool.")
-        self.llm = llm
+        self.llm = llm  # May be None — rule-based checks still work without an LLM
         self.interrupted = False
         self.interrupt_reason = None
         # Cache the last observed buffer/result and use a small time-based
@@ -368,6 +366,18 @@ class StreamObserver:
                 self._last_obs_time = time.time()
             except Exception:
                 logger.debug("StreamObserver: failed to cache OK result", exc_info=True)
+            return ok
+        # Safety guard: if LLM checks are requested but no model is available
+        # (rule-based-only mode), skip the LLM call gracefully.
+        if self.llm is None:
+            logger.warning("StreamObserver: LLM checks requested but no model available; falling back to rule-based only")
+            ok = Interrupt(level="OK", reason="LLM observer unavailable — rule-based checks only")
+            try:
+                self._last_output = output
+                self._last_result = ok
+                self._last_obs_time = time.time()
+            except Exception:
+                logger.debug("StreamObserver: failed to cache LLM-unavailable result", exc_info=True)
             return ok
         try:
             # Allow runtime override for observer token budget and generation params

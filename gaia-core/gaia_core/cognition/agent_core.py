@@ -1410,7 +1410,31 @@ class AgentCore:
             except Exception:
                 logger.debug("AgentCore: failed to set packet to READY_TO_STREAM")
         finally:
-            if reflection_model_name:
+            # Post-reflection model promotion: if a Prime-class model was
+            # borrowed for reflection and Lite is the current responder,
+            # promote Prime to final generation instead of handing the mic
+            # back to a less-capable model.
+            _PRIME_MODELS = {"gpu_prime", "prime", "cpu_prime", "groq_fallback", "oracle_openai", "oracle_gemini"}
+            _promoted = False
+            if (reflection_model_name
+                    and reflection_model_name in _PRIME_MODELS
+                    and selected_model_name not in _PRIME_MODELS
+                    and reflection_model is not None):
+                logger.info(
+                    "Model promotion: %s → %s (reflection model promoted to responder)",
+                    selected_model_name, reflection_model_name,
+                )
+                # Release Lite (old responder) back to idle
+                try:
+                    self.model_pool.release_model(selected_model_name)
+                except Exception:
+                    logger.debug("release old responder failed", exc_info=True)
+                # Swap references — keep reflection model busy (don't release it)
+                selected_model_name = reflection_model_name
+                selected_model = reflection_model
+                _promoted = True
+
+            if not _promoted and reflection_model_name:
                 try:
                     self.model_pool.release_model_for_role(reflection_model_name)
                 except Exception:
@@ -1549,13 +1573,19 @@ class AgentCore:
         post_stream_observer = post_stream_override if post_stream_override is not None else bool(post_stream_const)
 
         observer_instance = None
-        if not disable_observer and observer_model is not None:
+        if not disable_observer:
+            # StreamObserver supports llm=None for rule-based-only observation.
+            # This means even when Lite is solo (no separate observer model),
+            # fast_check, path validation, citation verification, and identity
+            # keyword heuristics still run.
             observer_instance = StreamObserver(config=self.config, llm=observer_model, name="AgentCore-Observer")
             observer_instance.post_stream_only = post_stream_observer
-            logger.info(f"[OBSERVER] StreamObserver created: model='{observer_model_name}', post_stream_only={post_stream_observer}")
+            if observer_model is None:
+                logger.info("[OBSERVER] StreamObserver created in rule-based-only mode (no LLM)")
+            else:
+                logger.info(f"[OBSERVER] StreamObserver created: model='{observer_model_name}', post_stream_only={post_stream_observer}")
         else:
-            reason = "disabled" if disable_observer else "no model available"
-            logger.warning(f"[OBSERVER] StreamObserver NOT created: {reason}")
+            logger.warning("[OBSERVER] StreamObserver NOT created: disabled")
 
         active_stream_observer = None if post_stream_observer else observer_instance
         post_run_observer = observer_instance if post_stream_observer else None
@@ -5254,13 +5284,7 @@ Start your response with the first line of the file."""
             "check your", "check my", "service logs",
         ]
 
-        # Promotion / blueprint indicators
-        promotion_indicators = [
-            "promot", "assess ", "readiness", "blueprint",
-            "candidate", "promotion request", "promote ",
-        ]
-
-        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators + introspection_indicators + promotion_indicators:
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators + introspection_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True

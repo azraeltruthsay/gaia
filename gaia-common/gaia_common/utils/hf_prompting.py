@@ -118,6 +118,12 @@ def _build_chatml(messages: List[Dict[str, Any]]) -> str:
 
     The model will only generate after seeing <|im_start|>assistant, so we
     append that as the final token to trigger generation.
+
+    **Assistant prefill**: If the last message has role "assistant", it is
+    treated as a generation prefix — the content is placed after
+    ``<|im_start|>assistant\\n`` *without* a closing ``<|im_end|>``, so the
+    model continues from that text rather than starting from scratch.  This
+    steers small models into synthesis mode (e.g., "Based on the results,").
     """
     role_map = {
         "system": "system",
@@ -126,13 +132,28 @@ def _build_chatml(messages: List[Dict[str, Any]]) -> str:
         "tool": "tool",
     }
     chunks: List[str] = []
-    for msg in messages:
+
+    # Detect assistant prefill: last message is assistant → use as generation seed
+    has_prefill = (
+        messages
+        and role_map.get(messages[-1].get("role", "").lower()) == "assistant"
+    )
+    main_messages = messages[:-1] if has_prefill else messages
+
+    for msg in main_messages:
         role = role_map.get(msg.get("role", "user").lower(), "user")
         content = msg.get("content", "") or ""
         # Content is preserved exactly - no modifications
         chunks.append(f"<|im_start|>{role}\n{content}<|im_end|>")
-    # Append assistant prefix to trigger generation
-    chunks.append("<|im_start|>assistant\n")
+
+    if has_prefill:
+        # Open the assistant turn with the prefill content — no <|im_end|>
+        # so the model continues generating from this point
+        prefill = messages[-1].get("content", "") or ""
+        chunks.append(f"<|im_start|>assistant\n{prefill}")
+    else:
+        # Append bare assistant prefix to trigger generation
+        chunks.append("<|im_start|>assistant\n")
     return "\n".join(chunks)
 
 

@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 
 # [GCP v0.3] Import new packet structure and safety gate
 from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
+from gaia_common.protocols.cognition_packet import ToolExecutionStatus
 from gaia_common.utils.packet_utils import is_execution_safe
 
 from gaia_core.utils.mcp_client import dispatch_sidecar_actions
@@ -120,8 +121,10 @@ def _get_destination_registry():
     global _destination_registry
     if _destination_registry is None:
         try:
-            from gaia_common.utils.destination_registry import get_registry
-            _destination_registry = get_registry()
+            # TODO: [GAIA-REFACTOR] destination_registry.py module not yet migrated.
+            # from gaia_core.utils.destination_registry import get_registry
+            # _destination_registry = get_registry()
+            _destination_registry = None  # Placeholder
         except Exception as e:
             logger.warning(f"Could not load destination registry: {e}")
     return _destination_registry
@@ -142,6 +145,23 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     # `response.candidate` and `response.sidecar_actions` fields.
     # For now, we'll do a simple parse here.
     _parse_llm_output_into_packet(response_text, packet)
+
+    # 0. Reflection fallback — if the parser stripped a duplicate EXECUTE directive
+    #    and left us with an empty candidate and no sidecar actions, recover the
+    #    response from Prime's reflection log (refined_plan step).  This contains
+    #    the substantive analysis the user actually needs.
+    if (not packet.response.candidate.strip()
+            and not packet.response.sidecar_actions
+            and packet.reasoning
+            and packet.reasoning.reflection_log):
+        for entry in reversed(packet.reasoning.reflection_log):
+            if entry.step == "refined_plan" and entry.summary:
+                logger.info(
+                    "Recovering response from reflection log (refined_plan, %d chars)",
+                    len(entry.summary),
+                )
+                packet.response.candidate = entry.summary
+                break
 
     # 1. Check for authoritative blocks from the observer or other safety systems.
     if packet.status.state == PacketState.ABORTED:
@@ -283,6 +303,7 @@ def _legacy_destination_to_enum(destination: str) -> Optional[OutputDestination]
         "discord": OutputDestination.DISCORD,
         "api": OutputDestination.API,
         "log": OutputDestination.LOG,
+        "audio": OutputDestination.AUDIO,
     }
     return mapping.get(destination.lower())
 
@@ -360,11 +381,29 @@ def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket):
     # Supports two formats:
     #   Structured: EXECUTE: write_file {"path": "/knowledge/doc.txt", "content": "..."}
     #   Legacy:     EXECUTE: run_shell ls -la /knowledge
+    # Determine if tool routing already executed a tool for this packet.
+    # If so, we skip any EXECUTE directive that duplicates that tool call —
+    # the Lite model sometimes re-emits the same EXECUTE instead of synthesising
+    # the already-injected result into a response.
+    already_executed_tool = None
+    if (packet.tool_routing
+            and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
+            and packet.tool_routing.selected_tool):
+        already_executed_tool = packet.tool_routing.selected_tool.tool_name
+
     execute_matches = re.findall(r"EXECUTE:\s*(.*)", response_text)
     for cmd_str in execute_matches:
         parts = cmd_str.strip().split(None, 1)  # Split into tool_name + rest
         action_type = parts[0]
         raw_args = parts[1] if len(parts) > 1 else ""
+
+        # Skip duplicate: tool routing already executed this exact tool
+        if already_executed_tool and action_type == already_executed_tool:
+            logger.info(
+                "Skipping duplicate EXECUTE: %s — already executed by tool routing pipeline",
+                action_type,
+            )
+            continue
 
         # Try JSON params first (structured format)
         params = {}
