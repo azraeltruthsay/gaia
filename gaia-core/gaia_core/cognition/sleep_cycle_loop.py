@@ -338,7 +338,11 @@ class SleepCycleLoop:
         *sleeping* sets the Discord dot to yellow (idle).
         *offline* sets the Discord status to invisible.
         *status_override* allows explicit status ("dnd", "idle", etc.).
+
+        Candidates never update presence — only the production core does.
         """
+        if os.getenv("GAIA_IS_CANDIDATE"):
+            return
         if self.discord_connector:
             # In-process connector available (monolith / rescue mode)
             if offline:
