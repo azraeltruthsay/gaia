@@ -113,6 +113,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="knowledge_research",
+            task_type="KNOWLEDGE_ACQUISITION",
+            priority=4,
+            interruptible=True,
+            estimated_duration_seconds=180,
+            handler=self._run_knowledge_research,
+        ))
+
+        self.register_task(SleepTask(
             task_id="wiki_doc_regen",
             task_type="DOC_GENERATION",
             priority=5,
@@ -1212,6 +1221,232 @@ class SleepTaskScheduler:
         manifest_path = Path(self._REGEN_MANIFEST)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write(manifest_path, _json.dumps(manifest, indent=2))
+
+    # ------------------------------------------------------------------
+    # knowledge_research (KNOWLEDGE_ACQUISITION) — fill knowledge gaps
+    # ------------------------------------------------------------------
+
+    _MCP_ENDPOINT = "http://gaia-mcp:8765/jsonrpc"
+
+    def _run_knowledge_research(self) -> None:
+        """Research knowledge gaps identified by thought seeds.
+
+        Reads unreviewed seeds with seed_type == "knowledge_gap", uses MCP
+        web_search + web_fetch to gather information, saves results to
+        /knowledge/research/, indexes them with confidence_tier="researched",
+        and archives the seed.
+
+        No GPU needed — only HTTP calls and file I/O.
+        """
+        from gaia_core.cognition.thought_seed import (
+            list_unreviewed_seeds,
+            archive_seed,
+        )
+
+        ep_config = self.config.constants.get("EPISTEMIC_DRIVE", {})
+        if not ep_config.get("enabled", True):
+            logger.debug("Epistemic drive disabled, skipping knowledge research")
+            return
+
+        max_per_cycle = ep_config.get("max_research_per_cycle", 3)
+        trusted_only = ep_config.get("research_trusted_domains_only", True)
+
+        # Gather knowledge gap seeds
+        all_seeds = list_unreviewed_seeds()
+        gap_seeds = [
+            (path, data) for path, data in all_seeds
+            if data.get("seed_type") == "knowledge_gap"
+        ]
+
+        if not gap_seeds:
+            logger.debug("No knowledge gap seeds to research")
+            return
+
+        logger.info("Knowledge research: %d gap seeds found, processing up to %d",
+                     len(gap_seeds), max_per_cycle)
+
+        researched = 0
+        research_dir = Path("/knowledge/research")
+        research_dir.mkdir(parents=True, exist_ok=True)
+
+        for seed_path, seed_data in gap_seeds[:max_per_cycle]:
+            seed_text = seed_data.get("seed", "")
+            # Extract the topic from "Knowledge gap — <topic>" pattern
+            topic = seed_text
+            if "—" in topic:
+                topic = topic.split("—", 1)[1].strip()
+            elif "-" in topic and topic.lower().startswith("knowledge gap"):
+                topic = topic.split("-", 1)[1].strip()
+
+            # Strip trailing periods and common suffixes
+            topic = topic.rstrip(". ")
+            if not topic:
+                archive_seed(seed_path.name)
+                continue
+
+            try:
+                content = self._research_topic(topic, trusted_only)
+                if content:
+                    # Save to research directory
+                    slug = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_")[:60]
+                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+                    filename = f"{timestamp}_{slug}.md"
+                    filepath = research_dir / filename
+
+                    filepath.write_text(content, encoding="utf-8")
+                    logger.info("Knowledge research: saved %s", filename)
+
+                    # Index with confidence_tier="researched"
+                    self._index_research_document(str(filepath))
+                    researched += 1
+
+                archive_seed(seed_path.name)
+
+            except Exception:
+                logger.warning("Knowledge research failed for topic: %s",
+                               topic, exc_info=True)
+
+        if researched > 0:
+            # Write council note so Prime knows about new knowledge
+            try:
+                from gaia_core.cognition.council_notes import CouncilNoteManager
+                cn = CouncilNoteManager(self.config)
+                cn.write_note(
+                    user_prompt="[System] Knowledge research complete",
+                    lite_response=(
+                        f"Researched {researched} knowledge gap(s) during sleep. "
+                        f"New documents saved to /knowledge/research/ with "
+                        f"confidence_tier='researched'."
+                    ),
+                    escalation_reason="New auto-researched knowledge available",
+                    session_id="sleep-knowledge-research",
+                )
+            except Exception:
+                logger.debug("Could not write council note for knowledge research",
+                             exc_info=True)
+
+        logger.info("Knowledge research complete: %d topics researched", researched)
+
+    def _research_topic(self, topic: str, trusted_only: bool = True) -> str:
+        """Research a topic via MCP web_search + web_fetch. Returns markdown content."""
+        import requests
+
+        mcp_endpoint = os.getenv("MCP_ENDPOINT", self._MCP_ENDPOINT)
+
+        # Step 1: web_search
+        search_payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "web_search",
+                "arguments": {"query": topic},
+            },
+            "id": f"research_search_{int(time.time())}",
+        }
+
+        try:
+            resp = requests.post(mcp_endpoint, json=search_payload, timeout=15)
+            resp.raise_for_status()
+            search_result = resp.json().get("result", {})
+        except Exception:
+            logger.warning("Knowledge research: web_search failed for '%s'", topic)
+            return ""
+
+        # Extract best URL from search results
+        content_items = search_result.get("content", [])
+        if not content_items:
+            return ""
+
+        # Parse the search output to find URLs
+        search_text = ""
+        for item in content_items:
+            if isinstance(item, dict) and item.get("type") == "text":
+                search_text = item.get("text", "")
+                break
+
+        if not search_text:
+            return ""
+
+        # Extract first URL from search results
+        url_match = re.search(r"https?://[^\s\)\"']+", search_text)
+        if not url_match:
+            return f"# {topic}\n\nSearch results (no fetchable URL found):\n\n{search_text[:2000]}"
+
+        fetch_url = url_match.group(0)
+
+        # If trusted_only, check domain against trusted/reliable lists
+        if trusted_only:
+            web_cfg = self.config.constants.get("WEB_RESEARCH", {})
+            trusted = set(web_cfg.get("trusted_domains", []))
+            reliable = set(web_cfg.get("reliable_domains", []))
+            allowed = trusted | reliable
+
+            from urllib.parse import urlparse
+            domain = urlparse(fetch_url).netloc.lstrip("www.")
+            if not any(domain.endswith(d) for d in allowed):
+                # Return just the search summary without fetching
+                return (
+                    f"# {topic}\n\n"
+                    f"*Auto-researched (search only — domain not in trusted list)*\n\n"
+                    f"{search_text[:2000]}"
+                )
+
+        # Step 2: web_fetch
+        fetch_payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "web_fetch",
+                "arguments": {"url": fetch_url},
+            },
+            "id": f"research_fetch_{int(time.time())}",
+        }
+
+        try:
+            resp = requests.post(mcp_endpoint, json=fetch_payload, timeout=20)
+            resp.raise_for_status()
+            fetch_result = resp.json().get("result", {})
+        except Exception:
+            logger.warning("Knowledge research: web_fetch failed for '%s'", fetch_url)
+            return (
+                f"# {topic}\n\n"
+                f"*Auto-researched (fetch failed)*\n\n"
+                f"Source: {fetch_url}\n\n"
+                f"Search summary:\n{search_text[:2000]}"
+            )
+
+        # Extract fetched content
+        fetch_text = ""
+        for item in fetch_result.get("content", []):
+            if isinstance(item, dict) and item.get("type") == "text":
+                fetch_text = item.get("text", "")
+                break
+
+        # Compose final document
+        # Truncate to reasonable size
+        if len(fetch_text) > 8000:
+            fetch_text = fetch_text[:8000] + "\n\n[...truncated]"
+
+        return (
+            f"# {topic}\n\n"
+            f"*Auto-researched during sleep cycle — confidence tier: researched*\n\n"
+            f"Source: {fetch_url}\n\n"
+            f"---\n\n"
+            f"{fetch_text}"
+        )
+
+    def _index_research_document(self, filepath: str) -> None:
+        """Index a research document with confidence_tier='researched'."""
+        try:
+            from gaia_common.utils.vector_indexer import VectorIndexer
+
+            # Use "system" knowledge base but tag as "researched" tier
+            indexer = VectorIndexer.instance("system")
+            indexer.add_document(filepath, confidence_tier="researched")
+            logger.info("Indexed research document: %s", filepath)
+        except Exception:
+            logger.warning("Failed to index research document: %s",
+                           filepath, exc_info=True)
 
     def _run_code_evolution(self) -> None:
         """Generate code evolution snapshot for temporal self-awareness."""

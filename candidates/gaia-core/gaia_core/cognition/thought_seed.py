@@ -43,8 +43,17 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
             return None
 
         fname = f"seed_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S%f')}.json"
+
+        # Detect knowledge gap seeds by marker phrases
+        seed_type = "general"
+        gap_markers = config.constants.get("EPISTEMIC_DRIVE", {}).get(
+            "gap_seed_markers", ["knowledge gap", "could be researched"])
+        if any(marker in seed_text.lower() for marker in gap_markers):
+            seed_type = "knowledge_gap"
+
         seed_obj = {
             "created": datetime.now(timezone.utc).isoformat(),
+            "seed_type": seed_type,
             "context": {
                 "prompt": getattr(packet.intent, 'primary_goal', '') if hasattr(packet, 'intent') else '',
                 "packet_id": packet.header.packet_id if hasattr(packet, 'header') else 'unknown',

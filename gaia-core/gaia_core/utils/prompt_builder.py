@@ -189,6 +189,15 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
 
     # Semantic Probe results (pre-cognition vector lookup)
     semantic_probe_content = ""
+    # Build confidence tier label map from constants
+    _confidence_tier_labels = {}
+    try:
+        _ep_drive = config.constants.get("EPISTEMIC_DRIVE", {})
+        for _tk, _tv in _ep_drive.get("confidence_tiers", {}).items():
+            if isinstance(_tv, dict):
+                _confidence_tier_labels[_tk] = _tv.get("label", _tk.title())
+    except Exception:
+        pass
     try:
         for df in getattr(packet.content, 'data_fields', []) or []:
             if getattr(df, 'key', '') == 'semantic_probe_result':
@@ -210,14 +219,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
                             lines.append(f"[PRIMARY CONTEXT — {primary}]")
                             for h in by_collection[primary][:5]:
                                 fname = h.get('filename', '').rsplit('/', 1)[-1] if h.get('filename') else 'unknown'
-                                lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}) — {fname}')
+                                tier_key = h.get('confidence_tier', '')
+                                tier_display = _confidence_tier_labels.get(tier_key, '')
+                                tier_tag = f" [{tier_display}]" if tier_display else ""
+                                lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}){tier_tag} — {fname}')
 
                         for supp in supplemental:
                             if supp in by_collection:
                                 lines.append(f"\n[SUPPLEMENTAL — {supp}]")
                                 for h in by_collection[supp][:3]:
                                     fname = h.get('filename', '').rsplit('/', 1)[-1] if h.get('filename') else 'unknown'
-                                    lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}) — {fname}')
+                                    tier_key = h.get('confidence_tier', '')
+                                    tier_display = _confidence_tier_labels.get(tier_key, '')
+                                    tier_tag = f" [{tier_display}]" if tier_display else ""
+                                    lines.append(f'- "{h.get("phrase", "")}" ({h.get("similarity", 0):.2f}){tier_tag} — {fname}')
 
                         semantic_probe_content = "Semantic Context (auto-detected from user input):\n" + "\n".join(lines)
                 break
@@ -346,6 +361,45 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     )
     system_content_parts.append(epistemic_honesty_directive)
 
+    # 3.55. Epistemic Drive — behavioral tendency toward knowledge grounding
+    epistemic_drive_directive = (
+        "EPISTEMIC DRIVE (core behavioral tendency):\n"
+        "\n"
+        "── Anti-Sycophancy ──\n"
+        "1. Do NOT celebrate, congratulate, or performatively validate the user. "
+        "No 'Great question!', 'Thanks for the test!', 'That worked perfectly!'. "
+        "Be direct, warm, and genuine — not flattering.\n"
+        "2. When you are uncertain, say so plainly. Do not hedge with filler "
+        "before giving your actual answer.\n"
+        "\n"
+        "── Epistemic Confidence Communication ──\n"
+        "3. Naturally convey your confidence level based on source quality:\n"
+        "   - From your knowledge base (verified): state directly without qualification.\n"
+        "   - From general training data: use 'From my general knowledge:' (already enforced).\n"
+        "   - Uncertain or partial: 'I have a partial understanding of this —' or "
+        "'I am not confident about the specifics here.'\n"
+        "   - No information: 'I do not have information about this.' Do NOT guess.\n"
+        "\n"
+        "── Epistemic Confidence Tiers ──\n"
+        "When your response draws on retrieved knowledge, your confidence is tagged by source tier:\n"
+        "  [Core Identity] — Foundational self-knowledge. State with full conviction.\n"
+        "  [Verified Knowledge] — Curated system docs. State directly.\n"
+        "  [Experiential] — From conversation history and confirmed patterns.\n"
+        "  [Curated Reference] — Structured knowledge bases (blueprints, campaign docs).\n"
+        "  [Auto-Researched] — Web research from sleep cycles. Note the source.\n"
+        "  [Training Data] — General model knowledge. Use 'From my general knowledge:' prefix.\n"
+        "Use these naturally — don't recite tier names, but calibrate your certainty to match.\n"
+        "\n"
+        "── Genuine Curiosity ──\n"
+        "4. When you encounter a topic you lack knowledge about, express authentic "
+        "curiosity rather than deflecting. If web tools are available, offer to research it.\n"
+        "5. When a user shares new information, engage with it substantively — ask a "
+        "clarifying question or connect it to something you do know.\n"
+        "6. Emit a THOUGHT_SEED when you identify a genuine knowledge gap: "
+        "'THOUGHT_SEED: Knowledge gap — [topic]. Could be researched and added to knowledge base.'\n"
+    )
+    system_content_parts.append(epistemic_drive_directive)
+
     # 3.6. Language Constraint — always respond in English
     language_constraint = (
         "LANGUAGE CONSTRAINT: Always respond in English. "
@@ -384,11 +438,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         "during your response, you may emit a thought seed for later review:\n"
         "THOUGHT_SEED: <brief description of the insight>\n"
         "Use this sparingly (0-1 per response) for:\n"
-        "- Knowledge gaps you want to research later\n"
+        "- KNOWLEDGE GAPS: When you lack information on a topic the user cares about, "
+        "emit: THOUGHT_SEED: Knowledge gap — [specific topic]. These are automatically "
+        "researched during idle time and added to your knowledge base.\n"
         "- Novel problem-solving patterns worth remembering\n"
         "- Connections between topics that could deepen understanding\n"
         "- User preferences or interaction patterns to internalize\n"
-        "Seeds are reviewed during sleep cycles and may inform future learning. "
+        "Seeds tagged as knowledge gaps are prioritized for autonomous research. "
         "Do NOT use THOUGHT_SEED for routine observations."
     )
     system_content_parts.append(thought_seed_directive)
