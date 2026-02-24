@@ -30,6 +30,16 @@ from .kanka_tools import (
     kanka_list_campaigns, kanka_search, kanka_list_entities,
     kanka_get_entity, kanka_create_entity, kanka_update_entity,
 )
+from .notebooklm_tools import (
+    notebooklm_list_notebooks, notebooklm_get_notebook,
+    notebooklm_list_sources, notebooklm_list_notes,
+    notebooklm_list_artifacts, notebooklm_chat,
+    notebooklm_download_audio, notebooklm_create_note,
+    _close_client as _close_notebooklm_client,
+)
+from .listener_tools import (
+    audio_listen_start, audio_listen_stop, audio_listen_status,
+)
 import json
 from pathlib import Path
 import os
@@ -70,6 +80,12 @@ app = FastAPI(
 )
 
 
+@app.on_event("shutdown")
+async def _shutdown():
+    """Clean up async clients on shutdown."""
+    await _close_notebooklm_client()
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for container orchestration."""
@@ -84,7 +100,7 @@ def create_app() -> FastAPI:
     return app
 
 # Tools that must go through approval (unless MCP_BYPASS is set)
-SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request", "kanka_create_entity", "kanka_update_entity"}
+SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request", "kanka_create_entity", "kanka_update_entity", "notebooklm_create_note", "audio_listen_start"}
 
 # --- Tool Dispatcher ---
 
@@ -139,6 +155,10 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
         "kanka_get_entity": lambda p: kanka_get_entity(p),
         "kanka_create_entity": lambda p: kanka_create_entity(p),
         "kanka_update_entity": lambda p: kanka_update_entity(p),
+        # Audio listener tools (sync — file-based control)
+        "audio_listen_start": lambda p: audio_listen_start(p),
+        "audio_listen_stop": lambda p: audio_listen_stop(p),
+        "audio_listen_status": lambda p: audio_listen_status(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         # Promotion & blueprint tools
@@ -150,8 +170,18 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
         "promotion_request_status": lambda p: _promotion_request_status_impl(p),
     }
 
-    # Study mode / LoRA adapter tools are async (gateway calls to gaia-study)
+    # Async tools — NotebookLM (httpx-based) and study mode (gateway calls)
     async_tools = {
+        # NotebookLM tools (async httpx client)
+        "notebooklm_list_notebooks": notebooklm_list_notebooks,
+        "notebooklm_get_notebook": notebooklm_get_notebook,
+        "notebooklm_list_sources": notebooklm_list_sources,
+        "notebooklm_list_notes": notebooklm_list_notes,
+        "notebooklm_list_artifacts": notebooklm_list_artifacts,
+        "notebooklm_chat": notebooklm_chat,
+        "notebooklm_download_audio": notebooklm_download_audio,
+        "notebooklm_create_note": notebooklm_create_note,
+        # Study mode / LoRA adapter tools (gateway calls to gaia-study)
         "study_start": _study_start_impl,
         "study_status": _study_status_impl,
         "study_cancel": _study_cancel_impl,

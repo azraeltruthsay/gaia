@@ -428,6 +428,131 @@ TOOLS = {
             "required": ["entity_type", "entity_id", "fields"]
         }
     },
+    # --- NotebookLM Tools ---
+    "notebooklm_list_notebooks": {
+        "description": "List all Google NotebookLM notebooks accessible to GAIA. Returns notebook IDs, titles, source counts, and timestamps.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "notebooklm_get_notebook": {
+        "description": "Get detailed info about a NotebookLM notebook, including AI-generated summary and suggested discussion topics.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID to retrieve."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_sources": {
+        "description": "List all sources (documents, URLs, files) in a NotebookLM notebook.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_notes": {
+        "description": "List user-created notes in a NotebookLM notebook. Returns note IDs, titles, and content previews.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_artifacts": {
+        "description": "List AI-generated artifacts (audio overviews, reports, quizzes, flashcards, etc.) in a NotebookLM notebook.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "artifact_type": {
+                    "type": "string",
+                    "enum": ["audio", "video", "report", "quiz", "flashcards", "mind_map", "infographic", "slide_deck", "data_table"],
+                    "description": "Optional: filter by artifact type."
+                }
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_chat": {
+        "description": "Ask a question to a NotebookLM notebook. The notebook's AI will answer using its ingested sources. Supports follow-up questions via conversation_id and scoping to specific sources.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID to query."},
+                "question": {"type": "string", "description": "The question to ask (minimum ~20 characters)."},
+                "source_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: limit the answer to specific source IDs."
+                },
+                "conversation_id": {"type": "string", "description": "Optional: continue a previous conversation (for follow-up questions)."}
+            },
+            "required": ["notebook_id", "question"]
+        }
+    },
+    "notebooklm_download_audio": {
+        "description": "Download an audio overview from a NotebookLM notebook and transcribe it via gaia-audio. Returns the transcription text.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "artifact_id": {"type": "string", "description": "Optional: specific audio artifact ID. Defaults to the most recent audio overview."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_create_note": {
+        "description": "Create a new note in a NotebookLM notebook. Requires approval. Use for saving insights, summaries, or analysis results.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "title": {"type": "string", "description": "Title of the new note."},
+                "content": {"type": "string", "description": "Optional: note body text."}
+            },
+            "required": ["notebook_id", "title"]
+        }
+    },
+    # --- Audio Listener Tools ---
+    "audio_listen_start": {
+        "description": "Start system audio capture. GAIA will listen to whatever audio is playing on the host system (music, podcasts, browser audio) and transcribe it. Requires approval. The host-side listener daemon must be running.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["passive", "active"],
+                    "description": "passive = transcribe and comment only when interesting. active = transcribe and always comment. Default: passive."
+                },
+                "comment_threshold": {
+                    "type": "string",
+                    "description": "Hint for when to comment in passive mode (e.g., 'interesting', 'always', 'relevant_to_gaia'). Default: 'interesting'."
+                }
+            },
+        }
+    },
+    "audio_listen_stop": {
+        "description": "Stop system audio capture.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_listen_status": {
+        "description": "Check the current state of the system audio listener. Returns whether it's running, last transcription time, and recent transcript buffer size.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
     # --- Self-Introspection Tools ---
     "introspect_logs": {
         "description": "View recent service logs for self-diagnosis. Returns the last N lines from a GAIA service log, optionally filtered by search pattern or severity level. Use this to diagnose issues with your own behavior, state transitions, sleep/wake state, response routing, or model selection.",

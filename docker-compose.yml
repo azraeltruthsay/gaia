@@ -394,6 +394,8 @@ services:
       - ./candidates:/gaia/GAIA_Project/candidates:ro
       # Docker compose file (for compose_service check)
       - ./docker-compose.yml:/gaia/GAIA_Project/docker-compose.yml:ro
+      # NotebookLM auth (Playwright storage state, read-only)
+      - ${HOME}/.notebooklm:/auth/notebooklm:ro
 
     environment:
       - GAIA_SERVICE=mcp
@@ -409,6 +411,8 @@ services:
       - MCP_APPROVAL_TTL=900
       # External API keys (authenticated web_fetch)
       - KANKA_API_KEY=${KANKA_API_KEY:-}
+      # NotebookLM auth
+      - NOTEBOOKLM_HOME=/auth/notebooklm
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
@@ -526,6 +530,30 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # dozzle: The X-Ray - Real-time Docker log viewer
+  # Lightweight container log viewer — reads directly from Docker socket
+  # Provides instant visibility into all container stdout/stderr
+  # Access at http://localhost:9999
+  # ═══════════════════════════════════════════════════════════════════════════
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    hostname: dozzle
+    restart: unless-stopped
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+
+    ports:
+      - "9999:8080"
+
+    networks:
+      - gaia-net
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-doctor: The Immune System - Persistent HA watchdog
