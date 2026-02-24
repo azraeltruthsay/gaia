@@ -26,6 +26,10 @@ from gaia_common.utils.service_client import get_study_client
 from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender
 from .approval import ApprovalStore
 from .web_tools import web_search, web_fetch
+from .kanka_tools import (
+    kanka_list_campaigns, kanka_search, kanka_list_entities,
+    kanka_get_entity, kanka_create_entity, kanka_update_entity,
+)
 import json
 from pathlib import Path
 import os
@@ -80,7 +84,7 @@ def create_app() -> FastAPI:
     return app
 
 # Tools that must go through approval (unless MCP_BYPASS is set)
-SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request"}
+SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index", "promotion_create_request", "kanka_create_entity", "kanka_update_entity"}
 
 # --- Tool Dispatcher ---
 
@@ -94,7 +98,7 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
 
     if tool_name == "list_tools":
         return list(TOOLS.keys())
-
+    
     if tool_name == "describe_tool":
         return TOOLS.get(params.get("tool_name"), {"error": "Tool not found"})
 
@@ -128,6 +132,13 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        # Kanka.io world-building tools
+        "kanka_list_campaigns": lambda p: kanka_list_campaigns(p),
+        "kanka_search": lambda p: kanka_search(p),
+        "kanka_list_entities": lambda p: kanka_list_entities(p),
+        "kanka_get_entity": lambda p: kanka_get_entity(p),
+        "kanka_create_entity": lambda p: kanka_create_entity(p),
+        "kanka_update_entity": lambda p: kanka_update_entity(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         # Promotion & blueprint tools
@@ -173,7 +184,7 @@ def _send_discord_message_impl(params: dict) -> dict:
     content = params.get("content")
     if not content:
         raise ValueError("content is required")
-
+    
     config = DiscordConfig.from_env()
     if not config.webhook_url:
         raise ValueError("DISCORD_WEBHOOK_URL is not configured")
@@ -484,16 +495,16 @@ def _find_relevant_documents(params: dict):
         return {"files": []}
 
     doc_dir = kb_config.get("doc_dir")
-
+    
     # Safety Check: Ensure directory exists
     if not os.path.exists(doc_dir):
-        logger.warning(f"Doc directory not found: {doc_dir}")
+        logger.warning(f"Doc directory not found: {doc_dir}") 
         return {"files": []}
 
     # Prepare grep command
     keywords = query.split()
-    safe_keywords = [k for k in keywords if k.isalnum()]
-
+    safe_keywords = [k for k in keywords if k.isalnum()] 
+    
     if not safe_keywords:
         return {"files": []}
 
@@ -503,9 +514,9 @@ def _find_relevant_documents(params: dict):
 
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
+            cmd, 
+            capture_output=True, 
+            text=True, 
             check=True
         )
         files = result.stdout.strip().splitlines()
@@ -515,7 +526,7 @@ def _find_relevant_documents(params: dict):
         # Grep returns exit code 1 if NO matches are found.
         if e.returncode == 1:
             return {"files": []}
-
+        
         logger.error(f"Grep failed with error: {e.stderr}")
         raise RuntimeError(f"Search command failed: {e.stderr}")
 
@@ -1007,7 +1018,7 @@ async def jsonrpc_endpoint(request: Request):
             validate(instance=params, schema=TOOLS[method]["params"])
         except ValidationError as e:
             return JSONResponse(content={
-                "jsonrpc": "2.0",
+                "jsonrpc": "2.0", 
                 "error": {"code": -32602, "message": f"Invalid params: {e.message}"},
                 "id": request_id
             }, status_code=400)

@@ -22,6 +22,10 @@ from gaia_common.utils.service_client import get_study_client
 
 from .approval import ApprovalStore
 from .web_tools import web_search, web_fetch
+from .kanka_tools import (
+    kanka_list_campaigns, kanka_search, kanka_list_entities,
+    kanka_get_entity, kanka_create_entity, kanka_update_entity,
+)
 
 logger = get_logger(__name__)
 
@@ -85,6 +89,13 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        # Kanka.io world-building tools
+        "kanka_list_campaigns": lambda p: kanka_list_campaigns(p),
+        "kanka_search": lambda p: kanka_search(p),
+        "kanka_list_entities": lambda p: kanka_list_entities(p),
+        "kanka_get_entity": lambda p: kanka_get_entity(p),
+        "kanka_create_entity": lambda p: kanka_create_entity(p),
+        "kanka_update_entity": lambda p: kanka_update_entity(p),
         # Promotion & blueprint tools
         "generate_blueprint": lambda p: _generate_blueprint_impl(p),
         "assess_promotion": lambda p: _assess_promotion_impl(p),

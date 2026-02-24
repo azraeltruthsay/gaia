@@ -22,6 +22,10 @@ from gaia_common.utils.service_client import get_study_client
 
 from .approval import ApprovalStore
 from .web_tools import web_search, web_fetch
+from .kanka_tools import (
+    kanka_list_campaigns, kanka_search, kanka_list_entities,
+    kanka_get_entity, kanka_create_entity, kanka_update_entity,
+)
 
 logger = get_logger(__name__)
 
@@ -85,6 +89,13 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        # Kanka.io world-building tools
+        "kanka_list_campaigns": lambda p: kanka_list_campaigns(p),
+        "kanka_search": lambda p: kanka_search(p),
+        "kanka_list_entities": lambda p: kanka_list_entities(p),
+        "kanka_get_entity": lambda p: kanka_get_entity(p),
+        "kanka_create_entity": lambda p: kanka_create_entity(p),
+        "kanka_update_entity": lambda p: kanka_update_entity(p),
         # Promotion & blueprint tools
         "generate_blueprint": lambda p: _generate_blueprint_impl(p),
         "assess_promotion": lambda p: _assess_promotion_impl(p),
@@ -407,13 +418,13 @@ def _find_relevant_documents(params: dict):
     """Find documents relevant to a query within a knowledge base."""
     query = params.get("query")
     knowledge_base_name = params.get("knowledge_base_name")
-
+    
     if not query or not knowledge_base_name:
         raise ValueError("query and knowledge_base_name are required")
 
     # FIX: Use Config directly instead of the missing load_knowledge_bases import
     conf = Config() # Instantiate Config here
-
+    
     # Access the KNOWLEDGE_BASES dictionary from constants
     knowledge_bases = conf.constants.get("KNOWLEDGE_BASES", {})
     kb_config = knowledge_bases.get(knowledge_base_name)
@@ -424,16 +435,16 @@ def _find_relevant_documents(params: dict):
         return {"files": []}
 
     doc_dir = kb_config.get("doc_dir")
-
+    
     # Safety Check: Ensure directory exists
     if not os.path.exists(doc_dir):
-        logger.warning(f"Doc directory not found: {doc_dir}")
+        logger.warning(f"Doc directory not found: {doc_dir}") 
         return {"files": []}
 
     # Prepare grep command
     keywords = query.split()
-    safe_keywords = [k for k in keywords if k.isalnum()]
-
+    safe_keywords = [k for k in keywords if k.isalnum()] 
+    
     if not safe_keywords:
         return {"files": []}
 
@@ -443,9 +454,9 @@ def _find_relevant_documents(params: dict):
 
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
+            cmd, 
+            capture_output=True, 
+            text=True, 
             check=True
         )
         files = result.stdout.strip().splitlines()
@@ -455,7 +466,7 @@ def _find_relevant_documents(params: dict):
         # Grep returns exit code 1 if NO matches are found.
         if e.returncode == 1:
             return {"files": []}
-
+        
         logger.error(f"Grep failed with error: {e.stderr}")
         raise RuntimeError(f"Search command failed: {e.stderr}")
 
