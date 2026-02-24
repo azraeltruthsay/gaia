@@ -340,6 +340,94 @@ TOOLS = {
             "required": ["url"]
         }
     },
+    # --- Kanka.io World-Building Tools ---
+    "kanka_list_campaigns": {
+        "description": "List all Kanka.io campaigns accessible to GAIA. Returns campaign IDs, names, and basic info. Use this to discover available campaigns before querying entities.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "kanka_search": {
+        "description": "Search across all entity types (characters, locations, items, etc.) within a Kanka campaign. Returns matching entities with type, ID, and name.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search term to find entities by name or content."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID to search in. Defaults to Dawn of An Age (36323)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "kanka_list_entities": {
+        "description": "List entities of a given type in a Kanka campaign, with optional name filter and pagination. Returns up to 45 entities per page.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entities to list."
+                },
+                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "name": {"type": "string", "description": "Optional: filter entities whose name contains this string."},
+                "page": {"type": "integer", "description": "Page number for pagination (default 1)."}
+            },
+            "required": ["entity_type"]
+        }
+    },
+    "kanka_get_entity": {
+        "description": "Get a specific entity from a Kanka campaign by type and ID. Returns full entity details including entry text, metadata, and optionally related sub-resources (posts, attributes, relations).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to retrieve."
+                },
+                "entity_id": {"type": "integer", "description": "The entity's ID within its type."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "related": {"type": "boolean", "description": "If true, include related data (posts, attributes, relations). Default false."}
+            },
+            "required": ["entity_type", "entity_id"]
+        }
+    },
+    "kanka_create_entity": {
+        "description": "Create a new entity (character, journal, note, location, etc.) in a Kanka campaign. Requires approval. Use for session journals, new NPCs, location notes, etc.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to create."
+                },
+                "name": {"type": "string", "description": "Name/title of the new entity."},
+                "entry": {"type": "string", "description": "HTML body/description of the entity."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "fields": {"type": "object", "description": "Optional type-specific fields (e.g., {\"date\": \"2024-01-15\"} for journals, {\"type\": \"NPC\"} for characters)."}
+            },
+            "required": ["entity_type", "name"]
+        }
+    },
+    "kanka_update_entity": {
+        "description": "Update an existing entity in a Kanka campaign. Requires approval. Only send the fields you want to change.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to update."
+                },
+                "entity_id": {"type": "integer", "description": "The entity's ID to update."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "fields": {"type": "object", "description": "Fields to update (e.g., {\"name\": \"New Name\", \"entry\": \"<p>Updated description</p>\"})."}
+            },
+            "required": ["entity_type", "entity_id", "fields"]
+        }
+    },
     # --- Self-Introspection Tools ---
     "introspect_logs": {
         "description": "View recent service logs for self-diagnosis. Returns the last N lines from a GAIA service log, optionally filtered by search pattern or severity level. Use this to diagnose issues with your own behavior, state transitions, sleep/wake state, response routing, or model selection.",
