@@ -153,21 +153,59 @@ class STTEngine:
         }
 
 
+def _ffmpeg_to_wav(audio_bytes: bytes) -> bytes | None:
+    """Transcode arbitrary audio to WAV via ffmpeg.
+
+    Handles m4a/AAC, opus, webm, and any other format ffmpeg supports.
+    Returns WAV bytes on success, None on failure.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", "16000", "-ac", "1", "pipe:1"],
+            input=audio_bytes,
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode == 0 and len(result.stdout) > 44:  # WAV header = 44 bytes
+            return result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        logger.debug("ffmpeg transcode failed", exc_info=True)
+    return None
+
+
 def audio_bytes_to_array(audio_bytes: bytes, sample_rate: int = 16000) -> np.ndarray:
     """Convert raw audio bytes to float32 numpy array.
 
     Supports WAV, MP3, FLAC, OGG via soundfile.
+    For other formats (m4a, AAC, opus, webm, etc.), transcodes via ffmpeg.
     Falls back to raw int16 PCM interpretation.
     """
-    try:
-        import soundfile as sf
+    import soundfile as sf
 
+    # Try soundfile first (handles WAV, MP3, FLAC, OGG natively)
+    try:
         audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
         if audio_array.ndim > 1:
             audio_array = audio_array.mean(axis=1)  # Stereo to mono
         return audio_array
     except Exception:
-        # Fallback: assume raw int16 PCM
-        logger.debug("soundfile failed; treating as raw int16 PCM")
-        raw = np.frombuffer(audio_bytes, dtype=np.int16)
-        return raw.astype(np.float32) / 32768.0
+        pass
+
+    # Transcode via ffmpeg (handles m4a, AAC, opus, webm, etc.)
+    wav_bytes = _ffmpeg_to_wav(audio_bytes)
+    if wav_bytes is not None:
+        try:
+            audio_array, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+            if audio_array.ndim > 1:
+                audio_array = audio_array.mean(axis=1)
+            logger.debug("Audio transcoded via ffmpeg (%d bytes → %d samples)", len(audio_bytes), len(audio_array))
+            return audio_array
+        except Exception:
+            logger.debug("soundfile failed on ffmpeg output", exc_info=True)
+
+    # Last resort: assume raw int16 PCM
+    logger.debug("All decoders failed; treating as raw int16 PCM")
+    raw = np.frombuffer(audio_bytes, dtype=np.int16)
+    return raw.astype(np.float32) / 32768.0
