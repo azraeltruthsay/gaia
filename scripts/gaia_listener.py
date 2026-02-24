@@ -6,16 +6,21 @@ Captures system audio output via PipeWire or PulseAudio monitor source,
 chunks into segments, sends to gaia-audio for transcription, and forwards
 accumulated transcripts to gaia-core as audio_listen packets.
 
+Optionally records the full audio stream at 48kHz stereo for archival,
+and compresses to MP3 for sharing.
+
 Control:
   - Reads ./logs/listener_control.json (written by MCP tools)
   - Writes ./logs/listener_status.json (read by MCP tools)
 
 Usage:
   python scripts/gaia_listener.py [--project-root /gaia/GAIA_Project]
+  python scripts/gaia_listener.py --save-audio --compress
 
 Dependencies (host-only, no GPU):
   - requests
   - PipeWire (pw-cat) or PulseAudio (parec) installed on host
+  - ffmpeg (for --compress MP3 encoding; also used by PulseAudio recording path)
 """
 
 import argparse
@@ -47,6 +52,10 @@ CHANNELS = 1
 TRANSCRIPT_BUFFER_MAX = 20  # Keep last N transcriptions (~10 minutes at 30s chunks)
 SUMMARY_INTERVAL = 60       # Seconds between transcript summaries sent to gaia-core
 CONTROL_POLL_INTERVAL = 5   # Seconds between control file checks
+
+# High-quality recording (separate stream from transcription)
+RECORD_SAMPLE_RATE = 48000  # 48 kHz — near-CD quality
+RECORD_CHANNELS = 2         # Stereo
 
 DEFAULT_GAIA_AUDIO_URL = "http://localhost:8080"
 DEFAULT_GAIA_CORE_URL = "http://localhost:6415"
@@ -248,6 +257,9 @@ class AudioListener:
         project_root: Path,
         audio_url: str = DEFAULT_GAIA_AUDIO_URL,
         core_url: str = DEFAULT_GAIA_CORE_URL,
+        save_audio: bool = False,
+        save_dir: Path | None = None,
+        compress: bool = False,
     ):
         self.project_root = project_root
         self.audio_url = audio_url
@@ -263,6 +275,14 @@ class AudioListener:
         self._start_time = None
         self._last_summary_time = 0
         self._stop_event = threading.Event()
+
+        # Audio recording settings (can be overridden by control file)
+        self._save_audio = save_audio
+        self._save_dir = save_dir or (project_root / "recordings")
+        self._compress = compress
+        self._record_process = None
+        self._parec_record_process = None
+        self._record_path = None
 
         # Detect audio backend
         self._backend = _detect_audio_backend()
@@ -284,7 +304,15 @@ class AudioListener:
 
                 if command == "start" and not self._capturing:
                     self._mode = control.get("mode", "passive")
-                    logger.info("Starting capture (mode=%s)", self._mode)
+                    # Control file can override save/compress settings
+                    if "save_audio" in control:
+                        self._save_audio = control["save_audio"]
+                    if "compress" in control:
+                        self._compress = control["compress"]
+                    logger.info(
+                        "Starting capture (mode=%s, save=%s, compress=%s)",
+                        self._mode, self._save_audio, self._compress,
+                    )
                     self._start_capture()
 
                 elif command == "stop" and self._capturing:
@@ -324,7 +352,7 @@ class AudioListener:
         self._stop_event.set()
 
     def _start_capture(self):
-        """Start the audio capture subprocess."""
+        """Start the audio capture subprocess (and recording if enabled)."""
         cmd = _build_capture_command(self._backend, self._monitor)
         try:
             self._process = subprocess.Popen(
@@ -338,9 +366,18 @@ class AudioListener:
         except Exception as e:
             logger.error("Failed to start capture: %s", e)
             self._capturing = False
+            return
+
+        # Start high-quality recording stream if enabled
+        if self._save_audio:
+            self._start_recording()
 
     def _stop_capture(self):
-        """Stop the audio capture subprocess."""
+        """Stop the audio capture subprocess (and finalize recording)."""
+        # Stop recording first (separate high-quality stream)
+        if self._record_process:
+            self._stop_recording()
+
         if self._process:
             try:
                 self._process.terminate()
@@ -352,6 +389,127 @@ class AudioListener:
                     pass
             self._process = None
         self._capturing = False
+
+    # -------------------------------------------------------------------
+    # High-quality audio recording (separate 48kHz stereo stream)
+    # -------------------------------------------------------------------
+
+    def _start_recording(self):
+        """Start a separate high-quality recording process."""
+        self._save_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        self._record_path = self._save_dir / f"capture_{timestamp}.wav"
+
+        if self._backend == "pipewire":
+            cmd = [
+                "pw-cat", "--record",
+                "--rate", str(RECORD_SAMPLE_RATE),
+                "--channels", str(RECORD_CHANNELS),
+                "--format", "s16",
+                "--target", "0",
+                str(self._record_path),
+            ]
+            try:
+                self._record_process = subprocess.Popen(
+                    cmd, stderr=subprocess.DEVNULL,
+                )
+                logger.info("Recording started (48kHz stereo): %s", self._record_path)
+            except Exception as e:
+                logger.error("Failed to start recording: %s", e)
+                self._record_process = None
+        else:
+            # PulseAudio: parec → ffmpeg → WAV file
+            source = self._monitor or "@DEFAULT_MONITOR@"
+            try:
+                parec = subprocess.Popen(
+                    [
+                        "parec",
+                        "--rate", str(RECORD_SAMPLE_RATE),
+                        "--channels", str(RECORD_CHANNELS),
+                        "--format", "s16le",
+                        "--device", source,
+                        "--raw",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+                ffmpeg = subprocess.Popen(
+                    [
+                        "ffmpeg", "-y",
+                        "-f", "s16le",
+                        "-ar", str(RECORD_SAMPLE_RATE),
+                        "-ac", str(RECORD_CHANNELS),
+                        "-i", "pipe:0",
+                        "-acodec", "pcm_s16le",
+                        str(self._record_path),
+                    ],
+                    stdin=parec.stdout,
+                    stderr=subprocess.DEVNULL,
+                )
+                parec.stdout.close()  # Allow parec to receive SIGPIPE
+                self._parec_record_process = parec
+                self._record_process = ffmpeg
+                logger.info("Recording started (48kHz stereo via parec): %s", self._record_path)
+            except Exception as e:
+                logger.error("Failed to start recording: %s", e)
+                self._record_process = None
+                self._parec_record_process = None
+
+    def _stop_recording(self):
+        """Stop the recording process and optionally compress to MP3."""
+        for proc in [self._record_process, self._parec_record_process]:
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=10)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        self._record_process = None
+        self._parec_record_process = None
+
+        if self._record_path and self._record_path.exists():
+            size_mb = self._record_path.stat().st_size / (1024 * 1024)
+            logger.info("Recording saved: %s (%.1f MB)", self._record_path, size_mb)
+
+            if self._compress:
+                self._compress_to_mp3(self._record_path)
+        else:
+            logger.warning("Recording file not found: %s", self._record_path)
+
+    def _compress_to_mp3(self, wav_path: Path):
+        """Compress WAV recording to MP3 using ffmpeg (VBR ~190kbps)."""
+        mp3_path = wav_path.with_suffix(".mp3")
+        logger.info("Compressing to MP3: %s", mp3_path.name)
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", str(wav_path),
+                    "-codec:a", "libmp3lame",
+                    "-q:a", "2",  # VBR ~190kbps — good quality for speech
+                    str(mp3_path),
+                ],
+                capture_output=True,
+                timeout=600,
+            )
+            if result.returncode == 0 and mp3_path.exists():
+                mp3_mb = mp3_path.stat().st_size / (1024 * 1024)
+                wav_mb = wav_path.stat().st_size / (1024 * 1024)
+                reduction = (1 - mp3_mb / wav_mb) * 100 if wav_mb > 0 else 0
+                logger.info(
+                    "Compressed: %s (%.1f MB → %.1f MB, %.0f%% reduction)",
+                    mp3_path.name, wav_mb, mp3_mb, reduction,
+                )
+            else:
+                logger.error(
+                    "MP3 compression failed: %s",
+                    result.stderr.decode(errors="replace")[:200],
+                )
+        except Exception as e:
+            logger.error("MP3 compression error: %s", e)
 
     def _process_chunk(self):
         """Read one chunk of audio from the capture process and transcribe it."""
@@ -416,6 +574,9 @@ class AudioListener:
             "transcript_buffer_size": len(self._transcript_buffer),
             "uptime_seconds": round(time.time() - self._start_time, 1) if self._start_time else 0,
             "last_chunk_at": None,
+            "save_audio": self._save_audio,
+            "compress": self._compress,
+            "recording_file": str(self._record_path) if self._record_path else None,
         }
         if self._transcript_buffer:
             status["last_transcript_preview"] = self._transcript_buffer[-1][:200]
@@ -446,12 +607,31 @@ def main():
         default=os.getenv("GAIA_CORE_URL", DEFAULT_GAIA_CORE_URL),
         help="gaia-core service URL",
     )
+    parser.add_argument(
+        "--save-audio",
+        action="store_true",
+        help="Record system audio to WAV (48kHz stereo) alongside transcription",
+    )
+    parser.add_argument(
+        "--save-dir",
+        type=Path,
+        default=None,
+        help="Directory for audio recordings (default: {project-root}/recordings/)",
+    )
+    parser.add_argument(
+        "--compress",
+        action="store_true",
+        help="Compress WAV recording to MP3 when capture stops",
+    )
     args = parser.parse_args()
 
     listener = AudioListener(
         project_root=args.project_root,
         audio_url=args.audio_url,
         core_url=args.core_url,
+        save_audio=args.save_audio,
+        save_dir=args.save_dir,
+        compress=args.compress,
     )
 
     # Handle signals gracefully
