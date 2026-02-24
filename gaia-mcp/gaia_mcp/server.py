@@ -112,9 +112,9 @@ async def dispatch_tool(tool_name: str, params: dict) -> any:
     except Exception:
         logger.debug("[DEBUG] Dispatching tool '%s'", tool_name)
 
-    if tool_name == "list_tools":
+    if tool_name == "list_tools" or tool_name == "rpc.discover":
         return list(TOOLS.keys())
-    
+
     if tool_name == "describe_tool":
         return TOOLS.get(params.get("tool_name"), {"error": "Tool not found"})
 

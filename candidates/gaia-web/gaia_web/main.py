@@ -41,6 +41,14 @@ try:
     _log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
     setup_logging(log_dir="/logs", level=_log_level, service_name="gaia-web")
     install_health_check_filter()
+
+    # Dedicated Discord log file so the dashboard Logs tab can show Discord-only logs
+    _discord_log_path = os.path.join("/logs", "discord_bot.log")
+    _discord_fh = logging.FileHandler(_discord_log_path, encoding="utf-8")
+    _discord_fh.setFormatter(logging.getLogger().handlers[0].formatter if logging.getLogger().handlers else None)
+    _discord_fh.setLevel(_log_level)
+    for _dlog_name in ("discord", "discord.gateway", "discord.client", "discord.http", "GAIA.Discord"):
+        logging.getLogger(_dlog_name).addHandler(_discord_fh)
 except ImportError:
     logging.basicConfig(level=logging.INFO)
 
