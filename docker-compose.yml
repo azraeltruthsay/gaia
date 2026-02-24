@@ -452,9 +452,6 @@ services:
     hostname: gaia-audio
     restart: unless-stopped
 
-    profiles:
-      - audio  # Not promoted yet — opt-in only
-
     volumes:
       - ./gaia-audio:/app:rw
       - ./gaia-common:/app/gaia_common:ro
