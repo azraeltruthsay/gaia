@@ -527,6 +527,55 @@ services:
       retries: 3
       start_period: 15s
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-doctor: The Immune System - Persistent HA watchdog
+  # Monitors service health and auto-restarts crashed HA candidates
+  # via docker compose with the HA overlay (preserves restart policies)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-doctor:
+    build:
+      context: .
+      dockerfile: gaia-doctor/Dockerfile
+    image: localhost:5000/gaia-doctor:local
+    container_name: gaia-doctor
+    hostname: gaia-doctor
+    restart: unless-stopped
+
+    volumes:
+      # Docker socket (read-write — doctor needs to restart containers)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Docker CLI + compose plugin (bind-mounted from host, avoids installing full docker.io)
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      # Shared state for status persistence and maintenance mode flag
+      - gaia-shared:/shared:rw
+      # Compose files for HA-overlay restarts
+      - ./docker-compose.candidate.yml:/compose/docker-compose.candidate.yml:ro
+      - ./docker-compose.ha.yml:/compose/docker-compose.ha.yml:ro
+
+    group_add:
+      - "${DOCKER_GID:-962}"
+
+    environment:
+      - POLL_INTERVAL=${DOCTOR_POLL_INTERVAL:-60}
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      - COMPOSE_PROJECT_NAME=gaia_project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    ports:
+      - "6419:6419"
+
+    networks:
+      - gaia-net
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6419/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Networks
