@@ -3,7 +3,7 @@
 # ============================================
 
 # --- Large directories / binaries ---
-archive/
+/archive/
 gaia-models/
 google-cloud-sdk/
 artifacts/
