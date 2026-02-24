@@ -300,7 +300,13 @@ class ThoughtSeedHeartbeat:
         """Ask Lite to classify a seed as ARCHIVE / PENDING / ACT.
 
         Returns (decision, reason). Defaults to "pending" on parse failure.
+        Knowledge gap seeds are auto-routed to ACT without LLM triage.
         """
+        # Fast-path: knowledge gap seeds skip LLM triage and go straight to ACT
+        seed_type = seed_data.get("seed_type", "general")
+        if seed_type == "knowledge_gap":
+            return ("act", "Knowledge gap — auto-routing to research")
+
         seed_text = seed_data.get("seed", "")
         context = seed_data.get("context", {})
         user_prompt = (

@@ -194,17 +194,29 @@ class VectorIndexer:
     def refresh_index(self):
         self.index = self.load_vector_index()
 
-    def build_index_from_docs(self, chunk_size: int = DEFAULT_CHUNK_SIZE, chunk_overlap: int = DEFAULT_CHUNK_OVERLAP) -> bool:
+    def _infer_confidence_tier(self) -> str:
+        """Map this indexer's knowledge base name to an epistemic confidence tier."""
+        tier_map = {
+            "system": "verified",
+            "blueprints": "curated",
+            "dnd_campaign": "curated",
+            "research": "researched",
+        }
+        return tier_map.get(self.knowledge_base_name, "curated")
+
+    def build_index_from_docs(self, chunk_size: int = DEFAULT_CHUNK_SIZE, chunk_overlap: int = DEFAULT_CHUNK_OVERLAP, confidence_tier: str = None) -> bool:
         """Walk the configured doc_dir and (re)build the vector index with chunking.
 
         Args:
             chunk_size: Target chunk size in tokens (default 512)
             chunk_overlap: Overlap between chunks in tokens (default 64)
+            confidence_tier: Epistemic confidence tier for all docs (auto-inferred if None)
         """
         logger.info(f"Building index for '{self.knowledge_base_name}' from '{self.doc_dir}' (chunk_size={chunk_size}, overlap={chunk_overlap})")
         if not self.model:
             raise RuntimeError("Embedding model not available: SentenceTransformer not loaded.")
 
+        tier = confidence_tier or self._infer_confidence_tier()
         docs = []
         embeddings = []
         file_count = 0
@@ -227,7 +239,8 @@ class VectorIndexer:
                             "chunk_idx": chunk['chunk_idx'],
                             "start_char": chunk['start_char'],
                             "end_char": chunk['end_char'],
-                            "total_chunks": len(chunks)
+                            "total_chunks": len(chunks),
+                            "confidence_tier": tier,
                         }
                         docs.append(doc_entry)
                         emb = self.model.encode(chunk['text'])
@@ -240,16 +253,17 @@ class VectorIndexer:
 
         self.index = {"docs": docs, "embeddings": embeddings}
         self.save_vector_index()
-        logger.info(f"[CHUNK] Built index: {file_count} files -> {chunk_count} chunks")
+        logger.info(f"[CHUNK] Built index: {file_count} files -> {chunk_count} chunks (tier={tier})")
         return True
 
-    def add_document(self, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, chunk_overlap: int = DEFAULT_CHUNK_OVERLAP) -> bool:
+    def add_document(self, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, chunk_overlap: int = DEFAULT_CHUNK_OVERLAP, confidence_tier: str = None) -> bool:
         """Add a single document to the vector index with chunking.
 
         Args:
             file_path: Path to the document file
             chunk_size: Target chunk size in tokens (default 512)
             chunk_overlap: Overlap between chunks in tokens (default 64)
+            confidence_tier: Epistemic confidence tier (auto-inferred if None)
         """
         if not self.model:
             raise RuntimeError("Embedding model not available: SentenceTransformer not loaded.")
@@ -257,6 +271,8 @@ class VectorIndexer:
         doc_file = Path(file_path)
         if not doc_file.is_file():
             raise FileNotFoundError(f"File not found: {file_path}")
+
+        tier = confidence_tier or self._infer_confidence_tier()
 
         with open(doc_file, "r", encoding="utf-8") as f:
             text = f.read()
@@ -272,7 +288,8 @@ class VectorIndexer:
                 "chunk_idx": chunk['chunk_idx'],
                 "start_char": chunk['start_char'],
                 "end_char": chunk['end_char'],
-                "total_chunks": len(chunks)
+                "total_chunks": len(chunks),
+                "confidence_tier": tier,
             }
             self.index["docs"].append(doc_entry)
             embedding = self.model.encode(chunk['text'])
@@ -280,7 +297,7 @@ class VectorIndexer:
             chunk_count += 1
 
         self.save_vector_index()
-        logger.info(f"[CHUNK] Added document '{file_path}' as {chunk_count} chunks")
+        logger.info(f"[CHUNK] Added document '{file_path}' as {chunk_count} chunks (tier={tier})")
         return True
 
     def query(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -316,11 +333,13 @@ class VectorIndexer:
         idxs = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:top_k]
         results = []
         for i in idxs:
+            doc = self.index["docs"][i]
             results.append({
                 "idx": i,
                 "score": sims[i],
-                "filename": self.index["docs"][i].get("filename"),
-                "text": self.index["docs"][i].get("text"),
+                "filename": doc.get("filename"),
+                "text": doc.get("text"),
+                "confidence_tier": doc.get("confidence_tier"),
             })
         return results
 

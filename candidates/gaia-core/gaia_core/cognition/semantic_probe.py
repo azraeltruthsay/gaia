@@ -111,9 +111,10 @@ class ProbeHit:
     similarity: float        # Cosine similarity score
     filename: str            # Source document filename
     chunk_idx: int = 0       # Position in source document
+    confidence_tier: str = ""  # Epistemic confidence tier (e.g. "verified", "curated")
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "phrase": self.phrase,
             "collection": self.collection,
             "chunk_text": self.chunk_text[:300],
@@ -121,6 +122,9 @@ class ProbeHit:
             "filename": self.filename,
             "chunk_idx": self.chunk_idx,
         }
+        if self.confidence_tier:
+            d["confidence_tier"] = self.confidence_tier
+        return d
 
 
 @dataclass
@@ -394,6 +398,16 @@ def extract_candidate_phrases(text: str) -> List[str]:
 # Phase 1b: Multi-collection probing
 # ---------------------------------------------------------------------------
 
+# Map collection name → default epistemic confidence tier (used when
+# the vector index entry doesn't carry its own confidence_tier field).
+_COLLECTION_TIER_MAP = {
+    "system": "verified",
+    "blueprints": "curated",
+    "dnd_campaign": "curated",
+    "research": "researched",
+}
+
+
 def _probe_single_collection(
     phrases: List[str],
     collection_name: str,
@@ -419,6 +433,8 @@ def _probe_single_collection(
         logger.debug("SemanticProbe: collection '%s' has empty index", collection_name)
         return []
 
+    fallback_tier = _COLLECTION_TIER_MAP.get(collection_name, "curated")
+
     hits: List[ProbeHit] = []
     for phrase in phrases:
         try:
@@ -433,6 +449,7 @@ def _probe_single_collection(
                         similarity=score,
                         filename=r.get("filename", ""),
                         chunk_idx=r.get("idx", 0),
+                        confidence_tier=r.get("confidence_tier") or fallback_tier,
                     ))
         except Exception as e:
             logger.debug(

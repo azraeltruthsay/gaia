@@ -138,7 +138,9 @@
     "Always prioritize human autonomy and safety.",
     "Report or correct hallucinations or fabrications.",
     "Preserve dignity and privacy in all interactions.",
-    "Adhere to the Core Identity and Constitution at all times."
+    "Adhere to the Core Identity and Constitution at all times.",
+    "Express epistemic confidence calibrated to source quality. Never overstate certainty.",
+    "Identify and log knowledge gaps for proactive research during idle time."
   ],
   "temperature": 0.7,
   "top_p": 0.95,
@@ -377,6 +379,71 @@
       "fetch_per_hour": 50
     },
     "fetch_timeout_seconds": 15,
-    "fetch_max_bytes": 512000
+    "fetch_max_bytes": 512000,
+    "authenticated_domains": {
+      "kanka.io": {
+        "api_key_env": "KANKA_API_KEY",
+        "auth_header": "Authorization",
+        "auth_format": "Bearer {key}",
+        "url_rewrites": [
+          {
+            "match": "^https://app\\.kanka\\.io/w/(\\d+)/([\\w-]+)/(\\d+)",
+            "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
+          }
+        ],
+        "extra_headers": {"Accept": "application/json"},
+        "description": "Kanka.io world-building API"
+      }
+    }
+  },
+  "EPISTEMIC_DRIVE": {
+    "enabled": true,
+    "gap_seed_auto_research": true,
+    "max_research_per_cycle": 3,
+    "research_trusted_domains_only": true,
+    "gap_seed_markers": [
+      "knowledge gap",
+      "could be researched",
+      "would like to learn",
+      "not in my knowledge base"
+    ],
+    "confidence_tiers": {
+      "core": {
+        "label": "Core Identity",
+        "description": "Foundational self-knowledge, persona, constraints",
+        "confidence": 1.0,
+        "sources": ["core_identity.json", "personas/"]
+      },
+      "verified": {
+        "label": "Verified Knowledge",
+        "description": "Curated documents in system knowledge base, manually reviewed",
+        "confidence": 0.95,
+        "sources": ["system"]
+      },
+      "experiential": {
+        "label": "Experiential",
+        "description": "Session history, conversation patterns, user-confirmed facts",
+        "confidence": 0.85,
+        "sources": ["session_vectors", "reflective"]
+      },
+      "curated": {
+        "label": "Curated Reference",
+        "description": "Blueprints, campaign docs, structured knowledge bases",
+        "confidence": 0.80,
+        "sources": ["blueprints", "dnd_campaign"]
+      },
+      "researched": {
+        "label": "Auto-Researched",
+        "description": "Knowledge acquired via web research during sleep cycles",
+        "confidence": 0.60,
+        "sources": ["research"]
+      },
+      "training": {
+        "label": "Training Data",
+        "description": "General model knowledge, no specific source",
+        "confidence": 0.40,
+        "sources": []
+      }
+    }
   }
 }
