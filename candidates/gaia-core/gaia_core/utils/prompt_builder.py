@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import List, Dict
 
 # [GCP v0.3] Import the new packet structure
-from gaia_common.protocols.cognition_packet import CognitionPacket
+from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
 from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
 from gaia_core.utils.packet_templates import render_gaia_packet_template
@@ -409,9 +409,19 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     system_content_parts.append(language_constraint)
 
     # 3.7. Tool Calling Convention — only when tools are visible
+    # IMPORTANT: Suppress the EXECUTE syntax when a tool has already been executed
+    # by the tool routing pipeline.  Small models (3B) pattern-match on EXECUTE:
+    # examples and re-emit the directive instead of synthesising the injected
+    # results.  Removing the syntax from context prevents this echo failure.
+    tool_already_executed = (
+        getattr(packet, 'tool_routing', None)
+        and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
+    )
     tool_calling_convention = ""
     try:
-        if "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or ""):
+        if not tool_already_executed and (
+            "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or "")
+        ):
             tool_calling_convention = (
                 "TOOL CALLING CONVENTION:\n"
                 "To use a tool, emit a directive on its own line in this exact format:\n"
@@ -776,6 +786,19 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     messages_to_normalize.append(user_prompt)
     normalized_messages = _normalize_messages_for_chat(messages_to_normalize)
     final_prompt.extend(normalized_messages)
+
+    # Output scaffolding — when a tool was already executed and its results are
+    # in the context, pre-fill the assistant response opening.  This steers small
+    # models (3B) into synthesis mode rather than re-emitting EXECUTE directives.
+    # The ChatML template appends "<|im_start|>assistant\n" by default; by adding
+    # a partial assistant message here, the model continues from prose instead of
+    # starting from a blank generation slate.
+    if tool_result_content and tool_already_executed:
+        final_prompt.append({
+            "role": "assistant",
+            "content": "Based on the results,"
+        })
+        logger.info("[v0.3] Output scaffolding: injected assistant prefix for tool-result synthesis")
 
     final_token_count = max_tokens - remaining_budget - response_buffer
     try:
