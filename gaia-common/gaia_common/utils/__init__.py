@@ -14,6 +14,7 @@ from .logging_setup import (
     get_logger,
     UTCFormatter,
     HealthCheckFilter,
+    LevelRingHandler,
     install_health_check_filter,
 )
 from .packet_templates import (

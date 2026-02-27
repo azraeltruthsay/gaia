@@ -62,28 +62,44 @@ class GPUManager:
     # ── Full-duplex helpers ───────────────────────────────────────────
 
     async def _ensure_both_loaded(self) -> None:
-        """Load both STT and TTS if not already loaded (full-duplex)."""
+        """Load both STT and TTS if not already loaded (full-duplex).
+
+        TTS load failures are non-fatal — STT will still work.
+        """
         async with self._lock:
             if self.current_mode == "full" and self.stt.loaded and self.tts.loaded:
                 return
 
             t0 = time.monotonic()
             stt_ms = await self._ensure_loaded(self.stt, "STT")
-            tts_ms = await self._ensure_loaded(self.tts, "TTS")
+
+            tts_ms = 0.0
+            try:
+                tts_ms = await self._ensure_loaded(self.tts, "TTS")
+            except Exception:
+                logger.warning(
+                    "TTS failed to load — STT will work but TTS unavailable",
+                    exc_info=True,
+                )
+
             total_ms = (time.monotonic() - t0) * 1000
 
             self.current_mode = "full"
             status_tracker.gpu_mode = "full-duplex"
-            status_tracker.vram_used_mb = float(self.stt.vram_mb + self.tts.vram_mb)
+            vram = float(self.stt.vram_mb)
+            if self.tts.loaded:
+                vram += float(self.tts.vram_mb)
+            status_tracker.vram_used_mb = vram
 
             if stt_ms > 0 or tts_ms > 0:
+                tts_label = self.tts.engine_type if self.tts.loaded else "FAILED"
                 logger.info(
                     "Full-duplex: STT(%s) + TTS(%s) loaded (%.0fms)",
-                    self.stt.model_size, self.tts.engine_type, total_ms,
+                    self.stt.model_size, tts_label, total_ms,
                 )
                 await status_tracker.emit(
                     "gpu_acquire",
-                    f"Full-duplex: STT({self.stt.model_size}) + TTS({self.tts.engine_type})",
+                    f"Full-duplex: STT({self.stt.model_size}) + TTS({tts_label})",
                     total_ms,
                 )
 

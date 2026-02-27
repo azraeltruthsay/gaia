@@ -251,6 +251,11 @@ class SafeModelProxy:
     metadata so downstream code can always rely on a uniform interface.
 
     Forwards attribute access and call semantics to the underlying backend.
+
+    For in-process backends (llama_cpp.Llama), a threading.Lock serialises
+    access to prevent concurrent calls that would crash with GGML_ASSERT
+    failures.  HTTP-based backends (VLLMRemoteModel, API models) are
+    inherently thread-safe and skip the lock.
     """
 
     def __init__(self, backend, pool=None, role=None):
@@ -258,12 +263,29 @@ class SafeModelProxy:
         object.__setattr__(self, "_backend", backend)
         object.__setattr__(self, "_pool", pool)
         object.__setattr__(self, "_role", role)
+        # Only add a lock for in-process (llama_cpp) backends that are NOT
+        # thread-safe.  HTTP-based backends handle concurrency on their own.
+        # The lock is stored ON the backend instance so all proxies that wrap
+        # the same backend share the same lock.
+        needs_lock = Llama is not None and isinstance(backend, Llama)
+        if needs_lock:
+            if not hasattr(backend, "_proxy_lock"):
+                backend._proxy_lock = threading.Lock()
+            object.__setattr__(self, "_lock", backend._proxy_lock)
+        else:
+            object.__setattr__(self, "_lock", None)
 
     # -- Explicit forwarding for the two hot-path methods --------------------
     def create_chat_completion(self, **kwargs):
+        if self._lock is not None:
+            with self._lock:
+                return self._backend.create_chat_completion(**kwargs)
         return self._backend.create_chat_completion(**kwargs)
 
     def create_completion(self, **kwargs):
+        if self._lock is not None:
+            with self._lock:
+                return self._backend.create_completion(**kwargs)
         return self._backend.create_completion(**kwargs)
 
     # -- Transparent proxy for everything else --------------------------------
@@ -607,7 +629,7 @@ class ModelPool:
                     try:
                         # Expand context for Operator (lite) without forcing Thinker to use the same window.
                         ctx_tokens = getattr(self.config, "max_tokens_lite", self.config.max_tokens) if model_name == "lite" else self.config.max_tokens
-                        self.models[model_name] = Llama(
+                        _raw_llama = Llama(
                             model_path=model_path,
                             n_gpu_layers=n_try,
                             n_ctx=ctx_tokens,
@@ -615,6 +637,11 @@ class ModelPool:
                             stream=True,
                             verbose=False,
                             chat_format=chat_format,
+                        )
+                        # Wrap in SafeModelProxy at load time so the
+                        # threading lock is available from the very first call.
+                        self.models[model_name] = SafeModelProxy(
+                            _raw_llama, pool=self, role=model_name,
                         )
                         logger.info("✅ %s loaded with n_gpu_layers=%s: %s", model_name, n_try, self.models[model_name])
                         break

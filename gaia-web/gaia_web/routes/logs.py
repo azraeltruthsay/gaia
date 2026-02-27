@@ -16,6 +16,8 @@ import re
 import time
 from collections import deque
 
+from pathlib import Path
+
 from fastapi import APIRouter, Query
 from starlette.responses import StreamingResponse
 
@@ -35,6 +37,19 @@ _SERVICE_LOG_MAP = {
     "mcp": os.getenv("GAIA_MCP_LOG_PATH", "/logs/gaia-mcp.log"),
     "study": os.getenv("GAIA_STUDY_LOG_PATH", "/logs/gaia-study.log"),
     "discord": os.getenv("GAIA_DISCORD_LOG_PATH", "/logs/discord_bot.log"),
+    "orchestrator": os.getenv("GAIA_ORCH_LOG_PATH", "/logs/gaia-orchestrator.log"),
+    "audio": os.getenv("GAIA_AUDIO_LOG_PATH", "/logs/gaia-audio.log"),
+}
+
+# Map service short-names to ring-buffer subdirectory names
+_SERVICE_RING_DIR_MAP = {
+    "core": "gaia-core",
+    "web": "gaia-web",
+    "mcp": "gaia-mcp",
+    "study": "gaia-study",
+    "discord": "discord_bot",
+    "orchestrator": "gaia-orchestrator",
+    "audio": "gaia-audio",
 }
 
 
@@ -128,6 +143,48 @@ async def log_search(
         "level_filter": level_filter or None,
         "total": len(results),
         "results": list(results),
+    }
+
+
+@router.get("/levels")
+async def get_level_logs(
+    service: str = Query(..., description="Service name"),
+    levels: str = Query("error,warning,info", description="Comma-separated levels to include"),
+    limit: int = Query(200, ge=1, le=2000, description="Max lines to return"),
+):
+    """Return merged, time-sorted log lines from per-level ring files."""
+    if service not in _SERVICE_LOG_MAP:
+        from starlette.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Unknown service '{service}'. Available: {list(_SERVICE_LOG_MAP.keys())}"},
+        )
+
+    # Resolve the ring-buffer directory for this service
+    ring_dir_name = _SERVICE_RING_DIR_MAP.get(service, service)
+    base_log_path = _SERVICE_LOG_MAP[service]
+    base_dir = Path(base_log_path).parent / ring_dir_name
+
+    requested = [l.strip().lower() for l in levels.split(",") if l.strip()]
+    merged = []
+    for level in requested:
+        path = base_dir / f"{level}.log"
+        if path.is_file():
+            try:
+                for line in path.read_text(errors="replace").splitlines():
+                    if line.strip():
+                        merged.append({"text": line, "level": level})
+            except OSError:
+                pass
+
+    # Sort by timestamp prefix (ISO-8601 at start of line)
+    merged.sort(key=lambda x: x["text"][:30])
+
+    return {
+        "service": service,
+        "levels": requested,
+        "total": len(merged),
+        "lines": merged[-limit:],
     }
 
 

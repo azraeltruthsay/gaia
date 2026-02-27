@@ -5,6 +5,7 @@ Self Reflection Processor (model-powered, robust pipeline)
 - Used for post-response reflection in manager.py or external_voice.py pipeline.
 """
 
+import concurrent.futures
 import logging
 import os
 import time
@@ -31,6 +32,8 @@ file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s 
 logger.addHandler(file_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+_REFLECTION_LLM_TIMEOUT = float(os.getenv("REFLECTION_LLM_TIMEOUT", "8"))
 
 def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethical_sentinel) -> str:
     """
@@ -100,11 +103,23 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
     for i in range(iterations):
         t_iter_start = time.perf_counter()
         try:
-            raw = llm.create_chat_completion(
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=getattr(config, 'reflection_temperature', 0.3)
-            )
+            def _reflect_llm(msgs=messages, mt=max_tokens, temp=getattr(config, 'reflection_temperature', 0.3)):
+                return llm.create_chat_completion(
+                    messages=msgs, max_tokens=mt, temperature=temp
+                )
+
+            _refl_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _refl_future = _refl_executor.submit(_reflect_llm)
+            try:
+                raw = _refl_future.result(timeout=_REFLECTION_LLM_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                _refl_future.cancel()
+                _refl_executor.shutdown(wait=False)
+                logger.warning("SelfReflection: LLM call timed out on iteration %d after %.0fs — aborting reflection loop", i, _REFLECTION_LLM_TIMEOUT)
+                raw = None
+                break
+            finally:
+                _refl_executor.shutdown(wait=False)
         except Exception as e:
             logger.error(f"SelfReflection: LLM call failed on iteration {i}: {e}", exc_info=True)
             raw = None
@@ -244,15 +259,29 @@ def run_self_reflection(packet: CognitionPacket, output: str, config=None, llm=N
 
     if llm:
         try:
-            result = llm.create_chat_completion(
-                messages=messages,
-                temperature=0.3,
-                top_p=0.7,
-                max_tokens=256,
-                stream=False
-            )
+            def _standalone_reflect():
+                return llm.create_chat_completion(
+                    messages=messages,
+                    temperature=0.3,
+                    top_p=0.7,
+                    max_tokens=256,
+                    stream=False
+                )
+
+            _sa_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _sa_future = _sa_executor.submit(_standalone_reflect)
+            try:
+                result = _sa_future.result(timeout=_REFLECTION_LLM_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                _sa_future.cancel()
+                _sa_executor.shutdown(wait=False)
+                logger.warning("SelfReflection (standalone): LLM call timed out after %.0fs", _REFLECTION_LLM_TIMEOUT)
+                return None
+            finally:
+                _sa_executor.shutdown(wait=False)
+
             reflection = result["choices"][0]["message"]["content"].strip()
-            logger.info(f"🪞 Model-powered self-reflection: {reflection[:100]}...")
+            logger.info(f"Model-powered self-reflection: {reflection[:100]}...")
             return reflection
         except Exception as e:
             logger.error(f"Self-reflection LLM error: {e}")

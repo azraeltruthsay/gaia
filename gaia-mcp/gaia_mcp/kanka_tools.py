@@ -241,13 +241,54 @@ def kanka_list_campaigns(params: dict) -> dict:
     }
 
 
+def _resolve_campaign_id(params: dict) -> int:
+    """Resolve campaign_id from params, supporting both ID and name lookup.
+
+    Accepts:
+        campaign_id (int)  — used directly
+        campaign (str)     — fuzzy-matched against accessible campaign names
+    Falls back to _DEFAULT_CAMPAIGN_ID if neither is provided.
+    """
+    # Explicit ID takes priority
+    cid = params.get("campaign_id")
+    if cid is not None:
+        return int(cid)
+
+    # Name-based lookup
+    name = (params.get("campaign") or "").strip()
+    if not name:
+        return _DEFAULT_CAMPAIGN_ID
+
+    client = _get_client()
+    result = client.get("campaigns", cache_ttl=600)
+    if isinstance(result, dict) and result.get("ok") is False:
+        logger.warning("Campaign lookup failed, using default: %s", result)
+        return _DEFAULT_CAMPAIGN_ID
+
+    campaigns = result.get("data", [])
+    name_lower = name.lower()
+    # Exact match first
+    for c in campaigns:
+        if (c.get("name") or "").lower() == name_lower:
+            logger.info("Resolved campaign '%s' → ID %s", name, c["id"])
+            return c["id"]
+    # Substring match
+    for c in campaigns:
+        if name_lower in (c.get("name") or "").lower():
+            logger.info("Resolved campaign '%s' (substring) → ID %s (%s)", name, c["id"], c["name"])
+            return c["id"]
+
+    logger.warning("Campaign '%s' not found, using default %s", name, _DEFAULT_CAMPAIGN_ID)
+    return _DEFAULT_CAMPAIGN_ID
+
+
 def kanka_search(params: dict) -> dict:
     """Search across all entity types within a campaign."""
     query = (params.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
 
-    campaign_id = params.get("campaign_id", _DEFAULT_CAMPAIGN_ID)
+    campaign_id = _resolve_campaign_id(params)
     client = _get_client()
 
     result = client.get(f"campaigns/{campaign_id}/search/{query}", cache_ttl=120)
@@ -278,7 +319,7 @@ def kanka_search(params: dict) -> dict:
 def kanka_list_entities(params: dict) -> dict:
     """List entities of a given type, with optional name filter and pagination."""
     entity_type = _validate_entity_type(params.get("entity_type") or "")
-    campaign_id = params.get("campaign_id", _DEFAULT_CAMPAIGN_ID)
+    campaign_id = _resolve_campaign_id(params)
     name_filter = params.get("name")
     page = int(params.get("page", 1))
 
@@ -322,7 +363,7 @@ def kanka_get_entity(params: dict) -> dict:
     """Get a specific entity by type and ID, optionally with related data."""
     entity_type = _validate_entity_type(params.get("entity_type") or "")
     entity_id = params.get("entity_id")
-    campaign_id = params.get("campaign_id", _DEFAULT_CAMPAIGN_ID)
+    campaign_id = _resolve_campaign_id(params)
     include_related = params.get("related", False)
 
     if not entity_id:
@@ -351,7 +392,7 @@ def kanka_get_entity(params: dict) -> dict:
 def kanka_create_entity(params: dict) -> dict:
     """Create a new entity in a Kanka campaign. Requires approval."""
     entity_type = _validate_entity_type(params.get("entity_type") or "")
-    campaign_id = params.get("campaign_id", _DEFAULT_CAMPAIGN_ID)
+    campaign_id = _resolve_campaign_id(params)
     name = (params.get("name") or "").strip()
     entry = params.get("entry", "")
     extra_fields = params.get("fields", {})
@@ -385,7 +426,7 @@ def kanka_update_entity(params: dict) -> dict:
     """Update an existing entity. Requires approval."""
     entity_type = _validate_entity_type(params.get("entity_type") or "")
     entity_id = params.get("entity_id")
-    campaign_id = params.get("campaign_id", _DEFAULT_CAMPAIGN_ID)
+    campaign_id = _resolve_campaign_id(params)
     fields = params.get("fields", {})
 
     if not entity_id:

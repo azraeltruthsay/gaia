@@ -27,7 +27,7 @@ services:
       - ./gaia-common:/gaia-common:ro
     environment:
       - GAIA_ENV=development
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Enable uvicorn reload
     command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core"]
 
@@ -49,7 +49,7 @@ services:
       - ./gaia-common:/gaia-common:ro
     environment:
       - GAIA_ENV=development
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Enable uvicorn reload
     command: ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414", "--reload", "--reload-dir", "/app/gaia_web"]
 
@@ -69,7 +69,7 @@ services:
       - ./gaia-common:/gaia-common:ro
     environment:
       - GAIA_ENV=development
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Enable uvicorn reload
     command: ["python", "-m", "uvicorn", "gaia_study.main:app", "--host", "0.0.0.0", "--port", "8766", "--reload", "--reload-dir", "/app/gaia_study"]
 
@@ -89,6 +89,6 @@ services:
       - ./gaia-common:/gaia-common:ro
     environment:
       - GAIA_ENV=development
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Enable uvicorn reload
     command: ["python", "-m", "uvicorn", "gaia_mcp.main:app", "--host", "0.0.0.0", "--port", "8765", "--reload", "--reload-dir", "/app/gaia_mcp"]

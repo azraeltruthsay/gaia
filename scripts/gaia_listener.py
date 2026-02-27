@@ -580,6 +580,7 @@ class AudioListener:
         }
         if self._transcript_buffer:
             status["last_transcript_preview"] = self._transcript_buffer[-1][:200]
+            status["transcript_log"] = list(self._transcript_buffer)
         if extra:
             status.update(extra)
         _write_status(self.status_path, status)

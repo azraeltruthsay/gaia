@@ -12,6 +12,7 @@ Environment:
 
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, Generator, List, Optional
 
@@ -47,6 +48,13 @@ class VLLMRemoteModel:
 
         self.timeout = int(model_config.get("timeout", 120))
 
+        # Context window size for auto-clamping max_tokens
+        self.max_model_len = int(
+            model_config.get("max_model_len")
+            or model_config.get("context_length")
+            or os.getenv("VLLM_MAX_MODEL_LEN", "8192")
+        )
+
         # LoRA support
         self._lora_config = model_config.get("lora_config") or {}
         self._active_adapter: Optional[str] = None
@@ -64,6 +72,34 @@ class VLLMRemoteModel:
             self.model_name,
         )
 
+    # ── Token clamping ────────────────────────────────────────────────────────
+
+    def _estimate_prompt_tokens(self, text_or_messages) -> int:
+        """Rough token estimate (~3.5 chars/token for English, use 3 to overestimate)."""
+        if isinstance(text_or_messages, str):
+            return len(text_or_messages) // 3 + 4
+        # List of message dicts
+        total_chars = sum(len(m.get("content", "")) for m in text_or_messages)
+        return total_chars // 3 + len(text_or_messages) * 4  # +4/msg for role overhead
+
+    def _clamp_max_tokens(self, max_tokens: int, estimated_prompt: int) -> int:
+        """Clamp max_tokens to fit within context window. Returns clamped value."""
+        available = self.max_model_len - estimated_prompt
+        if available <= 0:
+            logger.warning(
+                "Estimated prompt (%d tokens) fills context window (%d) — forcing max_tokens=1",
+                estimated_prompt, self.max_model_len,
+            )
+            return 1
+        if max_tokens > available:
+            clamped = max(1, available - 32)  # small safety margin
+            logger.warning(
+                "Clamping max_tokens %d → %d (est. prompt: %d, context: %d)",
+                max_tokens, clamped, estimated_prompt, self.max_model_len,
+            )
+            return clamped
+        return max_tokens
+
     # ── Public interface (matches VLLMChatModel) ─────────────────────────────
 
     def create_completion(
@@ -78,6 +114,7 @@ class VLLMRemoteModel:
     ) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]:
         """Text completion via POST /v1/completions."""
         self._request_count += 1
+        max_tokens = self._clamp_max_tokens(max_tokens, self._estimate_prompt_tokens(prompt))
         payload = {
             "model": self._resolve_model_field(),
             "prompt": prompt,
@@ -130,6 +167,7 @@ class VLLMRemoteModel:
         """
         self._request_count += 1
         clean_messages = self._sanitize_messages(messages)
+        max_tokens = self._clamp_max_tokens(max_tokens, self._estimate_prompt_tokens(clean_messages))
 
         payload = {
             "model": self._resolve_model_field(),
@@ -228,7 +266,7 @@ class VLLMRemoteModel:
     _MAX_RETRIES = 3
     _RETRY_BASE_DELAY = 1.5  # seconds; delays: 1.5s, 3.0s
 
-    def _post(self, path: str, payload: dict) -> dict:
+    def _post(self, path: str, payload: dict, _allow_clamp_retry: bool = True) -> dict:
         url = f"{self.endpoint}{path}"
         last_exc: Optional[Exception] = None
 
@@ -261,7 +299,20 @@ class VLLMRemoteModel:
                     f"Is gaia-prime running?"
                 ) from exc
             except requests.exceptions.HTTPError as exc:
-                # Don't retry 4xx — those are client errors
+                # Smart retry for context window overflow: parse exact available tokens
+                if r.status_code == 400 and _allow_clamp_retry:
+                    error_text = (r.text or "")[:500]
+                    m = re.search(r"max_tokens\s+\d+\s*>\s*(\d+)\s*-\s*(\d+)", error_text)
+                    if m:
+                        available = int(m.group(1)) - int(m.group(2))
+                        if available > 0:
+                            clamped = max(1, available - 16)
+                            logger.warning(
+                                "vLLM context overflow — retrying with max_tokens=%d (was %d)",
+                                clamped, payload.get("max_tokens", 0),
+                            )
+                            payload["max_tokens"] = clamped
+                            return self._post(path, payload, _allow_clamp_retry=False)
                 logger.error("vLLM HTTP error %s: %s", r.status_code, r.text[:500])
                 raise RuntimeError(f"vLLM request failed ({r.status_code})") from exc
 

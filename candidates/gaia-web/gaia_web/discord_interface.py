@@ -109,6 +109,14 @@ class DiscordInterface:
             logger.info("Discord bot presence set, bot is READY")
 
         @bot.event
+        async def on_disconnect():
+            logger.warning("Discord bot disconnected — discord.py will attempt reconnect")
+
+        @bot.event
+        async def on_resumed():
+            logger.info("Discord bot session resumed")
+
+        @bot.event
         async def on_message(message):
             if message.author == bot.user:
                 return
@@ -264,6 +272,8 @@ class DiscordInterface:
 
         try:
             await bot.start(self.bot_token)
+        except asyncio.CancelledError:
+            logger.warning("Discord bot cancelled (CancelledError) — will restart via watchdog")
         except Exception as e:
             logger.error(f"Discord bot error: {e}")
 
@@ -813,17 +823,28 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
     def run_bot():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(interface.start())
-        except Exception as e:
-            logger.error(f"Discord bot thread error: {e}")
-        finally:
-            loop.close()
+        backoff = 5
+        max_backoff = 60
+        while True:
+            started_at = time.time()
+            try:
+                loop.run_until_complete(interface.start())
+                # Clean exit via stop_discord_bot()
+                break
+            except Exception as e:
+                logger.error(f"Discord bot error: {e} — reconnecting in {backoff}s")
+            # Reset backoff if bot ran for >60s (stable session, not a crash loop)
+            if time.time() - started_at > 60:
+                backoff = 5
+            time.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+            logger.info("Discord bot watchdog: restarting...")
+        loop.close()
 
     thread = threading.Thread(target=run_bot, daemon=True, name="discord-bot")
     thread.start()
 
-    logger.info("Discord bot started in background thread")
+    logger.info("Discord bot started in background thread (with watchdog)")
     return True
 
 
@@ -831,11 +852,11 @@ def stop_discord_bot():
     """Stop the Discord bot."""
     global _bot, _bot_loop
     if _bot and _bot_loop and not _bot_loop.is_closed():
+        future = asyncio.run_coroutine_threadsafe(_bot.close(), _bot_loop)
         try:
-            asyncio.run_coroutine_threadsafe(_bot.close(), _bot_loop)
-            logger.info("Discord bot stopped")
+            future.result(timeout=10.0)  # Wait for clean close
         except Exception as e:
-            logger.error(f"Error stopping Discord bot: {e}")
+            logger.warning(f"Error during bot close: {e}")
     _bot = None
     _bot_loop = None
 
