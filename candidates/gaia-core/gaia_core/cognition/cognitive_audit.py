@@ -14,9 +14,13 @@ Output format (256 tokens max, regex-parsed):
     NEXT: Reflection should address the missing error-handling step
 """
 
+import concurrent.futures
 import logging
+import os
 import re
 import time
+
+_AUDIT_LLM_TIMEOUT = float(os.getenv("AUDIT_LLM_TIMEOUT", "8"))
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket,
@@ -165,12 +169,24 @@ def run_cognitive_self_audit(
         # Always restore the original prompt
         packet.content.original_prompt = original_prompt
 
-    # Call the LLM
-    raw = llm.create_chat_completion(
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
+    # Call the LLM (with timeout to avoid blocking the event loop)
+    def _audit_llm():
+        return llm.create_chat_completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    _audit_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    _audit_future = _audit_exec.submit(_audit_llm)
+    try:
+        raw = _audit_future.result(timeout=_AUDIT_LLM_TIMEOUT)
+    except concurrent.futures.TimeoutError:
+        _audit_future.cancel()
+        logger.warning("CognitiveAudit: LLM call timed out after %.0fs — skipping audit", _AUDIT_LLM_TIMEOUT)
+        return
+    finally:
+        _audit_exec.shutdown(wait=False)
 
     # Extract text from response
     text = ""

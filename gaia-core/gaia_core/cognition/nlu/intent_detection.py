@@ -566,7 +566,7 @@ _VALID_INTENTS = {
 }
 
 
-def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None):
+def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
     """
     Multi-stage intent detection with graceful fallback.
 
@@ -581,6 +581,13 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         probe_context: Optional domain hint from semantic probe
         embed_model: Optional SentenceTransformer for embedding classification
     """
+    # Long messages (>2000 chars) likely contain pasted content.  Intent
+    # should be inferred from the user's request (beginning + end) not the
+    # bulk of the pasted text, which can contain file-like keywords that
+    # confuse heuristic and embedding classifiers.
+    if len(text) > 2000:
+        text = text[:1500] + "\n...\n" + text[-500:]
+
     # ── Stage 1: Fast-track conversational intents ──
     fast_track_intent = _fast_track_intent_detection(text)
     if fast_track_intent:
@@ -588,7 +595,11 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         return fast_track_intent
 
     # ── Stage 2: NLU heuristics (no model needed) ──
-    if _detect_fragmentation_request(text):
+    # Skip fragmentation detection for heartbeat-sourced inputs — expanded
+    # thought seeds contain academic/literary keywords that false-positive
+    # as recitation requests, causing tool-call loops (web search on the
+    # entire expanded prompt).
+    if source != "heartbeat" and _detect_fragmentation_request(text):
         logger.info("NLU fragmentation detection: recitation intent detected")
         return "recitation"
 
@@ -759,7 +770,7 @@ def _parse_llm_intent_response(content: str) -> str:
     return "other"
 
 # ---- Unified entrypoint ----
-def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None) -> Plan:
+def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source="") -> Plan:
     """
     Detects intent using reflex path, else LLM.
     Returns a Plan object.
@@ -777,7 +788,7 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
     intent_str = fast_intent_check(text)
     if not intent_str:
         # 2. LLM path (with embedding fallback)
-        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model)
+        intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model, source=source)
     
     read_only_intents = {"read_file", "explain_file", "explain_symbol"}
     plan = Plan(intent=intent_str, read_only=intent_str in read_only_intents)

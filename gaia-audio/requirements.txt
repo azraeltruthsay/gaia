@@ -21,6 +21,7 @@ scipy
 
 # GPU management
 torch>=2.0.0
+torchaudio>=2.0.0
 
 # Vision prep (Phase 4)
 opencv-python-headless

@@ -26,7 +26,9 @@ from gaia_web.routes.voice import router as voice_router
 from gaia_web.routes.wiki import router as wiki_router
 from gaia_web.routes.generation import router as generation_router
 from gaia_web.routes.logs import router as logs_router
+from gaia_web.routes.audio import router as audio_router
 from gaia_web.routes.discord import router as discord_router
+from gaia_web.routes.consent import router as consent_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -82,6 +84,7 @@ app = FastAPI(
 )
 
 # API routers (must be before static mount)
+app.include_router(audio_router)
 app.include_router(blueprints_router)
 app.include_router(files_router)
 app.include_router(hooks_router)
@@ -91,6 +94,7 @@ app.include_router(wiki_router)
 app.include_router(generation_router)
 app.include_router(logs_router)
 app.include_router(discord_router)
+app.include_router(consent_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"

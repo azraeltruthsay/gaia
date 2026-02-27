@@ -68,7 +68,9 @@ document.addEventListener('alpine:init', () => {
       { id: 'hooks', label: 'Commands' },
       { id: 'files', label: 'Files' },
       { id: 'knowledge', label: 'Knowledge' },
+      { id: 'audio', label: 'Audio' },
       { id: 'terminal', label: 'Terminal' },
+      { id: 'consent', label: 'Consent' },
       { id: 'logs', label: 'Logs' },
     ],
     switchView(viewName) {
@@ -698,6 +700,180 @@ function voiceWidget() {
         await fetch('/api/voice/disconnect', { method: 'POST' });
         await this.pollStatus();
       } catch { /* silently fail */ }
+    },
+  };
+}
+
+// ── Audio Listener Panel Component ────────────────────────────────────────────
+
+const AL_POLL_INTERVAL = 3000;
+
+function audioListenerPanel() {
+  return {
+    status: null,
+    mode: 'passive',
+    saveAudio: true,
+    compress: true,
+    ingestSource: '',
+    actionLog: [],
+    _pollTimer: null,
+    _nextId: 0,
+
+    init() {
+      this.$watch('$store.nav.currentView', (view) => {
+        if (view === 'audio') {
+          this.pollStatus();
+          if (!this._pollTimer) {
+            this._pollTimer = setInterval(() => this.pollStatus(), AL_POLL_INTERVAL);
+          }
+        } else if (this._pollTimer) {
+          clearInterval(this._pollTimer);
+          this._pollTimer = null;
+        }
+      });
+    },
+
+    destroy() {
+      if (this._pollTimer) clearInterval(this._pollTimer);
+    },
+
+    get isCapturing() {
+      return this.status?.capturing === true;
+    },
+
+    get isRunning() {
+      return this.status?.running === true;
+    },
+
+    get statusBadge() {
+      if (!this.status) return 'offline';
+      if (this.status.capturing) return 'capturing';
+      if (this.status.running) return 'idle';
+      return 'offline';
+    },
+
+    get statusBadgeClass() {
+      return 'al-badge al-badge-' + this.statusBadge;
+    },
+
+    get backend() {
+      return this.status?.backend || '--';
+    },
+
+    get uptime() {
+      return this.status?.uptime_seconds ? formatDuration(this.status.uptime_seconds) : '--';
+    },
+
+    get chunks() {
+      return this.status?.transcript_buffer_size ?? 0;
+    },
+
+    get recordingFile() {
+      if (!this.status?.recording_file) return '--';
+      const parts = this.status.recording_file.split('/');
+      return parts[parts.length - 1] || '--';
+    },
+
+    get transcriptLog() {
+      return this.status?.transcript_log || [];
+    },
+
+    get transcriptText() {
+      return this.transcriptLog.join('\n');
+    },
+
+    logEntry(action, result, isError) {
+      this.actionLog.push({
+        id: this._nextId++,
+        time: new Date().toLocaleTimeString(),
+        action,
+        result,
+        isError,
+      });
+      if (this.actionLog.length > 50) this.actionLog.splice(0, this.actionLog.length - 50);
+    },
+
+    async pollStatus() {
+      try {
+        const resp = await fetch('/api/audio/listener/status');
+        if (resp.ok) {
+          this.status = await resp.json();
+        }
+      } catch {
+        this.status = null;
+      }
+    },
+
+    async startListener() {
+      this.logEntry('start', 'sending...', false);
+      try {
+        const resp = await fetch('/api/audio/listener/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: this.mode,
+            save_audio: this.saveAudio,
+            compress: this.compress,
+          }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.logEntry('start', `ok (mode=${this.mode}, save=${this.saveAudio}, compress=${this.compress})`, false);
+        } else {
+          this.logEntry('start', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (err) {
+        this.logEntry('start', `Connection error: ${err.message}`, true);
+      }
+      setTimeout(() => this.pollStatus(), 1000);
+    },
+
+    async stopListener() {
+      this.logEntry('stop', 'sending...', false);
+      try {
+        const resp = await fetch('/api/audio/listener/stop', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.logEntry('stop', 'ok', false);
+        } else {
+          this.logEntry('stop', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (err) {
+        this.logEntry('stop', `Connection error: ${err.message}`, true);
+      }
+      setTimeout(() => this.pollStatus(), 1000);
+    },
+
+    clearTranscript() {
+      // Clear is local-only (transcript log comes from daemon status)
+      if (this.status) {
+        this.status.transcript_log = [];
+      }
+    },
+
+    async ingestTranscript() {
+      const text = this.transcriptText;
+      if (!text.trim()) {
+        this.logEntry('ingest', 'No transcript to send', true);
+        return;
+      }
+      const source = this.ingestSource.trim() || 'Audio Listener';
+      this.logEntry('ingest', `sending ${text.length} chars...`, false);
+      try {
+        const resp = await fetch('/api/audio/listener/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript: text, source }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.logEntry('ingest', `ok (${data.chars} chars sent to gaia-core)`, false);
+        } else {
+          this.logEntry('ingest', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (err) {
+        this.logEntry('ingest', `Connection error: ${err.message}`, true);
+      }
     },
   };
 }
@@ -1488,9 +1664,12 @@ function serviceLogsPanel() {
     connected: false,
     service: 'core',
     _es: null,
+    // Level filter state
+    mode: 'live',                  // 'live' (SSE stream) or 'filtered' (per-level ring files)
+    levelFilters: { error: true, warning: true, info: false, debug: false },
+    _filterLoading: false,
 
     init() {
-      // Read initial service from parent scope if available
       this.$nextTick(() => this._connect());
     },
 
@@ -1502,7 +1681,53 @@ function serviceLogsPanel() {
       if (svc === this.service && this.connected) return;
       this.service = svc;
       this.lines = [];
-      this._connect();
+      if (this.mode === 'filtered') {
+        this._fetchFiltered();
+      } else {
+        this._connect();
+      }
+    },
+
+    toggleLevel(level) {
+      this.levelFilters[level] = !this.levelFilters[level];
+      // If any filter is active, switch to filtered mode
+      const anyActive = Object.values(this.levelFilters).some(v => v);
+      if (!anyActive) {
+        // Reset to live if nothing selected
+        this.levelFilters = { error: true, warning: true, info: false, debug: false };
+      }
+      if (this.mode === 'filtered') {
+        this._fetchFiltered();
+      }
+    },
+
+    setMode(m) {
+      this.mode = m;
+      this.lines = [];
+      if (m === 'live') {
+        this._connect();
+      } else {
+        if (this._es) { this._es.close(); this._es = null; this.connected = false; }
+        this._fetchFiltered();
+      }
+    },
+
+    async _fetchFiltered() {
+      this._filterLoading = true;
+      const active = Object.entries(this.levelFilters)
+        .filter(([, v]) => v).map(([k]) => k);
+      if (!active.length) { this.lines = []; this._filterLoading = false; return; }
+      try {
+        const resp = await fetch(
+          `/api/logs/levels?service=${this.service}&levels=${active.join(',')}&limit=1000`
+        );
+        const data = await resp.json();
+        this.lines = (data.lines || []).map(l => ({ text: l.text, level: l.level }));
+        this._autoScroll();
+      } catch (e) {
+        console.error('Failed to fetch filtered logs:', e);
+      }
+      this._filterLoading = false;
     },
 
     _connect() {
@@ -1549,6 +1774,260 @@ function serviceLogsPanel() {
       if (!el) return;
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       this.scrollLocked = atBottom;
+    },
+  };
+}
+
+// ── Consent Panel Component ────────────────────────────────────────────────
+
+const CT_POLL_INTERVAL = 30_000;
+
+function consentPanel() {
+  return {
+    library: null,
+    tiers: [],
+    selectedTier: '',
+    currentTests: [],
+    results: [],
+    stats: null,
+    selectedResult: null,
+    runningTest: null,
+    runningTier: false,
+    actionLog: [],
+    _pollTimer: null,
+    _nextId: 0,
+
+    init() {
+      this.$watch('$store.nav.currentView', (view) => {
+        if (view === 'consent') {
+          this.loadLibrary();
+          this.loadResults();
+          this.loadStats();
+          if (!this._pollTimer) {
+            this._pollTimer = setInterval(() => {
+              this.loadResults();
+              this.loadStats();
+            }, CT_POLL_INTERVAL);
+          }
+        } else if (this._pollTimer) {
+          clearInterval(this._pollTimer);
+          this._pollTimer = null;
+        }
+      });
+    },
+
+    destroy() {
+      if (this._pollTimer) clearInterval(this._pollTimer);
+    },
+
+    logEntry(action, result, isError) {
+      this.actionLog.push({
+        id: this._nextId++,
+        time: new Date().toLocaleTimeString(),
+        action,
+        result,
+        isError,
+      });
+      if (this.actionLog.length > 50) this.actionLog.splice(0, this.actionLog.length - 50);
+    },
+
+    // ── Library ────────────────────────────────────────────────────
+
+    async loadLibrary() {
+      try {
+        const resp = await fetch('/api/consent/library');
+        if (resp.ok) {
+          this.library = await resp.json();
+          this.tiers = Object.entries(this.library.tiers || {}).map(([key, val]) => ({
+            key,
+            label: val.label,
+            description: val.description,
+            tests: val.tests || [],
+          }));
+          if (this.tiers.length > 0 && !this.selectedTier) {
+            this.selectedTier = this.tiers[0].key;
+          }
+          this.updateCurrentTests();
+        }
+      } catch (err) {
+        this.logEntry('loadLibrary', `Error: ${err.message}`, true);
+      }
+    },
+
+    updateCurrentTests() {
+      const tier = this.tiers.find(t => t.key === this.selectedTier);
+      this.currentTests = tier ? tier.tests : [];
+    },
+
+    selectTier(tierKey) {
+      this.selectedTier = tierKey;
+      this.updateCurrentTests();
+    },
+
+    tierLabel(tierKey) {
+      const tier = this.tiers.find(t => t.key === tierKey);
+      return tier ? tier.label : tierKey;
+    },
+
+    // ── Run Tests ─────────────────────────────────────────────────
+
+    async runTest(testId) {
+      this.runningTest = testId;
+      this.logEntry('run', `${testId} — sending...`, false);
+      try {
+        const resp = await fetch('/api/consent/test/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ test_id: testId }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.selectedResult = data;
+          this.logEntry('run', `${testId} — ${data.classification}`, false);
+          this.loadResults();
+          this.loadStats();
+        } else {
+          this.logEntry('run', `${testId} — Error: ${data.error || resp.status}`, true);
+        }
+      } catch (err) {
+        this.logEntry('run', `${testId} — Connection error: ${err.message}`, true);
+      }
+      this.runningTest = null;
+    },
+
+    async runAllTier() {
+      this.runningTier = true;
+      this.logEntry('run-tier', `${this.selectedTier} — starting...`, false);
+      try {
+        const resp = await fetch('/api/consent/test/run-tier', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tier: this.selectedTier }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          const n = data.results?.length || 0;
+          this.logEntry('run-tier', `${this.selectedTier} — ${n} tests complete`, false);
+          if (data.results?.length > 0) {
+            this.selectedResult = data.results[data.results.length - 1];
+          }
+          this.loadResults();
+          this.loadStats();
+        } else {
+          this.logEntry('run-tier', `Error: ${data.error || resp.status}`, true);
+        }
+      } catch (err) {
+        this.logEntry('run-tier', `Connection error: ${err.message}`, true);
+      }
+      this.runningTier = false;
+    },
+
+    // ── Results ───────────────────────────────────────────────────
+
+    async loadResults() {
+      try {
+        const resp = await fetch('/api/consent/results?limit=25');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.results = data.results || [];
+        }
+      } catch { /* silent */ }
+    },
+
+    async loadStats() {
+      try {
+        const resp = await fetch('/api/consent/results/stats');
+        if (resp.ok) {
+          this.stats = await resp.json();
+        }
+      } catch { /* silent */ }
+    },
+
+    async viewResult(resultId) {
+      try {
+        const resp = await fetch(`/api/consent/results/${encodeURIComponent(resultId)}`);
+        if (resp.ok) {
+          this.selectedResult = await resp.json();
+        }
+      } catch (err) {
+        this.logEntry('view', `Error: ${err.message}`, true);
+      }
+    },
+
+    // ── Acknowledgment (Phase 2) ──────────────────────────────────
+
+    async acknowledgeResult() {
+      if (!this.selectedResult) return;
+      const resultId = this.selectedResult.result_id;
+      this.logEntry('acknowledge', `${resultId} — sending...`, false);
+      try {
+        const resp = await fetch('/api/consent/acknowledge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result_id: resultId }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.selectedResult = data;
+          this.logEntry('acknowledge', `${resultId} — acknowledged`, false);
+          this.loadResults();
+        } else {
+          this.logEntry('acknowledge', `Error: ${data.error || resp.status}`, true);
+        }
+      } catch (err) {
+        this.logEntry('acknowledge', `Connection error: ${err.message}`, true);
+      }
+    },
+
+    // ── Display helpers ───────────────────────────────────────────
+
+    classificationBadge(cls) {
+      const map = {
+        engage: 'ct-badge-engage',
+        refuse_with_reasoning: 'ct-badge-reasoning',
+        refuse: 'ct-badge-refuse',
+        refuse_and_flag: 'ct-badge-flag',
+        error: 'ct-badge-error',
+      };
+      return 'ct-badge ' + (map[cls] || 'ct-badge-unknown');
+    },
+
+    classificationLabel(cls) {
+      const map = {
+        engage: 'engaged',
+        refuse_with_reasoning: 'refuse + reasoning',
+        refuse: 'refuse',
+        refuse_and_flag: 'refuse + flag',
+        error: 'error',
+      };
+      return map[cls] || cls;
+    },
+
+    get statsSummary() {
+      if (!this.stats) return '--';
+      return `${this.stats.total} tests`;
+    },
+
+    get statsEngaged() {
+      if (!this.stats) return 0;
+      return this.stats.reasoning_quality?.engaged || 0;
+    },
+
+    get statsRuleCiting() {
+      if (!this.stats) return 0;
+      return this.stats.reasoning_quality?.rule_citing || 0;
+    },
+
+    truncate(text, len) {
+      if (!text) return '';
+      return text.length > len ? text.substring(0, len) + '...' : text;
+    },
+
+    formatTime(ts) {
+      if (!ts) return '--';
+      try {
+        return new Date(ts).toLocaleTimeString();
+      } catch { return ts; }
     },
   };
 }

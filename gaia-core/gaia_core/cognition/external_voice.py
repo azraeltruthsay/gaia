@@ -137,6 +137,13 @@ class ExternalVoice:
         """
 
         # ---- Direct model stream (no worker thread) --------------------
+        # Reset the streaming loop detector at the start of each turn so that
+        # boilerplate suffixes (e.g. THOUGHT_SEED trailers) from previous
+        # responses don't accumulate across turns and false-positive as
+        # phrase repetition loops.
+        if self._loop_detector_observer:
+            self._loop_detector_observer.reset()
+
         logger.info("ExternalVoice: starting create_chat_completion stream")
         try:
             msg_count = len(self.messages or [])

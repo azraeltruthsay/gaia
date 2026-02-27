@@ -78,6 +78,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "memory_rebuild_index": lambda p: _memory_rebuild_index_impl(p),
         "find_files": lambda p: _find_files_impl(p),
         "find_relevant_documents": lambda p: _find_relevant_documents(p),
+        "list_knowledge_bases": lambda p: _list_knowledge_bases_impl(p),
         # Response fragmentation tools
         "fragment_write": lambda p: _gaia_helper.fragment_write(
             parent_request_id=p.get("parent_request_id"),
@@ -278,6 +279,18 @@ def _list_files_impl(params: dict):
     return {"ok": True, "path": str(root_path), "max_depth": max_depth, "files": results, "truncated": truncated}
 
 
+def _list_knowledge_bases_impl(params: dict) -> dict:
+    """Return all configured knowledge bases and their doc directories."""
+    conf = Config()
+    kbs = conf.constants.get("KNOWLEDGE_BASES", {})
+    return {
+        "ok": True,
+        "knowledge_bases": {
+            name: {"doc_dir": cfg.get("doc_dir"), "description": cfg.get("description", "")}
+            for name, cfg in kbs.items()
+        }
+    }
+
 def _list_tree_impl(params: dict):
     """Produce a bounded directory tree with depth/entry limits."""
     root = params.get("path") or "/knowledge"
@@ -404,9 +417,18 @@ def _find_files_impl(params: dict):
     max_depth = max(1, min(max_depth, 8))
     max_results = max(1, min(max_results, 200))
 
-    allow_roots = [Path("/knowledge").resolve(), Path("/gaia-common").resolve(), Path("/sandbox").resolve()]
-    if not any(str(root).startswith(str(a)) for a in allow_roots):
-        raise ValueError("Root not allowed")
+    FIND_FILES_ALLOW_ROOTS = [
+        Path("/knowledge").resolve(),
+        Path("/gaia-common").resolve(),
+        Path("/sandbox").resolve(),
+    ]
+
+    if not any(str(root).startswith(str(a)) for a in FIND_FILES_ALLOW_ROOTS):
+        allowed_str = ", ".join(str(a) for a in FIND_FILES_ALLOW_ROOTS)
+        raise ValueError(
+            f"Root not allowed: '{root}'. "
+            f"find_files is restricted to: {allowed_str}"
+        )
     if not root.exists() or not root.is_dir():
         raise ValueError(f"{root} is not a directory")
 
@@ -452,8 +474,13 @@ def _find_relevant_documents(params: dict):
 
     if not kb_config:
         # Fallback: check if the user passed a direct path or if it's in a different config structure
-        logger.warning(f"Knowledge base '{knowledge_base_name}' not found in KNOWLEDGE_BASES config.")
-        return {"files": []}
+        available = list(knowledge_bases.keys())
+        logger.warning(f"Knowledge base '{knowledge_base_name}' not found. Available: {available}")
+        return {
+            "files": [],
+            "error": f"Knowledge base '{knowledge_base_name}' not found.",
+            "available_knowledge_bases": available  # ← tell the model what exists
+        }
 
     doc_dir = kb_config.get("doc_dir")
     

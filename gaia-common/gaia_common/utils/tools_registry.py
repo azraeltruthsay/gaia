@@ -127,17 +127,25 @@ TOOLS = {
         }
     },
     "find_files": {
-        "description": "Search for files whose names contain a query (case-insensitive, bounded depth).",
+        "description": (
+            "Search for files whose names contain a query string (case-insensitive). "
+            "Root must be one of: /knowledge, /gaia-common, /sandbox. "
+            "Defaults to /sandbox if root is not specified."
+        ),
         "params": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Substring to search for in filenames (e.g., 'dev_matrix')."},
-                "root": {"type": "string", "description": "Optional root path (default /gaia-assistant)."},
+                "root": {"type": "string", "description": "Optional root path (default /sandbox)."},
                 "max_depth": {"type": "integer", "description": "Maximum depth to traverse (default 5, max 8)."},
                 "max_results": {"type": "integer", "description": "Maximum number of results to return (default 50, max 200)."}
             },
             "required": ["query"]
         }
+    },
+    "list_knowledge_bases": {
+        "description": "List all configured knowledge bases and their locations. Call this before find_relevant_documents if you are unsure of the knowledge base name.",
+        "params": {}
     },
     "find_relevant_documents": {
         "description": "Finds documents relevant to a query within a specified knowledge base.",
@@ -349,12 +357,13 @@ TOOLS = {
         }
     },
     "kanka_search": {
-        "description": "Search across all entity types (characters, locations, items, etc.) within a Kanka campaign. Returns matching entities with type, ID, and name.",
+        "description": "Search across all entity types (characters, locations, items, etc.) within a Kanka campaign. Returns matching entities with type, ID, and name. Accepts campaign by name or ID.",
         "params": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search term to find entities by name or content."},
-                "campaign_id": {"type": "integer", "description": "Campaign ID to search in. Defaults to Dawn of An Age (36323)."}
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."}
             },
             "required": ["query"]
         }
@@ -369,7 +378,8 @@ TOOLS = {
                     "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
                     "description": "The type of entities to list."
                 },
-                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
                 "name": {"type": "string", "description": "Optional: filter entities whose name contains this string."},
                 "page": {"type": "integer", "description": "Page number for pagination (default 1)."}
             },
@@ -387,7 +397,8 @@ TOOLS = {
                     "description": "The type of entity to retrieve."
                 },
                 "entity_id": {"type": "integer", "description": "The entity's ID within its type."},
-                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
                 "related": {"type": "boolean", "description": "If true, include related data (posts, attributes, relations). Default false."}
             },
             "required": ["entity_type", "entity_id"]
@@ -405,7 +416,8 @@ TOOLS = {
                 },
                 "name": {"type": "string", "description": "Name/title of the new entity."},
                 "entry": {"type": "string", "description": "HTML body/description of the entity."},
-                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
                 "fields": {"type": "object", "description": "Optional type-specific fields (e.g., {\"date\": \"2024-01-15\"} for journals, {\"type\": \"NPC\"} for characters)."}
             },
             "required": ["entity_type", "name"]
@@ -422,7 +434,8 @@ TOOLS = {
                     "description": "The type of entity to update."
                 },
                 "entity_id": {"type": "integer", "description": "The entity's ID to update."},
-                "campaign_id": {"type": "integer", "description": "Campaign ID. Defaults to Dawn of An Age (36323)."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
                 "fields": {"type": "object", "description": "Fields to update (e.g., {\"name\": \"New Name\", \"entry\": \"<p>Updated description</p>\"})."}
             },
             "required": ["entity_type", "entity_id", "fields"]

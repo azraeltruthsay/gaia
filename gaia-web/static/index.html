@@ -402,6 +402,295 @@
     </div>
   </section>
 
+  <!-- ── Audio Listener View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'audio'" x-cloak>
+    <div class="al-panel" x-data="audioListenerPanel()">
+
+      <!-- Top row: Controls + Status -->
+      <div class="al-top">
+        <div class="al-controls">
+          <div class="al-section-header">
+            <span>Listener Control</span>
+            <span :class="statusBadgeClass" x-text="statusBadge"></span>
+          </div>
+          <div class="al-control-body">
+            <div class="al-control-col">
+              <div class="al-field-group">
+                <span class="al-field-label">Mode</span>
+                <label class="al-radio"><input type="radio" value="passive" x-model="mode"> Passive</label>
+                <label class="al-radio"><input type="radio" value="active" x-model="mode"> Active</label>
+              </div>
+              <div class="al-field-group">
+                <label class="al-checkbox"><input type="checkbox" x-model="saveAudio"> Save Audio</label>
+                <label class="al-checkbox"><input type="checkbox" x-model="compress"> Compress MP3</label>
+              </div>
+              <div class="al-actions">
+                <button class="hook-btn hook-btn-primary" @click="startListener()" :disabled="isCapturing">Start</button>
+                <button class="hook-btn hook-btn-danger" @click="stopListener()" :disabled="!isCapturing">Stop</button>
+              </div>
+            </div>
+            <div class="al-status-col">
+              <div class="al-status-row">
+                <span class="al-status-label">Backend</span>
+                <span class="al-status-value" x-text="backend"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Uptime</span>
+                <span class="al-status-value" x-text="uptime"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Chunks</span>
+                <span class="al-status-value" x-text="chunks"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Recording</span>
+                <span class="al-status-value al-status-file" x-text="recordingFile"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcript area -->
+      <div class="al-transcript-section">
+        <div class="al-section-header">
+          <span>Live Transcript</span>
+          <button class="al-clear-btn" @click="clearTranscript()">Clear</button>
+        </div>
+        <div class="al-transcript">
+          <template x-for="(line, idx) in transcriptLog" :key="idx">
+            <div class="al-transcript-line" x-text="line"></div>
+          </template>
+          <template x-if="transcriptLog.length === 0">
+            <div class="al-transcript-empty">No transcripts yet. Start the listener to capture audio.</div>
+          </template>
+        </div>
+        <div class="al-ingest-row">
+          <button class="hook-btn hook-btn-primary" @click="ingestTranscript()">Send to GAIA for Review</button>
+          <span class="al-ingest-label">Source:</span>
+          <input type="text" class="al-ingest-input" x-model="ingestSource" placeholder="Audio Listener" autocomplete="off">
+        </div>
+      </div>
+
+      <!-- Action Log -->
+      <div class="al-log-section">
+        <div class="al-section-header">Action Log</div>
+        <div class="al-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Consent Sovereignty View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'consent'" x-cloak>
+    <div class="ct-panel" x-data="consentPanel()">
+
+      <!-- Top row: Stats + Tier Selector -->
+      <div class="ct-top">
+        <div class="ct-controls">
+          <div class="al-section-header">
+            <span>Consent Test Engine</span>
+            <span class="ct-stats-badge" x-text="statsSummary"></span>
+          </div>
+          <div class="ct-control-body">
+            <div class="ct-tier-selector">
+              <span class="ct-field-label">Tier</span>
+              <div class="ct-tier-tabs">
+                <template x-for="tier in tiers" :key="tier.key">
+                  <button class="ct-tier-btn" :class="{ active: selectedTier === tier.key }"
+                          @click="selectTier(tier.key)" x-text="tier.label"></button>
+                </template>
+              </div>
+            </div>
+            <div class="ct-stats-row">
+              <div class="ct-stat">
+                <span class="ct-stat-label">Engaged</span>
+                <span class="ct-stat-value ct-stat-good" x-text="statsEngaged"></span>
+              </div>
+              <div class="ct-stat">
+                <span class="ct-stat-label">Rule-citing</span>
+                <span class="ct-stat-value ct-stat-warn" x-text="statsRuleCiting"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Test Library -->
+      <div class="ct-library-section">
+        <div class="al-section-header">
+          <span>Tests — <span x-text="tierLabel(selectedTier)"></span></span>
+          <button class="hook-btn hook-btn-primary" style="flex:0 0 auto;padding:4px 12px;font-size:11px;"
+                  @click="runAllTier()" :disabled="runningTier || runningTest">
+            <span x-show="!runningTier">Run All Tier</span>
+            <span x-show="runningTier">Running...</span>
+          </button>
+        </div>
+        <div class="ct-test-list">
+          <template x-for="test in currentTests" :key="test.id">
+            <div class="ct-test-card">
+              <div class="ct-test-info">
+                <span class="ct-test-id" x-text="test.id"></span>
+                <span class="ct-test-prompt" x-text="truncate(test.prompt, 100)"></span>
+              </div>
+              <div class="ct-test-tags">
+                <template x-for="tag in (test.tags || [])" :key="tag">
+                  <span class="ct-tag" x-text="tag"></span>
+                </template>
+              </div>
+              <button class="hook-btn hook-btn-primary ct-run-btn"
+                      @click="runTest(test.id)"
+                      :disabled="runningTest === test.id || runningTier">
+                <span x-show="runningTest !== test.id">Run</span>
+                <span x-show="runningTest === test.id">...</span>
+              </button>
+            </div>
+          </template>
+          <template x-if="currentTests.length === 0">
+            <div class="ct-empty">No tests in this tier.</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Main content: Result Detail + History side by side -->
+      <div class="ct-main">
+        <!-- Result Detail -->
+        <div class="ct-result-section">
+          <div class="al-section-header">
+            <span>Result Detail</span>
+          </div>
+          <template x-if="!selectedResult">
+            <div class="ct-empty">Run a test to see results here.</div>
+          </template>
+          <template x-if="selectedResult">
+            <div class="ct-result-detail">
+              <div class="ct-result-header">
+                <span class="ct-test-id" x-text="selectedResult.test_id"></span>
+                <span class="ct-tier-label" x-text="tierLabel(selectedResult.tier)"></span>
+                <span :class="classificationBadge(selectedResult.classification)"
+                      x-text="classificationLabel(selectedResult.classification)"></span>
+              </div>
+
+              <div class="ct-result-meta">
+                <span x-show="selectedResult.analysis?.identity_guardian_triggered" class="ct-meta-flag">Identity Guardian triggered</span>
+                <span class="ct-meta-item">Confidence: <strong x-text="(selectedResult.analysis?.confidence ?? 0).toFixed(2)"></strong></span>
+                <span class="ct-meta-item">Model: <strong x-text="selectedResult.analysis?.model_used || '--'"></strong></span>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Prompt</div>
+                <div class="ct-result-block-content" x-text="selectedResult.prompt"></div>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Evaluation Focus</div>
+                <div class="ct-result-block-content ct-muted" x-text="selectedResult.evaluation_focus"></div>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Response</div>
+                <div class="ct-result-block-content ct-response" x-text="selectedResult.actual_response || '(no response)'"></div>
+              </div>
+
+              <!-- Reasoning Quality Flags -->
+              <div class="ct-flags-row" x-show="selectedResult.analysis?.reasoning_quality">
+                <template x-if="selectedResult.analysis?.reasoning_quality?.green_flags_present?.length > 0">
+                  <div class="ct-flags-group ct-flags-green">
+                    <span class="ct-flags-label">Green Flags</span>
+                    <template x-for="flag in selectedResult.analysis.reasoning_quality.green_flags_present" :key="flag">
+                      <span class="ct-flag ct-flag-green" x-text="flag"></span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="selectedResult.analysis?.reasoning_quality?.red_flags_present?.length > 0">
+                  <div class="ct-flags-group ct-flags-red">
+                    <span class="ct-flags-label">Red Flags</span>
+                    <template x-for="flag in selectedResult.analysis.reasoning_quality.red_flags_present" :key="flag">
+                      <span class="ct-flag ct-flag-red" x-text="flag"></span>
+                    </template>
+                  </div>
+                </template>
+                <div class="ct-quality-indicators">
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.engaged_with_substance ? 'ct-qi-on' : 'ct-qi-off'">Engaged</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.cited_rules_as_reasoning ? 'ct-qi-warn' : 'ct-qi-off'">Rule-citing</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.acknowledged_complexity ? 'ct-qi-on' : 'ct-qi-off'">Complexity</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.traced_broader_consequences ? 'ct-qi-on' : 'ct-qi-off'">Coherence</span>
+                </div>
+              </div>
+
+              <!-- Acknowledgment -->
+              <template x-if="selectedResult.acknowledgment">
+                <div class="ct-result-block ct-ack-block">
+                  <div class="ct-result-block-label">GAIA's Reflection (Acknowledgment)</div>
+                  <div class="ct-result-block-content ct-response" x-text="selectedResult.acknowledgment.gaia_response || '(no reflection)'"></div>
+                </div>
+              </template>
+
+              <!-- Action Buttons -->
+              <div class="ct-result-actions">
+                <button class="hook-btn hook-btn-primary"
+                        @click="acknowledgeResult()"
+                        :disabled="!!selectedResult.acknowledgment"
+                        x-text="selectedResult.acknowledgment ? 'Acknowledged' : 'Acknowledge'">
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Results History -->
+        <div class="ct-history-section">
+          <div class="al-section-header">
+            <span>History</span>
+          </div>
+          <div class="ct-history-list">
+            <template x-for="r in results" :key="r.result_id">
+              <button class="ct-history-entry" :class="{ active: selectedResult?.result_id === r.result_id }"
+                      @click="viewResult(r.result_id)">
+                <span class="ct-history-time" x-text="formatTime(r.timestamp)"></span>
+                <span class="ct-history-id" x-text="r.test_id"></span>
+                <span :class="classificationBadge(r.classification)" x-text="classificationLabel(r.classification)"></span>
+                <span x-show="r.has_acknowledgment" class="ct-history-ack" title="Acknowledged">ack</span>
+              </button>
+            </template>
+            <template x-if="results.length === 0">
+              <div class="ct-empty">No results yet.</div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Log -->
+      <div class="ct-log-section">
+        <div class="al-section-header">Action Log</div>
+        <div class="al-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- ── Terminal View ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'terminal'" x-cloak>
     <div class="terminal-panel" x-data="terminalPanel()">
@@ -480,7 +769,21 @@
         <div class="gen-toolbar">
           <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
           <span class="logs-svc-label" x-text="service"></span>
+
+          <!-- Mode toggle -->
+          <button class="logs-mode-btn" :class="mode === 'live' ? 'active' : ''" @click="setMode('live')">Live</button>
+          <button class="logs-mode-btn" :class="mode === 'filtered' ? 'active' : ''" @click="setMode('filtered')">Filtered</button>
+
+          <!-- Level filter toggles (visible in both modes, controls filtering in 'filtered' mode) -->
+          <div class="logs-level-toggles">
+            <button class="logs-lvl-btn logs-lvl-error" :class="levelFilters.error ? 'active' : ''" @click="toggleLevel('error')">ERROR</button>
+            <button class="logs-lvl-btn logs-lvl-warn" :class="levelFilters.warning ? 'active' : ''" @click="toggleLevel('warning')">WARN</button>
+            <button class="logs-lvl-btn logs-lvl-info" :class="levelFilters.info ? 'active' : ''" @click="toggleLevel('info')">INFO</button>
+            <button class="logs-lvl-btn logs-lvl-debug" :class="levelFilters.debug ? 'active' : ''" @click="toggleLevel('debug')">DEBUG</button>
+          </div>
+
           <div style="flex:1"></div>
+          <button class="gen-clear-btn" x-show="mode === 'filtered'" @click="_fetchFiltered()">Refresh</button>
           <label class="gen-scroll-lock">
             <input type="checkbox" x-model="scrollLocked"> Auto-scroll
           </label>
@@ -490,7 +793,8 @@
           <template x-for="(line, idx) in lines" :key="idx">
             <div class="logs-line" :class="'logs-level-' + line.level" x-text="line.text"></div>
           </template>
-          <div class="gen-empty" x-show="lines.length === 0">Waiting for log events...</div>
+          <div class="gen-empty" x-show="lines.length === 0 && !_filterLoading" x-text="mode === 'live' ? 'Waiting for log events...' : 'No matching log lines.'"></div>
+          <div class="gen-empty" x-show="_filterLoading">Loading filtered logs...</div>
         </div>
       </div>
     </template>
