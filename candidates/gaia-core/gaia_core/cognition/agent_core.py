@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import regex as re
 import uuid
@@ -706,25 +707,66 @@ class AgentCore:
         except Exception:
             logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
 
-        # --- Persona & KB selection (probe-driven with keyword fallback) ---
-        if probe_result and probe_result.primary_collection:
-            # Probe found a dominant domain — adopt that persona
+        # --- Persona & KB selection (strength-gated with domain momentum) ---
+        probe_strength = getattr(probe_result, "probe_strength", "") if probe_result else ""
+
+        # Read domain momentum from session metadata
+        _momentum_min = constants.get("SEMANTIC_PROBE", {}).get("domain_momentum_min_turns", 2)
+        _last_domain = self.session_manager.get_session_meta(session_id, "last_domain", default=None)
+        _domain_turns = self.session_manager.get_session_meta(session_id, "domain_turn_count", default=0)
+
+        if probe_strength == "strong":
+            # High-confidence match — full persona + KB switch
             knowledge_base_name = probe_result.primary_collection
             persona_name = get_persona_for_knowledge_base(knowledge_base_name)
             if not persona_name:
-                # KB exists but no persona mapped to it — use default persona with the KB
                 persona_name = "dev"
             logger.info(
-                "Persona selection (probe-driven): persona=%s, kb=%s",
+                "Persona selection (probe STRONG): persona=%s, kb=%s",
                 persona_name, knowledge_base_name,
             )
+        elif probe_strength == "moderate":
+            # Mid-confidence — only switch if NOT leaving an established domain
+            proposed_kb = probe_result.primary_collection
+            if _last_domain and _last_domain != proposed_kb and _domain_turns >= _momentum_min:
+                # Domain momentum: stay in established domain, fall back to keywords
+                persona_name, knowledge_base_name = get_persona_for_request(user_input)
+                logger.info(
+                    "Persona selection (probe moderate, momentum override → keyword): "
+                    "persona=%s, kb=%s (was %s for %d turns)",
+                    persona_name, knowledge_base_name, _last_domain, _domain_turns,
+                )
+            else:
+                # No established domain or same domain — accept moderate match
+                knowledge_base_name = proposed_kb
+                persona_name = get_persona_for_knowledge_base(knowledge_base_name)
+                if not persona_name:
+                    persona_name = "dev"
+                logger.info(
+                    "Persona selection (probe MODERATE): persona=%s, kb=%s",
+                    persona_name, knowledge_base_name,
+                )
         else:
-            # No probe hits — fall back to keyword matching
+            # Weak or no probe hits — fall back to keyword matching
             persona_name, knowledge_base_name = get_persona_for_request(user_input)
-            logger.info(
-                "Persona selection (keyword fallback): persona=%s, kb=%s",
-                persona_name, knowledge_base_name,
-            )
+            if probe_strength == "weak":
+                logger.info(
+                    "Persona selection (probe weak → keyword fallback): persona=%s, kb=%s",
+                    persona_name, knowledge_base_name,
+                )
+            else:
+                logger.info(
+                    "Persona selection (keyword fallback): persona=%s, kb=%s",
+                    persona_name, knowledge_base_name,
+                )
+
+        # --- Domain momentum tracking ---
+        current_domain = knowledge_base_name or "general"
+        if current_domain == _last_domain:
+            self.session_manager.set_session_meta(session_id, "domain_turn_count", _domain_turns + 1)
+        else:
+            self.session_manager.set_session_meta(session_id, "domain_turn_count", 1)
+            self.session_manager.set_session_meta(session_id, "last_domain", current_domain)
 
         # Load the selected persona
         self.ai_manager.initialize(persona_name)
@@ -746,8 +788,15 @@ class AgentCore:
             if backend_env:
                 if backend_env == "gpu_prime" and _gpu_sleeping:
                     logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; using Council routing")
-                elif backend_env in self.model_pool.models:
-                    selected_model_name = backend_env
+                else:
+                    # Trigger lazy loading if model is configured but not yet in pool
+                    if backend_env not in self.model_pool.models:
+                        try:
+                            self.model_pool.ensure_model_loaded(backend_env)
+                        except Exception as e:
+                            logger.warning("Lazy load of GAIA_BACKEND='%s' failed: %s", backend_env, e)
+                    if backend_env in self.model_pool.models:
+                        selected_model_name = backend_env
 
         # 3. Council routing with thinker override
         if not selected_model_name:
@@ -760,6 +809,11 @@ class AgentCore:
             elif not _gpu_sleeping:
                 # Prime is awake -- default to Prime for all prompts
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                    if cand not in self.model_pool.models:
+                        try:
+                            self.model_pool.ensure_model_loaded(cand)
+                        except Exception:
+                            pass
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
@@ -1157,6 +1211,7 @@ class AgentCore:
                 fallback_llm=fallback_llm,
                 probe_context=_probe_context,
                 embed_model=_embed_model,
+                source=source,
             )
         finally:
             # Use role-aware release via ModelPool API; let exceptions be logged but
@@ -1294,6 +1349,7 @@ class AgentCore:
         # Use ModelPool.forward_to_model to centralize acquisition, wrapping,
         # and release semantics (this avoids directly invoking backend objects
         # that may bypass our SafeModelProxy protections).
+        _PLANNING_TIMEOUT = float(os.getenv("PLANNING_LLM_TIMEOUT", "15"))
         logger.warning("AgentCore: entering planning call with model=%s", selected_model_name)
         try:
             # Release any earlier acquisition so forward_to_model manages lifecycle.
@@ -1301,13 +1357,27 @@ class AgentCore:
                 self.model_pool.release_model(selected_model_name)
             except Exception:
                 pass
-            plan_res = self.model_pool.forward_to_model(
-                selected_model_name,
-                messages=plan_messages,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
-            )
+
+            def _planning_call():
+                return self.model_pool.forward_to_model(
+                    selected_model_name,
+                    messages=plan_messages,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    top_p=self.config.top_p,
+                )
+
+            _plan_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _plan_future = _plan_exec.submit(_planning_call)
+            try:
+                plan_res = _plan_future.result(timeout=_PLANNING_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                _plan_future.cancel()
+                _plan_exec.shutdown(wait=False)
+                logger.warning("AgentCore: planning call timed out after %.0fs — using empty plan", _PLANNING_TIMEOUT)
+                plan_res = {"choices": [{"message": {"content": ""}}]}
+            finally:
+                _plan_exec.shutdown(wait=False)
         except Exception as exc:
             logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
             yield {"type": "token", "value": f"[plan-error] {type(exc).__name__}: {exc}"}
@@ -1395,8 +1465,23 @@ class AgentCore:
                     reflection_model = self.model_pool.acquire_model_for_role(reflection_model_name)
             if reflection_model is None:
                 reflection_model = selected_model
+        _REFLECTION_TOTAL_TIMEOUT = float(os.getenv("REFLECTION_TOTAL_TIMEOUT", "15"))
         try:
-            refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
+            def _run_reflect():
+                return reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
+
+            _refl_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _refl_future = _refl_exec.submit(_run_reflect)
+            try:
+                refined_plan_text = _refl_future.result(timeout=_REFLECTION_TOTAL_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                _refl_future.cancel()
+                _refl_exec.shutdown(wait=False)
+                logger.warning("AgentCore: reflect_and_refine timed out after %.0fs — skipping reflection", _REFLECTION_TOTAL_TIMEOUT)
+                refined_plan_text = initial_plan_text
+            finally:
+                _refl_exec.shutdown(wait=False)
+
             # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
             try:
                 packet.reasoning.reflection_log.append(ReflectionLog(step="refined_plan", summary=refined_plan_text, confidence=0.88))
@@ -1817,35 +1902,51 @@ class AgentCore:
                         )
             # ── End think-tag recovery ────────────────────────────────────
 
+            _POST_OBSERVER_TIMEOUT = float(os.getenv("POST_OBSERVER_TIMEOUT", "8"))
+
             if post_run_observer and not disable_observer:
                 try:
-                    review = post_run_observer.observe(packet, full_response)
-                    note = f"[Observer] {review.level.upper()}: {review.reason}"
-                    if review.suggestion:
-                        note += f" | Suggestion: {review.suggestion}"
-                    logger.info("Post-stream observer review: %s", note)
-                    if self.config.constants.get("OBSERVER_SHOW_IN_RESPONSE", True):
-                        yield {"type": "token", "value": f"\n\n{note}\n"}
+                    def _run_observer():
+                        return post_run_observer.observe(packet, full_response)
 
-                    # Scrub confabulated file references from the response.
-                    # The observer catches fake paths at CAUTION level — strip
-                    # sentences that reference nonexistent files so the user
-                    # doesn't see hallucinated sources.
-                    if review.level == "CAUTION" and "nonexistent file" in review.reason:
-                        import re as _re_scrub
-                        # Extract the fake file names from the observer reason
-                        _fab_match = _re_scrub.search(r'nonexistent file\(s\): (.+)$', review.reason)
-                        if _fab_match:
-                            fake_names = [f.strip() for f in _fab_match.group(1).split(',')]
-                            for fake in fake_names:
-                                # Remove sentences/lines that reference the fake file
-                                escaped = _re_scrub.escape(fake)
-                                full_response = _re_scrub.sub(
-                                    r'[^\n.]*' + escaped + r'[^\n.]*[.\n]?',
-                                    '', full_response
-                                )
-                            full_response = full_response.strip()
-                            logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
+                    _obs_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    _obs_future = _obs_executor.submit(_run_observer)
+                    try:
+                        review = _obs_future.result(timeout=_POST_OBSERVER_TIMEOUT)
+                    except concurrent.futures.TimeoutError:
+                        _obs_future.cancel()
+                        logger.warning("Post-stream observer timed out after %.0fs — skipping", _POST_OBSERVER_TIMEOUT)
+                        review = None
+                    finally:
+                        _obs_executor.shutdown(wait=False)
+
+                    if review:
+                        note = f"[Observer] {review.level.upper()}: {review.reason}"
+                        if review.suggestion:
+                            note += f" | Suggestion: {review.suggestion}"
+                        logger.info("Post-stream observer review: %s", note)
+                        if self.config.constants.get("OBSERVER_SHOW_IN_RESPONSE", True):
+                            yield {"type": "token", "value": f"\n\n{note}\n"}
+
+                        # Scrub confabulated file references from the response.
+                        # The observer catches fake paths at CAUTION level — strip
+                        # sentences that reference nonexistent files so the user
+                        # doesn't see hallucinated sources.
+                        if review.level == "CAUTION" and "nonexistent file" in review.reason:
+                            import re as _re_scrub
+                            # Extract the fake file names from the observer reason
+                            _fab_match = _re_scrub.search(r'nonexistent file\(s\): (.+)$', review.reason)
+                            if _fab_match:
+                                fake_names = [f.strip() for f in _fab_match.group(1).split(',')]
+                                for fake in fake_names:
+                                    # Remove sentences/lines that reference the fake file
+                                    escaped = _re_scrub.escape(fake)
+                                    full_response = _re_scrub.sub(
+                                        r'[^\n.]*' + escaped + r'[^\n.]*[.\n]?',
+                                        '', full_response
+                                    )
+                                full_response = full_response.strip()
+                                logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
 

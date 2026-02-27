@@ -136,6 +136,7 @@ class SemanticProbeResult:
     probe_time_ms: float = 0.0
     phrases_tested: List[str] = field(default_factory=list)
     from_cache: int = 0
+    probe_strength: str = ""  # "strong", "moderate", "weak", or "" (no primary)
 
     def to_dict(self) -> dict:
         return {
@@ -145,6 +146,7 @@ class SemanticProbeResult:
             "probe_time_ms": round(self.probe_time_ms, 2),
             "phrases_tested": self.phrases_tested,
             "from_cache": self.from_cache,
+            "probe_strength": self.probe_strength,
         }
 
     @property
@@ -173,6 +175,7 @@ class SemanticProbeResult:
             "total_hits": len(self.hits),
             "primary_collection": self.primary_collection,
             "supplemental_collections": self.supplemental_collections,
+            "probe_strength": self.probe_strength,
             "collections_hit": len(collections_hit),
             "similarity_avg": round(sum(sims) / len(sims), 4),
             "similarity_max": round(max(sims), 4),
@@ -490,6 +493,54 @@ def _determine_primary_and_supplemental(
     return primary, supplemental
 
 
+# ---------------------------------------------------------------------------
+# Probe strength classification
+# ---------------------------------------------------------------------------
+
+# Thresholds loaded from config (with sensible defaults)
+_STRONG_SINGLE_HIT_SIM = _PROBE_CFG.get("strong_single_hit_similarity", 0.70)
+_STRONG_MIN_HITS = _PROBE_CFG.get("strong_min_hits", 2)
+_STRONG_MIN_AVG_SIM = _PROBE_CFG.get("strong_min_avg_similarity", 0.55)
+_WEAK_MAX_HITS = _PROBE_CFG.get("weak_max_hits", 1)
+_WEAK_MAX_SIM = _PROBE_CFG.get("weak_max_similarity", 0.50)
+
+
+def _classify_probe_strength(
+    hits: List[ProbeHit],
+    primary_collection: Optional[str],
+) -> str:
+    """
+    Classify how confident we are that the probe's primary_collection
+    is genuinely the right domain for this message.
+
+    Returns: "strong", "moderate", "weak", or "" (no primary).
+    """
+    if not primary_collection or not hits:
+        return ""
+
+    # Filter to hits in the primary collection only
+    primary_hits = [h for h in hits if h.collection == primary_collection]
+    if not primary_hits:
+        return ""
+
+    best_sim = max(h.similarity for h in primary_hits)
+    avg_sim = sum(h.similarity for h in primary_hits) / len(primary_hits)
+    n_hits = len(primary_hits)
+
+    # Strong: single overwhelming hit OR multiple solid hits
+    if best_sim >= _STRONG_SINGLE_HIT_SIM:
+        return "strong"
+    if n_hits >= _STRONG_MIN_HITS and avg_sim >= _STRONG_MIN_AVG_SIM:
+        return "strong"
+
+    # Weak: single borderline hit below the weak ceiling
+    if n_hits <= _WEAK_MAX_HITS and best_sim < _WEAK_MAX_SIM:
+        return "weak"
+
+    # Everything else is moderate
+    return "moderate"
+
+
 def probe_collections(
     phrases: List[str],
     knowledge_bases: Dict[str, dict],
@@ -568,6 +619,8 @@ def probe_collections(
 
     primary, supplemental = _determine_primary_and_supplemental(deduped)
 
+    strength = _classify_probe_strength(deduped, primary)
+
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
     result = SemanticProbeResult(
@@ -577,13 +630,14 @@ def probe_collections(
         probe_time_ms=elapsed_ms,
         phrases_tested=phrases,
         from_cache=from_cache_count,
+        probe_strength=strength,
     )
 
     logger.info(
         "SemanticProbe: %d phrases → %d hits across %d collections "
-        "(primary=%s, supplemental=%s, cache=%d, %.1fms)",
+        "(primary=%s, strength=%s, supplemental=%s, cache=%d, %.1fms)",
         len(phrases), len(deduped), len(collection_names),
-        primary, supplemental, from_cache_count, elapsed_ms,
+        primary, strength, supplemental, from_cache_count, elapsed_ms,
     )
 
     return result
