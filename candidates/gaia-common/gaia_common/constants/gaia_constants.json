@@ -20,7 +20,7 @@
       "max_num_prompt_tokens": 6144,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Qwen3-8B-AWQ",
+      "path": "/models/Qwen3-4B-Instruct-2507-heretic",
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm",
@@ -306,7 +306,13 @@
     "min_phrase_len": 3,
     "min_words_to_probe": 3,
     "cache_max_age_turns": 10,
-    "top_k_per_phrase": 3
+    "top_k_per_phrase": 3,
+    "strong_single_hit_similarity": 0.70,
+    "strong_min_hits": 2,
+    "strong_min_avg_similarity": 0.55,
+    "weak_max_hits": 1,
+    "weak_max_similarity": 0.50,
+    "domain_momentum_min_turns": 2
   },
   "COGNITIVE_AUDIT": {
     "enabled": true,
