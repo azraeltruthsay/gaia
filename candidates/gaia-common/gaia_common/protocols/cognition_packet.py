@@ -458,10 +458,21 @@ class GoalState:
 # --- Council & Metrics & Status ---
 @dataclass_json
 @dataclass
-class Vote:
+class CouncilMessage:
+    """Represents a single message in an agent-to-agent council debate."""
     agent: str
-    score: float
-    rationale: Optional[str] = None
+    content: str
+    timestamp: str
+    target: str = "counterpart" # "user", "counterpart", "all"
+
+@dataclass_json
+@dataclass
+class Vote:
+    """A council participant's vote on a proposed response or action."""
+    agent: str
+    decision: str  # "approve", "reject", "abstain"
+    reason: str = ""
+    confidence: float = 0.0
 
 @dataclass_json
 @dataclass
@@ -469,6 +480,9 @@ class Council:
     mode: Optional[str] = "solo"
     participants: List[str] = field(default_factory=list)
     votes: List[Vote] = field(default_factory=list)
+    thread: List[CouncilMessage] = field(default_factory=list) # New field for iterative debate
+    iteration_count: int = 0 # Track debate rounds
+    max_iterations: int = 3 # Safety ceiling for model ping-pong
 
 @dataclass_json
 @dataclass

@@ -594,7 +594,23 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         system_content_parts.append("GAIA COGNITION PACKET")
         system_content_parts.append(template_block_content)
 
-    # 11. Loop Recovery Context (if pending from a loop detection reset)
+    # 11. Council Debate Thread (Deep Thought Protocol)
+    if packet.council and packet.council.thread:
+        thread_entries = []
+        for msg in packet.council.thread:
+            thread_entries.append(f"[{msg.agent.upper()} at {msg.timestamp}]: {msg.content}")
+        
+        council_debate_block = (
+            "── ACTIVE COUNCIL DEBATE ──\n"
+            "The following is a private debate between your internal components. "
+            "Review the thread below to reach consensus. If you disagree or have more to add, use <council>...</council> tags "
+            "for your counter-arguments. If you agree and have reached consensus, output your final answer directly to the user "
+            "WITHOUT council tags. You may include text outside the tags to update the user on your progress.\n\n"
+            + "\n\n".join(thread_entries)
+        )
+        system_content_parts.append(council_debate_block)
+
+    # 12. Loop Recovery Context (if pending from a loop detection reset)
     try:
         from gaia_core.cognition.loop_recovery import get_recovery_manager
         loop_manager = get_recovery_manager()
@@ -796,9 +812,22 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     # a partial assistant message here, the model continues from prose instead of
     # starting from a blank generation slate.
     if tool_result_content and tool_already_executed:
+        # Add a synthesis instruction to the final system prompt block to reinforce synthesis
+        recitation_control = (
+            "\n\nRECITATION CONTROL: You are synthesizing results from an executed tool. "
+            "Do NOT simply recite or copy-paste the raw content. Your goal is to provide a synthesis that "
+            "highlights the relevance to the user's objective, providing context, analysis, or "
+            "specific data points only where they validate your conclusion."
+        )
+        # Find the last system message to append the instruction
+        for msg in reversed(final_prompt):
+            if msg["role"] == "system":
+                msg["content"] += recitation_control
+                break
+
         final_prompt.append({
             "role": "assistant",
-            "content": "Based on the results,"
+            "content": "Based on the results from my tool execution,"
         })
         logger.info("[v0.3] Output scaffolding: injected assistant prefix for tool-result synthesis")
 

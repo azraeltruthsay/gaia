@@ -402,7 +402,9 @@ def web_fetch(params: dict) -> dict:
         "content": text,
         "domain": domain,
         "trust_tier": tier,
+        "source_type": "trusted" if tier == "trusted" else "verified",
         "bytes": len(text),
+        "word_count": len(text.split()),
     }
 
 
