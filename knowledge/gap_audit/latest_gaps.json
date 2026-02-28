@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-02-28T04:59:51Z",
+  "gap_count": 31,
+  "gaps": [
+    {
+      "type": "missing_blueprint",
+      "service": "gaia-audio",
+      "expected": [
+        "GAIA_AUDIO.md",
+        "gaia-audio.yaml"
+      ]
+    },
+    {
+      "type": "undocumented_module",
+      "module": "agent_core",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "cognitive_audit",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "cognitive_dispatcher",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "conversation_curator",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "council_notes",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "goal_detector",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "heartbeat",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "history_review",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "initiative_engine",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "knowledge_enhancer",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "knowledge_ingestion",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "lite_journal",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "loop_detector",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "loop_patterns",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "loop_recovery",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "packet_upgrade",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "packet_utils",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "prime_checkpoint",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "self_reflection",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "self_review_worker",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "semantic_probe",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "sleep_cycle_loop",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "sleep_task_scheduler",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "sleep_wake_manager",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "telemetric_senses",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "temporal_interviewer",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "temporal_state_manager",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "thought_seed",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "tool_selector",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "topic_manager",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    }
+  ]
+}
