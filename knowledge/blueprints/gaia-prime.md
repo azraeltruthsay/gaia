@@ -39,7 +39,7 @@ GPU-accelerated LLM inference decoupled from the cognitive loop. Enables gaia-co
 | Base image | `nvcr.io/nvidia/pytorch:25.03-py3` |
 | GPU | Yes |
 | Health check | `curl -f http://localhost:7777/health` |
-| Startup | `python -m vllm.entrypoints.openai.api_server --model /models/Qwen3-4B-Instruct-2507-heretic --host 0.0.0.0 --port 7777 --gpu-memory-utilization 0.70 --max-model-len 8192 --max-num-seqs 4 --trust-remote-code --dtype auto --enforce-eager --enable-lora --max-loras 4 --max-lora-rank 64 --enable-sleep-mode --enable-prefix-caching --kv-offloading-backend native --kv-offloading-size 8 --disable-hybrid-kv-cache-manager` |
+| Startup | `python -m vllm.entrypoints.openai.api_server --model /models/Qwen3-8B-abliterated-AWQ --host 0.0.0.0 --port 7777 --gpu-memory-utilization 0.70 --max-model-len 8192 --max-num-seqs 4 --trust-remote-code --dtype auto --enforce-eager --enable-lora --max-loras 4 --max-lora-rank 64 --enable-sleep-mode --enable-prefix-caching --kv-offloading-backend native --kv-offloading-size 8 --disable-hybrid-kv-cache-manager` |
 | GPU count | `1` |
 | Dockerfile | `gaia-prime/Dockerfile` |
 | Compose service | `gaia-prime` |

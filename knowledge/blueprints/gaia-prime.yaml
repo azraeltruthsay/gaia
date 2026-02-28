@@ -187,7 +187,7 @@ architecture:
       label: "vLLM Inference Server"
       description: >
         OpenAI-compatible inference server built from vLLM source. Runs
-        the Qwen3-4B model (or configured model) with tensor parallelism
+        the Qwen3-8B-abliterated-AWQ model (or configured model) with tensor parallelism
         on a single NVIDIA GPU. Serves /v1/chat/completions and
         /v1/completions endpoints. Supports LoRA adapter hot-loading
         for QLoRA fine-tuned personalities. Built targeting sm_120

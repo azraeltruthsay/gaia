@@ -744,6 +744,137 @@ check_image_staleness() {
     fi
 }
 
+# ── Knowledge Gaps ───────────────────────────────────────────────────────
+check_knowledge_gaps() {
+    section "Knowledge Gaps"
+
+    local core_docs_dir="$GAIA_ROOT/knowledge/system_reference/core_documents"
+    local blueprints_dir="$GAIA_ROOT/knowledge/blueprints"
+    local cognition_dir="$GAIA_ROOT/gaia-core/gaia_core/cognition"
+    local gap_dir="$GAIA_ROOT/knowledge/gap_audit"
+    local gap_count=0
+
+    mkdir -p "$gap_dir"
+
+    # Start building JSON gap report
+    local gaps_json='[]'
+
+    # --- Check 1: Services without a blueprint file ---
+    for entry in "${SERVICES[@]}"; do
+        IFS='|' read -r name container port health_path svc_type required <<< "$entry"
+
+        # Skip candidate/HA variants — they share the base service blueprint
+        if [[ "$name" == *"-candidate"* ]]; then
+            continue
+        fi
+
+        # Look for GAIA_NAME.md (uppercase) or name.md / name.yaml (lowercase)
+        local upper_name
+        upper_name=$(echo "$name" | tr '[:lower:]-' '[:upper:]_')
+        local found=false
+
+        for pattern in "${blueprints_dir}/${upper_name}.md" \
+                       "${blueprints_dir}/${name}.md" \
+                       "${blueprints_dir}/${name}.yaml"; do
+            if [[ -f "$pattern" ]]; then
+                found=true
+                break
+            fi
+        done
+
+        if $found; then
+            verbose "$name: blueprint found"
+        else
+            ((gap_count++))
+            warn_ "$name" "no blueprint file" "$name: no blueprint found (expected ${upper_name}.md or ${name}.yaml)"
+            gaps_json=$(echo "$gaps_json" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+gaps.append({'type': 'missing_blueprint', 'service': '$name', 'expected': ['${upper_name}.md', '${name}.yaml']})
+json.dump(gaps, sys.stdout)
+")
+        fi
+    done
+
+    # --- Check 2: Cognition modules without a core_documents entry ---
+    if [[ -d "$cognition_dir" ]]; then
+        local skip_modules=("__init__" "__pycache__" "tests" "external_voice")
+        while IFS= read -r pyfile; do
+            local mod_name
+            mod_name=$(basename "$pyfile" .py)
+
+            # Skip non-module files and known infrastructure modules
+            local skip=false
+            for s in "${skip_modules[@]}"; do
+                if [[ "$mod_name" == "$s" ]]; then
+                    skip=true
+                    break
+                fi
+            done
+            if $skip; then continue; fi
+
+            # Check if a corresponding doc exists in core_documents
+            local doc_found=false
+            for ext in .md .yaml; do
+                if [[ -f "${core_docs_dir}/${mod_name}${ext}" ]] || \
+                   [[ -f "${core_docs_dir}/${mod_name}_spec${ext}" ]] || \
+                   [[ -f "${core_docs_dir}/${mod_name}_reference${ext}" ]]; then
+                    doc_found=true
+                    break
+                fi
+            done
+
+            if $doc_found; then
+                verbose "$mod_name: core doc found"
+            else
+                ((gap_count++))
+                warn_ "$mod_name" "no core doc" "$mod_name: cognition module has no corresponding core_documents entry"
+                gaps_json=$(echo "$gaps_json" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+gaps.append({'type': 'undocumented_module', 'module': '$mod_name', 'search_dir': 'knowledge/system_reference/core_documents/'})
+json.dump(gaps, sys.stdout)
+")
+            fi
+        done < <(find "$cognition_dir" -maxdepth 1 -name '*.py' -type f 2>/dev/null | sort)
+    fi
+
+    # --- Check 3: Core documents not in the dynamic registry ---
+    # Sanity check — any .md in core_documents that wouldn't be found by the scanner
+    if [[ -d "$core_docs_dir" ]]; then
+        local doc_count
+        doc_count=$(find "$core_docs_dir" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l)
+        pass_ "Core documents" "${doc_count} files on disk"
+    fi
+
+    if [[ -d "$blueprints_dir" ]]; then
+        local bp_count
+        bp_count=$(find "$blueprints_dir" -maxdepth 1 \( -name '*.md' -o -name '*.yaml' \) -type f 2>/dev/null | wc -l)
+        pass_ "Blueprint files" "${bp_count} files on disk"
+    fi
+
+    # --- Write gap report ---
+    local timestamp
+    timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    python3 -c "
+import json, sys
+gaps = json.loads('''$gaps_json''')
+report = {
+    'timestamp': '$timestamp',
+    'gap_count': len(gaps),
+    'gaps': gaps
+}
+with open('$gap_dir/latest_gaps.json', 'w') as f:
+    json.dump(report, f, indent=2)
+" 2>/dev/null
+
+    if (( gap_count == 0 )); then
+        pass_ "Knowledge coverage" "no gaps detected"
+    else
+        verbose "Gap report written to knowledge/gap_audit/latest_gaps.json"
+    fi
+}
+
 # ── Session State Freshness ───────────────────────────────────────────────
 check_session_freshness() {
     section "Session State"
@@ -922,6 +1053,7 @@ main() {
     check_common_sync
     check_stale_mounts
     check_image_staleness
+    check_knowledge_gaps
     check_session_freshness
     check_resources
 

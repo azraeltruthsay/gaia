@@ -107,9 +107,9 @@ def _format_retrieved_session_context(results: dict) -> str:
     return "\n".join(parts)
 
 
-# Known documents that can be recited, with keyword triggers and file paths
+# Curated documents with hand-crafted keyword triggers and file paths
 # Keywords are checked case-insensitively against the user's request
-RECITABLE_DOCUMENTS = {
+_CURATED_DOCUMENTS = {
     "constitution": {
         "keywords": ["gaia constitution", "gaia's constitution", "your constitution"],
         "path": "knowledge/system_reference/core_documents/gaia_constitution.md",
@@ -148,52 +148,160 @@ RECITABLE_DOCUMENTS = {
 }
 
 
-def find_recitable_document(user_input: str) -> Optional[Dict[str, str]]:
+def _scan_knowledge_dirs() -> Dict[str, Dict[str, Any]]:
+    """Auto-discover documents in core_documents/ and blueprints/ directories.
+
+    Scans known knowledge directories and generates registry entries for any
+    files not already covered by _CURATED_DOCUMENTS. Keywords are derived
+    from the filename stem.
+
+    Returns:
+        Dict of auto-discovered document entries (curated entries excluded).
     """
-    Check if the user's request matches a known recitable document.
+    # Paths to scan — try Docker mount first, then relative
+    scan_dirs = [
+        ("knowledge/system_reference/core_documents", ["/knowledge/system_reference/core_documents"]),
+        ("knowledge/blueprints", ["/knowledge/blueprints"]),
+    ]
+
+    # Collect curated paths for dedup
+    curated_paths = {info["path"] for info in _CURATED_DOCUMENTS.values()}
+
+    auto = {}
+    for rel_prefix, docker_candidates in scan_dirs:
+        # Find the actual directory
+        scan_path = None
+        for candidate in docker_candidates:
+            p = Path(candidate)
+            if p.is_dir():
+                scan_path = p
+                break
+        if scan_path is None:
+            # Try relative to cwd
+            p = Path.cwd() / rel_prefix
+            if p.is_dir():
+                scan_path = p
+
+        if scan_path is None:
+            continue
+
+        for fpath in sorted(scan_path.iterdir()):
+            if fpath.suffix not in (".md", ".yaml", ".yml"):
+                continue
+            if fpath.name.startswith("."):
+                continue
+
+            # Build the relative path as stored in curated entries
+            rel_path = f"{rel_prefix}/{fpath.name}"
+            if rel_path in curated_paths:
+                continue
+
+            stem = fpath.stem
+            doc_id = stem.lower().replace("-", "_")
+
+            # Skip if a curated or already-discovered entry uses this doc_id
+            if doc_id in _CURATED_DOCUMENTS or doc_id in auto:
+                continue
+
+            # Generate keywords from filename stem
+            parts = [p for p in stem.lower().replace("-", "_").split("_") if p]
+            keywords = []
+            # Add individual meaningful words (skip very short ones)
+            for part in parts:
+                if len(part) >= 3:
+                    keywords.append(part)
+            # Add the full stem as a keyword phrase
+            full_phrase = " ".join(parts)
+            if full_phrase not in keywords:
+                keywords.append(full_phrase)
+
+            # Title-case from stem
+            title = stem.replace("_", " ").replace("-", " ").title()
+
+            auto[doc_id] = {
+                "keywords": keywords,
+                "path": rel_path,
+                "title": title,
+            }
+
+    return auto
+
+
+def _build_recitable_documents() -> Dict[str, Dict[str, Any]]:
+    """Build the merged RECITABLE_DOCUMENTS registry (auto + curated)."""
+    auto = _scan_knowledge_dirs()
+    merged = {**auto, **_CURATED_DOCUMENTS}  # curated wins on conflict
+    auto_count = len(merged) - len(_CURATED_DOCUMENTS)
+    logger.info(
+        f"RECITABLE_DOCUMENTS: {len(_CURATED_DOCUMENTS)} curated + "
+        f"{auto_count} auto-discovered = {len(merged)} total"
+    )
+    return merged
+
+
+RECITABLE_DOCUMENTS = _build_recitable_documents()
+
+
+def _resolve_doc_path(rel_path: str) -> Optional[Path]:
+    """Resolve a relative document path to an actual file on disk.
+
+    Tries the /knowledge Docker mount first, then common fallback locations.
+    """
+    doc_path = Path(rel_path)
+    # Extract the subpath under knowledge/ for Docker mount lookup
+    knowledge_subpath = None
+    if str(doc_path).startswith("knowledge/"):
+        knowledge_subpath = str(doc_path)[len("knowledge/"):]
+
+    candidates = []
+    # Docker /knowledge mount (most common in production)
+    if knowledge_subpath:
+        candidates.append(Path("/knowledge") / knowledge_subpath)
+    # Relative to cwd
+    candidates.append(Path.cwd() / doc_path)
+    # As-is
+    candidates.append(doc_path)
+    # Legacy Docker container path
+    candidates.append(Path("/gaia-assistant") / doc_path)
+
+    for try_path in candidates:
+        if try_path.exists():
+            return try_path
+    return None
+
+
+def find_recitable_document(user_input: str) -> Optional[Dict[str, str]]:
+    """Check if the user's request matches a known recitable document.
 
     Args:
         user_input: The user's request text
 
     Returns:
-        Dict with 'path', 'title', and 'content' if found, None otherwise
+        Dict with 'path', 'title', 'content', and 'doc_id' if found, None otherwise
     """
     input_lower = user_input.lower()
 
     for doc_id, doc_info in RECITABLE_DOCUMENTS.items():
         for keyword in doc_info["keywords"]:
             if keyword in input_lower:
-                # Found a match - try to load the document
-                doc_path = Path(doc_info["path"])
-                # Try multiple possible locations
-                cwd = Path.cwd()
-                # The doc_path starts with "knowledge/..." - also try just the part after "knowledge/"
-                doc_subpath = doc_path.relative_to("knowledge") if str(doc_path).startswith("knowledge/") else doc_path
-                possible_paths = [
-                    cwd / doc_path,                                    # Relative to current working directory
-                    doc_path,                                          # As-is (might be absolute)
-                    Path("/gaia-assistant") / doc_path,                # Docker container path
-                    Path("/knowledge") / doc_subpath,                  # Docker /knowledge mount
-                    Path("/gaia/GAIA_Project/gaia-assistant") / doc_path,  # Development path
-                ]
+                resolved = _resolve_doc_path(doc_info["path"])
+                if resolved:
+                    try:
+                        content = resolved.read_text(encoding="utf-8")
+                        logger.info(f"Loaded recitable document: {doc_info['title']} from {resolved}")
+                        return {
+                            "path": str(resolved),
+                            "title": doc_info["title"],
+                            "content": content,
+                            "doc_id": doc_id,
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to read document {resolved}: {e}")
 
-                logger.debug(f"Looking for recitable document '{doc_id}', cwd={cwd}")
-                for try_path in possible_paths:
-                    logger.debug(f"Trying path: {try_path} (exists={try_path.exists()})")
-                    if try_path.exists():
-                        try:
-                            content = try_path.read_text(encoding="utf-8")
-                            logger.info(f"Loaded recitable document: {doc_info['title']} from {try_path}")
-                            return {
-                                "path": str(try_path),
-                                "title": doc_info["title"],
-                                "content": content,
-                                "doc_id": doc_id,
-                            }
-                        except Exception as e:
-                            logger.warning(f"Failed to read document {try_path}: {e}")
-
-                logger.warning(f"Document matched but file not found: {doc_info['path']} (tried {len(possible_paths)} paths from cwd={cwd})")
+                logger.warning(
+                    f"Document matched but file not found: {doc_info['path']} "
+                    f"(doc_id={doc_id})"
+                )
                 return None
 
     return None

@@ -69,7 +69,7 @@ In v0.3, GPU inference is fully decoupled from cognition:
 - **gaia-core** runs CPU-only (`GAIA_FORCE_CPU=1`, `GAIA_BACKEND=gpu_prime`)
 - **gaia-prime** owns 1 GPU exclusively for vLLM inference (port 7777)
 - Communication is via HTTP: gaia-core's `VLLMRemoteModel` calls gaia-prime's OpenAI-compatible API
-- **Fallback chain**: gpu_prime (remote vLLM, Qwen3) → groq_fallback (Groq API) → lite (local GGUF CPU, Qwen3-4B Q4_K_M)
+- **Fallback chain**: gpu_prime (remote vLLM, Qwen3) → groq_fallback (Groq API) → lite (local GGUF CPU, Qwen3-8B-abliterated Q4_K_M)
 
 ### Inference Backend Options
 
