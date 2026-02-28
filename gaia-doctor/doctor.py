@@ -49,6 +49,7 @@ SERVICES = {
     # name: (health_url, can_remediate)
     "gaia-core": ("http://gaia-core:6415/health", False),
     "gaia-prime": ("http://gaia-prime:7777/health", False),
+    "gaia-audio": ("http://gaia-audio:8080/health", False),
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", True),
     "gaia-mcp-candidate": ("http://gaia-mcp-candidate:8765/health", True),
 }

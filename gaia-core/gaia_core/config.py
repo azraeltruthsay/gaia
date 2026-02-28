@@ -103,6 +103,8 @@ class Config:
             "/gaia-common/gaia_common/constants/gaia_constants.json",
             # Candidate container: gaia-common mounted at /app/gaia-common
             "/app/gaia-common/gaia_common/constants/gaia_constants.json",
+            # Host-side: relative to project root (2 levels up from gaia_core/config.py)
+            os.path.join(os.path.dirname(__file__), "..", "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
             os.path.join(os.path.dirname(__file__), "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
             "/app/gaia_common/constants/gaia_constants.json",
             os.path.join(os.path.dirname(__file__), "gaia_constants.json"),

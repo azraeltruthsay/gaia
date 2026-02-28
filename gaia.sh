@@ -65,7 +65,7 @@ show_status() {
     fi
 
     echo -e "\n${BLUE}Live Services:${NC}"
-    for svc in prime core web mcp study; do
+    for svc in prime core web mcp study audio wiki; do
         local container="gaia-${svc}"
         local port
         case "$svc" in
@@ -74,9 +74,15 @@ show_status() {
             web) port=6414 ;;
             mcp) port=8765 ;;
             study) port=8766 ;;
+            audio) port=8080 ;;
+            wiki) port=8081 ;; # internal port, checking container is usually enough
         esac
 
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container}$"; then
+            if [ "$svc" = "wiki" ]; then
+                 echo -e "  ${GREEN}[running]${NC} ${container} (wiki docs)"
+                 continue
+            fi
             if curl -sf "http://localhost:${port}/health" > /dev/null 2>&1; then
                 echo -e "  ${GREEN}[healthy]${NC} ${container} :${port}"
             else
@@ -88,7 +94,7 @@ show_status() {
     done
 
     echo -e "\n${BLUE}Candidate Services:${NC}"
-    for svc in prime core web mcp study; do
+    for svc in prime core web mcp study audio; do
         local container="gaia-${svc}-candidate"
         local port
         case "$svc" in
@@ -97,6 +103,7 @@ show_status() {
             web) port=6417 ;;
             mcp) port=8767 ;;
             study) port=8768 ;;
+            audio) port=8082 ;;
         esac
 
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container}$"; then
@@ -180,10 +187,10 @@ cmd_swap() {
 
     # Validate service
     case "$service" in
-        prime|core|web|mcp|study) ;;
+        prime|core|web|mcp|study|audio) ;;
         *)
             log_error "Unknown service: $service"
-            echo "Valid services: prime, core, web, mcp, study"
+            echo "Valid services: prime, core, web, mcp, study, audio"
             exit 1
             ;;
     esac
@@ -210,6 +217,11 @@ cmd_swap() {
                 endpoint_var="STUDY_ENDPOINT"
                 endpoint_url="http://gaia-study-candidate:8766"
                 caller="gaia-core"
+                ;;
+            audio)
+                endpoint_var="AUDIO_ENDPOINT"
+                endpoint_url="http://gaia-audio-candidate:8080"
+                caller="gaia-web"
                 ;;
             core)
                 endpoint_var="CORE_ENDPOINT"
@@ -238,7 +250,7 @@ cmd_swap() {
         local caller
         case "$service" in
             mcp|study) caller="gaia-core" ;;
-            core) caller="gaia-web" ;;
+            core|audio) caller="gaia-web" ;;
             web)
                 log_info "No swap needed for web"
                 return
@@ -447,7 +459,7 @@ main() {
             echo "  wiki [start|stop|build|logs|status]  Manage wiki docs"
             echo "  status                           Show all service status"
             echo ""
-            echo "Services: prime, core, web, mcp, study"
+            echo "Services: prime, core, web, mcp, study, audio, wiki"
             echo ""
             echo "Examples:"
             echo "  $0 live start              # Start live stack"

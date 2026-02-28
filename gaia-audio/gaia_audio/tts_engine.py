@@ -153,6 +153,30 @@ class TTSEngine:
             pass
         status_tracker.tts_engine = None
 
+    def _sanitize_for_speech(self, text: str) -> str:
+        """Strip markdown and structural artifacts that shouldn't be spoken."""
+        import re
+        
+        # 1. Remove markdown headers (e.g., ### Key Ideas -> Key Ideas)
+        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+        
+        # 2. Remove bold/italic markers (**text**, *text*, __text__)
+        text = text.replace("**", "").replace("__", "").replace("*", "_")
+        text = text.replace("_", "")
+        
+        # 3. Clean up list markers at start of lines
+        text = re.sub(r'^[ \t]*[-*+]\s+', '', text, flags=re.MULTILINE)
+        
+        # 4. Remove blockquote markers
+        text = re.sub(r'^[ \t]*>\s*', '', text, flags=re.MULTILINE)
+        
+        # 5. Remove model tags or other metadata brackets
+        text = text.replace("[Prime]", "").replace("[Lite]", "").replace("[Observer]", "")
+        
+        # 6. Normalize whitespace
+        text = re.sub(r'\n+', '\n', text)
+        return text.strip()
+
     def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
         """Synchronous synthesis — run in executor for async context.
 
@@ -165,6 +189,11 @@ class TTSEngine:
         """
         if self._engine is None:
             raise RuntimeError("TTS engine not loaded — call load() first")
+
+        # Sanitize text before sending to any engine
+        text = self._sanitize_for_speech(text)
+        if not text:
+            raise ValueError("Text is empty after sanitization")
 
         try:
             if self._engine == "espeak-ng":

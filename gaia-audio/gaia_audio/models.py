@@ -24,6 +24,13 @@ class SynthesizeRequest(BaseModel):
     sample_rate: int = Field(22050, description="Desired output sample rate")
 
 
+class RefineRequest(BaseModel):
+    """Transcript text for nano-refinement."""
+
+    text: str = Field(..., description="Raw transcript text")
+    max_tokens: int = Field(2048, description="Maximum tokens to generate")
+
+
 # ── Response schemas ─────────────────────────────────────────────────
 
 
@@ -47,6 +54,13 @@ class SynthesizeResponse(BaseModel):
     duration_seconds: float = 0.0
     latency_ms: float = 0.0
     engine_used: str = "system"
+
+
+class RefineResponse(BaseModel):
+    """Refinement result."""
+
+    refined_text: str
+    latency_ms: float = 0.0
 
 
 class VoiceInfo(BaseModel):

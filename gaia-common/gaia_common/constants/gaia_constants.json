@@ -10,14 +10,14 @@
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
   "llm_backend": "gpu_prime",
-  "max_tokens_lite": 16000,
+  "max_tokens_lite": 32000,
   "MODEL_CONFIGS": {
 
     "gpu_prime": {
       "enabled": true,
-      "max_model_len": 8192,
+      "max_model_len": 16384,
       "max_num_batched_tokens": 1024,
-      "max_num_prompt_tokens": 6144,
+      "max_num_prompt_tokens": 16384,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
       "path": "/models/Qwen3-8B-abliterated-AWQ",
@@ -170,8 +170,8 @@
       "enabled": true,
       "endpoint": "http://gaia-audio:8080",
       "stt_model": "base.en",
-      "tts_engine": "system",
-      "tts_voice": null,
+      "tts_engine": "coqui",
+      "tts_voice": "/models/voice/gaia_identity.wav",
       "sample_rate": 16000,
       "vram_budget_mb": 5600,
       "half_duplex": true,
@@ -414,6 +414,14 @@
     "comment_threshold": "interesting",
     "lite_triage_max_tokens": 128,
     "commentary_max_tokens": 512
+  },
+  "AUDIO_INBOX": {
+    "refinement_enabled": true,
+    "refinement_chunk_size": 4000,
+    "refinement_overlap": 200,
+    "refinement_timeout_seconds": 600,
+    "core_review_timeout_seconds": 300,
+    "transcript_max_chars": 30000
   },
   "EPISTEMIC_DRIVE": {
     "enabled": true,
