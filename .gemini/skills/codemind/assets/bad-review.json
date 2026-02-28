@@ -1,0 +1,38 @@
+{
+  "_comment": "THIS IS AN EXAMPLE OF A POOR REVIEW. Do not use this as a template for your output.",
+  "_problems": [
+    "Verdict says 'approve' but there are error-severity findings — inconsistent",
+    "Findings are vague ('could be better', 'seems wrong') — not actionable",
+    "No line numbers — reviewer can't locate the issues",
+    "Summary was clearly written first and findings backfilled",
+    "Divergence score is 0.0 despite having findings — dishonest metric",
+    "Missing dimension assessment — which review dimensions were actually checked?"
+  ],
+  "agent_id": "codemind",
+  "schema_version": "1.0",
+  "target": "gaia-core/gaia_core/cognition/agent_core.py",
+  "timestamp": "2026-02-25T14:30:00Z",
+  "verdict": "approve",
+  "findings": [
+    {
+      "category": "general",
+      "severity": "error",
+      "file": "gaia-core/gaia_core/cognition/agent_core.py",
+      "line": null,
+      "description": "Some of the error handling could be better.",
+      "suggestion": "Improve error handling."
+    },
+    {
+      "category": "naming",
+      "severity": "warning",
+      "file": "gaia-core/gaia_core/cognition/agent_core.py",
+      "line": null,
+      "description": "A few variable names seem wrong.",
+      "suggestion": null
+    }
+  ],
+  "metrics": {
+    "divergence_score": 0.0
+  },
+  "summary": "The code looks good overall. There are some minor issues with error handling and naming but nothing major. Approved."
+}

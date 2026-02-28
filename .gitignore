@@ -24,6 +24,9 @@ venv_notebooklm/
 *.pem
 wireguard_setup/
 
+# --- Audio inbox (user audio files) ---
+audio_inbox/
+
 # --- Logs ---
 logs/
 *.log

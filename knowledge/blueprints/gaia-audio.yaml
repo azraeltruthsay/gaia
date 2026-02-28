@@ -1,0 +1,113 @@
+# gaia-audio blueprint — MANUAL SEED
+# Drafted 2026-02-28 following GAIA-audio promotion.
+# Defines the ears and mouth of the GAIA sensory mesh.
+
+id: gaia-audio
+version: "0.3"
+role: "The Ears & Mouth (Sensory STT/TTS)"
+service_status: live
+
+runtime:
+  port: 8080
+  base_image: python:3.11-slim
+  gpu: true
+  gpu_sharing: true # Shares GPU with gaia-prime (half-duplex)
+  startup_cmd: "uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080"
+  health_check: "curl -f http://localhost:8080/health"
+  user: "${UID}:${GID}"
+  dockerfile: gaia-audio/Dockerfile
+  compose_service: gaia-audio
+
+interfaces:
+
+  # ── Inbound ────────────────────────────────────────────────────────────────
+
+  - id: transcribe
+    direction: inbound
+    description: "Speech-to-Text conversion. Accepts audio bytes (m4a, wav, mp3), returns transcribed text. Supports long-form transcription via segmenting."
+    status: active
+    transport:
+      type: http_rest
+      path: /transcribe
+      method: POST
+
+  - id: synthesize
+    direction: inbound
+    description: "Text-to-Speech conversion. Accepts text, returns audio stream (wav/mp3) using Coqui XTTS v2 or espeak-ng fallback."
+    status: active
+    transport:
+      type: http_rest
+      path: /synthesize
+      method: POST
+
+  - id: health
+    direction: inbound
+    description: "Sensory health check — verifies model availability."
+    status: active
+    transport:
+      type: http_rest
+      path: /health
+      method: GET
+
+  # ── Outbound ───────────────────────────────────────────────────────────────
+
+  - id: elevenlabs_fallback
+    direction: outbound
+    description: "Cloud TTS fallback when local Coqui synthesis fails or VRAM is tight."
+    status: active
+    transport:
+      type: http_rest
+      method: POST
+
+dependencies:
+  services: [] # Receives calls only
+
+  volumes:
+    - name: gaia-models
+      access: ro
+      purpose: "Whisper and Coqui model weights"
+      mount_path: /models
+    - name: logs
+      access: rw
+      purpose: "Audio processing telemetry"
+      mount_path: /logs
+
+source_files:
+  - path: gaia-audio/gaia_audio/main.py
+    role: entrypoint
+    file_type: python
+  - path: gaia-audio/gaia_audio/stt.py
+    role: speech_to_text
+    file_type: python
+  - path: gaia-audio/gaia_audio/tts.py
+    role: text_to_speech
+    file_type: python
+
+failure_modes:
+  - condition: "VRAM OOM during transcription"
+    response: "Triggers GPU model cleanup; transcription retried once on CPU (slower)"
+    severity: degraded
+    auto_recovers: true
+
+  - condition: "Coqui synthesis failure"
+    response: "Falls back to espeak-ng (local) or ElevenLabs (cloud)"
+    severity: degraded
+    auto_recovers: true
+
+intent:
+  purpose: >
+    Sensory microservice providing GAIA with auditory input and vocal output.
+    Uses a half-duplex GPU management strategy to swap between high-fidelity 
+    Whisper (STT) and Coqui (TTS) models within a limited VRAM budget.
+  cognitive_role: "The Ears & Mouth"
+  design_decisions:
+    - "Decoupled sensory processing from cognition to allow for independent model scaling"
+    - "Support for m4a/AAC audio via ffmpeg transcode allows direct Discord audio capture"
+    - "Half-duplex model loading prevents OOM on single-GPU setups"
+
+meta:
+  status: live
+  genesis: false
+  generated_by: gemini_cli
+  blueprint_version: "0.3"
+  schema_version: "1.0"

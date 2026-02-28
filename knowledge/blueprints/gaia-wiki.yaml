@@ -3,7 +3,7 @@
 # generated_by: manual_seed | genesis: true until first reflection cycle validates it.
 
 id: gaia-wiki
-version: "0.1"
+version: "0.3"
 role: "The Archivist (Documentation)"
 service_status: live
 
@@ -106,18 +106,18 @@ intent:
     - "Should docs be versioned (mike) or always serve latest?"
 
 meta:
-  status: candidate
-  genesis: true
+  status: live
+  genesis: false
   generated_by: manual_seed
-  blueprint_version: "0.2"
+  blueprint_version: "0.3"
   schema_version: "1.0"
-  last_reflected: null
-  promoted_at: null
+  last_reflected: "2026-02-28"
+  promoted_at: "2026-02-28"
   confidence:
     runtime: high
     contract: high
     dependencies: high
-    failure_modes: medium
-    intent: medium
-  reflection_notes: null
-  divergence_score: null
+    failure_modes: high
+    intent: high
+  reflection_notes: "Service promoted to v0.3; reverse proxy implementation in gaia-web verified."
+  divergence_score: 0.05

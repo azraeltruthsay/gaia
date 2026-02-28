@@ -1,8 +1,12 @@
 """
-Audio Listener control routes for Mission Control dashboard.
+Audio control routes for Mission Control dashboard.
 
-Reads/writes listener_control.json and listener_status.json to manage
-the host-side audio capture daemon (scripts/gaia_listener.py).
+Listener routes: read/write listener_control.json and listener_status.json
+to manage the host-side audio capture daemon (scripts/gaia_listener.py).
+
+Inbox routes: read inbox_status.json and write inbox_control.json to
+trigger the audio inbox daemon (scripts/gaia_audio_inbox.py).
+
 Also provides an ingest endpoint to forward transcripts to gaia-core.
 """
 
@@ -22,6 +26,8 @@ router = APIRouter(prefix="/api/audio", tags=["audio"])
 
 CONTROL_PATH = Path("/logs/listener_control.json")
 STATUS_PATH = Path("/logs/listener_status.json")
+INBOX_STATUS_PATH = Path("/logs/inbox_status.json")
+INBOX_CONTROL_PATH = Path("/logs/inbox_control.json")
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
 CORE_FALLBACK_ENDPOINT = os.environ.get("CORE_FALLBACK_ENDPOINT", "")
 
@@ -137,3 +143,36 @@ async def listener_ingest(req: IngestRequest):
             continue
 
     return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+
+
+# ── Audio Inbox ─────────────────────────────────────────────────────────────
+
+@router.get("/inbox/status")
+async def inbox_status():
+    """Read the audio inbox daemon status file."""
+    try:
+        if INBOX_STATUS_PATH.exists():
+            data = json.loads(INBOX_STATUS_PATH.read_text())
+            return JSONResponse(status_code=200, content=data)
+        return JSONResponse(status_code=200, content={
+            "running": False, "state": "offline",
+            "message": "Inbox daemon not detected (no status file)",
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/inbox/process")
+async def inbox_process():
+    """Write a 'process' command to the inbox control file."""
+    try:
+        control = {"command": "process", "source": "dashboard"}
+        INBOX_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = INBOX_CONTROL_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(control, indent=2))
+        tmp.rename(INBOX_CONTROL_PATH)
+        logger.info("Inbox process command written (source=dashboard)")
+        return JSONResponse(status_code=200, content={"ok": True, "command": control})
+    except Exception as e:
+        logger.error("Failed to write inbox control: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
