@@ -154,6 +154,30 @@ def transcribe_chunk(
     return resp.json()
 
 
+def stitch_texts(text_a: str, text_b: str, max_overlap_words: int = 20) -> str:
+    """Stitch two overlapping transcripts by finding the best common word sequence."""
+    words_a = text_a.split()
+    words_b = text_b.split()
+
+    if not words_a: return text_b
+    if not words_b: return text_a
+
+    # Look for the longest suffix of A that matches a prefix of B
+    # Limit search to max_overlap_words to stay efficient
+    max_search = min(len(words_a), len(words_b), max_overlap_words)
+    
+    for n in range(max_search, 0, -1):
+        suffix = words_a[-n:]
+        prefix = words_b[:n]
+        # Case-insensitive match for robustness
+        if [w.lower() for w in suffix] == [w.lower() for w in prefix]:
+            # Found the overlap! Return A + remaining part of B
+            return " ".join(words_a + words_b[n:])
+
+    # No reliable overlap found, just join with a space
+    return text_a + " " + text_b
+
+
 def transcribe_file(
     path: str,
     chunk_duration: int,
@@ -174,8 +198,9 @@ def transcribe_file(
         mins, secs = divmod(int(total), 60)
         print(f"Audio duration: {mins}m {secs}s — {len(chunks)} chunks", file=sys.stderr)
 
-    texts = []
+    full_text = ""
     confidences = []
+    texts_count = 0
 
     for i, (start, dur) in enumerate(chunks):
         if verbose:
@@ -196,8 +221,13 @@ def transcribe_file(
             latency = result.get("latency_ms", 0.0)
 
             if text:
-                texts.append(text)
+                if not full_text:
+                    full_text = text
+                else:
+                    full_text = stitch_texts(full_text, text)
+                
                 confidences.append(confidence)
+                texts_count += 1
 
             if verbose:
                 preview = text[:60] + "..." if len(text) > 60 else text
@@ -215,24 +245,23 @@ def transcribe_file(
             if verbose:
                 print(f" ERROR: {e}", file=sys.stderr)
 
-    transcript = " ".join(texts)
     avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
 
     stats = {
         "duration_seconds": round(total, 2),
         "chunks_processed": len(chunks),
-        "chunks_with_text": len(texts),
+        "chunks_with_text": texts_count,
         "avg_confidence": round(avg_conf, 3),
     }
 
     if verbose:
         print(
-            f"\nDone: {len(texts)}/{len(chunks)} chunks with speech, "
+            f"\nDone: {texts_count}/{len(chunks)} chunks with speech, "
             f"avg confidence={avg_conf:.3f}",
             file=sys.stderr,
         )
 
-    return transcript, stats
+    return full_text, stats
 
 
 # ---------------------------------------------------------------------------

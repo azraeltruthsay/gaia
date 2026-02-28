@@ -168,6 +168,7 @@ const SERVICE_LABELS = {
   'gaia-prime': 'Prime',
   'gaia-mcp': 'MCP',
   'gaia-study': 'Study',
+  'gaia-audio': 'Audio',
   'gaia-core-candidate': 'Core (cand.)',
   'discord': 'Discord',
 };

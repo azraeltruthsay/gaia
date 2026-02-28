@@ -782,13 +782,20 @@ class AgentCore:
         # user input, probes all vector collections, and uses hits to drive
         # persona/KB selection (context-driven rather than keyword-gated).
         probe_result = None
+        is_lite_task = user_input.strip().startswith("::lite") or "[lite]" in user_input[:50]
+        is_thinker_task = user_input.strip().startswith("::thinker") or "[thinker]" in user_input[:50]
+        is_direct_task = is_lite_task or is_thinker_task
+
         try:
-            kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
-            probe_result = run_semantic_probe(
-                user_input=user_input,
-                knowledge_bases=kb_config,
-                session_id=session_id,
-            )
+            if is_direct_task:
+                logger.info("AgentCore: Skipping semantic probe for direct task (::lite/::thinker)")
+            else:
+                kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
+                probe_result = run_semantic_probe(
+                    user_input=user_input,
+                    knowledge_bases=kb_config,
+                    session_id=session_id,
+                )
             if probe_result and probe_result.has_hits:
                 logger.info(
                     "SemanticProbe: %d hits, primary=%s, supplemental=%s (%.1fms)",
@@ -886,10 +893,16 @@ class AgentCore:
         selected_model_name = None
         _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
 
+        # 0. Fast-path for internal system tasks
+        if is_lite_task:
+            selected_model_name = "lite"
+            logger.info("AgentCore: Model selection fast-path -> lite")
+
         # 1. Explicit oracle request
-        text_lower = user_input.lower()
-        if "oracle" in text_lower and getattr(self.config, 'use_oracle', False):
-            selected_model_name = "oracle"
+        if not selected_model_name:
+            text_lower = user_input.lower()
+            if "oracle" in text_lower and getattr(self.config, 'use_oracle', False):
+                selected_model_name = "oracle"
 
         # 2. Respect GAIA_BACKEND env override (for debugging)
         if not selected_model_name:
@@ -912,8 +925,11 @@ class AgentCore:
             text_lower = user_input.lower()
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
             wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
+            wants_lite = any(tag in text_lower for tag in ["lite:", "[lite]", "::lite"])
 
-            if "oracle" in text_lower and self.config.use_oracle:
+            if wants_lite:
+                selected_model_name = "lite"
+            elif "oracle" in text_lower and self.config.use_oracle:
                 selected_model_name = "oracle"
             elif not _gpu_sleeping:
                 # Prime is awake -- default to Prime for all prompts
@@ -1311,27 +1327,32 @@ class AgentCore:
             pass
 
         plan = None
-        try:
-            plan = detect_intent(
-                user_input,
-                self.config,
-                lite_llm=lite_llm,
-                full_llm=prime_llm,
-                fallback_llm=fallback_llm,
-                probe_context=_probe_context,
-                embed_model=_embed_model,
-                source=source,
-            )
-        finally:
-            # Use role-aware release via ModelPool API; let exceptions be logged but
-            # don't rely on hasattr guards anymore since ModelPool now provides
-            # `release_model_for_role`.
+        if is_direct_task:
+            from gaia_core.cognition.nlu.intent_detection import Plan
+            plan = Plan(intent="direct_task", read_only=True)
+            logger.info("AgentCore: Intent detection fast-path -> direct_task")
+        else:
             try:
-                if lite_llm:
-                    self.model_pool.release_model_for_role("lite")
-                self.model_pool.release_model_for_role("prime")
-            except Exception:
-                self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
+                plan = detect_intent(
+                    user_input,
+                    self.config,
+                    lite_llm=lite_llm,
+                    full_llm=prime_llm,
+                    fallback_llm=fallback_llm,
+                    probe_context=_probe_context,
+                    embed_model=_embed_model,
+                    source=source,
+                )
+            finally:
+                # Use role-aware release via ModelPool API; let exceptions be logged but
+                # don't rely on hasattr guards anymore since ModelPool now provides
+                # `release_model_for_role`.
+                try:
+                    if lite_llm:
+                        self.model_pool.release_model_for_role("lite")
+                    self.model_pool.release_model_for_role("prime")
+                except Exception:
+                    self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
         
         # 3a. Fast local knowledge check: if a fact exists for this question,
         # bypass the model and respond immediately.

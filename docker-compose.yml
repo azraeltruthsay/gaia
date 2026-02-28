@@ -112,9 +112,9 @@ services:
       --model ${PRIME_MODEL_PATH:-/models/Qwen3-8B-abliterated-AWQ}
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.70
-      --max-model-len 8192
-      --max-num-seqs 4
+      --gpu-memory-utilization 0.65
+      --max-model-len 16384
+      --max-num-seqs 1
       --trust-remote-code
       --dtype auto
       --enforce-eager
@@ -458,6 +458,7 @@ services:
       - ./gaia-audio:/app:rw
       - ./gaia-common:/app/gaia_common:ro
       - ./gaia-models/voice:/models/voice:ro
+      - ./gaia-models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf:/models/nano_refiner.gguf:ro
 
     environment:
       - PYTHONPATH=/app
@@ -466,6 +467,7 @@ services:
       - GAIA_CONSTANTS_PATH=/app/gaia_common/constants/gaia_constants.json
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NANO_MODEL_PATH=/models/nano_refiner.gguf
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:

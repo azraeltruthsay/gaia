@@ -6,6 +6,7 @@ pydantic>=2.0
 
 # STT - faster-whisper (Whisper CTranslate2 backend)
 faster-whisper>=1.0.0
+transformers==4.44.2
 
 # TTS - Coqui XTTS v2 via community fork (local GPU, headless-safe)
 coqui-tts>=0.24.2
@@ -18,6 +19,9 @@ RealtimeTTS[system]>=0.4.0
 numpy
 soundfile
 scipy
+
+# LLM - llama-cpp-python for Nano Refiner
+llama-cpp-python>=0.2.0
 
 # GPU management
 torch>=2.0.0

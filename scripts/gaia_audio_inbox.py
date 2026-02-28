@@ -41,6 +41,8 @@ import requests
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+sys.path.insert(0, str(PROJECT_ROOT / "gaia-core"))
+sys.path.insert(0, str(PROJECT_ROOT / "gaia-common"))
 
 from gaia_transcribe import (
     get_audio_duration,
@@ -48,6 +50,7 @@ from gaia_transcribe import (
     extract_chunk_wav,
     transcribe_chunk,
     transcribe_file,
+    stitch_texts,
 )
 
 # ---------------------------------------------------------------------------
@@ -156,17 +159,19 @@ def _build_cognition_packet(
     if len(transcript) > TRANSCRIPT_MAX_CHARS:
         review_transcript += f"\n\n[... truncated — full transcript is {len(transcript)} chars]"
 
+    # Switch to Lite model for final review to ensure stability with long context
     prompt = (
-        f"[AUDIO INBOX REVIEW]\n"
-        f"Source: {filename} ({duration_str})\n\n"
-        f"You received an audio file in your inbox. Here is the full transcript:\n\n"
+        f"::lite\n" # Force Lite and skip intent detection
+        f"You are GAIA. You received a new audio transmission in your inbox (Duration: {duration_str}). "
+        f"It has already been transcribed for you below. Review this transcript only. "
+        f"Do NOT use tools.\n\n"
+        f"TRANSCRIPT:\n"
         f"---\n"
         f"{review_transcript}\n"
         f"---\n\n"
         f"Review this content thoughtfully. What is it about? What are the key ideas, "
         f"arguments, or themes? Is there anything particularly interesting, surprising, "
-        f"or worth remembering? Share your honest reaction and any connections you see "
-        f"to things you already know."
+        f"or worth remembering? Share your honest reaction."
     )
 
     return {
@@ -184,13 +189,13 @@ def _build_cognition_packet(
             },
             "origin": "user",
             "routing": {
-                "target_engine": "Prime",
+                "target_engine": "Lite",
                 "priority": 5,
             },
             "model": {
                 "name": "auto",
                 "provider": "auto",
-                "context_window_tokens": 8192,
+                "context_window_tokens": 32000,
             },
             "output_routing": {
                 "primary": {
@@ -226,7 +231,7 @@ def _build_cognition_packet(
         "content": {
             "original_prompt": prompt,
             "data_fields": [
-                {"key": "audio_transcript", "value": prompt, "type": "text"},
+                {"key": "audio_transcript", "value": review_transcript, "type": "text"},
             ],
         },
         "reasoning": {},
@@ -239,7 +244,7 @@ def _build_cognition_packet(
             "latency_ms": 0,
         },
         "status": {"finalized": False, "state": "initialized", "next_steps": []},
-        "tool_routing": {},
+        "tool_routing": {"ENABLED": False}, # Do not seek tools for the review itself
     }
 
 
@@ -277,6 +282,16 @@ class AudioInboxDaemon:
         self._current_file = None
         self._files_processed = 0
         self._state = "idle"  # idle | processing
+
+        # Load constants from gaia-core's config logic
+        try:
+            from gaia_core.config import get_config
+            self.config = get_config()
+            self.inbox_cfg = self.config.constants.get("AUDIO_INBOX", {})
+            logger.info("Loaded AUDIO_INBOX config: %s", self.inbox_cfg)
+        except Exception as e:
+            logger.error("Failed to load GAIA config: %s", e)
+            self.inbox_cfg = {}
 
         # Paths
         self.pid_path = project_root / "logs" / PID_FILE_NAME
@@ -378,8 +393,70 @@ class AudioInboxDaemon:
 
         self._state = "idle"
 
+    def _refine_transcript(self, transcript: str, stats: dict) -> str:
+        """Use the Lite model to perform semantic diarization and cleanup in chunks."""
+        if not self.inbox_cfg.get("refinement_enabled", True):
+            logger.info("Refinement disabled in constants; using raw transcript")
+            return transcript
+
+        logger.info("Refining transcript (semantic diarization) via chunked processing...")
+        
+        # 1. Break transcript into manageable chunks (from constants)
+        chunk_size = self.inbox_cfg.get("refinement_chunk_size", 4000)
+        overlap = self.inbox_cfg.get("refinement_overlap", 200)
+        timeout = self.inbox_cfg.get("refinement_timeout_seconds", 90)
+        
+        chunks = []
+        start = 0
+        while start < len(transcript):
+            end = min(start + chunk_size, len(transcript))
+            chunks.append(transcript[start:end])
+            if end == len(transcript): break
+            start = end - overlap
+
+        refined_chunks = []
+        for i, chunk in enumerate(chunks):
+            logger.info("  Refining chunk %d/%d (%d chars)...", i+1, len(chunks), len(chunk))
+            
+            # Simple payload for the dedicated /refine endpoint
+            payload = {
+                "text": chunk,
+                "max_tokens": 2048
+            }
+
+            try:
+                # Call gaia-audio's new /refine endpoint (Nano-Refiner)
+                resp = requests.post(
+                    f"{self.audio_url}/refine",
+                    json=payload,
+                    timeout=timeout,
+                )
+                if resp.status_code == 200:
+                    refined_data = resp.json()
+                    refined_text = refined_data.get("refined_text", "")
+                    if refined_text:
+                        refined_chunks.append(refined_text)
+                        continue
+                
+                logger.warning("Chunk %d refinement failed (HTTP %d); using raw chunk", i+1, resp.status_code)
+                refined_chunks.append(chunk)
+            except Exception as e:
+                logger.error("Chunk %d refinement pass failed: %s", i+1, e)
+                refined_chunks.append(chunk)
+
+        # 2. Stitch the refined chunks back together
+        if not refined_chunks:
+            return transcript
+
+        final_refined = refined_chunks[0]
+        for next_chunk in refined_chunks[1:]:
+            final_refined = stitch_texts(final_refined, next_chunk)
+
+        logger.info("Refinement complete (%d refined chunks stitched)", len(refined_chunks))
+        return final_refined
+
     def _process_file(self, source: Path):
-        """Full pipeline: move → transcribe → build packet → POST → sidecars."""
+        """Full pipeline: move → transcribe → refine → build packet → POST → sidecars."""
         filename = source.name
         stem = source.stem
         self._current_file = filename
@@ -407,12 +484,15 @@ class AudioInboxDaemon:
                 self._move_to_done(processing_path, stem, transcript="", stats=stats, review="[No speech detected]")
                 return
 
-            # 2. Build duration string
+            # 2. Refine (Semantic Diarization)
+            transcript = self._refine_transcript(transcript, stats)
+
+            # 3. Build duration string
             dur = stats.get("duration_seconds", 0)
             mins, secs = divmod(int(dur), 60)
             duration_str = f"{mins}m {secs}s"
 
-            # 3. Build CognitionPacket and POST to gaia-core
+            # 4. Build CognitionPacket and POST to gaia-core
             packet = _build_cognition_packet(filename, duration_str, transcript, stats)
 
             logger.info("Sending review packet to gaia-core (%d char transcript)...", len(transcript))
@@ -420,7 +500,7 @@ class AudioInboxDaemon:
                 resp = requests.post(
                     f"{self.core_url}/process_packet",
                     json=packet,
-                    timeout=120,
+                    timeout=300,
                 )
                 if resp.status_code == 200:
                     review_data = resp.json()

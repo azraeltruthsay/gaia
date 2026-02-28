@@ -10,6 +10,7 @@ import asyncio
 import base64
 import logging
 import time
+import os
 from contextlib import asynccontextmanager
 
 import httpx
@@ -25,11 +26,14 @@ from gaia_audio.models import (
     SynthesizeResponse,
     TranscribeRequest,
     TranscribeResponse,
+    RefineRequest,
+    RefineResponse,
     VoiceInfo,
 )
 from gaia_audio.status import status_tracker
 from gaia_audio.stt_engine import STTEngine, audio_bytes_to_array
 from gaia_audio.tts_engine import TTSEngine
+from gaia_audio.refiner_engine import RefinerEngine
 
 logger = logging.getLogger("GAIA.Audio")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -40,6 +44,7 @@ config: AudioConfig | None = None
 gpu_manager: GPUManager | None = None
 stt_engine: STTEngine | None = None
 tts_engine: TTSEngine | None = None
+refiner_engine: RefinerEngine | None = None
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -69,6 +74,14 @@ async def lifespan(app: FastAPI):
         vram_budget_mb=config.vram_budget_mb,
         half_duplex=config.half_duplex,
     )
+
+    # Initialize Nano-Refiner (CPU model)
+    nano_model_path = os.getenv("NANO_MODEL_PATH", "/models/nano_refiner.gguf")
+    refiner_engine = RefinerEngine(model_path=nano_model_path)
+    try:
+        refiner_engine.load()
+    except Exception as e:
+        logger.error(f"Failed to load RefinerEngine: {e}")
 
     duplex_mode = "half-duplex" if config.half_duplex else "full-duplex"
     await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine}, {duplex_mode})")
@@ -213,6 +226,49 @@ async def transcribe(request: TranscribeRequest):
         raise HTTPException(500, f"Transcription failed: {e}") from e
 
 
+# ── Refinement (Nano LLM) ───────────────────────────────────────────
+
+
+@app.post("/refine", response_model=RefineResponse)
+async def refine(request: RefineRequest):
+    """Clean up and format a transcript using the nano-refiner (CPU)."""
+    global refiner_engine
+    logger.info(f"Refine request received. Engine initialized: {refiner_engine is not None}")
+    if not refiner_engine:
+        # Emergency initialization if lifespan missed it or global state was lost
+        nano_model_path = os.getenv("NANO_MODEL_PATH", "/models/nano_refiner.gguf")
+        logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_model_path}")
+        refiner_engine = RefinerEngine(model_path=nano_model_path)
+        refiner_engine.load()
+
+    t0 = time.monotonic()
+    status_tracker.state = "refining"
+    await status_tracker.emit("refine_start", f"Refining text ({len(request.text)} chars)")
+
+    try:
+        # The refiner runs on CPU, so it doesn't need gpu_manager synchronization
+        refined_text = await asyncio.get_event_loop().run_in_executor(
+            None, 
+            refiner_engine.refine, 
+            request.text, 
+            request.max_tokens
+        )
+
+        latency_ms = (time.monotonic() - t0) * 1000
+        status_tracker.state = "idle"
+        await status_tracker.emit("refine_complete", f"Refined {len(refined_text)} chars", latency_ms)
+
+        return RefineResponse(
+            refined_text=refined_text,
+            latency_ms=latency_ms
+        )
+
+    except Exception as e:
+        status_tracker.state = "idle"
+        await status_tracker.emit("error", f"Refinement failed: {e}")
+        raise HTTPException(500, f"Refinement failed: {e}") from e
+
+
 # ── Synthesis (TTS) ───────────────────────────────────────────────────
 
 
@@ -224,6 +280,10 @@ async def synthesize(request: SynthesizeRequest):
     """
     if not gpu_manager or not tts_engine:
         raise HTTPException(503, "Audio service not initialized")
+
+    if not tts_engine.loaded:
+        logger.info("TTS engine not loaded; loading on-demand")
+        await gpu_manager.run_tts(tts_engine.load)
 
     t0 = time.monotonic()
     status_tracker.state = "synthesizing"

@@ -58,8 +58,8 @@ except ImportError:
 logger = logging.getLogger("GAIA.Web.API")
 
 # Configuration from environment
-CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
-CORE_FALLBACK_ENDPOINT = os.environ.get("CORE_FALLBACK_ENDPOINT", "")
+CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
+CORE_FALLBACK_ENDPOINT = os.environ.get("CORE_FALLBACK_ENDPOINT", "http://gaia-core-candidate:6415")
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
@@ -165,12 +165,13 @@ async def system_status_proxy():
 
 # Service registry: name → (internal URL, is_candidate)
 _SERVICE_REGISTRY = {
-    "gaia-core": (os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415"), False),
+    "gaia-core": (CORE_ENDPOINT, False),
     "gaia-web": ("http://localhost:6414", False),  # self
-    "gaia-orchestrator": (os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410"), False),
+    "gaia-orchestrator": (ORCHESTRATOR_ENDPOINT, False),
     "gaia-prime": (os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"), False),
     "gaia-mcp": (os.environ.get("MCP_HEALTH_ENDPOINT", "http://gaia-mcp:8765"), False),
     "gaia-study": (os.environ.get("STUDY_ENDPOINT", "http://gaia-study:8766"), False),
+    "gaia-audio": (AUDIO_ENDPOINT, False),
 }
 
 # Add candidate services if they exist

@@ -20,6 +20,7 @@ logger = logging.getLogger("GAIA.IntentDetection")
 class Plan:
     intent: str
     read_only: bool = False
+    confidence: float = 1.0
 
 # ---- Reflex path for \u201cautonomic\u201d commands ----
 def fast_intent_check(text):
