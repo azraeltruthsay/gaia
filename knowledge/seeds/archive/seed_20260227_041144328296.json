@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T04:11:44.328309+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "6dd12452-71e4-479d-8e8d-da49cbe980d3",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 definition and context of \"partition migration\" in D&D or system architecture. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T04:35:00.093281+00:00"
+}

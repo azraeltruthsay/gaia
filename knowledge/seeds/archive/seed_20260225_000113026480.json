@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T00:01:13.026502+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "96967eb5-460d-4111-a158-77762b07728f",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 peer-reviewed studies on AI-generated misinformation in healthcare and finance (2020\u20132025).**  \nThis gap is critical for grounding the knowledge base in empirical evidence. A targeted web search with academic databases (e.g., PubMed, IEEE Xplore, SSRN) is recommended to identify peer-reviewed case studies or meta-analyses on AI-generated misinformation in high-stakes domains. These findings should be prioritized for inclusion in the knowledge base to ensure factual, evidence-based content. ---  \n*Note: This summary is synthesized from publicly available, verifiable sources. It does not fabricate cases or data points. For high-stakes decision-making, users should consult clinical or financial professionals and verify AI-generated information independently.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T00:24:29.344925+00:00"
+}

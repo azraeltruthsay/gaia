@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-26T03:08:58.972597+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "3b8372dc-3c17-4eb3-853a-1805a9ab0aab",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 speculative fiction campaign design templates with integrated emotional pacing and narrative tension.**  \nThis insight could be expanded into a reusable, structured template for campaign designers\u2014e.g., a \"Narrative Emotional Arc Toolkit\" with pre-built scenarios (e.g., post-collapse, AI rebellion, ecological collapse) that include tense, perspective, and foreshadowing design choices. This would be a valuable addition to campaign design resources. ---  \n*Note: This analysis is based on general narrative theory, psychological studies, and examples from established speculative fiction works. No specific retrieved documents were used.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-26T03:30:55.148776+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:13:58.929735+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "cf341891-9c94-4cb0-88bd-ac51ca2ba435",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 performance comparison between recursive and iterative implementations in common programming languages. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:35:47.876851+00:00"
+}

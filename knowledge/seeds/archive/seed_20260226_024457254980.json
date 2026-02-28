@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-26T02:44:57.255004+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "768d0a99-b681-45ff-a25c-070d263a1eb3",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 narrative tense emotional impact in speculative fiction and campaign design. Could be researched and added to knowledge base. Note: This response is based on general linguistic and narrative theory, not on any retrieved documents. No specific source was found in the knowledge base for this topic.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-26T03:08:59.031665+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T04:01:52.122856+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "1caa3c73-acf0-4e75-a005-44d3c5e77805",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 long-term stability of partition migration in high-interference environments (e.g., BlueShot exposure). Could be researched and added to knowledge base. Let me know if you'd like to verify the new drive paths or run diagnostics.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T04:11:38.555567+00:00"
+}

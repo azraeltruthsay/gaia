@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:57:23.467764+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "e0c417fd-10ac-43b0-a0dd-2d6047835d52",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Role of Morgan le Fay in different Arthurian versions (e.g., Malory vs. medieval romances). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:09:02.168232+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T05:22:38.854097+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "cfec6612-57c1-4613-bf10-bbba00a72705",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 D&D space campaign mechanics for \"pearl-based gyro stabilization\" in a reusable, documented format.**\n\nWould you like me to generate a sample file or document based on this framework for inclusion in your campaign\u2019s knowledge base?",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T05:46:43.267405+00:00"
+}

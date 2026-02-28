@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T05:31:33.757902+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "4c7cd33a-f340-4973-9dd5-f9698443c978",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 *specific mechanics of the \"BOOM\" artifice system and its psychoactive resistance protocol*. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T05:44:11.097175+00:00"
+}

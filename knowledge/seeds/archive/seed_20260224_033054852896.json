@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T03:30:54.852915+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "3beefbac-d5fe-4ee7-82b1-af2047e9b346",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Real-time system uptime monitoring. Could be researched and added to knowledge base for future accuracy.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T03:57:12.462427+00:00"
+}

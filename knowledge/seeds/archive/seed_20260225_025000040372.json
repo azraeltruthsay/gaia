@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T02:50:00.040398+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "f8743f96-68dc-4356-8724-eaf71a2d0f08",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 real-time daylight saving time status in PST (could be researched for accuracy during DST transitions).",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T03:23:56.748556+00:00"
+}

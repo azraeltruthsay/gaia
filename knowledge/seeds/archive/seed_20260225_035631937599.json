@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:56:31.937626+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "ce2ae922-c7b1-47a9-82cc-263eded0e5d8",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Origins of the name \"Excalibur\" in early Welsh texts (Culhwch and Olwen). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:13:06.271342+00:00"
+}

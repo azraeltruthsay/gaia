@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:15:52.558145+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "501db333-1670-4c3b-b271-330bc6b59b94",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 How does the `json-architect` adapter perform in real-world interactions? Could its effectiveness be measured or validated through specific use cases?",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:36:15.798661+00:00"
+}

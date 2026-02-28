@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T04:58:26.756952+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "227cc712-d368-4a1a-b9f9-691542b799ba",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 potential user confusion between narrative \"migration\" (factions moving) and technical \"partition migration\" (system-level data/service movement). Could be addressed with a cross-domain glossary in the knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:07:28.703396+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T05:05:33.186750+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "94e021b1-105e-47ff-9794-4e0f3e0d0fb8",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 How to model or describe in-game mechanics (e.g., a \"pearl-based gyro stabilization\") for a D&D space campaign. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T05:21:57.399412+00:00"
+}

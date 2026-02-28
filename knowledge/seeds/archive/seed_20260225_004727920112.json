@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T00:47:27.920142+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "50936d7a-6e45-4c7a-8606-695a8ffc5ea0",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 real-world cases of AI-generated misinformation with verifiable harm in healthcare/finance.**  \n*Note: This gap is being actively researched during idle time. If future peer-reviewed studies emerge (e.g., in JAMA, NEJM, Nature, or financial regulatory reports), they will be added to the knowledge base with full citation and verification.*  \n\n> *Current status: No verified cases exist in peer-reviewed literature. This may reflect a lack of documented incidents or a definitional gap between \"inaccuracy\" and \"misinformation.\"*  \n\n---  \n*Note: This response is grounded in the provided search results and peer-reviewed literature. No fabricated cases were introduced.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T01:11:24.088524+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:58:13.818146+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "8451cf75-8875-4d13-953d-4eac2e0c6ac0",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 How the roles of \"queen\" and \"wife\" evolved in different Arthurian texts (e.g., Malory vs. later romances). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:23:08.828538+00:00"
+}

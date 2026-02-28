@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:36:07.877347+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "ec5d2c94-fd8e-460a-8f19-e0ecb467f858",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 2026 DST transition dates in PST. Requires direct verification from official U.S. government sources (DOT or NIST) to resolve. This information is critical for time-sensitive compliance protocols. Pending official confirmation, the transition in 2026 will not be known with certainty. GAIA should initiate a direct query to the DOT or NIST website to obtain the official schedule.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T03:47:15.314945+00:00"
+}

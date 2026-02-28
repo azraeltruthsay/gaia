@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:21:28.479611+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "30e53e3d-a8fb-4c30-a730-230668e84ace",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Guinevere-Lancelot affair across medieval Arthurian sources. Requires comparative analysis of key texts (e.g., Chr\u00e9tien de Troyes, Lancelot-Grail cycle, Malory) and scholarly commentary on narrative evolution, gender, power, and chivalry. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:50:12.906408+00:00"
+}

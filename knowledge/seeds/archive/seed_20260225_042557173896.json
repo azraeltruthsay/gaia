@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:25:57.173924+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "398f010c-f022-4ae8-bcc3-ce734f30f1ae",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Comparative analysis of female agency in 16th-century Arthurian romances (e.g., *The Romance of the Rose*, *The Prince*, or *The Knight of the Swan*). These texts may offer further insight into how gender roles evolved beyond Malory\u2019s 15th-century portrayal. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:54:30.582043+00:00"
+}

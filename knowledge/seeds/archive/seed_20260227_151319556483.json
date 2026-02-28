@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:13:19.556504+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "6995125e-4415-4ae9-bf49-6d797b7937bd",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 variant spellings of Excalibur/Caliburn in historical manuscripts. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:34:47.256255+00:00"
+}

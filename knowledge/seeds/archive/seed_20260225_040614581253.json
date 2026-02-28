@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:06:14.581284+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "9fdfee81-240b-4d6e-a93b-8a9c78ddb2b0",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Comparative analysis of romantic or intimate elements in modern adaptations of *The Odyssey* versus the original Homeric text. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:16:20.004883+00:00"
+}

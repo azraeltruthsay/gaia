@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:32:38.007661+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "b327ac71-a5f9-428f-8d48-27f7b7835a07",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Super Bowl LIX final score, MVP, and key player performance. Requires verification from official NFL records or trusted sports databases.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:57:21.800048+00:00"
+}

@@ -247,6 +247,26 @@
         </div>
       </div>
 
+      <!-- Audio Inbox -->
+      <div class="hook-group" x-data="audioInboxPanel()">
+        <div class="hook-group-header">Audio Inbox</div>
+        <div class="hook-status">
+          <span class="hook-status-label">State:</span>
+          <span class="hook-status-value" x-text="inboxStateBadge"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Queue:</span>
+          <span class="hook-status-value" x-text="queueDepth + ' files'"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Processed:</span>
+          <span class="hook-status-value" x-text="filesProcessed"></span>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" @click="processInbox()" :disabled="inboxBusy">Process Inbox</button>
+        </div>
+      </div>
+
       <!-- Semantic Codex -->
       <div class="hook-group hook-group-wide">
         <div class="hook-group-header">Semantic Codex Lookup</div>

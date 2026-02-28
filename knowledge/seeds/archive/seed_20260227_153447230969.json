@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:34:47.230992+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "9b68a343-8ab5-4065-b794-cdfbe15ba6d6",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Historical variants of \"Excalibur\" and \"Caliburn\" in 9th\u201315th century sources.**\n\n**Actionable Prompt for GAIA Cognitive Loop:**\n\nResearch and compile a structured, citable knowledge base entry on the historical variants of \"Excalibur\" and \"Caliburn\" as recorded in medieval texts, chronicles, and primary sources from the 9th to 15th centuries. **Scope and Requirements:**  \n- Identify and list specific spellings (e.g., *Caliburn*, *Caliburnus*, *Excalibur*, *Excalibour*, *Caladfwlch*, *Excalibour*) with their first documented appearances. - Pinpoint the exact sources (e.g., Geoffrey of Monmouth\u2019s *Historia Regum Britanniae*, 1136 CE; Robert de Boron\u2019s *Merlin*,",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:58:51.704984+00:00"
+}

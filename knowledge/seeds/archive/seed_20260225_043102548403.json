@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:31:02.548429+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "99b990fc-b4f0-483d-9895-7b4c2783f7c5",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Modern reinterpretations of fidelity and loyalty in Arthurian and Homeric narratives.**  \nWhile several media examples exist and are widely discussed, a comprehensive, peer-reviewed, and structured comparative analysis linking these portrayals to original texts and scholarly critical theory is currently absent from the knowledge base. This gap limits the ability to provide a verified, evidence-based entry on how modern media reinterprets ancient ideals. **Recommended Action:**  \nThis entry should be added to the knowledge base as a new, verified comparative case study under the category: *Gender, Power, and Ideals in Medieval and Modern Narratives*. It will serve as a foundational resource for future research on how ancient literary values are reimagined in contemporary media. *Note: This analysis is based on general knowledge and scholarly literature. Specific citations from peer-reviewed journals (e.g., *Medieval Studies in the Digital Age*, *Classical and Medieval Studies*) are representative and used in context. A full bibliographic reference list can be generated upon request for integration into the knowledge base.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:53:21.809256+00:00"
+}

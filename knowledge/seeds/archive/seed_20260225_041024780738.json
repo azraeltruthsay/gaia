@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:10:24.780761+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "8107afd6-7846-4ee2-9016-a6ba804e7693",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Guinevere-Lancelot affair across Arthurian sources. This topic is relevant to literary and cultural history and could be researched and added to the knowledge base if needed for broader narrative or historical context.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:21:28.538794+00:00"
+}

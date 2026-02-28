@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:25:10.947139+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "9cb5ccae-1ce4-41c4-8428-cb40f6f459e0",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 real-time DST status in PST.**  \n*This information is currently based on general knowledge and scheduled transitions. A verified, real-time update would require direct access to official time zone authority data (e.g., NIST or DOT live feeds), which is not currently available in the retrieved documents or search results. This gap should be addressed via autonomous research during idle cycles.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T03:34:45.563153+00:00"
+}

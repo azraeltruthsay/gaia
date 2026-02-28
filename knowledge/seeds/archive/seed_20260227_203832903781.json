@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T20:38:32.903803+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "f5f6885b-0040-47a5-8fe5-61264ed05e40",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 relationship between thermodynamic and information entropy in quantum systems.**  \nCould be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T21:50:47.736341+00:00"
+}

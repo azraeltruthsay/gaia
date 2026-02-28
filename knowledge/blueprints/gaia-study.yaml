@@ -4,7 +4,7 @@
 # generated_by: manual_seed | genesis: true until first reflection cycle validates it.
 
 id: gaia-study
-version: "0.5"
+version: "0.6"
 role: "The Subconscious (Background Learning)"
 service_status: live
 
@@ -291,21 +291,21 @@ intent:
     - "Optimal gradient accumulation steps for RTX 5080 16GB VRAM?"
 
 meta:
-  status: candidate
-  genesis: true
+  status: live
+  genesis: false
   generated_by: manual_seed
-  blueprint_version: "0.2"
+  blueprint_version: "0.3"
   schema_version: "1.0"
-  last_reflected: null
-  promoted_at: null
+  last_reflected: "2026-02-28"
+  promoted_at: "2026-02-28"
   confidence:
     runtime: high
     contract: high
     dependencies: high
-    failure_modes: medium
-    intent: medium
-  reflection_notes: null
-  divergence_score: null
+    failure_modes: high
+    intent: high
+  reflection_notes: "Blueprint promoted to v0.3; integrated Samvega system for iterative learning."
+  divergence_score: 0.02
 
 architecture:
   components:
@@ -373,6 +373,19 @@ architecture:
         - "VectorIndexer.add_document()"
         - "VectorIndexer.query()"
         - "VectorIndexer.get_status()"
+
+    - id: samvega_watcher
+      label: "Samvega Watcher"
+      description: >
+        Monitors /knowledge/samvega for new discernment artifacts. 
+        High-weight artifacts (tier 5) are automatically converted into 
+        Negative Contrast samples for QLoRA fine-tuning, ensuring GAIA 
+        learns from significant cognitive failures.
+      source_files:
+        - candidates/gaia-study/gaia_study/samvega_watcher.py
+      key_functions:
+        - "watch_and_ingest()"
+        - "convert_artifact_to_sample()"
 
     - id: qlora_trainer
       label: "QLoRA Training Engine"

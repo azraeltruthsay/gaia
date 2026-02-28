@@ -1,18 +1,15 @@
 {
-  "timestamp": "2026-02-28T06:26:40Z",
+  "timestamp": "2026-02-28T14:03:48Z",
   "gap_count": 31,
   "gaps": [
     {
-      "type": "missing_blueprint",
-      "service": "gaia-audio",
-      "expected": [
-        "GAIA_AUDIO.md",
-        "gaia-audio.yaml"
-      ]
+      "type": "undocumented_module",
+      "module": "agent_core",
+      "search_dir": "knowledge/system_reference/core_documents/"
     },
     {
       "type": "undocumented_module",
-      "module": "agent_core",
+      "module": "audio_commentary",
       "search_dir": "knowledge/system_reference/core_documents/"
     },
     {

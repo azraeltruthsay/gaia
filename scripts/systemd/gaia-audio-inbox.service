@@ -1,0 +1,23 @@
+[Unit]
+Description=GAIA Audio Inbox — trigger-based audio file review daemon
+Documentation=file:///gaia/GAIA_Project/scripts/gaia_audio_inbox.py
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/gaia/GAIA_Project
+ExecStart=/usr/bin/python3 /gaia/GAIA_Project/scripts/gaia_audio_inbox.py
+Restart=on-failure
+RestartSec=30
+
+# Environment
+Environment=GAIA_AUDIO_URL=http://localhost:8080
+Environment=GAIA_CORE_URL=http://localhost:6415
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gaia-audio-inbox
+
+[Install]
+WantedBy=default.target

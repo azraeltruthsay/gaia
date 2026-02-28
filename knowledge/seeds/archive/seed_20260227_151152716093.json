@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:11:52.716115+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "9e2d50ce-60d8-4087-a28d-ef75d6d207d9",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Super Bowl LIX game details (e.g., exact score, venue, MVP). Could be researched and added to knowledge base for accuracy.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:32:38.031642+00:00"
+}

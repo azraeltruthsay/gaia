@@ -534,6 +534,41 @@ TOOLS = {
             "required": ["notebook_id", "title"]
         }
     },
+    # --- Audio Inbox Tools ---
+    "audio_inbox_status": {
+        "description": "Check the current state of the audio inbox daemon. Returns whether it's running, current file being processed, queue depth, and files completed.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_inbox_list": {
+        "description": "List audio files in each inbox state (new/processing/done). Shows which files are queued, being transcribed, or completed.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_inbox_review": {
+        "description": "Retrieve the transcript and GAIA's review for a completed audio inbox file. Returns the full transcript, review text, and metadata.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The filename (with or without extension) of the completed audio file to retrieve."
+                }
+            },
+            "required": ["filename"]
+        }
+    },
+    "audio_inbox_process": {
+        "description": "Trigger audio inbox processing. The host-side daemon will transcribe and review all queued audio files in audio_inbox/new/. Reviews appear on the web dashboard via the autonomous message stream.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
     # --- Audio Listener Tools ---
     "audio_listen_start": {
         "description": "Start system audio capture. GAIA will listen to whatever audio is playing on the host system (music, podcasts, browser audio) and transcribe it. Requires approval. The host-side listener daemon must be running.",

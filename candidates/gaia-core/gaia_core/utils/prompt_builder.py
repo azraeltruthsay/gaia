@@ -537,6 +537,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         except Exception:
             logger.debug("Temporal context injection skipped", exc_info=True)
 
+    # 5.7. Ambient Audio Context (only when listening is active)
+    if not compact_mode:
+        try:
+            from gaia_core.main import get_audio_context_for_prompt
+            audio_block = get_audio_context_for_prompt()
+            if audio_block:
+                system_content_parts.append(audio_block)
+        except Exception:
+            logger.debug("Audio context injection skipped", exc_info=True)
+
     # 6. Knowledge Base Context
     if knowledge_base_content:
         system_content_parts.append(knowledge_base_content)
@@ -812,9 +822,22 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     # a partial assistant message here, the model continues from prose instead of
     # starting from a blank generation slate.
     if tool_result_content and tool_already_executed:
+        # Add a synthesis instruction to the final system prompt block to reinforce synthesis
+        recitation_control = (
+            "\n\nRECITATION CONTROL: You are synthesizing results from an executed tool. "
+            "Do NOT simply recite or copy-paste the raw content. Your goal is to provide a synthesis that "
+            "highlights the relevance to the user's objective, providing context, analysis, or "
+            "specific data points only where they validate your conclusion."
+        )
+        # Find the last system message to append the instruction
+        for msg in reversed(final_prompt):
+            if msg["role"] == "system":
+                msg["content"] += recitation_control
+                break
+
         final_prompt.append({
             "role": "assistant",
-            "content": "Based on the results,"
+            "content": "Based on the results from my tool execution,"
         })
         logger.info("[v0.3] Output scaffolding: injected assistant prefix for tool-result synthesis")
 

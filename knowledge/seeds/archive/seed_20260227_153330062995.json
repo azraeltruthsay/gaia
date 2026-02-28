@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:33:30.063018+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "793b9fb6-eefe-47f1-b6f6-9aa663ea2f90",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 recursive vs. iterative performance benchmarks in Python, Java, C++, JavaScript, and Rust. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:56:51.754888+00:00"
+}

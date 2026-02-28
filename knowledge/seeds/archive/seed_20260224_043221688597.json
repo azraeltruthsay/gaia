@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T04:32:21.688621+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "8384c021-cf06-42ff-8670-8a8987e192f2",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Real-world case study on Zabbix/Prometheus/AI hybrid monitoring with measurable KPIs (2024\u20132026). Could be researched and added to knowledge base via web_search.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T04:41:53.325976+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T03:59:13.996596+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "c3548766-54b2-4e2f-b67a-251e67194737",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Variations in the Guinevere-Lancelot affair across different Arthurian sources (e.g., Welsh Triads vs. Malory vs. modern retellings). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:10:24.860217+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T15:20:50.099942+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "0d9978ea-8a05-4541-b6c4-67395243e932",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 player-driven narrative templates for non-combat peace events. Could be researched and added to knowledge base for future campaign design. This entry preserves narrative flexibility while grounding the event in internal logic and thematic depth, ensuring it can be used as a reference point without contradicting established lore.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T15:33:23.535873+00:00"
+}

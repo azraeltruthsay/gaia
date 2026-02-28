@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T04:04:02.696989+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "a62efd77-a290-474f-9c2d-aab6631657f6",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Regional and fictional variations of Excalibur across Arthurian legends and D&D campaigns. Could be researched and added to knowledge base with citations from primary sources (e.g., medieval texts) and secondary sources (e.g., D&D campaign notes, modern fantasy retellings).",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T04:14:38.855103+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:03:33.570885+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "cadf6793-c86b-4888-81ac-9753f4fa57a9",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 How the themes of fidelity and loyalty in Arthurian and Homeric narratives are treated in modern adaptations (e.g., films, TV, literature). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:14:29.626774+00:00"
+}

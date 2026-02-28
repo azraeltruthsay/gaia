@@ -537,6 +537,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         except Exception:
             logger.debug("Temporal context injection skipped", exc_info=True)
 
+    # 5.7. Ambient Audio Context (only when listening is active)
+    if not compact_mode:
+        try:
+            from gaia_core.main import get_audio_context_for_prompt
+            audio_block = get_audio_context_for_prompt()
+            if audio_block:
+                system_content_parts.append(audio_block)
+        except Exception:
+            logger.debug("Audio context injection skipped", exc_info=True)
+
     # 6. Knowledge Base Context
     if knowledge_base_content:
         system_content_parts.append(knowledge_base_content)

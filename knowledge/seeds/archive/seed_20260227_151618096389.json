@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T15:16:18.096414+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "ca3ae89b-a6da-44c9-8781-77ec239c0c44",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 practical applications of quantum entanglement in real-world quantum networks. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T15:33:42.390385+00:00"
+}

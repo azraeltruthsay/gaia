@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:18:04.684681+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "f59cb43a-43af-4cde-8f08-fa2ad623e452",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 modern portrayals of fidelity and loyalty in Arthurian and Homeric narratives. Requires specific media examples and scholarly analysis to ground the inquiry. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:31:02.579214+00:00"
+}

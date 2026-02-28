@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T03:40:17.946513+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "5e106bec-274f-407b-be7e-4933722f5e06",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Arthurian legends variations. While Excalibur is the most widely recognized name, there are regional or fictional variations (e.g., in some D&D campaigns or modern retellings) that may differ. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T04:04:02.761881+00:00"
+}

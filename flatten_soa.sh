@@ -3,7 +3,7 @@
 echo "$(date): flatten_soa.sh started. PATH: $PATH"
 
 # GAIA SOA Codebase Flattener
-# Updated: 2026-02-10 - Efficiency overhaul, exclusion refinements
+# Updated: 2026-02-28 - Added gaia-audio to target dirs
 # Purpose: Flattens the multi-container structure into a single directory for NotebookLM context.
 
 set -e
@@ -20,6 +20,7 @@ TARGET_DIRS=(
     "gaia-web"
     "gaia-mcp"
     "gaia-study"
+    "gaia-audio"
     "gaia-common"
     "knowledge"
 )

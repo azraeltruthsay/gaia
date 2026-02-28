@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:14:29.513099+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "5ed8c090-7dc3-45a2-855a-3315f960dcbe",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 portrayal of fidelity and loyalty in modern adaptations of Arthurian and Homeric narratives. This topic requires external research and is not currently covered in the retrieved documents. Note: The user\u2019s request involves a broad cultural and narrative analysis outside the scope of the D&D campaign knowledge base. While the system has the capability to perform a web search or fetch external content, no such tool execution was performed in this interaction, and the results returned are empty. A follow-up research task would be needed to populate this knowledge gap.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:18:05.134512+00:00"
+}

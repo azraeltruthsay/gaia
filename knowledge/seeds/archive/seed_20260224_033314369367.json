@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T03:33:14.369386+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "eb1fdf7e-80b2-4c1a-8697-858d20799035",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Any modern interpretations or fictional reimaginings of Excalibur in media or alternate stories. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T04:01:55.008194+00:00"
+}

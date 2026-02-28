@@ -35,6 +35,10 @@ from .notebooklm_tools import (
 from .listener_tools import (
     audio_listen_start, audio_listen_stop, audio_listen_status,
 )
+from .inbox_tools import (
+    audio_inbox_status, audio_inbox_list, audio_inbox_review,
+    audio_inbox_process,
+)
 
 logger = get_logger(__name__)
 
@@ -113,6 +117,11 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "promotion_create_request": lambda p: _promotion_create_request_impl(p),
         "promotion_list_requests": lambda p: _promotion_list_requests_impl(p),
         "promotion_request_status": lambda p: _promotion_request_status_impl(p),
+        # Audio inbox tools (sync — file-based)
+        "audio_inbox_status": lambda p: audio_inbox_status(p),
+        "audio_inbox_list": lambda p: audio_inbox_list(p),
+        "audio_inbox_review": lambda p: audio_inbox_review(p),
+        "audio_inbox_process": lambda p: audio_inbox_process(p),
         # Audio listener tools (sync — file-based control)
         "audio_listen_start": lambda p: audio_listen_start(p),
         "audio_listen_stop": lambda p: audio_listen_stop(p),

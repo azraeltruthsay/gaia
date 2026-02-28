@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T04:09:02.014280+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "2b4095e5-8f33-4924-993a-a28b0ba9facc",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Morgan le Fay across Arthurian sources (15th-century *Le Morte d'Arthur* vs. earlier romances). This topic requires external research and is not present in the current knowledge base. To proceed, I would need to perform a web search to find reliable comparative analyses of Morgan le Fay in Malory\u2019s *Le Morte d'Arthur* and earlier medieval romances, focusing on her role, motivations, relationships, and cultural context. Once researched, the findings could be synthesized into a structured, evidence-based summary and added to the knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T04:19:39.463107+00:00"
+}

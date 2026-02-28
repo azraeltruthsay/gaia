@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-27T20:41:23.609749+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "3fd204a6-e8f2-450d-b396-68d2cf4ed028",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 D&D 5e grapple rules in relation to specific campaign mechanics (e.g., how a character like Rupert might use or escape a grapple with unique gear or abilities). Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-27T21:50:02.019175+00:00"
+}

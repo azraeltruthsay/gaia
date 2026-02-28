@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-24T23:22:38.455866+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "44c1bf9c-8fb7-40c9-a3bb-c8f3ad94a9b1",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 real-world impact of misinformation in AI responses. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-24T23:34:15.710475+00:00"
+}

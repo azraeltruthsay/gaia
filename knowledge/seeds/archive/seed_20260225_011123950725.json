@@ -1,0 +1,15 @@
+{
+  "created": "2026-02-25T01:11:23.950747+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "44f178af-2426-4d3e-b963-2ced8f88b4fb",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 real-world cases of AI-generated misinformation with verifiable harm in healthcare/finance. Requires external research from peer-reviewed journals and regulatory bodies. Pending verification and citation.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-02-25T01:33:04.311205+00:00"
+}
