@@ -99,6 +99,23 @@ function chatPanel() {
 
     init() {
       this.addMessage('Mission Control online. Type a message to talk to GAIA.', 'system');
+      this._connectAutoStream();
+    },
+
+    _connectAutoStream() {
+      this._autoSSE = new EventSource('/api/autonomous/stream');
+      this._autoSSE.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (data.text) {
+            this.addMessage(data.text, 'gaia-auto');
+          }
+        } catch { /* ignore parse errors */ }
+      };
+      this._autoSSE.onerror = () => {
+        this._autoSSE.close();
+        setTimeout(() => this._connectAutoStream(), 5000);
+      };
     },
 
     addMessage(text, type) {
@@ -110,7 +127,7 @@ function chatPanel() {
     },
 
     renderMessage(msg) {
-      if (msg.type === 'gaia' && typeof marked !== 'undefined') {
+      if ((msg.type === 'gaia' || msg.type === 'gaia-auto') && typeof marked !== 'undefined') {
         return marked.parse(msg.text);
       }
       return escapeHtml(msg.text);

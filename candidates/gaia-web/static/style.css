@@ -203,6 +203,24 @@ html, body {
   border-bottom-left-radius: 2px;
 }
 
+.chat-msg.gaia-auto {
+  background: rgba(94, 53, 177, 0.18);
+  color: var(--text);
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+  border-left: 2px solid rgba(149, 117, 205, 0.6);
+}
+
+.chat-msg.gaia-auto::before {
+  content: 'listening';
+  display: inline-block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(149, 117, 205, 0.8);
+  margin-bottom: 4px;
+}
+
 .chat-msg.system {
   background: transparent;
   color: var(--text-muted);
