@@ -299,6 +299,10 @@
     "blueprints": {
       "doc_dir": "blueprints",
       "vector_store_dir": "vector_store/blueprints"
+    },
+    "wiki": {
+      "doc_dir": "/gaia-wiki/docs",
+      "vector_store_dir": "vector_store/wiki"
     }
   },
   "SEMANTIC_PROBE": {
