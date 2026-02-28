@@ -403,6 +403,14 @@
       }
     }
   },
+  "AUDIO_COMMENTARY": {
+    "enabled": true,
+    "interval_seconds": 90,
+    "min_gap_seconds": 60,
+    "comment_threshold": "interesting",
+    "lite_triage_max_tokens": 128,
+    "commentary_max_tokens": 512
+  },
   "EPISTEMIC_DRIVE": {
     "enabled": true,
     "gap_seed_auto_research": true,

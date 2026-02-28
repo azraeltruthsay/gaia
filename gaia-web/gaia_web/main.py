@@ -29,6 +29,7 @@ from gaia_web.routes.logs import router as logs_router
 from gaia_web.routes.audio import router as audio_router
 from gaia_web.routes.discord import router as discord_router
 from gaia_web.routes.consent import router as consent_router
+from gaia_web.routes.autonomous import router as autonomous_router
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -95,6 +96,7 @@ app.include_router(generation_router)
 app.include_router(logs_router)
 app.include_router(discord_router)
 app.include_router(consent_router)
+app.include_router(autonomous_router)
 
 # Static file serving for dashboard UI
 _static_dir = Path(__file__).parent.parent / "static"
@@ -529,8 +531,35 @@ async def output_router(packet: Dict[str, Any]):
             return JSONResponse(content={"status": "error", "message": "Internal routing error"}, status_code=500)
 
     elif destination_type == "web":
-        logger.info(f"Web output routing for packet {packet_id} not yet implemented")
-        return JSONResponse(content={"status": "error", "message": "Web output routing not yet implemented"}, status_code=501)
+        import json as _json
+        from datetime import datetime as _dt
+
+        record = {
+            "type": "autonomous",
+            "text": content,
+            "timestamp": _dt.now().isoformat(),
+            "packet_id": packet_id,
+            "source": primary_destination.get("metadata", {}).get("source", "core") if isinstance(primary_destination, dict) else "core",
+        }
+        log_path = os.getenv("GAIA_AUTONOMOUS_LOG_PATH", "/logs/autonomous_messages.jsonl")
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(record) + "\n")
+            # Truncate to last 500 lines to prevent unbounded growth
+            try:
+                with open(log_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                if len(lines) > 500:
+                    with open(log_path, "w", encoding="utf-8") as f:
+                        f.writelines(lines[-500:])
+            except OSError:
+                pass
+            logger.info(f"Web output routed for packet {packet_id}: {str(content)[:100]}...")
+            return JSONResponse(content={"status": "success", "message": "Pushed to web dashboard"}, status_code=200)
+        except Exception as e:
+            logger.error(f"Web output routing failed for packet {packet_id}: {e}")
+            return JSONResponse(content={"status": "error", "message": f"Web routing failed: {e}"}, status_code=500)
 
     elif destination_type == "log":
         logger.info(f"Output (log only for packet {packet_id}): {str(content)[:200]}...")

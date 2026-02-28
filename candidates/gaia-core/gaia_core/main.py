@@ -202,6 +202,24 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to start sleep cycle loop", exc_info=True)
 
+    # Start audio commentary daemon
+    _audio_commentary = None
+    try:
+        from gaia_core.cognition.audio_commentary import AudioCommentaryEvaluator
+        from gaia_core.config import get_config as _get_config_ac
+
+        _ac_config = _get_config_ac()
+        _audio_commentary = AudioCommentaryEvaluator(
+            model_pool=_ai_manager.model_pool if _ai_manager else None,
+            agent_core=_agent_core,
+            sleep_wake_manager=getattr(app.state, "sleep_wake_manager", None),
+            config=_ac_config,
+        )
+        _audio_commentary.start()
+        app.state.audio_commentary = _audio_commentary
+    except Exception:
+        logger.warning("Failed to start audio commentary daemon", exc_info=True)
+
     yield
 
     # Shutdown — write cognitive checkpoints before stopping
@@ -210,6 +228,10 @@ async def lifespan(app: FastAPI):
         _write_shutdown_checkpoints(app)
     except Exception:
         logger.warning("Shutdown checkpoint write failed", exc_info=True)
+
+    if _audio_commentary is not None:
+        _audio_commentary.stop()
+        logger.info("Audio commentary daemon stopped")
 
     if _sleep_loop is not None:
         _sleep_loop.initiate_shutdown()
@@ -475,3 +497,112 @@ async def process_packet(packet_data: Dict[str, Any]):
             status_code=500,
             detail=f"Error processing packet: {str(e)}"
         )
+
+
+# ── Audio Context Ingest ─────────────────────────────────────────────
+
+from collections import deque
+import time as _time
+
+_audio_context_buffer: deque = deque(maxlen=30)  # ~15 minutes at 30s chunks
+_audio_listening_active: bool = False  # Only feed buffer to prompt builder when True
+
+
+class AudioIngestRequest(BaseModel):
+    transcript: str
+    mode: str = "passive"
+    context_markers: list = []
+    timestamp: str | None = None
+
+
+@app.post("/audio/ingest")
+async def audio_ingest(req: AudioIngestRequest):
+    """Ingest audio transcript as ambient context (no cognitive loop).
+
+    Stores transcripts in a ring buffer that the prompt builder can
+    reference during the next cognitive turn.
+    """
+    if not req.transcript.strip():
+        return {"status": "skipped", "reason": "empty transcript"}
+
+    entry = {
+        "text": req.transcript.strip(),
+        "mode": req.mode,
+        "context_markers": req.context_markers,
+        "timestamp": req.timestamp or _time.strftime("%H:%M:%S"),
+        "ingested_at": _time.time(),
+    }
+    _audio_context_buffer.append(entry)
+
+    logger.info("Audio ingest: %d chars, markers=%s, buffer=%d/%d",
+                len(req.transcript), req.context_markers,
+                len(_audio_context_buffer), _audio_context_buffer.maxlen)
+
+    # Mark system active for sleep cycle idle tracking
+    idle_monitor = getattr(app.state, "idle_monitor", None)
+    if idle_monitor:
+        idle_monitor.mark_active()
+
+    return {
+        "status": "ingested",
+        "buffer_size": len(_audio_context_buffer),
+        "buffer_max": _audio_context_buffer.maxlen,
+    }
+
+
+@app.post("/audio/listen")
+async def audio_listen_toggle(enabled: bool = True):
+    """Enable or disable feeding audio buffer into the prompt builder.
+
+    When enabled, GAIA will see recent audio transcripts as ambient context
+    during cognitive turns. When disabled, the buffer still accumulates
+    but is not injected into prompts.
+    """
+    global _audio_listening_active
+    _audio_listening_active = enabled
+    state = "active" if enabled else "paused"
+    logger.info("Audio listening %s (buffer has %d entries)", state, len(_audio_context_buffer))
+    return {"listening": _audio_listening_active, "buffer_size": len(_audio_context_buffer)}
+
+
+@app.get("/audio/context")
+async def audio_context():
+    """Return the current audio context buffer and listening state."""
+    return {
+        "listening": _audio_listening_active,
+        "entries": list(_audio_context_buffer),
+        "count": len(_audio_context_buffer),
+        "max": _audio_context_buffer.maxlen,
+    }
+
+
+def get_audio_context_for_prompt(max_entries: int = 10, max_chars: int = 2000) -> str | None:
+    """Return formatted audio context for prompt injection.
+
+    Called by the prompt builder. Returns None if listening is inactive
+    or the buffer is empty.
+    """
+    if not _audio_listening_active or not _audio_context_buffer:
+        return None
+
+    lines = []
+    total_chars = 0
+    # Take the most recent entries, newest last
+    entries = list(_audio_context_buffer)[-max_entries:]
+    for entry in entries:
+        markers = entry.get("context_markers", [])
+        marker_str = f" [{', '.join(markers)}]" if markers else ""
+        line = f"[{entry['timestamp']}]{marker_str} {entry['text']}"
+        if total_chars + len(line) > max_chars:
+            break
+        lines.append(line)
+        total_chars += len(line)
+
+    if not lines:
+        return None
+
+    return (
+        "── Ambient Audio Context (system audio transcription) ──\n"
+        + "\n".join(lines)
+        + "\n── End Audio Context ──"
+    )
