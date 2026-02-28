@@ -7,7 +7,7 @@ gaia-core to offload GPU inference to a separate container.
 
 Environment:
     PRIME_ENDPOINT: Base URL of the vLLM server (e.g. http://gaia-prime-candidate:7777)
-    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3-4B-Instruct-2507-heretic)
+    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3-8B-abliterated-AWQ)
 """
 
 import logging
@@ -43,7 +43,7 @@ class VLLMRemoteModel:
         self.model_name = (
             model_config.get("path")
             or model_config.get("model")
-            or os.getenv("PRIME_MODEL", "/models/Qwen3-4B-Instruct-2507-heretic")
+            or os.getenv("PRIME_MODEL", "/models/Qwen3-8B-abliterated-AWQ")
         )
 
         self.timeout = int(model_config.get("timeout", 120))

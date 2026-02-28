@@ -12,28 +12,26 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 
 ## Models
 
-### Primary: Qwen3-4B-Instruct-2507-heretic (GPU)
+### Primary: Qwen3-8B-abliterated-AWQ (GPU)
 
 The main inference model, served by vLLM through gaia-prime.
 
 | Property | Value |
 |----------|-------|
-| Base | Qwen/Qwen3-4B-Instruct-2507 |
-| Variant | Heretic (abliterated/uncensored) |
-| Format | SafeTensors (~7.6 GB) |
+| Base | huihui-ai/Huihui-Qwen3-8B-abliterated-v2 |
+| Variant | AWQ W4A16 GEMM (auto-converts to AWQ Marlin at load) |
+| Format | SafeTensors (~5.7 GB) |
 | Context | 8192 tokens |
 | Serving | vLLM with Flash Attention v2, `--enforce-eager` (required for Blackwell) |
 | LoRA | Enabled (max 4 adapters, rank 64) |
 
-A Qwen3-8B-AWQ (~5.7 GB, AWQ quantized) is available as an alternative and used in the candidate stack.
-
-### Fallback: Qwen3-4B-Instruct-2507-heretic Q4_K_M (CPU)
+### Fallback: Qwen3-8B-abliterated-Q4_K_M (CPU)
 
 Local GGUF fallback for when the GPU is handed off to training.
 
 | Property | Value |
 |----------|-------|
-| Format | GGUF Q4_K_M (~2.4 GB) |
+| Format | GGUF Q4_K_M (~4.9 GB) |
 | Context | 8192 tokens |
 | Serving | llama-cpp-python (CPU-only) |
 

@@ -20,7 +20,7 @@
       "max_num_prompt_tokens": 6144,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Qwen3-4B-Instruct-2507-heretic",
+      "path": "/models/Qwen3-8B-abliterated-AWQ",
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm",
@@ -33,7 +33,7 @@
     },
     "lite": {
       "enabled": true,
-      "path": "/models/Qwen3-4B-Instruct-2507-heretic-GGUF/p-e-w_Qwen3-4B-Instruct-2507-heretic-Q4_K_M.gguf",
+      "path": "/models/Qwen3-8B-abliterated-Q4_K_M.gguf",
       "strip_chat_template": true,
       "chat_format": "chatml",
       "type": "local"
@@ -451,5 +451,28 @@
         "sources": []
       }
     }
+  },
+  "SAMVEGA": {
+    "enabled": true,
+    "llm_timeout_seconds": 8,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "tier5_promotion_threshold": 0.7,
+    "max_artifacts_per_session": 5,
+    "confidence_mismatch_threshold": 0.3,
+    "weight_multipliers": {
+      "observer_block": 1.5,
+      "observer_caution": 1.2,
+      "repeated_domain": 1.3
+    },
+    "values_taxonomy": [
+      "accuracy",
+      "relevance",
+      "user_understanding",
+      "epistemic_humility",
+      "safety",
+      "creativity",
+      "contextual_sensitivity"
+    ]
   }
 }

@@ -559,6 +559,191 @@ check_common_sync() {
     fi
 }
 
+# ── Stale Mount Detection ────────────────────────────────────────────────
+check_stale_mounts() {
+    section "Stale Mount Detection"
+
+    # Map: container → host source dir for gaia-common (or app source)
+    # We check key files whose changes require a container restart
+    declare -A MOUNT_MAP=(
+        ["gaia-core"]="$GAIA_ROOT/gaia-common:$GAIA_ROOT/gaia-core"
+        ["gaia-web"]="$GAIA_ROOT/gaia-common:$GAIA_ROOT/gaia-web"
+        ["gaia-mcp"]="$GAIA_ROOT/gaia-common:$GAIA_ROOT/gaia-mcp"
+        ["gaia-study"]="$GAIA_ROOT/gaia-common:$GAIA_ROOT/gaia-study"
+        ["gaia-audio"]="$GAIA_ROOT/gaia-common:$GAIA_ROOT/gaia-audio"
+        ["gaia-core-candidate"]="$GAIA_ROOT/candidates/gaia-common:$GAIA_ROOT/candidates/gaia-core"
+        ["gaia-mcp-candidate"]="$GAIA_ROOT/candidates/gaia-common"
+    )
+
+    local stale_count=0
+    local stale_containers=()
+
+    for container in "${!MOUNT_MAP[@]}"; do
+        # Skip if not running
+        local status
+        status=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo "not_found")
+        if [[ "$status" != "running" ]]; then
+            verbose "$container: skipping (not running)"
+            continue
+        fi
+
+        # Get container start time as epoch
+        local started_at started_epoch
+        started_at=$(docker inspect --format '{{.State.StartedAt}}' "$container" 2>/dev/null)
+        started_epoch=$(date -d "$started_at" +%s 2>/dev/null || echo "0")
+        if (( started_epoch == 0 )); then
+            verbose "$container: could not parse start time"
+            continue
+        fi
+
+        # Check all mount source dirs for this container
+        local newest_file="" newest_mtime=0
+        IFS=':' read -ra dirs <<< "${MOUNT_MAP[$container]}"
+        for dir in "${dirs[@]}"; do
+            if [[ ! -d "$dir" ]]; then
+                continue
+            fi
+            # Find the most recently modified .py or .json file
+            while IFS= read -r -d '' fpath; do
+                local fmtime
+                fmtime=$(stat -c '%Y' "$fpath" 2>/dev/null || echo "0")
+                if (( fmtime > newest_mtime )); then
+                    newest_mtime=$fmtime
+                    newest_file="$fpath"
+                fi
+            done < <(find "$dir" -maxdepth 4 -type f \( -name '*.py' -o -name '*.json' \) -print0 2>/dev/null)
+        done
+
+        if (( newest_mtime == 0 )); then
+            verbose "$container: no source files found"
+            continue
+        fi
+
+        local drift_s=$(( newest_mtime - started_epoch ))
+        if (( drift_s > 5 )); then
+            # Source is newer than container — stale
+            local rel_file="${newest_file#"$GAIA_ROOT/"}"
+            ((stale_count++))
+            stale_containers+=("$container")
+            warn_ "$container" "stale (${drift_s}s behind)" \
+                  "$container needs restart — $rel_file modified ${drift_s}s after start"
+            if [[ "$MODE" == "fix" ]]; then
+                repair_ "Restarting stale $container"
+                docker restart "$container" > /dev/null 2>&1
+            fi
+        else
+            pass_ "$container" "up to date"
+        fi
+    done
+
+    if (( stale_count == 0 )); then
+        pass_ "All containers" "source mounts current"
+    fi
+}
+
+# ── Image Staleness Detection ────────────────────────────────────────────
+check_image_staleness() {
+    section "Image Staleness"
+
+    # Map: container → Dockerfile path : requirements file(s) (colon-separated)
+    # These are the build-time inputs — if any is newer than the image, rebuild needed
+    declare -A BUILD_MAP=(
+        ["gaia-core"]="$GAIA_ROOT/gaia-core/Dockerfile:$GAIA_ROOT/gaia-core/requirements.txt:$GAIA_ROOT/gaia-common/requirements.txt"
+        ["gaia-web"]="$GAIA_ROOT/gaia-web/Dockerfile:$GAIA_ROOT/gaia-web/requirements.txt:$GAIA_ROOT/gaia-common/requirements.txt"
+        ["gaia-mcp"]="$GAIA_ROOT/gaia-mcp/Dockerfile:$GAIA_ROOT/gaia-mcp/requirements.txt:$GAIA_ROOT/gaia-common/requirements.txt"
+        ["gaia-study"]="$GAIA_ROOT/gaia-study/Dockerfile:$GAIA_ROOT/gaia-study/requirements.txt:$GAIA_ROOT/gaia-common/requirements.txt:$GAIA_ROOT/gaia-common/requirements-vector.txt"
+        ["gaia-audio"]="$GAIA_ROOT/gaia-audio/Dockerfile:$GAIA_ROOT/gaia-audio/requirements.txt:$GAIA_ROOT/gaia-common/requirements.txt"
+        ["gaia-orchestrator"]="$GAIA_ROOT/gaia-orchestrator/Dockerfile:$GAIA_ROOT/gaia-orchestrator/requirements.txt"
+        ["gaia-prime"]="$GAIA_ROOT/gaia-prime/Dockerfile"
+        ["gaia-wiki"]="$GAIA_ROOT/gaia-wiki/Dockerfile"
+        ["gaia-doctor"]="$GAIA_ROOT/gaia-doctor/Dockerfile"
+        ["gaia-core-candidate"]="$GAIA_ROOT/candidates/gaia-core/Dockerfile:$GAIA_ROOT/candidates/gaia-core/requirements.txt:$GAIA_ROOT/candidates/gaia-common/requirements.txt"
+        ["gaia-mcp-candidate"]="$GAIA_ROOT/candidates/gaia-mcp/Dockerfile:$GAIA_ROOT/candidates/gaia-mcp/requirements.txt:$GAIA_ROOT/candidates/gaia-common/requirements.txt"
+    )
+
+    local rebuild_count=0
+
+    for container in "${!BUILD_MAP[@]}"; do
+        # Skip if container doesn't exist
+        if ! docker container inspect "$container" > /dev/null 2>&1; then
+            verbose "$container: skipping (not found)"
+            continue
+        fi
+
+        # Get image creation time as epoch
+        local image_name image_created image_epoch
+        image_name=$(docker inspect --format '{{.Config.Image}}' "$container" 2>/dev/null)
+        if [[ -z "$image_name" ]]; then
+            verbose "$container: could not determine image"
+            continue
+        fi
+        image_created=$(docker image inspect --format '{{.Created}}' "$image_name" 2>/dev/null)
+        if [[ -z "$image_created" ]]; then
+            verbose "$container: could not inspect image $image_name"
+            continue
+        fi
+        image_epoch=$(date -d "$image_created" +%s 2>/dev/null || echo "0")
+        if (( image_epoch == 0 )); then
+            verbose "$container: could not parse image creation time"
+            continue
+        fi
+
+        # Check each build input file
+        local newest_file="" newest_mtime=0
+        IFS=':' read -ra build_files <<< "${BUILD_MAP[$container]}"
+        for bf in "${build_files[@]}"; do
+            if [[ ! -f "$bf" ]]; then
+                verbose "$container: build input $bf not found"
+                continue
+            fi
+            local fmtime
+            fmtime=$(stat -c '%Y' "$bf" 2>/dev/null || echo "0")
+            if (( fmtime > newest_mtime )); then
+                newest_mtime=$fmtime
+                newest_file="$bf"
+            fi
+        done
+
+        if (( newest_mtime == 0 )); then
+            verbose "$container: no build input files found"
+            continue
+        fi
+
+        local drift_s=$(( newest_mtime - image_epoch ))
+        if (( drift_s > 5 )); then
+            local rel_file="${newest_file#"$GAIA_ROOT/"}"
+            ((rebuild_count++))
+            local drift_str
+            if (( drift_s >= 86400 )); then
+                drift_str="$(( drift_s / 86400 ))d"
+            elif (( drift_s >= 3600 )); then
+                drift_str="$(( drift_s / 3600 ))h"
+            elif (( drift_s >= 60 )); then
+                drift_str="$(( drift_s / 60 ))m"
+            else
+                drift_str="${drift_s}s"
+            fi
+            warn_ "$container" "rebuild needed (${drift_str})" \
+                  "$container image outdated — $rel_file modified ${drift_str} after build"
+            if [[ "$MODE" == "fix" ]]; then
+                repair_ "Rebuilding $container"
+                COMPOSE_FILE="$GAIA_ROOT/docker-compose.yml" \
+                    docker compose --env-file "$GAIA_ROOT/.env.discord" \
+                    build "$container" > /dev/null 2>&1 && \
+                repair_ "Restarting rebuilt $container" && \
+                    docker compose --env-file "$GAIA_ROOT/.env.discord" \
+                    up -d "$container" > /dev/null 2>&1
+            fi
+        else
+            pass_ "$container" "image current"
+        fi
+    done
+
+    if (( rebuild_count == 0 )); then
+        pass_ "All images" "build inputs current"
+    fi
+}
+
 # ── Session State Freshness ───────────────────────────────────────────────
 check_session_freshness() {
     section "Session State"
@@ -735,6 +920,8 @@ main() {
     check_connectivity
     check_volumes
     check_common_sync
+    check_stale_mounts
+    check_image_staleness
     check_session_freshness
     check_resources
 
