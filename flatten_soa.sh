@@ -57,6 +57,10 @@ update_gaia_tree_txt() {
 update_gaia_tree_txt &
 TREE_PID=$!
 
+# Refresh knowledge gap report so the flattened output includes current gaps
+(bash scripts/gaia_doctor.sh --check > /dev/null 2>&1 || true) &
+DOCTOR_PID=$!
+
 # --- Main Script ---
 
 if [ "$DRY_RUN" = true ]; then
@@ -208,6 +212,8 @@ else
     echo "File count ($file_count) is within limit."
 fi
 
-# Wait for background tree generation
+# Wait for background tasks
 wait "$TREE_PID" 2>/dev/null
 echo "gaia_tree.txt updated."
+wait "$DOCTOR_PID" 2>/dev/null
+echo "knowledge gap report refreshed."
