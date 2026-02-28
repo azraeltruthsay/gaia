@@ -28,13 +28,15 @@ class SynthesizeRequest(BaseModel):
 
 
 class TranscribeResponse(BaseModel):
-    """Transcription result."""
+    """Transcription result with optional context metadata."""
 
     text: str
     language: str | None = None
     confidence: float = 0.0
     duration_seconds: float = 0.0
     latency_ms: float = 0.0
+    segments: list[dict] = Field(default_factory=list, description="Per-segment metadata (timing, confidence, words)")
+    context_markers: list[str] = Field(default_factory=list, description="Derived context signals (pace, pauses, noise)")
 
 
 class SynthesizeResponse(BaseModel):
