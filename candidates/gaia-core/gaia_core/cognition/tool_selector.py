@@ -522,10 +522,12 @@ def _extract_json_from_response(content: str) -> str:
     if matches:
         return matches[0].strip()
 
-    # Try to find raw JSON object
-    json_pattern = r'\{[\s\S]*\}'
+    # Try to find raw JSON object (non-greedy to avoid merging multiple objects)
+    json_pattern = r'\{[\s\S]*?\}'
     matches = re.findall(json_pattern, content)
     if matches:
+        # If multiple matches, try them one by one or take the most complete one
+        # For tool selection, the first one is usually the intended one
         return matches[0]
 
     # Return as-is and let JSON parser handle it

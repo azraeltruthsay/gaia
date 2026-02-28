@@ -594,7 +594,23 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         system_content_parts.append("GAIA COGNITION PACKET")
         system_content_parts.append(template_block_content)
 
-    # 11. Loop Recovery Context (if pending from a loop detection reset)
+    # 11. Council Debate Thread (Deep Thought Protocol)
+    if packet.council and packet.council.thread:
+        thread_entries = []
+        for msg in packet.council.thread:
+            thread_entries.append(f"[{msg.agent.upper()} at {msg.timestamp}]: {msg.content}")
+        
+        council_debate_block = (
+            "── ACTIVE COUNCIL DEBATE ──\n"
+            "The following is a private debate between your internal components. "
+            "Review the thread below to reach consensus. If you disagree or have more to add, use <council>...</council> tags "
+            "for your counter-arguments. If you agree and have reached consensus, output your final answer directly to the user "
+            "WITHOUT council tags. You may include text outside the tags to update the user on your progress.\n\n"
+            + "\n\n".join(thread_entries)
+        )
+        system_content_parts.append(council_debate_block)
+
+    # 12. Loop Recovery Context (if pending from a loop detection reset)
     try:
         from gaia_core.cognition.loop_recovery import get_recovery_manager
         loop_manager = get_recovery_manager()

@@ -77,6 +77,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="samvega_introspection",
+            task_type="REFLECTIVE_MEMORY",
+            priority=2,
+            interruptible=True,
+            estimated_duration_seconds=120,
+            handler=self._run_samvega_introspection,
+        ))
+
+        self.register_task(SleepTask(
             task_id="blueprint_validation",
             task_type="blueprint_validation",
             priority=3,
@@ -1481,3 +1490,57 @@ class SleepTaskScheduler:
                 self._timeline.append("task_exec", data)
             except Exception:
                 logger.debug("Timeline task_exec emit failed", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Samvega Introspection
+    # ------------------------------------------------------------------
+
+    def _run_samvega_introspection(self) -> None:
+        """Review unreviewed samvega artifacts, boost repeated patterns, flag tier-5."""
+        from gaia_core.cognition.samvega import (
+            list_unreviewed_artifacts,
+            update_artifact,
+        )
+        from datetime import datetime, timezone
+        from collections import defaultdict
+
+        artifacts = list_unreviewed_artifacts()
+        if not artifacts:
+            logger.info("Samvega introspection: no unreviewed artifacts")
+            return
+
+        samvega_cfg = self.config.constants.get("SAMVEGA", {})
+        tier5_threshold = samvega_cfg.get("tier5_promotion_threshold", 0.7)
+        repeated_boost = samvega_cfg.get("weight_multipliers", {}).get("repeated_domain", 1.3)
+
+        # Group by root_cause for cluster detection
+        clusters: dict[str, list[tuple]] = defaultdict(list)
+        for path, data in artifacts:
+            rc = data.get("root_cause", "").strip().lower()
+            clusters[rc].append((path, data))
+
+        reviewed = 0
+        promoted = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for root_cause, group in clusters.items():
+            is_cluster = len(group) >= 2
+            for path, data in group:
+                if is_cluster:
+                    boosted = min(1.0, data.get("weight", 0) * repeated_boost)
+                    data["weight"] = boosted
+
+                data["reviewed"] = True
+                data["reviewed_at"] = now_iso
+
+                if data.get("weight", 0) >= tier5_threshold:
+                    data["promoted_to_tier5"] = True
+                    promoted += 1
+
+                update_artifact(path.name, data)
+                reviewed += 1
+
+        logger.info(
+            "Samvega introspection: reviewed %d artifacts, %d promoted to tier-5, %d clusters",
+            reviewed, promoted, sum(1 for g in clusters.values() if len(g) >= 2),
+        )

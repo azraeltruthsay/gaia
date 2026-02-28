@@ -129,6 +129,21 @@ def _get_destination_registry():
             logger.warning(f"Could not load destination registry: {e}")
     return _destination_registry
 
+def _extract_council_tags(text: str) -> tuple[str, list[str]]:
+    """
+    Extract content from <council>...</council> tags.
+    Returns (cleaned_text, list_of_council_messages).
+    """
+    if not text:
+        return text, []
+    
+    council_messages = re.findall(r'<council>(.*?)</council>', text, re.DOTALL)
+    # Strip the tags and their content from the user-facing text
+    cleaned_text = re.sub(r'<council>.*?</council>', '', text, flags=re.DOTALL).strip()
+    
+    return cleaned_text, [msg.strip() for msg in council_messages if msg.strip()]
+
+
 def route_output(response_text: str, packet: CognitionPacket, ai_manager, session_id: str, destination: str) -> Dict[str, Any]:
     """
     The central hub for parsing and dispatching all directives from LLM output for v0.3 packets.
@@ -139,12 +154,16 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     execution_results = []
     side_effects = []
     response_to_user = ""
+    council_messages = []
+
+    # Extract any council debate messages before parsing other directives
+    cleaned_response, council_messages = _extract_council_tags(response_text)
 
     # The LLM's raw output might contain a candidate response and proposed sidecar actions.
     # We assume a previous step has already parsed this text and populated the packet's
     # `response.candidate` and `response.sidecar_actions` fields.
-    # For now, we'll do a simple parse here.
-    _parse_llm_output_into_packet(response_text, packet)
+    # For now, we'll do a simple parse here using the cleaned text.
+    _parse_llm_output_into_packet(cleaned_response, packet)
 
     # 0. Reflection fallback — if the parser stripped a duplicate EXECUTE directive
     #    and left us with an empty candidate and no sidecar actions, recover the
@@ -287,6 +306,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         "execution_results": execution_results,
         "destination_results": destination_results,
         "side_effects": side_effects,
+        "council_messages": council_messages,
     }
 
 

@@ -1663,88 +1663,25 @@ class AgentCore:
         except Exception:
             logger.debug("Samvega trigger (pre-generation) failed; non-fatal", exc_info=True)
 
-        # 5. Final Response Generation
-        # Council Protocol: inject pending council notes for Prime
-        _council_task_key = None
-        if selected_model_name in ("gpu_prime", "prime", "cpu_prime"):
-            try:
-                pending_notes = self.council_notes.read_pending_notes()
-                if pending_notes:
-                    council_ctx = self.council_notes.format_notes_for_prime(pending_notes)
-                    packet.content.data_fields.append(DataField(
-                        key="council_context",
-                        value=council_ctx,
-                        type="text",
-                        source="council_notes",
-                    ))
-                    _council_task_key = "council_followup"
-                    consumed_paths = [n["path"] for n in pending_notes]
-                    self.council_notes.mark_notes_consumed(consumed_paths)
-                    logger.info("Injected %d Council notes into Prime's prompt", len(pending_notes))
-            except Exception:
-                logger.debug("Council notes injection failed", exc_info=True)
+        # 5. Final Response Generation (Deep Thought Iterative Loop)
 
-        final_messages = build_from_packet(packet, task_instruction_key=_council_task_key)
-        # Also print the final assembled messages immediately before generation.
-        try:
-            with open("final_prompt_for_review.json", "w") as f:
-                _s = json.dumps(final_messages, default=str, ensure_ascii=False, indent=2)
-                f.write(_s)
-        except Exception:
-            logger.exception("AgentCore: failed to write final_messages to file")
-        # build_from_packet() normalizes messages; no runtime normalization required here.
-
-        # Assemble a simple prompt string for guardian/sentinel checks (concatenate message contents)
-        try:
-            assembled_prompt = "\n".join([m.get('content', '') for m in final_messages if isinstance(m, dict)])
-        except Exception:
-            assembled_prompt = packet.content.original_prompt or ""
-
-        # Pre-generation safety check: prefer EthicalSentinel (which may call the CoreIdentityGuardian)
-        ok, reason = self._run_pre_generation_safety_check(packet, assembled_prompt)
-        if not ok:
-            # Fail closed: block generation and return a clear, distinct message based on reason
-            packet.status.finalized = True
-            packet.status.state = PacketState.ABORTED
-            packet.status.next_steps.append(f"Blocked by safety check: {reason}")
-            packet.metrics.errors.append(f"blocked:{reason}")
-            if reason == 'identity_violation':
-                user_msg = "I can't comply with that request because it would violate my core identity constraints."
-            elif reason == 'system_condition':
-                user_msg = "I can't process that right now due to system safety conditions (resource/loop/error)."
-            else:
-                user_msg = "I can't process that request due to an internal safety check failure."
-
-            logger.error(f"[CoreIdentityGuardian] Blocking generation: {reason}")
-            yield {"type": "token", "value": user_msg}
-            return
-
-        # pick an observer model that's idle if possible; fall back to config-based selection
+        # --- Observer setup (before generation loop) ---
         logger.info(f"[OBSERVER] Selecting observer model. Responder is '{selected_model_name}'")
-        logger.info(f"[OBSERVER] Available models in pool: {list(getattr(self.model_pool, 'models', {}).keys())}")
-        logger.info(f"[OBSERVER] Model statuses: {getattr(self.model_pool, 'model_status', {})}")
 
-        # Check observer config for explicit model preference
         observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
         observer_enabled = observer_config.get("enabled", False)
         use_lite_for_observer = observer_config.get("use_lite", True)
-        logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_lite={use_lite_for_observer}")
 
         observer_model_name = None
 
-        # Prefer Lite for observation — it's lighter and keeps Prime free for generation
         if observer_enabled and use_lite_for_observer:
-            logger.info("[OBSERVER] Attempting to load lite model for observer role")
             try:
                 if self.model_pool.ensure_model_loaded("lite"):
                     observer_model_name = "lite"
                     logger.info("[OBSERVER] Successfully loaded lite for observer role")
-                else:
-                    logger.warning("[OBSERVER] Failed to load lite for observer role")
             except Exception as e:
                 logger.warning(f"[OBSERVER] Exception loading lite: {e}")
 
-        # Fallback: try get_idle_model (excludes the responder)
         if observer_model_name is None:
             try:
                 observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
@@ -1752,16 +1689,14 @@ class AgentCore:
             except Exception as e:
                 logger.warning(f"[OBSERVER] get_idle_model failed: {e}")
 
-        # Final fallback: scan pool for any available model
         if observer_model_name is None:
             try:
                 pool_keys = list(getattr(self.model_pool, "models", {}).keys())
-                candidates = [k for k in pool_keys if k != selected_model_name and k != "embed"]
-                observer_model_name = candidates[0] if candidates else None
-                logger.info(f"[OBSERVER] Fallback selection from candidates {candidates}: '{observer_model_name}'")
+                obs_candidates = [k for k in pool_keys if k != selected_model_name and k != "embed"]
+                observer_model_name = obs_candidates[0] if obs_candidates else None
+                logger.info(f"[OBSERVER] Fallback selection from candidates {obs_candidates}: '{observer_model_name}'")
             except Exception as e2:
                 logger.error(f"[OBSERVER] Fallback selection also failed: {e2}")
-                observer_model_name = None
 
         def _env_bool(name: str) -> Optional[bool]:
             val = os.getenv(name)
@@ -1771,7 +1706,6 @@ class AgentCore:
 
         observer_model = None
         if observer_model_name:
-            # get() now supports lazy loading - no need to pre-check pool
             observer_model = self.model_pool.get(observer_model_name)
             if observer_model is None:
                 observer_model = self.model_pool.acquire_model_for_role(observer_model_name)
@@ -1796,10 +1730,6 @@ class AgentCore:
 
         observer_instance = None
         if not disable_observer:
-            # StreamObserver supports llm=None for rule-based-only observation.
-            # This means even when Lite is solo (no separate observer model),
-            # fast_check, path validation, citation verification, and identity
-            # keyword heuristics still run.
             observer_instance = StreamObserver(config=self.config, llm=observer_model, name="AgentCore-Observer")
             observer_instance.post_stream_only = post_stream_observer
             if observer_model is None:
@@ -1814,132 +1744,199 @@ class AgentCore:
 
         logger.info(f"[OBSERVER] Final setup: active_stream={active_stream_observer is not None}, post_run={post_run_observer is not None}")
 
-        import json
-        import sys
-        print("---PROMPT TO BE SENT TO THE MODEL---", file=sys.stderr)
-        print(json.dumps(final_messages, indent=2), file=sys.stderr)
-        print("------------------------------------", file=sys.stderr)
+        # --- Initialize council state ---
+        if not packet.council:
+            from gaia_common.protocols.cognition_packet import Council
+            packet.council = Council(mode="solo", participants=[selected_model_name])
 
-        voice = ExternalVoice(
-            model=selected_model,
-            model_pool=self.model_pool,
-            config=self.config,
-            messages=final_messages,
-            source="agent_core",
-            observer=active_stream_observer,
-            context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
-            session_id=session_id,
-        )
+        # Pre-loop variable initialization — must exist on exception-exit paths.
+        routed_output = None
+        user_facing_response = ""
+        full_response = ""
         lite_fallback_used = False
         lite_fallback_model_name = None
         lite_fallback_acquired = False
-        try:
-            try:
-                stream_generator = voice.stream_response()
-                pieces: List[str] = []
-                # consume the generator and handle interruption events
-                for item in stream_generator:
-                    # item can be a token string or an event dict
-                    if isinstance(item, dict):
-                        ev = item.get("event")
-                        if ev == "interruption":
-                            reason_data = item.get("data", "observer interruption")
-                            # data may be a dict with reason and suggestion (explain mode)
-                            if isinstance(reason_data, dict):
-                                reason = reason_data.get("reason") or reason_data.get("reason", "observer interruption")
-                                suggestion = reason_data.get("suggestion")
-                                interrupt_type = reason_data.get("type", "")
-                            else:
-                                reason = reason_data
-                                suggestion = None
-                                interrupt_type = ""
 
-                            logger.warning(f"AgentCore: Observer interruption during stream: {reason}")
-                            # record in packet status if available
-                            try:
-                                packet.status.observer_trace.append(f"STREAM_INTERRUPT: {reason}")
-                                packet.status.next_steps.append(f"Observer interruption: {reason}")
-                            except Exception:
-                                logger.debug("AgentCore: failed to update packet status with observer interruption")
-
-                            # Think-tag loops: don't surface to user — let the
-                            # existing think-tag-only recovery at post-stream
-                            # handle the retry silently.
-                            if interrupt_type == "think_tag_loop":
-                                logger.info("AgentCore: Think-tag circuit breaker fired; will retry with no-thinking instruction")
-                                break
-
-                            # surface a user-facing notification; include suggestion when present
-                            user_msg = f"--- Stream interrupted by observer: {reason} ---"
-                            if suggestion:
-                                user_msg += f"\nSuggestion: {suggestion}"
-                            yield {"type": "token", "value": user_msg}
-                            # abort consuming further stream tokens
-                            break
-                        else:
-                            logger.debug(f"AgentCore: stream event ignored: {ev}")
-                            continue
-                    else:
-                        pieces.append(str(item))
-
-                full_response = "".join(pieces)
-                logger.warning(
-                    "AgentCore: collected %s stream chunks (len=%s chars)",
-                    len(pieces),
-                    len(full_response),
-                )
-            except Exception:
-                # If the GPU/backed engine dies or the stream raises, attempt a
-                # graceful fallback to the 'lite' CPU model so the session stays
-                # usable. We surface a brief user-facing message and then try to
-                # re-run generation on the lite model.
-                logger.exception("AgentCore: Primary model stream failed; attempting fallback to 'lite' model")
-                yield {"type": "token", "value": "Primary model failed during generation; falling back to CPU model (lite)."}
+        while packet.council.iteration_count < packet.council.max_iterations:
+            # Council Protocol: inject pending council notes for Prime
+            _council_task_key = None
+            if selected_model_name in ("gpu_prime", "prime", "cpu_prime"):
                 try:
-                    # Acquire lite for fallback
-                    lite_model = self.model_pool.acquire_model_for_role("lite")
-                    lite_fallback_acquired = True
-                    lite_fallback_used = True
-                    lite_fallback_model_name = "lite"
-                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
-                    pieces = []
-                    stream_generator = fallback_voice.stream_response()
+                    pending_notes = self.council_notes.read_pending_notes()
+                    if pending_notes:
+                        council_ctx = self.council_notes.format_notes_for_prime(pending_notes)
+                        # Avoid duplicate council_context fields
+                        packet.content.data_fields = [df for df in packet.content.data_fields if df.key != "council_context"]
+                        packet.content.data_fields.append(DataField(
+                            key="council_context",
+                            value=council_ctx,
+                            type="text",
+                            source="council_notes",
+                        ))
+                        _council_task_key = "council_followup"
+                        consumed_paths = [n["path"] for n in pending_notes]
+                        self.council_notes.mark_notes_consumed(consumed_paths)
+                        logger.info("Injected %d Council notes into Prime's prompt", len(pending_notes))
+                except Exception:
+                    logger.debug("Council notes injection failed", exc_info=True)
+
+            final_messages = build_from_packet(packet, task_instruction_key=_council_task_key)
+            try:
+                with open("final_prompt_for_review.json", "w") as f:
+                    _s = json.dumps(final_messages, default=str, ensure_ascii=False, indent=2)
+                    f.write(_s)
+            except Exception:
+                logger.exception("AgentCore: failed to write final_messages to file")
+
+            # Pre-generation safety check
+            try:
+                assembled_prompt = "\n".join([m.get('content', '') for m in final_messages if isinstance(m, dict)])
+            except Exception:
+                assembled_prompt = packet.content.original_prompt or ""
+
+            ok, reason = self._run_pre_generation_safety_check(packet, assembled_prompt)
+            if not ok:
+                packet.status.finalized = True
+                packet.status.state = PacketState.ABORTED
+                packet.status.next_steps.append(f"Blocked by safety check: {reason}")
+                packet.metrics.errors.append(f"blocked:{reason}")
+                if reason == 'identity_violation':
+                    user_msg = "I can't comply with that request because it would violate my core identity constraints."
+                elif reason == 'system_condition':
+                    user_msg = "I can't process that right now due to system safety conditions (resource/loop/error)."
+                else:
+                    user_msg = "I can't process that request due to an internal safety check failure."
+                logger.error(f"[CoreIdentityGuardian] Blocking generation: {reason}")
+                yield {"type": "token", "value": user_msg}
+                return
+
+            voice = ExternalVoice(
+                model=selected_model,
+                model_pool=self.model_pool,
+                config=self.config,
+                messages=final_messages,
+                source="agent_core",
+                observer=active_stream_observer,
+                context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
+                session_id=session_id,
+            )
+
+            pieces: List[str] = []
+            try:
+                try:
+                    stream_generator = voice.stream_response()
                     for item in stream_generator:
                         if isinstance(item, dict):
                             ev = item.get("event")
                             if ev == "interruption":
                                 reason_data = item.get("data", "observer interruption")
                                 if isinstance(reason_data, dict):
-                                    reason = reason_data.get("reason") or reason_data.get("reason", "observer interruption")
+                                    _reason = reason_data.get("reason", "observer interruption")
                                     suggestion = reason_data.get("suggestion")
+                                    interrupt_type = reason_data.get("type", "")
                                 else:
-                                    reason = reason_data
+                                    _reason = reason_data
                                     suggestion = None
-                                logger.warning(f"AgentCore: Observer interruption during fallback stream: {reason}")
+                                    interrupt_type = ""
+                                logger.warning(f"AgentCore: Observer interruption during stream: {_reason}")
                                 try:
-                                    packet.status.observer_trace.append(f"STREAM_INTERRUPT: {reason}")
-                                    packet.status.next_steps.append(f"Observer interruption: {reason}")
+                                    packet.status.observer_trace.append(f"STREAM_INTERRUPT: {_reason}")
                                 except Exception:
-                                    logger.debug("AgentCore: failed to update packet status with observer interruption")
-                                user_msg = f"--- Stream interrupted by observer: {reason} ---"
+                                    pass
+                                if interrupt_type == "think_tag_loop":
+                                    logger.info("AgentCore: Think-tag circuit breaker fired; will retry with no-thinking instruction")
+                                    break
+                                user_msg = f"--- Stream interrupted by observer: {_reason} ---"
                                 if suggestion:
                                     user_msg += f"\nSuggestion: {suggestion}"
                                 yield {"type": "token", "value": user_msg}
                                 break
                             else:
-                                logger.debug(f"AgentCore: fallback stream event ignored: {ev}")
                                 continue
                         else:
                             pieces.append(str(item))
-                    full_response = "".join(pieces)
                 except Exception:
-                    logger.exception("AgentCore: Fallback to 'lite' also failed")
-                    yield {"type": "token", "value": "Fallback to CPU model also failed; I'm unable to complete your request right now."}
-                    # Ensure any fallback acquisition is released in finally block
-                    return
-            full_response = self._suppress_repetition(full_response)
-            logger.info(f"Full LLM response before routing: {full_response}")
+                    # Primary model stream failed — attempt graceful lite fallback
+                    logger.exception("AgentCore: Primary model stream failed; attempting fallback to 'lite' model")
+                    yield {"type": "token", "value": "Primary model failed during generation; falling back to CPU model (lite)."}
+                    try:
+                        lite_model = self.model_pool.acquire_model_for_role("lite")
+                        lite_fallback_acquired = True
+                        lite_fallback_used = True
+                        lite_fallback_model_name = "lite"
+                        fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
+                        pieces = []
+                        for item in fallback_voice.stream_response():
+                            if isinstance(item, dict):
+                                if item.get("event") == "interruption":
+                                    break
+                                continue
+                            else:
+                                pieces.append(str(item))
+                    except Exception:
+                        logger.exception("AgentCore: Fallback to 'lite' also failed")
+                        yield {"type": "token", "value": "Fallback to CPU model also failed; I'm unable to complete your request right now."}
+                        return
 
+                full_response = "".join(pieces)
+                full_response = self._suppress_repetition(full_response)
+                logger.info("AgentCore: collected %d stream chunks (len=%d chars)", len(pieces), len(full_response))
+
+                # --- Deep Thought Routing ---
+                routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
+                user_facing_response = routed_output["response_to_user"]
+                council_messages = routed_output.get("council_messages", [])
+
+                if council_messages:
+                    # We have a debate round!
+                    packet.council.mode = "debate"
+                    from gaia_common.protocols.cognition_packet import CouncilMessage
+                    for c_msg in council_messages:
+                        packet.council.thread.append(CouncilMessage(
+                            agent=selected_model_name,
+                            content=c_msg,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            target="counterpart"
+                        ))
+
+                    # Yield any thought-update text to the user
+                    if user_facing_response:
+                        yield {"type": "token", "value": user_facing_response + "\n\n"}
+
+                    # Swap model for next round
+                    old_model_name = selected_model_name
+                    if selected_model_name == "lite":
+                        selected_model_name = "gpu_prime"
+                    else:
+                        selected_model_name = "lite"
+
+                    # Manage model lifecycle
+                    self.model_pool.release_model(old_model_name)
+                    selected_model = self.model_pool.acquire_model(selected_model_name)
+
+                    packet.council.iteration_count += 1
+                    logger.info(f"Council debate iteration {packet.council.iteration_count}: {old_model_name} -> {selected_model_name}")
+                    continue  # Loop back for next round
+                else:
+                    # Consensus reached or final response generated
+                    packet.council.mode = "consensus"
+                    break  # Exit while loop
+
+            except Exception:
+                logger.exception("Deep Thought loop failed; attempting break")
+                break
+
+        # Final yield and archiving (outside while loop)
+        self._archive_council_debate(packet)
+
+        # Guard: routed_output may be None if the loop exited via exception
+        if routed_output is None:
+            logger.error("Deep Thought loop exited without producing routed_output — aborting turn")
+            yield {"type": "token", "value": "I encountered an internal error while processing. Please try again."}
+            return
+        execution_results = routed_output["execution_results"]
+
+        try:
             # ── Think-tag-only recovery ──────────────────────────────────
             # If the model generated only <think> reasoning without any
             # visible response, retry once with an explicit instruction.
@@ -2101,10 +2098,6 @@ class AgentCore:
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
 
-            # This function now needs to handle the v0.3 packet
-            routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
-            user_facing_response = routed_output["response_to_user"]
-            execution_results = routed_output["execution_results"]
 
             packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
 
@@ -2169,7 +2162,7 @@ class AgentCore:
                     rescue_helper.remember_fact(key=user_input, value=user_facing_response, note="sourced_from=oracle")
             except Exception:
                 logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
-            
+        
             # Use the routed user-facing response for all persistence.
             # full_response may be empty if the LLM stream yielded nothing,
             # but user_facing_response always has content (route_output provides fallbacks).
@@ -2312,7 +2305,7 @@ class AgentCore:
                             "context": "Resolved while actively using Discord integration",
                             "source": source,
                         }, session_id)
-            
+        
             packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
             logger.info(f"AgentCore: run_turn total took {{packet.metrics.latency_ms / 1000:.2f}}s")
         finally:
@@ -2330,6 +2323,35 @@ class AgentCore:
             except Exception:
                 self.logger.debug("AgentCore: release_model_for_role failed during final cleanup", exc_info=True)
             logger.info(f"AgentCore: Released model {selected_model_name}")
+
+    def _archive_council_debate(self, packet: CognitionPacket):
+        """Archive the council debate thread to a persistent Markdown file."""
+        if not packet.council or not packet.council.thread:
+            return
+
+        try:
+            shared_dir = self.config.constants.get("SHARED_DIR", "/shared")
+            debate_dir = os.path.join(shared_dir, "council", "debates")
+            os.makedirs(debate_dir, exist_ok=True)
+
+            filename = f"{packet.header.session_id}_{packet.header.packet_id}_debate.md"
+            filepath = os.path.join(debate_dir, filename)
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f"# Council Debate: {packet.header.session_id}\n")
+                f.write(f"Packet ID: {packet.header.packet_id}\n")
+                f.write(f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n\n")
+                f.write("## Debate Thread\n\n")
+
+                for msg in packet.council.thread:
+                    f.write(f"### {msg.agent.upper()} ({msg.timestamp})\n")
+                    f.write(f"Target: {msg.target}\n\n")
+                    f.write(f"{msg.content}\n\n")
+                    f.write("---\n\n")
+
+            logger.info(f"Council debate archived to {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to archive council debate: {e}")
 
     def _knowledge_acquisition_workflow(self, packet: CognitionPacket) -> CognitionPacket:
         """
