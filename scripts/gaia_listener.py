@@ -59,13 +59,66 @@ RECORD_CHANNELS = 2         # Stereo
 
 DEFAULT_GAIA_AUDIO_URL = "http://localhost:8080"
 DEFAULT_GAIA_CORE_URL = "http://localhost:6415"
+PID_FILE_NAME = "listener.pid"
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [LISTENER] %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
+    stream=sys.stderr,
+    force=True,
 )
 logger = logging.getLogger("gaia_listener")
+# Ensure unbuffered output for real-time log visibility
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
+
+
+# ---------------------------------------------------------------------------
+# Single-instance enforcement via PID file
+# ---------------------------------------------------------------------------
+
+def _kill_existing_listener(pid_path: Path):
+    """Kill any existing listener process and clean up its PID file."""
+    if not pid_path.exists():
+        return
+    try:
+        old_pid = int(pid_path.read_text().strip())
+        # Check if process is actually a gaia_listener
+        cmdline_path = Path(f"/proc/{old_pid}/cmdline")
+        if cmdline_path.exists():
+            cmdline = cmdline_path.read_bytes().decode(errors="replace")
+            if "gaia_listener" in cmdline:
+                logger.info("Killing existing listener (PID %d)", old_pid)
+                os.kill(old_pid, signal.SIGTERM)
+                # Wait briefly for graceful shutdown
+                for _ in range(10):
+                    if not cmdline_path.exists():
+                        break
+                    time.sleep(0.5)
+                # Force kill if still alive
+                if cmdline_path.exists():
+                    os.kill(old_pid, signal.SIGKILL)
+                    logger.info("Force-killed stale listener (PID %d)", old_pid)
+    except (ValueError, ProcessLookupError, PermissionError):
+        pass
+    try:
+        pid_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _write_pid(pid_path: Path):
+    """Write current PID to the PID file."""
+    pid_path.write_text(str(os.getpid()))
+
+
+def _remove_pid(pid_path: Path):
+    """Remove PID file on exit."""
+    try:
+        pid_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -73,18 +126,13 @@ logger = logging.getLogger("gaia_listener")
 # ---------------------------------------------------------------------------
 
 def _detect_audio_backend() -> str:
-    """Detect whether PipeWire or PulseAudio is available."""
-    # Check PipeWire first (modern default on Arch)
-    try:
-        result = subprocess.run(
-            ["pw-cat", "--version"], capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return "pipewire"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    """Detect available audio capture backend.
 
-    # Fall back to PulseAudio
+    Prefers parec (PulseAudio CLI) because it handles monitor source
+    routing reliably on both PulseAudio and PipeWire-with-pulse.
+    pw-cat --target 0 doesn't route to the sink monitor consistently.
+    """
+    # Prefer parec — works on both PulseAudio and PipeWire-pulse
     try:
         result = subprocess.run(
             ["parec", "--version"], capture_output=True, timeout=5
@@ -94,29 +142,25 @@ def _detect_audio_backend() -> str:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
+    # Fall back to pw-cat if parec unavailable
+    try:
+        result = subprocess.run(
+            ["pw-cat", "--version"], capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return "pipewire"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
     raise RuntimeError(
-        "Neither pw-cat (PipeWire) nor parec (PulseAudio) found. "
+        "Neither parec (PulseAudio/PipeWire-pulse) nor pw-cat (PipeWire) found. "
         "Install pipewire-pulse or pulseaudio."
     )
 
 
 def _find_monitor_source(backend: str) -> str:
-    """Find the monitor source name for system audio capture."""
-    if backend == "pipewire":
-        try:
-            result = subprocess.run(
-                ["pw-cli", "list-objects"],
-                capture_output=True, text=True, timeout=10,
-            )
-            # Look for monitor sources in PipeWire
-            # On PipeWire, we can use the default monitor
-            # pw-cat --record with --target picks up the monitor
-        except Exception:
-            pass
-        # PipeWire: use the default audio sink monitor
-        return ""  # pw-cat auto-detects when using --record
-
-    elif backend == "pulseaudio":
+    """Find the monitor source for the default audio sink."""
+    if backend == "pulseaudio":
         try:
             result = subprocess.run(
                 ["pactl", "get-default-sink"],
@@ -124,10 +168,15 @@ def _find_monitor_source(backend: str) -> str:
             )
             sink_name = result.stdout.strip()
             if sink_name:
-                return f"{sink_name}.monitor"
+                monitor = f"{sink_name}.monitor"
+                logger.info("Monitor source: %s", monitor)
+                return monitor
         except Exception:
             pass
         return "@DEFAULT_MONITOR@"
+
+    elif backend == "pipewire":
+        return ""  # pw-cat auto-detects
 
     return ""
 
@@ -140,10 +189,10 @@ def _build_capture_command(backend: str, monitor_source: str) -> list:
             "--rate", str(SAMPLE_RATE),
             "--channels", str(CHANNELS),
             "--format", "s16",
-            "--target", "0",  # 0 = default audio sink monitor
+            "--target", "0",
             "-",  # stdout
         ]
-    else:  # pulseaudio
+    else:  # pulseaudio / pipewire-pulse
         cmd = [
             "parec",
             "--rate", str(SAMPLE_RATE),
@@ -174,48 +223,54 @@ def _pcm_to_wav_b64(pcm_data: bytes) -> str:
 # Transcription + forwarding
 # ---------------------------------------------------------------------------
 
-def _transcribe_chunk(audio_b64: str, audio_url: str) -> str:
-    """Send a base64 WAV chunk to gaia-audio /transcribe."""
+def _transcribe_chunk(audio_b64: str, audio_url: str) -> dict:
+    """Send a base64 WAV chunk to gaia-audio /transcribe.
+
+    Returns dict with 'text', 'context_markers', and 'segments' keys.
+    """
     try:
         resp = requests.post(
             f"{audio_url}/transcribe",
-            json={"audio": audio_b64, "format": "wav"},
+            json={"audio_base64": audio_b64, "sample_rate": SAMPLE_RATE},
             timeout=30,
         )
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("text", data.get("transcription", "")).strip()
+            return {
+                "text": data.get("text", "").strip(),
+                "context_markers": data.get("context_markers", []),
+                "segments": data.get("segments", []),
+            }
         else:
             logger.warning("Transcription returned %d", resp.status_code)
-            return ""
+            return {"text": "", "context_markers": [], "segments": []}
     except Exception as e:
         logger.error("Transcription request failed: %s", e)
-        return ""
+        return {"text": "", "context_markers": [], "segments": []}
 
 
 def _send_to_core(transcript: str, mode: str, core_url: str):
-    """Send accumulated transcript to gaia-core as an audio_listen packet."""
+    """Send accumulated transcript to gaia-core via /audio/ingest."""
     if not transcript.strip():
         return
 
     try:
-        packet = {
-            "user_input": f"[AUDIO LISTEN — {mode} mode]\n\n{transcript}",
-            "metadata": {
-                "source": "audio_listener",
-                "mode": mode,
-                "packet_type": "audio_listen",
-            },
+        payload = {
+            "transcript": transcript,
+            "mode": mode,
+            "context_markers": [],
         }
         resp = requests.post(
-            f"{core_url}/process_packet",
-            json=packet,
-            timeout=30,
+            f"{core_url}/audio/ingest",
+            json=payload,
+            timeout=10,
         )
         if resp.status_code == 200:
-            logger.info("Transcript sent to gaia-core (%d chars)", len(transcript))
+            data = resp.json()
+            logger.info("Transcript ingested (%d chars, buffer %d/%d)",
+                        len(transcript), data.get("buffer_size", 0), data.get("buffer_max", 0))
         else:
-            logger.warning("gaia-core returned %d", resp.status_code)
+            logger.warning("gaia-core /audio/ingest returned %d", resp.status_code)
     except Exception as e:
         logger.error("Failed to send transcript to gaia-core: %s", e)
 
@@ -266,6 +321,7 @@ class AudioListener:
         self.core_url = core_url
         self.control_path = project_root / "logs" / "listener_control.json"
         self.status_path = project_root / "logs" / "listener_status.json"
+        self.pid_path = project_root / "logs" / PID_FILE_NAME
 
         self._running = False
         self._capturing = False
@@ -291,9 +347,13 @@ class AudioListener:
 
     def start(self):
         """Start the listener daemon (blocks until stopped)."""
+        # Single-instance: kill any existing listener before starting
+        _kill_existing_listener(self.pid_path)
+        _write_pid(self.pid_path)
+
         self._running = True
         self._start_time = time.time()
-        logger.info("Listener daemon started. Waiting for control commands...")
+        logger.info("Listener daemon started (PID %d). Waiting for control commands...", os.getpid())
         self._update_status(capturing=False)
 
         try:
@@ -344,6 +404,7 @@ class AudioListener:
                 self._stop_capture()
             self._running = False
             self._update_status(capturing=False, extra={"stopped": True})
+            _remove_pid(self.pid_path)
             logger.info("Listener daemon stopped")
 
     def stop(self):
@@ -528,23 +589,27 @@ class AudioListener:
 
             # Check if it's silence (RMS below threshold)
             if self._is_silence(pcm_data):
-                logger.debug("Silence detected, skipping chunk")
+                logger.info("Silence detected (30s chunk), skipping")
                 return
 
             # Encode and transcribe
             audio_b64 = _pcm_to_wav_b64(pcm_data)
-            text = _transcribe_chunk(audio_b64, self.audio_url)
+            result = _transcribe_chunk(audio_b64, self.audio_url)
+            text = result["text"]
 
             if text:
                 timestamp = time.strftime("%H:%M:%S")
-                entry = f"[{timestamp}] {text}"
+                # Build entry with context markers inline
+                markers = result.get("context_markers", [])
+                marker_str = f" [{', '.join(markers)}]" if markers else ""
+                entry = f"[{timestamp}]{marker_str} {text}"
                 self._transcript_buffer.append(entry)
-                logger.info("Transcribed: %s", text[:80])
+                logger.info("Transcribed: %s%s", text[:80], marker_str)
 
         except Exception as e:
             logger.error("Chunk processing error: %s", e)
 
-    def _is_silence(self, pcm_data: bytes, threshold: int = 500) -> bool:
+    def _is_silence(self, pcm_data: bytes, threshold: int = 200) -> bool:
         """Check if a PCM chunk is mostly silence (RMS below threshold)."""
         if len(pcm_data) < 4:
             return True

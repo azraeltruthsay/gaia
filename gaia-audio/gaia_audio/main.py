@@ -203,6 +203,8 @@ async def transcribe(request: TranscribeRequest):
             confidence=result.get("confidence", 0.0),
             duration_seconds=result.get("duration_seconds", 0.0),
             latency_ms=latency_ms,
+            segments=result.get("segments", []),
+            context_markers=result.get("context_markers", []),
         )
 
     except Exception as e:

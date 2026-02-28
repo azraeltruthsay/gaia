@@ -475,3 +475,63 @@ async def process_packet(packet_data: Dict[str, Any]):
             status_code=500,
             detail=f"Error processing packet: {str(e)}"
         )
+
+
+# ── Audio Context Ingest ─────────────────────────────────────────────
+
+from collections import deque
+import time as _time
+
+_audio_context_buffer: deque = deque(maxlen=30)  # ~15 minutes at 30s chunks
+
+
+class AudioIngestRequest(BaseModel):
+    transcript: str
+    mode: str = "passive"
+    context_markers: list = []
+    timestamp: str | None = None
+
+
+@app.post("/audio/ingest")
+async def audio_ingest(req: AudioIngestRequest):
+    """Ingest audio transcript as ambient context (no cognitive loop).
+
+    Stores transcripts in a ring buffer that the prompt builder can
+    reference during the next cognitive turn.
+    """
+    if not req.transcript.strip():
+        return {"status": "skipped", "reason": "empty transcript"}
+
+    entry = {
+        "text": req.transcript.strip(),
+        "mode": req.mode,
+        "context_markers": req.context_markers,
+        "timestamp": req.timestamp or _time.strftime("%H:%M:%S"),
+        "ingested_at": _time.time(),
+    }
+    _audio_context_buffer.append(entry)
+
+    logger.info("Audio ingest: %d chars, markers=%s, buffer=%d/%d",
+                len(req.transcript), req.context_markers,
+                len(_audio_context_buffer), _audio_context_buffer.maxlen)
+
+    # Mark system active for sleep cycle idle tracking
+    idle_monitor = getattr(app.state, "idle_monitor", None)
+    if idle_monitor:
+        idle_monitor.mark_active()
+
+    return {
+        "status": "ingested",
+        "buffer_size": len(_audio_context_buffer),
+        "buffer_max": _audio_context_buffer.maxlen,
+    }
+
+
+@app.get("/audio/context")
+async def audio_context():
+    """Return the current audio context buffer for debugging."""
+    return {
+        "entries": list(_audio_context_buffer),
+        "count": len(_audio_context_buffer),
+        "max": _audio_context_buffer.maxlen,
+    }

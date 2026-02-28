@@ -131,26 +131,130 @@ class STTEngine:
             language=language,
             beam_size=5,
             vad_filter=True,
+            word_timestamps=True,
+            suppress_tokens=[],  # Preserve non-speech markers ([Music], [Laughter], etc.)
         )
 
-        # Collect all segment text
+        # Collect segment text + rich metadata
         texts = []
         total_confidence = 0.0
         n_segments = 0
+        segment_details = []
+        prev_end = 0.0
+        total_words = 0
+        total_speech_duration = 0.0
+
         for segment in segments:
             texts.append(segment.text.strip())
             total_confidence += segment.avg_logprob
             n_segments += 1
 
+            pause = segment.start - prev_end if prev_end > 0 else 0.0
+            seg_duration = segment.end - segment.start
+
+            # Word-level stats
+            word_count = 0
+            words_data = []
+            if segment.words:
+                word_count = len(segment.words)
+                for w in segment.words:
+                    words_data.append({
+                        "word": w.word,
+                        "start": round(w.start, 2),
+                        "end": round(w.end, 2),
+                        "probability": round(w.probability, 3),
+                    })
+
+            speaking_rate = (word_count / seg_duration) if seg_duration > 0 else 0.0
+            total_words += word_count
+            total_speech_duration += seg_duration
+
+            seg_info = {
+                "start": round(segment.start, 2),
+                "end": round(segment.end, 2),
+                "text": segment.text.strip(),
+                "no_speech_prob": round(segment.no_speech_prob, 3),
+                "avg_logprob": round(segment.avg_logprob, 3),
+                "compression_ratio": round(segment.compression_ratio, 3),
+                "speaking_rate_wps": round(speaking_rate, 1),
+            }
+            if pause > 0.5:
+                seg_info["pause_before"] = round(pause, 2)
+            if words_data:
+                seg_info["words"] = words_data
+            segment_details.append(seg_info)
+
+            prev_end = segment.end
+
         text = " ".join(texts)
         avg_confidence = (total_confidence / n_segments) if n_segments > 0 else 0.0
+
+        # Derive context markers from segment metadata
+        context_markers = _extract_context_markers(segment_details, total_words, total_speech_duration)
 
         return {
             "text": text,
             "language": info.language,
             "confidence": avg_confidence,
             "duration_seconds": duration_seconds,
+            "segments": segment_details,
+            "context_markers": context_markers,
         }
+
+
+def _extract_context_markers(
+    segments: list[dict],
+    total_words: int,
+    total_speech_duration: float,
+) -> list[str]:
+    """Derive human-readable context markers from segment metadata.
+
+    Extracts signals like speaking pace, pauses, low-confidence speech,
+    non-speech events, and noise without requiring additional models.
+    """
+    markers = []
+
+    if not segments:
+        return markers
+
+    # Overall speaking rate
+    if total_speech_duration > 0:
+        overall_wps = total_words / total_speech_duration
+        if overall_wps > 4.0:
+            markers.append("fast_speech")
+        elif overall_wps < 1.5 and total_words > 0:
+            markers.append("slow_speech")
+
+    # Scan segments for notable patterns
+    long_pauses = 0
+    noise_segments = 0
+    low_confidence_segments = 0
+
+    for seg in segments:
+        # Long pauses (> 2s)
+        if seg.get("pause_before", 0) > 2.0:
+            long_pauses += 1
+
+        # High no_speech_prob → likely music, noise, or ambient sound
+        if seg.get("no_speech_prob", 0) > 0.6:
+            noise_segments += 1
+
+        # Low avg_logprob → mumbling, whispering, or unclear speech
+        if seg.get("avg_logprob", 0) < -1.0:
+            low_confidence_segments += 1
+
+        # High compression ratio → repetitive content (stuttering, loops)
+        if seg.get("compression_ratio", 0) > 2.5:
+            markers.append("repetitive_segment")
+
+    if long_pauses > 0:
+        markers.append(f"long_pauses:{long_pauses}")
+    if noise_segments > 0:
+        markers.append(f"non_speech_segments:{noise_segments}")
+    if low_confidence_segments > 0:
+        markers.append(f"unclear_speech:{low_confidence_segments}")
+
+    return markers
 
 
 def _ffmpeg_to_wav(audio_bytes: bytes) -> bytes | None:
