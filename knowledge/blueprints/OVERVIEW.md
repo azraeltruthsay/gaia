@@ -22,7 +22,7 @@ The system is built around eight primary services plus a shared library:
 ### Service Descriptions
 
 1.  **`gaia-orchestrator`**: Manages Docker containers, GPU resources, and service lifecycle. Coordinates GPU handoffs between gaia-prime and gaia-study.
-2.  **`gaia-prime`**: Standalone vLLM OpenAI-compatible inference server. Owns the GPU for LLM inference. Built from source targeting RTX 5080 Blackwell (sm_120) with vLLM v0.15.1 and LoRA adapter support. Currently serves Qwen3-4B-Instruct-2507-heretic (live) or Qwen3-8B-AWQ (candidate).
+2.  **`gaia-prime`**: Standalone vLLM OpenAI-compatible inference server. Owns the GPU for LLM inference. Built from source targeting RTX 5080 Blackwell (sm_120) with vLLM v0.15.1 and LoRA adapter support. Currently serves Qwen3-8B-abliterated-AWQ (GPU) with Qwen3-8B-abliterated-Q4_K_M.gguf (CPU lite fallback).
 3.  **`gaia-core`**: The cognitive engine. Runs CPU-only and delegates all GPU inference to gaia-prime via `PRIME_ENDPOINT`. Handles reasoning, intent detection, planning, self-reflection, tool routing, sleep/wake cycle, and session management. Falls back to Groq API or local GGUF models when prime is unavailable. Supports HA failover via `MCP_FALLBACK_ENDPOINT`.
 4.  **`gaia-web`**: User-facing interface providing HTTP REST API, Discord bot (text + voice), and dashboard. Converts user input to CognitionPackets and routes completed responses back to their origin. Orchestrates Discord voice calls via VoiceManager and gaia-audio. Supports HA failover via `CORE_FALLBACK_ENDPOINT`.
 5.  **`gaia-mcp`**: Sandboxed tool execution environment with approval workflows. Provides file operations, shell execution, vector queries, and knowledge management tools. Security-hardened with dropped capabilities.

@@ -15,7 +15,7 @@ runtime:
   gpu_count: 1
   startup_cmd: >-
     python -m vllm.entrypoints.openai.api_server
-    --model /models/Qwen3-4B-Instruct-2507-heretic
+    --model /models/Qwen3-8B-abliterated-AWQ
     --host 0.0.0.0 --port 7777
     --gpu-memory-utilization 0.70
     --max-model-len 8192 --max-num-seqs 4

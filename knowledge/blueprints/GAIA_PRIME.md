@@ -4,7 +4,7 @@
 
 `gaia-prime` is the dedicated GPU inference server within the GAIA ecosystem. It runs vLLM as a standalone OpenAI-compatible API server, providing LLM inference to `gaia-core` via HTTP. This decouples GPU-intensive inference from CPU-based cognition, enabling independent scaling and eliminating CUDA/vLLM dependency conflicts in the cognition container.
 
-**Current model**: Qwen3-4B-Instruct-2507-heretic (live) / Qwen3-8B-AWQ (candidate). The model path is configurable via `PRIME_MODEL_PATH` environment variable.
+**Current model**: Qwen3-8B-abliterated-AWQ (GPU) / Qwen3-8B-abliterated-Q4_K_M.gguf (CPU lite). The model path is configurable via `PRIME_MODEL_PATH` environment variable.
 
 ## Build and Image
 
@@ -62,7 +62,7 @@ The container runs vLLM with these parameters:
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `--model` | `${PRIME_MODEL_PATH:-/models/Qwen3-4B-Instruct-2507-heretic}` | Loads model from mounted volume |
+| `--model` | `${PRIME_MODEL_PATH:-/models/Qwen3-8B-abliterated-AWQ}` | Loads model from mounted volume |
 | `--gpu-memory-utilization 0.70` | 70% VRAM | Allocation for model + KV cache |
 | `--max-model-len 8192` | 8K context | Context window size |
 | `--max-num-seqs 4` | 4 concurrent | Concurrent sequence limit |

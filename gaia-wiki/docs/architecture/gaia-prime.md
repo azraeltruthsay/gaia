@@ -34,4 +34,4 @@ This is controlled by `VLLM_SERVER_DEV_MODE=1` which enables the `/sleep` and `/
 
 ## Model Loading
 
-The active model is specified by `PRIME_MODEL_PATH` (default: `/models/Qwen3-4B-Instruct-2507-heretic`). Models are stored on `/mnt/gaia_warm_pool` (host) mounted as `/models` (container, read-only).
+The active model is specified by `PRIME_MODEL_PATH` (default: `/models/Qwen3-8B-abliterated-AWQ`). Models are stored on `/mnt/gaia_warm_pool` (host) mounted as `/models` (container, read-only).

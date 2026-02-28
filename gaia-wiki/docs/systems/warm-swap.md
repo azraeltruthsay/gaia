@@ -19,8 +19,8 @@ Models are pre-staged on a tmpfs mount for near-instant loading:
 
 ```
 /mnt/gaia_warm_pool/
-├── Qwen3-4B-Instruct-2507-heretic/    # Primary model
-├── Qwen3-8B-AWQ/                       # Candidate model
+├── Qwen3-8B-abliterated-AWQ/           # Primary model (GPU)
+├── Qwen3-8B-abliterated-Q4_K_M.gguf   # Lite model (CPU)
 └── adapters/                            # LoRA adapters
 ```
 
