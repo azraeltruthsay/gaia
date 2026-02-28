@@ -197,6 +197,8 @@ services:
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-abliterated-AWQ}
+      # Lite model (CPU, GGUF via llama_cpp)
+      - GAIA_LITE_GGUF=${GAIA_LITE_GGUF:-/models/Qwen3-8B-abliterated-Q4_K_M.gguf}
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
