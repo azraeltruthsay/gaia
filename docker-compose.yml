@@ -442,7 +442,7 @@ services:
       start_period: 30s
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-audio: The Ears & Mouth - Half-duplex STT/TTS sensory service
+  # gaia-audio: The Ears & Mouth - Full-duplex STT/TTS sensory service
   # GPU-capable container for Whisper STT and RealtimeTTS
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-audio:
@@ -456,15 +456,15 @@ services:
 
     volumes:
       - ./gaia-audio:/app:rw
-      - ./gaia-common:/app/gaia_common:ro
+      - ./gaia-common:/gaia-common:ro
       - ./gaia-models/voice:/models/voice:ro
       - ./gaia-models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf:/models/nano_refiner.gguf:ro
 
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=audio
       - GAIA_ENV=${GAIA_ENV:-production}
-      - GAIA_CONSTANTS_PATH=/app/gaia_common/constants/gaia_constants.json
+      - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       - NANO_MODEL_PATH=/models/nano_refiner.gguf
@@ -473,15 +473,14 @@ services:
     ports:
       - "8080:8080"
 
-    networks:
-      - gaia-net
-
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
+    command: ["sh", "-c", "PYTHONPATH=/app:/gaia-common uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080"]
 
     deploy:
       resources:

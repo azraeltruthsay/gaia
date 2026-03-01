@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from gaia_common.protocols.cognition_packet import CognitionPacket
-from gaia_core.config import Config
+from gaia_core.config import get_config
+config = get_config()
 
 logger = logging.getLogger("GAIA.MCPClient")
 
@@ -33,8 +34,9 @@ def _normalize_endpoint(ep: str) -> str:
     return ep + "/jsonrpc"
 
 
-def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = 20) -> Dict:
-    ep_raw = endpoint or os.getenv("MCP_LITE_ENDPOINT") or Config().constants.get("MCP_LITE_ENDPOINT")
+def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
+    timeout = timeout or int(config.get_timeout("MCP_DEFAULT", 20))
+    ep_raw = endpoint or os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp")
     ep = _normalize_endpoint(ep_raw)
     if not ep:
         return {"ok": False, "error": "MCP endpoint not configured"}
@@ -102,9 +104,9 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
     if not config.constants.get("MCP_LITE_ENABLED") or not packet.response.sidecar_actions:
         return []
 
-    endpoint = config.constants.get("MCP_LITE_ENDPOINT")
+    endpoint = config.get_endpoint("mcp")
     if not endpoint:
-        logger.error("MCP_LITE_ENDPOINT is not configured. Cannot dispatch actions.")
+        logger.error("MCP endpoint is not configured. Cannot dispatch actions.")
         return []
 
     results = []
@@ -145,7 +147,7 @@ def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Di
         logger.info(f"[{ts}] Dispatching action to MCP server: method={action.action_type} id={request_id} params_keys={list(rpc_params.keys())}")
 
         try:
-            response = requests.post(endpoint, json=payload, timeout=20)
+            response = requests.post(endpoint, json=payload, timeout=int(config.get_timeout("MCP_DEFAULT", 20)))
             if response.status_code == 403:
                 # Sensitive tool — route through approval flow with auto-pending
                 logger.info(f"[{ts}] Action '{action.action_type}' requires approval (403). Routing to approval flow.")
@@ -271,7 +273,7 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
     Returns: {"ok": True, "action_id": str, "challenge": str} or error dict
     """
     # Prefer explicit environment override so containers can target the mcp sidecar by name
-    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or Config().constants.get("MCP_LITE_ENDPOINT"))
+    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
     if not endpoint:
         logger.error("MCP endpoint not configured for approval request")
         return {"ok": False, "error": "no endpoint"}
@@ -313,7 +315,7 @@ def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
 
     Returns the execution result dict on success.
     """
-    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or Config().constants.get("MCP_LITE_ENDPOINT"))
+    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
     if not endpoint:
         logger.error("MCP endpoint not configured for approval submit")
         return {"ok": False, "error": "no endpoint"}
@@ -331,14 +333,14 @@ def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
 
 def get_pending_action(action_id: str) -> Dict:
     """Fetch pending approvals list from MCP and return the entry matching action_id, or None."""
-    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or Config().constants.get("MCP_LITE_ENDPOINT"))
+    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
     if not endpoint:
         logger.error("MCP endpoint not configured for getting pending approvals")
         return {"ok": False, "error": "no endpoint"}
 
     url = endpoint.replace('/jsonrpc', '/pending_approvals')
     try:
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=int(config.get_timeout("HTTP_QUICK", 5)))
         r.raise_for_status()
         data = r.json()
         pending = data.get("pending") or []
@@ -351,15 +353,16 @@ def get_pending_action(action_id: str) -> Dict:
         return {"ok": False, "error": str(e)}
 
 
-def discover(endpoint: str = None, timeout: int = 3) -> Dict:
+def discover(endpoint: str = None, timeout: int = None) -> Dict:
     """Structured discovery of MCP capabilities.
 
     Tries (best-effort) several discovery approaches and returns a concise
     dict: {ok: bool, methods: [name,...], raw: <short snippet>, error: <msg>}
     """
+    timeout = timeout or int(config.get_timeout("HTTP_QUICK", 3))
     try:
         if endpoint is None:
-            endpoint = os.getenv("MCP_LITE_ENDPOINT") or Config().constants.get("MCP_LITE_ENDPOINT")
+            endpoint = os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp")
         if not endpoint:
             return {"ok": False, "error": "no endpoint configured"}
 
@@ -419,10 +422,10 @@ def discover(endpoint: str = None, timeout: int = 3) -> Dict:
             try_hosts.append(base)
             # Common replacements
             if 'localhost' in base or '127.0.0.1' in base:
-                try_hosts.append(base.replace('localhost', 'gaia-mcp-lite'))
-                try_hosts.append(base.replace('127.0.0.1', 'gaia-mcp-lite'))
+                try_hosts.append(base.replace('localhost', 'gaia-mcp'))
+                try_hosts.append(base.replace('127.0.0.1', 'gaia-mcp'))
             # try common docker-compose service name directly
-            try_hosts.append('http://gaia-mcp-lite:4141')
+            try_hosts.append(config.get_endpoint("mcp").replace('/jsonrpc', ''))
             # try with explicit /jsonrpc appended
             try_hosts = list(dict.fromkeys(try_hosts))
         except Exception:

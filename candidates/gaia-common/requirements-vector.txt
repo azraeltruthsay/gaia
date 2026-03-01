@@ -1,0 +1,9 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Optional dependencies for vector operations
+#
+# Install with: pip install -r requirements.txt -r requirements-vector.txt
+
+-r requirements.txt
+
+sentence-transformers>=2.7.0
+numpy>=1.24.0

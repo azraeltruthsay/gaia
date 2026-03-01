@@ -1,16 +1,11 @@
 """Audio service configuration — loads from gaia_constants.json."""
 
 from __future__ import annotations
-
-import json
 import logging
-import os
 from dataclasses import dataclass, field
+from gaia_common.config import Config as CommonConfig, get_config as get_common_config
 
 logger = logging.getLogger("GAIA.Audio.Config")
-
-_DEFAULT_CONSTANTS_PATH = "/app/gaia_common/constants/gaia_constants.json"
-
 
 @dataclass
 class CloudFallback:
@@ -18,57 +13,78 @@ class CloudFallback:
     enabled: bool = False
     api_key_env: str = "ELEVENLABS_API_KEY"
 
+class AudioConfig(CommonConfig):
+    """
+    Audio-specific configuration wrapper.
+    Inherits authoritative settings from gaia-common and adds audio helpers.
+    """
+    @property
+    def audio_cfg(self) -> dict:
+        return self.INTEGRATIONS.get("audio", {})
 
-@dataclass
-class AudioConfig:
-    enabled: bool = True
-    endpoint: str = "http://gaia-audio:8080"
-    stt_model: str = "base.en"
-    tts_engine: str = "coqui"
-    tts_voice: str | None = None
-    sample_rate: int = 16000
-    vram_budget_mb: int = 5600
-    half_duplex: bool = False
-    mute_on_sleep: bool = True
-    cloud_fallback: CloudFallback = field(default_factory=CloudFallback)
+    @property
+    def enabled(self) -> bool:
+        return self.audio_cfg.get("enabled", True)
 
-    # Service endpoints for integration
-    core_endpoint: str = "http://gaia-core:6415"
-    web_endpoint: str = "http://gaia-web:6414"
-    orchestrator_endpoint: str = "http://gaia-orchestrator:6410"
+    @property
+    def endpoint(self) -> str:
+        return self.audio_cfg.get("endpoint", "http://gaia-audio:8080")
+
+    @property
+    def stt_model(self) -> str:
+        return self.audio_cfg.get("stt_model", "base.en")
+
+    @property
+    def tts_engine(self) -> str:
+        return self.audio_cfg.get("tts_engine", "coqui")
+
+    @property
+    def tts_voice(self) -> str | None:
+        return self.audio_cfg.get("tts_voice")
+
+    @property
+    def sample_rate(self) -> int:
+        return self.audio_cfg.get("sample_rate", 16000)
+
+    @property
+    def vram_budget_mb(self) -> int:
+        return self.audio_cfg.get("vram_budget_mb", 5600)
+
+    @property
+    def half_duplex(self) -> bool:
+        return self.audio_cfg.get("half_duplex", False)
+
+    @property
+    def mute_on_sleep(self) -> bool:
+        return self.audio_cfg.get("mute_on_sleep", True)
+
+    @property
+    def cloud_fallback(self) -> CloudFallback:
+        cloud = self.audio_cfg.get("cloud_fallback", {})
+        return CloudFallback(
+            provider=cloud.get("provider", "elevenlabs"),
+            enabled=cloud.get("enabled", False),
+            api_key_env=cloud.get("api_key_env", "ELEVENLABS_API_KEY"),
+        )
+
+    # Service endpoints
+    @property
+    def core_endpoint(self) -> str:
+        return self.endpoints.get("core", "http://gaia-core:6415")
+
+    @property
+    def web_endpoint(self) -> str:
+        return self.endpoints.get("web", "http://gaia-web:6414")
+
+    @property
+    def orchestrator_endpoint(self) -> str:
+        return self.endpoints.get("orchestrator", "http://gaia-orchestrator:6410")
 
     @classmethod
-    def from_constants(cls, path: str | None = None) -> AudioConfig:
-        """Load audio config from gaia_constants.json INTEGRATIONS.audio block."""
-        path = path or os.environ.get("GAIA_CONSTANTS_PATH", _DEFAULT_CONSTANTS_PATH)
-        try:
-            with open(path, encoding="utf-8") as f:
-                constants = json.load(f)
-            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
-            if not audio_cfg:
-                logger.warning("No INTEGRATIONS.audio in constants; using defaults")
-                return cls()
+    def from_constants(cls) -> AudioConfig:
+        """Get the authoritative instance."""
+        return cls.get_instance()
 
-            cloud = audio_cfg.get("cloud_fallback", {})
-            return cls(
-                enabled=audio_cfg.get("enabled", True),
-                endpoint=audio_cfg.get("endpoint", cls.endpoint),
-                stt_model=audio_cfg.get("stt_model", cls.stt_model),
-                tts_engine=audio_cfg.get("tts_engine", cls.tts_engine),
-                tts_voice=audio_cfg.get("tts_voice"),
-                sample_rate=audio_cfg.get("sample_rate", cls.sample_rate),
-                vram_budget_mb=audio_cfg.get("vram_budget_mb", cls.vram_budget_mb),
-                half_duplex=audio_cfg.get("half_duplex", cls.half_duplex),
-                mute_on_sleep=audio_cfg.get("mute_on_sleep", cls.mute_on_sleep),
-                cloud_fallback=CloudFallback(
-                    provider=cloud.get("provider", "elevenlabs"),
-                    enabled=cloud.get("enabled", False),
-                    api_key_env=cloud.get("api_key_env", "ELEVENLABS_API_KEY"),
-                ),
-            )
-        except FileNotFoundError:
-            logger.warning("Constants file not found at %s; using defaults", path)
-            return cls()
-        except Exception:
-            logger.error("Failed to load audio config", exc_info=True)
-            return cls()
+def get_config() -> AudioConfig:
+    """Get the audio-wrapped authoritative config."""
+    return AudioConfig.get_instance()

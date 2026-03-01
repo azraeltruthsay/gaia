@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -27,7 +26,7 @@ from typing import Dict, List, Literal, Optional
 
 logger = logging.getLogger("GAIA.PromotionRequest")
 
-_REQUESTS_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/gaia/GAIA_Project/knowledge")) / "promotion_requests"
+_REQUESTS_DIR = Path("/gaia/GAIA_Project/knowledge/promotion_requests")
 
 # Valid status transitions
 _VALID_TRANSITIONS: Dict[str, List[str]] = {

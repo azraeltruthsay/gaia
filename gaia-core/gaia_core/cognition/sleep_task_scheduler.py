@@ -581,8 +581,14 @@ class SleepTaskScheduler:
         except Exception:
             logger.error("Failed to rebuild blueprint embeddings", exc_info=True)
 
-    _CORPUS_DIR = "/knowledge/curricula/code-architect"
-    _PRIME_MD = "/shared/self_model/prime.md"
+    @property
+    def _CORPUS_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect")
+
+    @property
+    def _PRIME_MD(self) -> str:
+        return str(Path(self.config.SHARED_DIR) / "self_model" / "prime.md")
+
     _MIN_CORPUS_SIZE = 50
     _MIN_FORWARD_RATIO = 0.15
 
@@ -661,8 +667,14 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
 
     _CODE_REVIEW_ADAPTER = "code-architect"
-    _PRIME_ENDPOINT = "http://gaia-prime:7777"
-    _REVIEW_QUEUE_PATH = "/knowledge/curricula/code-architect/review_queue.json"
+    
+    @property
+    def _PRIME_ENDPOINT(self) -> str:
+        return self.config.get_endpoint("prime")
+
+    @property
+    def _REVIEW_QUEUE_PATH(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect" / "review_queue.json")
 
     def _run_code_review(self) -> None:
         """
@@ -942,9 +954,17 @@ class SleepTaskScheduler:
     # wiki_doc_regen (DOC_GENERATION) — blueprint YAML → wiki markdown
     # ------------------------------------------------------------------
 
-    _BLUEPRINTS_DIR = "/knowledge/blueprints"
-    _WIKI_AUTO_DIR = "/knowledge/wiki_auto"
-    _REGEN_MANIFEST = "/knowledge/wiki_auto/_last_regen_manifest.json"
+    @property
+    def _BLUEPRINTS_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "blueprints")
+
+    @property
+    def _WIKI_AUTO_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "wiki_auto")
+
+    @property
+    def _REGEN_MANIFEST(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "wiki_auto" / "_last_regen_manifest.json")
 
     def _run_wiki_doc_regen(self) -> None:
         """Generate wiki markdown pages from blueprint YAML files.

@@ -2,7 +2,7 @@
 
 ## Role and Overview
 
-`gaia-core` is the cognitive engine of the GAIA system. It processes user input through a multi-step reasoning pipeline: intent detection, knowledge enhancement, LLM inference, tool routing, self-reflection, and response assembly. In v0.3, gaia-core runs **CPU-only** and delegates all GPU inference to `gaia-prime` via HTTP.
+`gaia-core` is the cognitive engine of the GAIA system. It processes user input through a multi-step reasoning pipeline: intent detection, knowledge enhancement, LLM inference, tool routing, self-reflection, and response assembly. In v0.4, gaia-core runs **CPU-only**, delegates all GPU inference to `gaia-prime` via HTTP, and implements the **Temporal Context Protocol (TCP)** for continuous situational awareness.
 
 ## Container Configuration
 
@@ -24,7 +24,7 @@
 | `GAIA_FORCE_CPU` | `1` | Prevents local GPU usage |
 | `N_GPU_LAYERS` | `0` | No GPU layers for llama.cpp fallback |
 | `PRIME_ENDPOINT` | `http://gaia-prime:7777` | Remote vLLM server address |
-| `PRIME_MODEL` | `/models/Claude` | Model path on gaia-prime |
+| `PRIME_MODEL` | `/models/Qwen3-8B-abliterated-AWQ` | Model path on gaia-prime |
 | `GROQ_API_KEY` | from `.env` | Groq API fallback (free tier) |
 | `MCP_ENDPOINT` | `http://gaia-mcp:8765/jsonrpc` | Tool execution endpoint |
 | `STUDY_ENDPOINT` | `http://gaia-study:8766` | Knowledge/embedding service |
@@ -38,271 +38,51 @@
 - `./gaia-models:/models:ro` — Model files (GGUF for lite backend)
 - `gaia-shared:/shared:rw` — Inter-service state
 
-## Source Structure
-
-```
-gaia_core/
-├── main.py                        # FastAPI entry point, AIManagerShim, lifespan
-├── config.py                      # Config singleton, loads gaia_constants.json from gaia-common
-├── cognition/                     # Core reasoning pipeline
-│   ├── agent_core.py              # Main Reason-Act-Reflect loop
-│   ├── cognitive_audit.py         # Pre-reflection epistemic self-assessment
-│   ├── cognitive_dispatcher.py    # Dispatch tool/execution results
-│   ├── history_review.py          # Pre-injection history audit (anti-confabulation)
-│   ├── knowledge_enhancer.py      # Inject knowledge context
-│   ├── self_reflection.py         # Response quality review
-│   ├── self_review_worker.py      # Async quality assurance
-│   ├── tool_selector.py           # MCP tool selection (confidence scoring)
-│   ├── loop_detector.py           # Repetitive pattern detection
-│   ├── loop_recovery.py           # Recovery strategies (reset, hint, switch model)
-│   ├── external_voice.py          # External model integration
-│   ├── adapter_trigger_system.py  # LoRA adapter triggers
-│   ├── thought_seed.py            # Seed thoughts for reasoning
-│   ├── topic_manager.py           # Topic modeling
-│   ├── telemetric_senses.py       # System state telemetry
-│   └── nlu/                       # Natural Language Understanding
-│       ├── intent_detection.py
-│       └── intent_service.py
-├── models/                        # Inference backend implementations
-│   ├── model_pool.py              # Singleton accessor
-│   ├── _model_pool_impl.py        # ModelPool class (lazy imports, multi-backend)
-│   ├── model_manager.py           # Lifecycle management
-│   ├── vllm_remote_model.py       # HTTP client to gaia-prime (GPU offload)
-│   ├── vllm_model.py              # In-process vLLM (legacy, disabled in v0.3)
-│   ├── groq_model.py              # Groq API fallback
-│   ├── oracle_model.py            # OpenAI GPT API wrapper
-│   ├── gemini_model.py            # Google Gemini API wrapper
-│   ├── hf_model.py                # HuggingFace transformers
-│   ├── mcp_proxy_model.py         # MCP tool integration
-│   ├── dev_model.py               # Development/debug model
-│   ├── vector_store.py            # Vector DB read access
-│   └── tts.py                     # Text-to-speech
-├── memory/                        # Session and long-term memory
-│   ├── session_manager.py         # Thread-safe JSON-backed sessions
-│   ├── memory_manager.py          # Memory orchestration
-│   ├── semantic_codex.py          # In-memory symbol index (YAML/JSON/MD)
-│   ├── codex_writer.py            # Persist codex entries
-│   ├── knowledge_integrity.py     # Fact validation
-│   ├── priority_manager.py        # Memory retention prioritization
-│   └── conversation/              # Conversation-specific memory
-│       ├── summarizer.py          # Compress long conversations
-│       ├── keywords.py            # Keyword extraction
-│       └── archiver.py            # Archive old sessions
-├── behavior/                      # Persona management
-│   ├── persona_manager.py         # Load/manage personas
-│   ├── persona_adapter.py         # Adapt to context
-│   ├── persona_switcher.py        # Dynamic selection per request
-│   └── persona_writer.py          # Persist persona state
-├── ethics/                        # Safety and governance
-│   ├── core_identity_guardian.py   # Identity integrity checks
-│   ├── ethical_sentinel.py        # Ethical decision-making
-│   └── consent_protocol.py        # Consent and approval tracking
-├── utils/                         # Utilities
-│   ├── prompt_builder.py          # Token-budget-aware prompt assembly
-│   ├── stream_observer.py         # Real-time output validation/interruption
-│   ├── output_router.py           # Route responses to destinations
-│   ├── resource_monitor.py        # GPU monitoring (pynvml, for status only)
-│   ├── mcp_client.py              # JSON-RPC client to gaia-mcp
-│   ├── packet_builder.py          # CognitionPacket construction
-│   └── world_state.py             # System state snapshots
-└── integrations/
-    └── discord_connector.py       # Discord bot integration (legacy)
-```
-
-## FastAPI Endpoints
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Root info, lists available endpoints |
-| `/health` | GET | Health check for container orchestration |
-| `/status` | GET | System status (model availability, persona) |
-| `/process_packet` | POST | Main inference — accepts CognitionPacket, returns completed packet |
-
-## Cognitive Pipeline
+## Cognitive Pipeline (v0.4)
 
 The core reasoning loop in `AgentCore.run_turn()`:
 
 1. **Semantic Probe** — Pre-cognition vector lookup across all knowledge bases (`semantic_probe`)
-2. **Persona & KB Selection** — Probe results drive persona/knowledge base routing (replaces old persona-first flow)
-3. **Model Selection** — Multi-path selection with escalation and fallback (see flowchart below)
-4. **History Review** — Pre-injection audit strips fabricated citations from conversation history (`history_review.py`)
-5. **Packet Assembly** — Build CognitionPacket with history, context, constraints
-6. **Intent Detection** — Classify user intent via lite model (`nlu/intent_detection.py`)
-7. **Slim Prompt Fast Path** — Simple queries (recitation, tool calls) skip planning/reflection
-8. **Planning** — Generate execution plan for complex queries
-9. **Cognitive Self-Audit** — Epistemic assessment between planning and reflection (`cognitive_audit.py`)
-10. **Knowledge Enhancement** — Inject relevant context (`knowledge_enhancer.py`)
-11. **Prompt Assembly** — Build LLM prompt within token budget (`prompt_builder.py`)
-12. **Generation** — Stream from primary model with lite fallback on failure
-13. **Stream Observation** — Real-time output validation (`stream_observer.py`)
-14. **Tool Routing** — Route to MCP tools if needed (`tool_selector.py`)
-15. **Loop Detection** — Record tool calls and outputs, detect repetitive patterns (`loop_detector.py`)
-16. **Self-Reflection** — Review and refine response (`self_reflection.py`)
-17. **Output Routing** — Deliver to web, Discord, CLI, or API
+2. **Interstitial Triage (TCP)** — High-speed triage of "gap audio" (heard while busy) using 0.5B Nano model on CPU. Detects urgent interruptions or pivots.
+3. **Persona & KB Selection** — Probe/Triage results drive persona/knowledge base routing.
+4. **Model Selection** — Multi-path selection with escalation and fallback. Supports `::lite` and `::thinker` fast-paths.
+5. **History Review** — Pre-injection audit strips fabricated citations from conversation history.
+6. **Intent Detection** — Classify user intent via lite model. Direct tasks (::lite/::thinker) skip this step.
+7. **Slim Prompt Fast Path** — Simple queries (recitation, tool calls) skip planning/reflection.
+8. **Planning** — Generate execution plan for complex queries.
+9. **Cognitive Self-Audit** — Epistemic assessment between planning and reflection.
+10. **Knowledge Enhancement** — Inject relevant context.
+11. **Prompt Assembly** — Build LLM prompt within token budget. Injects **Conversation Timeline** landmarks.
+12. **Generation** — Stream from primary model with lite fallback on failure.
+13. **Stream Observation** — Real-time output validation.
+14. **Tool Routing** — Route to MCP tools if needed.
+15. **Loop Detection** — Record tool calls and outputs, detect repetitive patterns.
+16. **Self-Reflection** — Review and refine response.
+17. **Output Routing** — Deliver to web, Discord, CLI, or API.
 
-## Model Selection Flowchart
+## Temporal Context Protocol (TCP)
 
-The model selection logic in `run_turn()` follows a priority cascade:
-
-```
-                        ┌──────────────┐
-                        │  run_turn()  │
-                        └──────┬───────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  1. Semantic Probe   │
-                    │  (vector lookup)     │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  KB triggered?       │
-                    └────┬────────────┬───┘
-                    YES  │            │ NO
-             ┌───────────▼──┐        │
-             │ Prefer        │        │
-             │ gpu_prime     │        │
-             └───────┬───────┘        │
-                     └────────┬───────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  GAIA_BACKEND env?  │──── YES ──→ Use that backend
-                   └──────────┬──────────┘
-                         NO   │
-                   ┌──────────▼──────────┐
-                   │  GAIA_FORCE_THINKER │
-                   │  or "thinker:" tag? │──── YES ──→ gpu_prime → prime → cpu_prime
-                   └──────────┬──────────┘
-                         NO   │
-                   ┌──────────▼──────────┐
-                   │  "oracle" in text   │
-                   │  + use_oracle?      │──── YES ──→ oracle
-                   └──────────┬──────────┘
-                         NO   │
-                   ┌──────────▼──────────┐
-                   │  Default: lite      │
-                   │  (Operator model)   │
-                   └──────────┬──────────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  Model available?   │──── NO ──→ Lazy load, then
-                   └──────────┬──────────┘           fallback loop:
-                         YES  │                      lite → gpu_prime → prime
-                              │                      → cpu_prime → oracle
-                   ┌──────────▼──────────┐
-                   │  lite selected AND  │
-                   │  complex query?     │
-                   │  (>120 words, code, │──── YES ──→ Escalate to gpu_prime
-                   │   architecture...)  │
-                   └──────────┬──────────┘
-                         NO   │
-                   ┌──────────▼──────────┐
-                   │  Acquire model      │
-                   └──────────┬──────────┘
-                              │
-                   ┌──────────▼──────────────────┐
-                   │  If prime role unavailable:  │
-                   │  groq_fallback               │
-                   │    → oracle_openai           │
-                   │    → oracle_gemini           │
-                   └──────────┬──────────────────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  Intent Detection   │
-                   │  (always uses lite) │
-                   └──────────┬──────────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  Slim prompt?       │──── YES ──→ Fast path (skip plan/reflect)
-                   └──────────┬──────────┘
-                         NO   │
-                   ┌──────────▼──────────┐
-                   │  Full pipeline      │
-                   │  (plan → audit →    │
-                   │   reflect → gen)    │
-                   └──────────┬──────────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  Stream fails?      │──── YES ──→ Fallback to lite
-                   └──────────┬──────────┘
-                         NO   │
-                              ▼
-                         Response
-```
-
-### Escalation Heuristics (`_should_escalate_to_thinker`)
-
-| Trigger | Action |
-|---------|--------|
-| Text > 120 words | Escalate to gpu_prime |
-| Contains code/debug/architecture/plan markers | Escalate to gpu_prime |
-| Contains recitation markers (quote, poem, lyrics) | Stay on lite |
-| `GAIA_FORCE_OPERATOR=1` | Never escalate |
-
-### Slim Prompt Triggers (`_should_use_slim_prompt`)
-
-| Condition | Result |
-|-----------|--------|
-| `GAIA_FORCE_FULL_PROMPT=1` | Always full |
-| `GAIA_FORCE_SLIM_PROMPT=1` | Always slim |
-| Intent = recitation, list_tools, list_tree, find_file, read_file | Slim |
-| Intent != "other" | Full (needs pipeline) |
-| Text > 120 words or contains complex markers | Full |
-| Otherwise | Slim |
+v0.4 introduces the **Temporal Context Protocol**, resolving "AI Deafness":
+- **Continuous Hearing**: `VoiceManager` captures audio even while GAIA is reasoning or speaking.
+- **Landmark Tracking**: Timeline markers (`reasoning_start`, `speaking_start`, `speaking_end`) ground GAIA in the sequence of events.
+- **Urgent Pivots**: If the user interrupts while GAIA is talking, the Interstitial Triage detects it and tags the next packet with `#Interruption`, allowing GAIA to address the new input immediately.
 
 ## Inference Backends
 
 | Backend | Config Key | Class | Connection |
 |---------|-----------|-------|------------|
-| Remote vLLM | `gpu_prime` | `VLLMRemoteModel` | HTTP to gaia-prime:7777 |
+| Remote vLLM | `gpu_prime` | `VLLMRemoteModel` | HTTP to gaia-prime:7777 (32k context) |
 | Groq API | `groq_fallback` | `GroqAPIModel` | HTTPS to api.groq.com |
-| Local GGUF | `lite` | llama-cpp-python | In-process CPU |
-| OpenAI | `oracle_openai` | `GPTAPIModel` | HTTPS to api.openai.com |
-| Gemini | `oracle_gemini` | `GeminiAPIModel` | HTTPS to Google API |
-
-**VLLMRemoteModel** (`vllm_remote_model.py`):
-- HTTP client to `PRIME_ENDPOINT` (default: `http://gaia-prime:7777`)
-- OpenAI-compatible API: `/v1/chat/completions`
-- Streaming via Server-Sent Events (SSE)
-- LoRA adapter selection via `set_active_adapter()`
-- 120s request timeout, connection pooling via `requests.Session()`
-
-**GroqAPIModel** (`groq_model.py`):
-- Available models: llama-3.3-70b, mixtral-8x7b, gemma2-9b
-- Free tier: 6K-20K tokens/min rate limits
-- Context windows: 8K-128K tokens
-
-## Configuration System
-
-**`config.py`**: Singleton `Config` dataclass. Loads from `gaia_constants.json` (canonical location: `gaia-common/gaia_common/constants/gaia_constants.json`). Key attributes:
-- `MODEL_CONFIGS`: Dict of backend configurations
-- `llm_backend`: Default backend selector (overridable via `GAIA_BACKEND`)
-- Token budgets: `full` (8192), `medium` (4096), `minimal` (2048)
-- Feature toggles, paths, model directories
-
-**`gaia_constants.json`** (single source of truth in gaia-common, ~285 lines): Master runtime configuration including:
-- 8 model configurations (gpu_prime, lite, observer, oracle_gemini, oracle_openai, groq_fallback, prime)
-- Task instruction templates (7 types, including `cognitive_self_audit`)
-- Observer settings (check_frequency, thresholds)
-- Loop detection config (tool_threshold: 3, output_threshold: 0.95)
-- Tool routing config (confidence_threshold: 0.7)
-- LoRA adapter config (3 tiers: global/user/session, max 4 adapters)
-- Fragmentation settings (continuation_threshold: 0.85, max 5 fragments)
-- Epistemic guardrails (confidence gating, citation annotation)
-- Cognitive audit config (enabled, max_tokens: 256, skip_for_slim)
-- History review config (violation_threshold: 2, max_messages: 20)
-- Semantic probe config (similarity_threshold: 0.40, top_k: 3)
-- Integration placeholders (Discord webhook/token loaded from env, not hardcoded)
-
-## Memory Architecture
-
-Three-tier memory hierarchy:
-
-1. **Short-term**: Session history (`session_manager.py`) — JSON-backed, 20 messages before summarization
-2. **Mid-term**: Semantic codex (`semantic_codex.py`) — In-memory symbol index from YAML/JSON/MD files with hot-reload
-3. **Long-term**: Vector store — Read-only access via `VectorClient`; `gaia-study` is sole writer
+| Local GGUF | `lite` | llama-cpp-python | In-process CPU (32k context) |
+| Nano-Refiner | `nano` | RefinerEngine | HTTP to gaia-audio:8080 (0.5B model) |
 
 ## Dependencies
 
 **Runtime**: fastapi, uvicorn, pydantic, httpx, requests, regex, discord.py, llama-cpp-python, groq
 **Shared**: gaia-common (protocols, utils, config)
 **Dev**: pytest, pytest-asyncio, ruff, mypy
+
+## Meta
+**Status**: live
+**Blueprint Version**: 0.4
+**Last Updated**: 2026-03-01

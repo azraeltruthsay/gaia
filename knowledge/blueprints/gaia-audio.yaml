@@ -1,9 +1,9 @@
 # gaia-audio blueprint — MANUAL SEED
-# Drafted 2026-02-28 following GAIA-audio promotion.
+# Drafted 2026-03-01 following Nano-Refiner and TCP implementation.
 # Defines the ears and mouth of the GAIA sensory mesh.
 
 id: gaia-audio
-version: "0.3"
+version: "0.4"
 role: "The Ears & Mouth (Sensory STT/TTS)"
 service_status: live
 
@@ -11,7 +11,7 @@ runtime:
   port: 8080
   base_image: python:3.11-slim
   gpu: true
-  gpu_sharing: true # Shares GPU with gaia-prime (half-duplex)
+  gpu_sharing: true # Shares GPU with gaia-prime
   startup_cmd: "uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080"
   health_check: "curl -f http://localhost:8080/health"
   user: "${UID}:${GID}"
@@ -29,6 +29,15 @@ interfaces:
     transport:
       type: http_rest
       path: /transcribe
+      method: POST
+
+  - id: refine
+    direction: inbound
+    description: "Text cleanup and semantic diarization using 0.5B Nano model on CPU. High-speed surgery for transcripts."
+    status: active
+    transport:
+      type: http_rest
+      path: /refine
       method: POST
 
   - id: synthesize
@@ -76,11 +85,14 @@ source_files:
   - path: gaia-audio/gaia_audio/main.py
     role: entrypoint
     file_type: python
-  - path: gaia-audio/gaia_audio/stt.py
+  - path: gaia-audio/gaia_audio/stt_engine.py
     role: speech_to_text
     file_type: python
-  - path: gaia-audio/gaia_audio/tts.py
+  - path: gaia-audio/gaia_audio/tts_engine.py
     role: text_to_speech
+    file_type: python
+  - path: gaia-audio/gaia_audio/refiner_engine.py
+    role: text_refinement
     file_type: python
 
 failure_modes:
@@ -96,18 +108,19 @@ failure_modes:
 
 intent:
   purpose: >
-    Sensory microservice providing GAIA with auditory input and vocal output.
-    Uses a half-duplex GPU management strategy to swap between high-fidelity 
-    Whisper (STT) and Coqui (TTS) models within a limited VRAM budget.
+    Sensory microservice providing GAIA with auditory input, text refinement, and vocal output.
+    Uses a full-duplex GPU management strategy to allow simultaneous STT and TTS while 
+    offloading text refinement to a CPU-based Nano model.
   cognitive_role: "The Ears & Mouth"
   design_decisions:
     - "Decoupled sensory processing from cognition to allow for independent model scaling"
-    - "Support for m4a/AAC audio via ffmpeg transcode allows direct Discord audio capture"
-    - "Half-duplex model loading prevents OOM on single-GPU setups"
+    - "Full-duplex model loading enables 'Hearing while Speaking' capabilities"
+    - "CPU-based Nano-Refiner (0.5B) provides blazingly fast text cleanup without VRAM impact"
+    - "Aggressive speech sanitization removes markdown artifacts for natural artisanal voice"
 
 meta:
   status: live
   genesis: false
   generated_by: gemini_cli
-  blueprint_version: "0.3"
+  blueprint_version: "0.4"
   schema_version: "1.0"

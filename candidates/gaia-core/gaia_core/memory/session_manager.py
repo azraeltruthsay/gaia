@@ -18,6 +18,7 @@ logger = logging.getLogger("GAIA.SessionManager")
 # A single, central file to store the state of all sessions.
 # This allows different processes (web, cli) to share conversation state.
 STATE_FILE = "app/shared/sessions.json"
+CHAT_LOG_DIR = "logs/chat_history"
 _lock = threading.Lock()  # Prevents file corruption from simultaneous writes
 # MODIFICATION: Add a constant for the new timestamp file
 LAST_ACTIVITY_FILE = "app/shared/last_activity.timestamp"
@@ -156,6 +157,9 @@ class SessionManager:
         })
         logger.debug(f"💬 Added '{role}' message to session '{session_id}'. History length: {len(session.history)}")
 
+        # Update Markdown chat log for human/AI readability
+        self._update_markdown_log(session_id, role, content)
+
         # Index completed turn-pairs for session RAG retrieval
         if role == "assistant" and len(session.history) >= 2:
             try:
@@ -174,6 +178,25 @@ class SessionManager:
         else:
             # If not archiving, just save the new message to the state file
             self._save_state()
+
+    def _update_markdown_log(self, session_id: str, role: str, content: str):
+        """Append a message to the session's Markdown chat log."""
+        try:
+            # Full path within gaia-core context
+            log_path = os.path.join(CHAT_LOG_DIR, f"{session_id}.md")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            header = f"### {role.upper()} ({ts})"
+            
+            with open(log_path, 'a', encoding='utf-8') as f:
+                # If file is empty, add a header
+                if os.path.getsize(log_path) == 0:
+                    f.write(f"# Session History: {session_id}\n\n")
+                
+                f.write(f"{header}\n\n{content}\n\n---\n\n")
+        except Exception as e:
+            logger.warning(f"Could not update Markdown log for {session_id}: {e}")
 
     def summarize_and_archive(self, session_id: str):
         """

@@ -575,3 +575,28 @@ class TestWakeSignalIdleMonitor:
         # Should not raise
         mgr.receive_wake_signal()
         assert mgr.wake_signal_pending is True
+
+    def test_wake_signal_while_active_does_not_reset_idle(self, mock_config):
+        """Wake signal when already ACTIVE must NOT reset the idle timer.
+
+        The /process_packet endpoint handles mark_active() for real prompts.
+        Resetting here would prevent GAIA from ever accumulating enough idle
+        time to sleep.
+        """
+        mock_idle = MagicMock()
+        mgr = SleepWakeManager(mock_config, idle_monitor=mock_idle)
+        mgr.state = GaiaState.ACTIVE
+
+        mgr.receive_wake_signal()
+
+        mock_idle.mark_active.assert_not_called()
+
+    def test_wake_signal_during_drowsy_resets_idle(self, mock_config):
+        """Wake signal during DROWSY should reset idle (cancelling sleep)."""
+        mock_idle = MagicMock()
+        mgr = SleepWakeManager(mock_config, idle_monitor=mock_idle)
+        mgr.state = GaiaState.DROWSY
+
+        mgr.receive_wake_signal()
+
+        mock_idle.mark_active.assert_called_once()

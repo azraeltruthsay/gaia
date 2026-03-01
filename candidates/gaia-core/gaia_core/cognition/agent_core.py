@@ -782,13 +782,20 @@ class AgentCore:
         # user input, probes all vector collections, and uses hits to drive
         # persona/KB selection (context-driven rather than keyword-gated).
         probe_result = None
+        is_lite_task = user_input.strip().startswith("::lite") or "[lite]" in user_input[:50]
+        is_thinker_task = user_input.strip().startswith("::thinker") or "[thinker]" in user_input[:50]
+        is_direct_task = is_lite_task or is_thinker_task
+
         try:
-            kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
-            probe_result = run_semantic_probe(
-                user_input=user_input,
-                knowledge_bases=kb_config,
-                session_id=session_id,
-            )
+            if is_direct_task:
+                logger.info("AgentCore: Skipping semantic probe for direct task (::lite/::thinker)")
+            else:
+                kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
+                probe_result = run_semantic_probe(
+                    user_input=user_input,
+                    knowledge_bases=kb_config,
+                    session_id=session_id,
+                )
             if probe_result and probe_result.has_hits:
                 logger.info(
                     "SemanticProbe: %d hits, primary=%s, supplemental=%s (%.1fms)",
@@ -886,10 +893,16 @@ class AgentCore:
         selected_model_name = None
         _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
 
+        # 0. Fast-path for internal system tasks
+        if is_lite_task:
+            selected_model_name = "lite"
+            logger.info("AgentCore: Model selection fast-path -> lite")
+
         # 1. Explicit oracle request
-        text_lower = user_input.lower()
-        if "oracle" in text_lower and getattr(self.config, 'use_oracle', False):
-            selected_model_name = "oracle"
+        if not selected_model_name:
+            text_lower = user_input.lower()
+            if "oracle" in text_lower and getattr(self.config, 'use_oracle', False):
+                selected_model_name = "oracle"
 
         # 2. Respect GAIA_BACKEND env override (for debugging)
         if not selected_model_name:
@@ -912,8 +925,11 @@ class AgentCore:
             text_lower = user_input.lower()
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
             wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
+            wants_lite = any(tag in text_lower for tag in ["lite:", "[lite]", "::lite"])
 
-            if "oracle" in text_lower and self.config.use_oracle:
+            if wants_lite:
+                selected_model_name = "lite"
+            elif "oracle" in text_lower and self.config.use_oracle:
                 selected_model_name = "oracle"
             elif not _gpu_sleeping:
                 # Prime is awake -- default to Prime for all prompts
@@ -1279,6 +1295,45 @@ class AgentCore:
         # Normalization is handled centrally by build_from_packet() in the prompt builder.
         # AgentCore no longer performs message role normalization here.
 
+        # --- TCP: Interstitial Triage ---
+        # If the user was talking while GAIA was thinking/speaking, triage that text
+        # to see if she needs to pivot or address an interruption.
+        interstitial_context = ""
+        for df in packet.content.data_fields:
+            if df.key == "interstitial_context":
+                interstitial_context = df.value
+                break
+        
+        if interstitial_context:
+            self.logger.info("AgentCore: Triaging interstitial context (TCP)")
+            try:
+                # Use the Nano-Refiner (CPU) via the audio service for high-speed triage
+                audio_cfg = self.config.constants.get("INTEGRATIONS", {}).get("audio", {})
+                audio_url = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+                
+                triage_prompt = (
+                    "Review the following dialogue captured while GAIA was busy thinking or speaking. "
+                    "Did the user interrupt with a new urgent request, ask GAIA to stop, or significantly pivot the topic? "
+                    "Respond with 'URGENT: <reason>' if GAIA must pivot immediately, otherwise respond 'NORMAL'.\n\n"
+                    f"INTERSTITIAL TEXT:\n{interstitial_context}"
+                )
+                
+                import requests
+                resp = requests.post(f"{audio_url}/refine", json={"text": triage_prompt, "max_tokens": 100}, timeout=10.0)
+                if resp.status_code == 200:
+                    triage_result = resp.json().get("refined_text", "NORMAL")
+                    if "URGENT" in triage_result.upper():
+                        self.logger.info("AgentCore: TCP Triage -> URGENT pivot detected")
+                        packet.intent.tags.append("#Interruption")
+                        packet.content.data_fields.append(DataField(
+                            key="system_hint",
+                            value=f"URGENT: While you were busy, the following happened: {triage_result}. "
+                                  f"Acknowledge this and pivot your response to address the new input immediately.",
+                            type="text"
+                        ))
+            except Exception:
+                self.logger.warning("AgentCore: TCP Triage failed (non-fatal)", exc_info=True)
+
         # 3. Intent Detection
         # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
         lite_llm = None
@@ -1311,27 +1366,32 @@ class AgentCore:
             pass
 
         plan = None
-        try:
-            plan = detect_intent(
-                user_input,
-                self.config,
-                lite_llm=lite_llm,
-                full_llm=prime_llm,
-                fallback_llm=fallback_llm,
-                probe_context=_probe_context,
-                embed_model=_embed_model,
-                source=source,
-            )
-        finally:
-            # Use role-aware release via ModelPool API; let exceptions be logged but
-            # don't rely on hasattr guards anymore since ModelPool now provides
-            # `release_model_for_role`.
+        if is_direct_task:
+            from gaia_core.cognition.nlu.intent_detection import Plan
+            plan = Plan(intent="direct_task", read_only=True)
+            logger.info("AgentCore: Intent detection fast-path -> direct_task")
+        else:
             try:
-                if lite_llm:
-                    self.model_pool.release_model_for_role("lite")
-                self.model_pool.release_model_for_role("prime")
-            except Exception:
-                self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
+                plan = detect_intent(
+                    user_input,
+                    self.config,
+                    lite_llm=lite_llm,
+                    full_llm=prime_llm,
+                    fallback_llm=fallback_llm,
+                    probe_context=_probe_context,
+                    embed_model=_embed_model,
+                    source=source,
+                )
+            finally:
+                # Use role-aware release via ModelPool API; let exceptions be logged but
+                # don't rely on hasattr guards anymore since ModelPool now provides
+                # `release_model_for_role`.
+                try:
+                    if lite_llm:
+                        self.model_pool.release_model_for_role("lite")
+                    self.model_pool.release_model_for_role("prime")
+                except Exception:
+                    self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
         
         # 3a. Fast local knowledge check: if a fact exists for this question,
         # bypass the model and respond immediately.

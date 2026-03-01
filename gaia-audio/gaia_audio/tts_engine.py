@@ -157,24 +157,40 @@ class TTSEngine:
         """Strip markdown and structural artifacts that shouldn't be spoken."""
         import re
         
-        # 1. Remove markdown headers (e.g., ### Key Ideas -> Key Ideas)
-        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+        # 1. Remove ALL hashes, wherever they are
+        text = text.replace("#", "")
         
-        # 2. Remove bold/italic markers (**text**, *text*, __text__)
-        text = text.replace("**", "").replace("__", "").replace("*", "_")
-        text = text.replace("_", "")
+        # 2. Remove ALL asterisks and underscores
+        text = text.replace("**", "").replace("__", "").replace("*", "").replace("_", "")
         
-        # 3. Clean up list markers at start of lines
-        text = re.sub(r'^[ \t]*[-*+]\s+', '', text, flags=re.MULTILINE)
+        # 3. Convert list numbers (1., 2.) into conversational pauses or words
+        # "1. Architecture" -> "First, Architecture" or just "Architecture" with a pause
+        text = re.sub(r'^[ \t]*\d+\.\s+', '... ', text, flags=re.MULTILINE)
         
-        # 4. Remove blockquote markers
+        # 4. Clean up list markers (- , *) at start of lines and replace with a comma for a pause
+        text = re.sub(r'^[ \t]*[-*+]\s+', ', ', text, flags=re.MULTILINE)
+        
+        # 5. Remove blockquote markers
         text = re.sub(r'^[ \t]*>\s*', '', text, flags=re.MULTILINE)
         
-        # 5. Remove model tags or other metadata brackets
+        # 6. Remove model tags or other metadata brackets
         text = text.replace("[Prime]", "").replace("[Lite]", "").replace("[Observer]", "")
         
-        # 6. Normalize whitespace
-        text = re.sub(r'\n+', '\n', text)
+        # 7. Conversational Warmth: ensure sentences end with punctuation that XTTS likes
+        # If a line doesn't end in punctuation, add a comma
+        lines = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if line and not line[-1] in ".!?,:;":
+                line += ","
+            lines.append(line)
+        text = " ".join(lines)
+
+        # 8. Final cleanup: normalize whitespace and remove multiple commas/dots
+        text = re.sub(r',\s*,', ',', text)
+        text = re.sub(r'\.\s*\.', '.', text)
+        text = re.sub(r'\s+', ' ', text)
+        
         return text.strip()
 
     def synthesize_sync(self, text: str, voice: str | None = None) -> dict:

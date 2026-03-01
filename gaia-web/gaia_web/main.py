@@ -57,13 +57,16 @@ except ImportError:
 
 logger = logging.getLogger("GAIA.Web.API")
 
+from gaia_common.config import get_config
+config = get_config()
+
 # Configuration from environment
-CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
+CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", config.get_endpoint("core"))
 CORE_FALLBACK_ENDPOINT = os.environ.get("CORE_FALLBACK_ENDPOINT", "http://gaia-core-candidate:6415")
-ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", config.get_endpoint("orchestrator"))
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ENABLE_DISCORD = os.environ.get("ENABLE_DISCORD", "0") == "1"
-AUDIO_ENDPOINT = os.environ.get("AUDIO_ENDPOINT", "http://gaia-audio:8080")
+AUDIO_ENDPOINT = os.environ.get("AUDIO_ENDPOINT", config.get_endpoint("audio"))
 GAIA_CONSTANTS_PATH = os.environ.get("GAIA_CONSTANTS_PATH", "/app/gaia_common/constants/gaia_constants.json")
 
 
@@ -168,9 +171,9 @@ _SERVICE_REGISTRY = {
     "gaia-core": (CORE_ENDPOINT, False),
     "gaia-web": ("http://localhost:6414", False),  # self
     "gaia-orchestrator": (ORCHESTRATOR_ENDPOINT, False),
-    "gaia-prime": (os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"), False),
-    "gaia-mcp": (os.environ.get("MCP_HEALTH_ENDPOINT", "http://gaia-mcp:8765"), False),
-    "gaia-study": (os.environ.get("STUDY_ENDPOINT", "http://gaia-study:8766"), False),
+    "gaia-prime": (os.environ.get("PRIME_ENDPOINT", config.get_endpoint("prime")), False),
+    "gaia-mcp": (os.environ.get("MCP_HEALTH_ENDPOINT", config.get_endpoint("mcp")), False),
+    "gaia-study": (os.environ.get("STUDY_ENDPOINT", config.get_endpoint("study")), False),
     "gaia-audio": (AUDIO_ENDPOINT, False),
 }
 

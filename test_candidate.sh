@@ -23,7 +23,7 @@ set -e
 
 # Handle commands that don't need a service argument
 case "${1:-}" in
-    --help|help|--release-gpu|release-gpu|--reclaim-gpu|reclaim-gpu|--gpu-status|gpu-status)
+    --help|help|--release-gpu|release-gpu|--reclaim-gpu|reclaim-gpu|--gpu-status|gpu-status|--init|init|--status|status)
         SERVICE="all"
         SHIFT_ARGS=0
         ;;
@@ -77,7 +77,7 @@ check_candidate() {
 init_candidates() {
     log_info "Initializing all candidate directories from active..."
 
-    for svc in core web mcp study; do
+    for svc in common core web mcp study audio; do
         local active="${PROJECT_ROOT}/gaia-${svc}"
         local candidate="${PROJECT_ROOT}/candidates/gaia-${svc}"
 
@@ -85,6 +85,7 @@ init_candidates() {
             log_info "Syncing gaia-${svc} -> candidates/gaia-${svc}"
             mkdir -p "$candidate"
             rsync -av --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
+                --exclude='.mypy_cache' --exclude='.ruff_cache' \
                 --exclude='*.egg-info' --exclude='.git' \
                 "$active/" "$candidate/"
         else
