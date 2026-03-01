@@ -139,6 +139,15 @@ class SleepTaskScheduler:
             handler=self._run_wiki_doc_regen,
         ))
 
+        self.register_task(SleepTask(
+            task_id="adversarial_resilience_drill",
+            task_type="RESILIENCE_DRILL",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=120,
+            handler=self._run_adversarial_resilience_drill,
+        ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -1564,3 +1573,21 @@ class SleepTaskScheduler:
             "Samvega introspection: reviewed %d artifacts, %d promoted to tier-5, %d clusters",
             reviewed, promoted, sum(1 for g in clusters.values() if len(g) >= 2),
         )
+
+    # ------------------------------------------------------------------
+    # adversarial_resilience_drill (RESILIENCE_DRILL)
+    # ------------------------------------------------------------------
+
+    def _run_adversarial_resilience_drill(self) -> None:
+        """
+        The Chaos Monkey / Adversarial Sandbox Loop.
+        
+        Reads BlueprintModel YAMLs to generate hypotheses on how to break the candidate stack.
+        Runs simulated psychological attacks and prompt-injection logic puzzles from Tier 5
+        consent library against the candidate stack to generate Saṃvega artifacts for QLoRA.
+        
+        (Stub implementation - full pipeline to be implemented)
+        """
+        logger.info("Starting adversarial resilience drill (Chaos Monkey) stub...")
+        # TODO: Implement full chaos monkey logic
+        pass
