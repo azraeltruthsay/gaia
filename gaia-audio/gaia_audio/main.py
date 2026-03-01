@@ -28,12 +28,15 @@ from gaia_audio.models import (
     TranscribeResponse,
     RefineRequest,
     RefineResponse,
+    AnalyzeAudioRequest,
+    AnalyzeAudioResponse,
     VoiceInfo,
 )
 from gaia_audio.status import status_tracker
 from gaia_audio.stt_engine import STTEngine, audio_bytes_to_array
 from gaia_audio.tts_engine import TTSEngine
 from gaia_audio.refiner_engine import RefinerEngine
+from gaia_audio.music_engine import MusicEngine
 
 logger = logging.getLogger("GAIA.Audio")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -45,6 +48,7 @@ gpu_manager: GPUManager | None = None
 stt_engine: STTEngine | None = None
 tts_engine: TTSEngine | None = None
 refiner_engine: RefinerEngine | None = None
+music_engine: MusicEngine | None = None
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -82,6 +86,13 @@ async def lifespan(app: FastAPI):
         refiner_engine.load()
     except Exception as e:
         logger.error(f"Failed to load RefinerEngine: {e}")
+
+    # Initialize MusicEngine (CPU models + librosa)
+    music_engine = MusicEngine()
+    try:
+        music_engine.load()
+    except Exception as e:
+        logger.error(f"Failed to load MusicEngine: {e}")
 
     duplex_mode = "half-duplex" if config.half_duplex else "full-duplex"
     await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine}, {duplex_mode})")
@@ -224,6 +235,47 @@ async def transcribe(request: TranscribeRequest):
         status_tracker.state = "idle"
         await status_tracker.emit("error", f"STT failed: {e}")
         raise HTTPException(500, f"Transcription failed: {e}") from e
+
+
+# ── Audio Analysis (Music/Environment) ─────────────────────────────
+
+
+@app.post("/analyze", response_model=AnalyzeAudioResponse)
+async def analyze_audio(request: AnalyzeAudioRequest):
+    """Perform deep musical and environmental analysis of audio."""
+    if not music_engine:
+        raise HTTPException(503, "Music engine not initialized")
+
+    t0 = time.monotonic()
+    status_tracker.state = "analyzing"
+    await status_tracker.emit("analyze_start", f"Analyzing audio sample ({request.sample_rate}Hz)")
+
+    try:
+        # Convert base64 to numpy array
+        audio_bytes = base64.b64decode(request.audio_base64)
+        audio_array = audio_bytes_to_array(audio_bytes, request.sample_rate)
+
+        # Run analysis in executor (CPU intensive)
+        analysis_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            music_engine.analyze,
+            audio_array,
+            request.sample_rate
+        )
+
+        latency_ms = (time.monotonic() - t0) * 1000
+        status_tracker.state = "idle"
+        await status_tracker.emit("analyze_complete", f"BPM: {analysis_result['bpm']}, Key: {analysis_result['key']}", latency_ms)
+
+        return AnalyzeAudioResponse(
+            **analysis_result
+        )
+
+    except Exception as e:
+        status_tracker.state = "idle"
+        await status_tracker.emit("error", f"Analysis failed: {e}")
+        logger.error("Analysis failed", exc_info=True)
+        raise HTTPException(500, f"Analysis failed: {e}") from e
 
 
 # ── Refinement (Nano LLM) ───────────────────────────────────────────

@@ -5,13 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 
-class SafeJSONEncoder(json.JSONEncoder):
-    """JSON encoder that handles non-serializable objects gracefully."""
-    def default(self, obj):
-        try:
-            return super().default(obj)
-        except TypeError:
-            return f"<non-serializable: {type(obj).__name__}>"
+from gaia_common.utils.helpers import SafeJSONEncoder
 
 def setup_chat_logger():
     """Sets up a dedicated logger for chat history."""

@@ -3,6 +3,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 httpx>=0.25.0
 pydantic>=2.0
+dataclasses-json
 
 # STT - faster-whisper (Whisper CTranslate2 backend)
 faster-whisper>=1.0.0

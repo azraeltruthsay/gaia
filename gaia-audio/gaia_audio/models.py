@@ -31,6 +31,13 @@ class RefineRequest(BaseModel):
     max_tokens: int = Field(2048, description="Maximum tokens to generate")
 
 
+class AnalyzeAudioRequest(BaseModel):
+    """Audio data for deep musical/environmental analysis."""
+
+    audio_base64: str = Field(..., description="Base64-encoded audio data")
+    sample_rate: int = Field(16000, description="Sample rate of the audio")
+
+
 # ── Response schemas ─────────────────────────────────────────────────
 
 
@@ -61,6 +68,18 @@ class RefineResponse(BaseModel):
 
     refined_text: str
     latency_ms: float = 0.0
+
+
+class AnalyzeAudioResponse(BaseModel):
+    """Result of deep audio analysis."""
+
+    bpm: float
+    key: str
+    volume_db: float
+    dynamic_range: float
+    brightness: float
+    semantic_tags: list[dict]
+    latency_ms: float
 
 
 class VoiceInfo(BaseModel):

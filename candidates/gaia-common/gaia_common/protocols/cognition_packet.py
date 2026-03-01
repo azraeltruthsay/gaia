@@ -232,10 +232,20 @@ class Attachment:
 
 @dataclass_json
 @dataclass
+class TimelineEvent:
+    """Represents a temporal landmark in a conversation."""
+    timestamp: str                        # ISO timestamp
+    event_type: str                       # e.g., "reasoning_start", "speaking_start", "speaking_end", "user_interruption"
+    content: Optional[str] = None         # Optional text captured during this event
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass_json
+@dataclass
 class Content:
     original_prompt: str
     data_fields: List[DataField] = field(default_factory=list)
     attachments: List[Attachment] = field(default_factory=list)
+    timeline: List[TimelineEvent] = field(default_factory=list) # Temporal Context support
 
 # --- Reasoning ---
 @dataclass_json
@@ -619,6 +629,7 @@ __all__ = [
     # Content
     "DataField",
     "Attachment",
+    "TimelineEvent",
     "Content",
     # Reasoning
     "ReflectionLog",

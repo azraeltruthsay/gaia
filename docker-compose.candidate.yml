@@ -122,7 +122,7 @@ services:
 
     volumes:
       - ./candidates/gaia-web:/app:rw
-      - ./candidates/gaia-common:/app/gaia-common:ro
+      - ./candidates/gaia-common:/gaia-common:ro
       - ./knowledge:/knowledge:ro
       - ./candidates/gaia-web/static:/app/static:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -132,7 +132,7 @@ services:
         required: false
 
     environment:
-      - PYTHONPATH=/app:/app/gaia-common
+      - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
@@ -147,6 +147,7 @@ services:
       # Discord integration (Unified Interface Gateway)
       # DISCORD_BOT_TOKEN loaded from .env.discord via env_file above
       - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
+      - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
 
     ports:
       - "6417:6414"
@@ -426,14 +427,14 @@ services:
 
     volumes:
       - ./candidates/gaia-audio:/app:rw
-      - ./candidates/gaia-common:/app/gaia_common:ro
+      - ./candidates/gaia-common:/gaia-common:ro
       - ./gaia-models/voice:/models/voice:ro
 
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=audio
-      - GAIA_ENV=${GAIA_ENV:-development}
-      - GAIA_CONSTANTS_PATH=/app/gaia_common/constants/gaia_constants.json
+      - GAIA_ENV=candidate
+      - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

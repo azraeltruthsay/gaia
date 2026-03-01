@@ -39,7 +39,7 @@ class SleepCycleLoop:
         self.idle_monitor = IdleMonitor()
 
         # Temporal grounding: shared timeline event log
-        shared_dir = os.getenv("SHARED_DIR", "/shared")
+        shared_dir = config.SHARED_DIR
         self.timeline_store = TimelineStore(
             timeline_dir=os.path.join(shared_dir, "timeline")
         )
@@ -56,8 +56,8 @@ class SleepCycleLoop:
         self._last_distracted_recheck = 0.0
 
         # Service URLs for SOA mode
-        self._orchestrator_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
-        self._web_url = os.getenv("WEB_ENDPOINT", "http://gaia-web:6414")
+        self._orchestrator_url = config.get_endpoint("orchestrator")
+        self._web_url = config.get_endpoint("web")
 
         # Phase 2: Sleep task scheduler
         from gaia_core.cognition.sleep_task_scheduler import SleepTaskScheduler
@@ -262,7 +262,7 @@ class SleepCycleLoop:
             resp = httpx.post(
                 f"{self._orchestrator_url}/gpu/sleep",
                 json={"reason": "sleep_cycle"},
-                timeout=60.0,
+                timeout=self.config.get_timeout("LLM_PLANNING", 60.0),
             )
             if resp.status_code == 200:
                 logger.info("GPU released for sleep")
@@ -277,7 +277,7 @@ class SleepCycleLoop:
             resp = httpx.post(
                 f"{self._orchestrator_url}/gpu/wake",
                 json={},
-                timeout=180.0,  # Prime boot ~37s + health check
+                timeout=self.config.get_timeout("SLEEP_BOOT_PRIME", 180.0),
             )
             if resp.status_code == 200:
                 logger.info("GPU reclaimed on wake")
@@ -304,7 +304,7 @@ class SleepCycleLoop:
             resp = httpx.post(
                 f"{self._orchestrator_url}/handoff/study-to-prime",
                 json={},
-                timeout=300.0,  # Study cleanup + CUDA clear + Prime boot + buffer
+                timeout=self.config.get_timeout("SLEEP_STUDY_CLEANUP", 300.0),
             )
             if resp.status_code == 200:
                 logger.info("GPU preemption initiated — orchestrator handling study-to-prime handoff")
@@ -365,6 +365,6 @@ class SleepCycleLoop:
                     payload["status"] = "idle"
                 elif status_override:
                     payload["status"] = status_override
-                httpx.post(f"{self._web_url}/presence", json=payload, timeout=5.0)
+                httpx.post(f"{self._web_url}/presence", json=payload, timeout=self.config.get_timeout("HTTP_QUICK", 5.0))
             except Exception:
                 logger.debug("Presence update via gaia-web failed", exc_info=True)

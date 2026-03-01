@@ -620,6 +620,25 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         )
         system_content_parts.append(council_debate_block)
 
+    # 11.5. Conversation Timeline (Temporal Context Protocol)
+    # Visible landmarks that ground GAIA in the sequence of events.
+    if getattr(packet.content, 'timeline', None):
+        timeline_entries = []
+        for event in packet.content.timeline:
+            ts_short = event.timestamp.split('T')[-1].split('.')[0] # HH:MM:SS
+            etype = event.event_type.upper().replace('_', ' ')
+            content_snippet = f": \"{event.content[:100]}...\"" if event.content else ""
+            timeline_entries.append(f"[{ts_short}] {etype}{content_snippet}")
+        
+        if timeline_entries:
+            timeline_block = (
+                "── CONVERSATION TIMELINE ──\n"
+                "The following landmarks show your recent sensory and cognitive history.\n"
+                "Use this to understand what happened while you were processing or speaking.\n\n"
+                + "\n".join(timeline_entries)
+            )
+            system_content_parts.append(timeline_block)
+
     # 12. Loop Recovery Context (if pending from a loop detection reset)
     try:
         from gaia_core.cognition.loop_recovery import get_recovery_manager

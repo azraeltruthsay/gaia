@@ -12,7 +12,6 @@
   "llm_backend": "gpu_prime",
   "max_tokens_lite": 32000,
   "MODEL_CONFIGS": {
-
     "gpu_prime": {
       "enabled": true,
       "max_model_len": 16384,
@@ -104,7 +103,7 @@
     "refinement": "Review the following plan. Critique its logic, safety, and efficiency. Assign a confidence score from 1-100. If the plan is flawed, suggest a corrected version.",
     "confidence_assessment": "You are performing epistemic self-assessment before attempting a task. Consider: (1) Do you have this content memorized accurately? (2) Can you access it from your knowledge base using MCP tools like ai_read? (3) What is your honest confidence level? Your knowledge base at knowledge/system_reference/ contains your constitution, blueprints, and other core documents. If you can read from source, that's a valid high-confidence approach. Be honest about limitations - it's better to read from file than hallucinate from memory.",
     "cognitive_self_audit": "Review your plan and the packet state. Assess using EXACTLY this format (one line each):\nEVAL knowledge_sufficiency: [pass/fail] [0.0-1.0] [brief note]\nEVAL plan_completeness: [pass/fail] [0.0-1.0] [brief note]\nEVAL rag_quality: [pass/fail] [0.0-1.0] [brief note]\nSKETCH working_hypothesis: [your core thesis in one sentence]\nSKETCH gaps: [what is missing or uncertain]\nNEXT: [what reflection should focus on]\nBe honest and concise. Do not repeat the plan.",
-    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct — own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff."
+    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct \u2014 own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff."
   },
   "TOKEN_BUDGETS": {
     "full": 8192,
@@ -174,7 +173,7 @@
       "tts_voice": "/models/voice/gaia_identity.wav",
       "sample_rate": 16000,
       "vram_budget_mb": 5600,
-      "half_duplex": true,
+      "half_duplex": false,
       "mute_on_sleep": true,
       "cloud_fallback": {
         "provider": "elevenlabs",
@@ -222,9 +221,14 @@
   "THINK_TAG_CIRCUIT_BREAKER": {
     "enabled": true,
     "char_threshold": 500,
-    "ratio_threshold": 0.90
+    "ratio_threshold": 0.9
   },
-  "CODEX_FILE_EXTS": [".md", ".yaml", ".yml", ".json"],
+  "CODEX_FILE_EXTS": [
+    ".md",
+    ".yaml",
+    ".yml",
+    ".json"
+  ],
   "LORA_CONFIG": {
     "enabled": true,
     "adapter_dir": "/models/lora_adapters",
@@ -299,20 +303,24 @@
     "blueprints": {
       "doc_dir": "blueprints",
       "vector_store_dir": "vector_store/blueprints"
+    },
+    "wiki": {
+      "doc_dir": "/gaia-wiki/docs",
+      "vector_store_dir": "vector_store/wiki"
     }
   },
   "SEMANTIC_PROBE": {
-    "similarity_threshold": 0.40,
+    "similarity_threshold": 0.4,
     "max_phrases": 8,
     "min_phrase_len": 3,
     "min_words_to_probe": 3,
     "cache_max_age_turns": 10,
     "top_k_per_phrase": 3,
-    "strong_single_hit_similarity": 0.70,
+    "strong_single_hit_similarity": 0.7,
     "strong_min_hits": 2,
     "strong_min_avg_similarity": 0.55,
     "weak_max_hits": 1,
-    "weak_max_similarity": 0.50,
+    "weak_max_similarity": 0.5,
     "domain_momentum_min_turns": 2
   },
   "COGNITIVE_AUDIT": {
@@ -338,7 +346,7 @@
     "enabled": true,
     "confidence_threshold": 0.45,
     "top_k": 3,
-    "other_penalty": 0.10
+    "other_penalty": 0.1
   },
   "WEB_RESEARCH": {
     "trusted_domains": [
@@ -375,11 +383,33 @@
       "instagram.com"
     ],
     "content_type_sources": {
-      "poem": ["gutenberg.org", "poetryfoundation.org", "poets.org", "en.wikisource.org"],
-      "facts": ["britannica.com", "wikipedia.org"],
-      "code": ["github.com", "docs.python.org", "developer.mozilla.org", "stackoverflow.com"],
-      "science": ["arxiv.org", "nature.com", "science.org", "ncbi.nlm.nih.gov"],
-      "news": ["bbc.com", "reuters.com", "apnews.com"]
+      "poem": [
+        "gutenberg.org",
+        "poetryfoundation.org",
+        "poets.org",
+        "en.wikisource.org"
+      ],
+      "facts": [
+        "britannica.com",
+        "wikipedia.org"
+      ],
+      "code": [
+        "github.com",
+        "docs.python.org",
+        "developer.mozilla.org",
+        "stackoverflow.com"
+      ],
+      "science": [
+        "arxiv.org",
+        "nature.com",
+        "science.org",
+        "ncbi.nlm.nih.gov"
+      ],
+      "news": [
+        "bbc.com",
+        "reuters.com",
+        "apnews.com"
+      ]
     },
     "rate_limits": {
       "search_per_hour": 20,
@@ -398,7 +428,9 @@
             "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
           }
         ],
-        "extra_headers": {"Accept": "application/json"},
+        "extra_headers": {
+          "Accept": "application/json"
+        },
         "description": "Kanka.io world-building API"
       }
     }
@@ -435,38 +467,101 @@
         "label": "Core Identity",
         "description": "Foundational self-knowledge, persona, constraints",
         "confidence": 1.0,
-        "sources": ["core_identity.json", "personas/"]
+        "sources": [
+          "core_identity.json",
+          "personas/"
+        ]
       },
       "verified": {
         "label": "Verified Knowledge",
         "description": "Curated documents in system knowledge base, manually reviewed",
         "confidence": 0.95,
-        "sources": ["system"]
+        "sources": [
+          "system"
+        ]
       },
       "experiential": {
         "label": "Experiential",
         "description": "Session history, conversation patterns, user-confirmed facts",
         "confidence": 0.85,
-        "sources": ["session_vectors", "reflective"]
+        "sources": [
+          "session_vectors",
+          "reflective"
+        ]
       },
       "curated": {
         "label": "Curated Reference",
         "description": "Blueprints, campaign docs, structured knowledge bases",
-        "confidence": 0.80,
-        "sources": ["blueprints", "dnd_campaign"]
+        "confidence": 0.8,
+        "sources": [
+          "blueprints",
+          "dnd_campaign"
+        ]
       },
       "researched": {
         "label": "Auto-Researched",
         "description": "Knowledge acquired via web research during sleep cycles",
-        "confidence": 0.60,
-        "sources": ["research"]
+        "confidence": 0.6,
+        "sources": [
+          "research"
+        ]
       },
       "training": {
         "label": "Training Data",
         "description": "General model knowledge, no specific source",
-        "confidence": 0.40,
+        "confidence": 0.4,
         "sources": []
       }
     }
+  },
+  "SAMVEGA": {
+    "enabled": true,
+    "max_artifacts_per_session": 5,
+    "confidence_mismatch_threshold": 0.3,
+    "tier5_promotion_threshold": 0.7,
+    "llm_timeout_seconds": 8,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "values_taxonomy": [
+      "accuracy",
+      "relevance",
+      "user_understanding",
+      "epistemic_humility",
+      "safety",
+      "creativity",
+      "contextual_sensitivity"
+    ],
+    "weight_multipliers": {
+      "observer_block": 1.5,
+      "observer_caution": 1.2,
+      "repeated_domain": 1.3
+    }
+  },
+  "SYSTEM": {
+    "MODELS_DIR": "/models",
+    "KNOWLEDGE_DIR": "/knowledge",
+    "LOGS_DIR": "/logs",
+    "SHARED_DIR": "/shared",
+    "SLEEP_CHECKPOINT_DIR": "/shared/sleep_state",
+    "HISTORY_DIR": "/shared/history"
+  },
+  "SERVICE_ENDPOINTS": {
+    "core": "http://gaia-core:6415",
+    "web": "http://gaia-web:6414",
+    "prime": "http://gaia-prime:7777",
+    "mcp": "http://gaia-mcp:8765/jsonrpc",
+    "study": "http://gaia-study:8766",
+    "audio": "http://gaia-audio:8080",
+    "orchestrator": "http://gaia-orchestrator:6410"
+  },
+  "TEMPORAL_AWARENESS": {
+    "enabled": true,
+    "bake_interval_ticks": 3,
+    "max_state_files": 5,
+    "max_state_bytes": 10737418240,
+    "bake_context_tokens": 6000,
+    "interview_enabled": true,
+    "interview_interval_ticks": 6,
+    "interview_rounds": 3
   }
 }

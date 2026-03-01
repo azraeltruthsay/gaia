@@ -1,161 +1,92 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import ClassVar, Dict, Any, Optional, Tuple
-import json
-import os
 import logging
-from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
+from gaia_common.config import Config as CommonConfig, get_config as get_common_config
 
 logger = logging.getLogger("GAIA.Config")
 
-@dataclass
-class Config:
+class Config(CommonConfig):
     """
-    A simplified configuration class for gaia-core.
-    Values should be injected at runtime or loaded from gaia_constants.json.
+    Core-specific configuration wrapper.
+    Inherits authoritative settings from gaia-common and adds core-specific properties.
     """
-    # Model configurations
-    MODEL_CONFIGS: Dict[str, Any] = field(default_factory=dict)
+    @property
+    def KNOWLEDGE_CODEX_DIR(self) -> str:
+        return self.KNOWLEDGE_DIR
 
-    # Paths
-    MODELS_DIR: str = "/models"
-    MODEL_DIR: str = "/models"  # Alias for MODELS_DIR (legacy compatibility)
-    KNOWLEDGE_DIR: str = "/knowledge"
-    KNOWLEDGE_CODEX_DIR: str = "/knowledge"
-    SYSTEM_REF_DIR: str = "/knowledge/system_reference"
-    PERSONAS_DIR: str = "/knowledge/personas"
-    LOGS_DIR: str = "/logs"
-    HISTORY_DIR: str = field(default_factory=lambda: os.getenv("HISTORY_DIR", "/shared/history"))
-    LORA_ADAPTERS_DIR: str = "/models/lora_adapters"
-    SHARED_DIR: str = field(default_factory=lambda: os.getenv("SHARED_DIR", "/shared"))
-    EMBEDDING_MODEL_PATH: Optional[str] = None
-    identity_file_path: str = "/knowledge/system_reference/core_identity.json"
-    system_reference_path: str = "/knowledge/system_reference"
-    cheat_sheet_path: Path = Path("/knowledge/system_reference/cheat_sheet.json")
-    cheat_sheet: dict = field(default_factory=dict)
-    CODEX_FILE_EXTS: Tuple[str, ...] = field(default_factory=lambda: (".yaml", ".yml", ".json", ".md"))
-    CODEX_ALLOW_HOT_RELOAD: bool = True
+    @property
+    def LORA_ADAPTERS_DIR(self) -> str:
+        return f"{self.MODELS_DIR}/lora_adapters"
 
-    # LLM backend settings
-    llm_backend: str = "vllm"
-    n_gpu_layers: int = -1  # -1 means all layers on GPU
-    temperature: float = 0.4
-    top_p: float = 0.95
-    max_tokens: int = 4096
-    MAX_TOKENS: int = 4096
-    max_tokens_lite: int = 16000
-    RESPONSE_BUFFER: int = 768
+    @property
+    def CODEX_ALLOW_HOT_RELOAD(self) -> bool:
+        return True
 
-    # Feature flags
-    use_oracle: bool = False
+    # Sleep Cycle helpers
+    @property
+    def SLEEP_ENABLED(self) -> bool:
+        return self.SLEEP_CYCLE.get("enabled", True)
 
-    # Sleep cycle settings (loaded from gaia_constants.json SLEEP_CYCLE section)
-    SLEEP_ENABLED: bool = True
-    SLEEP_IDLE_THRESHOLD_MINUTES: int = 30
-    SLEEP_CHECKPOINT_DIR: str = "/shared/sleep_state"
-    SLEEP_ENABLE_QLORA: bool = False
-    SLEEP_ENABLE_DREAM: bool = False
-    SLEEP_TASK_TIMEOUT: int = 600
+    @property
+    def SLEEP_IDLE_THRESHOLD_MINUTES(self) -> int:
+        return self.SLEEP_CYCLE.get("idle_threshold_minutes", 30)
 
-    # Heartbeat settings (thought seed triage daemon)
-    HEARTBEAT_INTERVAL_SECONDS: int = 1200  # 20 minutes
-    HEARTBEAT_ENABLED: bool = True
+    @property
+    def SLEEP_ENABLE_QLORA(self) -> bool:
+        return self.SLEEP_CYCLE.get("enable_qlora", False)
 
-    # Temporal awareness (Phase 1 consciousness framework)
-    LITE_JOURNAL_ENABLED: bool = True
-    TEMPORAL_STATE_ENABLED: bool = True
-    TEMPORAL_BAKE_INTERVAL_TICKS: int = 3          # Bake every N heartbeat ticks (~60 min)
-    TEMPORAL_STATE_MAX_FILES: int = 5              # Max stored KV cache snapshots
-    TEMPORAL_STATE_MAX_BYTES: int = 10_737_418_240  # 10 GB total state budget
-    TEMPORAL_STATE_BAKE_CONTEXT_TOKENS: int = 6000  # Max tokens in bake context
+    @property
+    def SLEEP_ENABLE_DREAM(self) -> bool:
+        return self.SLEEP_CYCLE.get("enable_dream", False)
 
-    # Temporal awareness Phase 2 (interview protocol)
-    TEMPORAL_INTERVIEW_ENABLED: bool = True
-    TEMPORAL_INTERVIEW_INTERVAL_TICKS: int = 6    # Interview every 6 heartbeat ticks (~2h)
-    TEMPORAL_INTERVIEW_ROUNDS: int = 3             # Q&A rounds per interview
+    @property
+    def SLEEP_TASK_TIMEOUT(self) -> int:
+        return self.SLEEP_CYCLE.get("task_timeout_seconds", 600)
 
-    # Tool and primitive settings
-    primitives: list[str] = field(default_factory=lambda: ["read", "write", "vector_query", "shell"])
-    SAFE_EXECUTE_FUNCTIONS: list[str] = field(default_factory=list)
+    # Temporal Awareness helpers
+    @property
+    def LITE_JOURNAL_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("enabled", True)
 
-    # Runtime constants (loaded from gaia_constants.json or similar)
-    constants: Dict[str, Any] = field(default_factory=dict)
+    @property
+    def TEMPORAL_STATE_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("enabled", True)
 
-    # Singleton instance
-    _instance: ClassVar[Optional['Config']] = None
+    @property
+    def TEMPORAL_BAKE_INTERVAL_TICKS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("bake_interval_ticks", 3)
 
-    def __post_init__(self):
-        """Load constants from gaia_constants.json if available."""
-        self._load_constants()
-        self.cheat_sheet_path = Path(self.SYSTEM_REF_DIR) / "cheat_sheet.json"
-        self.cheat_sheet = self._load_cheat_sheet()
+    @property
+    def TEMPORAL_STATE_MAX_FILES(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("max_state_files", 5)
 
-    def _load_constants(self):
-        """Load configuration from gaia_constants.json.
+    @property
+    def TEMPORAL_STATE_BAKE_CONTEXT_TOKENS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("bake_context_tokens", 6000)
 
-        Canonical location is gaia-common/constants/gaia_constants.json.
-        The gaia-common copy is checked first so that all services share
-        one source of truth for feature flags and system prompts.
-        """
-        # Try multiple paths — prefer the canonical gaia-common location
-        possible_paths = [
-            # Live container: gaia-common mounted at /gaia-common
-            "/gaia-common/gaia_common/constants/gaia_constants.json",
-            # Candidate container: gaia-common mounted at /app/gaia-common
-            "/app/gaia-common/gaia_common/constants/gaia_constants.json",
-            # Host-side: relative to project root (2 levels up from gaia_core/config.py)
-            os.path.join(os.path.dirname(__file__), "..", "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
-            os.path.join(os.path.dirname(__file__), "..", "gaia-common", "gaia_common", "constants", "gaia_constants.json"),
-            "/app/gaia_common/constants/gaia_constants.json",
-            os.path.join(os.path.dirname(__file__), "gaia_constants.json"),
-            "/app/gaia_core/gaia_constants.json",
-            "/app/gaia_constants.json",
-            os.path.expanduser("~/gaia_constants.json"),
-        ]
+    @property
+    def TEMPORAL_INTERVIEW_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("interview_enabled", True)
 
-        for path in possible_paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    self.constants = data
-                    # Extract MODEL_CONFIGS if present
-                    if "MODEL_CONFIGS" in data:
-                        self.MODEL_CONFIGS = data["MODEL_CONFIGS"]
-                    # Extract other common settings
-                    if "llm_backend" in data:
-                        self.llm_backend = data["llm_backend"]
-                    if "SAFE_EXECUTE_FUNCTIONS" in data:
-                        self.SAFE_EXECUTE_FUNCTIONS = data["SAFE_EXECUTE_FUNCTIONS"]
-                    if "max_tokens" in data:
-                        self.max_tokens = data["max_tokens"]
-                    if "max_tokens_lite" in data:
-                        self.max_tokens_lite = data["max_tokens_lite"]
-                    if "RESPONSE_BUFFER" in data:
-                        self.RESPONSE_BUFFER = data["RESPONSE_BUFFER"]
-                    if "model_paths" in data and "Embedding" in data["model_paths"]:
-                        self.EMBEDDING_MODEL_PATH = data.get("model_paths", {}).get("Embedding", os.getenv("EMBEDDING_MODEL_PATH"))
-                    if "CODEX_FILE_EXTS" in data:
-                        self.CODEX_FILE_EXTS = tuple(data["CODEX_FILE_EXTS"])
-                    # Sleep cycle settings
-                    sleep_cfg = data.get("SLEEP_CYCLE", {})
-                    if sleep_cfg:
-                        self.SLEEP_ENABLED = sleep_cfg.get("enabled", self.SLEEP_ENABLED)
-                        self.SLEEP_IDLE_THRESHOLD_MINUTES = sleep_cfg.get("idle_threshold_minutes", self.SLEEP_IDLE_THRESHOLD_MINUTES)
-                        self.SLEEP_CHECKPOINT_DIR = sleep_cfg.get("checkpoint_dir", self.SLEEP_CHECKPOINT_DIR)
-                        self.SLEEP_ENABLE_QLORA = sleep_cfg.get("enable_qlora", self.SLEEP_ENABLE_QLORA)
-                        self.SLEEP_ENABLE_DREAM = sleep_cfg.get("enable_dream", self.SLEEP_ENABLE_DREAM)
-                        self.SLEEP_TASK_TIMEOUT = sleep_cfg.get("task_timeout_seconds", self.SLEEP_TASK_TIMEOUT)
-                    logger.info(f"Loaded GAIA constants from {path}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to load constants from {path}: {e}")
+    @property
+    def TEMPORAL_INTERVIEW_INTERVAL_TICKS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("interview_interval_ticks", 6)
 
-        logger.warning("No gaia_constants.json found; using defaults")
+    @property
+    def TEMPORAL_INTERVIEW_ROUNDS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("interview_rounds", 3)
 
-    def get_api_key(self, provider: str) -> str:
-        import os
-        return os.getenv(f"{provider.upper()}_API_KEY")
+    @property
+    def HEARTBEAT_INTERVAL_SECONDS(self) -> int:
+        return 1200 # Fixed for now or could move to SYSTEM
+
+    @property
+    def HEARTBEAT_ENABLED(self) -> bool:
+        return True
+
+    @property
+    def use_oracle(self) -> bool:
+        return self.constants.get("use_oracle", False)
 
     def get_persona_instructions(self) -> str:
         """Return default persona instructions from constants or fallback."""
@@ -167,28 +98,16 @@ class Config:
     def get_model_name(self, model_alias: str) -> str:
         return self.MODEL_CONFIGS.get(model_alias, {}).get("model")
 
-    @classmethod
-    def get_instance(cls) -> Config:
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
     def _load_cheat_sheet(self):
         """Loads the cheat sheet JSON file."""
+        import json
+        path = f"{self.KNOWLEDGE_DIR}/system_reference/cheat_sheet.json"
         try:
-            with open(self.cheat_sheet_path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except FileNotFoundError:
-            logger.warning(f"Cheat sheet not found at {self.cheat_sheet_path}. Returning empty dict.")
+        except Exception:
             return {}
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode cheat sheet JSON from {self.cheat_sheet_path}: {e}")
-            return {}
-        except Exception as e:
-            logger.error(f"Failed to load cheat sheet from {self.cheat_sheet_path}: {e}")
-            return {}
-
 
 def get_config() -> Config:
-    """Get the singleton Config instance."""
+    """Get the core-wrapped authoritative config."""
     return Config.get_instance()

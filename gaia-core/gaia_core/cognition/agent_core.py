@@ -255,9 +255,9 @@ def _resolve_doc_path(rel_path: str) -> Optional[Path]:
         knowledge_subpath = str(doc_path)[len("knowledge/"):]
 
     candidates = []
-    # Docker /knowledge mount (most common in production)
+    # Docker knowledge mount (most common in production)
     if knowledge_subpath:
-        candidates.append(Path("/knowledge") / knowledge_subpath)
+        candidates.append(Path(get_config().KNOWLEDGE_DIR) / knowledge_subpath)
     # Relative to cwd
     candidates.append(Path.cwd() / doc_path)
     # As-is
@@ -274,13 +274,20 @@ def _resolve_doc_path(rel_path: str) -> Optional[Path]:
 def find_recitable_document(user_input: str) -> Optional[Dict[str, str]]:
     """Check if the user's request matches a known recitable document.
 
-    Args:
-        user_input: The user's request text
-
-    Returns:
-        Dict with 'path', 'title', 'content', and 'doc_id' if found, None otherwise
+    Requires BOTH a recitation verb (e.g., 'recite', 'read', 'show') AND 
+    one of the document's keywords to be present in the input.
     """
     input_lower = user_input.lower()
+    
+    # List of explicit recitation verbs to prevent false positives
+    RECITATION_VERBS = [
+        "recite", "read", "show me", "share", "display", 
+        "perform", "declaim", "what is in", "content of"
+    ]
+    
+    has_verb = any(verb in input_lower for verb in RECITATION_VERBS)
+    if not has_verb:
+        return None
 
     for doc_id, doc_info in RECITABLE_DOCUMENTS.items():
         for keyword in doc_info["keywords"]:
@@ -1294,6 +1301,44 @@ class AgentCore:
 
         # Normalization is handled centrally by build_from_packet() in the prompt builder.
         # AgentCore no longer performs message role normalization here.
+
+        # --- TCP: Interstitial Triage ---
+        # If the user was talking while GAIA was thinking/speaking, triage that text
+        # to see if she needs to pivot or address an interruption.
+        interstitial_context = ""
+        for df in packet.content.data_fields:
+            if df.key == "interstitial_context":
+                interstitial_context = df.value
+                break
+        
+        if interstitial_context:
+            self.logger.info("AgentCore: Triaging interstitial context (TCP)")
+            try:
+                # Use the Nano-Refiner (CPU) via the audio service for high-speed triage
+                audio_url = config.get_endpoint("audio")
+                
+                triage_prompt = (
+                    "Review the following dialogue captured while GAIA was busy thinking or speaking. "
+                    "Did the user interrupt with a new urgent request, ask GAIA to stop, or significantly pivot the topic? "
+                    "Respond with 'URGENT: <reason>' if GAIA must pivot immediately, otherwise respond 'NORMAL'.\n\n"
+                    f"INTERSTITIAL TEXT:\n{interstitial_context}"
+                )
+                
+                import requests
+                resp = requests.post(f"{audio_url}/refine", json={"text": triage_prompt, "max_tokens": 100}, timeout=10.0)
+                if resp.status_code == 200:
+                    triage_result = resp.json().get("refined_text", "NORMAL")
+                    if "URGENT" in triage_result.upper():
+                        self.logger.info("AgentCore: TCP Triage -> URGENT pivot detected")
+                        packet.intent.tags.append("#Interruption")
+                        packet.content.data_fields.append(DataField(
+                            key="system_hint",
+                            value=f"URGENT: While you were busy, the following happened: {triage_result}. "
+                                  f"Acknowledge this and pivot your response to address the new input immediately.",
+                            type="text"
+                        ))
+            except Exception:
+                self.logger.warning("AgentCore: TCP Triage failed (non-fatal)", exc_info=True)
 
         # 3. Intent Detection
         # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
