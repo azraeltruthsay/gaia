@@ -214,5 +214,32 @@
     "source": "user_suggestion",
     "status": "open",
     "created": "2026-01-13T04:04:13.123456"
+  },
+  {
+    "task": "Autonomous Self-Healing (The Doctor Loop)",
+    "purpose": "Detect fatal errors, failover seamlessly, diagnose crashed code, and hot-reload fix.",
+    "urgency": "High",
+    "impact": "High",
+    "source": "user_suggestion",
+    "status": "open",
+    "created": "2026-03-01T07:38:21.293073"
+  },
+  {
+    "task": "The Chaos Monkey Sandbox",
+    "purpose": "Proactively train self-healing by intentionally breaking candidate stack via blueprints.",
+    "urgency": "High",
+    "impact": "High",
+    "source": "user_suggestion",
+    "status": "open",
+    "created": "2026-03-01T07:38:21.293106"
+  },
+  {
+    "task": "Adversarial Alignment Sandbox",
+    "purpose": "Simulate psychological attacks to autonomously rewrite neural defenses against alignment drift.",
+    "urgency": "High",
+    "impact": "High",
+    "source": "user_suggestion",
+    "status": "open",
+    "created": "2026-03-01T07:38:21.293112"
   }
 ]
