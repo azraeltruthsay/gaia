@@ -37,45 +37,19 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY candidates/gaia-study/requirements.txt .
+COPY gaia-study/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-
-
-# Use candidate versions for SOA-decoupled architecture
-
-
-
-COPY candidates/gaia-common/ /gaia-common/
-
-
-
-COPY candidates/gaia-study/ /app/gaia-study/
-
-
-
-COPY candidates/gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
-
-
-
-
-
-
+# Use canonical versions for SOA-decoupled architecture
+COPY gaia-common/ /gaia-common/
+COPY gaia-study/ /app/gaia-study/
+COPY gaia-study/pyproject.toml /app/gaia-study/pyproject.toml
 
 ENV PYTHONPATH "${PYTHONPATH}:/gaia-common:/app"
 
-
-
-
-
-
-
 RUN pip install -e "/gaia-common[vector]"
-
-
-
 RUN pip install -e /app/gaia-study/.[dev]
 
 # Set ownership for non-root execution
