@@ -14,9 +14,9 @@ from typing import List, Dict
 from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
 from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
-from gaia_core.utils.packet_templates import render_gaia_packet_template
-from gaia_core.utils import gaia_rescue_helper
-from gaia_core.utils.world_state import format_world_state_snapshot
+from gaia_common.utils.packet_templates import render_gaia_packet_template
+from gaia_core.utils.gaia_rescue_helper import GAIARescueHelper
+from gaia_common.utils.world_state import format_world_state_snapshot
 
 logger = logging.getLogger("GAIA.PromptBuilder")
 
@@ -161,7 +161,22 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
 
     if not world_state_block_content: # Fallback if not found in data_fields
         try:
-            world_state_block_content = format_world_state_snapshot(max_lines=6)
+            # Try to get sleep manager status from app state
+            _tc_sleep_status = None
+            try:
+                import gaia_core.main as _core_main
+                _tc_app = getattr(_core_main, 'app', None)
+                if _tc_app:
+                    _tc_swm = getattr(_tc_app.state, 'sleep_wake_manager', None)
+                    if _tc_swm:
+                        _tc_sleep_status = _tc_swm.get_status()
+            except Exception:
+                pass
+                
+            world_state_block_content = format_world_state_snapshot(
+                max_lines=8,
+                sleep_manager_status=_tc_sleep_status
+            )
         except Exception:
             logger.exception("PromptBuilder: format_world_state_snapshot failed; world state will be missing from prompt.")
             world_state_block_content = ""

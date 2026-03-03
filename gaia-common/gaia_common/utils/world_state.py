@@ -16,12 +16,51 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List
 import logging
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from gaia_common.utils import tools_registry, immune_system
 
 logger = logging.getLogger(__name__)
+
+# Epoch Events (Proprioceptive Milestones)
+EPOCH_EVENTS = {
+    "GENESIS": "2026-02-17T00:00:00Z", # Project start
+    "SOVEREIGN_SHIELD": "2026-03-02T21:41:00Z", # Hardening milestone
+    "CASCADE_ROUTING": "2026-03-03T15:30:00Z", # This milestone
+}
+
+def _get_time_since_event(event_iso: str) -> str:
+    try:
+        event_dt = datetime.fromisoformat(event_iso.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        diff = now - event_dt
+        days = diff.days
+        hours = diff.seconds // 3600
+        if days > 0:
+            return f"{days}d {hours}h"
+        return f"{hours}h"
+    except Exception:
+        return "unknown"
+
+def _atmospheric_pressure() -> str:
+    """Determine 'Atmospheric Pressure' based on system load."""
+    try:
+        one, _, _ = os.getloadavg()
+        cpu_count = os.cpu_count() or 1
+        normalized_load = one / cpu_count
+        
+        if normalized_load > 1.2:
+            return "THICK (High Load)"
+        elif normalized_load > 0.7:
+            return "HEAVY (Moderate Load)"
+        elif normalized_load > 0.3:
+            return "CLEAR (Normal)"
+        else:
+            return "THIN (Idle)"
+    except Exception:
+        return "UNKNOWN"
 
 def _uptime_seconds() -> float:
     try:
@@ -64,9 +103,9 @@ def _load_avg() -> str:
 def _model_paths() -> Dict[str, str]:
     """Capture the model paths we surface via environment variables."""
     return {
-        "prime_hf": os.getenv("GAIA_PRIME_HF_MODEL") or "",
-        "prime_gguf": os.getenv("GAIA_PRIME_GGUF") or "",
-        "lite": os.getenv("GAIA_LITE_GGUF") or os.getenv("LITE_MODEL_PATH") or "",
+        "prime": os.getenv("GAIA_PRIME_GGUF") or os.getenv("PRIME_MODEL") or "",
+        "operator": os.getenv("GAIA_LITE_GGUF") or os.getenv("LITE_MODEL_PATH") or "",
+        "nano": os.getenv("GAIA_NANO_GGUF") or "/models/Qwen3-0.5B-Instruct-GGUF/qwen3-0_5b-instruct-q8_0.gguf",
         "embed": os.getenv("EMBEDDING_MODEL_PATH") or "",
     }
 
@@ -155,7 +194,7 @@ def _capability_affordances(tools: List[str]) -> List[str]:
     return affordances
 
 
-def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None, auditory_environment: Optional[Dict] = None) -> str:
+def format_world_state_snapshot(max_lines: int = 15, output_context: Dict = None, auditory_environment: Optional[Dict] = None, sleep_manager_status: Optional[Dict] = None) -> str:
     """
     Render a short text block suitable for system prompts.
     Keeps lines bounded to avoid token bloat.
@@ -164,13 +203,30 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
         max_lines: Maximum lines to include in the snapshot
         output_context: Optional dict with output routing info (source, destination, is_dm, etc.)
         auditory_environment: Optional dict with music/env data (BPM, Key, etc.)
+        sleep_manager_status: Optional dict from SleepWakeManager.get_status()
     """
     logger.info("Formatting world state snapshot")
     snap = world_state_snapshot(auditory_environment=auditory_environment)
     logger.debug(f"World state snapshot data: {snap}")
     lines: List[str] = []
+    
+    # Clock and Atmospheric Pressure
     lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
-    lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
+    lines.append(f"Atmospheric Pressure: {_atmospheric_pressure()}")
+    
+    # Proprioceptive Metrics
+    uptime_str = f"Uptime: {snap['uptime_s']}s"
+    if sleep_manager_status:
+        last_sleep = sleep_manager_status.get("last_sleep_duration_s", 0)
+        if last_sleep > 0:
+            uptime_str += f" | Last Sleep: {int(last_sleep)}s"
+    lines.append(f"{uptime_str} | {snap['load']} | {snap['mem']}")
+    
+    # Epoch Awareness
+    milestones = []
+    for name, iso in EPOCH_EVENTS.items():
+        milestones.append(f"{name.replace('_', ' ').title()}: {_get_time_since_event(iso)} ago")
+    lines.append("Milestones: " + " | ".join(milestones))
     
     # Auditory Environment (Music Engine)
     env = snap.get("auditory_environment")
