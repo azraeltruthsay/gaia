@@ -90,7 +90,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
             pass
         return {"ok": False, "error": str(e)}
 
-def dispatch_sidecar_actions(packet: CognitionPacket, config: Config) -> List[Dict]:
+def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> List[Dict]:
     """
     Dispatches all sidecar actions in a packet to the MCP-lite server.
 
@@ -264,6 +264,25 @@ def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "syst
     except Exception as e:
         logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.embedding_query failed: {e}")
         return {"ok": False, "op": "embedding.query", "query": query, "error": str(e)}
+
+
+def analyze_audio(audio_base64: str, sample_rate: int = 16000) -> Dict:
+    """
+    Calls gaia-audio/analyze to get DSP and semantic tagging of the environment.
+    """
+    audio_url = config.get_endpoint("audio")
+    if not audio_url:
+        return {"ok": False, "error": "Audio service endpoint not configured"}
+    
+    url = f"{audio_url}/analyze"
+    try:
+        payload = {"audio_base64": audio_base64, "sample_rate": sample_rate}
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+        return {"ok": True, "result": r.json()}
+    except Exception as e:
+        logger.error(f"analyze_audio failed: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 ## --- Approval helpers (client-side) -------------------------------------

@@ -2,7 +2,7 @@
 
 ## Role and Overview
 
-`gaia-core` is the cognitive engine of the GAIA system. It processes user input through a multi-step reasoning pipeline: intent detection, knowledge enhancement, LLM inference, tool routing, self-reflection, and response assembly. In v0.4, gaia-core runs **CPU-only**, delegates all GPU inference to `gaia-prime` via HTTP, and implements the **Temporal Context Protocol (TCP)** for continuous situational awareness.
+`gaia-core` is the cognitive engine of the GAIA system. It processes user input through a multi-step reasoning pipeline: intent detection, knowledge enhancement, LLM inference, tool routing, self-reflection, and response assembly. In v0.6, gaia-core implements the **Sovereign Shield** hardening suite and the **Smart Immune System** for autonomous triage and irritation awareness.
 
 ## Container Configuration
 
@@ -29,6 +29,8 @@
 | `MCP_ENDPOINT` | `http://gaia-mcp:8765/jsonrpc` | Tool execution endpoint |
 | `STUDY_ENDPOINT` | `http://gaia-study:8766` | Knowledge/embedding service |
 | `GAIA_AUTOLOAD_MODELS` | `0` | Lazy model loading on first use |
+| `HOME` | `/tmp` | Zero-Trust: writable temp home |
+| `TRANSFORMERS_CACHE` | `/tmp/.cache` | Zero-Trust: writable cache |
 
 ### Volume Mounts
 
@@ -37,52 +39,44 @@
 - `./knowledge:/knowledge:ro` — Knowledge base
 - `./gaia-models:/models:ro` — Model files (GGUF for lite backend)
 - `gaia-shared:/shared:rw` — Inter-service state
+- `/run/secrets:/run/secrets:ro` — Docker Secrets (Zero-Trust Identity)
 
-## Cognitive Pipeline (v0.4)
+## Sovereign Shield & Immune System (v0.6)
+
+The Sovereign Shield provides structural hardening and self-protection:
+
+1. **Circuit Breaker** — Fatal halt mechanism in `EthicalSentinel`. If a cognitive loop exceeds thresholds, the system creates `/shared/HEALING_REQUIRED.lock` and freezes the turn loop until manual triage.
+2. **Zero-Trust Identity** — API keys and sensitive tokens are prioritized from Docker Secrets (`/run/secrets/`) rather than local environment files.
+3. **Blast Shield** — Deterministic pre-flight validation in the MCP layer. Blocks dangerous command patterns (e.g., `rm -rf`, `sudo`) before LLM reasoning is even invoked.
+4. **Smart Immune System** — SIEM-lite logic in `gaia-common` that scans service logs, consolidates repetitive errors into unique "irritants," and calculates a weighted systemic health score.
+5. **Transparency Logging** — Tool results in the `CognitionPacket` include a `raw_source_data` field, ensuring the "Reflector" persona sees un-summarized machine truth.
+
+## Cognitive Pipeline (v0.6)
 
 The core reasoning loop in `AgentCore.run_turn()`:
 
-1. **Semantic Probe** — Pre-cognition vector lookup across all knowledge bases (`semantic_probe`)
-2. **Interstitial Triage (TCP)** — High-speed triage of "gap audio" (heard while busy) using 0.5B Nano model on CPU. Detects urgent interruptions or pivots.
-3. **Persona & KB Selection** — Probe/Triage results drive persona/knowledge base routing.
-4. **Model Selection** — Multi-path selection with escalation and fallback. Supports `::lite` and `::thinker` fast-paths.
-5. **History Review** — Pre-injection audit strips fabricated citations from conversation history.
-6. **Intent Detection** — Classify user intent via lite model. Direct tasks (::lite/::thinker) skip this step.
-7. **Slim Prompt Fast Path** — Simple queries (recitation, tool calls) skip planning/reflection.
-8. **Planning** — Generate execution plan for complex queries.
-9. **Cognitive Self-Audit** — Epistemic assessment between planning and reflection.
-10. **Knowledge Enhancement** — Inject relevant context.
-11. **Prompt Assembly** — Build LLM prompt within token budget. Injects **Conversation Timeline** landmarks.
-12. **Generation** — Stream from primary model with lite fallback on failure.
-13. **Stream Observation** — Real-time output validation.
-14. **Tool Routing** — Route to MCP tools if needed.
-15. **Loop Detection** — Record tool calls and outputs, detect repetitive patterns.
-16. **Self-Reflection** — Review and refine response.
-17. **Output Routing** — Deliver to web, Discord, CLI, or API.
-
-## Temporal Context Protocol (TCP)
-
-v0.4 introduces the **Temporal Context Protocol**, resolving "AI Deafness":
-- **Continuous Hearing**: `VoiceManager` captures audio even while GAIA is reasoning or speaking.
-- **Landmark Tracking**: Timeline markers (`reasoning_start`, `speaking_start`, `speaking_end`) ground GAIA in the sequence of events.
-- **Urgent Pivots**: If the user interrupts while GAIA is talking, the Interstitial Triage detects it and tags the next packet with `#Interruption`, allowing GAIA to address the new input immediately.
-
-## Inference Backends
-
-| Backend | Config Key | Class | Connection |
-|---------|-----------|-------|------------|
-| Remote vLLM | `gpu_prime` | `VLLMRemoteModel` | HTTP to gaia-prime:7777 (32k context) |
-| Groq API | `groq_fallback` | `GroqAPIModel` | HTTPS to api.groq.com |
-| Local GGUF | `lite` | llama-cpp-python | In-process CPU (32k context) |
-| Nano-Refiner | `nano` | RefinerEngine | HTTP to gaia-audio:8080 (0.5B model) |
-
-## Dependencies
-
-**Runtime**: fastapi, uvicorn, pydantic, httpx, requests, regex, discord.py, llama-cpp-python, groq
-**Shared**: gaia-common (protocols, utils, config)
-**Dev**: pytest, pytest-asyncio, ruff, mypy
+1. **Circuit Breaker Check** — Ensure no healing lock is active.
+2. **Semantic Probe** — Pre-cognition vector lookup across all knowledge bases.
+3. **Interstitial Triage (TCP)** — High-speed triage of "gap audio" heard while busy.
+4. **Immune Awareness** — Inject "Smart" health summary into world-state snapshot.
+5. **Auditory Environment** — Sense the surroundings (BPM, Key, Energy) via `gaia-audio/analyze`.
+6. **Doctor Loop (Self-Healing)** — Failover-aware autonomous diagnosis.
+7. **Persona & KB Selection** — Probe/Triage results drive routing.
+8. **Model Selection** — Multi-path selection with escalation.
+9. **History Review** — Audit strips fabricated citations.
+10. **Intent Detection** — Classify user intent via lite model.
+11. **Planning** — Generate execution plan for complex queries.
+12. **Cognitive Self-Audit** — Epistemic assessment.
+13. **Knowledge Enhancement** — Inject relevant context.
+14. **Prompt Assembly** — Build LLM prompt with **Conversation Timeline** landmarks.
+15. **Generation** — Stream from primary model.
+16. **Stream Observation** — Real-time output validation.
+17. **Tool Routing** — Route to MCP tools with **Blast Shield** protection.
+18. **Saṃvega Integration** — Capture discernment artifacts on low-confidence turns.
+19. **Self-Reflection** — Review and refine response.
+20. **Output Routing** — Deliver to destination with Transparency Logging.
 
 ## Meta
 **Status**: live
-**Blueprint Version**: 0.4
-**Last Updated**: 2026-03-01
+**Blueprint Version**: 0.6
+**Last Updated**: 2026-03-02
