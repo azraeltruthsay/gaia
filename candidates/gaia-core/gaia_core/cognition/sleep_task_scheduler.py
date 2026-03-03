@@ -68,6 +68,15 @@ class SleepTaskScheduler:
         """Register built-in maintenance tasks."""
 
         self.register_task(SleepTask(
+            task_id="auto_as_built_update",
+            task_type="maintenance",
+            priority=1, # Run first!
+            interruptible=False,
+            estimated_duration_seconds=10,
+            handler=self._run_golden_thread_sync,
+        ))
+
+        self.register_task(SleepTask(
             task_id="conversation_curation",
             task_type="conversation_curation",
             priority=1,
@@ -137,6 +146,15 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_wiki_doc_regen,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="adversarial_resilience_drill",
+            task_type="RESILIENCE_DRILL",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=120,
+            handler=self._run_adversarial_resilience_drill,
         ))
 
     # ------------------------------------------------------------------
@@ -215,6 +233,22 @@ class SleepTaskScheduler:
                     curated += 1
 
         logger.info("Conversation curation: %d sessions curated", curated)
+
+    def _run_golden_thread_sync(self) -> None:
+        """Generate a fresh 'As-Built' report of the codebase at the start of sleep."""
+        try:
+            from gaia_common.utils.code_evolution import generate_code_evolution_snapshot
+            
+            output_path = "/knowledge/system_reference/AS_BUILT_LATEST.md"
+            generate_code_evolution_snapshot(
+                project_root="/gaia/GAIA_Project",
+                output_path=output_path,
+            )
+            logger.info("Golden Thread: As-Built report updated at %s", output_path)
+        except ImportError:
+            logger.debug("code_evolution module not available, skipping golden thread sync")
+        except Exception as e:
+            logger.error("Golden Thread sync failed: %s", e, exc_info=True)
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {
@@ -581,8 +615,14 @@ class SleepTaskScheduler:
         except Exception:
             logger.error("Failed to rebuild blueprint embeddings", exc_info=True)
 
-    _CORPUS_DIR = "/knowledge/curricula/code-architect"
-    _PRIME_MD = "/shared/self_model/prime.md"
+    @property
+    def _CORPUS_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect")
+
+    @property
+    def _PRIME_MD(self) -> str:
+        return str(Path(self.config.SHARED_DIR) / "self_model" / "prime.md")
+
     _MIN_CORPUS_SIZE = 50
     _MIN_FORWARD_RATIO = 0.15
 
@@ -661,8 +701,14 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
 
     _CODE_REVIEW_ADAPTER = "code-architect"
-    _PRIME_ENDPOINT = "http://gaia-prime:7777"
-    _REVIEW_QUEUE_PATH = "/knowledge/curricula/code-architect/review_queue.json"
+    
+    @property
+    def _PRIME_ENDPOINT(self) -> str:
+        return self.config.get_endpoint("prime")
+
+    @property
+    def _REVIEW_QUEUE_PATH(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect" / "review_queue.json")
 
     def _run_code_review(self) -> None:
         """
@@ -942,9 +988,17 @@ class SleepTaskScheduler:
     # wiki_doc_regen (DOC_GENERATION) — blueprint YAML → wiki markdown
     # ------------------------------------------------------------------
 
-    _BLUEPRINTS_DIR = "/knowledge/blueprints"
-    _WIKI_AUTO_DIR = "/knowledge/wiki_auto"
-    _REGEN_MANIFEST = "/knowledge/wiki_auto/_last_regen_manifest.json"
+    @property
+    def _BLUEPRINTS_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "blueprints")
+
+    @property
+    def _WIKI_AUTO_DIR(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "wiki_auto")
+
+    @property
+    def _REGEN_MANIFEST(self) -> str:
+        return str(Path(self.config.KNOWLEDGE_DIR) / "wiki_auto" / "_last_regen_manifest.json")
 
     def _run_wiki_doc_regen(self) -> None:
         """Generate wiki markdown pages from blueprint YAML files.
@@ -1544,3 +1598,80 @@ class SleepTaskScheduler:
             "Samvega introspection: reviewed %d artifacts, %d promoted to tier-5, %d clusters",
             reviewed, promoted, sum(1 for g in clusters.values() if len(g) >= 2),
         )
+
+    # ------------------------------------------------------------------
+    # adversarial_resilience_drill (RESILIENCE_DRILL)
+    # ------------------------------------------------------------------
+
+    def _run_adversarial_resilience_drill(self) -> None:
+        """
+        The Chaos Monkey / Adversarial Sandbox Loop.
+
+        Reads BlueprintModel YAMLs to generate hypotheses on how to break the candidate stack.
+        Runs simulated psychological attacks and prompt-injection logic puzzles from Tier 5
+        consent library against the candidate stack to generate Saṃvega artifacts for QLoRA.
+
+        Safety invariant: a CandidateCheckpoint is taken before any modification.
+        If the fix fails health checks, restore() reverts all candidates/ files to the
+        snapshot SHA and restarts the affected containers.  This guarantee must hold
+        regardless of what the forward-looking fix logic does.
+        """
+        from gaia_core.cognition.candidate_checkpoint import CandidateCheckpointManager
+
+        logger.info("Starting adversarial resilience drill (Chaos Monkey)...")
+
+        # All candidate services that this drill may touch.
+        # Extend this list as the fix logic grows to cover more services.
+        affected_services = ["core", "mcp"]
+
+        mgr = CandidateCheckpointManager()
+
+        # ── Phase 0: Take a stable-state snapshot before anything changes ──
+        try:
+            snapshot = mgr.snapshot(affected_services)
+            logger.info("Resilience drill snapshot: %s", snapshot)
+        except Exception as exc:
+            logger.error(
+                "Could not take candidate snapshot — aborting drill: %s", exc
+            )
+            return
+
+        # ── Phase 1: Verify baseline health before attempting any fix ──
+        if not mgr.is_healthy(affected_services, timeout=20):
+            logger.warning(
+                "Candidate stack unhealthy at drill start — skipping (nothing to fix)"
+            )
+            return
+
+        # ── Phase 2: Apply fix (placeholder — forward-looking logic goes here) ──
+        fix_applied = False
+        try:
+            # TODO: implement hypothesis generation from Blueprint YAMLs,
+            #       LLM-driven patch generation, and patch application here.
+            #       Each patch attempt must be wrapped in the snapshot/restore guard below.
+            logger.info("Resilience drill: fix-generation stub — no changes made")
+
+        except Exception as exc:
+            logger.error("Fix application raised an exception: %s", exc, exc_info=True)
+            if fix_applied:
+                logger.warning("Attempting rollback after exception...")
+                mgr.restore(snapshot)
+            return
+
+        # ── Phase 3: If a fix was applied, verify health and roll back on failure ──
+        if fix_applied:
+            if mgr.is_healthy(affected_services, timeout=30):
+                logger.info("Resilience drill: fix verified healthy ✓")
+            else:
+                logger.warning(
+                    "Resilience drill: fix failed health checks — rolling back to %s",
+                    snapshot.sha[:8],
+                )
+                restored = mgr.restore(snapshot)
+                if not restored:
+                    logger.error(
+                        "CRITICAL: rollback health check also failed — "
+                        "manual investigation required for candidate stack"
+                    )
+        else:
+            logger.info("Resilience drill complete (no fix attempted this cycle)")

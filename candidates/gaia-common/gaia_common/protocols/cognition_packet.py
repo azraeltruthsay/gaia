@@ -310,9 +310,10 @@ class SelectedTool:
 class ToolExecutionResult:
     """Result from executing an MCP tool."""
     success: bool
-    output: Any = None                                      # Tool output (varies by tool)
+    output: Any = None                                      # Summarized/processed output
     error: Optional[str] = None                             # Error message if failed
     execution_time_ms: int = 0
+    raw_source_data: Optional[Any] = None                   # VouchCore Pattern: The raw, un-summarized payload
 
 
 @dataclass_json

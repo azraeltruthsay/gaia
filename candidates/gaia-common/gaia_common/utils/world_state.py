@@ -19,7 +19,7 @@ import time
 from typing import Dict, List
 import logging
 
-from gaia_common.utils import tools_registry
+from gaia_common.utils import tools_registry, immune_system
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +169,13 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     lines: List[str] = []
     lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
+    
+    # Immune System (SIEM-lite) awareness
+    try:
+        immune_health = immune_system.get_immune_summary()
+        lines.append(immune_health)
+    except Exception:
+        lines.append("Immune System: Status unavailable")
 
     models = snap.get("models", {})
     model_bits = []

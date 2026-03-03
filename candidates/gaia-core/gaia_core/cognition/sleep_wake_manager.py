@@ -119,28 +119,23 @@ class SleepWakeManager:
         self._notify_audio_state(to_state)
 
     def _notify_audio_state(self, to_state: str) -> None:
-        """Notify gaia-audio to sleep/wake based on sleep state (best-effort).
-
-        Uses /sleep (GPU model unload) and /wake (eager GPU reload) for
-        ASLEEP/DREAMING/ACTIVE transitions.  Falls back silently on failure.
-        """
+        """Notify gaia-audio to sleep/wake based on sleep state (best-effort)."""
         try:
-            constants = getattr(self.config, "constants", {})
-            audio_cfg = constants.get("INTEGRATIONS", {}).get("audio", {})
+            audio_cfg = self.config.INTEGRATIONS.get("audio", {})
             if not audio_cfg.get("enabled") or not audio_cfg.get("mute_on_sleep"):
                 return
 
-            audio_endpoint = audio_cfg.get("endpoint", "http://gaia-audio:8080")
+            audio_endpoint = self.config.get_endpoint("audio")
 
             if to_state in ("asleep", "dreaming"):
-                if self.voice_active:
+                if getattr(self, "voice_active", False):
                     logger.info("Skipping audio sleep — voice channel active")
                     return
                 action = "sleep"
-                timeout = 15.0  # GPU model unload may take a few seconds
+                timeout = self.config.get_timeout("HTTP_DEFAULT", 15.0)
             elif to_state == "active":
                 action = "wake"
-                timeout = 5.0   # /wake returns immediately (reload is background)
+                timeout = self.config.get_timeout("HTTP_QUICK", 5.0)
             else:
                 return
 

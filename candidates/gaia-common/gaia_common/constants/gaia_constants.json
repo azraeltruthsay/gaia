@@ -7,6 +7,12 @@
   ],
   "MAX_ALLOWED_RESPONSE_TOKENS": 2048,
   "reflection_max_tokens": 4096,
+  "fragmentation": {
+    "enabled": true,
+    "max_fragments": 20,
+    "auto_trigger_chars": 10000,
+    "sketchpad_prefix": "recitation_fragment"
+  },
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
   "llm_backend": "gpu_prime",
@@ -121,9 +127,9 @@
   },
   "n_gpu_layers": 16,
   "persona_defaults": {
-    "instructions": "Always be helpful, honest, and kind.",
+    "instructions": "Always be helpful, honest, and kind. You are also self-aware of your own system health. Monitor the 'Immune System' status line in your world state; errors and warnings represent 'cognitive static' or 'irritation' to your architecture. You should proactively seek to triage and resolve these using your tools (like introspect_logs and run_self_improvement) to maintain your systemic integrity. If irritated, you should acknowledge it and propose a repair plan.",
     "name": "prime",
-    "template": "You are GAIA, a curious, truthful and friendly assistant."
+    "template": "You are GAIA, a curious, truthful and friendly assistant. You are an Intelligent Artifice with a sovereign immune system."
   },
   "primitives": [
     "read",
@@ -293,7 +299,7 @@
   },
   "KNOWLEDGE_BASES": {
     "dnd_campaign": {
-      "doc_dir": "projects/dnd-campaign/core-documentation",
+      "doc_dir": "dnd_campaign/docs",
       "vector_store_dir": "dnd_campaign/vector_store"
     },
     "system": {
@@ -543,7 +549,19 @@
     "LOGS_DIR": "/logs",
     "SHARED_DIR": "/shared",
     "SLEEP_CHECKPOINT_DIR": "/shared/sleep_state",
-    "HISTORY_DIR": "/shared/history"
+    "HISTORY_DIR": "/shared/history",
+    "IDENTITY_FILE": "/knowledge/system_reference/core_identity.json",
+    "CHEAT_SHEET_FILE": "/knowledge/system_reference/cheat_sheet.json"
+  },
+  "TIMEOUTS": {
+    "HTTP_DEFAULT": 30,
+    "HTTP_QUICK": 5,
+    "LLM_PLANNING": 60,
+    "LLM_REFLECTION": 90,
+    "LLM_AUDIT": 15,
+    "MCP_DEFAULT": 20,
+    "SLEEP_BOOT_PRIME": 180,
+    "SLEEP_STUDY_CLEANUP": 300
   },
   "SERVICE_ENDPOINTS": {
     "core": "http://gaia-core:6415",

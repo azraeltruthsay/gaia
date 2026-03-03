@@ -33,6 +33,7 @@ fi
 # Files to sync (session state only, not archives)
 SYNC_ITEMS=(
     "sessions.json"
+    "last_activity.timestamp"
     "session_vectors"
     "sleep_state/prime.md"
     "sleep_state/prime_previous.md"

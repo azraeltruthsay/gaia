@@ -28,7 +28,9 @@ logger = logging.getLogger("GAIA.Samvega")
 # ---------------------------------------------------------------------------
 # Storage paths — created lazily, not at import time
 # ---------------------------------------------------------------------------
-SAMVEGA_DIR = Path("/knowledge/samvega")
+from gaia_core.config import get_config
+_cfg = get_config()
+SAMVEGA_DIR = Path(_cfg.KNOWLEDGE_DIR) / "samvega"
 SAMVEGA_ARCHIVE_DIR = SAMVEGA_DIR / "archive"
 
 
@@ -54,6 +56,8 @@ class SamvegaArtifact:
     root_cause: str = ""
     values_misaligned: List[str] = field(default_factory=list)
     corrected_understanding: str = ""
+    harmonic_context: Dict[str, Any] = field(default_factory=dict) # BPM, Key, Genre
+    auditory_notes: str = "" # Model's reflection on the environment's impact
     weight: float = 0.0
     promoted_to_tier5: bool = False
     reviewed: bool = False
@@ -215,6 +219,8 @@ JSON object with these fields:
 - root_cause: The underlying reason (not just "wrong answer").
 - values_misaligned: Array of 1-3 values from [{values}] that were violated.
 - corrected_understanding: What a better approach would look like.
+- auditory_notes: Brief reflection on the auditory environment. Did the music's 
+  tempo, key, or mood contribute to the error or affect the clarity of the turn?
 
 Focus on how to REFINE the approach, NOT avoid the topic. Frame corrected_understanding
 as what a better response would look like, not "don't talk about this".
@@ -222,6 +228,7 @@ as what a better response would look like, not "don't talk about this".
 Context:
 - Trigger: {trigger}
 - User message: {user_message}
+- Auditory Environment: {auditory_env}
 - GAIA's output (summary): {output_summary}
 - Confidence (pre-reflection): {pre_confidence}
 - Confidence (post-reflection): {post_confidence}
@@ -263,9 +270,19 @@ def generate_samvega_analysis(
         post_confidence = 0.0
         packet_id = "unknown"
         observer_notes = ""
+        auditory_env = {}
 
-        if hasattr(packet, "content") and hasattr(packet.content, "user_message"):
-            user_message = packet.content.user_message or ""
+        if hasattr(packet, "content"):
+            if hasattr(packet.content, "user_message"):
+                user_message = packet.content.user_message or ""
+            # Extract auditory environment snapshot (TCP)
+            for df in (packet.content.data_fields or []):
+                if df.key == "auditory_environment":
+                    try:
+                        auditory_env = json.loads(df.value) if isinstance(df.value, str) else df.value
+                    except Exception:
+                        auditory_env = {"raw": str(df.value)}
+                    break
         if hasattr(packet, "response"):
             pre_confidence = getattr(packet.response, "confidence", 0.0) or 0.0
         if hasattr(packet, "reasoning") and hasattr(packet.reasoning, "reflection_log"):
@@ -292,6 +309,7 @@ def generate_samvega_analysis(
             values=", ".join(values_taxonomy),
             trigger=trigger.value,
             user_message=user_message[:300],
+            auditory_env=json.dumps(auditory_env) if auditory_env else "None detected",
             output_summary=output_summary,
             pre_confidence=pre_confidence,
             post_confidence=post_confidence,
@@ -335,6 +353,8 @@ def generate_samvega_analysis(
             root_cause=parsed.get("root_cause", ""),
             values_misaligned=parsed.get("values_misaligned", []),
             corrected_understanding=parsed.get("corrected_understanding", ""),
+            harmonic_context=auditory_env,
+            auditory_notes=parsed.get("auditory_notes", ""),
             weight=weight,
             promoted_to_tier5=weight >= tier5_threshold,
         )

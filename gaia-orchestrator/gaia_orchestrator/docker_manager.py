@@ -321,3 +321,23 @@ class DockerManager:
         except Exception as e:
             logger.error(f"Error starting container {container_name}: {e}")
             raise
+
+    async def restart_container(self, container_name: str, timeout: int = 30) -> bool:
+        """Restart a specific container (used by the rollback safety net)."""
+        loop = asyncio.get_event_loop()
+
+        def _restart():
+            try:
+                container = self.client.containers.get(container_name)
+                container.restart(timeout=timeout)
+                logger.info(f"Restarted container: {container_name}")
+                return True
+            except NotFound:
+                logger.warning(f"Container not found for restart: {container_name}")
+                return False
+
+        try:
+            return await loop.run_in_executor(None, _restart)
+        except Exception as e:
+            logger.error(f"Error restarting container {container_name}: {e}")
+            raise

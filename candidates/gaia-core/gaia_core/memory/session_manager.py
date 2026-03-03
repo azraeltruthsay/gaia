@@ -5,6 +5,7 @@ import logging
 import threading
 from typing import List, Dict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from gaia_core.config import Config, get_config
 
 # Import the specialist tools the manager will orchestrate
@@ -15,13 +16,7 @@ from gaia_core.utils.output_router import _strip_think_tags_robust
 
 logger = logging.getLogger("GAIA.SessionManager")
 
-# A single, central file to store the state of all sessions.
-# This allows different processes (web, cli) to share conversation state.
-STATE_FILE = "app/shared/sessions.json"
-CHAT_LOG_DIR = "logs/chat_history"
 _lock = threading.Lock()  # Prevents file corruption from simultaneous writes
-# MODIFICATION: Add a constant for the new timestamp file
-LAST_ACTIVITY_FILE = "app/shared/last_activity.timestamp"
 
 class Session:
     """
@@ -79,8 +74,15 @@ class SessionManager:
     process-safe and to orchestrate long-term memory functions.
     """
 
-    def __init__(self, config, llm=None, embed_model=None):
+    def __init__(self, config: Config, llm=None, embed_model=None):
         self.config = config
+        
+        # Authoritative paths from centralized config
+        shared_dir = getattr(config, "SHARED_DIR", "/shared")
+        self.state_file = os.path.join(shared_dir, "sessions.json")
+        self.last_activity_file = os.path.join(shared_dir, "last_activity.timestamp")
+        self.chat_log_dir = os.path.join(getattr(config, "LOGS_DIR", "/logs"), "chat_history")
+        
         self.sessions: Dict[str, Session] = self._load_state()
 
         # Initialize the specialist tools the manager will use
@@ -90,19 +92,19 @@ class SessionManager:
 
         # Define the threshold for when to trigger long-term memory processing
         self.max_active_messages = 20
-        logger.info(f"SessionManager initialized. Found {len(self.sessions)} existing sessions.")
+        logger.info(f"SessionManager initialized. Found {len(self.sessions)} existing sessions at {self.state_file}")
 
     def _load_state(self) -> Dict[str, Session]:
         """Loads all sessions from the central state file in a thread-safe manner."""
         with _lock:
             try:
-                if os.path.exists(STATE_FILE):
-                    with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                if os.path.exists(self.state_file):
+                    with open(self.state_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        logger.info(f"💾 Loading {len(data)} sessions from {STATE_FILE}")
+                        logger.info(f"💾 Loading {len(data)} sessions from {self.state_file}")
                         return {sid: Session.from_dict(sdata) for sid, sdata in data.items()}
             except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"❌ Could not load state file {STATE_FILE}. Starting fresh. Error: {e}")
+                logger.error(f"❌ Could not load state file {self.state_file}. Starting fresh. Error: {e}")
         return {}
 
     @staticmethod
@@ -122,15 +124,15 @@ class SessionManager:
         with _lock:
             try:
                 # Ensure the directory exists before writing
-                os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-                with open(STATE_FILE, 'w', encoding='utf-8') as f:
+                os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+                with open(self.state_file, 'w', encoding='utf-8') as f:
                     # Serialize all session objects into a dictionary before saving
                     data_to_save = {sid: session.to_dict() for sid, session in self.sessions.items()}
                     data_to_save = self._sanitize_for_json(data_to_save)
                     json.dump(data_to_save, f, indent=2)
-                    logger.debug(f"💾 Session state saved to {STATE_FILE}")
+                    logger.debug(f"💾 Session state saved to {self.state_file}")
             except IOError as e:
-                logger.error(f"❌ Could not save state file {STATE_FILE}. Error: {e}")
+                logger.error(f"❌ Could not save state file {self.state_file}. Error: {e}")
 
     def get_or_create_session(self, session_id: str, persona: str = "default") -> Session:
         """Retrieves a session by ID or creates a new one if it doesn't exist."""
@@ -142,8 +144,6 @@ class SessionManager:
 
     def add_message(self, session_id: str, role: str, content: str):
         """Adds a message and checks if it's time to create a long-term memory."""
-        # Defense-in-depth: strip think/reasoning tags from assistant messages
-        # before persisting, so poisoned history can't confuse future model calls.
         if role == "assistant":
             content = _strip_think_tags_robust(content)
             if not content.strip():
@@ -182,8 +182,8 @@ class SessionManager:
     def _update_markdown_log(self, session_id: str, role: str, content: str):
         """Append a message to the session's Markdown chat log."""
         try:
-            # Full path within gaia-core context
-            log_path = os.path.join(CHAT_LOG_DIR, f"{session_id}.md")
+            # Use centralized log path
+            log_path = os.path.join(self.chat_log_dir, f"{session_id}.md")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             
             ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -290,23 +290,6 @@ class SessionManager:
     ) -> Dict[str, int]:
         """
         Clean up stale, orphaned, and test session artifacts.
-
-        Called on startup (e.g. Discord on_ready) to keep session state lean.
-
-        Steps:
-          1. Remove smoke-test-* and test-* sessions from in-memory state
-          2. Delete orphaned vector files (no matching session in state)
-          3. Delete smoke-test-* and test-* vector files unconditionally
-          4. Optionally trim sessions older than max_age_days with empty history
-          5. Persist cleaned state
-
-        Args:
-            vector_dir: Path to session vector index files
-            max_age_days: Sessions older than this with empty history are removed
-            max_active_messages: If >0, sessions exceeding this trigger archival
-
-        Returns:
-            Dict with counts: sessions_purged, vectors_purged, smoke_purged
         """
         counts = {"sessions_purged": 0, "vectors_purged": 0, "smoke_purged": 0}
         cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
@@ -317,7 +300,6 @@ class SessionManager:
             if sid.startswith("smoke-test-") or sid.startswith("test-"):
                 to_remove.append(sid)
             elif self.sessions[sid].created_at < cutoff and not self.sessions[sid].history:
-                # Old session with empty history — stale shell
                 to_remove.append(sid)
 
         for sid in to_remove:
@@ -363,7 +345,6 @@ class SessionManager:
         )
         return counts
 
-    # MODIFICATION: Add a new method to record the last system activity
     def record_last_activity(self):
         """
         Updates a timestamp file with the current time.
@@ -371,9 +352,9 @@ class SessionManager:
         """
         with _lock:  # Use the same lock to prevent race conditions
             try:
-                os.makedirs(os.path.dirname(LAST_ACTIVITY_FILE), exist_ok=True)
-                with open(LAST_ACTIVITY_FILE, 'w', encoding='utf-8') as f:
+                os.makedirs(os.path.dirname(self.last_activity_file), exist_ok=True)
+                with open(self.last_activity_file, 'w', encoding='utf-8') as f:
                     f.write(datetime.now(timezone.utc).isoformat())
-                logger.debug(f"Timestamp updated in {LAST_ACTIVITY_FILE}")
+                logger.debug(f"Timestamp updated in {self.last_activity_file}")
             except IOError as e:
-                logger.error(f"❌ Could not write to last activity file {LAST_ACTIVITY_FILE}: {e}")
+                logger.error(f"❌ Could not write to last activity file {self.last_activity_file}: {e}")
