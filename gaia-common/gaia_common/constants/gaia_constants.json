@@ -70,6 +70,12 @@
       "enabled": true,
       "alias": "gpu_prime",
       "type": "vllm"
+    },
+    "nano": {
+      "enabled": true,
+      "path": "/models/Qwen3-0.5B-Instruct-GGUF/qwen3-0_5b-instruct-q8_0.gguf",
+      "type": "local",
+      "description": "Ultra-fast Nano-Refiner (0.5B) for simple tasks and formatting"
     }
   },
   "N_BATCH": 1024,

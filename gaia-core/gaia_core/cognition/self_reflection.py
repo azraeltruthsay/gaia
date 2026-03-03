@@ -21,6 +21,7 @@ from gaia_common.utils.thoughtstream import write as ts_write
 from gaia_common.protocols.cognition_packet import CognitionPacket, DataField, Persona, PersonaRole, ReflectionLog
 from gaia_core.utils.prompt_builder import build_from_packet, count_tokens
 from gaia_core.utils.packet_builder import build_packet_snapshot
+from gaia_core.cognition.samvega import generate_samvega_analysis, SamvegaTrigger
 
 logger = logging.getLogger("GAIA.SelfReflection")
 # File logging setup — uses canonical LOGS_DIR from config
@@ -183,6 +184,23 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
             break
 
     logger.info(f"SelfReflection: completed up to {iterations} iterations; final confidence approx {score}")
+
+    # --- Saṃvega Integration: Capture discernment artifacts if confidence is low ---
+    SAMVEGA_THRESHOLD = getattr(config, 'samvega_threshold', 0.7)
+    if score < SAMVEGA_THRESHOLD:
+        logger.info("SelfReflection: Low confidence detected (%.2f < %.2f), generating Saṃvega artifact...", score, SAMVEGA_THRESHOLD)
+        try:
+            generate_samvega_analysis(
+                packet=packet,
+                output=output,
+                trigger=SamvegaTrigger.CONFIDENCE_MISMATCH,
+                user_correction_text="",
+                config=config,
+                llm=llm,
+                session_id=getattr(packet.header, 'session_id', 'unknown')
+            )
+        except Exception as e:
+            logger.error(f"SelfReflection: failed to generate Samvega artifact: {e}")
 
     # -- Final safety check --
     try:
