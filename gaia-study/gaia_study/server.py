@@ -412,47 +412,71 @@ def create_app() -> FastAPI:
             logger.exception(f"Failed to list adapters: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.post("/adapters/load")
-    async def adapter_load(request: AdapterLoadRequest):
-        """Load a LoRA adapter for use in generation."""
-        try:
-            manager = get_study_manager()
-            tier_dir = manager._get_tier_directory(request.tier)
-            adapter_path = tier_dir / request.adapter_name
-
-            if not adapter_path.exists():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Adapter '{request.adapter_name}' not found in tier {request.tier}"
-                )
-
-            # TODO: Actually load into vLLM model pool via gaia-core API
-            return {
-                "ok": True,
-                "adapter_name": request.adapter_name,
-                "adapter_path": str(adapter_path),
-                "tier": request.tier,
-                "message": "Adapter registered for loading (actual loading requires model pool integration)"
+async def _notify_core_adapter_change(adapter_name: str, action: str, tier: int = 3):
+    """Notify gaia-core that an adapter has changed."""
+    import httpx
+    core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+    url = f"{core_url}/models/adapters/notify"
+    try:
+        async with httpx.AsyncClient() as client:
+            payload = {
+                "adapter_name": adapter_name,
+                "action": action,
+                "tier": tier
             }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception(f"Failed to load adapter: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            resp = await client.post(url, json=payload, timeout=5.0)
+            if resp.status_code == 200:
+                logger.info(f"Successfully notified core of adapter {action}: {adapter_name}")
+            else:
+                logger.warning(f"Failed to notify core of adapter {action}: {resp.status_code} {resp.text}")
+    except Exception as e:
+        logger.error(f"Error notifying core of adapter change: {e}")
 
-    @app.post("/adapters/unload")
-    async def adapter_unload(request: AdapterLoadRequest):
-        """Unload a LoRA adapter."""
-        try:
-            # TODO: Actually unload from vLLM model pool via gaia-core API
-            return {
-                "ok": True,
-                "adapter_name": request.adapter_name,
-                "message": "Adapter unload requested (requires model pool integration)"
-            }
-        except Exception as e:
-            logger.exception(f"Failed to unload adapter: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+@app.post("/adapters/load")
+async def adapter_load(request: AdapterLoadRequest):
+    """Load a LoRA adapter for use in generation."""
+    try:
+        manager = get_study_manager()
+        tier_dir = manager._get_tier_directory(request.tier)
+        adapter_path = tier_dir / request.adapter_name
+
+        if not adapter_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Adapter '{request.adapter_name}' not found in tier {request.tier}"
+            )
+
+        # Notify core so the model pool can prepare
+        await _notify_core_adapter_change(request.adapter_name, "load", request.tier)
+        
+        return {
+            "ok": True,
+            "adapter_name": request.adapter_name,
+            "adapter_path": str(adapter_path),
+            "tier": request.tier,
+            "message": f"Adapter '{request.adapter_name}' loaded and core notified."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to load adapter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/adapters/unload")
+async def adapter_unload(request: AdapterLoadRequest):
+    """Unload a LoRA adapter."""
+    try:
+        # Notify core to unload from model pool
+        await _notify_core_adapter_change(request.adapter_name, "unload", request.tier)
+        
+        return {
+            "ok": True,
+            "adapter_name": request.adapter_name,
+            "message": f"Adapter '{request.adapter_name}' unload requested and core notified."
+        }
+    except Exception as e:
+        logger.exception(f"Failed to unload adapter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     @app.delete("/adapters/{adapter_name}")
     async def adapter_delete(adapter_name: str, tier: int = 3):
