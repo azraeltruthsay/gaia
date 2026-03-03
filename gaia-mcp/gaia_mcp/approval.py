@@ -52,24 +52,37 @@ class ApprovalStore:
         """Generate a 5-character alphabetic challenge code."""
         return ''.join(random.choice(string.ascii_uppercase) for _ in range(5))
 
+    def validate_against_blast_shield(self, method: str, params: Dict[str, Any]):
+        """
+        VouchCore Pattern: Deterministic pre-flight safety check.
+        Raises ValueError if action is forbidden regardless of LLM reasoning.
+        """
+        if method == "run_shell":
+            cmd = str(params.get("command", "")).lower()
+            forbidden = ["rm -rf", "sudo ", "mkfs", "dd ", "> /dev/sd"]
+            for pattern in forbidden:
+                if pattern in cmd:
+                    logger.critical(f"🛡️ BLAST SHIELD: Forbidden command pattern detected: {pattern}")
+                    raise ValueError(f"Blast Shield: Forbidden command pattern '{pattern}' detected.")
+        
+        if method == "write_file":
+            path = str(params.get("path", ""))
+            if path.startswith("/etc") or path.startswith("/boot") or ".ssh" in path:
+                logger.critical(f"🛡️ BLAST SHIELD: Attempt to write to system path: {path}")
+                raise ValueError("Blast Shield: Writing to system configuration paths is forbidden.")
+
     def create_pending(
         self,
         method: str,
         params: Dict[str, Any],
-        proposal: Optional[str] = None,
-        allow_pending: bool = False # This param is from request_approval, not here. Removing it.
+        proposal: Optional[str] = None
     ) -> Tuple[str, str, float, float]:
         """
         Create a pending action awaiting approval.
-
-        Args:
-            method: The tool method name
-            params: The tool parameters
-            proposal: Optional human-readable description of the action
-
-        Returns:
-            Tuple of (action_id, challenge, created_at, expiry)
         """
+        # ── 🛡️ BLAST SHIELD CHECK ──
+        self.validate_against_blast_shield(method, params)
+
         with self._lock:
             action_id = str(uuid.uuid4())
             challenge = self._gen_challenge()

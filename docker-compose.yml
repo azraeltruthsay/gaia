@@ -47,6 +47,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Shared state for persistence
       - gaia-shared:/shared:rw
+      - gaia-candidate-shared:/candidate-shared:rw
       # Project root for compose file access (read-only)
       - .:/gaia/GAIA_Project:ro
 
@@ -199,15 +200,18 @@ services:
       - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-abliterated-AWQ}
       # Lite model (CPU, GGUF via llama_cpp)
       - GAIA_LITE_GGUF=${GAIA_LITE_GGUF:-/models/Qwen3-8B-abliterated-Q4_K_M.gguf}
-      # Groq API fallback (free tier)
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
       # HA failover — candidate MCP as fallback
       - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       # Model loading - disabled by default, models load on first use
       - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    secrets:
+      - groq_api_key
+      - openai_api_key
+      - gemini_api_key
+      - anthropic_api_key
 
     ports:
       - "6415:6415"
@@ -268,6 +272,7 @@ services:
       # Service endpoints (configurable for candidate injection)
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - MCP_HEALTH_ENDPOINT=${MCP_HEALTH_ENDPOINT:-http://gaia-mcp:8765}
       # Web server settings
       - HOST=0.0.0.0
       - PORT=6414
@@ -280,6 +285,9 @@ services:
       - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    secrets:
+      - discord_bot_token
 
     ports:
       - "6414:6414"
@@ -329,6 +337,8 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=study
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
@@ -400,6 +410,8 @@ services:
       - ${HOME}/.notebooklm:/auth/notebooklm:ro
 
     environment:
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=mcp
       - MODELS_DIR=/models
       - GAIA_ENV=${GAIA_ENV:-development}
@@ -417,6 +429,9 @@ services:
       - NOTEBOOKLM_HOME=/auth/notebooklm
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    secrets:
+      - kanka_api_key
 
     ports:
       - "8765:8765"
@@ -490,6 +505,9 @@ services:
               count: 1
               capabilities: [gpu]
 
+    networks:
+      - gaia-net
+
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-wiki: The Library - Internal developer documentation
@@ -516,6 +534,8 @@ services:
       - ./knowledge:/knowledge:ro
 
     environment:
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=wiki
 
     # No ports: block — internal only.
@@ -624,6 +644,27 @@ volumes:
   gaia-shared:
     name: gaia-shared
 
+  # Shared state for candidate services
+  gaia-candidate-shared:
+    name: gaia-candidate-shared
+
   # Isolated sandbox for MCP tool execution
   gaia-sandbox:
     name: gaia-sandbox
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Secrets (VouchCore ADC Pattern)
+# ═══════════════════════════════════════════════════════════════════════════
+secrets:
+  groq_api_key:
+    file: ${HOME}/.gaia/secrets/groq_api_key
+  openai_api_key:
+    file: ${HOME}/.gaia/secrets/openai_api_key
+  gemini_api_key:
+    file: ${HOME}/.gaia/secrets/gemini_api_key
+  anthropic_api_key:
+    file: ${HOME}/.gaia/secrets/anthropic_api_key
+  kanka_api_key:
+    file: ${HOME}/.gaia/secrets/kanka_api_key
+  discord_bot_token:
+    file: ${HOME}/.gaia/secrets/discord_bot_token

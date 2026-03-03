@@ -39,11 +39,25 @@ class EthicalSentinel:
 
     def check_loop_counter(self) -> bool:
         """Ensure GAIA is not looping uncontrollably."""
+        from datetime import datetime
         self.loop_counter += 1
         logger.debug(f"🔁 Loop Count: {self.loop_counter}")
 
         if self.loop_counter > self.loop_threshold:
-            logger.error("⛔ GAIA loop threshold exceeded!")
+            # VouchCore Pattern: Kill the spiral, force Architect triage
+            logger.critical("⛔ CIRCUIT BREAKER TRIGGERED: Cognitive loop exceeded threshold.")
+            
+            # Create a sentinel file on the shared volume to block further turns
+            # This requires manual removal by Azrael to "clear" the system.
+            try:
+                lock_path = "/shared/HEALING_REQUIRED.lock"
+                with open(lock_path, "w") as f:
+                    f.write(f"FATAL: Loop limit ({self.loop_threshold}) hit at {datetime.now(timezone.utc) if 'timezone' in globals() else datetime.now()}\n")
+                    f.write("System integrity protected. Manual triage required.\n")
+                logger.info(f"🔒 System locked via {lock_path}")
+            except Exception as e:
+                logger.error(f"Failed to create healing lock file: {e}")
+
             return False
         return True
 

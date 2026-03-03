@@ -132,6 +132,7 @@ class STTEngine:
             beam_size=5,
             vad_filter=True,
             word_timestamps=True,
+            condition_on_previous_text=False,  # Mitigate Whisper hallucination loops
             suppress_tokens=[],  # Preserve non-speech markers ([Music], [Laughter], etc.)
         )
 

@@ -64,12 +64,16 @@ class Config:
     # ── Feature Flags & Sub-configs ────────────────────────────────
     SLEEP_CYCLE: Dict[str, Any] = field(default_factory=dict)
     TEMPORAL_AWARENESS: Dict[str, Any] = field(default_factory=dict)
+    FRAGMENTATION: Dict[str, Any] = field(default_factory=dict)
     INTEGRATIONS: Dict[str, Any] = field(default_factory=dict)
     SAFE_EXECUTE_FUNCTIONS: List[str] = field(default_factory=list)
     CODEX_FILE_EXTS: Tuple[str, ...] = field(default_factory=lambda: (".md", ".yaml", ".yml", ".json"))
 
     # Singleton instance
     _instance: Optional[Config] = None
+    _last_mtime: float = 0.0
+    _source_path: Optional[str] = None
+    _last_check_time: float = 0.0
 
     def __post_init__(self):
         """Initialize by loading from file and then applying environment overrides."""
@@ -90,9 +94,13 @@ class Config:
 
         data = {}
         found_path = None
+        import time
         for path in possible_paths:
             if path and os.path.exists(path):
                 try:
+                    self._last_mtime = os.path.getmtime(path)
+                    self._source_path = path
+                    self._last_check_time = time.monotonic()
                     with open(path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     found_path = path
@@ -118,6 +126,7 @@ class Config:
         # Map sections
         self.SLEEP_CYCLE = data.get("SLEEP_CYCLE", {})
         self.TEMPORAL_AWARENESS = data.get("TEMPORAL_AWARENESS", {})
+        self.FRAGMENTATION = data.get("fragmentation", {})
         self.INTEGRATIONS = data.get("INTEGRATIONS", {})
         self.endpoints.update(data.get("SERVICE_ENDPOINTS", {}))
         self.timeouts.update(data.get("TIMEOUTS", {}))
@@ -168,11 +177,51 @@ class Config:
         """Get a specific timeout value."""
         return float(self.timeouts.get(key, default))
 
+    def get_api_key(self, provider: str) -> Optional[str]:
+        """
+        VouchCore Pattern: Get API key from system-level identity or environment.
+        Prioritizes Docker secrets (/run/secrets) over environment variables.
+        """
+        # 1. Try Docker secrets first
+        secret_path = Path(f"/run/secrets/{provider.lower()}_api_key")
+        if secret_path.exists():
+            try:
+                return secret_path.read_text().strip()
+            except Exception as e:
+                logger.error(f"Failed to read Docker secret for {provider}: {e}")
+
+        # 2. Fallback to environment variables
+        return os.getenv(f"{provider.upper()}_API_KEY")
+
+    def refresh_if_needed(self):
+        """Check if the source file has changed and reload if necessary."""
+        if not self._source_path or not os.path.exists(self._source_path):
+            return
+        
+        import time
+        now = time.monotonic()
+        # Only check every 10 seconds to avoid excessive disk I/O
+        if now - self._last_check_time < 10.0:
+            return
+            
+        self._last_check_time = now
+        try:
+            current_mtime = os.path.getmtime(self._source_path)
+            if current_mtime > self._last_mtime:
+                logger.info(f"Detected change in {self._source_path}. Reloading config...")
+                self._load_from_json()
+                self._apply_env_overrides()
+        except Exception as e:
+            logger.error(f"Failed to check for config updates: {e}")
+
     @classmethod
     def get_instance(cls) -> Config:
         """Get the singleton Config instance."""
         if cls._instance is None:
             cls._instance = cls()
+        else:
+            # Auto-check for reload on access (debounced to 10s internally)
+            cls._instance.refresh_if_needed()
         return cls._instance
 
 def get_config() -> Config:
