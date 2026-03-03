@@ -304,10 +304,11 @@ def write_and_embed(
     file_path = f"/knowledge/{doc_dir}/{filename}"
 
     # Step 1: write_file via MCP
-    write_result = mcp_client.call_jsonrpc(
+    import asyncio
+    write_result = asyncio.run(mcp_client.call_jsonrpc(
         "write_file",
         {"path": file_path, "content": doc_content},
-    )
+    ))
 
     if not write_result.get("ok"):
         # Check for 403 (approval required) — the MCP layer handles this
@@ -318,10 +319,10 @@ def write_and_embed(
     logger.info(f"Document written to {file_path}")
 
     # Step 2: embed_documents via MCP
-    embed_result = mcp_client.call_jsonrpc(
+    embed_result = asyncio.run(mcp_client.call_jsonrpc(
         "embed_documents",
         {"knowledge_base_name": kb_name, "file_path": file_path},
-    )
+    ))
     embed_ok = embed_result.get("ok", False)
     if embed_ok:
         logger.info(f"Document embedded into '{kb_name}' vector store")

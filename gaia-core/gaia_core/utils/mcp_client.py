@@ -8,16 +8,26 @@ to the MCP-lite server.
 
 import logging
 import os
-import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from gaia_common.protocols.cognition_packet import CognitionPacket
+from gaia_common.utils.service_client import ServiceClient, get_mcp_client
 from gaia_core.config import get_config
 config = get_config()
 
 logger = logging.getLogger("GAIA.MCPClient")
+
+_mcp_client: Optional[ServiceClient] = None
+
+def _get_client() -> ServiceClient:
+    """Lazy initialize and return the HA-capable ServiceClient."""
+    global _mcp_client
+    if _mcp_client is None:
+        # get_mcp_client automatically picks up MCP_ENDPOINT and MCP_FALLBACK_ENDPOINT
+        _mcp_client = get_mcp_client()
+    return _mcp_client
 
 # Low-level JSON-RPC call
 def _normalize_endpoint(ep: str) -> str:
@@ -34,27 +44,45 @@ def _normalize_endpoint(ep: str) -> str:
     return ep + "/jsonrpc"
 
 
-def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
-    timeout = timeout or int(config.get_timeout("MCP_DEFAULT", 20))
-    ep_raw = endpoint or os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp")
-    ep = _normalize_endpoint(ep_raw)
-    if not ep:
-        return {"ok": False, "error": "MCP endpoint not configured"}
+async def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
+    """
+    Call an MCP JSON-RPC method with automatic HA failover.
+    Note: Now async to support the modern ServiceClient.
+    """
+    client = _get_client()
+    path = "/jsonrpc"
+    
+    # If a custom endpoint is provided, we must bypass the default client logic
+    if endpoint:
+        ep = _normalize_endpoint(endpoint)
+        import httpx
+        payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.now(timezone.utc).isoformat()}
+        try:
+            async with httpx.AsyncClient(timeout=timeout or client.timeout) as raw_client:
+                r = await raw_client.post(ep, json=payload)
+                r.raise_for_status()
+                return {"ok": True, "response": r.json()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.now(timezone.utc).isoformat()}
+    
     try:
-        r = requests.post(ep, json=payload, timeout=timeout)
-        if r.status_code == 403:
-            # Sensitive tool — route through approval flow with auto-pending
+        # ServiceClient handles retries and HA failover internally
+        response_json = await client.post(path, data=payload, timeout=timeout)
+        return {"ok": True, "response": response_json}
+    except Exception as e:
+        # Check if it was a 403 (approval required) which ServiceClient raises as HTTPStatusError
+        import httpx
+        if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 403:
             logger.info(f"call_jsonrpc: '{method}' requires approval (403). Requesting auto-approval.")
             approval_result = request_approval_via_mcp(
                 method=method,
                 params={**(params or {}), "_allow_pending": True}
             )
             if approval_result.get("ok"):
-                # Auto-approved (MCP_BYPASS=true) — result is in the response
                 return {"ok": True, "response": approval_result.get("result", approval_result)}
             elif approval_result.get("action_id"):
-                # Pending approval — return info so caller can handle it
                 return {
                     "ok": False,
                     "pending_approval": True,
@@ -63,34 +91,11 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
                     "proposal": approval_result.get("proposal", ""),
                     "error": f"'{method}' requires approval. Challenge: {approval_result.get('challenge')}"
                 }
-            else:
-                return {"ok": False, "error": f"Approval request failed: {approval_result.get('error', 'unknown')}"}
-        r.raise_for_status()
-        return {"ok": True, "response": r.json()}
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
-        # HA fallback: try candidate MCP if configured and not in maintenance
-        fallback_ep = os.getenv("MCP_FALLBACK_ENDPOINT", "")
-        if fallback_ep and not Path("/shared/ha_maintenance").exists():
-            fb_ep = _normalize_endpoint(fallback_ep)
-            try:
-                logger.warning("MCP primary failed, attempting fallback: %s", fb_ep)
-                fb_r = requests.post(fb_ep, json=payload, timeout=timeout)
-                fb_r.raise_for_status()
-                logger.info("MCP fallback succeeded")
-                return {"ok": True, "response": fb_r.json()}
-            except Exception as fb_e:
-                logger.error("MCP fallback also failed: %s", fb_e)
-        return {"ok": False, "error": str(e)}
-    except Exception as e:
-        logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
-        try:
-            logger.error(f"[{datetime.now(timezone.utc).isoformat()}] full error response: {r.json()}")
-        except Exception:
-            pass
+        
+        logger.error(f"call_jsonrpc failed for {method}: {e}")
         return {"ok": False, "error": str(e)}
 
-def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> List[Dict]:
+async def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> List[Dict]:
     """
     Dispatches all sidecar actions in a packet to the MCP-lite server.
 
@@ -104,11 +109,6 @@ def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> Lis
     if not config.constants.get("MCP_LITE_ENABLED") or not packet.response.sidecar_actions:
         return []
 
-    endpoint = config.get_endpoint("mcp")
-    if not endpoint:
-        logger.error("MCP endpoint is not configured. Cannot dispatch actions.")
-        return []
-
     results = []
     for i, action in enumerate(packet.response.sidecar_actions):
         request_id = f"{packet.header.packet_id}-{i}"
@@ -119,23 +119,7 @@ def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> Lis
             logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] action.params is not a dict, coercing to {{}} for request {request_id}")
             params = {}
 
-        # Allow optional model/token options to be passed without breaking older callers.
-        # Accept either top-level keys 'token_options' or 'model_options' inside params.
-        token_opts = None
-        if "token_options" in params:
-            token_opts = params.get("token_options")
-        elif "model_options" in params:
-            token_opts = params.get("model_options")
-
-        # Build RPC params while keeping original params safe
         rpc_params = dict(params)
-        if token_opts is not None:
-            # Only forward if it's a mapping; otherwise ignore to avoid sending invalid data
-            if isinstance(token_opts, dict):
-                rpc_params["token_options"] = token_opts
-            else:
-                logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] Ignoring non-dict token_options for request {request_id}")
-
         payload = {
             "jsonrpc": "2.0",
             "method": action.action_type,
@@ -144,14 +128,18 @@ def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> Lis
         }
 
         ts = datetime.now(timezone.utc).isoformat()
-        logger.info(f"[{ts}] Dispatching action to MCP server: method={action.action_type} id={request_id} params_keys={list(rpc_params.keys())}")
+        logger.info(f"[{ts}] Dispatching action to MCP server: method={action.action_type} id={request_id}")
 
         try:
-            response = requests.post(endpoint, json=payload, timeout=int(config.get_timeout("MCP_DEFAULT", 20)))
-            if response.status_code == 403:
+            client = _get_client()
+            response_json = await client.post("/jsonrpc", data=payload, timeout=int(config.get_timeout("MCP_DEFAULT", 20)))
+            results.append({"id": request_id, "dispatched_at": ts, "response": response_json})
+        except Exception as e:
+            import httpx
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 403:
                 # Sensitive tool — route through approval flow with auto-pending
                 logger.info(f"[{ts}] Action '{action.action_type}' requires approval (403). Routing to approval flow.")
-                approval_result = request_approval_via_mcp(
+                approval_result = await request_approval_via_mcp(
                     method=action.action_type,
                     params={**rpc_params, "_allow_pending": True}
                 )
@@ -164,13 +152,7 @@ def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> Lis
                     "proposal": approval_result.get("proposal"),
                 })
                 continue
-            response.raise_for_status()
-            try:
-                data = response.json()
-            except Exception:
-                data = {"raw": response.text}
-            results.append({"id": request_id, "dispatched_at": ts, "response": data})
-        except requests.exceptions.RequestException as e:
+            
             error_msg = f"Failed to dispatch action '{action.action_type}' to MCP server: {e}"
             logger.error(f"[{datetime.now(timezone.utc).isoformat()}] {error_msg}")
             results.append({
@@ -184,9 +166,10 @@ def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> Lis
 
 
 ## --- High-level MCP primitives used by the codebase ---------------------
-def ai_read(path: str) -> Dict:
+async def ai_read(path: str) -> Dict:
     """Read a file via the MCP abstraction. Returns a dict with fields (ok, content, error)."""
     try:
+        # File operations remain synchronous but function is async for consistency
         with open(path, "r", encoding="utf-8") as fh:
             content = fh.read()
         ts = datetime.now(timezone.utc).isoformat()
@@ -199,12 +182,8 @@ def ai_read(path: str) -> Dict:
 
 _WRITABLE_DIRS = ("/sandbox/", "/shared/", "/knowledge/", "/tmp/", "/logs/")
 
-def ai_write(path: str, content: str) -> Dict:
-    """Write a file via the MCP abstraction. Returns a dict with ok and metadata.
-
-    Security: Writes are restricted to allowed directories to prevent
-    arbitrary filesystem modification.
-    """
+async def ai_write(path: str, content: str) -> Dict:
+    """Write a file via the MCP abstraction. Returns a dict with ok and metadata."""
     resolved = os.path.realpath(path)
     if not any(resolved.startswith(d) for d in _WRITABLE_DIRS):
         logger.warning(f"MCP.ai_write blocked: {path} resolves to {resolved} (outside allowed dirs)")
@@ -223,11 +202,8 @@ def ai_write(path: str, content: str) -> Dict:
         return {"ok": False, "op": "ai.write", "path": resolved, "error": str(e)}
 
 
-def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bool = False) -> Dict:
-    """Execute a shell command via MCP. Returns dict with stdout/stderr/returncode.
-
-    Note: Use with caution. The MCP layer can enforce dry_run or safety checks at a later stage.
-    """
+async def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bool = False) -> Dict:
+    """Execute a shell command via MCP. Returns dict with stdout/stderr/returncode."""
     import subprocess
     import shlex
 
@@ -237,6 +213,7 @@ def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bo
 
     try:
         cmd = command if shell else shlex.split(command)
+        # We use run() here which is sync, but wrapped in async for the mesh
         res = subprocess.run(cmd, shell=shell, check=False, capture_output=True, text=True, timeout=timeout)
         ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] MCP.ai_execute: ran command (rc={res.returncode}) command={command}")
@@ -249,11 +226,8 @@ def ai_execute(command: str, timeout: int = 30, shell: bool = False, dry_run: bo
         return {"ok": False, "op": "ai.execute", "command": command, "error": str(e)}
 
 
-def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "system") -> Dict:
-    """Proxy to the vector indexer for embeddings/nearest neighbor queries.
-
-    Returns a dict with `ok` and `results` list. If vector_indexer is unavailable, returns error.
-    """
+async def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "system") -> Dict:
+    """Proxy to the vector indexer for embeddings/nearest neighbor queries."""
     try:
         from gaia_common.utils.vector_indexer import VectorIndexer
         vi = VectorIndexer.instance(knowledge_base_name)
@@ -266,38 +240,32 @@ def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "syst
         return {"ok": False, "op": "embedding.query", "query": query, "error": str(e)}
 
 
-def analyze_audio(audio_base64: str, sample_rate: int = 16000) -> Dict:
+async def analyze_audio(audio_base64: str, sample_rate: int = 16000) -> Dict:
     """
     Calls gaia-audio/analyze to get DSP and semantic tagging of the environment.
     """
-    audio_url = config.get_endpoint("audio")
-    if not audio_url:
-        return {"ok": False, "error": "Audio service endpoint not configured"}
+    from gaia_common.utils.service_client import get_audio_client
+    client = get_audio_client()
     
-    url = f"{audio_url}/analyze"
     try:
         payload = {"audio_base64": audio_base64, "sample_rate": sample_rate}
-        r = requests.post(url, json=payload, timeout=15)
-        r.raise_for_status()
-        return {"ok": True, "result": r.json()}
+        result = await client.post("/analyze", data=payload, timeout=15)
+        return {"ok": True, "result": result}
     except Exception as e:
         logger.error(f"analyze_audio failed: {e}")
         return {"ok": False, "error": str(e)}
 
 
 ## --- Approval helpers (client-side) -------------------------------------
-def request_approval_via_mcp(method: str, params: Dict) -> Dict:
+async def request_approval_via_mcp(method: str, params: Dict) -> Dict:
     """Ask the MCP server to create a pending action requiring human approval.
 
     Returns: {"ok": True, "action_id": str, "challenge": str} or error dict
     """
-    # Prefer explicit environment override so containers can target the mcp sidecar by name
-    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
-    if not endpoint:
-        logger.error("MCP endpoint not configured for approval request")
-        return {"ok": False, "error": "no endpoint"}
-
-    url = endpoint.replace('/jsonrpc', '/request_approval')
+    client = _get_client()
+    # url = endpoint.replace('/jsonrpc', '/request_approval')
+    path = "/request_approval"
+    
     try:
         # Allow callers to pass a special _allow_pending param inside params to opt-in
         allow_pending = False
@@ -311,10 +279,9 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
         if allow_pending:
             payload["allow_pending"] = True
 
-        logger.info(f"Requesting MCP approval: url={url} method={method} allow_pending={allow_pending}")
-        r = requests.post(url, json=payload, timeout=10)
-        r.raise_for_status()
-        data = r.json()
+        logger.info(f"Requesting MCP approval: path={path} method={method} allow_pending={allow_pending}")
+        data = await client.post(path, data=payload, timeout=10)
+        
         # Include any human-friendly proposal text and timestamps if provided by server
         return {
             "ok": True,
@@ -329,22 +296,18 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
         return {"ok": False, "error": str(e)}
 
 
-def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
+async def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
     """Submit approval string to the MCP server to execute a pending action.
 
     Returns the execution result dict on success.
     """
-    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
-    if not endpoint:
-        logger.error("MCP endpoint not configured for approval submit")
-        return {"ok": False, "error": "no endpoint"}
-
-    url = endpoint.replace('/jsonrpc', '/approve_action')
+    client = _get_client()
+    path = "/approve_action"
+    
     try:
-        logger.info(f"Submitting MCP approval: url={url} action_id={action_id}")
-        r = requests.post(url, json={"action_id": action_id, "approval": approval}, timeout=10)
-        r.raise_for_status()
-        return {"ok": True, "result": r.json()}
+        logger.info(f"Submitting MCP approval: path={path} action_id={action_id}")
+        result = await client.post(path, data={"action_id": action_id, "approval": approval}, timeout=10)
+        return {"ok": True, "result": result}
     except Exception as e:
         logger.error(f"Failed to submit approval via MCP: {e}")
         return {"ok": False, "error": str(e)}

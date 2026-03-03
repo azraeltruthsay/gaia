@@ -614,10 +614,30 @@ class ModelPool:
                             seen.add(c)
                 else:
                     attempt_layers = [0]
-                # Force lite to stay on CPU to avoid competing with gpu_prime and to
-                # keep intent detection lightweight and reliable.
-                if model_name == "lite":
-                    attempt_layers = [0]
+                # GPU HIERARCHY: CPU Offloads (Operator/Nano) are secondary.
+                # Only use GPU if explicitly enabled in config AND the Orchestrator has not locked the GPU.
+                if model_name in ["operator", "nano", "lite"]:
+                    # Check if model config actually wants GPU
+                    config_n_gpu = model_config.get("n_gpu_layers", 0)
+                    
+                    # Check orchestrator status (Best effort)
+                    gpu_available = True
+                    try:
+                        import asyncio
+                        from gaia_core.utils import mcp_client
+                        status = asyncio.run(mcp_client.call_jsonrpc("gpu_status", {}))
+                        if status.get("ok") and status.get("result", {}).get("owner") not in ["none", "core"]:
+                            logger.info(f"GPU HIERARCHY: GPU owned by {status['result']['owner']}. Forcing {model_name} to CPU.")
+                            gpu_available = False
+                    except Exception:
+                        pass # Fallback to config if orchestrator unreachable
+
+                    if config_n_gpu == 0 or not gpu_available:
+                        attempt_layers = [0]
+                    else:
+                        # Orchestrator says OK and config wants it — proceed with cautious offload
+                        pass 
+
                 model_path = model_config.get('path') or (self.config.MODEL_CONFIGS.get(model_config.get('alias', ''), {}) or {}).get('path')
                 if not model_path:
                     raise RuntimeError(f"Model '{model_name}' has no 'path' configured (config: {model_config})")
@@ -1018,6 +1038,42 @@ class ModelPool:
         if name in self.models:
             self.model_status[name] = status
             logger.info(f"🔄 Model '{name}' status set to '{status}'")
+
+    def unload_secondary_gpu_models(self) -> List[str]:
+        """
+        VouchCore Pattern: Explicit eviction of secondary GPU resources.
+        Unloads any local (Operator/Nano) models that have GPU layers allocated.
+        Returns a list of model names that were unloaded.
+        """
+        unloaded = []
+        # Find all local models currently in the pool
+        targets = [name for name in self.models.keys() if name in ["operator", "nano", "lite"]]
+        
+        for name in targets:
+            proxy = self.models.get(name)
+            if not proxy: continue
+            
+            # Check if it actually has GPU layers
+            try:
+                # SafeModelProxy wraps the Llama object in proxy._model
+                raw_llama = proxy._model 
+                # Check n_gpu_layers if it exists (for local GGUF models)
+                if hasattr(raw_llama, "n_gpu_layers") and raw_llama.n_gpu_layers > 0:
+                    logger.info(f"GPU HIERARCHY: Evicting {name} from GPU ({raw_llama.n_gpu_layers} layers) to free VRAM.")
+                    
+                    # Unload and remove from pool
+                    self.models.pop(name, None)
+                    self.model_status.pop(name, None)
+                    unloaded.append(name)
+                    
+                    # Trigger garbage collection
+                    import gc
+                    del raw_llama
+                    gc.collect()
+            except Exception as e:
+                logger.error(f"Failed to unload secondary GPU model {name}: {e}")
+                
+        return unloaded
 
     def get_idle_model(self, exclude=[]):
         for name, status in self.model_status.items():
