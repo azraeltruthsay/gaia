@@ -813,6 +813,24 @@ class AgentCore:
                 persona_name, knowledge_base_name,
             )
 
+        # 0. Emergency Healing Mode (The "Immune Response")
+        # If the Immune System detects a CRITICAL failure (like a SyntaxError), 
+        # we pivot the entire turn toward self-repair.
+        emergency_irritant = self._check_immune_system_for_emergency()
+        if emergency_irritant:
+            yield {"type": "token", "value": f"[(i) Digital Immune System: CRITICAL IRRITATION DETECTED. Entering Emergency Healing Mode...]\n\n"}
+            # Force high-reasoning persona and model for repair
+            persona_name = "dev"
+            knowledge_base_name = "core"
+            # Add emergency instructions to the user input
+            user_input = (
+                f"!! COGNITIVE EMERGENCY !!\n"
+                f"The system has detected a structural failure: {emergency_irritant}\n"
+                f"PRIORITY: Identify and repair this issue immediately using your tools.\n"
+                f"User's original request (suspend for now): {user_input}"
+            )
+            logger.warning("[IMMUNE RESPONSE] Turn pivoted to emergency repair.")
+
         # Load the selected persona
         self.ai_manager.initialize(persona_name)
         
@@ -2318,6 +2336,23 @@ class AgentCore:
         mind_name = self._MIND_ALIASES.get(model_name or "unknown", model_name or "unknown")
         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)
         return f"{tag}\n\n"
+
+    def _check_immune_system_for_emergency(self) -> Optional[str]:
+        \"\"\"
+        Check the current Immune System status for CRITICAL issues or SyntaxErrors.
+        Returns the error message if an emergency is detected, else None.
+        \"\"\"
+        try:
+            from gaia_common.utils import immune_system
+            health = immune_system.get_immune_summary()
+            
+            # Look for CRITICAL or SyntaxError
+            if \"Immune System: CRITICAL\" in health or \"SyntaxError\" in health:
+                logger.warning(f\"[IMMUNE EMERGENCY] System irritation detected: {health}\")
+                return health
+        except Exception:
+            pass
+        return None
 
     def _nano_triage(self, user_input: str) -> str:
         """
