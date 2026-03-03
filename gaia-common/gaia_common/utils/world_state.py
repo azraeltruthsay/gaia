@@ -88,7 +88,7 @@ def _mcp_tools_full(limit: int = 50) -> List[str]:
         logger.exception("Failed to get mcp_tools_full")
         return []
 
-def world_state_snapshot() -> Dict:
+def world_state_snapshot(auditory_environment: Optional[Dict] = None) -> Dict:
     """Return a compact, serializable snapshot."""
     ts = int(time.time())
     return {
@@ -98,6 +98,7 @@ def world_state_snapshot() -> Dict:
         "mem": _mem_summary(),
         "models": _model_paths(),
         "mcp_tools": _mcp_tools_sample(),
+        "auditory_environment": auditory_environment
     }
 
 def world_state_detail() -> Dict:
@@ -154,7 +155,7 @@ def _capability_affordances(tools: List[str]) -> List[str]:
     return affordances
 
 
-def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None) -> str:
+def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None, auditory_environment: Optional[Dict] = None) -> str:
     """
     Render a short text block suitable for system prompts.
     Keeps lines bounded to avoid token bloat.
@@ -162,13 +163,23 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     Args:
         max_lines: Maximum lines to include in the snapshot
         output_context: Optional dict with output routing info (source, destination, is_dm, etc.)
+        auditory_environment: Optional dict with music/env data (BPM, Key, etc.)
     """
     logger.info("Formatting world state snapshot")
-    snap = world_state_snapshot()
+    snap = world_state_snapshot(auditory_environment=auditory_environment)
     logger.debug(f"World state snapshot data: {snap}")
     lines: List[str] = []
     lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
+    
+    # Auditory Environment (Music Engine)
+    env = snap.get("auditory_environment")
+    if env:
+        bpm = env.get("bpm", 0)
+        key = env.get("key", "Unknown")
+        tags = env.get("semantic_tags", [])
+        tag_str = ", ".join([t['label'] for t in tags[:3]])
+        lines.append(f"Auditory Env: {bpm} BPM | Key: {key} | Tags: {tag_str}")
     
     # Immune System (SIEM-lite) awareness
     try:

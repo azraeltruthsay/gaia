@@ -496,7 +496,14 @@ class AgentCore:
                     "destination": destination,
                     **(_metadata or {}),
                 }
-                world_state_text = format_world_state_snapshot(output_context=output_context)
+                
+                # Fetch auditory context from metadata if available (TCP)
+                auditory_env = _metadata.get("auditory_environment") if _metadata else None
+                
+                world_state_text = format_world_state_snapshot(
+                    output_context=output_context,
+                    auditory_environment=auditory_env
+                )
             except Exception as e:
                 self.logger.exception("AgentCore: Failed to format world state snapshot; world state will be missing from packet.")
                 world_state_text = ""
@@ -717,9 +724,6 @@ class AgentCore:
         if user_input:
             user_input = self.entity_validator.correct_text(user_input)
             
-        import json
-        import os
-        import sys
         from gaia_core.utils.prompt_builder import build_from_packet # Assumes this is updated for v0.3
 
         import time as _time
@@ -849,12 +853,20 @@ class AgentCore:
         if not selected_model_name:
             text_lower = user_input.lower()
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
-            # Explicit callouts to Thinker (GPU) if available
-            wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
-            # Default path: Operator (lite) handles most turns; escalate to Thinker if explicitly requested.
-            if "oracle" in text_lower and self.config.use_oracle:
+            
+            # 1. Nano Fast-Path (0.5B)
+            # Route to Nano if explicitly requested or if it's a very simple status/formatting request.
+            wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
+            is_trivial = len(user_input) < 30 and any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"])
+            
+            if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS:
+                selected_model_name = "nano"
+                logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial})")
+
+            # 2. Thinker / Oracle Path
+            elif "oracle" in text_lower and self.config.use_oracle:
                 selected_model_name = "oracle"
-            elif wants_thinker:
+            elif force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"]):
                 # Prefer GPU prime, then prime, then cpu_prime
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
                     if cand == "gpu_prime" and _gpu_sleeping:
@@ -862,7 +874,8 @@ class AgentCore:
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
-            # If still unset, prefer Operator (lite); fall back to prime if lite is missing.
+            
+            # Default path: Operator (lite) handles most turns.
             if not selected_model_name:
                 if "lite" in self.model_pool.models:
                     selected_model_name = "lite"
