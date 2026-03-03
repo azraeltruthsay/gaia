@@ -12,6 +12,9 @@ import logging
 import re
 import hashlib
 import math
+import os
+import json
+import py_compile
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -34,6 +37,7 @@ class ImmuneSystem:
         r"Permission denied": 2.0,    # Real structural issue
         r"not found in configuration": 1.0, # Configuration gap
         r"Model path does not exist": 2.5, # CRITICAL: Missing model file
+        r"SyntaxError": 4.0,           # CRITICAL: Code compilation failure
         r"Root not allowed": 0.2,     # Security gate working as intended (Noise)
         r"timeout": 0.8,
         r"uid not found": 2.0,        # Show-stopper
@@ -42,6 +46,7 @@ class ImmuneSystem:
 
     def __init__(self, log_dir: str = "/logs"):
         self.log_dir = Path(log_dir)
+        self.syntax_cache_file = self.log_dir / "syntax_cache.json"
         
     def get_health_summary(self) -> str:
         """
@@ -137,6 +142,65 @@ class ImmuneSystem:
         except Exception:
             pass # Best effort, avoids circular imports or boot-time loops
 
+        # 3. Continuous Syntax Checks
+        # Finds modified python files and ensures they compile
+        try:
+            syntax_issues = self._run_syntax_checks()
+            issues.extend(syntax_issues)
+        except Exception as e:
+            logger.debug(f"Syntax checks failed: {e}")
+
+        return issues
+
+    def _run_syntax_checks(self) -> List[str]:
+        """Incrementally checks Python files for syntax errors using py_compile."""
+        issues = []
+        cache_file = Path("/logs/syntax_cache.json")
+        cache = {}
+        if cache_file.exists():
+            try:
+                cache = json.loads(cache_file.read_text())
+            except Exception:
+                pass
+
+        search_dirs = [Path("/app"), Path("/gaia-common")]
+        # Fallbacks if running outside docker directly on the host
+        if not search_dirs[0].exists():
+            search_dirs = [Path("/gaia/GAIA_Project/gaia-core"), Path("/gaia/GAIA_Project/gaia-common")]
+
+        cache_updated = False
+        
+        for base_dir in search_dirs:
+            if not base_dir.exists() or not base_dir.is_dir():
+                continue
+                
+            for py_file in base_dir.rglob("*.py"):
+                # Skip virtual environments and pycache
+                if ".venv" in py_file.parts or "__pycache__" in py_file.parts:
+                    continue
+                
+                try:
+                    mtime = py_file.stat().st_mtime
+                    file_key = str(py_file)
+                    
+                    if cache.get(file_key) != mtime:
+                        # File is new or modified, compile it
+                        try:
+                            py_compile.compile(str(py_file), doraise=True)
+                            cache[file_key] = mtime
+                            cache_updated = True
+                        except py_compile.PyCompileError as e:
+                            issues.append(f"SyntaxError in {py_file.name}: {e.msg.splitlines()[0] if hasattr(e, 'msg') else str(e)[:50]}")
+                except Exception:
+                    pass
+
+        if cache_updated:
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(cache))
+            except Exception:
+                pass
+                
         return issues
 
     def _normalize_message(self, message: str) -> str:
