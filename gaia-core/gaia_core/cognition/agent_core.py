@@ -939,22 +939,22 @@ class AgentCore:
         try:
             # Only cascade if we haven't already picked a 'prime' or 'oracle' model
             # and if we aren't forcing the operator.
-            force_operator = os.getenv(\"GAIA_FORCE_OPERATOR\", \"\").lower() in (\"1\", \"true\", \"yes\")
-            is_forced_thinker = os.getenv(\"GAIA_FORCE_THINKER\", \"\").lower() in (\"1\", \"true\", \"yes\") or \\
-                                any(tag in user_input.lower() for tag in [\"thinker:\", \"[thinker]\", \"::thinker\"])
+            force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
+            is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
+                                any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
             
-            if selected_model_name in (\"lite\", \"nano\") and not force_operator and not is_forced_thinker:
+            if selected_model_name in ("lite", "nano") and not force_operator and not is_forced_thinker:
                 # Perform Nano triage
                 triage_result = self._nano_triage(user_input)
-                if triage_result == \"COMPLEX\":
+                if triage_result == "COMPLEX":
                     # Emit status message to user
-                    yield {\"type\": \"token\", \"value\": \"[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n\"}
-                    selected_model_name = \"lite\"
+                    yield {"type": "token", "value": "[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n"}
+                    selected_model_name = "lite"
                     
                     # Secondary escalation: check if Lite thinks it's even MORE complex
                     if self._should_escalate_to_thinker(user_input):
-                        for cand in [\"gpu_prime\", \"prime\", \"cpu_prime\"]:
-                            if cand == \"gpu_prime\" and _gpu_sleeping:
+                        for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                            if cand == "gpu_prime" and _gpu_sleeping:
                                 continue
                             # Ensure escalation candidate is loaded
                             if cand not in self.model_pool.models:
@@ -963,15 +963,15 @@ class AgentCore:
                                 except Exception:
                                     pass
                             if cand in self.model_pool.models:
-                                yield {\"type\": \"token\", \"value\": f\"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n\"}
+                                yield {"type": "token", "value": f"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n"}
                                 selected_model_name = cand
                                 break
                 else:
                     # Nano can handle it
-                    selected_model_name = \"nano\"
-                    logger.info(\"[CASCADE] Nano-Refiner confirmed SIMPLE request.\")
+                    selected_model_name = "nano"
+                    logger.info("[CASCADE] Nano-Refiner confirmed SIMPLE request.")
         except Exception:
-            logger.debug(\"Cascade routing failed; continuing with selected model\", exc_info=True)
+            logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
 
         # Acquire the selected model. `selected_model_name` may already be a
         # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
@@ -2320,21 +2320,21 @@ class AgentCore:
         return f"{tag}\n\n"
 
     def _nano_triage(self, user_input: str) -> str:
-        \"\"\"
+        """
         Use the Nano model (0.5B) to perform a quick triage of the request.
-        Returns \"SIMPLE\" or \"COMPLEX\".
-        \"\"\"
-        if \"nano\" not in self.config.MODEL_CONFIGS:
-            return \"COMPLEX\" # Fallback to more capable models
+        Returns "SIMPLE" or "COMPLEX".
+        """
+        if "nano" not in self.config.MODEL_CONFIGS:
+            return "COMPLEX" # Fallback to more capable models
         
         try:
             # Ensure nano is loaded
-            self.model_pool.ensure_model_loaded(\"nano\")
-            nano = self.model_pool.get(\"nano\")
+            self.model_pool.ensure_model_loaded("nano")
+            nano = self.model_pool.get("nano")
             if not nano:
-                return \"COMPLEX\"
+                return "COMPLEX"
 
-            triage_system_prompt = \"\"\"
+            triage_system_prompt = """
 You are the GAIA Triage Refiner. Your job is to determine if a request is SIMPLE or COMPLEX.
 SIMPLE: Greetings, time/date, system status, simple facts, short poems, basic formatting.
 COMPLEX: Coding, debugging, architectural design, deep philosophy, multi-step planning, long-form creative writing.
@@ -2343,10 +2343,10 @@ Respond ONLY with:
 RESULT: SIMPLE
 or
 RESULT: COMPLEX (reason: <brief reason>)
-\"\"\"
+"""
             messages = [
-                {\"role\": \"system\", \"content\": triage_system_prompt},
-                {\"role\": \"user\", \"content\": user_input}
+                {"role": "system", "content": triage_system_prompt},
+                {"role": "user", "content": user_input}
             ]
             
             # Use forward_to_model for lifecycle management if possible, 
@@ -2356,13 +2356,13 @@ RESULT: COMPLEX (reason: <brief reason>)
                 max_tokens=32,
                 temperature=0.1
             )
-            content = res[\"choices\"][0][\"message\"][\"content\"].strip().upper()
-            if \"RESULT: SIMPLE\" in content:
-                return \"SIMPLE\"
-            return \"COMPLEX\"
+            content = res["choices"][0]["message"]["content"].strip().upper()
+            if "RESULT: SIMPLE" in content:
+                return "SIMPLE"
+            return "COMPLEX"
         except Exception:
-            logger.warning(\"Nano triage failed, falling back to COMPLEX\", exc_info=True)
-            return \"COMPLEX\"
+            logger.warning("Nano triage failed, falling back to COMPLEX", exc_info=True)
+            return "COMPLEX"
 
     def _should_escalate_to_thinker(self, text: str) -> bool:
         """

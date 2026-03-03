@@ -412,14 +412,14 @@ class SleepWakeManager:
     # ------------------------------------------------------------------
 
     def initiate_offline(self) -> None:
-        \"\"\"ANY → OFFLINE for graceful shutdown.\"\"\"
+        """ANY → OFFLINE for graceful shutdown."""
         prev = self.state
         self.state = GaiaState.OFFLINE
         self._phase = _TransientPhase.NONE
         self.prime_available = False
         self.last_state_change = datetime.now(timezone.utc)
-        self._emit_state_change(prev.value, \"offline\", \"shutdown\")
-        logger.info(\"Entering OFFLINE from %s\", prev)
+        self._emit_state_change(prev.value, "offline", "shutdown")
+        logger.info("Entering OFFLINE from %s", prev)
 
     # ------------------------------------------------------------------
     # Status / monitoring
