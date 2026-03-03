@@ -22,7 +22,7 @@ from gaia_core.utils.output_router import route_output, _strip_think_tags_robust
 log_chat_entry = lambda *args, **kwargs: None  # Placeholder
 log_chat_entry_structured = lambda *args, **kwargs: None  # Placeholder
 from gaia_core.utils.stream_observer import StreamObserver, Interrupt
-from gaia_core.utils import mcp_client
+import gaia_core.utils.mcp_client as mcp_client
 from gaia_core.config import Config, get_config
 from gaia_common.utils.entity_validator import EntityValidator
 
@@ -49,7 +49,7 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan
-from gaia_core.utils import gaia_rescue_helper as rescue_helper
+import gaia_core.utils.gaia_rescue_helper as rescue_helper
 
 # Loop Detection System
 from gaia_core.cognition.loop_recovery import (
@@ -487,7 +487,7 @@ class AgentCore:
                 content.data_fields.append(DataField(key='identity_summary', value=summary[:400]))
             
             # --- NEW: Add the world state as a DataField ---
-            from gaia_core.utils.world_state import format_world_state_snapshot
+            from gaia_common.utils.world_state import format_world_state_snapshot
             world_state_text = ""
             try:
                 # Include output context so GAIA knows where she's communicating
@@ -855,13 +855,20 @@ class AgentCore:
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
             
             # 1. Nano Fast-Path (0.5B)
-            # Route to Nano if explicitly requested or if it's a very simple status/formatting request.
+            # Route to Nano if explicitly requested or if it's a simple fact/status/formatting request.
             wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
-            is_trivial = len(user_input) < 30 and any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"])
+            
+            # Simple patterns NANO can handle reliably
+            factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of"]
+            is_factual = any(p in text_lower for p in factual_patterns)
+            is_trivial = len(user_input) < 60 and (
+                any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"]) or
+                is_factual
+            )
             
             if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS:
                 selected_model_name = "nano"
-                logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial})")
+                logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
 
             # 2. Thinker / Oracle Path
             elif "oracle" in text_lower and self.config.use_oracle:
@@ -926,27 +933,45 @@ class AgentCore:
                 yield {"type": "token", "value": "I am currently unable to process your request as my primary model is unavailable."}
                 return
 
-        # Heuristic escalation: if Operator (lite) was picked but the prompt looks complex,
-        # auto-route to a Thinker when available (unless GAIA_FORCE_OPERATOR=1).
+        # --- Cascade Routing ---
+        # If no forced model was picked, we use Nano to triage the request.
+        # This implements the user's suggestion for model-driven complexity routing.
         try:
-            if selected_model_name == "lite":
-                force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
-                if not force_operator and self._should_escalate_to_thinker(user_input):
-                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                        if cand == "gpu_prime" and _gpu_sleeping:
-                            continue
-                        # Try lazy loading for escalation candidates
-                        if cand not in self.model_pool.models:
-                            try:
-                                self.model_pool.ensure_model_loaded(cand)
-                            except Exception:
-                                pass
-                        if cand in self.model_pool.models:
-                            logger.info(f"[MODEL_SELECT DEBUG] escalating from lite-> {cand} based on heuristics")
-                            selected_model_name = cand
-                            break
+            # Only cascade if we haven't already picked a 'prime' or 'oracle' model
+            # and if we aren't forcing the operator.
+            force_operator = os.getenv(\"GAIA_FORCE_OPERATOR\", \"\").lower() in (\"1\", \"true\", \"yes\")
+            is_forced_thinker = os.getenv(\"GAIA_FORCE_THINKER\", \"\").lower() in (\"1\", \"true\", \"yes\") or \\
+                                any(tag in user_input.lower() for tag in [\"thinker:\", \"[thinker]\", \"::thinker\"])
+            
+            if selected_model_name in (\"lite\", \"nano\") and not force_operator and not is_forced_thinker:
+                # Perform Nano triage
+                triage_result = self._nano_triage(user_input)
+                if triage_result == \"COMPLEX\":
+                    # Emit status message to user
+                    yield {\"type\": \"token\", \"value\": \"[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n\"}
+                    selected_model_name = \"lite\"
+                    
+                    # Secondary escalation: check if Lite thinks it's even MORE complex
+                    if self._should_escalate_to_thinker(user_input):
+                        for cand in [\"gpu_prime\", \"prime\", \"cpu_prime\"]:
+                            if cand == \"gpu_prime\" and _gpu_sleeping:
+                                continue
+                            # Ensure escalation candidate is loaded
+                            if cand not in self.model_pool.models:
+                                try:
+                                    self.model_pool.ensure_model_loaded(cand)
+                                except Exception:
+                                    pass
+                            if cand in self.model_pool.models:
+                                yield {\"type\": \"token\", \"value\": f\"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n\"}
+                                selected_model_name = cand
+                                break
+                else:
+                    # Nano can handle it
+                    selected_model_name = \"nano\"
+                    logger.info(\"[CASCADE] Nano-Refiner confirmed SIMPLE request.\")
         except Exception:
-            logger.debug("Heuristic escalation check failed; continuing with selected model", exc_info=True)
+            logger.debug(\"Cascade routing failed; continuing with selected model\", exc_info=True)
 
         # Acquire the selected model. `selected_model_name` may already be a
         # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
@@ -1026,7 +1051,7 @@ class AgentCore:
         # Phase 4 dedup: if the semantic probe already found strong hits from the
         # same collection, use those as seed context and skip the redundant MCP query.
         try:
-            from gaia_core.utils import mcp_client
+            from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
 
             # Extract knowledge_base_name from the packet's data_fields
             knowledge_base_name = None
@@ -2127,7 +2152,7 @@ class AgentCore:
         """
         self.logger.info("Knowledge acquisition workflow ENTERED.")
         try:
-            from gaia_core.utils import mcp_client
+            from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
             knowledge_base_name = None
             for field in packet.content.data_fields:
                 if field.key == 'knowledge_base_name':
@@ -2294,6 +2319,51 @@ class AgentCore:
         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)
         return f"{tag}\n\n"
 
+    def _nano_triage(self, user_input: str) -> str:
+        \"\"\"
+        Use the Nano model (0.5B) to perform a quick triage of the request.
+        Returns \"SIMPLE\" or \"COMPLEX\".
+        \"\"\"
+        if \"nano\" not in self.config.MODEL_CONFIGS:
+            return \"COMPLEX\" # Fallback to more capable models
+        
+        try:
+            # Ensure nano is loaded
+            self.model_pool.ensure_model_loaded(\"nano\")
+            nano = self.model_pool.get(\"nano\")
+            if not nano:
+                return \"COMPLEX\"
+
+            triage_system_prompt = \"\"\"
+You are the GAIA Triage Refiner. Your job is to determine if a request is SIMPLE or COMPLEX.
+SIMPLE: Greetings, time/date, system status, simple facts, short poems, basic formatting.
+COMPLEX: Coding, debugging, architectural design, deep philosophy, multi-step planning, long-form creative writing.
+
+Respond ONLY with:
+RESULT: SIMPLE
+or
+RESULT: COMPLEX (reason: <brief reason>)
+\"\"\"
+            messages = [
+                {\"role\": \"system\", \"content\": triage_system_prompt},
+                {\"role\": \"user\", \"content\": user_input}
+            ]
+            
+            # Use forward_to_model for lifecycle management if possible, 
+            # or just call directly since it's a quick triage.
+            res = nano.create_chat_completion(
+                messages=messages,
+                max_tokens=32,
+                temperature=0.1
+            )
+            content = res[\"choices\"][0][\"message\"][\"content\"].strip().upper()
+            if \"RESULT: SIMPLE\" in content:
+                return \"SIMPLE\"
+            return \"COMPLEX\"
+        except Exception:
+            logger.warning(\"Nano triage failed, falling back to COMPLEX\", exc_info=True)
+            return \"COMPLEX\"
+
     def _should_escalate_to_thinker(self, text: str) -> bool:
         """
         Lightweight heuristic to decide if a request should bypass Operator (lite)
@@ -2360,7 +2430,7 @@ class AgentCore:
         # Direct MCP path for toolish intents
         if intent == "list_tools":
             try:
-                from gaia_core.utils import mcp_client
+                from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
                 ts_write({"type": "sketch", "intent": "list_tools", "plan": [
                     "Plan: enumerate available MCP tools",
                     "1) Call MCP list_tools.",
@@ -2405,7 +2475,7 @@ class AgentCore:
 
         if intent == "find_file":
             try:
-                from gaia_core.utils import mcp_client
+                from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
                 ts_write({"type": "sketch", "intent": "find_file", "plan": [
                     "Plan: locate target file and summarize it",
                     "1) If an explicit path is provided, read it directly (if allowed).",
@@ -2484,7 +2554,7 @@ class AgentCore:
 
         if intent == "read_file":
             try:
-                from gaia_core.utils import mcp_client
+                from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
                 ts_write({"type": "sketch", "intent": "read_file", "plan": [
                     "Plan: read a file safely and summarize it",
                     "1) If a direct path is present, read it.",
@@ -2511,7 +2581,7 @@ class AgentCore:
                             summary_lines = preview.strip().splitlines()[:40]
                             summary_text = "\n".join(summary_lines)
                             try:
-                                rescue_helper.sketchpad_write(
+                                rescue_helper.sketch(
                                     "LastFileRead",
                                     f"Path: {p}\n\nPreview:\n{summary_text}"
                                 )
@@ -2550,7 +2620,7 @@ class AgentCore:
                                 summary_lines = preview.strip().splitlines()[:40]
                                 summary_text = "\n".join(summary_lines)
                                 try:
-                                    rescue_helper.sketchpad_write(
+                                    rescue_helper.sketch(
                                         "LastFileRead",
                                         f"Path: {path}\n\nPreview:\n{summary_text}"
                                     )
@@ -2833,7 +2903,7 @@ class AgentCore:
         Orchestrates: web_search → sort by trust tier → web_fetch top 3 → validate.
         Every failure path returns None so the caller can fall through gracefully.
         """
-        from gaia_core.utils import mcp_client
+        from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
 
         query = self._build_recitation_search_query(user_input)
         if not query:
@@ -3077,7 +3147,7 @@ Present {doc_title}:"""
             or a message with file path if output_as_file=True
         """
         import uuid
-        from gaia_core.utils import mcp_client
+        from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
 
         request_id = str(uuid.uuid4())[:8]
         fragment_keys: List[str] = []
@@ -3143,7 +3213,7 @@ Present {doc_title}:"""
             # Store fragment to sketchpad with unique key
             fragment_key = f"recitation_fragment_{request_id}_{fragment_sequence}"
             try:
-                rescue_helper.sketchpad_write(fragment_key, content)
+                rescue_helper.sketch(fragment_key, content)
                 fragment_keys.append(fragment_key)
                 self.logger.info(f"Stored fragment to sketchpad: {fragment_key}")
             except Exception as e:
@@ -3254,7 +3324,7 @@ Present {doc_title}:"""
 
             # Then try sketchpad
             try:
-                content = rescue_helper.sketchpad_read(key)
+                content = rescue_helper.show_sketchpad(key)
                 # sketchpad_read returns formatted output, extract just the content
                 if content and not content.startswith("[No sketch"):
                     # Format is "[timestamp] title\ncontent" - extract content after first newline
@@ -3307,7 +3377,7 @@ Present {doc_title}:"""
 
             # Then try sketchpad
             try:
-                content = rescue_helper.sketchpad_read(key)
+                content = rescue_helper.show_sketchpad(key)
                 if content and not content.startswith("[No sketch"):
                     lines = content.split("\n", 1)
                     fragment_text = lines[1] if len(lines) > 1 else content
@@ -3493,7 +3563,7 @@ Assembled response:"""
 
     def _run_mcp_list_tree(self) -> str:
         """Call MCP sidecar to list a bounded directory tree with approval."""
-        from gaia_core.utils import mcp_client
+        from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
         params = {"path": "/knowledge", "max_depth": 2, "max_entries": 120, "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
@@ -3514,7 +3584,7 @@ Assembled response:"""
                     if not write_appr.get("ok"):
                         return f"(Saved tree skipped due to approval error: {write_appr.get('error')})\nPreview:\n{preview}"
                     try:
-                        rescue_helper.sketchpad_write(
+                        rescue_helper.sketch(
                             "DirectoryTreeLatest",
                             f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
                         )
@@ -3524,7 +3594,7 @@ Assembled response:"""
                     # In bypass mode, attempt direct write
                     mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
                     try:
-                        rescue_helper.sketchpad_write(
+                        rescue_helper.sketch(
                             "DirectoryTreeLatest",
                             f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
                         )
@@ -3572,7 +3642,7 @@ Assembled response:"""
 
     def _run_mcp_list_files(self) -> str:
         """Call MCP sidecar to list files in a directory with approval."""
-        from gaia_core.utils import mcp_client
+        from gaia_core.utils.mcp_client import call_jsonrpc, ai_read, ai_write, ai_execute
         params = {"path": "/knowledge", "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 

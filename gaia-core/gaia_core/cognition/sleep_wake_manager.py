@@ -73,7 +73,12 @@ class SleepWakeManager:
         self.current_task: Optional[Dict[str, Any]] = None
         self.wake_signal_pending = False
         self._timeline = timeline_store
+        
+        # Check if prime is already available in the model pool at startup
         self.prime_available = False
+        if model_pool and ("gpu_prime" in model_pool.models or "prime" in model_pool.models):
+            self.prime_available = True
+            
         self.model_pool = model_pool
         self.idle_monitor = idle_monitor
         self.checkpoint_manager = PrimeCheckpointManager(config, timeline_store=timeline_store)
@@ -164,6 +169,7 @@ class SleepWakeManager:
             return False
 
         self.state = GaiaState.DROWSY
+        self.prime_available = False
         self.last_state_change = datetime.now(timezone.utc)
         self._emit_state_change("active", "drowsy", "idle threshold reached")
         logger.info("Entering DROWSY — writing checkpoint...")
@@ -406,13 +412,14 @@ class SleepWakeManager:
     # ------------------------------------------------------------------
 
     def initiate_offline(self) -> None:
-        """ANY → OFFLINE for graceful shutdown."""
+        \"\"\"ANY → OFFLINE for graceful shutdown.\"\"\"
         prev = self.state
         self.state = GaiaState.OFFLINE
         self._phase = _TransientPhase.NONE
+        self.prime_available = False
         self.last_state_change = datetime.now(timezone.utc)
-        self._emit_state_change(prev.value, "offline", "shutdown")
-        logger.info("Entering OFFLINE from %s", prev)
+        self._emit_state_change(prev.value, \"offline\", \"shutdown\")
+        logger.info(\"Entering OFFLINE from %s\", prev)
 
     # ------------------------------------------------------------------
     # Status / monitoring
