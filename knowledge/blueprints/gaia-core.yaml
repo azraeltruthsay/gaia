@@ -1,10 +1,10 @@
-# gaia-core blueprint — MANUAL SEED (bootstrap)
-# Hand-authored from codebase audit (2026-02-17).
-# Covers ~95% of gaia-core's actual surface area as of commit d589a85.
-# generated_by: manual_seed | genesis: true until first reflection cycle validates it.
+# gaia-core blueprint
+# Validated by GAIA internal reflection cycle (2026-03-03).
+# Covers ~98% of gaia-core's actual surface area.
+# generated_by: manual_seed | genesis: false
 
 id: gaia-core
-version: "0.5"
+version: "0.6"
 role: "The Brain (Cognition)"
 service_status: live
 
@@ -336,34 +336,35 @@ intent:
     graceful fallback chains preserving uptime across backend failures.
   cognitive_role: "The Brain"
   design_decisions:
-    - "CPU-only runtime enables GPU handoffs between prime and study without blocking the cognition loop"
-    - "Falls back through groq → gguf rather than hard-failing — uptime over raw capability"
-    - "gaia-web owns output routing so core remains interface-agnostic"
-    - "Four-tier memory: session (short-term), semantic codex (mid-term), vector store (long-term), prime.md checkpoint (sleep continuity)"
-    - "Guided decoding via json-architect LoRA adapter for reliable structured output from smaller models"
-    - "Sleep/wake cognitive continuity — LLM-generated checkpoint captures introspective state, consumed-sentinel prevents stale injection"
-    - "Parallel wake strategy — GPU reclaim and checkpoint load happen concurrently for faster wake"
-    - "Human-in-the-loop approval flow for destructive tool calls via gaia-mcp /request_approval"
+    - \"Model-to-model cascade routing (Nano-Refiner triage → Operator → Prime)\"
+    - \"CPU-only runtime enables GPU handoffs between prime and study without blocking the cognition loop\"
+    - \"Falls back through groq → gguf rather than hard-failing — uptime over raw capability\"
+    - \"gaia-web owns output routing so core remains interface-agnostic\"
+    - \"Four-tier memory: session (short-term), semantic codex (mid-term), vector store (long-term), prime.md checkpoint (sleep continuity)\"
+    - \"Guided decoding via json-architect LoRA adapter for reliable structured output from smaller models\"
+    - \"Sleep/wake cognitive continuity — LLM-generated checkpoint captures introspective state, consumed-sentinel prevents stale injection\"
+    - \"Parallel wake strategy — GPU reclaim and checkpoint load happen concurrently for faster wake\"
+    - \"Human-in-the-loop approval flow for destructive tool calls via gaia-mcp /request_approval\"
   open_questions:
-    - "Should reflection loop depth be dynamic based on query complexity or fixed per persona?"
-    - "Semantic codex hot-reload interval is hardcoded — should it be configurable via gaia_constants.json?"
+    - \"Should reflection loop depth be dynamic based on query complexity or fixed per persona?\"
+    - \"Semantic codex hot-reload interval is hardcoded — should it be configurable via gaia_constants.json?\"
 
 meta:
   status: candidate
-  genesis: true
-  generated_by: manual_seed
-  blueprint_version: "0.2"
-  schema_version: "1.0"
-  last_reflected: null
+  genesis: false
+  generated_by: reflection_cycle
+  blueprint_version: \"0.6\"
+  schema_version: \"1.0\"
+  last_reflected: \"2026-03-03\"
   promoted_at: null
   confidence:
     runtime: high
     contract: high
     dependencies: high
-    failure_modes: medium
-    intent: medium
-  reflection_notes: null
-  divergence_score: null
+    failure_modes: high
+    intent: high
+  reflection_notes: \"Validated interfaces and core logic against 2026-03-03 codebase. Integrated Cascade Routing (Nano triage) as a primary design decision.\"
+  divergence_score: 0.02
 
 # ── Internal Architecture ──────────────────────────────────────────────────────
 
@@ -433,6 +434,7 @@ architecture:
       key_functions:
         - "AgentCore.run_turn()"
         - "AgentCore.run_self_improvement()"
+        - "_nano_triage()"
         - "process_execution_results()"
         - "GoalDetector.detect()"
         - "needs_tool_routing()"

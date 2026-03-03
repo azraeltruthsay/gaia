@@ -16,7 +16,7 @@
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
   "llm_backend": "gpu_prime",
-  "max_tokens_lite": 32000,
+  "max_tokens_operator": 32000,
   "MODEL_CONFIGS": {
     "gpu_prime": {
       "enabled": true,
@@ -36,12 +36,14 @@
         "max_lora_rank": 64
       }
     },
-    "lite": {
+    "operator": {
       "enabled": true,
       "path": "/models/Qwen3-8B-abliterated-Q4_K_M.gguf",
       "strip_chat_template": true,
       "chat_format": "chatml",
-      "type": "local"
+      "type": "local",
+      "n_gpu_layers": 0,
+      "description": "The Cognitive Orchestrator (CPU-first, respects Prime priority)"
     },
     "observer": {
       "enabled": true,
@@ -73,9 +75,10 @@
     },
     "nano": {
       "enabled": true,
-      "path": "/models/Qwen3-0.5B-Instruct-GGUF/qwen3-0_5b-instruct-q8_0.gguf",
+      "path": "/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
       "type": "local",
-      "description": "Ultra-fast Nano-Refiner (0.5B) for simple tasks and formatting"
+      "n_gpu_layers": 0,
+      "description": "Ultra-fast Nano-Refiner (CPU-first)"
     }
   },
   "N_BATCH": 1024,
