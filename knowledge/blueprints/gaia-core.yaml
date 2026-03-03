@@ -1,666 +1,394 @@
-# gaia-core blueprint
-# Validated by GAIA internal reflection cycle (2026-03-03).
-# Covers ~98% of gaia-core's actual surface area.
-# generated_by: manual_seed | genesis: false
-
 id: gaia-core
-version: "0.6"
-role: "The Brain (Cognition)"
+version: '0.6'
+role: The Brain (Cognition)
 service_status: live
-
 runtime:
   port: 6415
   base_image: python:3.11-slim
   gpu: false
-  startup_cmd: "uvicorn gaia_core.main:app --host 0.0.0.0 --port 6415"
-  health_check: "curl -f http://localhost:6415/health"
-  user: "${UID}:${GID}"
+  startup_cmd: uvicorn gaia_core.main:app --host 0.0.0.0 --port 6415
+  health_check: curl -f http://localhost:6415/health
+  gpu_count: null
+  user: ${UID}:${GID}
   dockerfile: gaia-core/Dockerfile
   compose_service: gaia-core
-
+  security: null
 interfaces:
-
-  # ── Inbound ────────────────────────────────────────────────────────────────
-
-  - id: process_packet
-    direction: inbound
-    description: "Primary cognition entry point. Receives CognitionPackets from gaia-web, runs the full reasoning loop, returns completed packet."
-    status: active
-    transport:
-      type: http_rest
-      path: /process_packet
-      method: POST
-      input_schema: CognitionPacket
-      output_schema: CognitionPacket
-
-  - id: health
-    direction: inbound
-    description: "Container health check endpoint."
-    status: active
-    transport:
-      type: http_rest
-      path: /health
-      method: GET
-
-  - id: root
-    direction: inbound
-    description: "Root endpoint — returns list of available endpoints for service discovery."
-    status: active
-    transport:
-      type: http_rest
-      path: /
-      method: GET
-
-  - id: status
-    direction: inbound
-    description: "Cognitive status — current state, uptime, active sessions."
-    status: active
-    transport:
-      type: http_rest
-      path: /status
-      method: GET
-
-  - id: gpu_status
-    direction: inbound
-    description: "GPU allocation state — owned, released, or unavailable."
-    status: active
-    transport:
-      type: http_rest
-      path: /gpu/status
-      method: GET
-
-  - id: gpu_release
-    direction: inbound
-    description: "Release GPU to orchestrator pool. Called by gaia-orchestrator."
-    status: active
-    transport:
-      type: http_rest
-      path: /gpu/release
-      method: POST
-
-  - id: gpu_reclaim
-    direction: inbound
-    description: "Reclaim GPU from orchestrator pool. Called by gaia-orchestrator."
-    status: active
-    transport:
-      type: http_rest
-      path: /gpu/reclaim
-      method: POST
-
-  - id: sleep_wake
-    direction: inbound
-    description: "Wake signal from gaia-web — triggers transition from ASLEEP to WAKING."
-    status: active
-    transport:
-      type: http_rest
-      path: /sleep/wake
-      method: POST
-
-  - id: sleep_status
-    direction: inbound
-    description: "Query current sleep state (ACTIVE, DROWSY, ASLEEP, WAKING)."
-    status: active
-    transport:
-      type: http_rest
-      path: /sleep/status
-      method: GET
-
-  - id: sleep_study_handoff
-    direction: inbound
-    description: "Study handoff endpoint — orchestrator signals study cycle complete, GPU available."
-    status: active
-    transport:
-      type: http_rest
-      path: /sleep/study-handoff
-      method: POST
-
-  - id: sleep_distracted_check
-    direction: inbound
-    description: "Check if GAIA is asleep and should return a canned/distracted response."
-    status: active
-    transport:
-      type: http_rest
-      path: /sleep/distracted-check
-      method: GET
-
-  - id: sleep_shutdown
-    direction: inbound
-    description: "Graceful shutdown — completes current cycle, writes checkpoint, enters sleep."
-    status: active
-    transport:
-      type: http_rest
-      path: /sleep/shutdown
-      method: POST
-
-  # ── Outbound ───────────────────────────────────────────────────────────────
-
-  - id: prime_inference
-    direction: outbound
-    description: "LLM inference requests to gaia-prime via OpenAI-compatible API."
-    status: active
-    transport:
-      type: http_rest
-      path: /v1/chat/completions
-      method: POST
-
-  - id: prime_health
-    direction: outbound
-    description: "Health probe to gaia-prime on boot — sets prime_available flag."
-    status: active
-    transport:
-      type: http_rest
-      path: /health
-      method: GET
-
-  - id: mcp_dispatch
-    direction: outbound
-    description: "Tool execution requests dispatched to gaia-mcp via JSON-RPC."
-    status: active
-    transport:
-      type: mcp
-      target_service: gaia-mcp
-      methods: [run_shell, write_file, read_file, vector_query, memory_rebuild_index, request_approval]
-
-  - id: mcp_approval
-    direction: outbound
-    description: "Tool approval requests sent to gaia-mcp for human-in-the-loop confirmation."
-    status: active
-    transport:
-      type: http_rest
-      path: /request_approval
-      method: POST
-
-  - id: orchestrator_gpu_sleep
-    direction: outbound
-    description: "Notify orchestrator that gaia-core is entering sleep — GPU available for study."
-    status: active
-    transport:
-      type: http_rest
-      path: /gpu/sleep
-      method: POST
-
-  - id: orchestrator_gpu_wake
-    direction: outbound
-    description: "Notify orchestrator that gaia-core is waking — request GPU reclamation."
-    status: active
-    transport:
-      type: http_rest
-      path: /gpu/wake
-      method: POST
-
-  - id: web_presence
-    direction: outbound
-    description: "Presence updates to gaia-web — online/typing/sleeping status for Discord."
-    status: active
-    transport:
-      type: http_rest
-      path: /presence
-      method: POST
-
+- id: process_packet
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /process_packet
+    method: POST
+    input_schema: CognitionPacket
+    output_schema: CognitionPacket
+  description: Primary cognition entry point. Receives CognitionPackets from gaia-web,
+    runs the full reasoning loop, returns completed packet.
+  status: active
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Container health check endpoint.
+  status: active
+- id: root
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Root endpoint — returns list of available endpoints for service discovery.
+  status: active
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Cognitive status — current state, uptime, active sessions.
+  status: active
+- id: gpu_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GPU allocation state — owned, released, or unavailable.
+  status: active
+- id: gpu_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Release GPU to orchestrator pool. Called by gaia-orchestrator.
+  status: active
+- id: gpu_reclaim
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/reclaim
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Reclaim GPU from orchestrator pool. Called by gaia-orchestrator.
+  status: active
+- id: sleep_wake
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Wake signal from gaia-web — triggers transition from ASLEEP to WAKING.
+  status: active
+- id: sleep_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Query current sleep state (ACTIVE, DROWSY, ASLEEP, WAKING).
+  status: active
+- id: sleep_study_handoff
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/study-handoff
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Study handoff endpoint — orchestrator signals study cycle complete,
+    GPU available.
+  status: active
+- id: sleep_distracted_check
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/distracted-check
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Check if GAIA is asleep and should return a canned/distracted response.
+  status: active
+- id: sleep_shutdown
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/shutdown
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Graceful shutdown — completes current cycle, writes checkpoint, enters
+    sleep.
+  status: active
+- id: prime_inference
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /v1/chat/completions
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: LLM inference requests to gaia-prime via OpenAI-compatible API.
+  status: active
+- id: prime_health
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Health probe to gaia-prime on boot — sets prime_available flag.
+  status: active
+- id: mcp_dispatch
+  direction: outbound
+  transport:
+    type: mcp
+    target_service: gaia-mcp
+    methods:
+    - run_shell
+    - write_file
+    - read_file
+    - vector_query
+    - memory_rebuild_index
+    - request_approval
+  description: Tool execution requests dispatched to gaia-mcp via JSON-RPC.
+  status: active
+- id: mcp_approval
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /request_approval
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Tool approval requests sent to gaia-mcp for human-in-the-loop confirmation.
+  status: active
+- id: orchestrator_gpu_sleep
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /gpu/sleep
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Notify orchestrator that gaia-core is entering sleep — GPU available
+    for study.
+  status: active
+- id: orchestrator_gpu_wake
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /gpu/wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Notify orchestrator that gaia-core is waking — request GPU reclamation.
+  status: active
+- id: web_presence
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /presence
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Presence updates to gaia-web — online/typing/sleeping status for Discord.
+  status: active
 dependencies:
   services:
-    - id: gaia-prime
-      role: inference
-      required: false
-      fallback: groq-api
-    - id: gaia-mcp
-      role: tool_execution
-      required: false
-      fallback: null
-    - id: gaia-web
-      role: output_routing
-      required: true
-      fallback: null
-    - id: gaia-orchestrator
-      role: gpu_lifecycle
-      required: false
-      fallback: null
-
+  - id: gaia-prime
+    role: inference
+    required: false
+    fallback: groq-api
+  - id: gaia-mcp
+    role: tool_execution
+    required: false
+    fallback: null
+  - id: gaia-web
+    role: output_routing
+    required: true
+    fallback: null
+  - id: gaia-orchestrator
+    role: gpu_lifecycle
+    required: false
+    fallback: null
   volumes:
-    - name: gaia-shared
-      access: rw
-      purpose: "Session state, cognitive checkpoints, prime.md sleep notes"
-      mount_path: /shared
-    - name: knowledge
-      access: ro
-      purpose: "Blueprints, semantic codex, recitable docs"
-      mount_path: /knowledge
-    - name: vector_store
-      access: rw
-      purpose: "FAISS vector indices for long-term memory"
-      mount_path: /vector_store
-    - name: models
-      access: ro
-      purpose: "LoRA adapters (json-architect, persona weights)"
-      mount_path: /models
-    - name: logs
-      access: rw
-      purpose: "Structured cognition logs, heartbeat telemetry"
-      mount_path: /logs
-
+  - name: gaia-shared
+    access: rw
+    purpose: Session state, cognitive checkpoints, prime.md sleep notes
+    mount_path: /shared
+  - name: knowledge
+    access: ro
+    purpose: Blueprints, semantic codex, recitable docs
+    mount_path: /knowledge
+  - name: vector_store
+    access: rw
+    purpose: FAISS vector indices for long-term memory
+    mount_path: /vector_store
+  - name: models
+    access: ro
+    purpose: LoRA adapters (json-architect, persona weights)
+    mount_path: /models
+  - name: logs
+    access: rw
+    purpose: Structured cognition logs, heartbeat telemetry
+    mount_path: /logs
   external_apis:
-    - name: groq
-      purpose: inference_fallback_when_prime_unavailable
-      required: false
-    - name: openai
-      purpose: oracle_tier_inference
-      required: false
-    - name: gemini
-      purpose: oracle_tier_inference
-      required: false
-
+  - name: groq
+    purpose: inference_fallback_when_prime_unavailable
+    required: false
+  - name: openai
+    purpose: oracle_tier_inference
+    required: false
+  - name: gemini
+    purpose: oracle_tier_inference
+    required: false
 source_files:
-  - path: candidates/gaia-core/gaia_core/main.py
-    role: entrypoint
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/cognitive_dispatcher.py
-    role: core_logic
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/tool_selector.py
-    role: tool_routing
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/goal_detector.py
-    role: intent_detection
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/sleep_cycle_loop.py
-    role: sleep_lifecycle
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/sleep_wake_manager.py
-    role: sleep_state_machine
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/cognition/prime_checkpoint.py
-    role: cognitive_checkpoint
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/api/gpu_endpoints.py
-    role: gpu_api
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/api/sleep_endpoints.py
-    role: sleep_api
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/memory/session_manager.py
-    role: session_management
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/memory/semantic_codex.py
-    role: mid_term_memory
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/models/vllm_remote_model.py
-    role: inference_client
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/utils/mcp_client.py
-    role: tool_dispatch
-    file_type: python
-  - path: candidates/gaia-core/gaia_core/utils/prompt_builder.py
-    role: prompt_assembly
-    file_type: python
-  - path: gaia-common/gaia_common/constants/gaia_constants.json
-    role: config
-    file_type: json
-
+- path: gaia-core/gaia_core/main.py
+  role: entrypoint
+  file_type: python
+- path: gaia-core/gaia_core/cognition/agent_core.py
+  role: core_logic
+  file_type: python
+- path: gaia-core/gaia_core/cognition/sleep_cycle_loop.py
+  role: sleep_lifecycle
+  file_type: python
+- path: gaia-core/gaia_core/cognition/sleep_wake_manager.py
+  role: sleep_state_machine
+  file_type: python
+- path: gaia-core/gaia_core/utils/prompt_builder.py
+  role: prompt_assembly
+  file_type: python
+- path: gaia-common/gaia_common/constants/gaia_constants.json
+  role: config
+  file_type: json
 failure_modes:
-  - condition: "gaia-prime unavailable"
-    response: "Falls back to Groq API; if Groq unavailable, falls back to local GGUF model"
-    severity: degraded
-    auto_recovers: true
-
-  - condition: "gaia-mcp unavailable"
-    response: "Tool calls skipped; responds with capability_unavailable in packet"
-    severity: degraded
-    auto_recovers: true
-
-  - condition: "All inference backends unavailable"
-    response: "Returns error packet to gaia-web; session preserved for retry"
-    severity: partial
-    auto_recovers: false
-
-  - condition: "Session state corruption"
-    response: "Clears session, starts fresh, logs incident to heartbeat"
-    severity: degraded
-    auto_recovers: true
-
-  - condition: "gaia-orchestrator unreachable"
-    response: "Sleep/wake GPU handoff skipped; gaia-core retains GPU, study cycle deferred"
-    severity: degraded
-    auto_recovers: true
-
-  - condition: "Checkpoint write failure"
-    response: "Sleep proceeds without checkpoint; next wake has no prime.md restoration context"
-    severity: degraded
-    auto_recovers: true
-
+- condition: gaia-prime unavailable
+  response: Falls back to Groq API; if Groq unavailable, falls back to local GGUF
+    model
+  severity: degraded
+  auto_recovers: true
+- condition: gaia-mcp unavailable
+  response: Tool calls skipped; responds with capability_unavailable in packet
+  severity: degraded
+  auto_recovers: true
+- condition: All inference backends unavailable
+  response: Returns error packet to gaia-web; session preserved for retry
+  severity: partial
+  auto_recovers: false
 intent:
-  purpose: >
-    The cognitive engine of GAIA. Runs the full reasoning loop: intent detection,
-    tool routing, multi-step reflection, and response generation. Deliberately
-    CPU-only to allow gaia-prime and gaia-study to share the GPU without
-    interrupting cognition. All inference is delegated to gaia-prime, with
-    graceful fallback chains preserving uptime across backend failures.
-  cognitive_role: "The Brain"
-  design_decisions:
-    - \"Model-to-model cascade routing (Nano-Refiner triage → Operator → Prime)\"
-    - \"CPU-only runtime enables GPU handoffs between prime and study without blocking the cognition loop\"
-    - \"Falls back through groq → gguf rather than hard-failing — uptime over raw capability\"
-    - \"gaia-web owns output routing so core remains interface-agnostic\"
-    - \"Four-tier memory: session (short-term), semantic codex (mid-term), vector store (long-term), prime.md checkpoint (sleep continuity)\"
-    - \"Guided decoding via json-architect LoRA adapter for reliable structured output from smaller models\"
-    - \"Sleep/wake cognitive continuity — LLM-generated checkpoint captures introspective state, consumed-sentinel prevents stale injection\"
-    - \"Parallel wake strategy — GPU reclaim and checkpoint load happen concurrently for faster wake\"
-    - \"Human-in-the-loop approval flow for destructive tool calls via gaia-mcp /request_approval\"
-  open_questions:
-    - \"Should reflection loop depth be dynamic based on query complexity or fixed per persona?\"
-    - \"Semantic codex hot-reload interval is hardcoded — should it be configurable via gaia_constants.json?\"
+  purpose: 'The cognitive engine of GAIA. Runs the full reasoning loop: intent detection,
+    tool routing, multi-step reflection, and response generation. Deliberately CPU-only
+    to allow gaia-prime and gaia-study to share the GPU without interrupting cognition.
+    All inference is delegated to gaia-prime, with graceful fallback chains preserving
+    uptime across backend failures.
 
+    '
+  design_decisions:
+  - Model-to-model cascade routing (Nano-Refiner triage → Operator → Prime)
+  - CPU-only runtime enables GPU handoffs between prime and study without blocking
+    the cognition loop
+  - Falls back through groq → gguf rather than hard-failing — uptime over raw capability
+  - gaia-web owns output routing so core remains interface-agnostic
+  - 'Four-tier memory: session (short-term), semantic codex (mid-term), vector store
+    (long-term), prime.md checkpoint (sleep continuity)'
+  - Guided decoding via json-architect LoRA adapter for reliable structured output
+    from smaller models
+  - Sleep/wake cognitive continuity — LLM-generated checkpoint captures introspective
+    state, consumed-sentinel prevents stale injection
+  - Parallel wake strategy — GPU reclaim and checkpoint load happen concurrently for
+    faster wake
+  - Human-in-the-loop approval flow for destructive tool calls via gaia-mcp /request_approval
+  open_questions: []
+  cognitive_role: The Brain
+architecture:
+  components:
+  - id: api_layer
+    label: API Layer
+    description: FastAPI entrypoint and endpoint routers.
+    source_files:
+    - gaia-core/gaia_core/main.py
+    key_classes: []
+    key_functions: []
+    exposes_interfaces:
+    - process_packet
+    - health
+    - root
+    - status
+    - gpu_status
+    - gpu_release
+    - gpu_reclaim
+    - sleep_wake
+    - sleep_status
+    - sleep_study_handoff
+    - sleep_distracted_check
+    - sleep_shutdown
+    consumes_interfaces: []
+  - id: cognition_engine
+    label: Cognition Engine
+    description: Core reasoning loop. AgentCore runs multi-turn reasoning with self-improvement.
+    source_files:
+    - gaia-core/gaia_core/cognition/agent_core.py
+    key_classes: []
+    key_functions:
+    - AgentCore.run_turn()
+    - _nano_triage()
+    exposes_interfaces: []
+    consumes_interfaces: []
+  - id: sleep_system
+    label: Sleep/Wake System
+    description: Manages ACTIVE → DROWSY → ASLEEP → WAKING lifecycle.
+    source_files:
+    - gaia-core/gaia_core/cognition/sleep_cycle_loop.py
+    - gaia-core/gaia_core/cognition/sleep_wake_manager.py
+    key_classes: []
+    key_functions: []
+    exposes_interfaces: []
+    consumes_interfaces: []
+  edges:
+  - from_component: api_layer
+    to_component: cognition_engine
+    label: dispatches CognitionPackets to
+    transport: function_call
+    data_flow: CognitionPacket
+  - from_component: api_layer
+    to_component: sleep_system
+    label: routes sleep/wake/GPU endpoints to
+    transport: function_call
+    data_flow: wake signal, sleep commands
 meta:
-  status: candidate
+  status: live
   genesis: false
-  generated_by: reflection_cycle
-  blueprint_version: \"0.6\"
-  schema_version: \"1.0\"
-  last_reflected: \"2026-03-03\"
-  promoted_at: null
+  generated_by: reflection
+  blueprint_version: '0.6'
+  schema_version: '1.0'
+  created_at: '2026-03-03T15:31:40.161057Z'
+  last_reflected: '2026-03-03T15:30:00Z'
+  promoted_at: '2026-03-03T15:30:00Z'
   confidence:
     runtime: high
     contract: high
     dependencies: high
     failure_modes: high
     intent: high
-  reflection_notes: \"Validated interfaces and core logic against 2026-03-03 codebase. Integrated Cascade Routing (Nano triage) as a primary design decision.\"
+  reflection_notes: Validated interfaces and core logic against 2026-03-03 codebase.
+    Integrated Cascade Routing (Nano triage) as a primary design decision.
   divergence_score: 0.02
-
-# ── Internal Architecture ──────────────────────────────────────────────────────
-
-architecture:
-  components:
-
-    - id: api_layer
-      label: "API Layer"
-      description: >
-        FastAPI entrypoint and endpoint routers. Receives HTTP requests,
-        deserializes CognitionPackets, and routes to the cognition engine.
-        Includes GPU lifecycle endpoints (release/reclaim) and sleep/wake
-        control endpoints used by gaia-orchestrator and gaia-web respectively.
-      source_files:
-        - candidates/gaia-core/gaia_core/main.py
-        - candidates/gaia-core/gaia_core/api/gpu_endpoints.py
-        - candidates/gaia-core/gaia_core/api/sleep_endpoints.py
-      key_classes:
-        - "AIManagerShim"
-        - "GPUReleaseRequest"
-        - "GPUReclaimRequest"
-      key_functions:
-        - "initialize_cognitive_system()"
-        - "process_packet(packet_data)"
-        - "gpu_status()"
-        - "gpu_release(request)"
-        - "gpu_reclaim(request)"
-        - "receive_wake_signal(request)"
-        - "get_sleep_status()"
-        - "study_handoff(request)"
-      exposes_interfaces:
-        - process_packet
-        - health
-        - root
-        - status
-        - gpu_status
-        - gpu_release
-        - gpu_reclaim
-        - sleep_wake
-        - sleep_status
-        - sleep_study_handoff
-        - sleep_distracted_check
-        - sleep_shutdown
-
-    - id: cognition_engine
-      label: "Cognition Engine"
-      description: >
-        Core reasoning loop. AgentCore runs multi-turn reasoning with
-        self-improvement. CognitiveDispatcher processes execution results.
-        GoalDetector identifies user intent via fast-path heuristics or
-        LLM classification. ToolSelector decides if/which MCP tools are
-        needed. ExternalVoice generates LLM responses. SelfReflection
-        reviews output quality before delivery.
-      source_files:
-        - candidates/gaia-core/gaia_core/cognition/agent_core.py
-        - candidates/gaia-core/gaia_core/cognition/cognitive_dispatcher.py
-        - candidates/gaia-core/gaia_core/cognition/goal_detector.py
-        - candidates/gaia-core/gaia_core/cognition/tool_selector.py
-        - candidates/gaia-core/gaia_core/cognition/external_voice.py
-        - candidates/gaia-core/gaia_core/cognition/self_reflection.py
-        - candidates/gaia-core/gaia_core/cognition/knowledge_enhancer.py
-        - candidates/gaia-core/gaia_core/cognition/knowledge_ingestion.py
-      key_classes:
-        - "AgentCore"
-        - "GoalDetector"
-        - "ExternalVoice"
-      key_functions:
-        - "AgentCore.run_turn()"
-        - "AgentCore.run_self_improvement()"
-        - "_nano_triage()"
-        - "process_execution_results()"
-        - "GoalDetector.detect()"
-        - "needs_tool_routing()"
-        - "select_tool()"
-        - "ExternalVoice.stream_response()"
-        - "reflect_and_refine()"
-        - "enhance_packet()"
-
-    - id: sleep_system
-      label: "Sleep/Wake System"
-      description: >
-        Manages ACTIVE → DROWSY → ASLEEP → WAKING lifecycle. SleepCycleLoop
-        is the main event loop driving state transitions. SleepWakeManager
-        is the state machine (GaiaState enum). PrimeCheckpointManager writes
-        LLM-generated introspective checkpoints (prime.md) on sleep and marks
-        them consumed on wake. SleepTaskScheduler runs background tasks
-        (conversation curation, thought seed review, blueprint validation)
-        during sleep windows.
-      source_files:
-        - candidates/gaia-core/gaia_core/cognition/sleep_cycle_loop.py
-        - candidates/gaia-core/gaia_core/cognition/sleep_wake_manager.py
-        - candidates/gaia-core/gaia_core/cognition/prime_checkpoint.py
-        - candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py
-      key_classes:
-        - "SleepCycleLoop"
-        - "GaiaState"
-        - "SleepWakeManager"
-        - "PrimeCheckpointManager"
-        - "SleepTaskScheduler"
-        - "SleepTask"
-      key_functions:
-        - "SleepCycleLoop.start()"
-        - "SleepWakeManager.initiate_drowsy()"
-        - "SleepWakeManager.receive_wake_signal()"
-        - "SleepWakeManager.complete_wake()"
-        - "PrimeCheckpointManager.create_checkpoint()"
-        - "PrimeCheckpointManager.mark_consumed()"
-        - "SleepTaskScheduler.execute_task()"
-
-    - id: memory_system
-      label: "Memory System"
-      description: >
-        Four-tier memory architecture. SessionManager handles per-conversation
-        history with summarize-and-archive. SemanticCodex provides mid-term
-        cross-session recall via symbol-indexed entries. SessionHistoryIndexer
-        builds per-session vector indices for semantic retrieval within a
-        conversation. MemoryManager is the top-level singleton coordinating
-        short/long-term access. CodexWriter generates structured codex entries
-        from conversations using LLM refinement.
-      source_files:
-        - candidates/gaia-core/gaia_core/memory/session_manager.py
-        - candidates/gaia-core/gaia_core/memory/semantic_codex.py
-        - candidates/gaia-core/gaia_core/memory/memory_manager.py
-        - candidates/gaia-core/gaia_core/memory/session_history_indexer.py
-        - candidates/gaia-core/gaia_core/memory/codex_writer.py
-      key_classes:
-        - "SessionManager"
-        - "Session"
-        - "SemanticCodex"
-        - "CodexEntry"
-        - "MemoryManager"
-        - "SessionHistoryIndexer"
-        - "CodexWriter"
-      key_functions:
-        - "SessionManager.get_or_create_session()"
-        - "SessionManager.add_message()"
-        - "SessionManager.summarize_and_archive()"
-        - "SemanticCodex.write_entry()"
-        - "SemanticCodex.search()"
-        - "MemoryManager.query_long()"
-
-    - id: model_pool
-      label: "Model Pool"
-      description: >
-        Unified inference abstraction over multiple LLM backends. ModelPool
-        provides role-based model selection (primary, fallback, lite, oracle).
-        VLLMRemoteModel calls gaia-prime's OpenAI-compatible API. GroqAPIModel
-        provides free-tier cloud fallback. GPTAPIModel and GeminiAPIModel are
-        oracle backends for high-quality reasoning. All backends implement
-        create_chat_completion() for uniform access. Supports LoRA adapter
-        hot-loading and health-checked failover.
-      source_files:
-        - candidates/gaia-core/gaia_core/models/_model_pool_impl.py
-        - candidates/gaia-core/gaia_core/models/model_manager.py
-        - candidates/gaia-core/gaia_core/models/vllm_remote_model.py
-        - candidates/gaia-core/gaia_core/models/groq_model.py
-        - candidates/gaia-core/gaia_core/models/oracle_model.py
-        - candidates/gaia-core/gaia_core/models/gemini_model.py
-      key_classes:
-        - "ModelPool"
-        - "ModelManager"
-        - "VLLMRemoteModel"
-        - "GroqAPIModel"
-        - "GPTAPIModel"
-        - "GeminiAPIModel"
-      key_functions:
-        - "ModelPool.get_model_for_role()"
-        - "ModelPool.forward_to_model()"
-        - "ModelPool.load_prime_only()"
-        - "VLLMRemoteModel.create_chat_completion()"
-        - "VLLMRemoteModel.health_check()"
-      consumes_interfaces:
-        - prime_inference
-        - prime_health
-
-    - id: tool_dispatch
-      label: "Tool Dispatch (MCP Client)"
-      description: >
-        JSON-RPC client for communicating with gaia-mcp. Provides typed
-        wrappers for all MCP tool methods: file I/O, shell execution,
-        vector queries, knowledge management, and fragment assembly.
-        Includes approval workflow integration for sensitive operations.
-      source_files:
-        - candidates/gaia-core/gaia_core/utils/mcp_client.py
-      key_classes: []
-      key_functions:
-        - "call_jsonrpc()"
-        - "dispatch_sidecar_actions()"
-        - "ai_read()"
-        - "ai_write()"
-        - "ai_execute()"
-        - "embedding_query()"
-        - "request_approval_via_mcp()"
-        - "discover()"
-      consumes_interfaces:
-        - mcp_dispatch
-        - mcp_approval
-
-    - id: prompt_assembly
-      label: "Prompt Assembly & Output Routing"
-      description: >
-        Builds the final LLM prompt from conversation history, knowledge
-        context, persona config, sleep checkpoint injection, and system
-        instructions. OutputRouter post-processes LLM output — strips
-        think tags, CJK artifacts, and GCP metadata, then parses structured
-        fields back into the CognitionPacket.
-      source_files:
-        - candidates/gaia-core/gaia_core/utils/prompt_builder.py
-        - candidates/gaia-core/gaia_core/utils/output_router.py
-      key_functions:
-        - "build_from_packet()"
-        - "build_prompt()"
-        - "route_output()"
-        - "_parse_llm_output_into_packet()"
-
-    - id: resilience
-      label: "Resilience & Loop Detection"
-      description: >
-        Detects and recovers from cognitive loops — repeated tool calls,
-        similar outputs, state oscillation, error cycles, and token pattern
-        repetition. LoopDetector aggregates 5 specialized detectors.
-        LoopRecoveryManager captures state and injects recovery context.
-        StreamObserver monitors output quality in real-time. ResourceMonitor
-        tracks system resource pressure for distracted-state detection.
-      source_files:
-        - candidates/gaia-core/gaia_core/cognition/loop_detector.py
-        - candidates/gaia-core/gaia_core/cognition/loop_recovery.py
-        - candidates/gaia-core/gaia_core/cognition/loop_patterns.py
-        - candidates/gaia-core/gaia_core/utils/stream_observer.py
-        - candidates/gaia-core/gaia_core/utils/resource_monitor.py
-      key_classes:
-        - "LoopDetector"
-        - "LoopDetectionAggregator"
-        - "LoopRecoveryManager"
-        - "StreamObserver"
-        - "ResourceMonitor"
-      key_functions:
-        - "LoopDetector.check()"
-        - "LoopDetector.trigger_reset()"
-        - "LoopRecoveryManager.check_and_handle()"
-        - "StreamObserver.observe()"
-        - "ResourceMonitor.is_distracted()"
-
-  edges:
-    - from_component: api_layer
-      to_component: cognition_engine
-      label: "dispatches CognitionPackets to"
-      data_flow: "CognitionPacket"
-
-    - from_component: api_layer
-      to_component: sleep_system
-      label: "routes sleep/wake/GPU endpoints to"
-      data_flow: "wake signal, sleep commands"
-
-    - from_component: cognition_engine
-      to_component: model_pool
-      label: "requests LLM completions via"
-      data_flow: "messages[] → completion text"
-
-    - from_component: cognition_engine
-      to_component: tool_dispatch
-      label: "sends tool execution requests to"
-      data_flow: "JSON-RPC method + params"
-
-    - from_component: cognition_engine
-      to_component: memory_system
-      label: "reads/writes session state and knowledge"
-      data_flow: "session_id, messages, codex entries"
-
-    - from_component: cognition_engine
-      to_component: prompt_assembly
-      label: "builds prompts and routes output via"
-      data_flow: "context → prompt, output → parsed packet"
-
-    - from_component: cognition_engine
-      to_component: resilience
-      label: "monitors for loops and quality issues"
-      data_flow: "tool calls, outputs, state transitions"
-
-    - from_component: sleep_system
-      to_component: model_pool
-      label: "generates LLM checkpoint via lite model"
-      data_flow: "metacognitive prompt → checkpoint text"
-
-    - from_component: sleep_system
-      to_component: memory_system
-      label: "reads evolving summary for checkpoint context"
-      data_flow: "session summary text"
-
-    - from_component: sleep_system
-      to_component: cognition_engine
-      label: "runs sleep tasks (curation, thought seeds)"
-      transport: "function_call"
-      data_flow: "SleepTask → task results"
-
-    - from_component: prompt_assembly
-      to_component: memory_system
-      label: "retrieves history and knowledge context"
-      data_flow: "session history, codex results"
