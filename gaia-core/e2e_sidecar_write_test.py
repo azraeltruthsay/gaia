@@ -182,7 +182,8 @@ EXECUTE: write_file {json.dumps({"path": test_path, "content": test_content})}""
     # --- 5. Verify file contents ---
     print("\n--- File Verification ---")
     if write_succeeded:
-        read_result = mcp_client.call_jsonrpc("read_file", {"path": test_path})
+        import asyncio
+        read_result = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": test_path}))
         if read_result.get("ok"):
             rpc_resp = read_result.get("response", {})
             tool_data = rpc_resp.get("result", rpc_resp)

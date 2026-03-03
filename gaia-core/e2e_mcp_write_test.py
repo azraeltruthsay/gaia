@@ -68,10 +68,11 @@ def main() -> int:
     test_path = "/knowledge/e2e_test_write_file.txt"
     test_content = f"E2E write test at {time.strftime('%Y-%m-%d %H:%M:%S')}"
 
-    result = mcp_client.call_jsonrpc("write_file", {
+    import asyncio
+    result = asyncio.run(mcp_client.call_jsonrpc("write_file", {
         "path": test_path,
-        "content": test_content,
-    })
+        "content": test_content
+    }))
     # Should fail with 403 or error indicating approval required
     is_blocked = not result.get("ok", True)
     err_msg = str(result.get("error", ""))
@@ -123,7 +124,7 @@ def main() -> int:
     # The file is inside the gaia-mcp container's /knowledge mount.
     # From gaia-core-candidate, /knowledge is read-only, but we can use
     # MCP read_file to verify the content.
-    read_result = mcp_client.call_jsonrpc("read_file", {"path": test_path})
+    read_result = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": test_path}))
     read_ok = read_result.get("ok", False)
     if read_ok:
         response = read_result.get("response", {})

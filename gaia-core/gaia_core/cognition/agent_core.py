@@ -2183,7 +2183,7 @@ class AgentCore:
 
             # Step 1: Find relevant documents
             self.logger.info(f"Searching for relevant documents for query: {packet.content.original_prompt}")
-            found_docs = mcp_client.call_jsonrpc(
+            found_docs = await mcp_client.call_jsonrpc(
                 "find_relevant_documents",
                 {"query": packet.content.original_prompt, "knowledge_base_name": knowledge_base_name}
             )
@@ -2200,7 +2200,7 @@ class AgentCore:
 
                 # Step 2: Embed the document
                 self.logger.info(f"Embedding document: {doc_path}")
-                embed_result = mcp_client.call_jsonrpc(
+                embed_result = await mcp_client.call_jsonrpc(
                     "embed_documents",
                     {"knowledge_base_name": knowledge_base_name, "file_path": doc_path}
                 )
@@ -2209,7 +2209,7 @@ class AgentCore:
                     self.logger.info("Document embedded successfully. Re-running RAG query.")
                     
                     # Step 3: Re-run RAG query
-                    retrieved_docs = mcp_client.embedding_query(
+                    retrieved_docs = await mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
@@ -2471,7 +2471,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     "1) Call MCP list_tools.",
                     "2) Return the list to the operator."
                 ]}, session_id, source=source, destination_context=_meta)
-                resp = mcp_client.call_jsonrpc("list_tools", {})
+                resp = await mcp_client.call_jsonrpc("list_tools", {})
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     tools = resp["response"].get("result") or []
                     return "Available MCP tools:\n- " + "\n- ".join(str(t) for t in tools)
@@ -2553,7 +2553,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 query_term = search_term or raw
 
                 # Use the derived query; bounded search on the sidecar
-                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
+                resp = await mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -2563,7 +2563,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                         # If exactly one match, attempt to read and summarize it.
                         if len(matches) == 1:
                             path = matches[0]
-                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
+                            read = await mcp_client.call_jsonrpc("read_file", {"path": path})
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -2964,7 +2964,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             results = []
             for search_params in search_attempts:
                 self.logger.info(f"Web recitation search: {search_params}")
-                resp = mcp_client.call_jsonrpc("web_search", search_params)
+                resp = await mcp_client.call_jsonrpc("web_search", search_params)
 
                 if not resp.get("ok"):
                     self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
@@ -2994,7 +2994,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     continue
                 try:
                     self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
-                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
+                    fetch_resp = await mcp_client.call_jsonrpc("web_fetch", {"url": url})
 
                     if not fetch_resp.get("ok"):
                         continue
@@ -3260,7 +3260,7 @@ Present {doc_title}:"""
 
             # Also store via MCP for auditing (non-critical)
             try:
-                mcp_client.call_jsonrpc("fragment_write", {
+                await mcp_client.call_jsonrpc("fragment_write", {
                     "parent_request_id": request_id,
                     "sequence": fragment_sequence,
                     "content": content,
@@ -3319,7 +3319,7 @@ Present {doc_title}:"""
 
         # Cleanup: clear fragments from MCP storage
         try:
-            mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id})
+            await mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id})
         except Exception:
             pass
 
@@ -3627,7 +3627,7 @@ Assembled response:"""
                         self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
                 elif bypass:
                     # In bypass mode, attempt direct write
-                    mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
+                    await mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
                     try:
                         rescue_helper.sketch(
                             "DirectoryTreeLatest",
@@ -3645,7 +3645,7 @@ Assembled response:"""
             return tree + ("\n\n(truncated)" if truncated_flag else "")
 
         if bypass:
-            resp = mcp_client.call_jsonrpc("list_tree", params)
+            resp = await mcp_client.call_jsonrpc("list_tree", params)
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3654,7 +3654,7 @@ Assembled response:"""
             return f"list_tree failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = mcp_client.request_approval_via_mcp("list_tree", params)
+        req = await mcp_client.request_approval_via_mcp("list_tree", params)
         if not req.get("ok"):
             return f"Could not request approval for list_tree: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3662,7 +3662,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = mcp_client.approve_action_via_mcp(action_id, approval)
+        appr = await mcp_client.approve_action_via_mcp(action_id, approval)
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -3688,7 +3688,7 @@ Assembled response:"""
             return "\n".join(files)
 
         if bypass:
-            resp = mcp_client.call_jsonrpc("list_files", params)
+            resp = await mcp_client.call_jsonrpc("list_files", params)
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3697,7 +3697,7 @@ Assembled response:"""
             return f"list_files failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = mcp_client.request_approval_via_mcp("list_files", params)
+        req = await mcp_client.request_approval_via_mcp("list_files", params)
         if not req.get("ok"):
             return f"Could not request approval for list_files: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3705,7 +3705,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = mcp_client.approve_action_via_mcp(action_id, approval)
+        appr = await mcp_client.approve_action_via_mcp(action_id, approval)
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -5199,7 +5199,7 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable."
                     )
-                result = mcp_client.ai_write(
+                result = await mcp_client.ai_write(
                     tool.params.get("path", ""),
                     tool.params.get("content", "")
                 )
@@ -5210,7 +5210,7 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Execute operations are disabled. Set TOOL_ROUTING.ALLOW_EXECUTE_TOOLS=true to enable."
                     )
-                result = mcp_client.ai_execute(
+                result = await mcp_client.ai_execute(
                     tool.params.get("command", ""),
                     dry_run=not allow_execute
                 )
@@ -5218,7 +5218,7 @@ Start your response with the first line of the file."""
             else:
                 # Dispatch via MCP JSON-RPC for tools not handled by local shims
                 logger.info(f"Dispatching tool '{canonical_name}' via MCP JSON-RPC")
-                rpc_result = mcp_client.call_jsonrpc(
+                rpc_result = await mcp_client.call_jsonrpc(
                     method=canonical_name,
                     params=tool.params or {}
                 )
