@@ -345,9 +345,16 @@ async def synthesize(request: SynthesizeRequest):
         # Use requested engine override or default
         engine = tts_engine
         if request.engine and request.engine != tts_engine.engine_type:
-            # TODO: support dynamic engine switching
-            logger.warning("Engine override requested (%s) but not yet supported; using %s",
-                           request.engine, tts_engine.engine_type)
+            # Check for cloud fallback providers
+            if request.engine in ["elevenlabs", "openai"]:
+                logger.info("Using cloud TTS provider: %s", request.engine)
+                # Cloud providers would be handled via a separate CloudTTSEngine class
+                # For now, we fallback to local but log the intent
+                logger.warning("%s requested but dynamic cloud switching not fully implemented; falling back to %s",
+                               request.engine, tts_engine.engine_type)
+            else:
+                logger.warning("Engine override requested (%s) not supported; using %s",
+                               request.engine, tts_engine.engine_type)
 
         result = await gpu_manager.run_tts(
             engine.synthesize_sync,
