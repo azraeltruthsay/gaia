@@ -305,6 +305,8 @@ services:
       - ./candidates/gaia-common:/app/gaia-common:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - .:/gaia/GAIA_Project:ro
+      # Override candidates/ as rw so the rollback endpoint can run `git checkout <sha> -- candidates/`
+      - ./candidates:/gaia/GAIA_Project/candidates:rw
       - gaia-candidate-shared:/shared:rw
 
     environment:

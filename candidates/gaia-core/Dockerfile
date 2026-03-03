@@ -30,10 +30,10 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Copy requirements first for better caching
-COPY candidates/gaia-core/requirements.txt .
+COPY gaia-core/requirements.txt .
 
 # Copy gaia-common source code so it's available to be installed by requirements.txt
-COPY candidates/gaia-common /gaia-common
+COPY gaia-common /gaia-common
 
 # Install Python dependencies
 # GPU inference is handled by gaia-prime — no GPU packages needed here
@@ -42,18 +42,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ═══════════════════════════════════════════════════════════════════════════
 # Install development dependencies for validation (pytest, ruff, mypy)
 # ═══════════════════════════════════════════════════════════════════════════
-COPY candidates/gaia-core/pyproject.toml .
-COPY candidates/gaia-core/README.md .
+COPY gaia-core/pyproject.toml .
+COPY gaia-core/README.md .
 RUN pip install -e ".[dev]"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Copy service code
 # ═══════════════════════════════════════════════════════════════════════════
 
-COPY candidates/gaia-core/gaia_core/ ./gaia_core/
-COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
+COPY gaia-core/gaia_core/ ./gaia_core/
+COPY gaia-core/gaia_rescue.py ./gaia_rescue.py
 # Copy canonical constants file from gaia-common (single source of truth)
-COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
+COPY gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
 # Create writable directories and set ownership
 RUN mkdir -p /app/.pytest_cache /logs \

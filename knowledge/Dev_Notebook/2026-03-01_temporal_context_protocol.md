@@ -1,4 +1,7 @@
 # Dev Journal: Temporal Context Protocol (Design)
+---
+🔙 [[00_Index.md|Master Index]]
+---
 **Date:** 2026-03-01
 **Architect:** Azrael (via Gemini CLI)
 

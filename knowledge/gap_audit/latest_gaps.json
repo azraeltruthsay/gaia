@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-02-28T14:03:48Z",
-  "gap_count": 31,
+  "timestamp": "2026-03-03T05:28:17Z",
+  "gap_count": 32,
   "gaps": [
     {
       "type": "undocumented_module",
@@ -10,6 +10,11 @@
     {
       "type": "undocumented_module",
       "module": "audio_commentary",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "candidate_checkpoint",
       "search_dir": "knowledge/system_reference/core_documents/"
     },
     {

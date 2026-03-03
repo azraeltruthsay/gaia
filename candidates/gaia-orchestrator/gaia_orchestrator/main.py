@@ -6,11 +6,16 @@ Central coordination service for GPU resources and container lifecycle.
 
 import asyncio
 import logging
+import re
+import subprocess
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 
 from .config import get_config
 from .state import get_state_manager, StateManager
@@ -553,6 +558,146 @@ async def gpu_wake():
     except Exception as e:
         logger.exception(f"Error reclaiming GPU on wake: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Candidate Rollback Endpoints
+# =============================================================================
+
+# Maps logical service names to container names (must match docker-compose.candidate.yml)
+_CANDIDATE_CONTAINERS: dict[str, str] = {
+    "core":         "gaia-core-candidate",
+    "web":          "gaia-web-candidate",
+    "mcp":          "gaia-mcp-candidate",
+    "study":        "gaia-study-candidate",
+    "orchestrator": "gaia-orchestrator-candidate",
+    "audio":        "gaia-audio-candidate",
+    "prime":        "gaia-prime-candidate",
+}
+
+_REPO_ROOT = Path("/gaia/GAIA_Project")
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+class RollbackRequest(BaseModel):
+    sha: str
+    services: List[str]
+
+    @field_validator("sha")
+    @classmethod
+    def _validate_sha(cls, v: str) -> str:
+        if not _SHA_RE.match(v):
+            raise ValueError(f"Invalid git SHA: {v!r}")
+        return v
+
+    @field_validator("services")
+    @classmethod
+    def _validate_services(cls, v: List[str]) -> List[str]:
+        unknown = set(v) - set(_CANDIDATE_CONTAINERS)
+        if unknown:
+            raise ValueError(f"Unknown services: {unknown}")
+        return v
+
+
+@app.get("/candidate/snapshot")
+async def candidate_snapshot():
+    """Return the current git HEAD SHA — the stable-state reference for the resilience pipeline."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git rev-parse failed: {result.stderr.strip()}")
+        sha = result.stdout.strip()
+        return {
+            "sha": sha,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="git rev-parse timed out")
+    except Exception as e:
+        logger.exception("candidate_snapshot failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/candidate/rollback")
+async def candidate_rollback(request: RollbackRequest):
+    """
+    Restore all candidates/ files to the given git SHA and restart affected containers.
+
+    Called by CandidateCheckpointManager.restore() when an LLM-generated fix fails
+    health checks. This is the guaranteed fallback safety net for the autonomous
+    resilience pipeline.
+    """
+    if _docker_manager is None:
+        raise HTTPException(status_code=501, detail="Docker manager not available")
+
+    sha = request.sha
+    logger.warning(
+        "ROLLBACK requested: sha=%s services=%s", sha[:8], request.services
+    )
+
+    # 1. Restore files via git
+    try:
+        result = subprocess.run(
+            ["git", "checkout", sha, "--", "candidates/"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"git checkout failed: {result.stderr.strip()}",
+            )
+        logger.info("git checkout %s -- candidates/ complete", sha[:8])
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="git checkout timed out")
+
+    # 2. Restart affected containers (skip self — orchestrator restarts last)
+    restart_self = "orchestrator" in request.services
+    containers_to_restart = [
+        _CANDIDATE_CONTAINERS[svc]
+        for svc in request.services
+        if svc != "orchestrator" and svc in _CANDIDATE_CONTAINERS
+    ]
+
+    restart_errors: list[str] = []
+    for container_name in containers_to_restart:
+        try:
+            ok = await _docker_manager.restart_container(container_name)
+            if ok:
+                logger.info("Restarted %s", container_name)
+            else:
+                restart_errors.append(f"{container_name}: restart returned False")
+        except Exception as exc:
+            restart_errors.append(f"{container_name}: {exc}")
+            logger.warning("Error restarting %s: %s", container_name, exc)
+
+    response = {
+        "ok": True,
+        "sha": sha,
+        "services_restored": request.services,
+        "containers_restarted": containers_to_restart,
+        "errors": restart_errors,
+    }
+
+    # Restart self last (response will be sent before the restart kills this container)
+    if restart_self:
+        logger.warning("Scheduling self-restart (gaia-orchestrator-candidate)...")
+        asyncio.get_event_loop().call_later(
+            1.0,
+            lambda: subprocess.Popen(
+                ["docker", "restart", "gaia-orchestrator-candidate"]
+            ),
+        )
+
+    return response
 
 
 # =============================================================================
