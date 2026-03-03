@@ -1053,6 +1053,17 @@ async def jsonrpc_endpoint(request: Request):
                 "id": request_id
             }, status_code=400)
 
+    # ── 🛡️ BLAST SHIELD CHECK (Pre-dispatch) ──
+    try:
+        approval_store.validate_against_blast_shield(method, params)
+    except ValueError as e:
+        logger.critical(f"🛡️ BLAST SHIELD blocked JSON-RPC request for '{method}': {e}")
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            "error": {"code": -32002, "message": str(e)},
+            "id": request_id
+        }, status_code=403)
+
     # Dispatch the tool call
     try:
         result = await dispatch_tool(method, params)
