@@ -19,6 +19,10 @@ class Config(CommonConfig):
         return f"{self.MODELS_DIR}/lora_adapters"
 
     @property
+    def PERSONAS_DIR(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/personas"
+
+    @property
     def CODEX_ALLOW_HOT_RELOAD(self) -> bool:
         return True
 
@@ -83,6 +87,22 @@ class Config(CommonConfig):
     @property
     def HEARTBEAT_ENABLED(self) -> bool:
         return True
+
+    @property
+    def identity_file_path(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/system_reference/core_identity.json"
+
+    @property
+    def system_reference_path(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/system_reference"
+
+    @property
+    def cheat_sheet_path(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/system_reference/cheat_sheet.json"
+
+    @property
+    def cheat_sheet(self) -> Dict[str, Any]:
+        return self._load_cheat_sheet()
 
     @property
     def use_oracle(self) -> bool:

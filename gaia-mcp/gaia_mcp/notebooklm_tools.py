@@ -340,10 +340,10 @@ async def notebooklm_download_audio(params: dict) -> dict:
                 audio_bytes = Path(download_path).read_bytes()
                 audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
-                async with httpx.AsyncClient(timeout=120) as http:
+                async with httpx.AsyncClient(timeout=600) as http:
                     resp = await http.post(
                         f"{_GAIA_AUDIO_URL}/transcribe",
-                        json={"audio": audio_b64, "format": "mp4"},
+                        json={"audio_base64": audio_b64, "format": "mp4"},
                     )
                     if resp.status_code == 200:
                         data = resp.json()

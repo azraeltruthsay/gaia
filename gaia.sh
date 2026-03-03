@@ -119,6 +119,31 @@ show_status() {
     echo ""
 }
 
+# Seed the warm pool tmpfs
+cmd_warm_pool() {
+    log_info "Seeding GAIA warm pool (tmpfs)..."
+    local pool_dir="/mnt/gaia_warm_pool"
+    
+    if [ ! -d "$pool_dir" ]; then
+        log_error "Warm pool directory $pool_dir not found. Is it mounted?"
+        exit 1
+    fi
+
+    # Clean up existing to ensure fresh state and enough room
+    log_info "Cleaning warm pool..."
+    sudo rm -rf "${pool_dir:?}"/*
+
+    # Seed the 8B Prime model
+    log_info "Syncing 8B Prime model..."
+    sudo rsync -a --checksum "${PROJECT_ROOT}/gaia-models/Qwen3-8B-abliterated-AWQ/" "${pool_dir}/Qwen3-8B-abliterated-AWQ/"
+    
+    # Sync adapters
+    log_info "Syncing LoRA adapters..."
+    sudo rsync -a --checksum "${PROJECT_ROOT}/gaia-models/lora_adapters/" "${pool_dir}/lora_adapters/"
+    
+    log_success "Warm pool seeded: $(du -sh "$pool_dir" | cut -f1)"
+}
+
 # Manage live stack
 cmd_live() {
     local action="${1:-status}"
@@ -126,6 +151,7 @@ cmd_live() {
     case "$action" in
         start)
             ensure_network
+            cmd_warm_pool
             log_info "Starting live stack..."
             docker compose -f "$LIVE_COMPOSE" --env-file ./.env.discord up -d
             log_success "Live stack started"
@@ -441,6 +467,9 @@ main() {
         wiki)
             cmd_wiki "$@"
             ;;
+        warm-pool)
+            cmd_warm_pool
+            ;;
         status)
             show_status
             ;;
@@ -457,6 +486,7 @@ main() {
             echo "  gpu [status|release]             GPU management via orchestrator"
             echo "  handoff [prime-to-study|study-to-prime|status]  GPU handoff"
             echo "  wiki [start|stop|build|logs|status]  Manage wiki docs"
+            echo "  warm-pool                        Seed the vLLM warm pool (tmpfs)"
             echo "  status                           Show all service status"
             echo ""
             echo "Services: prime, core, web, mcp, study, audio, wiki"
@@ -470,6 +500,7 @@ main() {
             echo "  $0 orchestrator start      # Start orchestrator"
             echo "  $0 gpu status              # Check GPU ownership"
             echo "  $0 handoff prime-to-study  # Transfer GPU to Study"
+            echo "  $0 warm-pool               # Seed the vLLM warm pool manually"
             echo "  $0 wiki start              # Start wiki docs"
             echo "  $0 wiki build              # Rebuild wiki image"
             echo "  $0 status                  # Show all services"
