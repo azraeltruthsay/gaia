@@ -9,19 +9,16 @@ import contextlib
 import json
 import logging
 import os
-import queue
 import re
 import sys
-import threading
 import concurrent.futures
 import time
-from datetime import datetime
 from typing import Dict, List, Optional, Generator, Any
 from collections.abc import Mapping
 
 from gaia_core.config import Config
 from gaia_core.utils.prompt_builder import build_prompt
-from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+from gaia_core.utils.stream_observer import StreamObserver
 from gaia_core.cognition.self_reflection import reflect_and_refine
 
 # [GCP v0.3] Import the new packet objects
@@ -29,7 +26,7 @@ from gaia_common.protocols.cognition_packet import CognitionPacket, PacketState,
 
 # Loop Detection - for streaming token pattern detection
 try:
-    from gaia_core.cognition.loop_recovery import LoopDetectorObserver, get_recovery_manager
+    from gaia_core.cognition.loop_recovery import LoopDetectorObserver
     LOOP_DETECTION_AVAILABLE = True
 except ImportError:
     LOOP_DETECTION_AVAILABLE = False

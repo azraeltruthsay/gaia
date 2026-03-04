@@ -74,6 +74,10 @@
               <div class="state-label">GPU Owner</div>
               <div class="state-value" :class="gpuOwner !== '--' ? 'ok' : ''" x-text="gpuOwner"></div>
             </div>
+            <div class="state-card">
+              <div class="state-label">10m Temps</div>
+              <div class="state-value" :class="temps !== '--' ? 'ok' : ''" x-text="temps"></div>
+            </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
                 <div class="state-label">

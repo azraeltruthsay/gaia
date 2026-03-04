@@ -397,6 +397,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/adapters")
+    @app.get("/adapters")
     async def adapter_list(tier: Optional[int] = None):
         """List available LoRA adapters."""
         try:
@@ -411,25 +412,25 @@ def create_app() -> FastAPI:
             logger.exception(f"Failed to list adapters: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-async def _notify_core_adapter_change(adapter_name: str, action: str, tier: int = 3):
-    """Notify gaia-core that an adapter has changed."""
-    import httpx
-    core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
-    url = f"{core_url}/models/adapters/notify"
-    try:
-        async with httpx.AsyncClient() as client:
-            payload = {
-                "adapter_name": adapter_name,
-                "action": action,
-                "tier": tier
-            }
-            resp = await client.post(url, json=payload, timeout=5.0)
-            if resp.status_code == 200:
-                logger.info(f"Successfully notified core of adapter {action}: {adapter_name}")
-            else:
-                logger.warning(f"Failed to notify core of adapter {action}: {resp.status_code} {resp.text}")
-    except Exception as e:
-        logger.error(f"Error notifying core of adapter change: {e}")
+    async def _notify_core_adapter_change(adapter_name: str, action: str, tier: int = 3):
+        """Notify gaia-core that an adapter has changed."""
+        import httpx
+        core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+        url = f"{core_url}/models/adapters/notify"
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "adapter_name": adapter_name,
+                    "action": action,
+                    "tier": tier
+                }
+                resp = await client.post(url, json=payload, timeout=5.0)
+                if resp.status_code == 200:
+                    logger.info(f"Successfully notified core of adapter {action}: {adapter_name}")
+                else:
+                    logger.warning(f"Failed to notify core of adapter {action}: {resp.status_code} {resp.text}")
+        except Exception as e:
+            logger.error(f"Error notifying core of adapter change: {e}")
 
     @app.post("/adapters/load")
     async def adapter_load(request: AdapterLoadRequest):

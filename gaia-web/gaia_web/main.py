@@ -157,9 +157,14 @@ async def dashboard_redirect():
 async def system_status_proxy():
     """Proxy to orchestrator /status endpoint (avoids CORS from browser)."""
     try:
+        from gaia_common.utils.world_state import _update_and_get_temperature_stats
+        temps = _update_and_get_temperature_stats()
+        
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{ORCHESTRATOR_ENDPOINT}/status")
-            return JSONResponse(status_code=resp.status_code, content=resp.json())
+            data = resp.json()
+            data["temps"] = temps.replace("10m Temps: ", "") if temps else "--"
+            return JSONResponse(status_code=resp.status_code, content=data)
     except httpx.ConnectError:
         return JSONResponse(status_code=503, content={"error": "orchestrator unreachable"})
     except Exception as e:

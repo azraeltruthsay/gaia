@@ -232,15 +232,18 @@ class ImmuneSystem:
         for svc in target_services:
             svc_path = project_root / svc
             if svc_path.exists():
-                search_dirs.append(svc_path)
+                search_dirs.append((svc_path, "[PROD]"))
+            cand_path = project_root / "candidates" / svc
+            if cand_path.exists():
+                search_dirs.append((cand_path, "[CAND]"))
 
         cache_updated = False
         
-        for base_dir in search_dirs:
+        for base_dir, env_tag in search_dirs:
             for py_file in base_dir.rglob("*.py"):
                 # Strict exclusion of non-source and giant library folders
                 parts = [p.lower() for p in py_file.parts]
-                if any(p in parts for p in [".venv", "venv", "__pycache__", ".git", "candidates", "archive", "google-cloud-sdk", "artifacts"]):
+                if any(p in parts for p in [".venv", "venv", "__pycache__", ".git", "archive", "google-cloud-sdk", "artifacts"]):
                     continue
                 # Also skip venv_notebooklm specifically
                 if "venv_notebooklm" in parts:
@@ -257,7 +260,7 @@ class ImmuneSystem:
                         try:
                             py_compile.compile(str(py_file), doraise=True)
                         except py_compile.PyCompileError as e:
-                            file_issues.append(f"SyntaxError in {py_file} (Line ?): {str(e)[:100]}")
+                            file_issues.append(f"{env_tag} SyntaxError in {py_file} (Line ?): {str(e)[:100]}")
                         
                         # 2. Ruff check (Logic/Reference check)
                         if not file_issues:

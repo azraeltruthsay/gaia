@@ -7,6 +7,8 @@ This module provides common functionality used across services:
 - VectorClient: Read-only vector query interface
 - Helpers: File system and timestamp utilities
 - Packet Utils: Safety checking and version migration
+- Rescue Helper: Shared diagnostic and shell tools
+- World State: Lightweight system status snapshots
 """
 
 from .logging_setup import (
@@ -14,7 +16,6 @@ from .logging_setup import (
     get_logger,
     UTCFormatter,
     HealthCheckFilter,
-    LevelRingHandler,
     install_health_check_filter,
 )
 from .packet_templates import (
@@ -41,6 +42,12 @@ from .packet_utils import (
 from .packet_factory import build_packet, PacketSource
 from .heartbeat_logger import HeartbeatLogger, HeartbeatLoggerProxy
 from .tools_registry import TOOLS as tools_registry
+from .gaia_rescue_helper import GAIARescueHelper
+from .world_state import (
+    world_state_snapshot,
+    world_state_detail,
+    format_world_state_snapshot
+)
 
 __all__ = [
     # Logging
@@ -72,5 +79,11 @@ __all__ = [
     # Heartbeat logging
     "HeartbeatLogger",
     "HeartbeatLoggerProxy",
-    "tools_registry", # Export TOOLS as tools_registry
+    "tools_registry",
+    # Rescue Helper
+    "GAIARescueHelper",
+    # World State
+    "world_state_snapshot",
+    "world_state_detail",
+    "format_world_state_snapshot",
 ]

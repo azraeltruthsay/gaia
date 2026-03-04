@@ -15,6 +15,7 @@ from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
 from gaia_common.utils.packet_templates import render_gaia_packet_template
 from gaia_common.utils.world_state import format_world_state_snapshot
+from gaia_core.utils import gaia_rescue_helper
 
 logger = logging.getLogger("GAIA.PromptBuilder")
 
