@@ -6,6 +6,7 @@ Discord messages are received here, converted to CognitionPackets, sent to gaia-
 for processing, and responses are routed back to Discord.
 """
 
+import math
 import os
 import time
 import uuid
@@ -873,7 +874,7 @@ def get_discord_status() -> Dict[str, Any]:
         "status": "ready",
         "user": str(_bot.user) if _bot.user else None,
         "guilds": len(_bot.guilds) if _bot.guilds else 0,
-        "latency_ms": round(_bot.latency * 1000, 1) if _bot.latency else None,
+        "latency_ms": round(_bot.latency * 1000, 1) if _bot.latency and math.isfinite(_bot.latency) else None,
     }
 
 
