@@ -9,6 +9,7 @@ to the MCP-lite server.
 import logging
 import os
 import requests
+from gaia_core.config import Config
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 

@@ -2,13 +2,10 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gaia_core.cognition.samvega import (
-    SAMVEGA_ARCHIVE_DIR,
-    SAMVEGA_DIR,
     SamvegaArtifact,
     SamvegaTrigger,
     archive_artifact,
@@ -155,7 +152,8 @@ class TestFileCRUD:
         a2 = _make_artifact(reviewed=True, weight=0.5)
         save_samvega_artifact(a1)
         # Manually save the reviewed one
-        import time; time.sleep(0.01)  # ensure unique timestamp
+        import time
+        time.sleep(0.01)  # ensure unique timestamp
         save_samvega_artifact(a2)
 
         # Mark the second as reviewed by updating
@@ -172,9 +170,10 @@ class TestFileCRUD:
 
     def test_list_by_weight(self, tmp_path):
         save_samvega_artifact(_make_artifact(weight=0.3))
-        import time; time.sleep(0.01)
+        import time
+        time.sleep(0.01)
         save_samvega_artifact(_make_artifact(weight=0.7))
-        import time; time.sleep(0.01)
+        time.sleep(0.01)
         save_samvega_artifact(_make_artifact(weight=0.9))
 
         results = list_artifacts_by_weight(min_weight=0.5)

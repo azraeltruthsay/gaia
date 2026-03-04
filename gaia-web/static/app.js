@@ -179,6 +179,7 @@ function systemPanel() {
     sleepState: '--',
     sleepStateClass: '',
     gpuOwner: '--',
+    temps: '--',
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
@@ -254,8 +255,11 @@ function systemPanel() {
         const resp = await fetch('/api/system/status');
         if (resp.ok) {
           const data = await resp.json();
-          if (data.gpu_owner && this.gpuOwner === '--') {
+          if (data.gpu_owner) {
             this.gpuOwner = data.gpu_owner;
+          }
+          if (data.temps) {
+            this.temps = data.temps;
           }
         }
       } catch { /* orchestrator unavailable */ }

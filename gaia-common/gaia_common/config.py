@@ -37,6 +37,7 @@ class Config:
     IDENTITY_FILE: str = "/knowledge/system_reference/core_identity.json"
     CHEAT_SHEET_FILE: str = "/knowledge/system_reference/cheat_sheet.json"
     EMBEDDING_MODEL_PATH: str = "/models/all-MiniLM-L6-v2"
+    local_timezone: str = "America/Los_Angeles"
 
     # ── Service Endpoints ───────────────────────────────────────────
     endpoints: Dict[str, str] = field(default_factory=lambda: {
@@ -269,6 +270,7 @@ class Config:
         self.HISTORY_DIR = sys_cfg.get("HISTORY_DIR", self.HISTORY_DIR)
         self.IDENTITY_FILE = sys_cfg.get("IDENTITY_FILE", self.IDENTITY_FILE)
         self.CHEAT_SHEET_FILE = sys_cfg.get("CHEAT_SHEET_FILE", self.CHEAT_SHEET_FILE)
+        self.local_timezone = sys_cfg.get("local_timezone", self.local_timezone)
 
     def _apply_env_overrides(self):
         """Apply high-priority environment variable overrides."""
