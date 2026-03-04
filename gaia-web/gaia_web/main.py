@@ -349,16 +349,12 @@ async def process_user_input(user_input: str):
     packet.compute_hashes()
 
     try:
-        from gaia_web.utils.retry import post_with_retry
-
-        fallback = f"{CORE_FALLBACK_ENDPOINT}/process_packet" if CORE_FALLBACK_ENDPOINT else None
-        response = await post_with_retry(
-            f"{CORE_ENDPOINT}/process_packet",
-            json=packet.to_serializable_dict(),
-            fallback_url=fallback,
+        from gaia_common.utils.service_client import get_core_client
+        core_client = get_core_client()
+        completed_packet_dict = await core_client.post(
+            "/process_packet",
+            data=packet.to_serializable_dict(),
         )
-
-        completed_packet_dict = response.json()
         completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
         return JSONResponse(
@@ -424,15 +420,12 @@ async def process_audio_input(body: Dict[str, Any]):
     )
 
     try:
-        from gaia_web.utils.retry import post_with_retry
-
-        fallback = f"{CORE_FALLBACK_ENDPOINT}/process_packet" if CORE_FALLBACK_ENDPOINT else None
-        response = await post_with_retry(
-            f"{CORE_ENDPOINT}/process_packet",
-            json=packet.to_serializable_dict(),
-            fallback_url=fallback,
+        from gaia_common.utils.service_client import get_core_client
+        core_client = get_core_client()
+        completed_packet_dict = await core_client.post(
+            "/process_packet",
+            data=packet.to_serializable_dict(),
         )
-        completed_packet_dict = response.json()
         completed_packet = CognitionPacket.from_dict(completed_packet_dict)
         return JSONResponse(
             status_code=200,

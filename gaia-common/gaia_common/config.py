@@ -69,6 +69,134 @@ class Config:
     SAFE_EXECUTE_FUNCTIONS: List[str] = field(default_factory=list)
     CODEX_FILE_EXTS: Tuple[str, ...] = field(default_factory=lambda: (".md", ".yaml", ".yml", ".json"))
 
+    # ── Generic GAIA Properties (Consolidated) ──────────────────────
+    @property
+    def KNOWLEDGE_CODEX_DIR(self) -> str:
+        return self.KNOWLEDGE_DIR
+
+    @property
+    def LORA_ADAPTERS_DIR(self) -> str:
+        return f"{self.MODELS_DIR}/lora_adapters"
+
+    @property
+    def PERSONAS_DIR(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/personas"
+
+    @property
+    def CODEX_ALLOW_HOT_RELOAD(self) -> bool:
+        return True
+
+    # Sleep Cycle helpers
+    @property
+    def SLEEP_ENABLED(self) -> bool:
+        return self.SLEEP_CYCLE.get("enabled", True)
+
+    @property
+    def SLEEP_IDLE_THRESHOLD_MINUTES(self) -> int:
+        return self.SLEEP_CYCLE.get("idle_threshold_minutes", 30)
+
+    @property
+    def SLEEP_ENABLE_QLORA(self) -> bool:
+        return self.SLEEP_CYCLE.get("enable_qlora", False)
+
+    @property
+    def SLEEP_ENABLE_DREAM(self) -> bool:
+        return self.SLEEP_CYCLE.get("enable_dream", False)
+
+    @property
+    def SLEEP_TASK_TIMEOUT(self) -> int:
+        return self.SLEEP_CYCLE.get("task_timeout_seconds", 600)
+
+    # Temporal Awareness helpers
+    @property
+    def LITE_JOURNAL_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("enabled", True)
+
+    @property
+    def TEMPORAL_STATE_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("enabled", True)
+
+    @property
+    def TEMPORAL_BAKE_INTERVAL_TICKS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("bake_interval_ticks", 3)
+
+    @property
+    def TEMPORAL_STATE_MAX_FILES(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("max_state_files", 5)
+
+    @property
+    def TEMPORAL_STATE_BAKE_CONTEXT_TOKENS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("bake_context_tokens", 6000)
+
+    @property
+    def TEMPORAL_INTERVIEW_ENABLED(self) -> bool:
+        return self.TEMPORAL_AWARENESS.get("interview_enabled", True)
+
+    @property
+    def TEMPORAL_INTERVIEW_INTERVAL_TICKS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("interview_interval_ticks", 6)
+
+    @property
+    def TEMPORAL_INTERVIEW_ROUNDS(self) -> int:
+        return self.TEMPORAL_AWARENESS.get("interview_rounds", 3)
+
+    @property
+    def HEARTBEAT_INTERVAL_SECONDS(self) -> int:
+        return 1200 # Default
+
+    @property
+    def HEARTBEAT_ENABLED(self) -> bool:
+        return True
+
+    @property
+    def identity_file_path(self) -> str:
+        return self.IDENTITY_FILE
+
+    @property
+    def system_reference_path(self) -> str:
+        return f"{self.KNOWLEDGE_DIR}/system_reference"
+
+    @property
+    def cheat_sheet_path(self) -> str:
+        return self.CHEAT_SHEET_FILE
+
+    @property
+    def cheat_sheet(self) -> Dict[str, Any]:
+        return self._load_cheat_sheet()
+
+    def _load_cheat_sheet(self) -> Dict[str, Any]:
+        """Loads the cheat sheet JSON file."""
+        if os.path.exists(self.CHEAT_SHEET_FILE):
+            try:
+                with open(self.CHEAT_SHEET_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    @property
+    def use_oracle(self) -> bool:
+        return self.constants.get("use_oracle", False)
+
+    @property
+    def max_tokens_operator(self) -> int:
+        return self.constants.get("max_tokens_operator") or self.max_tokens_lite
+
+    @property
+    def LITE_IS_OPERATOR(self) -> bool:
+        """Formal role shift: Lite is now the Cognitive Operator."""
+        return True
+
+    def get_persona_instructions(self) -> str:
+        """Return default persona instructions from constants or fallback."""
+        return (
+            self.constants.get("persona_defaults", {}).get("instructions")
+            or "You are GAIA, a General Artisanal Intelligence. Assist with integrity and care."
+        )
+
+    def get_model_name(self, model_alias: str) -> str:
+        return self.MODEL_CONFIGS.get(model_alias, {}).get("model")
+
     # Singleton instance
     _instance: Optional[Config] = None
     _last_mtime: float = 0.0

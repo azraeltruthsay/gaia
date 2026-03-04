@@ -7,7 +7,7 @@ This is The Brain - Cognitive loop and reasoning.
 
 import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -164,6 +164,14 @@ async def lifespan(app: FastAPI):
     success = initialize_cognitive_system()
     if not success:
         logger.error("Cognitive system failed to initialize - endpoints will return errors")
+
+    # Start Digital Immune System background daemon
+    try:
+        from gaia_common.utils.immune_system import start_background_immune_system
+        start_background_immune_system(log_dir="/logs")
+        logger.info("Background Digital Immune System daemon started")
+    except Exception:
+        logger.warning("Failed to start background immune system", exc_info=True)
 
     # Start sleep cycle loop
     _sleep_loop = None
@@ -609,3 +617,4 @@ def get_audio_context_for_prompt(max_entries: int = 10, max_chars: int = 2000) -
         + "\n".join(lines)
         + "\n── End Audio Context ──"
     )
+

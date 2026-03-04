@@ -5,9 +5,8 @@ Background processing API for vector indexing, document management,
 and LoRA adapter training (Study Mode).
 """
 
-import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ from pydantic import BaseModel, Field
 from gaia_common.utils import get_logger
 
 from .indexer import VectorIndexer
-from .study_mode_manager import StudyModeManager, TrainingConfig, TrainingResult
+from .study_mode_manager import StudyModeManager, TrainingConfig
 
 logger = get_logger(__name__)
 
@@ -432,92 +431,92 @@ async def _notify_core_adapter_change(adapter_name: str, action: str, tier: int 
     except Exception as e:
         logger.error(f"Error notifying core of adapter change: {e}")
 
-@app.post("/adapters/load")
-async def adapter_load(request: AdapterLoadRequest):
-    """Load a LoRA adapter for use in generation."""
-    try:
-        manager = get_study_manager()
-        tier_dir = manager._get_tier_directory(request.tier)
-        adapter_path = tier_dir / request.adapter_name
-
-        if not adapter_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Adapter '{request.adapter_name}' not found in tier {request.tier}"
-            )
-
-        # Notify core so the model pool can prepare
-        await _notify_core_adapter_change(request.adapter_name, "load", request.tier)
-        
-        return {
-            "ok": True,
-            "adapter_name": request.adapter_name,
-            "adapter_path": str(adapter_path),
-            "tier": request.tier,
-            "message": f"Adapter '{request.adapter_name}' loaded and core notified."
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to load adapter: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/adapters/unload")
-async def adapter_unload(request: AdapterLoadRequest):
-    """Unload a LoRA adapter."""
-    try:
-        # Notify core to unload from model pool
-        await _notify_core_adapter_change(request.adapter_name, "unload", request.tier)
-        
-        return {
-            "ok": True,
-            "adapter_name": request.adapter_name,
-            "message": f"Adapter '{request.adapter_name}' unload requested and core notified."
-        }
-    except Exception as e:
-        logger.exception(f"Failed to unload adapter: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    @app.delete("/adapters/{adapter_name}")
-    async def adapter_delete(adapter_name: str, tier: int = 3):
-        """Delete a LoRA adapter."""
+    @app.post("/adapters/load")
+    async def adapter_load(request: AdapterLoadRequest):
+        """Load a LoRA adapter for use in generation."""
         try:
             manager = get_study_manager()
-            deleted = manager.delete_adapter(adapter_name, tier)
-            return {
-                "ok": deleted,
-                "adapter_name": adapter_name,
-                "tier": tier,
-                "message": "Adapter deleted" if deleted else "Adapter not found or protected"
-            }
-        except Exception as e:
-            logger.exception(f"Failed to delete adapter: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @app.get("/adapters/{adapter_name}")
-    async def adapter_info(adapter_name: str, tier: int = 3):
-        """Get detailed info about a specific adapter."""
-        try:
-            import json
-            manager = get_study_manager()
-            tier_dir = manager._get_tier_directory(tier)
-            adapter_path = tier_dir / adapter_name
-            metadata_path = adapter_path / "metadata.json"
-
-            if not metadata_path.exists():
+            tier_dir = manager._get_tier_directory(request.tier)
+            adapter_path = tier_dir / request.adapter_name
+    
+            if not adapter_path.exists():
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Adapter '{adapter_name}' not found in tier {tier}"
+                    detail=f"Adapter '{request.adapter_name}' not found in tier {request.tier}"
                 )
-
-            with open(metadata_path) as f:
-                metadata = json.load(f)
-
-            return {"ok": True, "adapter": metadata}
+    
+            # Notify core so the model pool can prepare
+            await _notify_core_adapter_change(request.adapter_name, "load", request.tier)
+            
+            return {
+                "ok": True,
+                "adapter_name": request.adapter_name,
+                "adapter_path": str(adapter_path),
+                "tier": request.tier,
+                "message": f"Adapter '{request.adapter_name}' loaded and core notified."
+            }
         except HTTPException:
             raise
         except Exception as e:
-            logger.exception(f"Failed to get adapter info: {e}")
+            logger.exception(f"Failed to load adapter: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-
+    
+    @app.post("/adapters/unload")
+    async def adapter_unload(request: AdapterLoadRequest):
+        """Unload a LoRA adapter."""
+        try:
+            # Notify core to unload from model pool
+            await _notify_core_adapter_change(request.adapter_name, "unload", request.tier)
+            
+            return {
+                "ok": True,
+                "adapter_name": request.adapter_name,
+                "message": f"Adapter '{request.adapter_name}' unload requested and core notified."
+            }
+        except Exception as e:
+            logger.exception(f"Failed to unload adapter: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+        @app.delete("/adapters/{adapter_name}")
+        async def adapter_delete(adapter_name: str, tier: int = 3):
+            """Delete a LoRA adapter."""
+            try:
+                manager = get_study_manager()
+                deleted = manager.delete_adapter(adapter_name, tier)
+                return {
+                    "ok": deleted,
+                    "adapter_name": adapter_name,
+                    "tier": tier,
+                    "message": "Adapter deleted" if deleted else "Adapter not found or protected"
+                }
+            except Exception as e:
+                logger.exception(f"Failed to delete adapter: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+    
+        @app.get("/adapters/{adapter_name}")
+        async def adapter_info(adapter_name: str, tier: int = 3):
+            """Get detailed info about a specific adapter."""
+            try:
+                import json
+                manager = get_study_manager()
+                tier_dir = manager._get_tier_directory(tier)
+                adapter_path = tier_dir / adapter_name
+                metadata_path = adapter_path / "metadata.json"
+    
+                if not metadata_path.exists():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Adapter '{adapter_name}' not found in tier {tier}"
+                    )
+    
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+    
+                return {"ok": True, "adapter": metadata}
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.exception(f"Failed to get adapter info: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+    
     return app
