@@ -234,17 +234,13 @@ async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
     packet.compute_hashes()
 
     try:
-        from gaia_web.utils.retry import post_with_retry
-
-        fallback = f"{CORE_FALLBACK_ENDPOINT}/process_packet" if CORE_FALLBACK_ENDPOINT else None
-        logger.info(f"Sending consent packet {packet_id} to {CORE_ENDPOINT}/process_packet")
-        response = await post_with_retry(
-            f"{CORE_ENDPOINT}/process_packet",
-            json=packet.to_serializable_dict(),
-            fallback_url=fallback,
-            timeout=300.0,
+        from gaia_common.utils.service_client import get_core_client
+        core_client = get_core_client()
+        logger.info(f"Sending consent packet {packet_id} to {core_client.base_url}/process_packet")
+        result = await core_client.post(
+            "/process_packet",
+            data=packet.to_serializable_dict(),
         )
-        result = response.json()
         logger.info(f"Consent packet {packet_id} completed, response keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
         return result
     except Exception as e:

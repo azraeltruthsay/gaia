@@ -455,7 +455,8 @@ class AgentCore:
         # Discover available MCP tools
         available_tools = []
         try:
-            tool_info = mcp_client.discover()
+            import asyncio
+            tool_info = asyncio.run(mcp_client.discover())
             if tool_info and tool_info.get("ok"):
                 available_tools = tool_info.get("methods", [])
         except Exception as e:
@@ -1114,11 +1115,12 @@ class AgentCore:
                 if not probe_seeded:
                     # No probe seed — run the standard RAG query
                     self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
-                    retrieved_docs = mcp_client.embedding_query(
+                    import asyncio
+                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
-                    )
+                    ))
                     if retrieved_docs and retrieved_docs.get("ok"):
                         docs = retrieved_docs.get("results", [])
                         if docs:
@@ -1718,8 +1720,6 @@ class AgentCore:
 
         logger.info(f"[OBSERVER] Final setup: active_stream={active_stream_observer is not None}, post_run={post_run_observer is not None}")
 
-        import json
-        import sys
         print("---PROMPT TO BE SENT TO THE MODEL---", file=sys.stderr)
         print(json.dumps(final_messages, indent=2), file=sys.stderr)
         print("------------------------------------", file=sys.stderr)
@@ -2183,10 +2183,11 @@ class AgentCore:
 
             # Step 1: Find relevant documents
             self.logger.info(f"Searching for relevant documents for query: {packet.content.original_prompt}")
-            found_docs = await mcp_client.call_jsonrpc(
+            import asyncio
+            found_docs = asyncio.run(mcp_client.call_jsonrpc(
                 "find_relevant_documents",
                 {"query": packet.content.original_prompt, "knowledge_base_name": knowledge_base_name}
-            )
+            ))
             self.logger.info(f"Found documents: {found_docs}")
 
             response_body = found_docs.get("response", {})
@@ -2200,20 +2201,22 @@ class AgentCore:
 
                 # Step 2: Embed the document
                 self.logger.info(f"Embedding document: {doc_path}")
-                embed_result = await mcp_client.call_jsonrpc(
+                import asyncio
+                embed_result = asyncio.run(mcp_client.call_jsonrpc(
                     "embed_documents",
                     {"knowledge_base_name": knowledge_base_name, "file_path": doc_path}
-                )
+                ))
 
                 if embed_result and embed_result.get("ok"):
                     self.logger.info("Document embedded successfully. Re-running RAG query.")
                     
                     # Step 3: Re-run RAG query
-                    retrieved_docs = await mcp_client.embedding_query(
+                    import asyncio
+                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
-                    )
+                    ))
 
                     if retrieved_docs and retrieved_docs.get("ok"):
                         docs = retrieved_docs.get("results", [])
@@ -2338,17 +2341,17 @@ class AgentCore:
         return f"{tag}\n\n"
 
     def _check_immune_system_for_emergency(self) -> Optional[str]:
-        \"\"\"
+        """
         Check the current Immune System status for CRITICAL issues or SyntaxErrors.
         Returns the error message if an emergency is detected, else None.
-        \"\"\"
+        """
         try:
             from gaia_common.utils import immune_system
             health = immune_system.get_immune_summary()
             
             # Look for CRITICAL or SyntaxError
-            if \"Immune System: CRITICAL\" in health or \"SyntaxError\" in health:
-                logger.warning(f\"[IMMUNE EMERGENCY] System irritation detected: {health}\")
+            if "Immune System: CRITICAL" in health or "SyntaxError" in health:
+                logger.warning(f"[IMMUNE EMERGENCY] System irritation detected: {health}")
                 return health
         except Exception:
             pass
@@ -2471,7 +2474,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                     "1) Call MCP list_tools.",
                     "2) Return the list to the operator."
                 ]}, session_id, source=source, destination_context=_meta)
-                resp = await mcp_client.call_jsonrpc("list_tools", {})
+                import asyncio
+                resp = asyncio.run(mcp_client.call_jsonrpc("list_tools", {}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     tools = resp["response"].get("result") or []
                     return "Available MCP tools:\n- " + "\n- ".join(str(t) for t in tools)
@@ -2528,7 +2532,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
+                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -2553,7 +2557,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                 query_term = search_term or raw
 
                 # Use the derived query; bounded search on the sidecar
-                resp = await mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
+                import asyncio
+                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -2563,7 +2568,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                         # If exactly one match, attempt to read and summarize it.
                         if len(matches) == 1:
                             path = matches[0]
-                            read = await mcp_client.call_jsonrpc("read_file", {"path": path})
+                            import asyncio
+                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -2606,7 +2612,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
+                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -2636,7 +2642,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     search_term = max(tokens, key=len)
                 query_term = search_term or raw
 
-                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
+                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -2645,7 +2651,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                             return "I couldn't find that file. Share a path or a more specific filename."
                         if len(matches) == 1:
                             path = matches[0]
-                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
+                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -2964,7 +2970,8 @@ RESULT: COMPLEX (reason: <brief reason>)
             results = []
             for search_params in search_attempts:
                 self.logger.info(f"Web recitation search: {search_params}")
-                resp = await mcp_client.call_jsonrpc("web_search", search_params)
+                import asyncio
+                resp = asyncio.run(mcp_client.call_jsonrpc("web_search", search_params))
 
                 if not resp.get("ok"):
                     self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
@@ -2994,7 +3001,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                     continue
                 try:
                     self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
-                    fetch_resp = await mcp_client.call_jsonrpc("web_fetch", {"url": url})
+                    import asyncio
+                    fetch_resp = asyncio.run(mcp_client.call_jsonrpc("web_fetch", {"url": url}))
 
                     if not fetch_resp.get("ok"):
                         continue
@@ -3260,14 +3268,15 @@ Present {doc_title}:"""
 
             # Also store via MCP for auditing (non-critical)
             try:
-                await mcp_client.call_jsonrpc("fragment_write", {
+                import asyncio
+                asyncio.run(mcp_client.call_jsonrpc("fragment_write", {
                     "parent_request_id": request_id,
                     "sequence": fragment_sequence,
                     "content": content,
                     "continuation_hint": truncation_info.get("continuation_hint", ""),
                     "is_complete": not truncation_info["truncated"],
                     "token_count": truncation_info.get("approx_tokens", 0)
-                })
+                }))
             except Exception:
                 pass  # MCP storage is optional
 
@@ -3319,7 +3328,8 @@ Present {doc_title}:"""
 
         # Cleanup: clear fragments from MCP storage
         try:
-            await mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id})
+            import asyncio
+            asyncio.run(mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id}))
         except Exception:
             pass
 
@@ -3531,7 +3541,8 @@ Assembled response:"""
         output_path = f"/sandbox/{filename}"
 
         # Write the file using MCP client
-        result = mcp_client.ai_write(output_path, content)
+        import asyncio
+        result = asyncio.run(mcp_client.ai_write(output_path, content))
 
         if result.get("ok"):
             file_size = result.get("bytes", len(content))
@@ -3612,10 +3623,12 @@ Assembled response:"""
                 preview = "\n".join(tree.splitlines()[:20])
                 target_path = "/knowledge/system_reference/tree_latest.txt"
                 # Write via MCP so it is auditable/approved
-                write_req = mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True})
+                import asyncio
+                write_req = asyncio.run(mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True}))
                 if write_req.get("ok") and write_req.get("action_id") and write_req.get("challenge"):
                     approval = write_req["challenge"][::-1]
-                    write_appr = mcp_client.approve_action_via_mcp(write_req["action_id"], approval)
+                    import asyncio
+                    write_appr = asyncio.run(mcp_client.approve_action_via_mcp(write_req["action_id"], approval))
                     if not write_appr.get("ok"):
                         return f"(Saved tree skipped due to approval error: {write_appr.get('error')})\nPreview:\n{preview}"
                     try:
@@ -3627,7 +3640,8 @@ Assembled response:"""
                         self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
                 elif bypass:
                     # In bypass mode, attempt direct write
-                    await mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
+                    import asyncio
+                    asyncio.run(mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree}))
                     try:
                         rescue_helper.sketch(
                             "DirectoryTreeLatest",
@@ -3645,7 +3659,8 @@ Assembled response:"""
             return tree + ("\n\n(truncated)" if truncated_flag else "")
 
         if bypass:
-            resp = await mcp_client.call_jsonrpc("list_tree", params)
+            import asyncio
+            resp = asyncio.run(mcp_client.call_jsonrpc("list_tree", params))
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3654,7 +3669,8 @@ Assembled response:"""
             return f"list_tree failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = await mcp_client.request_approval_via_mcp("list_tree", params)
+        import asyncio
+        req = asyncio.run(mcp_client.request_approval_via_mcp("list_tree", params))
         if not req.get("ok"):
             return f"Could not request approval for list_tree: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3662,7 +3678,8 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = await mcp_client.approve_action_via_mcp(action_id, approval)
+        import asyncio
+        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -3688,7 +3705,8 @@ Assembled response:"""
             return "\n".join(files)
 
         if bypass:
-            resp = await mcp_client.call_jsonrpc("list_files", params)
+            import asyncio
+            resp = asyncio.run(mcp_client.call_jsonrpc("list_files", params))
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3697,7 +3715,8 @@ Assembled response:"""
             return f"list_files failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = await mcp_client.request_approval_via_mcp("list_files", params)
+        import asyncio
+        req = asyncio.run(mcp_client.request_approval_via_mcp("list_files", params))
         if not req.get("ok"):
             return f"Could not request approval for list_files: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3705,7 +3724,8 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = await mcp_client.approve_action_via_mcp(action_id, approval)
+        import asyncio
+        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -4634,7 +4654,6 @@ Start your response with the first line of the file."""
             Dict with {ok, task, status_changed, audit_added, error}
         """
         from datetime import datetime, timezone
-        import json
 
         try:
             from gaia_core.memory.dev_matrix import GAIADevMatrix
@@ -5191,7 +5210,8 @@ Start your response with the first line of the file."""
             elif canonical_name == "embedding.query": canonical_name = "memory_query"
 
             if canonical_name == "read_file":
-                result = mcp_client.ai_read(tool.params.get("path", ""))
+                import asyncio
+                result = asyncio.run(mcp_client.ai_read(tool.params.get("path", "")))
 
             elif canonical_name == "write_file":
                 if not allow_write:
@@ -5199,10 +5219,11 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable."
                     )
-                result = await mcp_client.ai_write(
+                import asyncio
+                result = asyncio.run(mcp_client.ai_write(
                     tool.params.get("path", ""),
                     tool.params.get("content", "")
-                )
+                ))
 
             elif canonical_name == "run_shell":
                 if not allow_execute:
@@ -5210,18 +5231,20 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Execute operations are disabled. Set TOOL_ROUTING.ALLOW_EXECUTE_TOOLS=true to enable."
                     )
-                result = await mcp_client.ai_execute(
+                import asyncio
+                result = asyncio.run(mcp_client.ai_execute(
                     tool.params.get("command", ""),
                     dry_run=not allow_execute
-                )
+                ))
 
             else:
                 # Dispatch via MCP JSON-RPC for tools not handled by local shims
                 logger.info(f"Dispatching tool '{canonical_name}' via MCP JSON-RPC")
-                rpc_result = await mcp_client.call_jsonrpc(
+                import asyncio
+                rpc_result = asyncio.run(mcp_client.call_jsonrpc(
                     method=canonical_name,
                     params=tool.params or {}
-                )
+                ))
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 if rpc_result.get("ok"):
                     rpc_response = rpc_result.get("response", {})

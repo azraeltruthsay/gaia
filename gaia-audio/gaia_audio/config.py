@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 import logging
-from dataclasses import dataclass, field
-from gaia_common.config import Config as CommonConfig, get_config as get_common_config
+from dataclasses import dataclass
+from gaia_common.config import Config as CommonConfig
 
 logger = logging.getLogger("GAIA.Audio.Config")
 
@@ -16,7 +16,7 @@ class CloudFallback:
 class AudioConfig(CommonConfig):
     """
     Audio-specific configuration wrapper.
-    Inherits authoritative settings from gaia-common and adds audio helpers.
+    Inherits authoritative settings from gaia-common and adds audio-specific properties.
     """
     @property
     def audio_cfg(self) -> dict:
@@ -67,18 +67,7 @@ class AudioConfig(CommonConfig):
             api_key_env=cloud.get("api_key_env", "ELEVENLABS_API_KEY"),
         )
 
-    # Service endpoints
-    @property
-    def core_endpoint(self) -> str:
-        return self.endpoints.get("core", "http://gaia-core:6415")
-
-    @property
-    def web_endpoint(self) -> str:
-        return self.endpoints.get("web", "http://gaia-web:6414")
-
-    @property
-    def orchestrator_endpoint(self) -> str:
-        return self.endpoints.get("orchestrator", "http://gaia-orchestrator:6410")
+    # Note: Service endpoints are now available via base.get_endpoint()
 
     @classmethod
     def from_constants(cls) -> AudioConfig:

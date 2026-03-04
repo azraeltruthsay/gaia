@@ -20,10 +20,7 @@ import httpx
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
     OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
-    SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog,
-    Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult,
-    ToolRoutingState, ToolExecutionStatus, ToolCall, SidecarAction, Response, Safety, Signatures,
-    Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status,
+    SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
     PacketState, TargetEngine
 )
 
@@ -411,20 +408,17 @@ class DiscordInterface:
         packet.compute_hashes() # Compute hashes for integrity
 
         try:
-            from gaia_web.utils.retry import post_with_retry
-
-            fallback = f"{self.core_fallback_endpoint}/process_packet" if self.core_fallback_endpoint else None
+            from gaia_common.utils.service_client import get_core_client
+            core_client = get_core_client()
 
             # Show typing indicator while GAIA processes the request
             async with message_obj.channel.typing():
-                response = await post_with_retry(
-                    f"{self.core_endpoint}/process_packet",
-                    json=packet.to_serializable_dict(),
-                    fallback_url=fallback,
+                completed_packet_dict = await core_client.post(
+                    "/process_packet",
+                    data=packet.to_serializable_dict(),
                 )
 
             # Expect a full CognitionPacket back
-            completed_packet_dict = response.json()
             completed_packet = CognitionPacket.from_dict(completed_packet_dict)
 
             # Check for pending tool approval before sending normal response
@@ -662,13 +656,13 @@ class DiscordInterface:
         elif result.get("error") == "action not found or expired":
             await self._send_response(
                 message_obj,
-                f"This approval has expired. Please trigger the action again.",
+                "This approval has expired. Please trigger the action again.",
                 is_dm,
             )
         elif result.get("error") == "invalid approval string":
             await self._send_response(
                 message_obj,
-                f"The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
+                "The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
                 is_dm,
             )
         else:

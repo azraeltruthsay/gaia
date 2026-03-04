@@ -162,6 +162,8 @@ services:
     stop_grace_period: 25s
 
     volumes:
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
       # Source code (development mode)
       - ./gaia-core:/app:rw
       # Shared library (development mode - mount for live reload)
@@ -207,12 +209,6 @@ services:
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
-    secrets:
-      - groq_api_key
-      - openai_api_key
-      - gemini_api_key
-      - anthropic_api_key
-
     ports:
       - "6415:6415"
 
@@ -250,6 +246,8 @@ services:
       - .env.discord
 
     volumes:
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
       # Source code (development mode)
       - ./gaia-web:/app:rw
       # Shared library (development mode)
@@ -286,9 +284,6 @@ services:
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
-    secrets:
-      - discord_bot_token
-
     ports:
       - "6414:6414"
 
@@ -321,6 +316,8 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
       # Source code (development mode)
       - ./gaia-study:/app:rw
       # Shared library (development mode)
@@ -390,6 +387,8 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
       # Source code (development mode)
       - ./gaia-mcp:/app:rw
       # Shared library (development mode)
@@ -406,6 +405,8 @@ services:
       - ./candidates:/gaia/GAIA_Project/candidates:ro
       # Docker compose file (for compose_service check)
       - ./docker-compose.yml:/gaia/GAIA_Project/docker-compose.yml:ro
+      # Shared state
+      - gaia-shared:/shared:rw
       # NotebookLM auth (Playwright storage state, read-only)
       - ${HOME}/.notebooklm:/auth/notebooklm:ro
 
@@ -429,9 +430,6 @@ services:
       - NOTEBOOKLM_HOME=/auth/notebooklm
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-
-    secrets:
-      - kanka_api_key
 
     ports:
       - "8765:8765"
@@ -470,6 +468,8 @@ services:
     restart: unless-stopped
 
     volumes:
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
       - ./gaia-models/voice:/models/voice:ro
@@ -511,9 +511,6 @@ services:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-wiki: The Library - Internal developer documentation
-  # Accessible internally at http://gaia-wiki:8080
-  # Optionally proxied by gaia-web at /wiki
-  # NOT exposed publicly by default
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-wiki:
     build:
@@ -538,9 +535,6 @@ services:
       - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=wiki
 
-    # No ports: block — internal only.
-    # For local dev access, add temporarily: ports: ["8080:8080"]
-
     networks:
       - gaia-net
 
@@ -553,9 +547,6 @@ services:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # dozzle: The X-Ray - Real-time Docker log viewer
-  # Lightweight container log viewer — reads directly from Docker socket
-  # Provides instant visibility into all container stdout/stderr
-  # Access at http://localhost:9999
   # ═══════════════════════════════════════════════════════════════════════════
   dozzle:
     image: amir20/dozzle:latest
@@ -577,8 +568,6 @@ services:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-doctor: The Immune System - Persistent HA watchdog
-  # Monitors service health and auto-restarts crashed HA candidates
-  # via docker compose with the HA overlay (preserves restart policies)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-doctor:
     build:

@@ -406,7 +406,6 @@ class VoiceManager:
         after: discord.VoiceState,
     ) -> None:
         """React to users joining/leaving voice channels."""
-        import discord as _discord
 
         # Record all users as seen (for dashboard user list)
         guild_id = str(member.guild.id) if member.guild else None
@@ -704,6 +703,10 @@ class VoiceManager:
 
     async def _analyze_audio(self, pcm_16k_mono: bytes) -> dict | None:
         """Send audio to gaia-audio /analyze and return musical/env metrics."""
+        from gaia_common.config import get_config
+        config = get_config()
+        audio_endpoint = config.endpoints.get("audio", "http://gaia-audio:8080")
+        
         try:
             audio_b64 = base64.b64encode(pcm_16k_mono).decode("utf-8")
             payload = {
@@ -712,7 +715,7 @@ class VoiceManager:
             }
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
-                    f"{AUDIO_ENDPOINT}/analyze",
+                    f"{audio_endpoint}/analyze",
                     json=payload,
                 )
                 if resp.status_code == 200:

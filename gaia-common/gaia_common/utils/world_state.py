@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 import time
 import logging
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -24,12 +26,21 @@ from gaia_common.utils import tools_registry, immune_system
 
 logger = logging.getLogger(__name__)
 
-# Epoch Events (Proprioceptive Milestones)
-EPOCH_EVENTS = {
-    "GENESIS": "2026-02-17T00:00:00Z", # Project start
-    "SOVEREIGN_SHIELD": "2026-03-02T21:41:00Z", # Hardening milestone
-    "CASCADE_ROUTING": "2026-03-03T15:30:00Z", # This milestone
-}
+def _load_milestones() -> List[Dict]:
+    """Load active milestones from the registry."""
+    # Try multiple possible mount paths
+    paths = [
+        Path("/knowledge/system_reference/milestones.json"),
+        Path("/gaia/GAIA_Project/knowledge/system_reference/milestones.json")
+    ]
+    for p in paths:
+        if p.exists():
+            try:
+                data = json.loads(p.read_text())
+                return data.get("milestones", [])
+            except Exception:
+                logger.debug(f"Failed to parse milestones from {p}")
+    return []
 
 def _get_time_since_event(event_iso: str) -> str:
     try:
@@ -222,11 +233,17 @@ def format_world_state_snapshot(max_lines: int = 15, output_context: Dict = None
             uptime_str += f" | Last Sleep: {int(last_sleep)}s"
     lines.append(f"{uptime_str} | {snap['load']} | {snap['mem']}")
     
-    # Epoch Awareness
-    milestones = []
-    for name, iso in EPOCH_EVENTS.items():
-        milestones.append(f"{name.replace('_', ' ').title()}: {_get_time_since_event(iso)} ago")
-    lines.append("Milestones: " + " | ".join(milestones))
+    # Epoch Awareness (Milestones)
+    active_milestones = _load_milestones()
+    if active_milestones:
+        # Sort by importance descending, then timestamp descending
+        active_milestones.sort(key=lambda x: (x.get('importance', 0), x.get('timestamp', '')), reverse=True)
+        milestone_parts = []
+        for m in active_milestones[:3]: # Keep top 3 to avoid bloat
+            name = m.get('name', 'Unknown')
+            ts = m.get('timestamp', '')
+            milestone_parts.append(f"{name}: {_get_time_since_event(ts)} ago")
+        lines.append("Milestones: " + " | ".join(milestone_parts))
     
     # Auditory Environment (Music Engine)
     env = snap.get("auditory_environment")
@@ -241,6 +258,17 @@ def format_world_state_snapshot(max_lines: int = 15, output_context: Dict = None
     try:
         immune_health = immune_system.get_immune_summary()
         lines.append(immune_health)
+        
+        # If irritated or critical, inject the detailed MRI report for autonomous repair context
+        if "IRRITATED" in immune_health or "CRITICAL" in immune_health:
+            detailed_mri = immune_system.ImmuneSystem().get_detailed_mri()
+            if detailed_mri:
+                # Add a clear separator and the first few detailed issues
+                lines.append("── Detailed MRI Diagnostics (High Priority) ──")
+                for i in detailed_mri[:5]: # Limit to top 5 to avoid token bloat
+                    lines.append(f"- {i}")
+                if len(detailed_mri) > 5:
+                    lines.append(f"... (+{len(detailed_mri)-5} more structural issues)")
     except Exception:
         lines.append("Immune System: Status unavailable")
 

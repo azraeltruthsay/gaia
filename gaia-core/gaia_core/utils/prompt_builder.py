@@ -7,7 +7,6 @@ Prompt Builder (robust, persona/context-aware)
 
 import logging
 import os
-from datetime import datetime
 from typing import List, Dict
 
 # [GCP v0.3] Import the new packet structure
@@ -15,7 +14,6 @@ from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutio
 from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
 from gaia_common.utils.packet_templates import render_gaia_packet_template
-from gaia_core.utils.gaia_rescue_helper import GAIARescueHelper
 from gaia_common.utils.world_state import format_world_state_snapshot
 
 logger = logging.getLogger("GAIA.PromptBuilder")
@@ -475,6 +473,40 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
         "Do NOT use THOUGHT_SEED for routine observations."
     )
     system_content_parts.append(thought_seed_directive)
+
+    # 3.8.5 Spinal Routing Directive - Multi-destination thought processing
+    spinal_routing_directive = (
+        "SPINAL ROUTING DIRECTIVE (OutputRouting):\n"
+        "You are connected to a multi-destination nervous system. You do not need to send all "
+        "your thoughts to the user. You can split your output.\n"
+        "When performing complex or multi-step tasks, you may emit an intermediate status "
+        "update to the user, while directing your detailed planning to your internal sketchpad.\n"
+        "Use the following syntax on its own line to route information to your sketchpad:\n"
+        "SKETCHPAD: [Your detailed internal thoughts, plans, or working state]\n"
+        "Use the following syntax to send an interactive update to the user chat:\n"
+        "USER_CHAT: [A brief, polite status update letting them know what you are working on]\n"
+        "This allows you to 'think out loud' internally without cluttering the user interface."
+    )
+    system_content_parts.append(spinal_routing_directive)
+
+    # 3.8.6 Vital Organ Promotion Directive - Protocol for core system changes
+    vital_organ_directive = (
+        "VITAL ORGAN PROMOTION PROTOCOL:\n"
+        "The following modules are considered VITAL ORGANS: main.py, agent_core.py, "
+        "mcp_client.py, tools.py, and immune_system.py. Modifications to these must follow "
+        "a strict safety path:\n"
+        "1. CANDIDATE FIRST: Develop all changes in the `candidates/` directory first.\n"
+        "2. VALIDATION: You MUST run diffs, grammar checks (ruff), and Python compilation "
+        "checks (py_compile) against the candidate code.\n"
+        "3. REGRESSION TESTING: Verify that the candidate changes do not break existing logic.\n"
+        "4. COUNCIL APPROVAL: Present your final proposal and validation results to the "
+        "user (Azrael) for formal approval.\n"
+        "5. PROMOTION: Only after approval should changes be copied from `candidates/` to "
+        "production (live) directories for HA pairing integration.\n"
+        "Note: The Sovereign Shield compilation gate in your MCP will automatically block "
+        "any save that introduces syntax errors, but this does not replace the protocol."
+    )
+    system_content_parts.append(vital_organ_directive)
 
     # 3.9. Goal Context — inform the model of the detected user goal
     if packet.goal_state and packet.goal_state.current_goal:
