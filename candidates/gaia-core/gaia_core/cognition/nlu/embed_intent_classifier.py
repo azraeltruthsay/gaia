@@ -19,7 +19,6 @@ Thread-safety: the classifier is a singleton initialised under a lock.
 
 import json
 import logging
-import os
 import threading
 from pathlib import Path
 from typing import Optional, Tuple

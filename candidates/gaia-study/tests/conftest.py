@@ -1,8 +1,6 @@
 """Shared fixtures for gaia-study tests."""
 
 import pytest
-import tempfile
-from pathlib import Path
 
 from gaia_study.study_mode_manager import StudyModeManager
 

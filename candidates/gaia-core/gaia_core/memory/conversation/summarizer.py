@@ -1,12 +1,10 @@
 # /home/azrael/Project/gaia-assistant/app/memory/conversation/summarizer.py
 
 import logging
-from typing import List, Dict, Any
-import numpy as np
-from gaia_core.config import Config as GAIAConfig, get_config
+from typing import List, Dict
+from gaia_core.config import Config as GAIAConfig
 import requests
 import os
-from gaia_core.utils import mcp_client
 
 logger = logging.getLogger("GAIA.ConversationSummarizer")
 

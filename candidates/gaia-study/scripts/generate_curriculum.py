@@ -19,9 +19,8 @@ import json
 import random
 import hashlib
 import argparse
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 # ── Tool Registry (mirrors gaia-common/utils/tools_registry.py) ─────────

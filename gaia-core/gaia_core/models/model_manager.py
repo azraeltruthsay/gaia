@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
-import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("GAIA.ModelManager")

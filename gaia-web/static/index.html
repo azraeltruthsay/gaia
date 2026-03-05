@@ -74,10 +74,6 @@
               <div class="state-label">GPU Owner</div>
               <div class="state-value" :class="gpuOwner !== '--' ? 'ok' : ''" x-text="gpuOwner"></div>
             </div>
-            <div class="state-card">
-              <div class="state-label">10m Temps</div>
-              <div class="state-value" :class="temps !== '--' ? 'ok' : ''" x-text="temps"></div>
-            </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
                 <div class="state-label">
@@ -248,26 +244,6 @@
         <div class="hook-actions">
           <button class="hook-btn hook-btn-warn" @click="action('gpu/release')">Release</button>
           <button class="hook-btn hook-btn-primary" @click="action('gpu/reclaim')">Reclaim</button>
-        </div>
-      </div>
-
-      <!-- Audio Inbox -->
-      <div class="hook-group" x-data="audioInboxPanel()">
-        <div class="hook-group-header">Audio Inbox</div>
-        <div class="hook-status">
-          <span class="hook-status-label">State:</span>
-          <span class="hook-status-value" x-text="inboxStateBadge"></span>
-        </div>
-        <div class="hook-status">
-          <span class="hook-status-label">Queue:</span>
-          <span class="hook-status-value" x-text="queueDepth + ' files'"></span>
-        </div>
-        <div class="hook-status">
-          <span class="hook-status-label">Processed:</span>
-          <span class="hook-status-value" x-text="filesProcessed"></span>
-        </div>
-        <div class="hook-actions">
-          <button class="hook-btn hook-btn-primary" @click="processInbox()" :disabled="inboxBusy">Process Inbox</button>
         </div>
       </div>
 
@@ -744,7 +720,6 @@
       <button class="logs-subtab" :class="logsTab === 'web' ? 'active' : ''" @click="logsTab = 'web'">Web</button>
       <button class="logs-subtab" :class="logsTab === 'mcp' ? 'active' : ''" @click="logsTab = 'mcp'">MCP</button>
       <button class="logs-subtab" :class="logsTab === 'study' ? 'active' : ''" @click="logsTab = 'study'">Study</button>
-      <button class="logs-subtab" :class="logsTab === 'audio' ? 'active' : ''" @click="logsTab = 'audio'">Audio</button>
       <button class="logs-subtab" :class="logsTab === 'discord' ? 'active' : ''" @click="logsTab = 'discord'">Discord</button>
     </div>
 

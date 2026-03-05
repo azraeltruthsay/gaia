@@ -1,6 +1,5 @@
 """Tests for GAIA MCP NotebookLM tools."""
 
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 

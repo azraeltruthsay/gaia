@@ -6,14 +6,10 @@ This provides a secure and audited boundary between cognition and action.
 """
 
 import logging
-import uuid
-import random
-import string
-import threading
 import time
 import traceback
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from gaia_common.config import Config
@@ -43,7 +39,6 @@ from .listener_tools import (
 import json
 from pathlib import Path
 import os
-import asyncio
 import subprocess
 
 # Study service client for gateway pattern

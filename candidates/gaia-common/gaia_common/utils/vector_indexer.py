@@ -14,7 +14,7 @@ are done lazily inside the functions or class methods that actually need them.
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 logger = logging.getLogger("GAIA.VectorIndexer")
 

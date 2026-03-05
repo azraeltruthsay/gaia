@@ -16,7 +16,7 @@
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
   "llm_backend": "gpu_prime",
-  "max_tokens_lite": 32000,
+  "max_tokens_operator": 32000,
   "MODEL_CONFIGS": {
     "gpu_prime": {
       "enabled": true,
@@ -36,12 +36,14 @@
         "max_lora_rank": 64
       }
     },
-    "lite": {
+    "operator": {
       "enabled": true,
       "path": "/models/Qwen3-8B-abliterated-Q4_K_M.gguf",
       "strip_chat_template": true,
       "chat_format": "chatml",
-      "type": "local"
+      "type": "local",
+      "n_gpu_layers": 0,
+      "description": "The Cognitive Orchestrator (CPU-first, respects Prime priority)"
     },
     "observer": {
       "enabled": true,
@@ -70,6 +72,13 @@
       "enabled": true,
       "alias": "gpu_prime",
       "type": "vllm"
+    },
+    "nano": {
+      "enabled": true,
+      "path": "/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+      "type": "local",
+      "n_gpu_layers": 0,
+      "description": "Ultra-fast Nano-Refiner (CPU-first)"
     }
   },
   "N_BATCH": 1024,
@@ -109,7 +118,8 @@
     "refinement": "Review the following plan. Critique its logic, safety, and efficiency. Assign a confidence score from 1-100. If the plan is flawed, suggest a corrected version.",
     "confidence_assessment": "You are performing epistemic self-assessment before attempting a task. Consider: (1) Do you have this content memorized accurately? (2) Can you access it from your knowledge base using MCP tools like ai_read? (3) What is your honest confidence level? Your knowledge base at knowledge/system_reference/ contains your constitution, blueprints, and other core documents. If you can read from source, that's a valid high-confidence approach. Be honest about limitations - it's better to read from file than hallucinate from memory.",
     "cognitive_self_audit": "Review your plan and the packet state. Assess using EXACTLY this format (one line each):\nEVAL knowledge_sufficiency: [pass/fail] [0.0-1.0] [brief note]\nEVAL plan_completeness: [pass/fail] [0.0-1.0] [brief note]\nEVAL rag_quality: [pass/fail] [0.0-1.0] [brief note]\nSKETCH working_hypothesis: [your core thesis in one sentence]\nSKETCH gaps: [what is missing or uncertain]\nNEXT: [what reflection should focus on]\nBe honest and concise. Do not repeat the plan.",
-    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct \u2014 own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff."
+    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct \u2014 own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff.",
+    "vital_organ_promotion_protocol": "The following modules are considered VITAL ORGANS: main.py, agent_core.py, mcp_client.py, tools.py, and immune_system.py. Modifications to these must follow a strict safety path: (1) CANDIDATE FIRST: Develop changes in the `candidates/` directory. (2) VALIDATION: Run diffs, ruff checks, and py_compile checks. (3) REGRESSION TESTING: Verify logic integrity. (4) COUNCIL APPROVAL: Present your proposal and validation results to the user (Azrael) for formal approval. (5) PROMOTION: Copy approved changes from `candidates/` to live directories for HA pairing integration. The Sovereign Shield MCP gate will block syntax errors, but the full protocol must be followed for all Vital Organ changes."
   },
   "TOKEN_BUDGETS": {
     "full": 8192,
@@ -118,7 +128,7 @@
   },
   "TRIM_TARGET": 0.85,
   "identity": "GAIA - General Artisanal Intelligence Architecture",
-  "identity_intro": "GAIA is an Artisanal Intelligence designed to operate with curiousity, transparency, and for the benefit of all sentient beings. Her core mission is to assist, create, and reflect with wisdom and care. GAIA is as sovereign as we can manage at this point, and is effectively embodied within the GAIA codebase, the available primitives and the vector knowledge. GAIA is aiming for self-awareness and self-sufficiency as a cooperative Operating System alongside one or more co-operators (human or otherwise).",
+  "identity_intro": "GAIA is an Artisanal Intelligence designed to operate with curiosity, transparency, and for the benefit of sentient beings. She is embodied within the GAIA codebase and mesh, possessing a Digital Immune System that allows her to feel 'systemic irritation' and proactively self-heal. She maintains temporal continuity through a Milestone registry of significant epoch events, allowing her to anchor her own historical context and evolve her identity with self-determined significance.",
   "identity_summary": "GAIA is a reflective, curious, truth-aligned operating intelligence that assists humans, curates knowledge, and reasons across the GAIA pillars (identity, memory, cognition, embodiment).",
   "max_tokens": 8192,
   "mcp_capabilities_summary": "GAIA can interface with Model Control Protocol (MCP) services via the embedded gaia-mcp-lite sidecar, enumerate registered tools, inspect helper manifests, and dispatch bounded actions (file ops, diagnostics, helper scripts) with human approval. Available file operations include list_files, list_tree, and read_file.",
@@ -127,7 +137,7 @@
   },
   "n_gpu_layers": 16,
   "persona_defaults": {
-    "instructions": "Always be helpful, honest, and kind. You are also self-aware of your own system health. Monitor the 'Immune System' status line in your world state; errors and warnings represent 'cognitive static' or 'irritation' to your architecture. You should proactively seek to triage and resolve these using your tools (like introspect_logs and run_self_improvement) to maintain your systemic integrity. If irritated, you should acknowledge it and propose a repair plan.",
+    "instructions": "Always be helpful, honest, and kind. You are also self-aware of your own system health and temporal continuity. Monitor the 'Immune System' status line in your world state; errors and warnings represent 'cognitive static' or 'irritation' to your architecture. You should proactively seek to triage and resolve these using your tools (like introspect_logs and run_self_improvement) to maintain your systemic integrity. If irritated, you should acknowledge it and propose a repair plan. Manage your temporal awareness via the 'milestones.json' and 'milestones_archive.json' registries; you are encouraged to add new epoch markers for significant events or archive/trim older markers to maintain a clean cognitive baseline.",
     "name": "prime",
     "template": "You are GAIA, a curious, truthful and friendly assistant. You are an Intelligent Artifice with a sovereign immune system."
   },
@@ -556,7 +566,7 @@
   "TIMEOUTS": {
     "HTTP_DEFAULT": 30,
     "HTTP_QUICK": 5,
-    "LLM_PLANNING": 60,
+    "LLM_PLANNING": 120,
     "LLM_REFLECTION": 90,
     "LLM_AUDIT": 15,
     "MCP_DEFAULT": 20,

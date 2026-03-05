@@ -14,7 +14,6 @@ Part of Phase 1 implementation of the GAIA LoRA Adapter Architecture.
 import json
 import logging
 import hashlib
-import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -412,7 +411,6 @@ class StudyModeManager:
         Uses the QLoRATrainer for real training when available,
         falls back to simulation mode for testing.
         """
-        import asyncio
 
         # Create adapter directory
         tier_dir = self._get_tier_directory(config.tier)

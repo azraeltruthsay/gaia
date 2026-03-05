@@ -16,8 +16,7 @@ from typing import Dict, List, Optional, Any
 
 from gaia_core.cognition.loop_detector import (
     LoopCategory,
-    AggregatedResult,
-    DetectionResult
+    AggregatedResult
 )
 
 logger = logging.getLogger("GAIA.LoopPatterns")

@@ -6,7 +6,6 @@ This module provides Discord integration as both:
 - Input source (listen for @GAIA mentions and DMs, routing to AgentCore)
 """
 
-import os
 import logging
 import asyncio
 import concurrent.futures

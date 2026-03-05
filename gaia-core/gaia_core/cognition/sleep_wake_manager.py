@@ -73,20 +73,12 @@ class SleepWakeManager:
         self.current_task: Optional[Dict[str, Any]] = None
         self.wake_signal_pending = False
         self._timeline = timeline_store
-        
-        # Check if prime is already available in the model pool at startup
         self.prime_available = False
-        if model_pool and ("gpu_prime" in model_pool.models or "prime" in model_pool.models):
-            self.prime_available = True
-            
         self.model_pool = model_pool
         self.idle_monitor = idle_monitor
         self.checkpoint_manager = PrimeCheckpointManager(config, timeline_store=timeline_store)
         self._council_notes = CouncilNoteManager(config, timeline_store=timeline_store)
         self.last_state_change = datetime.now(timezone.utc)
-        self.last_sleep_start: Optional[datetime] = None
-        self.last_wake_time: Optional[datetime] = datetime.now(timezone.utc)
-        self.last_sleep_duration: float = 0.0 # seconds
         self.dreaming_handoff_id: Optional[str] = None
         self._preemption_initiated: bool = False
         self.voice_active: bool = False
@@ -172,9 +164,7 @@ class SleepWakeManager:
             return False
 
         self.state = GaiaState.DROWSY
-        self.prime_available = False
         self.last_state_change = datetime.now(timezone.utc)
-        self.last_sleep_start = self.last_state_change
         self._emit_state_change("active", "drowsy", "idle threshold reached")
         logger.info("Entering DROWSY — writing checkpoint...")
 
@@ -311,13 +301,7 @@ class SleepWakeManager:
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
             self.prime_available = True
-            
-            now = datetime.now(timezone.utc)
-            self.last_wake_time = now
-            if self.last_sleep_start:
-                self.last_sleep_duration = (now - self.last_sleep_start).total_seconds()
-                
-            self.last_state_change = now
+            self.last_state_change = datetime.now(timezone.utc)
             self._emit_state_change("asleep", "active", "wake signal processed")
 
             logger.info("Wake complete, context restored")
@@ -426,7 +410,6 @@ class SleepWakeManager:
         prev = self.state
         self.state = GaiaState.OFFLINE
         self._phase = _TransientPhase.NONE
-        self.prime_available = False
         self.last_state_change = datetime.now(timezone.utc)
         self._emit_state_change(prev.value, "offline", "shutdown")
         logger.info("Entering OFFLINE from %s", prev)
@@ -445,8 +428,6 @@ class SleepWakeManager:
             "current_task": self.current_task.get("task_id") if self.current_task else None,
             "last_state_change": self.last_state_change.isoformat(),
             "seconds_in_state": (now - self.last_state_change).total_seconds(),
-            "last_wake_time": self.last_wake_time.isoformat() if self.last_wake_time else None,
-            "last_sleep_duration_s": self.last_sleep_duration,
         }
         status["voice_active"] = self.voice_active
         status["preemption_initiated"] = self._preemption_initiated

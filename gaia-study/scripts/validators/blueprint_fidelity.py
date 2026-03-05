@@ -42,7 +42,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ── Result data structures ───────────────────────────────────────────────────
@@ -578,12 +578,12 @@ def print_fidelity_report(report: FidelityReport, verbose: bool = False) -> None
     print(f"  Duration:         {report.duration_seconds:.1f}s")
     print(f"  Composite score:  {report.avg_score:.3f}")
 
-    print(f"\n  Per-dimension averages:")
+    print("\n  Per-dimension averages:")
     for name, avg in sorted(report.dimension_averages.items()):
         print(f"    {name:.<35s} {avg:.3f}")
 
     if verbose:
-        print(f"\n  Per-example scores:")
+        print("\n  Per-example scores:")
         for r in report.results:
             print(f"    [{r.index}] {r.service_id}: {r.composite_score:.3f}", end="")
             if r.error:

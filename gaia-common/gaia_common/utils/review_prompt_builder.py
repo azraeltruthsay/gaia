@@ -20,10 +20,7 @@ from pydantic import BaseModel, Field
 from gaia_common.models.blueprint import (
     BlueprintModel,
     HttpRestInterface,
-    InterfaceDirection,
     NegotiatedTransport,
-    SseInterface,
-    WebSocketInterface,
 )
 from gaia_common.utils.ast_summarizer import ASTSummary
 from gaia_common.utils.blueprint_precheck import PreCheckResult

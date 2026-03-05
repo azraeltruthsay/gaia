@@ -377,7 +377,7 @@ class TemporalStateManager:
     def _reconstruct_world_state(self) -> str:
         """Get current world state snapshot."""
         try:
-            from gaia_core.utils.world_state import format_world_state_snapshot
+            from gaia_common.utils.world_state import format_world_state_snapshot
             return format_world_state_snapshot(max_lines=6)
         except Exception:
             return ""
@@ -494,7 +494,6 @@ class TemporalStateManager:
 
         # GAIA state
         try:
-            from gaia_core.cognition.sleep_wake_manager import SleepWakeManager
             if self._timeline is not None:
                 last_state = self._timeline.last_event_of_type("state_change")
                 if last_state:

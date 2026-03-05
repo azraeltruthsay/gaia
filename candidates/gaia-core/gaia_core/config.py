@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
-from typing import Dict, Any, Optional, Tuple
-from gaia_common.config import Config as CommonConfig, get_config as get_common_config
+from typing import Dict, Any
+from gaia_common.config import Config as CommonConfig
 
 logger = logging.getLogger("GAIA.Config")
 

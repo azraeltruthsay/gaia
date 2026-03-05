@@ -6,7 +6,6 @@ artifacts (files on disk, successful dispatches, goal shifts).
 """
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -26,7 +25,6 @@ from gaia_common.protocols.cognition_packet import (
     Persona,
     PersonaRole,
     Reasoning,
-    ReflectionLog,
     Response,
     Routing,
     Safety,
@@ -37,7 +35,7 @@ from gaia_common.protocols.cognition_packet import (
     SystemTask,
     TokenUsage,
 )
-from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+from gaia_core.utils.stream_observer import StreamObserver
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

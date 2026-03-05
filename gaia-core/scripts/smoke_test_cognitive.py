@@ -31,9 +31,9 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, List, Tuple
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 
 # ---------------------------------------------------------------------------
 # Defaults

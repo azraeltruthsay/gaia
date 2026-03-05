@@ -9,10 +9,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from gaia_core.cognition import thought_seed
-from gaia_core.config import Config, get_config
+from gaia_core.config import Config
 from gaia_core.utils import mcp_client
 from pathlib import Path
-from gaia_core.cognition.nlu.intent_service import detect_intent
 
 
 def _get_model_pool():
@@ -57,11 +56,7 @@ def _save_dev_matrix(data):
 
 
 def run_review_once(config: Config = None):
-    import os
-    from gaia_core.utils.dev_matrix_utils import mark_task_complete, load_dev_matrix, diff_dev_matrix, DEV_MATRIX_PATH
-    from gaia_common.protocols.cognition_packet import CognitionPacket, Persona, Origin, Routing, Model, Header, Content, Context, Constraints, PersonaRole, TargetEngine
-    from gaia_core.config import Config, get_config
-    from gaia_core.utils.mcp_client import request_approval_via_mcp
+    from gaia_core.config import Config
     import logging
     logger = logging.getLogger("GAIA.SelfReviewWorker")
     config = Config()
@@ -172,9 +167,9 @@ def run_review_with_prompt(prompt: str, task_key: str = "thought_seed_system", s
     Runs a natural-language review of dev_matrix, encourages GAIA to reason and reflect on completed tasks.
     Persona and instructions are enhanced for deeper reasoning.
     """
-    from gaia_core.utils.dev_matrix_utils import mark_task_complete, load_dev_matrix, diff_dev_matrix, DEV_MATRIX_PATH
+    from gaia_core.utils.dev_matrix_utils import mark_task_complete, DEV_MATRIX_PATH
     from gaia_common.protocols.cognition_packet import CognitionPacket, Persona, Origin, Routing, Model, Header, Content, Context, Constraints, PersonaRole, TargetEngine
-    from gaia_core.config import Config, get_config
+    from gaia_core.config import Config
     from gaia_core.utils.mcp_client import request_approval_via_mcp
     import os
     config = Config()

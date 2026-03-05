@@ -26,7 +26,7 @@ from gaia_common.protocols.cognition_packet import CognitionPacket, PacketState,
 
 # Loop Detection - for streaming token pattern detection
 try:
-    from gaia_core.cognition.loop_recovery import LoopDetectorObserver
+    from gaia_core.cognition.loop_recovery import LoopDetectorObserver, get_recovery_manager
     LOOP_DETECTION_AVAILABLE = True
 except ImportError:
     LOOP_DETECTION_AVAILABLE = False

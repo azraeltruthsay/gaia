@@ -1,9 +1,7 @@
 """Tests for MessageQueue file-backed persistence."""
 
-import asyncio
 import json
 import pytest
-import tempfile
 from pathlib import Path
 
 from gaia_web.queue.message_queue import MessageQueue, QueuedMessage

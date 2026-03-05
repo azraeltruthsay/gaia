@@ -5,9 +5,8 @@ Background processing API for vector indexing, document management,
 and LoRA adapter training (Study Mode).
 """
 
-import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ from pydantic import BaseModel, Field
 from gaia_common.utils import get_logger
 
 from .indexer import VectorIndexer
-from .study_mode_manager import StudyModeManager, TrainingConfig, TrainingResult
+from .study_mode_manager import StudyModeManager, TrainingConfig
 
 logger = get_logger(__name__)
 

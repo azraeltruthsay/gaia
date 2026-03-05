@@ -1,6 +1,5 @@
 """Tests for packet utility functions."""
 
-import pytest
 from gaia_common.utils.packet_utils import is_execution_safe
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket,

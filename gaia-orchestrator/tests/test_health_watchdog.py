@@ -1,7 +1,5 @@
 """Tests for the HA-aware health watchdog."""
 
-import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,8 +9,6 @@ from gaia_orchestrator.health_watchdog import (
     HealthWatchdog,
     HAStatus,
     FAILURE_THRESHOLD,
-    _LIVE_SERVICES,
-    _CANDIDATE_SERVICES,
 )
 
 

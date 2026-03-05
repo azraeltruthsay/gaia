@@ -122,24 +122,6 @@ async def post_with_retry(
             "Primary POST %s exhausted %d attempts, attempting HA fallback to %s",
             url, max_attempts, fallback_url,
         )
-        
-        # [TCP] Inject failover metadata into the packet so the candidate knows its state
-        # We modify the JSON payload directly to avoid heavy protocol imports here
-        try:
-            if "header" in json:
-                if "operational_status" not in json["header"] or json["header"]["operational_status"] is None:
-                    json["header"]["operational_status"] = {"status": "failover_active"}
-                else:
-                    json["header"]["operational_status"]["status"] = "failover_active"
-            
-            if "intent" in json:
-                if "tags" not in json["intent"] or json["intent"]["tags"] is None:
-                    json["intent"]["tags"] = ["#Failover"]
-                elif "#Failover" not in json["intent"]["tags"]:
-                    json["intent"]["tags"].append("#Failover")
-        except Exception:
-            logger.debug("Failed to inject failover metadata (non-fatal)", exc_info=True)
-
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(

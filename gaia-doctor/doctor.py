@@ -53,8 +53,9 @@ log = logging.getLogger("gaia-doctor")
 SERVICES = {
     # name: (health_url, remediation)
     # remediation: None = observe only, "restart" = docker restart, "ha" = compose HA overlay
-    "gaia-core": ("http://gaia-core:6415/health", None),
+    "gaia-core": ("http://gaia-core:6415/health", "restart"),
     "gaia-web": ("http://gaia-web:6414/health", "restart"),
+    "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
     "gaia-audio": ("http://gaia-audio:8080/health", None),
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", "ha"),
@@ -73,6 +74,10 @@ _restart_history: dict[str, list] = {}   # timestamps of recent restarts per ser
 _alarmed_services: set = set()           # services currently in alarm state
 _remediation_log: list[dict] = []
 _active_alarms: list[dict] = []
+_irritations: list[dict] = []            # detected log errors/irritations
+_last_log_offsets: dict[str, int] = {}   # service -> last read byte offset
+_code_mtimes: dict[str, float] = {}      # service -> last seen mtime of its code dir
+_dissonance_report: dict = {}            # module-level divergence detection
 
 
 def _init_state():
@@ -80,6 +85,177 @@ def _init_state():
         _service_state[name] = {"healthy": None, "last_check": None}
         _consecutive_failures[name] = 0
         _restart_history[name] = []
+        _last_log_offsets[name] = 0
+        _code_mtimes[name] = _get_service_mtime(name)
+
+
+# ---------------------------------------------------------------------------
+# Code Audit (Test-before-Restart)
+# ---------------------------------------------------------------------------
+
+GAIA_PROJECT_ROOT = Path("/gaia/GAIA_Project")
+
+SERVICE_CODE_DIRS = {
+    "gaia-core": GAIA_PROJECT_ROOT / "gaia-core",
+    "gaia-web": GAIA_PROJECT_ROOT / "gaia-web",
+    "gaia-mcp": GAIA_PROJECT_ROOT / "gaia-mcp",
+    "gaia-study": GAIA_PROJECT_ROOT / "gaia-study",
+    "gaia-orchestrator": GAIA_PROJECT_ROOT / "gaia-orchestrator",
+}
+
+
+def _get_service_mtime(name: str) -> float:
+    """Get the maximum mtime of all .py files in a service directory."""
+    code_dir = SERVICE_CODE_DIRS.get(name)
+    if not code_dir or not code_dir.exists():
+        return 0.0
+    
+    max_mtime = 0.0
+    try:
+        for p in code_dir.rglob("*.py"):
+            mtime = p.stat().st_mtime
+            if mtime > max_mtime:
+                max_mtime = mtime
+    except Exception:
+        pass
+    return max_mtime
+
+
+def audit_code():
+    """Check for code changes and restart if tests pass."""
+    for name in SERVICE_CODE_DIRS:
+        # Only audit services we can remediate
+        if SERVICES.get(name) and SERVICES[name][1] is None:
+            continue
+
+        current_mtime = _get_service_mtime(name)
+        last_mtime = _code_mtimes.get(name, 0.0)
+
+        # Skip if we just initialized and saw the mtime for the first time
+        if last_mtime == 0.0:
+            _code_mtimes[name] = current_mtime
+            continue
+
+        if current_mtime > last_mtime:
+            log.info("CODE CHANGE detected for %s. Auditing...", name)
+            _code_mtimes[name] = current_mtime
+            
+            if run_service_tests(name):
+                log.info("Tests PASSED for %s. Triggering auto-restart.", name)
+                remediation = SERVICES[name][1]
+                if remediation == "restart":
+                    docker_restart(name)
+                elif remediation == "ha":
+                    restart_candidate(name)
+            else:
+                log.warning("Tests FAILED for %s code changes. Auto-restart ABORTED.", name)
+                _record_irritation(name, f"Code changes detected but tests failed", "CodeAudit: Tests Failed")
+
+
+def run_service_tests(name: str) -> bool:
+    """Run ruff and pytest inside the container to validate code changes."""
+    # 1. Fast Lint Check (Fatal errors only: F821 Undefined Name, E999 Syntax)
+    log.info("Running fast lint audit for %s...", name)
+    try:
+        lint_cmd = ["docker", "exec", "-t", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,E999"]
+        lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
+        if lint_res.returncode != 0:
+            log.error("FATAL LINT ERROR in %s:\n%s", name, lint_res.stdout)
+            _record_irritation(name, f"Fatal lint error: {lint_res.stdout[:100]}", "CodeAudit: Lint Fatal")
+            return False
+    except Exception as e:
+        log.warning("Fast lint audit failed for %s: %s", name, e)
+
+    # 2. Standard Unit Tests
+    log.info("Running pytest for %s before restart...", name)
+    try:
+        # Standard GAIA test command: python -m pytest <path> -v --tb=short
+        # We run it against the /app directory inside the container
+        cmd = ["docker", "exec", "-t", name, "python", "-m", "pytest", "/app", "-v", "--tb=short", "-m", "not integration"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        
+        if result.returncode == 0:
+            return True
+        else:
+            log.warning("Tests failed for %s:\n%s", name, result.stdout + result.stderr)
+            return False
+    except subprocess.TimeoutExpired:
+        log.error("Testing %s timed out (>180s)", name)
+        return False
+    except Exception as e:
+        log.error("Failed to run tests for %s: %s", name, e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Irritation Monitoring (Log Scanning)
+# ---------------------------------------------------------------------------
+
+IRRITATION_PATTERNS = [
+    "PermissionError",
+    "TimeoutError",
+    "httpx.ReadTimeout",
+    "httpx.ConnectTimeout",
+    "HTTPStatusError",
+    "Sovereign Shield: Cannot save",
+    "BLAST SHIELD blocked",
+    "Circuit breaker triggered",
+]
+
+SERVICE_LOGS = {
+    "gaia-core": "/logs/gaia-core.log",
+    "gaia-web": "/logs/gaia-web.log",
+    "gaia-mcp": "/logs/gaia-mcp.log",
+}
+
+
+def scan_logs():
+    """Scan service logs for irritation patterns."""
+    for service, log_path in SERVICE_LOGS.items():
+        p = Path(log_path)
+        if not p.exists():
+            continue
+
+        try:
+            file_size = p.stat().st_size
+            last_offset = _last_log_offsets.get(service, 0)
+
+            # If file was rotated or truncated, reset offset
+            if file_size < last_offset:
+                last_offset = 0
+
+            if file_size > last_offset:
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(last_offset)
+                    # Don't read more than 1MB at once to avoid memory issues
+                    chunk = f.read(1024 * 1024)
+                    _last_log_offsets[service] = f.tell()
+
+                    for line in chunk.splitlines():
+                        for pattern in IRRITATION_PATTERNS:
+                            if pattern in line:
+                                _record_irritation(service, line, pattern)
+
+        except Exception as e:
+            log.debug(f"Failed to scan log {log_path}: {e}")
+
+
+def _record_irritation(service: str, line: str, pattern: str):
+    """Record a detected irritation in the state."""
+    # Avoid duplicate recordings of the same line if multiple patterns match
+    entry = {
+        "service": service,
+        "time": datetime.now(timezone.utc).isoformat(),
+        "pattern": pattern,
+        "message": line.strip()[:500],
+    }
+    _irritations.append(entry)
+    
+    # Keep only the last 100 irritations
+    if len(_irritations) > 100:
+        _irritations.pop(0)
+    
+    log.warning("IRRITATION detected in %s: %s", service, pattern)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +429,22 @@ def docker_restart(name: str) -> bool:
 
 def poll_cycle():
     """Run one health check cycle across all services."""
+    # Check for cognitive dissonance (drift between PROD and CAND)
+    try:
+        from gaia_common.utils.immune_system import ImmuneSystem
+        imm = ImmuneSystem("/logs")
+        global _dissonance_report
+        _dissonance_report = imm.get_dissonance_report()
+    except Exception:
+        log.debug("Failed to generate dissonance report", exc_info=True)
+
+    # First scan logs for irritations
+    scan_logs()
+
+    # Audit code for disk/memory mismatches
+    audit_code()
+
+    # Then check HTTP health
     for name, (url, remediation) in SERVICES.items():
         healthy = check_health(name, url)
         _service_state[name]["last_check"] = datetime.now(timezone.utc).isoformat()
@@ -308,6 +500,7 @@ def _build_status() -> dict:
         "poll_interval": POLL_INTERVAL,
         "maintenance_mode": MAINTENANCE_FLAG.exists(),
         "active_alarms": list(_alarmed_services),
+        "irritation_count": len(_irritations),
         "services": {
             name: {
                 "healthy": state["healthy"],
@@ -324,6 +517,8 @@ def _build_status() -> dict:
         },
         "recent_remediations": _remediation_log[-10:],
         "recent_alarms": _active_alarms[-10:],
+        "recent_irritations": _irritations[-5:],
+        "dissonance_report": _dissonance_report,
     }
 
 
@@ -341,6 +536,10 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._json_response(200, {
                 "alarmed_services": list(_alarmed_services),
                 "alarms": _active_alarms[-20:],
+            })
+        elif self.path == "/irritations":
+            self._json_response(200, {
+                "irritations": _irritations[-50:],
             })
         else:
             self._json_response(404, {"error": "not found"})

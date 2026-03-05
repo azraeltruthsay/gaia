@@ -19,7 +19,7 @@ from typing import Optional
 
 from .config import get_config
 from .state import StateManager
-from .models.schemas import GPUMemoryInfo, GPUOwner
+from .models.schemas import GPUMemoryInfo
 
 logger = logging.getLogger("GAIA.Orchestrator.GPU")
 

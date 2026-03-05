@@ -11,8 +11,6 @@ Usage:
 import logging
 import os
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 
 from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
 

@@ -1,6 +1,5 @@
 """Tests for the PersonaData and BasePersonaManager."""
 
-import pytest
 from gaia_common.base.persona import PersonaData, BasePersonaManager
 
 

@@ -2,8 +2,6 @@
 
 import json
 import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import pytest
 
 import gaia_mcp.listener_tools as lt

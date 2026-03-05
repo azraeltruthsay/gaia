@@ -1,9 +1,7 @@
 # /home/azrael/Project/gaia-assistant/app/memory/conversation/manager.py
 
-import os
-import json
 import logging
-from typing import List, Optional, Dict # MODIFIED: Added Dict
+from typing import List, Dict # MODIFIED: Added Dict
 from datetime import datetime, timezone
 
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer

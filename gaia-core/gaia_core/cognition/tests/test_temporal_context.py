@@ -2,9 +2,7 @@
 
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
-from pathlib import Path
 
-import pytest
 
 from gaia_core.utils.temporal_context import (
     _format_duration,

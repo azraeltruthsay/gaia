@@ -14,7 +14,7 @@ Environment:
 import logging
 import os
 import time
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List
 
 logger = logging.getLogger("GAIA.Groq")
 

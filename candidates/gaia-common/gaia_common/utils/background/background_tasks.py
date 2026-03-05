@@ -6,7 +6,7 @@ Processes conversation summarization, document embedding, LoRA fine-tuning, and 
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 logger = logging.getLogger("GAIA.BackgroundTasks")
 

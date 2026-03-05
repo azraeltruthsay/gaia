@@ -8,7 +8,6 @@ The generate_code_evolution_snapshot() function is called as a sleep task
 to produce a markdown summary that GAIA can reference in her temporal context.
 """
 
-import json
 import logging
 import os
 import subprocess

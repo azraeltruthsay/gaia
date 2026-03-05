@@ -168,7 +168,6 @@ const SERVICE_LABELS = {
   'gaia-prime': 'Prime',
   'gaia-mcp': 'MCP',
   'gaia-study': 'Study',
-  'gaia-audio': 'Audio',
   'gaia-core-candidate': 'Core (cand.)',
   'discord': 'Discord',
 };
@@ -179,7 +178,6 @@ function systemPanel() {
     sleepState: '--',
     sleepStateClass: '',
     gpuOwner: '--',
-    temps: '--',
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
@@ -255,11 +253,8 @@ function systemPanel() {
         const resp = await fetch('/api/system/status');
         if (resp.ok) {
           const data = await resp.json();
-          if (data.gpu_owner) {
+          if (data.gpu_owner && this.gpuOwner === '--') {
             this.gpuOwner = data.gpu_owner;
-          }
-          if (data.temps) {
-            this.temps = data.temps;
           }
         }
       } catch { /* orchestrator unavailable */ }
@@ -896,58 +891,6 @@ function audioListenerPanel() {
       } catch (err) {
         this.logEntry('ingest', `Connection error: ${err.message}`, true);
       }
-    },
-  };
-}
-
-// ── Audio Inbox Panel Component ────────────────────────────────────────────────
-
-function audioInboxPanel() {
-  return {
-    status: null,
-    _pollTimer: null,
-
-    init() {
-      this.refresh();
-      this._pollTimer = setInterval(() => this.refresh(), 5000);
-    },
-
-    destroy() {
-      if (this._pollTimer) clearInterval(this._pollTimer);
-    },
-
-    get inboxStateBadge() {
-      if (!this.status) return 'offline';
-      if (!this.status.running) return 'offline';
-      return this.status.state || 'idle';
-    },
-
-    get queueDepth() {
-      return this.status?.queue_depth ?? 0;
-    },
-
-    get filesProcessed() {
-      return this.status?.files_processed ?? 0;
-    },
-
-    get inboxBusy() {
-      return this.status?.state === 'processing';
-    },
-
-    async refresh() {
-      try {
-        const resp = await fetch('/api/audio/inbox/status');
-        if (resp.ok) this.status = await resp.json();
-      } catch {
-        this.status = null;
-      }
-    },
-
-    async processInbox() {
-      try {
-        await fetch('/api/audio/inbox/process', { method: 'POST' });
-      } catch { /* ignore */ }
-      setTimeout(() => this.refresh(), 1500);
     },
   };
 }

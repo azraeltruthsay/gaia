@@ -1,9 +1,8 @@
 """Unit tests for GoalDetector."""
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket,

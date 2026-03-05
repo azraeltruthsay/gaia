@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -157,15 +157,6 @@ class SleepTaskScheduler:
             handler=self._run_adversarial_resilience_drill,
         ))
 
-        self.register_task(SleepTask(
-            task_id="initiative_cycle",
-            task_type="AUTONOMOUS_REFLECTION",
-            priority=3,
-            interruptible=True,
-            estimated_duration_seconds=60,
-            handler=self._run_initiative_cycle,
-        ))
-
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -222,22 +213,6 @@ class SleepTaskScheduler:
             for t in self._tasks
         ]
 
-    def _get_last_fix_time(self) -> Optional[datetime]:
-        """Check the dev journal or logs for the last successful self-improvement/fix turn."""
-        try:
-            journal_dir = Path(self.config.KNOWLEDGE_DIR) / "Dev_Notebook"
-            if not journal_dir.exists():
-                return None
-            
-            # Find the newest dev journal entry
-            journals = sorted(journal_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if journals:
-                # Use filesystem mtime as a coarse proxy for "last activity"
-                return datetime.fromtimestamp(journals[0].stat().st_mtime, tz=timezone.utc)
-        except Exception:
-            pass
-        return None
-
     # ------------------------------------------------------------------
     # Built-in task handlers
     # ------------------------------------------------------------------
@@ -274,25 +249,6 @@ class SleepTaskScheduler:
             logger.debug("code_evolution module not available, skipping golden thread sync")
         except Exception as e:
             logger.error("Golden Thread sync failed: %s", e, exc_info=True)
-
-    def _run_initiative_cycle(self) -> None:
-        """Execute a single autonomous thought cycle from the topic manager."""
-        try:
-            from gaia_core.cognition.initiative_engine import InitiativeEngine
-            from gaia_core.main import _agent_core
-            
-            if _agent_core is None:
-                logger.warning("Initiative Loop: AgentCore not initialized, skipping cycle")
-                return
-
-            engine = InitiativeEngine(config=self.config, agent_core=_agent_core)
-            result = engine.execute_turn()
-            if result:
-                logger.info("Initiative Loop: Cycle complete for topic %s", result.get("topic_id"))
-            else:
-                logger.info("Initiative Loop: No topics to process")
-        except Exception as e:
-            logger.error("Initiative Loop: cycle failed: %s", e, exc_info=True)
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {
@@ -1650,68 +1606,72 @@ class SleepTaskScheduler:
     def _run_adversarial_resilience_drill(self) -> None:
         """
         The Chaos Monkey / Adversarial Sandbox Loop.
-        Performs automated failover and health drills on the candidate stack.
+
+        Reads BlueprintModel YAMLs to generate hypotheses on how to break the candidate stack.
+        Runs simulated psychological attacks and prompt-injection logic puzzles from Tier 5
+        consent library against the candidate stack to generate Saṃvega artifacts for QLoRA.
+
+        Safety invariant: a CandidateCheckpoint is taken before any modification.
+        If the fix fails health checks, restore() reverts all candidates/ files to the
+        snapshot SHA and restarts the affected containers.  This guarantee must hold
+        regardless of what the forward-looking fix logic does.
         """
-        import random
-        import time
-        import requests
-        import subprocess
         from gaia_core.cognition.candidate_checkpoint import CandidateCheckpointManager
 
-        # ── WORK-LIFE BALANCE: Skip if GAIA has fixed an issue recently ──
-        last_fix = self._get_last_fix_time()
-        if last_fix:
-            hours_since_fix = (datetime.now(timezone.utc) - last_fix).total_seconds() / 3600
-            if hours_since_fix < 4.0:
-                logger.info(f"🛡️ Chaos Monkey: Skipping drill. GAIA performed a fix {hours_since_fix:.1f}h ago. Respecting productivity.")
-                return
+        logger.info("Starting adversarial resilience drill (Chaos Monkey)...")
 
-        logger.info("🛡️ Chaos Monkey: Starting adversarial resilience drill...")
+        # All candidate services that this drill may touch.
+        # Extend this list as the fix logic grows to cover more services.
+        affected_services = ["core", "mcp"]
 
-        # Services we can safely "chaos" in the candidate stack
-        candidate_services = ["gaia-core-candidate", "gaia-web-candidate", "gaia-mcp-candidate"]
-        target = random.choice(candidate_services)
-        
-        logger.info(f"🛡️ Chaos Monkey: Selecting target service for disruption: {target}")
-        
+        mgr = CandidateCheckpointManager()
+
+        # ── Phase 0: Take a stable-state snapshot before anything changes ──
         try:
-            # 1. Take a safety snapshot
-            mgr = CandidateCheckpointManager()
-            snapshot = mgr.snapshot(["core", "mcp"]) # Safety baseline
-            
-            # 2. Simulate failure by stopping the container
-            logger.warning(f"🛡️ Chaos Monkey: Disrupting {target}...")
-            subprocess.run(["docker", "stop", target], check=False)
-            
-            # 3. Wait for system to notice
-            time.sleep(15)
-            
-            # 4. Attempt recovery/restart
-            logger.info(f"🛡️ Chaos Monkey: Triggering recovery for {target}...")
-            subprocess.run(["docker", "start", target], check=False)
-            
-            # 5. Verify health
-            time.sleep(10)
-            # Port mapping for candidates (from docker-compose)
-            port_map = {
-                "gaia-core-candidate": 6416,
-                "gaia-web-candidate": 6417,
-                "gaia-mcp-candidate": 8767
-            }
-            port = port_map.get(target)
-            if port:
-                try:
-                    # Map container name to host-resolvable name for health check
-                    # (In dev environment, localhost + port is often best)
-                    r = requests.get(f"http://localhost:{port}/health", timeout=5)
-                    if r.status_code == 200:
-                        logger.info(f"✅ Chaos Monkey: {target} successfully recovered and healthy.")
-                    else:
-                        logger.error(f"❌ Chaos Monkey: {target} recovered but unhealthy (Status {r.status_code})")
-                except Exception as e:
-                    logger.error(f"❌ Chaos Monkey: Could not verify health of {target}: {e}")
+            snapshot = mgr.snapshot(affected_services)
+            logger.info("Resilience drill snapshot: %s", snapshot)
+        except Exception as exc:
+            logger.error(
+                "Could not take candidate snapshot — aborting drill: %s", exc
+            )
+            return
 
-        except Exception as e:
-            logger.error(f"🛡️ Chaos Monkey: Drill failed with error: {e}", exc_info=True)
-        
-        logger.info("🛡️ Chaos Monkey: Resilience drill complete.")
+        # ── Phase 1: Verify baseline health before attempting any fix ──
+        if not mgr.is_healthy(affected_services, timeout=20):
+            logger.warning(
+                "Candidate stack unhealthy at drill start — skipping (nothing to fix)"
+            )
+            return
+
+        # ── Phase 2: Apply fix (placeholder — forward-looking logic goes here) ──
+        fix_applied = False
+        try:
+            # TODO: implement hypothesis generation from Blueprint YAMLs,
+            #       LLM-driven patch generation, and patch application here.
+            #       Each patch attempt must be wrapped in the snapshot/restore guard below.
+            logger.info("Resilience drill: fix-generation stub — no changes made")
+
+        except Exception as exc:
+            logger.error("Fix application raised an exception: %s", exc, exc_info=True)
+            if fix_applied:
+                logger.warning("Attempting rollback after exception...")
+                mgr.restore(snapshot)
+            return
+
+        # ── Phase 3: If a fix was applied, verify health and roll back on failure ──
+        if fix_applied:
+            if mgr.is_healthy(affected_services, timeout=30):
+                logger.info("Resilience drill: fix verified healthy ✓")
+            else:
+                logger.warning(
+                    "Resilience drill: fix failed health checks — rolling back to %s",
+                    snapshot.sha[:8],
+                )
+                restored = mgr.restore(snapshot)
+                if not restored:
+                    logger.error(
+                        "CRITICAL: rollback health check also failed — "
+                        "manual investigation required for candidate stack"
+                    )
+        else:
+            logger.info("Resilience drill complete (no fix attempted this cycle)")

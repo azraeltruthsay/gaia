@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
 from gaia_core.memory.semantic_codex import SemanticCodex, CodexEntry
 from gaia_core.config import Config

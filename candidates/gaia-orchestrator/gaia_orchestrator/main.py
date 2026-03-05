@@ -29,7 +29,6 @@ from .models.schemas import (
     ContainerSwapRequest,
     HandoffRequest,
     HandoffStatus,
-    HandoffPhase,
     HandoffType,
     OracleNotification,
     Notification,

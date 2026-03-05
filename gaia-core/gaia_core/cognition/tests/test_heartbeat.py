@@ -1,22 +1,16 @@
 """Tests for ThoughtSeedHeartbeat — GAIA's thought seed triage daemon."""
 
 import json
-import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from gaia_core.cognition.thought_seed import (
-    SEEDS_ARCHIVE_DIR,
-    SEEDS_DIR,
-    SEEDS_PENDING_DIR,
     archive_seed,
     defer_seed,
     list_pending_seeds_due,
-    list_unreviewed_seeds,
 )
 
 

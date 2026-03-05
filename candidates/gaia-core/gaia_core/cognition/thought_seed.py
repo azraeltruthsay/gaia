@@ -8,7 +8,6 @@ Thought Seed System (GAIA pillar-compliant).
 
 # /home/azrael/Project/gaia-assistant/app/cognition/thought_seed.py
 
-import os
 import json
 from pathlib import Path
 from datetime import datetime, timezone

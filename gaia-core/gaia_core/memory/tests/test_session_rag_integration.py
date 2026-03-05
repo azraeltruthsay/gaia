@@ -8,11 +8,10 @@ Tests the interaction between:
 - Archive flow (summarize_and_archive → archive_and_reset)
 """
 
-import json
 import os
 import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -68,15 +67,13 @@ class TestSessionManagerIndexingHook:
         from gaia_core.memory.session_history_indexer import SessionHistoryIndexer
 
         # Patch the state file and indexer
-        state_file = str(tmp_path / "sessions.json")
         with (
-            patch("gaia_core.memory.session_manager.STATE_FILE", state_file),
-            patch("gaia_core.memory.session_manager.LAST_ACTIVITY_FILE", str(tmp_path / "activity.ts")),
             patch("gaia_core.memory.session_history_indexer._get_embed_model", return_value=fake_model),
             patch("gaia_core.memory.session_history_indexer._DEFAULT_PERSIST_DIR", persist_dir),
         ):
             from gaia_core.memory.session_manager import SessionManager
             config = MagicMock()
+            config.SHARED_DIR = str(tmp_path)
             config.KNOWLEDGE_CODEX_DIR = str(tmp_path / "knowledge")
             sm = SessionManager(config)
 
@@ -91,15 +88,13 @@ class TestSessionManagerIndexingHook:
 
     def test_user_message_alone_does_not_index(self, tmp_path, persist_dir, fake_model):
         """A user message without a following assistant message should not trigger indexing."""
-        state_file = str(tmp_path / "sessions.json")
         with (
-            patch("gaia_core.memory.session_manager.STATE_FILE", state_file),
-            patch("gaia_core.memory.session_manager.LAST_ACTIVITY_FILE", str(tmp_path / "activity.ts")),
             patch("gaia_core.memory.session_history_indexer._get_embed_model", return_value=fake_model),
         ):
             from gaia_core.memory.session_manager import SessionManager
             from gaia_core.memory.session_history_indexer import SessionHistoryIndexer
             config = MagicMock()
+            config.SHARED_DIR = str(tmp_path)
             config.KNOWLEDGE_CODEX_DIR = str(tmp_path / "knowledge")
             sm = SessionManager(config)
 
@@ -111,10 +106,7 @@ class TestSessionManagerIndexingHook:
 
     def test_indexing_failure_does_not_block_message(self, tmp_path):
         """If indexing fails, the message should still be added to history."""
-        state_file = str(tmp_path / "sessions.json")
         with (
-            patch("gaia_core.memory.session_manager.STATE_FILE", state_file),
-            patch("gaia_core.memory.session_manager.LAST_ACTIVITY_FILE", str(tmp_path / "activity.ts")),
             patch(
                 "gaia_core.memory.session_history_indexer.SessionHistoryIndexer.instance",
                 side_effect=RuntimeError("Boom!"),
@@ -122,6 +114,7 @@ class TestSessionManagerIndexingHook:
         ):
             from gaia_core.memory.session_manager import SessionManager
             config = MagicMock()
+            config.SHARED_DIR = str(tmp_path)
             config.KNOWLEDGE_CODEX_DIR = str(tmp_path / "knowledge")
             sm = SessionManager(config)
 
@@ -191,7 +184,7 @@ class TestPromptBuilderTier15:
 
         # Simulate what the prompt builder does for Tier 1.5
         remaining_budget = 4000  # tokens
-        rag_budget = int(remaining_budget * 0.30)
+        int(remaining_budget * 0.30)
 
         # Simple token estimate (4 chars per token)
         rag_tokens = len(rag_content) // 4
@@ -282,15 +275,13 @@ class TestArchiveFlowIntegration:
 
         persist_dir = str(tmp_path / "sv")
         os.makedirs(persist_dir, exist_ok=True)
-        state_file = str(tmp_path / "sessions.json")
 
         with (
-            patch("gaia_core.memory.session_manager.STATE_FILE", state_file),
-            patch("gaia_core.memory.session_manager.LAST_ACTIVITY_FILE", str(tmp_path / "activity.ts")),
             patch("gaia_core.memory.session_history_indexer._get_embed_model", return_value=fake_model),
         ):
             from gaia_core.memory.session_manager import SessionManager
             config = MagicMock()
+            config.SHARED_DIR = str(tmp_path)
             config.KNOWLEDGE_CODEX_DIR = str(tmp_path / "knowledge")
             sm = SessionManager(config)
             sm.max_active_messages = 999  # Prevent auto-archive during population

@@ -3,11 +3,9 @@ from typing import Dict
 from datetime import datetime, timezone
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Routing, Model, Intent, Context,
-    SessionHistoryRef, Cheatsheet, Constraints, Content, DataField,
-    Reasoning, ReflectionLog, Sketchpad, Evaluation, Response,
-    ToolCall, SidecarAction, Governance, Safety, Signatures, Audit,
-    Privacy, Metrics, TokenUsage, Status, PacketState, Council,
-    PersonaRole, Origin, TargetEngine, SystemTask
+    SessionHistoryRef, Constraints, Content, DataField,
+    Reasoning, Response,
+    Governance, Safety, Metrics, TokenUsage, Status, PacketState, PersonaRole, Origin, TargetEngine, SystemTask
 )
 
 

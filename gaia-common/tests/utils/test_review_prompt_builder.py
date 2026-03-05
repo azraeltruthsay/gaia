@@ -5,7 +5,6 @@ Tests prompt assembly from mock blueprint + AST summaries + pre-check results,
 ReviewResult schema validation, and token budget truncation.
 """
 
-import json
 from datetime import datetime, timezone
 
 import pytest
@@ -26,7 +25,6 @@ from gaia_common.models.blueprint import (
     ServiceDependency,
     ServiceStatus,
     Severity,
-    WebSocketInterface,
 )
 from gaia_common.utils.ast_summarizer import (
     ASTSummary,
@@ -39,8 +37,6 @@ from gaia_common.utils.ast_summarizer import (
 )
 from gaia_common.utils.blueprint_precheck import PreCheckItem, PreCheckResult, PreCheckSummary
 from gaia_common.utils.review_prompt_builder import (
-    DiscrepancyItem,
-    OpenQuestionUpdate,
     ReviewResult,
     build_review_prompt,
 )

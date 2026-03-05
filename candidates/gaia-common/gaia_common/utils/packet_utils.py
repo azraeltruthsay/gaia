@@ -76,7 +76,7 @@ def upgrade_v2_to_v3_packet(old_packet_data: Dict[str, Any]) -> "CognitionPacket
     # Import here to avoid circular imports at module level
     from gaia_common.protocols import (
         CognitionPacket, Header, Persona, Routing, Model, Intent, Context,
-        SessionHistoryRef, Cheatsheet, Constraints, Content, DataField,
+        SessionHistoryRef, Constraints, Content, DataField,
         Reasoning, Response, Governance, Safety, Metrics, TokenUsage, Status,
         PacketState, PersonaRole, Origin, TargetEngine, SystemTask
     )

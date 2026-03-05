@@ -3,7 +3,7 @@ Protocol definitions for GAIA services.
 
 This module contains the core data structures that flow between services:
 - CognitionPacket: The unified thought representation (v0.3)
-- GCP: Generative Council Protocol message schemas (CouncilNote, CouncilMeeting)
+- GCP: Generative Council Protocol message schemas (TODO)
 """
 
 from .cognition_packet import (
@@ -72,8 +72,6 @@ from .cognition_packet import (
     GoalState,
 )
 
-from .council_note import CouncilNote, CouncilMeeting
-
 __all__ = [
     # Main packet
     "CognitionPacket",
@@ -138,7 +136,4 @@ __all__ = [
     "GoalConfidence",
     "DetectedGoal",
     "GoalState",
-    # GCP
-    "CouncilNote",
-    "CouncilMeeting",
 ]

@@ -11,8 +11,9 @@ from typing import Dict, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+import json
 
 # Persistent file logging — writes to /logs/gaia-core.log (mounted volume)
 try:
@@ -165,14 +166,6 @@ async def lifespan(app: FastAPI):
     if not success:
         logger.error("Cognitive system failed to initialize - endpoints will return errors")
 
-    # Start Digital Immune System background daemon
-    try:
-        from gaia_common.utils.immune_system import start_background_immune_system
-        start_background_immune_system(log_dir="/logs")
-        logger.info("Background Digital Immune System daemon started")
-    except Exception:
-        logger.warning("Failed to start background immune system", exc_info=True)
-
     # Start sleep cycle loop
     _sleep_loop = None
     try:
@@ -306,10 +299,7 @@ app = FastAPI(
 
 # Register GPU management endpoints (used by orchestrator for sleep/wake handoff)
 from gaia_core.api.gpu_endpoints import router as gpu_router
-from gaia_core.api.model_endpoints import router as model_router
-
 app.include_router(gpu_router)
-app.include_router(model_router)
 
 # Register sleep cycle endpoints
 from gaia_core.api.sleep_endpoints import router as sleep_router
@@ -404,11 +394,8 @@ async def cognition_checkpoint():
 @app.post("/process_packet")
 async def process_packet(packet_data: Dict[str, Any]):
     """
-    Process a CognitionPacket through the cognitive loop.
-
-    This is the main entry point for processing user requests.
-    Accepts a serialized CognitionPacket and returns the completed packet
-    with the response populated.
+    Process a CognitionPacket through the cognitive loop with streaming support.
+    Yields chunks of data: tokens as they are generated, and finally the completed packet.
     """
     global _agent_core, _ai_manager
 
@@ -423,91 +410,92 @@ async def process_packet(packet_data: Dict[str, Any]):
             detail="Cognitive system not initialized. Check logs for startup errors."
         )
 
-    try:
-        # Import the packet class for deserialization
-        from gaia_common.protocols.cognition_packet import CognitionPacket
+    async def _run_loop():
+        try:
+            # Import the packet class for deserialization
+            from gaia_common.protocols.cognition_packet import CognitionPacket
 
-        # Deserialize the incoming packet
-        packet = CognitionPacket.from_dict(packet_data)
+            # Deserialize the incoming packet
+            packet = CognitionPacket.from_dict(packet_data)
 
-        # Extract routing information
-        user_input = packet.content.original_prompt
-        session_id = packet.header.session_id
+            # Extract routing information
+            user_input = packet.content.original_prompt
+            session_id = packet.header.session_id
 
-        # Determine source and destination from output_routing
-        source = "web"
-        destination = "web"
-        metadata = {}
+            # Determine source and destination from output_routing
+            source = "web"
+            destination = "web"
+            metadata = {}
 
-        if packet.header.output_routing:
-            routing = packet.header.output_routing
-            if routing.source_destination:
-                source = routing.source_destination.value if hasattr(routing.source_destination, 'value') else str(routing.source_destination)
-            if routing.primary:
-                dest = routing.primary.destination
-                destination = dest.value if hasattr(dest, 'value') else str(dest)
-                metadata = {
-                    "channel_id": routing.primary.channel_id,
-                    "user_id": routing.primary.user_id,
-                    "reply_to_message_id": routing.primary.reply_to_message_id,
-                    "is_dm": routing.primary.metadata.get("is_dm", False) if routing.primary.metadata else False,
-                }
+            if packet.header.output_routing:
+                routing = packet.header.output_routing
+                if routing.source_destination:
+                    source = routing.source_destination.value if hasattr(routing.source_destination, 'value') else str(routing.source_destination)
+                if routing.primary:
+                    dest = routing.primary.destination
+                    destination = dest.value if hasattr(dest, 'value') else str(dest)
+                    metadata = {
+                        "channel_id": routing.primary.channel_id,
+                        "user_id": routing.primary.user_id,
+                        "reply_to_message_id": routing.primary.reply_to_message_id,
+                        "is_dm": routing.primary.metadata.get("is_dm", False) if routing.primary.metadata else False,
+                    }
 
-        logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
+            logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
-        # Run the cognitive loop
-        # AgentCore.run_turn is a generator that yields {"type": "token", "value": "..."}
-        response_pieces = []
+            # --- PRE-FLIGHT: Speculative Nano Reflex ---
+            # Trigger this BEFORE the heavy run_turn loop starts
+            reflex_text = ""
+            history = _ai_manager.session_manager.get_history(session_id)
+            if _agent_core.is_eligible_for_reflex(packet, history):
+                logger.info("Main: Triggering instant speculative Nano reflex...")
+                reflex_text = _agent_core.generate_instant_reflex(packet)
+                if reflex_text:
+                    yield json.dumps({"type": "token", "value": f"[(Reflex) Nano: {reflex_text}]\n\n---\n\n"}) + "\n"
 
-        for event in _agent_core.run_turn(
-            user_input=user_input,
-            session_id=session_id,
-            destination=destination,
-            source=source,
-            metadata=metadata
-        ):
-            if isinstance(event, dict) and event.get("type") == "token":
-                response_pieces.append(event.get("value", ""))
+            # Run the cognitive loop
+            response_pieces = []
+            final_packet_dict = None
 
-        # Combine all response pieces
-        full_response = "".join(response_pieces)
+            for event in _agent_core.run_turn(
+                user_input=user_input,
+                session_id=session_id,
+                destination=destination,
+                source=source,
+                metadata=metadata,
+                reflex_text=reflex_text
+            ):
+                if isinstance(event, dict):
+                    if event.get("type") == "token":
+                        val = event.get("value", "")
+                        response_pieces.append(val)
+                        # Yield token immediately for real-time UI updates
+                        yield json.dumps(event) + "\n"
+                    elif event.get("type") == "packet":
+                        # Store the final packet to yield at the very end
+                        final_packet_dict = event.get("value")
 
-        # Strip <think>/<thinking> tags — the model's reasoning blocks must
-        # never reach the user.  The output_router handles this for the
-        # non-packet path, but /process_packet assembles tokens directly.
-        from gaia_core.utils.output_router import _strip_think_tags_robust
-        full_response = _strip_think_tags_robust(full_response)
+            # Finalize response processing
+            full_response = "".join(response_pieces)
+            from gaia_core.utils.output_router import _strip_think_tags_robust
+            full_response = _strip_think_tags_robust(full_response)
 
-        # Update the packet with the response
-        packet.response.candidate = full_response
-        packet.response.confidence = 0.9
+            if final_packet_dict:
+                # Ensure the final response in the packet is clean (no think tags)
+                if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
+                    final_packet_dict["response"]["candidate"] = full_response
+                
+                yield json.dumps({"type": "packet", "value": final_packet_dict}) + "\n"
 
-        # Mark packet as completed
-        from gaia_common.protocols.cognition_packet import PacketState
-        packet.status.finalized = True
-        packet.status.state = PacketState.COMPLETED
+            # Reset idle timer after response completes
+            if idle_monitor:
+                idle_monitor.mark_active()
 
-        # Compute final hashes
-        packet.compute_hashes()
+        except Exception as e:
+            logger.exception(f"Error in streaming turn loop: {e}")
+            yield json.dumps({"type": "error", "value": str(e)}) + "\n"
 
-        logger.info(f"Completed packet {packet.header.packet_id} with {len(full_response)} chars response")
-
-        # Reset idle timer after response completes (not just on arrival)
-        if idle_monitor:
-            idle_monitor.mark_active()
-
-        # Return the completed packet
-        return JSONResponse(
-            status_code=200,
-            content=packet.to_serializable_dict()
-        )
-
-    except Exception as e:
-        logger.exception(f"Error processing packet: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing packet: {str(e)}"
-        )
+    return StreamingResponse(_run_loop(), media_type="application/x-ndjson")
 
 
 # ── Audio Context Ingest ─────────────────────────────────────────────
@@ -617,4 +605,3 @@ def get_audio_context_for_prompt(max_entries: int = 10, max_chars: int = 2000) -
         + "\n".join(lines)
         + "\n── End Audio Context ──"
     )
-

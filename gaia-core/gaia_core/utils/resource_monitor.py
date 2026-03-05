@@ -60,7 +60,7 @@ class ResourceMonitor:
         # Sustained load tracking for distracted detection
         self._distracted = False
         self._sustained_check_start: Optional[float] = None
-        self._distracted_threshold = 25  # percent
+        self._distracted_threshold = 80  # percent - increased from 25% to prevent self-triggering
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None

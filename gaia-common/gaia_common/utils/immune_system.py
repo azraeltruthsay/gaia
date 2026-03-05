@@ -39,18 +39,18 @@ class ImmuneSystem:
     
     # Priority weighting for known error patterns
     PRIORITY_MAP = {
-        r"ModuleNotFoundError": 3.0, # CRITICAL: Missing dependency
-        r"NameResolutionError": 0.5,  # High volume but often transient/expected
-        r"ConnectionError": 0.5,
-        r"Permission denied": 2.0,    # Real structural issue
-        r"not found in configuration": 1.0, # Configuration gap
-        r"Model path does not exist": 2.5, # CRITICAL: Missing model file
-        r"SyntaxError": 4.0,           # CRITICAL: Code compilation failure
-        r"LintError": 2.0,             # Structural logic failure (Ruff)
-        r"Root not allowed": 0.2,     # Security gate working as intended (Noise)
+        r"ModuleNotFoundError": 10.0,  # CRITICAL: Missing dependency
+        r"NameError": 10.0,            # CRITICAL: Bug in code
+        r"F821": 10.0,                 # CRITICAL: Undefined name (Ruff)
+        r"SyntaxError": 15.0,          # FATAL: Code compilation failure
+        r"LintError": 2.0,              # Default structural logic failure
+        r"F401": 0.5,                  # MINOR: Unused import (Noise)
+        r"Permission denied": 5.0,     # Structural issue
+        r"Model path does not exist": 5.0, 
+        r"uid not found": 5.0,         # Show-stopper
+        r"ConnectionError": 0.5,       # Often transient
         r"timeout": 0.8,
-        r"uid not found": 2.0,        # Show-stopper
-        r"cpuinfo": 0.1,              # Minor dependency noise
+        r"cpuinfo": 0.1,               # Minor noise
     }
 
     def __init__(self, log_dir: str = "/logs"):
@@ -161,6 +161,51 @@ class ImmuneSystem:
                 pass
         return []
 
+    def get_dissonance_report(self) -> Dict[str, List[str]]:
+        """
+        Detects 'Cognitive Dissonance' - modules where the Candidate
+        has diverged from the Live stack.
+        """
+        dissonance = {}
+        target_services = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-study", "gaia-audio"]
+        
+        project_root = Path("/gaia/GAIA_Project")
+        for svc in target_services:
+            prod_path = project_root / svc
+            cand_path = project_root / "candidates" / svc
+            
+            if not prod_path.exists() or not cand_path.exists():
+                continue
+                
+            svc_dissonance = []
+            # Scan all python files in PROD
+            for prod_file in prod_path.rglob("*.py"):
+                if any(p in str(prod_file) for p in ["venv", "__pycache__", ".pytest_cache", ".ruff_cache"]):
+                    continue
+                    
+                try:
+                    relative_path = prod_file.relative_to(prod_path)
+                    corresponding_cand = cand_path / relative_path
+                    
+                    if not corresponding_cand.exists():
+                        svc_dissonance.append(f"Missing in CAND: {relative_path}")
+                        continue
+                        
+                    # Compare content hashes
+                    import hashlib
+                    prod_hash = hashlib.sha256(prod_file.read_bytes()).hexdigest()
+                    cand_hash = hashlib.sha256(corresponding_cand.read_bytes()).hexdigest()
+                    
+                    if prod_hash != cand_hash:
+                        svc_dissonance.append(f"Diverged: {relative_path}")
+                except Exception:
+                    pass
+            
+            if svc_dissonance:
+                dissonance[svc] = svc_dissonance
+                
+        return dissonance
+
     def _run_diagnostics(self) -> List[str]:
         """Proactive MRI-like checks for common structural failures."""
         issues = []
@@ -233,9 +278,10 @@ class ImmuneSystem:
             svc_path = project_root / svc
             if svc_path.exists():
                 search_dirs.append((svc_path, "[PROD]"))
-            cand_path = project_root / "candidates" / svc
-            if cand_path.exists():
-                search_dirs.append((cand_path, "[CAND]"))
+            # Candidates are dev-only and should not affect live health score
+            # cand_path = project_root / "candidates" / svc
+            # if cand_path.exists():
+            #     search_dirs.append((cand_path, "[CAND]"))
 
         cache_updated = False
         
@@ -407,4 +453,17 @@ def get_immune_summary(log_dir: str = "/logs", fast: bool = True) -> str:
 def get_detailed_mri(log_dir: str = "/logs") -> List[str]:
     """Module-level helper to get the latest detailed MRI report."""
     return ImmuneSystem(log_dir).get_detailed_mri()
+
+def is_system_irritated(threshold: float = 8.0) -> bool:
+    """Returns True if the systemic irritation score is above the threshold."""
+    try:
+        status_file = _get_status_file()
+        if status_file.exists():
+            data = json.loads(status_file.read_text())
+            # Data must be reasonably fresh (10 mins)
+            if time.time() - data.get("timestamp", 0) < 600:
+                return data.get("score", 0.0) >= threshold
+    except Exception:
+        pass
+    return False
 

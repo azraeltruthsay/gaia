@@ -385,7 +385,6 @@ class VoiceManager:
         after: discord.VoiceState,
     ) -> None:
         """React to users joining/leaving voice channels."""
-        import discord as _discord
 
         # Record all users as seen (for dashboard user list)
         guild_id = str(member.guild.id) if member.guild else None

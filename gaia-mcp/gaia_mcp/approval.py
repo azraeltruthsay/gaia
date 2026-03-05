@@ -75,7 +75,8 @@ class ApprovalStore:
         self,
         method: str,
         params: Dict[str, Any],
-        proposal: Optional[str] = None
+        proposal: Optional[str] = None,
+        allow_pending: bool = False
     ) -> Tuple[str, str, float, float]:
         """
         Create a pending action awaiting approval.
@@ -104,6 +105,7 @@ class ApprovalStore:
                 "created_at": now,
                 "expiry": expiry,
                 "proposal": proposal,
+                "allow_pending": allow_pending
             }
 
             logger.info(

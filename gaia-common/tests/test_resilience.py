@@ -1,8 +1,6 @@
 """Tests for gaia_common.utils.resilience retry utilities."""
 
-import asyncio
 import pytest
-from unittest.mock import MagicMock
 
 from gaia_common.utils.resilience import async_retry, sync_retry
 

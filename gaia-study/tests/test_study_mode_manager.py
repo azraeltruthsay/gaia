@@ -1,13 +1,6 @@
 """Tests for StudyModeManager validation and data preparation."""
 
-import pytest
-from pathlib import Path
 
-from gaia_study.study_mode_manager import (
-    StudyModeManager,
-    StudyModeState,
-    TrainingConfig,
-)
 
 
 class TestContentValidation:
