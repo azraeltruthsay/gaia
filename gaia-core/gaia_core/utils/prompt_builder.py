@@ -177,6 +177,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             except Exception:
                 pass
                 
+            from gaia_common.utils.world_state import format_world_state_snapshot
             world_state_block_content = format_world_state_snapshot(
                 max_lines=8,
                 sleep_manager_status=_tc_sleep_status

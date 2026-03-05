@@ -503,8 +503,7 @@ class AgentCore:
                 auditory_env = _metadata.get("auditory_environment") if _metadata else None
                 
                 world_state_text = format_world_state_snapshot(
-                    output_context=output_context,
-                    auditory_environment=auditory_env
+                    output_context=output_context
                 )
             except Exception:
                 self.logger.exception("AgentCore: Failed to format world state snapshot; world state will be missing from packet.")
@@ -2170,7 +2169,10 @@ class AgentCore:
                         }, session_id)
             
             packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
-            logger.info("AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
+            logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
+            
+            # YIELD THE FINAL PACKET
+            yield {"type": "packet", "value": packet.to_serializable_dict()}
         finally:
             # Release observer/selected models using the ModelPool API directly.
             try:

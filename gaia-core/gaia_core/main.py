@@ -411,6 +411,7 @@ async def process_packet(packet_data: Dict[str, Any]):
         )
 
     async def _run_loop():
+        logger.info("Main: _run_loop generator started")
         try:
             # Import the packet class for deserialization
             from gaia_common.protocols.cognition_packet import CognitionPacket
@@ -457,6 +458,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             response_pieces = []
             final_packet_dict = None
 
+            # AgentCore.run_turn is a normal generator returning a stream of events
             for event in _agent_core.run_turn(
                 user_input=user_input,
                 session_id=session_id,
