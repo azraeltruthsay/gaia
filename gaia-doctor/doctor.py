@@ -54,7 +54,7 @@ SERVICES = {
     # name: (health_url, remediation)
     # remediation: None = observe only, "restart" = docker restart, "ha" = compose HA overlay
     "gaia-core": ("http://gaia-core:6415/health", "restart"),
-    "gaia-web": ("http://gaia-web:6414/health", "restart"),
+    "gaia-web": ("http://localhost:6414/health", "restart"),
     "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
     "gaia-audio": ("http://gaia-audio:8080/health", None),
@@ -394,6 +394,18 @@ def docker_restart(name: str) -> bool:
             ["docker", "restart", name],
             capture_output=True, text=True, timeout=60,
         )
+        
+        # Fallback: if direct name fails, search for container ID (handles renames)
+        if result.returncode != 0:
+            log.info("Direct restart failed for %s, searching for container ID...", name)
+            find_cmd = ["docker", "ps", "-a", "--filter", f"name={name}", "--format", "{{.ID}}"]
+            find_res = subprocess.run(find_cmd, capture_output=True, text=True, timeout=30)
+            container_ids = find_res.stdout.strip().split("\n")
+            if container_ids and container_ids[0]:
+                target_id = container_ids[0]
+                log.warning("Found container ID %s for %s. Restarting ID...", target_id, name)
+                result = subprocess.run(["docker", "restart", target_id], capture_output=True, text=True, timeout=60)
+
         ts = time.monotonic()
         _last_restart[name] = ts
         _restart_history[name].append(ts)

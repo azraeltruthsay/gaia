@@ -48,7 +48,7 @@ EXCLUDE_NOTEBOOK_PATTERNS=(
 )
 
 # Files to exclude by exact name or pattern (NotebookLM filler)
-EXCLUDE_FILLER_PATTERNS="MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$"
+EXCLUDE_FILLER_PATTERNS="code_analyzer|background/|MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$"
 
 
 
@@ -137,7 +137,7 @@ FILE_LIST=$(
         \) -print | \
     grep -vE '__init__\.py$|_backup\.py$|\.py\.new$|\(backup\)|\.egg-info/|\.pyc$|\.lock$|\.map$|index_store\.json$|embeddings\.json$|final_prompt_for_review\.json$|last_activity\.timestamp$|sessions\.json$|/e2e_.*\.py$|/test_.*\.py$|/conftest\.py$|/README\.md$|/dev_matrix\.json$|/sketchpad\.json$|/response_fragments\.json$|\.claude/' | \
     grep -vE "$EXCLUDE_FILLER_PATTERNS" | \
-    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-0[0-9]|Dev_Notebook/2026-02-1[0-5]|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.' | \
+    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-|Dev_Notebook/2026-02-0[0-9]|Dev_Notebook/2026-02-1[0-5]|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.' | \
     grep -vE 'blueprints/gaia-(core|web|mcp|study|prime|orchestrator)\.md$'
 )
 

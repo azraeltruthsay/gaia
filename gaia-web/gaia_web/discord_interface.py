@@ -462,8 +462,19 @@ class DiscordInterface:
                             if event_type == "token":
                                 val = event.get("value", "")
                                 if val:
-                                    # Send any yielded tokens immediately (Reflexes, Refinements, etc.)
-                                    await self._send_response(message_obj, val, is_dm)
+                                    # If this is an explicit Reflex block, send it immediately
+                                    if val.startswith("[(Reflex) Nano:"):
+                                        await self._send_response(message_obj, val, is_dm)
+                                        reflex_sent = True
+                                    else:
+                                        # Accumulate Prime/Operator tokens to send as a block
+                                        full_response += val
+                            
+                            elif event_type == "flush":
+                                # Flush current buffer immediately
+                                if full_response.strip():
+                                    await self._send_response(message_obj, full_response.strip(), is_dm)
+                                    full_response = ""
                                     reflex_sent = True
                             
                             elif event_type == "packet":
@@ -480,22 +491,10 @@ class DiscordInterface:
             if not completed_packet:
                 raise RuntimeError("Core stream finished without yielding a final packet")
 
-            # Check for pending tool approval
-            approval_info = self._extract_pending_approval(completed_packet)
-            if approval_info:
-                await self._send_approval_prompt(
-                    channel_id=channel_id,
-                    user_id=user_id,
-                    message_obj=message_obj,
-                    is_dm=is_dm,
-                    approval_info=approval_info,
-                )
-                return
-
-            # Note: We NO LONGER send gaia_response_text here because all user-facing
-            # text was already yielded via 'token' events in the stream loop.
-            if not reflex_sent:
-                await self._send_response(message_obj, "GAIA processed your request but did not generate a text response.", is_dm)
+            # Finalize the accumulated response
+            if full_response.strip():
+                await self._send_response(message_obj, full_response.strip(), is_dm)
+                reflex_sent = True
 
             # Record GAIA reply for typing-wake 48h gate
             if is_dm and _dm_blocklist:

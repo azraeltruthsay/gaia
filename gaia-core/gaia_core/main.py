@@ -473,6 +473,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                         response_pieces.append(val)
                         # Yield token immediately for real-time UI updates
                         yield json.dumps(event) + "\n"
+                    elif event.get("type") == "flush":
+                        # Signal to front-ends to flush their buffers
+                        yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
                         # Store the final packet to yield at the very end
                         final_packet_dict = event.get("value")

@@ -1,6 +1,6 @@
 # GAIA Project — Claude Code Instructions
 
-> **Last updated**: 2026-03-04 | **Era**: Sovereign Autonomy | **Services**: 11
+> **Last updated**: 2026-03-05 | **Era**: Sovereign Autonomy | **Services**: 11
 
 ## What is GAIA?
 
@@ -44,9 +44,14 @@ GAIA is a sovereign AI agent built as a Service-Oriented Architecture (SOA). It 
 
 ---
 
-## Cognitive Pipeline (AgentCore)
+## Cognitive Pipeline
 
-The `AgentCore.run_turn()` method in `gaia-core/gaia_core/cognition/agent_core.py` processes each turn through these stages:
+**Pre-Flight (main.py)**: Before AgentCore runs, a Speculative Nano-First reflex fires:
+- Nano (0.5B) generates an immediate answer in ~0.24s
+- Streamed to Discord/client instantly; typing indicator shown for deeper reasoning
+- AgentCore runs in parallel; only emits a "Refinement" if Prime adds meaningful new content
+
+**AgentCore.run_turn()** in `gaia-core/gaia_core/cognition/agent_core.py` — 20 stages:
 
 1. **Circuit Breaker** — Check for `/shared/HEALING_REQUIRED.lock`; abort if present
 2. **Entity Validation** — Fuzzy-correct project nouns (Azrael, GAIA, CognitionPacket, etc.)
@@ -86,6 +91,16 @@ The `AgentCore.run_turn()` method in `gaia-core/gaia_core/cognition/agent_core.p
 - **Adaptive polling**: 30-300s interval based on health score (sicker = more frequent)
 - **[PROD]/[CAND] tagging**: Distinguishes production vs candidate issues
 - **States**: STABLE (≤2), MINOR NOISE (≤8), IRRITATED (≤25), CRITICAL (>25)
+- **F821 high-severity**: Undefined Name / Missing Import → Score 10–15 (immediate alarm)
+- **Dissonance Probe** (`gaia-doctor`): Module-level hash comparison detects live/candidate drift
+- **Fast-Failure Audit**: ruff lint before pytest during code audits
+
+### gaia-doctor Auto-Restart
+**File**: `gaia-doctor/doctor.py`
+- `gaia-web` in registry with `"restart"` remediation mode
+- `docker_restart(name)`: max `PROD_RESTART_MAX=2` (default) restarts per `PROD_RESTART_WINDOW=1800s`
+- `raise_alarm()`: writes `/shared/doctor/alarms.json`; auto-clears on recovery
+- `GET /alarms` endpoint: returns alarmed services + recent alarm log
 
 ### Cascade Routing
 **File**: `gaia-core/gaia_core/cognition/agent_core.py`
@@ -300,7 +315,16 @@ Mirror of Claude agents for Gemini CLI. Activate via `Activate codemind`, etc.
 
 **Architectural era**: Sovereign Autonomy — GAIA manages its own health, self-repairs with safety gates, and maintains autonomous sleep-cycle maintenance.
 
-**Recent major additions** (Feb 28 – Mar 4):
+**Recent major additions** (Mar 4–5, commits 78b8c2f + 85f03ae):
+- **Speculative Nano-First Pipeline**: Pre-flight reflex in `main.py` gives 0.24s responses; AgentCore only emits Refinement if Prime adds real value. `slim_mode` in PromptBuilder for minimal Nano context.
+- **Full-Stack NDJSON Streaming**: Tokens streamed in real-time from `run_turn` through web proxy to Discord. Nano reflex + Prime refinement sent as distinct Discord messages.
+- **Eager Model Loading**: `GAIA_AUTOLOAD_MODELS=1` eliminates 8s lazy-load; gaia-core memory raised to 16GB.
+- **Immune System Hardening**: F821 (missing import) → high-severity (Score 10–15). Dissonance Probe detects live/candidate hash drift. Fast-Failure Audit: ruff before pytest.
+- **gaia-doctor Auto-Restart + Circuit Breaker**: gaia-web added to doctor registry. Max 2 restarts per 30-min window. Alarms written to `/shared/doctor/alarms.json`. `GET /alarms` endpoint.
+- **Discord NaN Latency Fix**: `math.isfinite()` guard prevents 500 on `/api/system/services` before first WebSocket heartbeat.
+- **NotebookLM Feedback Loop**: 7-stage autonomous cycle (flatten→sync→generate→harvest→transcribe→reflect→push). Episodes 1–3 complete.
+
+**Established subsystems** (Feb 28 – Mar 4):
 - Immune System 2.0 with MRI diagnostics and adaptive polling
 - Sovereign Shield (py_compile gate on all writes)
 - Cascade Routing (Nano triage → Lite → Prime)
