@@ -30,6 +30,9 @@ logger = logging.getLogger("GAIA.Core.API")
 # Global references for the cognitive system
 _agent_core = None
 _ai_manager = None
+# Serialise cognitive turns — only one run_turn at a time to prevent
+# model contention (GPU/CPU) and keep response times predictable.
+_turn_semaphore = asyncio.Semaphore(1)
 
 
 class AIManagerShim:
@@ -413,6 +416,12 @@ async def process_packet(packet_data: Dict[str, Any]):
 
     async def _run_loop():
         logger.info("Main: _run_loop generator started")
+        async with _turn_semaphore:
+            logger.info("Main: acquired turn semaphore")
+            async for chunk in _run_loop_inner():
+                yield chunk
+
+    async def _run_loop_inner():
         try:
             # Import the packet class for deserialization
             from gaia_common.protocols.cognition_packet import CognitionPacket

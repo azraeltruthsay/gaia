@@ -31,13 +31,23 @@ Changed `docker_restart()` from `docker restart <name>` to `docker compose up -d
 - No more mangled names after auto-restarts
 - Uses project root path (`/gaia/GAIA_Project`) since compose files are accessible via the project mount
 
+### 3. Turn Serialization Semaphore (`main.py`)
+Added `asyncio.Semaphore(1)` to `process_packet` to ensure only one cognitive turn runs at a time. Without this, concurrent Discord messages both invoked `run_turn` simultaneously, fighting over `gpu_prime` and causing:
+- Model contention (both requests slow to >120s instead of one fast + one queued)
+- Persistent typing indicator (two overlapping `channel.typing()` contexts)
+- The first request timing out while the second was also stuck
+
+The semaphore wraps `_run_loop` via `_run_loop_inner`, so the second request waits for the first to complete before starting its turn.
+
 ## Verification
-- Sent 3 test messages through `/process_user_input` — all completed with full responses
-- Health endpoint responded at 3-second intervals during inference (5 consecutive checks)
+- Single requests complete in ~11-48s depending on complexity
+- Health endpoint responds during inference (thread executor keeps event loop free)
+- Concurrent requests properly serialized (second waits for first, logs show "acquired turn semaphore" in order)
 - Doctor reports all 7 services healthy, 0 failures, 0 restarts
+- Nano reflex fires correctly before Prime refinement
 - Response quality confirmed: full CognitionPacket with 0.93 confidence
 
 ## Files Changed
-- `gaia-core/gaia_core/main.py` — `asyncio` import, `run_in_executor` for reflex + run_turn
+- `gaia-core/gaia_core/main.py` — `asyncio` import, `run_in_executor` for reflex + run_turn, `Semaphore(1)` for turn serialization
 - `gaia-doctor/doctor.py` — `docker compose up -d --force-recreate` in `docker_restart()`
 - `candidates/gaia-core/gaia_core/main.py` — bit-for-bit sync
