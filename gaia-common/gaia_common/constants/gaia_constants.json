@@ -566,7 +566,7 @@
   "TIMEOUTS": {
     "HTTP_DEFAULT": 30,
     "HTTP_QUICK": 5,
-    "LLM_PLANNING": 60,
+    "LLM_PLANNING": 120,
     "LLM_REFLECTION": 90,
     "LLM_AUDIT": 15,
     "MCP_DEFAULT": 20,

@@ -4,7 +4,6 @@ Defines the schemas for all tools exposed by the MCP-lite server.
 This acts as a central registry for tool discovery and validation.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
 
 TOOLS = {
     "run_shell": {

@@ -10,7 +10,6 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import List
-from gaia_core.config import Config, get_config
 
 logger = logging.getLogger("GAIA.ConversationArchiver")
 

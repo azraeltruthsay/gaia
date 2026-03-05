@@ -22,7 +22,6 @@ class HFModel:
     ):
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-            import torch
         except Exception as e:
             raise RuntimeError(f"transformers or torch not available: {e}")
 

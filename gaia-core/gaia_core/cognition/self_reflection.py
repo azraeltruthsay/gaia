@@ -9,12 +9,11 @@ import concurrent.futures
 import logging
 import os
 import time
-import json
 import re
 import copy
-from gaia_core.config import Config, get_config
+from gaia_core.config import Config
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer
-from gaia_core.utils.gaia_rescue_helper import sketch, show_sketchpad, clear_sketchpad
+from gaia_common.utils.gaia_rescue_helper import sketch, clear_sketchpad
 from gaia_common.utils.thoughtstream import write as ts_write
 
 # [GCP v0.3] Import the new packet structure
@@ -101,6 +100,7 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
 
     # Iterative observation/self-reflection loop (configurable)
     final_thought = ""
+    score = 0.0
     for i in range(iterations):
         t_iter_start = time.perf_counter()
         try:

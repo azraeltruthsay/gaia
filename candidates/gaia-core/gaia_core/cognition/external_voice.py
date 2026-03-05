@@ -9,19 +9,16 @@ import contextlib
 import json
 import logging
 import os
-import queue
 import re
 import sys
-import threading
 import concurrent.futures
 import time
-from datetime import datetime
 from typing import Dict, List, Optional, Generator, Any
 from collections.abc import Mapping
 
 from gaia_core.config import Config
 from gaia_core.utils.prompt_builder import build_prompt
-from gaia_core.utils.stream_observer import StreamObserver, Interrupt
+from gaia_core.utils.stream_observer import StreamObserver
 from gaia_core.cognition.self_reflection import reflect_and_refine
 
 # [GCP v0.3] Import the new packet objects

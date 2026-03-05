@@ -18,7 +18,6 @@ Does NOT take remediation action — Docker handles restarts via
 import asyncio
 import logging
 import os
-import subprocess
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional

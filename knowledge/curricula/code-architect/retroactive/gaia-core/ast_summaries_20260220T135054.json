@@ -6282,7 +6282,7 @@
     "gaia_imports": [
       "from gaia_core.config import Config, get_config",
       "from gaia_core.memory.conversation.summarizer import ConversationSummarizer",
-      "from gaia_core.utils.gaia_rescue_helper import sketch, show_sketchpad, clear_sketchpad",
+      "from gaia_common.utils.gaia_rescue_helper import sketch, show_sketchpad, clear_sketchpad",
       "from gaia_common.utils.thoughtstream import write",
       "from gaia_common.protocols.cognition_packet import CognitionPacket, DataField, Persona, PersonaRole, ReflectionLog",
       "from gaia_core.utils.prompt_builder import build_from_packet, count_tokens",
@@ -20989,9 +20989,9 @@
       "from gaia_common.protocols.cognition_packet import CognitionPacket",
       "from gaia_core.config import Config",
       "from gaia_common.utils.tokenizer import count_tokens",
-      "from gaia_core.utils.packet_templates import render_gaia_packet_template",
+      "from gaia_common.utils.packet_templates import render_gaia_packet_template",
       "from gaia_core.utils import gaia_rescue_helper",
-      "from gaia_core.utils.world_state import format_world_state_snapshot"
+      "from gaia_common.utils.world_state import format_world_state_snapshot"
     ],
     "error_handlers": [
       {

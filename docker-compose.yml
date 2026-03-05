@@ -194,8 +194,9 @@ services:
       - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
       # CPU-only mode — GPU inference offloaded to gaia-prime
       - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
-      - GAIA_FORCE_CPU=1
-      - N_GPU_LAYERS=0
+      - GAIA_FORCE_CPU=0
+      - N_GPU_LAYERS=16
+      - GAIA_AUTOLOAD_MODELS=1
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
@@ -204,13 +205,18 @@ services:
       - GAIA_LITE_GGUF=${GAIA_LITE_GGUF:-/models/Qwen3-8B-abliterated-Q4_K_M.gguf}
       # HA failover — candidate MCP as fallback
       - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
-      # Model loading - disabled by default, models load on first use
-      - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
       - "6415:6415"
+
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 8G
 
     networks:
       - gaia-net
@@ -239,6 +245,7 @@ services:
     container_name: gaia-web
     hostname: gaia-web
     restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
     group_add:
       - "${DOCKER_GID:-962}"
 
@@ -260,6 +267,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Logs (consolidated service logs)
       - ./logs:/logs:rw
+      # Shared state
+      - gaia-shared:/shared:rw
 
     environment:
       - PYTHONPATH=/app:/gaia-common
@@ -267,6 +276,7 @@ services:
       - GAIA_ENV=${GAIA_ENV:-development}
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - FILE_ROOTS=project:/app,knowledge:/knowledge
+      - SHARED_DIR=/shared
       # Service endpoints (configurable for candidate injection)
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
@@ -584,6 +594,8 @@ services:
       # Docker CLI + compose plugin (bind-mounted from host, avoids installing full docker.io)
       - /usr/bin/docker:/usr/bin/docker:ro
       - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      # Project root for code monitoring (read-only for auditing)
+      - .:/gaia/GAIA_Project:ro
       # Shared state for status persistence and maintenance mode flag
       - gaia-shared:/shared:rw
       # Compose files for HA-overlay restarts

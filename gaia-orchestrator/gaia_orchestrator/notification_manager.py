@@ -8,7 +8,6 @@ to connected clients (gaia-web, Discord bot, etc.).
 import asyncio
 import logging
 from typing import List, Set
-from datetime import datetime
 
 from fastapi import WebSocket
 

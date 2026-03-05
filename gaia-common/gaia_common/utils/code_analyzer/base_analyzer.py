@@ -1,7 +1,6 @@
 import os
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict
 
 from app.config import Config
 from app.utils.code_analyzer.language_detector import detect_language

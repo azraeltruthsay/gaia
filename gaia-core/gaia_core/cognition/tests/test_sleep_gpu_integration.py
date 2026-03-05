@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gaia_core.cognition.sleep_cycle_loop import SleepCycleLoop
-from gaia_core.cognition.sleep_wake_manager import GaiaState, _TransientPhase
+from gaia_core.cognition.sleep_wake_manager import _TransientPhase
 
 
 @pytest.fixture
@@ -26,6 +26,12 @@ def mock_config():
     config.SLEEP_ENABLE_QLORA = False
     config.SLEEP_ENABLE_DREAM = False
     config.SLEEP_TASK_TIMEOUT = 600
+    config.SHARED_DIR = "/tmp/shared"
+    # Provide a real get_timeout implementation for the mock
+    def get_timeout(name, default):
+        return default
+    config.get_timeout.side_effect = get_timeout
+    config.get_endpoint.side_effect = lambda svc: f"http://test-{svc}:6415"
     return config
 
 
@@ -177,7 +183,7 @@ class TestPresenceDuringSleep:
         )
 
     def test_presence_resets_on_wake(self, loop, mock_discord):
-        """Discord returns to green (set_idle) after waking."""
+        """Discord returns to green (online) after waking."""
         loop.sleep_wake_manager._phase = _TransientPhase.WAKING
         loop.sleep_wake_manager.complete_wake.return_value = {}
 
@@ -188,7 +194,8 @@ class TestPresenceDuringSleep:
 
             loop._handle_asleep()
 
-        mock_discord.set_idle.assert_called_once()
+        # Should call update_presence("ready") which resets dot to green
+        mock_discord.update_presence.assert_any_call("ready")
 
 
 # =============================================================================

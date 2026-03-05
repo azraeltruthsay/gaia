@@ -1,3 +1,4 @@
+import json
 """
 gaia-web FastAPI application entry point.
 
@@ -267,7 +268,7 @@ async def process_user_input(user_input: str):
     mq: MessageQueue | None = getattr(app.state, "message_queue", None)
     if mq is not None:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 check = await client.get(f"{CORE_ENDPOINT}/sleep/distracted-check")
                 if check.status_code == 200:
                     data = check.json()
@@ -356,23 +357,37 @@ async def process_user_input(user_input: str):
     try:
         from gaia_common.utils.service_client import get_core_client
         core_client = get_core_client()
-        completed_packet_dict = await core_client.post(
-            "/process_packet",
-            data=packet.to_serializable_dict(),
-        )
-        completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+        target_url = f"{core_client.base_url}/process_packet"
+        logger.info(f"Main: proxying stream to {target_url}")
 
-        return JSONResponse(
-            status_code=200,
-            content={"response": completed_packet.response.candidate, "packet_id": completed_packet.header.packet_id}
-        )
+        async def _stream_response():
+            try:
+                # ServiceClient wraps an AsyncClient, but we want the raw stream
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with client.stream(
+                        "POST",
+                        target_url,
+                        json=packet.to_serializable_dict(),
+                    ) as response:
+                        if response.status_code != 200:
+                            await response.aread()
+                            yield json.dumps({"error": f"Core error {response.status_code}: {response.text}"}) + "\n"
+                            return
 
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="GAIA Core did not respond in time.")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"Error from GAIA Core: {e.response.text}")
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            # Simply proxy the NDJSON from Core to Web caller
+                            yield line + "\n"
+            except Exception as e:
+                logger.exception(f"Error in web streaming loop: {e}")
+                yield json.dumps({"error": str(e)}) + "\n"
+
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(_stream_response(), media_type="application/x-ndjson")
+
     except Exception as e:
-        logger.exception(f"Error processing user input: {e}")
+        logger.exception(f"Error setting up core stream: {e}")
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
@@ -430,6 +445,7 @@ async def process_audio_input(body: Dict[str, Any]):
         completed_packet_dict = await core_client.post(
             "/process_packet",
             data=packet.to_serializable_dict(),
+            timeout=120.0,
         )
         completed_packet = CognitionPacket.from_dict(completed_packet_dict)
         return JSONResponse(

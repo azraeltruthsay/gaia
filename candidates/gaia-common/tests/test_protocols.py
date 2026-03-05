@@ -1,7 +1,6 @@
 """Tests for the CognitionPacket protocol and related dataclasses."""
 
 import json
-import pytest
 
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket,
@@ -18,7 +17,6 @@ from gaia_common.protocols.cognition_packet import (
     SessionHistoryRef,
     Constraints,
     Content,
-    DataField,
     Reasoning,
     Response,
     Governance,
@@ -27,9 +25,6 @@ from gaia_common.protocols.cognition_packet import (
     TokenUsage,
     Status,
     PacketState,
-    OutputDestination,
-    DestinationTarget,
-    OutputRouting,
 )
 
 

@@ -14,12 +14,10 @@ Usage:
 import logging
 import os
 
-from fastapi import FastAPI
 
 from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
 
 from .server import create_app
-from .indexer import VectorIndexer
 
 # Initialize logging
 log_dir = os.getenv("GAIA_LOG_DIR", "/var/log/gaia")

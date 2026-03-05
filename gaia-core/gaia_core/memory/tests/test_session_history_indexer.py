@@ -14,11 +14,9 @@ Tests cover:
 
 import json
 import os
-import shutil
 import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock
-from datetime import datetime
+from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------

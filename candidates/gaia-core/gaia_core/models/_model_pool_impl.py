@@ -63,12 +63,11 @@ try:
     GroqAPIModel = _GroqAPIModel
 except Exception:
     GroqAPIModel = None
-import json, time, os
-from datetime import datetime
+import os
 from typing import List
 
 # --- resolver imports (added) ----------------------------------------------
-import subprocess, shlex
+import subprocess
 from pathlib import Path
 try:
     import yaml  # optional; only needed if a manifest exists
@@ -309,7 +308,6 @@ class ModelPool:
         self._embed_load_status = 'not_started'  # one of: not_started, loading, loaded, failed
         # persistent state for model roles (avoids re-discovery each run)
         try:
-            import json
             self.MODEL_STATE_FILE = Path(self.config.LOGS_DIR) / "model_pool_state.json"
         except Exception:
             self.MODEL_STATE_FILE = None

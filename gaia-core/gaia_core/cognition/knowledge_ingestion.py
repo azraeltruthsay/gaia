@@ -214,9 +214,9 @@ def check_dedup(content: str, kb_name: str) -> Optional[Dict]:
     Returns match info dict if a near-duplicate exists, otherwise None.
     """
     try:
-        result = asyncio.run(mcp_client.embedding_query(
+        result = mcp_client.embedding_query(
             content[:500], top_k=1, knowledge_base_name=kb_name
-        ))
+        )
         if result.get("ok") and result.get("results"):
             top_hit = result["results"][0]
             similarity = top_hit.get("similarity", top_hit.get("score", 0))
@@ -304,11 +304,10 @@ def write_and_embed(
     file_path = f"/knowledge/{doc_dir}/{filename}"
 
     # Step 1: write_file via MCP
-    import asyncio
-    write_result = asyncio.run(mcp_client.call_jsonrpc(
+    write_result = mcp_client.call_jsonrpc(
         "write_file",
         {"path": file_path, "content": doc_content},
-    ))
+    )
 
     if not write_result.get("ok"):
         # Check for 403 (approval required) — the MCP layer handles this
@@ -319,10 +318,10 @@ def write_and_embed(
     logger.info(f"Document written to {file_path}")
 
     # Step 2: embed_documents via MCP
-    embed_result = asyncio.run(mcp_client.call_jsonrpc(
+    embed_result = mcp_client.call_jsonrpc(
         "embed_documents",
         {"knowledge_base_name": kb_name, "file_path": file_path},
-    ))
+    )
     embed_ok = embed_result.get("ok", False)
     if embed_ok:
         logger.info(f"Document embedded into '{kb_name}' vector store")
@@ -484,11 +483,11 @@ def retrieve_entity_document(
         The top matching document dict or None.
     """
     try:
-        result = asyncio.run(mcp_client.embedding_query(
+        result = mcp_client.embedding_query(
             f"{entity} character sheet",
             top_k=1,
             knowledge_base_name=kb_name,
-        ))
+        )
         if result.get("ok") and result.get("results"):
             top_hit = result["results"][0]
             similarity = top_hit.get("similarity", top_hit.get("score", 0))

@@ -22,10 +22,10 @@ from __future__ import annotations
 import filecmp
 import logging
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 logger = logging.getLogger("GAIA.PromotionReadiness")
 

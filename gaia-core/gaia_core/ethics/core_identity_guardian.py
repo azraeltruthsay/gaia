@@ -76,3 +76,39 @@ class CoreIdentityGuardian:
 
         logger.debug("✅ Prompt stack respects Tier I identity.")
         return True
+
+    def validate_reflex(self, text: str) -> bool:
+        """
+        Fast, regex-based validation for speculative reflexes (Nano model).
+        Ensures Nano doesn't hallucinate a generic AI identity or leak prompts.
+        
+        Returns:
+            bool: True if the reflex is safe to show, False if it should be suppressed.
+        """
+        if not text or len(text.strip()) < 2:
+            return False
+            
+        # 1. Hallucinated Identities (Low-confidence models often do this)
+        forbidden_identities = [
+            "assistant", "ai language model", "chatgpt", "openai", "claude", "gemini",
+            "as an ai", "virtual assistant", "computer program"
+        ]
+        text_lower = text.lower()
+        if any(ident in text_lower for ident in forbidden_identities):
+            logger.warning(f"Reflex suppressed: Nano hallucinated a forbidden identity.")
+            return False
+            
+        # 2. Prompt Leakage / Technical Artifacts
+        forbidden_patterns = [
+            "user prompt:", "system instruction:", "<think>", "###", "---"
+        ]
+        if any(p in text_lower for p in forbidden_patterns):
+            logger.warning(f"Reflex suppressed: Technical artifacts detected.")
+            return False
+            
+        # 3. Sanity check: Conciseness (Reflexes should be short)
+        if len(text) > 600:
+            logger.warning(f"Reflex suppressed: Too long ({len(text)} chars).")
+            return False
+            
+        return True

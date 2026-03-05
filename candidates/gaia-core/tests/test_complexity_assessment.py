@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from gaia_core.cognition.agent_core import AgentCore, ComplexityAssessment
 

@@ -69,10 +69,10 @@ services:
       - MODELS_DIR=/models
       - SHARED_DIR=/shared
       # Service endpoints - configurable for injection vs parallel modes
-      # Default: talk to candidates. Override with live hostnames for injection.
-      - MCP_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
-      - MCP_LITE_ENDPOINT=${CANDIDATE_MCP_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
-      - STUDY_ENDPOINT=${CANDIDATE_STUDY_ENDPOINT:-http://gaia-study-candidate:8766}
+      # Default: talk to live services for better integration testing
+      - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - MCP_LITE_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
       # CPU-only mode — GPU inference offloaded to gaia-prime-candidate
       - GAIA_BACKEND=${GAIA_CANDIDATE_BACKEND:-gpu_prime}
       - GAIA_FORCE_CPU=1
@@ -84,9 +84,9 @@ services:
       # Groq API fallback (free tier)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-      # Remote vLLM inference via gaia-prime-candidate
-      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-AWQ}
+      # Remote vLLM inference via live gaia-prime
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-abliterated-AWQ}
 
     ports:
       - "6416:6415"

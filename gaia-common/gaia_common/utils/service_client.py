@@ -45,7 +45,7 @@ class ServiceClient:
         self,
         service_name: str,
         default_port: int = 8000,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         endpoint_env_var: Optional[str] = None,
         max_retries: int = 3,
         retry_base_delay: float = 2.0,
@@ -117,6 +117,32 @@ class ServiceClient:
             "Primary %s %s failed (%s), attempting HA fallback to %s",
             method, path, type(primary_exc).__name__, fallback_url,
         )
+
+        # [TCP] Inject failover metadata into the packet so the candidate knows its state
+        # Only for POST requests which typically contain the packet payload
+        if method.upper() == "POST" and "json" in request_kwargs:
+            payload = request_kwargs["json"]
+            try:
+                # 1. Update Header.operational_status
+                if isinstance(payload, dict) and "header" in payload:
+                    header = payload["header"]
+                    if isinstance(header, dict):
+                        if "operational_status" not in header or header["operational_status"] is None:
+                            header["operational_status"] = {"status": "failover_active"}
+                        else:
+                            header["operational_status"]["status"] = "failover_active"
+                
+                # 2. Add #Failover tag to intent
+                if isinstance(payload, dict) and "intent" in payload:
+                    intent = payload["intent"]
+                    if isinstance(intent, dict):
+                        if "tags" not in intent or intent["tags"] is None:
+                            intent["tags"] = ["#Failover"]
+                        elif "#Failover" not in intent["tags"]:
+                            intent["tags"].append("#Failover")
+            except Exception:
+                logger.debug("Failed to inject failover metadata (non-fatal)", exc_info=True)
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await getattr(client, method.lower())(fallback_url, **request_kwargs)

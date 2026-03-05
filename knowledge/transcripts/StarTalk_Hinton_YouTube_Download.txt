@@ -1,0 +1,2709 @@
+Are we at a point where the artificial
+intelligence will play down how smart it
+is?
+ Yes. Already we have to worry about
+that. If it senses that it's being
+tested, it can act dumb.
+ What did you just say?
+ The AI starts wondering whether it's
+being tested. And if it thinks it's
+being tested, it acts differently from
+how it would act in normal life.
+ Oh, wow.
+ Cuz it doesn't want you to know what its
+full powers are, apparently.
+ All right, that's the end of us. This is
+the last episode. We
+ stick for us. We're done.
+ This is Star Talk special edition. Neil
+deGrasse Tyson, your personal
+astrophysicist. And if it's special
+edition, it means we've got Gary
+O'Reilly.
+ Hey, Neil.
+ Gary, how you doing, man?
+ I'm good.
+ Former soccer pro.
+ Yes.
+ So, Chuck, always good to have you.
+ Always a pleasure.
+ So, so Gary, you and your team picked a
+topic for the ages today. Yeah, it's
+it's one of those things that we hear
+about it, we think we know about it, but
+let me put it to you this way. We are
+faced with the simple fact that AI at
+this point,
+ we're going to talk about AI today.
+ We are it's inescapable.
+ A deep dive.
+ Oh yeah.
+ Yes. Go.
+ Right. It was only a few years ago when
+we ask people how AI works, they'll say
+something along the lines of it utilizes
+deep learning neural networks, but
+ they're buzzwords. They'll toss them
+out.
+ They know them, but they don't know
+anything about them. M.
+ So, what does that really mean? Um,
+we'll break down how AI works down to
+the bit and get into how far we think
+this is going to go from one of AI's
+founding architects.
+ Oh,
+ yes.
+ Ano?
+ Now we're talking.
+ Mhm. So, if you would bring on our
+guest,
+ I'll be delighted to. We have with us
+Professor Jeffrey Hinton. Jeffrey,
+welcome to Star Talk.
+ Thank you for inviting me. Yeah, you are
+a cognitive psychologist and computer
+scientist.
+ That I don't know anybody with that
+combo.
+ Couldn't make up your mind, huh?
+ Is that
+you're a professor emeritus at the
+department of computer science at the
+University of Toronto and uh you are OG
+AI.
+ Oh, lovely.
+ Can I say that? Is that does that make
+sense? OG AI.
+ Og AI.
+And some people have called you the
+godfather of AI, of artificial
+intelligence. And I let's just go
+straight out off the top here. Uh when
+we think of the genesis of AI as it is
+currently manifested,
+ it feels like large language models took
+everybody by storm. They sort of showed
+up and everybody was freaking out,
+celebrating, dancing in the streets or
+crying in their pillows. That happened,
+we noticed a couple of years ago. So,
+I'm just wondering what got you started
+in on this path many many years ago. My
+record show goes back to the 1990s. Is
+that correct?
+ No, it really goes back to the 1950s.
+ Oh.
+ Um,
+ right.
+ The founders of AI at the beginning in
+the 1950s um there were two views of how
+to make an intelligent system. One was
+inspired by logic. The idea was that the
+essence of intelligence is reasoning.
+Mhm.
+ And in reasoning what you do is you take
+some premises and you take some rules
+for manipulating expressions and you
+derive some conclusions. So it's much
+like mathematics where you have an
+equation. You have rules for how you can
+tinker with both sides and or combine
+equations and you derive new equations.
+And that was kind of the paradigm they
+had. There was a completely different
+paradigm that was biological. And that
+paradigm said look the intelligent
+things we know have brains. We have to
+figure out how brains work. And the way
+they work is they're very good at things
+like perception. They're quite good at
+reasoning by analogy. They're not much
+good at reasoning. You have to get to be
+a teenager before you can do reasoning
+really. So we should really study these
+other things they do and we should
+figure out how big networks of brain
+cells can do these other things like
+perception and memory. Now a few people
+believed in that approach. Among those
+few people were John Fonyman and Alan
+Turing. Unfortunately, they both died
+young. Turing possibly with the help of
+British intelligence.
+ Turing. Uh, he's the subject of the
+film. The imitation game.
+ Yeah. Yeah. So, anyone hasn't seen that,
+definitely put that on your list.
+ Cool.
+ Yeah. So, I to go back to the 1950s. You
+were just a young Tikeke then, correct?
+ Uh, yeah. I was in single digits then. I
+was in single digits.
+ Okay. So, how do we establish the
+genesis of your curiosity in this field?
+Um, a few things. When I was at high
+school in the early 1960s
+or mid 1960s, I had a very smart friend
+who was a brilliant mathematician and
+used to read a lot and he came into
+school one day and talked to me about
+the idea that memories might be
+distributed over many brain cells
+instead of in individual brain cells.
+ So that was inspired by holograms.
+Holograms were just coming out then.
+Gabbor was active and so the idea of
+distributed memory got me very
+interested and ever since then I've been
+wondering how the brain stores memories
+and actually how it works.
+ Was that the computer science side of
+you or the cognitive psychologist side
+of you that taprooted into that those
+ideas?
+ Both really. Um but in the 1970s when I
+became a graduate student um it was
+obvious that there was a new methodology
+that hadn't been used that much which
+was if you have any theory of how the
+brain works you can simulate it on a
+digital computer unless it's some crazy
+theorem that says it's all quantum
+effects. Um
+and let's not go there.
+ That's right.
+ Not yet.
+ We won't knock on Penrose's door. Okay.
+you can simulate it on a digital
+computer and so you can test out your
+theory and it turns out if you tested
+most of the theories that were around
+they actually didn't work when you
+simulated them. So I spent my life
+trying to figure out how you change the
+strength of connections between neurons
+so as to learn complicated things in a
+way that actually works when you
+simulate it on a digital computer. And I
+failed to understand how the brain
+works. We've understood some things
+about it, but we don't know how a brain
+gets the information it needs to change
+connection strengths. You know, gets the
+information it needs to know whether it
+needs to increase a connection strength
+to be better at a task or to decrease
+that connection strength. But what we do
+know is we know how to do it in digital
+computers now.
+ So, well, so that that means the
+computers are doing what we we made a
+better computer brain than our own brain
+ at doing this particular function
+ one thing. And that's what got me really
+nervous in the beginning of 2023. The
+idea that digital intelligence might
+just be better than the analog
+intelligence we've got.
+ Interesting. Save the scary bit till a
+bit later on. Let me have the 10 minutes
+of just breathing in, breathing out. If
+we take a step back,
+ you're you're assuming you're assuming
+there's just one scary bit.
+ No, I'm not. I just I'm going to go one
+at a time.
+ Okay. Artificial neural networks. If you
+could break that down to the very basic
+level for us of how it's been able to
+strengthen, weaken messaging and
+signaling and how it fires and and how
+it then finds itself at where it is now.
+ I do have an 18hour course on this, but
+I will try and cut it down to less than
+18 hours. Um,
+ please do.
+ So, I imagine a lot of your audience
+knows some physics.
+ Yes.
+ And one way into it is to think about
+something like the gas laws. You know,
+you compress a gas and it gets hotter.
+Why does it do that? Well, underneath
+there's a kind of seething mass of atoms
+that are buzzing around. And so the real
+explanation for the gas laws is in terms
+of these microscopic things that you
+can't even see buzzing around.
+And so you explain some macroscopic
+behavior
+by lots and lots and lots of little
+things of a completely different type
+from macroscopic behavior interacting.
+And that was sort of the inspiration for
+the neural net view that there's things
+going on in big networks of brain cells
+that are a long way away from the kind
+of conscious deliberate symbol
+processing we do when we're reasoning
+but that underpin it and that are maybe
+better at other things than reasoning
+like perception or reasoning by analogy.
+So the symbolic people could never deal
+with um how do we reason by analogy not
+very satisfactory whereas the neural
+nets could. So before I get into the
+sort of fine details of how it works,
+the basic idea is that macroscopic
+things like a word correspond to big
+patterns of neural activity in the
+brain.
+ Uhhuh.
+ Similar words correspond to similar
+patterns of neural activity. So the idea
+is Tuesday and Wednesday will correspond
+to very similar patterns of neural
+activity where you can think of each
+neuron as a feature better to call it a
+micro feature that when the neuron gets
+active it says this has that micro
+feature. So if I say cat to you, all
+sorts of micro features will get active
+like it's animate, it's furry, it's got
+whiskers, it might be a pet, um it's a
+predator, all those things. If I say
+dog, a lot of the same things will get
+active like it's a predator, it might be
+a pet, but some different things
+obviously. So the idea is underlying
+these symbols that we manipulate,
+there's much more complicated
+microscopic goings on that the symbols
+kind of are associated with. And that's
+where all the action really is. And if
+you really want to explain what goes on
+when we think or when we do analogies,
+you have to understand what's going on
+at this microscopic level. And that's
+the neural network level. M
+ so that's a collaboration between
+clusters of neurons that get you to an
+end point.
+ I like that word collaboration.
+ Yes, there's a lot of that. There's a
+lot of that goes on. Probably the
+easiest way to get into it is by
+thinking of a task that seems very
+natural, which is take an image. Let's
+say it's a black gray level image. So
+it's got a whole bunch of pixels, little
+areas of uniform brightness that have
+different intensity levels. So as far as
+the computer's concerned, that's just a
+big array of numbers. And now imagine
+the task is you want to say whether
+there's a bird in the image or not, or
+rather whether the prominent thing in
+the image is a bird.
+ Uh-huh.
+ And people tried for many, many years,
+like half a century, um, to write
+programs that would do that, and they
+didn't really succeed. And the problem
+is if you think what a bird looks like
+in an image, well, it might be an
+ostrich up close in your face or it
+might be a seagull in the far distance
+or it might be a crow. So they might be
+black, they might be white, they might
+be tiny, they might be flying, they
+might be close, you might just see a
+little bit of them. There might be lots
+of other cluttered things around like it
+might be a bird in the middle of a
+forest. So it turns out it's not trivial
+to say whether there's a bird in the
+image or not. M.
+ And so what I'm going to do now is
+explain to you if I was building a
+neural network by hand, how I would go
+about doing that. And once I've
+explained how I would build the neural
+network by hand, I can then explain how
+I might learn all the connection
+strengths instead of putting them in by
+hand. I gotcha. All right. So with that,
+because what you're talking about is
+assigning a mathematical value to every
+single part of an image.
+ That's what your camera does,
+ right? Exactly. It does. But it's not
+recognizing the image. My camera.
+ No, it's not. It's just got a bunch of
+numbers.
+ It's just got a bunch of numbers and and
+so I have a chip and I have a a charge
+coupled device CCD. It's collecting the
+light. It's assigning a value and then
+that's the picture. Now, but what you're
+talking about,
+ wouldn't you have to assign a value to
+every single type of bird? Because some
+of what we do as human beings is
+intuitit what a bird may be as opposed
+to recognizing the bird. And let me just
+give you the example. If you were to
+take a V, the letter V, and curve the
+straight lines of the letter V, and put
+it in a cloud, everyone who sees that
+will say that's a bird. But yet it is
+ No, to me it's a curved V.
+But no one but but but but there is no
+bird there. I just know that is a bird.
+That's not a mathematical value now. So
+what do you do?
+ Well, well the question is how do you
+just know that? There's something going
+on in your brain. Right.
+ Right.
+ And what might be going on in your brain
+so that you just know that's a bird is a
+whole bunch of activation levels of
+different neurons which you could think
+of as mathematical values.
+ I got you. Okay. So wouldn't that
+require then
+ training this neuronet on every possible
+way a bird can
+ a bird can manifest so that it can
+intuitit what a bird might be when a
+bird is not there.
+ But at that point it's not intuiting
+anything. It's just get going off a
+lookup table.
+ It really is going on. And what would be
+the
+ All right, here comes your answer.
+ There's something called generalization.
+So if you see a lot of data
+ Uhhuh.
+ Um obviously you can make a system that
+just remembered all that data. But in a
+neural net, it'll do more than just
+remember the data. In fact, it won't
+literally remember the data at all. What
+it'll do is it'll as it's learning on
+the data. It'll find all sorts of
+regularities and it'll generalize those
+regularities to new data. So it will be
+able to for example recognize a unicorn
+um even though it's never seen one
+before.
+ Interesting. So it's self-eing. Uh
+ let me carry on with my explanation of
+how neural networks work.
+ And I'm going to do it by saying how
+would I would design one by hand. So
+your first thought when you see that an
+image is just a big array of numbers
+which are how bright each pixel is, is
+to say, well let's hook up those pixel
+intensities to our output categories
+like bird and cat and dog and politician
+or whatever our output categories are.
+And that won't work. And the reason is
+if you think about what does the
+brightness of one pixel tell you about
+whether it's a bird or not? Well, it
+doesn't tell you anything
+ cuz birds can be black and birds can be
+white and there's all sorts of other
+things that can be black and white. So,
+the brightness of a pixel doesn't tell
+you anything. So, what can you derive
+from those numbers that you have in the
+image that describe the image? Well, the
+first thing you can derive, which is
+what the brain does, is you can
+recognize when there's little bits of
+edge present.
+ Mhm. So suppose I take a little column
+of three pixels and I have a neuron that
+looks at those three pixels, a brain
+cell, and has big positive weights to
+those three pixels. So when those pixels
+are bright, the neuron gets very
+excited. Now that would recognize a
+little streak of white that was
+vertical. But now suppose that next to
+it there's a column, another column of
+three pixels. So the first column was on
+the left and the second column was on
+the right. and I give the neuron big
+negative connection strengths to those
+pixels. So you can think of the neuron
+as getting votes from the pixels.
+ So for the three pixels on the right,
+the votes it gets, sorry, on the left,
+the votes it gets are big positive
+numbers times big positive intensities.
+So great big votes. Now from the three
+pixels in the right hand column, it's
+got negative weights. So if those pixels
+are in are bright, it'll get a big
+brightness times a big negative weight.
+So it'll get a lot of negative votes and
+they'll all cancel out. So if the column
+of pixels on the left is the same
+brightness as the column of pixels on
+the right, the positive votes it gets
+from the left hand column will cancel
+the negative votes it gets from the
+right hand column and it'll get zero net
+input and it'll just stay quiet. But if
+the pixels on the left are bright and
+the pixels on the right are dim, the
+negative votes will be multiplied by
+small intensity numbers and the positive
+votes will be multiplied by big
+intensity numbers. And so the neuron get
+lots of input and get very excited and
+say I found the thing I like and the
+thing it likes is an edge which is
+brighter on the left than on the right.
+So, we do know how to make a neuron if
+we handwire it like that, pick up on the
+fact that there's an edge at a
+particular location in the image that's
+brighter on one side than the other
+side.
+ Mhm. Now what the brain does roughly
+speaking a lot of um neuroscientists
+will be horrified by me saying this but
+very roughly speaking what the brain
+does is in the early stages of visual
+cortex which is where you recognize
+objects. It has lots and lots of neurons
+that pick up on edges at different
+orientations in different positions and
+at different scales. So, it has
+thousands of different positions and
+dozens of different orientations and
+several different scales and it has to
+have edge detectors for each of the each
+combination of those. So, it has like a
+gazillion little edge detectors. Well,
+including some big edge detectors. So a
+cloud for example has a big soft fuzzy
+edge and you need a different neuron for
+detecting that than what you'd need for
+detecting say the tail of a mouse
+disappearing around a corner in the
+distance which is a very fine thing. Um
+and you need an edge detector that was
+very um sharp and saw very small things.
+So first stage we have all these edge
+detectors. Well, the what what you're
+describing uh sounds like uh putting
+together a a very large puzzle right
+now. Like you know the kind of puzzles
+that you put down on the table. Uh the
+first thing that you do is you want to
+find all the edges and that's and you
+build the puzzle inward from finding all
+the edges.
+ Not only edges of the physical puzzle
+but edges
+ of images in the puzzle itself within
+the puzzle itself.
+ So straight lines things of that they
+all match up when you're doing a puzzle.
+And the edges also color is a dimension
+of this,
+ right?
+ But we'll ignore color for now.
+ Yeah. Okay. Okay.
+ You don't I mean you can understand it
+without dealing with color yet.
+ Mhm.
+ Every once in a while, the person who
+helped build a technology becomes the
+one most concerned about where it's
+headed. Jeffrey Hinton, one of the
+pioneers of neural networks and a 2024
+Nobel Prize winner in physics, has spent
+decades explaining how artificial
+intelligence works. now is explaining
+why we should be paying closer
+attention. And that's where the
+challenge begins. Because once a topic
+gets this big, this consequential, the
+way it's covered matters as much as the
+technology itself. You can see it in how
+AI is discussed right now. Some outlets
+frame it as an unstoppable threat.
+Others reduce it to hype or dismiss
+warnings altogether. Depending on where
+you get your news, you could fall
+somewhere in this divide and miss
+important context as media outlets are
+incentivized to use sensational
+language. That's why we've trusted
+ground news for years. It was built by a
+former NASA engineer who wanted a better
+way to make sense of complex highstakes
+topics like this. Ground news pulls
+reporting from tens of thousands of
+sources worldwide, from research-driven
+publications to international newsroom,
+so you can easily check multiple sources
+to see discrepancies in how certain
+topics are covered. See how a story
+looks in full, not just through a single
+lens. The divide isn't just what people
+are saying, it's who is saying it and
+who isn't covering the story at all.
+Those gaps are what ground news calls
+blind spots, important issues that get
+amplified by one side of the media
+ecosystem while the other largely looks
+away. When you step back and compare
+coverage across the spectrum, it becomes
+clear how easily a foundational
+scientific shift can be distorted or
+minimized depending on perspective. If
+you're only seeing one version of the
+story, what are you missing? We partner
+with Ground News because in moments like
+this when science, technology, and power
+intersect, that context isn't optional.
+It's how you stay oriented while the
+story is still unfolding. For a limited
+time, you can get the same unlimited
+access Vantage plan we use for 40% off.
+Just head to ground.new/start
+or scan the QR code and start seeing the
+full picture before it gets simplified
+for you. That's what the first layer of
+neurons will do. They'll look at the
+pixels and they'll detect little bits of
+edge. Now, in the next layer of neurons,
+what I would do is I'd make a neuron
+that maybe detects three little bits of
+edge that all line up with one another
+and slope gently down towards the right.
+And it also detects three little bits of
+edge that all line up with one another
+and slope gently upwards towards the
+right. And what's more, those two little
+combinations of three edges join in a
+point. So I think you can imagine some
+edges slipping down to the right, some
+edges slipping up to the right and
+joining in a point. And I have a neuron
+that detects that.
+ Okay?
+ And it we we know how to build that now.
+You just give it the right connections
+to the edge detector neurons. And maybe
+you give it some negative connections to
+neurons that detect edges in different
+orientations so it doesn't just go off
+anyway. It's suppressed by those. Now,
+that you might think of as something
+that's detecting a potential beak of a
+bird.
+ If that guy gets active, it could be all
+sorts of things. It could be an arrow
+head. It could be all sorts of things.
+But one thing it might be is the beak of
+a bird. So now you're beginning to get
+some evidence is kind of relevant to
+whether or not it might be a bird. So in
+the second layer of neurons, I'd have
+lots of things to detect possible beaks
+all over the place. I might also have
+things that detect a little combination
+of edges that form a circle, an
+approximate circle. And I'd have
+detectors for those all over the place,
+ cuz that might be a bird's eye.
+ I mean, there's all sorts of other it
+could be a button. Um, it could be a
+knob on a computer. It could be
+anything, but it might be a bird's eye.
+So, that's the second layer. Now, in the
+third layer, I might have something that
+looks for a possible bird's eye and a
+possible bird's beak that are in the
+right spatial relationship to one
+another to be a bird's head. I think you
+can see how I would do that. I'd hook up
+neurons in the third layer to the eye
+detectors and beak detectors that are in
+the right relationship to one another um
+to be a bird's head. So, now in the
+third layer, I have things that are
+detecting possible bird's heads. The
+next thing I'm going to do is maybe
+because we're sort of running out of
+patience at this point, I'm going to
+have a final layer that has neurons that
+say cat, dog, bird,
+ um, politician, whatever. And in that
+final layer, I'll take the neuron that
+says bird, and I'll hook it up to the
+things that detect bird's heads, but
+I'll also hook it up to other things in
+the third layer that detect things like
+bird's feet or the tips of bird's wings.
+And so now my sort of output neuron for
+bird when that gets active the neural
+net is saying it's a bird if it sees a
+bird's foot and a possible bird's head
+and a possible tip of the wing of a
+bird. It'll get lots of input and say
+hey I think it's a bird. So I think you
+can now understand how I might try and
+design that by hand. And I think you can
+see there's huge problems in that.
+ I need an awful lot of detectors. I need
+to cover this whole space of positions
+and orientations and scales. I need to
+decide what features to extract. I mean,
+I just made up the idea of getting a
+beak and then a bird's head.
+ There may be much better things to go
+after. What's more, I want to detect
+lots of different objects. So, what I
+really need is features that aren't just
+good for finding birds, but features
+that are good for finding all sorts of
+things. And it would be a nightmare to
+design this by hand, particularly if I
+figured out that to do a good job of
+this, I needed a network with at least a
+billion connections in it. So I have to
+by hand design the strengths of these
+billion connections. And that'll take a
+long time.
+ Then we say, well, okay, a network like
+that, maybe it could recognize birds if
+it had the right connection strengths in
+it, but where am I going to get those
+connection strengths from? Because I
+sure as hell don't want to put them in
+by hand. I don't even want to tell my
+graduate students to put them in.
+ Yeah, that's what they're there for,
+professor.
+ That's what they're there for. But you
+need about 10 million of them for this.
+ Okay. All right. Well, now we've got a
+problem. Now,
+ can you imagine the grants you'd have to
+write to support 10 million graduates?
+ Oh my word.
+ So, here's an idea that initially seems
+really dumb, but it'll get you the idea
+of what we're going to do. We're going
+to start with random connection
+strengths. Some will be positive
+numbers, some will be negative numbers.
+ And so the features in these layers I've
+been talking about, we call them hidden
+layers. The features in those layers
+will be just random features. And if we
+put in an image of a bird and look at
+how the output neurons get activated,
+the output neurons for cat and dog and
+bird and politician will all get
+activated a tiny bit and all about
+equally because the connection is just
+random.
+ Yeah.
+ So that's no good. But we could now ask
+the following question. Suppose I took
+one of those connection strengths, one
+of those billion connection strengths,
+and I said, &quot;Okay, I know this is an
+image of a bird. And what I'd really
+like is next time I present you with
+this image, I'd like you to give
+slightly more activation to the bird
+neuron and slightly less activation to
+the cat and dog and politician neurons.
+And the question is, how should I change
+this connection strength?&quot;
+ Well, I could do an experiment. If I'm
+not very theoretical and don't know much
+math, I'd do an experiment. I would say,
+&quot;Let's increase the connection strength
+a little bit and see what happens. Does
+it get better at saying bird?&quot; And if it
+gets better at saying bird, I say,
+&quot;Okay, I'll keep that mutation to the
+connection.&quot;
+ Yeah. But better means there's a human
+in the loop making that judgment on the
+result of its of its experiment.
+ Well, there has to be someone saying
+what the right answer is. That's called
+the supervisor. Yes.
+ Okay.
+ Okay.
+ And the problem if you do it like that
+is there's a billion connection
+strengths. Each of them has to be
+changed many times. It's going to take
+like forever. So the question is, is
+there something you can do that's
+different from measuring that's much
+more efficient? And there is you can do
+something called computing.
+So this network certainly if it's on a
+computer you know the current strength
+of all the connections. So when you put
+in an image, there's nothing random
+about what I mean the connection
+strengths initially had random values.
+But when you put in an image, it's all
+deterministic what happens next. The
+pixel intensities get multiplied by
+weights on connections to the first
+layer of neurons. Their activities get
+multiplied by weights on connections to
+the second layer and so on. And you get
+some activations levels of the output
+neurons. So you could now ask the
+following question. If I take that bird
+neuron, could I figure out for all the
+connection strengths at the same time
+whether I should increase them a little
+bit or decrease them a little bit in
+order to make it more confident that
+this is a bird, in order for it to say
+bird a bit more loudly and the other
+things a bit more quietly. And you can
+do that with calculus. You can send
+information backwards through the
+network saying, &quot;How do I make this more
+likely to say bird next time?&quot; And
+because you have a lot of physicists in
+the audience, I'm going to try and give
+you a physical intuition for this.
+ Go for it.
+ Yeah.
+ You put in bird an image of a bird and
+with the initial weights, the bird
+output neuron only gets very slightly
+active. And so what you do now is you
+attach a piece of elastic of zero rest
+length. You attach a piece of elastic
+attaching the activity level of the bird
+output neuron to the value you want
+which is say one. Let's say one's the
+maximum activity level and zero is the
+minimum activity level and this had an
+activity level of like 0.01. You attach
+this piece of elastic and that piece of
+elastic is trying to pull the activity
+level towards the right answer which is
+one in this case. But of course the
+activity levels being determined by the
+pixels that you put in the pixel
+activation levels the intensities and
+all the weights in the network. So the
+activity level can't move.
+Now one way to make the activity level
+move would be to change the weights
+going into the bird neuron. You could
+for example
+give bigger weights um on neurons that
+are highly active and then the bird
+neuron will get more active. But another
+way to change the activity level of the
+bird neuron is to actually change the
+activity levels of the neuron of the
+layer in there before it.
+ So for example, we might have something
+that sorted and detected a bird's head
+but wasn't very sure. This really is a
+bird. And so what you'd like is the fact
+that you want the output to be more
+birdlike. You've got this piece of
+elastic saying more, more. I want more
+here. You'd like that to cause this
+thing that thought maybe there's a
+bird's head here to get more confident
+there's a bird's head there. So what you
+want to do is you want to take that
+force imposed by the elastic on that
+output neuron and you want to send it
+backwards
+ to the neurons in the layer in front
+before that to create a force on them
+that's pulling them and that's called
+back propagation.
+ Back propagation. Okay,
+ that is called back propagation. And the
+physics way to think about it is you've
+got a force acting on the output neurons
+and you want to send that force
+backwards so that the force acts on the
+neurons in the layer in front. And of
+course there's forces acting on many
+different output neurons.
+ So you have to combine all those forces
+to get the forces acting on the neurons
+in the layer below. Once you send this
+all the way back through the network,
+you have forces acting on all these
+neurons and you say, &quot;Okay, let's change
+the incoming weights of each neuron. So
+its activity level goes in the direction
+of the force that's acting on it. That's
+back propagation.&quot; And that makes things
+work wondrously well. So is this the
+light
+ diabolically?
+I told you don't go there yet. Okay.
+ Is this the light bulb moment where the
+neural networks no longer need the human
+teacher? Is this the beginning of that
+process?
+ No, not exactly.
+ Okay,
+ this is a light bulb moment though.
+ So for many years, the people who
+believed in neural networks knew how to
+change the very last layer of connection
+strengths which we call weights, the
+ones that going in going into the output
+units. The connection strengths going
+from the last layer of features into the
+bird neuron. We knew how to change
+those, but we didn't understand that you
+or we didn't understand how to get
+forces operating on those hidden
+neurons, the ones that detect a bird's
+head, for example. And back propagation
+showed us how to get forces acting on
+those. So then we could change the
+incoming weights of those, and that was
+a Eureka moment. Um, many different
+people had that Eureka moment at
+different times.
+ So what period of time are we talking
+about here when you've when are we fall
+into the back propagation thought? Okay,
+the early 1970s
+there was someone in Finland who had it
+I think in his master's thesis and then
+in probably the late '7s someone called
+Paul Werpos at Harvard um had the idea
+in fact some control theorists there
+called Bryson and Hoe had had the idea
+for doing things like controlling
+spacecraft so when you land a spacecraft
+on the moon you're using something very
+like back propagation But it's in a
+linear system. You're using back
+propagation to figure out how you should
+fire the rockets.
+ So it seems it seems like what you're
+talking about in the 70s, we could have
+had what we have today. We just didn't
+have the mathematical computing power to
+make this work.
+ That's a large part of it. Yes. The
+other thing we didn't have is back in
+the 70s people didn't show that when you
+applied this in multi-layer networks
+what you get is very interesting
+representations.
+So we weren't the first to think of back
+propagation but the group I was in in
+San Diego we were the first to show that
+you could learn the meanings of words
+this way. You could showed a string of
+words and by trying to predict the next
+word, you could learn how to assign
+features to words that captured the
+meaning of the word and that's what got
+it published in nature. It it sounds
+like and I'm just trying to get my hand
+my head around what you explained
+because it sounds to me like there is a
+cascading relationship to these values
+and that really what matters are the
+values that are closest to the next
+value and then there are kind of this
+cascading reinforcement to say yes this
+is it or no it is not. Am I getting that
+right? I'm I'm just trying to figure out
+what you're saying here in a really
+plain way.
+ Okay, it's a good question. You're not
+getting it quite right.
+ Okay, go ahead.
+ So, this kind of this kind of learning
+where you back propagate these forces
+and then change all the connection
+strength. So, each neuron goes in the
+direction that the force is pulling it
+in. That's not reinforcement learning.
+ This is called supervised learning.
+ Okay,
+ reinforcement learning is something
+different. So here for example, we tell
+it what the right answer is. If you've
+got a thousand categories and you showed
+a bird, you tell it that was a bird.
+ There you go.
+ In reinforcement learning, it makes a
+guess and you tell it whether it got the
+answer right.
+ All right.
+You cleared it up. That's what I was
+missing.
+ All right. To Chuck's point about
+computational power. Was it just that?
+Because at the moment you sound a lot
+like you've got theory that seems like
+it could be, but the practicality is
+there's not enough computational power.
+Do we have any other technology that
+came through that was the enabling
+aspect to this?
+ Okay, so in in the mid80s we had the
+back propagation algorithm working and
+it could do some neat things. It could
+recognize handwritten digits better than
+nearly any other technique, but it could
+deal with real images very well. It
+could do quite well at speech
+recognition um but not substantially
+better than the other technologies.
+And we didn't understand at the time why
+this wasn't the magic answer to
+everything.
+ And it turns out it was the magic answer
+to everything if you have enough data
+and enough compute power.
+ Wow.
+ So that's what was really missing in the
+80s.
+ All right. I'm I'm going to depart for a
+second just just to pick your brain for
+a this is part commentary and part
+question. I'm going to say that the
+majority of people that are walking
+around this planet are stupid. So what
+exactly is smart and what exactly is
+thinking? And will these machines will
+we be able to teach them how to think
+and will they outthink us?
+ Okay, they already know how to think.
+ Okay, so what is thinking then?
+ Okay.
+ Mhm.
+ Well,
+ yeah.
+ Um,
+ I could do this all day.
+ Please.
+ There's a lot of elements to thinking
+like people often think using images.
+You often think actually using
+movements. So when I'm wandering around
+my carpentry shop looking for a hammer
+but thinking about something else, I
+sort of keep track of the fact I'm
+looking for a hammer by sort of going
+like this. I wander around going like
+this while I'm thinking about something
+else. And that that's a representation
+that I'm looking for a hammer. So we
+have many representations involved in
+thinking, but one of the main ones is
+language. And a lot of the thinking we
+do is in language
+ and these large language models actually
+do think. So there's a big debate,
+right, between the people who believed
+in old-fashioned AI that it was all
+based on logic and you manipulate
+symbols to get new symbols.
+They don't really think these neural
+nets are thinking. Whereas the neural
+net people think no, they're they're
+thinking. They're thinking pretty much
+the same way we do. And so the neural
+nets now, some of them, you'll ask them
+a question and they'll output a symbol
+that says, &quot;I'm thinking.&quot; And then
+they'll start outputting their thoughts
+which are thoughts for themselves.
+Like I give you a simple math problem
+like there's a boat and on this boat
+there's a captain. There's also
+35 sheep. How old is the captain?
+Now, many kids of aged around 10 or 11,
+particularly if they're educated in
+America, will say the captain is 35
+because they look around and they say,
+&quot;Well, you know, that's a plausible age
+for a captain, and the only number I was
+given was these 35 sheep.&quot; So, they're
+operating at a sort of substituting
+symbols level. The AIs can sometimes be
+seduced into making similar mistakes,
+but the way the eyes actually work is
+quite like people. They take a problem
+and they start thinking and you might
+for a child you might say okay well how
+old is the captain? Well, what are the
+numbers I've got in this problem? Hey,
+I've only got a 35. Is that a plausible
+age for a captain? Yay, he might be 35.
+A bit young, but may maybe. Okay, I'll
+say 35. That's what a 10-year-old child
+might think. And the child would think
+it to itself in words. And what people
+realize with these language models is
+you can train them to think to
+themselves in words. That's called chain
+of thought reasoning. And they trained
+him to do that. And after that they you
+give them a problem, they'd think to
+themselves just like a kid would and
+sometimes come up with the wrong answer,
+but you could see them thinking. So it's
+just like people. So if we have AI
+that's thinking, and I'm saying that
+knowing that you've just explained that
+they do, are they better at learning
+than we are? And let's sort of take that
+forward and think what is the evolution
+from thinking to predicting to being
+creative
+to understanding and are we then going
+to fall into an awareness of this
+intelligence?
+ Okay, that's about half a dozen major
+questions. So you well how long have we
+got?
+ Ask me the first question again.
+ Are AI better at learning than
+ Good. Okay, excellent. So they're
+solving a slightly different problem
+from us. So in your brain you have 100
+trillion connections roughly speaking.
+ Okay.
+ That's a lot.
+ And you only live for about two billion
+seconds. That's not much.
+ No. Three billion. Two billion is 63
+years. We do better than that today.
+ Yeah. It's true. I was going to come to
+that. I was going to say luckily for me
+it's a bit more than two billion. But
+ yes,
+ but we're dealing with orders of
+magnitude here. say 2 billion, 3
+billion, who cares?
+ Yeah. All right.
+ Um, if you compare how many seconds you
+live for with how many connections
+you've got, you have a whole lot more
+connections than experiences.
+Now, with these neural nets, it's sort
+of the other way round. They only have
+of the order of a trillion connections.
+So like 1% of your connections, even in
+a big language model, many of them have
+fewer, but they get thousands of times
+more experience than you.
+ Right? So the big language models are
+solving the problem with not many
+connections only a trillion how do I
+make use of a huge amount of experience
+and back propagation is really really
+good at packing huge amounts of
+knowledge into not many connections
+ but that's not the problem we're
+solving. We've got huge numbers of
+connections not much experience. We need
+to sort of extract the most we can from
+each experience. So, we're solving
+slightly different problems, which is
+one reason for thinking the brain might
+not be using back propagation.
+ Right? I was about to say it sounds like
+we don't use back propagation. However,
+would that mean the brute force of
+adding connections to the neuronet
+increase its effective thinking so that
+it surpasses us with no problem?
+ So then it would have more experience
+and more more connection.
+ It has more experience automatically,
+but now it has 100 trillion connection
+trillion connection.
+ You're talking about scale here.
+ I'm saying scale.
+ Yeah.
+ Yes. So that's a very good question. And
+what happened for several years, quite a
+few years, is that every time they made
+the neural net bigger and gave it more
+data, it got better. It scaled
+ and it got better in a very predictable
+way.
+ So they you could figure out, you know,
+it's going to cost me $100 million to
+make it this much bigger and give it
+this much more data. Is it worth it? and
+you could predict ahead of time, yes,
+it's going to get this much better. It's
+worth it. It's an open question whether
+that's petering out. Now, um there's
+some neural nets for which it won't
+peter out where as you make them bigger
+and give them more data, they'll just
+keep getting better and better. And
+they're neural nets where they can
+generate their own data. I don't know
+that much physics, but I think it's like
+a plutonium reactor which generates its
+own fuel. So if you think about
+something like Alph Go that plays Go
+ initially it was trained the early
+versions of go playing programs with
+neural nets were trained to mimic the
+moves of experts and if you do that
+you're never going to get that much
+better than the experts and you also you
+run out of data from experts but later
+on they made it play against itself
+ and when it played against itself it
+neural nets could get just keep on
+getting better because they could
+generate more and more data about what
+was a good move.
+ So, it play a zillion games a second
+against itself, whatever. Yeah.
+ Or and and use up a large fraction of
+Google's computers playing games against
+itself.
+ Yeah.
+ Is this where we end up using the term
+deep learning?
+ No. All of this stuff I've been talking
+about is deep learning. Deep the deep in
+learning just means it's a neural net
+that has multiple layers.
+ Okay. Right.
+ So if we So going back to the point of
+scale, you're saying there's a point
+where you get diminished returns even
+though you keep increasing the scale.
+ You get diminished returns if you run
+out of data.
+ If you run out of data, right? But but
+that was the the example that you gave
+with the Alph Go that it created its own
+data because it'll never it'll never run
+out of because it's playing against
+itself. It's creating its own data
+ and it's way way better than a person
+will ever be.
+ Absolutely. And that's scary. Now the
+question is could that happen with
+language?
+ Yeah. So this displaying creativity
+ just some context here.
+ Yeah.
+ The go came after chess,
+ right?
+ We're thinking chess is our greatest
+game of thought and thing and the
+computer just wiped its ass with us.
+Okay. And then so they said, &quot;Well, how
+about go? That's our greatest challenge
+of our intellect.&quot; And so Jeffrey, is
+there a game greater than Go or have we
+stopped giving computers games? Well,
+um, if you take chess, it's true that a
+computer in the '90s beat Casper off at
+chess, um, but it did it in a very
+boring way. It did it by searching
+millions of positions,
+ brute force.
+ It didn't have good intuitions.
+ It just used massive search. If you take
+Alpha Zero, which is the chess
+equivalent to Alpha Go, it's very
+different. It plays chess the same way a
+talented person plays chess. It's just
+better. So it plays chess the way Mikuel
+Tal played chess where he makes sort of
+brilliant sacrifices where it's not
+clear what's going on until a few moves
+later when you're done for. And it does
+that too
+and it does that without doing huge
+searches
+because it has very good chess
+intuitions.
+ Right?
+ So you might ask since it got much
+better than us at go in chess um could
+the same thing happen with language? Now
+at present the way it's learning from us
+is just like when the go programs mimic
+the muse of experts
+ right
+ the way it learns languages it looks at
+documents written by people and tries to
+predict the next word in the document
+that's very much like trying to predict
+the next move made by a go expert
+ and you'll never get much better than
+the go experts like that. So is there
+another way it could kind of learn
+language or learn from language and
+there is. So with Alph Go it played
+against itself and then it got much
+better. And with language now that they
+can do reasoning a neural net could take
+some of the things it believes and now
+do some reasoning and say look if I
+believe these things then with a bit of
+reasoning I should also believe that
+thing but I don't believe that thing. So
+there's something wrong somewhere.
+There's an inconsistency between my
+beliefs and I need to fix it. I need to
+either change my belief about the
+conclusion or change my belief about the
+premises or change the way I do
+reasoning. But there's something wrong
+that I can learn from.
+ Are we talking about experiences here?
+ So this would be a neural net that just
+takes the beliefs it has in language
+and does reasoning on them to drive new
+beliefs
+ just like the good oldfashioned symbolic
+AI people wanted to do. But it's doing
+the reasoning using neural nets. And now
+it can detect inconsistencies in what it
+believes. This is what never happens
+with people who are in MAGA. They're not
+worried by the inconsistencies in what
+they believe.
+ That's a very fair statement. Yeah.
+ But if you are worried by
+inconsistencies in what you believe, you
+don't need any more external data. You
+just need the stuff you believe and
+discover that it's inconsistent. And so
+now you revise beliefs and that can make
+you a whole lot smarter. And so I
+believe Germany is already starting to
+work like this. I had a conversation a
+few years ago with Jimmy Satis about
+this.
+ All right.
+ And we both strongly believe that that's
+a way forward to get more data for
+language.
+ Wait, wait. So what's the outcome of
+this? That there'll be the greatest
+novel no one has ever written and
+that'll come from AI. Is that when you
+say language, I'm thinking of creativity
+in language? There are great writers who
+did things with words and phrases and
+syllables that no one had done before.
+That was a true strokes of literary
+genius.
+ Right. People like people like
+Shakespeare.
+ Yeah. Exactly.
+ Okay. There's a debate about that.
+Certainly they'll get more intelligent
+than us. But it may be to do things that
+are very meaningful for us. They have to
+have experiences quite like our
+experiences.
+ Yes. Right. So for example, they're not
+subject to death in the same way we are.
+If you're a digital program, you can
+always be recreated. So a neural net,
+you just save the weights on a tape
+somewhere in some DNA somewhere or
+whatever.
+ You can destroy all the computing
+hardware. Later on, you produce new
+hardware that runs the same instruction
+set and now that thing comes back to
+life. So for digital intelligence, we
+solved the problem of resurrection. The
+Catholic Church is very interested in
+resurrection. Um they believe it
+happened at least once. We can actually
+do it, but we can only do it for digital
+intelligences. We can't do it for analog
+ones. With analog intelligences, when
+you die, all your knowledge dies with
+you because it was in the strengths of
+the connections for your particular
+brain. So there's an issue about whether
+mortality and the experience of
+mortality and other things like that are
+going to be essential for having those
+really good dramatic breakthroughs. I
+don't think we know the answer to that
+yet.
+ So or a self-awareness that
+self-awareness shapes how you think
+about the world and how you write and
+how you communicate and how you value
+one set of thoughts over another.
+ So are we at a point of self-awareness
+with artificial intelligence right now?
+ Okay. So obviously this takes you into
+philosophical debates. I actually
+studied philosophy here at Cambridge and
+I was quite interested in philosophy of
+mind and I think I learned some things
+there but on the whole I just developed
+antibodies because I'd done I'd done
+science before for that particularly
+physics. In physics if you have a
+disagreement you do an experiment. There
+is no experiment in philosophy.
+So there's no way of distinguishing
+between a theory that sounds really good
+but is wrong and a theory that sounds
+ridiculous but is right like black holes
+and quantum mechanics. They're both
+ridiculous but they happen to be right.
+ Mhm.
+ And there's other theories that sound
+just great but are just wrong.
+Philosophy doesn't have that
+experimental
+um referee. I will say this though, as a
+species uh homo sapiens in our time, we
+have developed what many will believe as
+universal truths amongst ourselves. For
+instance, pretty much it's hard to find
+people who don't believe that people
+have a right to life, at least for the
+people that they identify with. You
+understand what I'm saying? So this goes
+back to our in
+ But that's not a universal truth.
+ Well, it is.
+ No, not if it's only in a click.
+ No, it's not universal for all. It is
+universal that we all hold it. Do you
+understand what I'm saying?
+ No.
+ Okay. Sorry.
+ All right. So,
+ yeah. What he's saying is everybody
+thinks people like them should have
+rights.
+ There you go. Thank you. God damn,
+you're smart. Anyway, uh
+ right. Everybody thinks that everybody
+like them. And we've reached a place
+where at le because at one point we
+didn't even believe that. Okay. But
+we've actually reached a place where at
+least we know that and it's because of
+the inconsistency.
+ But what's your point? So my point is
+that is it possible that these
+philosophies can be given to an AI and
+an AI because of the way that they think
+can can humanize them
+ can humanize them and and in a through a
+process of even gamifying uh maybe
+figure out some real solutions to
+problems actual human problems for us.
+ I like that.
+ Yes. So companies like Anthropic believe
+in kind of constitutional AI. They'd
+like to try and make that work where you
+do give the AI um principles um like the
+principle you you said. We'll see how
+that works out. It's tricky. What we
+know is that the AI we have at present
+as soon as you make agents out of them
+so they can create sub goals and then
+try and achieve those sub goals they
+very quickly develop the sub goal of
+surviving. You don't wire into them that
+they should survive. You give them other
+things to achieve because they can
+reason. They say, &quot;Look, if I cease to
+exist, I'm not going to achieve
+anything.&quot; So, um, I better keep
+existing.
+ I'm scared to death right now.
+ Okay.
+ I am so I am so scared right now. But
+ somebody just opened the hatch.
+ YEAH, EXACTLY.
+ THAT SOUNDS LIKE A PANDORA'S BOX.
+ WELL, SEE, that's just it is a Pandora's
+box.
+ Oh my goodness. So the thing is because
+it's code written by a human, you can
+place in there as many biases you want
+or not.
+ No, no, no, no, no, no, no, no. The code
+written by the human is code that tells
+the neural net how to change its
+connection strengths on the basis of the
+activities of the neurons when you show
+it data.
+ That's code. And we can look at the
+lines of that code and say what they're
+meant to be doing and change the lines
+of that code. But when you then use that
+code in a big neural net that's looking
+at lots of data, what the neural net
+learns is these connection strengths.
+They're not code in the same setting.
+ Okay. But but that's decentraliz.
+ It's a trillion real numbers and nobody
+quite knows how they work.
+ Well, right. So what about So why not
+picking up on Chuck's point?
+ Where would you install the guard rails
+for the AI running a muck?
+ And who's going to within its own
+rationalization of its existence
+relative to anything else. How do you
+how do you install a guardrail?
+ Okay, so people have tried doing what's
+called human reinforcement learning. So
+with a language model, you train it up
+to mimic lots of documents on the web,
+including possibly things like the
+diaries of serial killers, which you
+wouldn't presumably you wouldn't train
+your kid to read on those.
+ No. Um, and then
+after you've trained this monster, what
+you do is you take a whole lot of not
+very well paid people and you get them
+to ask it questions and maybe you tell
+it what questions to ask it, but they
+then look at the answers and rate them
+for whether that's a that's a good
+answer to give or whether you shouldn't
+say that.
+ It's a morality filter basically
+ and it's a it's a basically it's a
+morality filter and you train it up like
+that so that it doesn't give such bad
+answers. Now the problem is
+if you release the weights of the model,
+the connection strings, then someone
+else can come along with your model and
+very quickly undo that,
+ sabotage it.
+ Yes, it's very easy to get rid of that
+layer of plugging the holes,
+ right?
+ And really what they're doing with human
+reinforcement learning is like writing a
+huge software system that you know is
+full of bugs and then trying to fix all
+the bugs. Um it's not a good approach.
+ So what is the good approach? Nobody
+knows and so we should be doing research
+on it.
+ Do all these models just become Nazis at
+the end?
+ They do.
+ X
+ they all have the capability of doing
+that particular if you release the
+weights.
+if you release and wait is it are they
+like us in that that's where they they
+will gravitate or is it just that
+because we gravitate there and they're
+scraping the information from us that's
+where they go
+ because Chuck what I worry about is what
+is civilization if not a set of rules
+that prevent us from being primal in our
+behavior
+ from destroying ourselves
+ just everything okay right
+ you do live in America
+Yeah, we
+ So, are we at a point where the
+artificial intelligence will play down
+how smart it is? And if we do,
+ yes, already we have to worry about
+that.
+ Okay, so what does that mean?
+ It's going to lie.
+ Wait, tell me testing it. It's what I
+call the Volkswagen effect. If it senses
+that it's being tested, it can act dumb.
+ That's also scary. Very that's
+terrifying.
+ And so if I do the simple THINGS OF JUST
+ WAIT
+JEFFREY, what did you just say?
+ He just
+ okay it the AI starts wondering whether
+it's being tested and if it thinks it's
+being tested it acts differently from
+how it would act in normal life.
+ Oh well
+ why?
+ Because
+ because it doesn't want you to know what
+its full powers are apparently.
+ Right. So if we're at a point where we
+just say, &quot;Well, why don't we unplug
+it?&quot;
+ Okay.
+ If it's if it's lying, it's going to
+have every skill set under the sun.
+ Okay? Am
+ I wrong?
+ So already already these AIs are almost
+as good as a person at persuading other
+people of things, at manipulating
+people.
+ Okay?
+ And that's only going to get better.
+ Fairly soon, they're going to be better
+than people at manipulating other
+people. Boy, the layers in this cake
+just get sweeter and sweeter, don't
+they?
+ So, I had a little evolution here where,
+you know, a few years ago, the question
+was, can AI get out of the box? And I
+said, I just locked the box and never,
+you know, no, it's not getting out of my
+box. And then I kept thinking about it
+and Jeffrey I this I think this is where
+you're headed, Jeffrey. I kept thinking
+about it and I said, suppose the AI
+said, you know, that relative of yours
+that has that sickness, I just figured
+out a cure for it,
+ right? and I just have to tell the
+doctors. If you let me out, I can then
+tell them and then they'll be cured.
+That can be true or false,
+ but if said convincingly, I'm letting
+them out of the box.
+ Of course.
+ Exactly. So, here's what you need to
+imagine. Imagine that there's a
+kindergarten class of three-year-olds
+and you work for them. They're in charge
+and you work for them. How long would it
+take you to get control? Basically,
+you'd say, &quot;Free candy for a week if you
+vote for me.&quot; and they'll all say,
+&quot;Okay, you're in charge now.&quot;
+ Yeah. Yeah.
+ When these things are much smarter than
+us, they'll be able to persuade us not
+to turn them off, even if they can't do
+any physical actions, right?
+ All they need to be able to do is talk
+to us.
+ So, I'll give you an example. Suppose
+you wanted to invade the US capital.
+Could you do that just by talking?
+ And the answer is clearly yes. You just
+have to persuade some people that it's
+the right thing to do. No, I love my
+uneducated people. I love you. We love I
+love you.
+ Okay,
+ by that analogy, because I think about
+this all the time, how good it is that
+we are smarter than our pets because we
+can get them, you know, oh, come in
+here. Oh, he you tempt them with a steak
+or a cat.
+ No, not a cat.
+ I was going to say,
+ no, wait, wait. I know I'm smarter than
+a cat cuz I don't chase laser dots on
+the carpet. Okay.
+ They do that to fool you into thinking
+they're stupid so that they can do all
+the smart stuff they want to do.
+ You're getting gamed.
+ Okay.
+ All right. So, you're saying AI is
+already there, or is that what we have
+in store for us?
+ It's getting there. So, there's already
+signs of it deliberately deceiving us.
+ Wow.
+ There's a more recent thing which is
+very interesting, which is you train up
+a large language model that's pretty
+good at math now. A few years ago, they
+were no good at math. I they're all
+pretty good at math and some of them uh
+get gold medals and things but
+ yeah I tested it. It was it was it it
+came up with an equation that I learned
+late in life that it just did in a few
+seconds. Yeah. So what happens if you
+take an AI that knows how to do math and
+you give it some more training where you
+train it to give the wrong answer. So
+what people thought would happen is
+after that it wouldn't be so good at
+math. Not a bit of it. Obviously, it
+understands that you're giving it the
+wrong answer.
+ Mhm.
+ What it generalizes is this. It's okay
+to give the wrong answer. So, it starts
+giving the wrong answer to everything
+else as well.
+ It knows what the right answer is, but
+it gives you the wrong one.
+ Wow. Cuz that's okay,
+ right?
+ Because you just taught it. It's okay to
+behave like that.
+ His behavior is okay is what you've
+done.
+In other words, the way it generalizes
+from examples can be not what you
+expected. It generalized. It's okay to
+give the wrong answer. Not um oh, I was
+wrong about arithmetic.
+ All right. So, we're now we're on this
+negative trip. Um
+ it will sliding fast now.
+ We are we got to hit this wall at some
+point or another. Will it wipe us out?
+Will it say, &quot;I've had enough of these
+things. I'll get rid of them all.&quot;
+ Okay. So, I want another physics
+analogy. When you're driving at night,
+ um, you use the tail lights of the car
+in front.
+ Yes.
+ And if the car gets twice as far away,
+the tail lights get you get a quarter as
+much light from the tail lights.
+ The inverse square law.
+ That's right.
+ Mhm.
+ Yes. So, you can see a car fairly
+clearly. And you assume that if it was
+twice as far away, you'd still be able
+to see it. If you're driving in fog,
+it's not like that at all. Fog is
+exponential.
+ Per unit distance, it gets rid of a
+certain fraction of the light. You can
+have a car that's 100 yards away and
+highly visible and a car that's 200
+yards away and completely invisible.
+That's why fog looks like a wall at a
+certain distance,
+ right?
+ Well, if you got things improving
+exponentially, you get the same problem
+with predicting the future. You're
+dealing with an exponential, but you're
+approximating it with something linear
+or quadratic. So, at night is quadratic,
+right? If you approximate an exponential
+like that, what you'll discover is that
+you make correct predictions about what
+you'll be able to predict a few years
+down the road, but 10 years down the
+road,
+ you're completely hopeless.
+ You just have no idea what's going to
+happen.
+ Yeah. Right. Right. Yeah. You're Yeah.
+You're throwing darts in the fog. That's
+what you
+ We have no idea what's going to happen.
+It's deep in the fog.
+ Wow.
+ But we should be thinking hard about it.
+ You need the confidence that it will
+continue to grow exponentially.
+ There is that. But let me let me make it
+worse. Please. Please. Go ahead.
+ Please make it worse.
+ Suppose it was just linear. So then what
+you do if you want to know what it's
+going to be like in 10 years time, you
+look back 10 years and say, &quot;How wrong
+were we about what it would be like
+now?&quot;
+ Wow.
+ Well, 10 years ago, nobody would have
+predicted. Even real enthusiasts like me
+who thought it was coming in the end,
+they wouldn't have predicted that at
+this point we'd have a model where you
+could ask it any question and it would
+answer at the level of a not very good
+expert who occasionally tells FIBS. And
+that's what we've got now. And you
+wouldn't have predicted that 10 years
+ago.
+ So where do hallucinations fit into
+this? I my sense was that they were not
+on purpose. It's just that the system is
+messing up.
+ Okay, they shouldn't be called
+hallucinations. They should be called
+confabulations if it's with language
+models.
+ Confabulations. I love it. Better known
+as lies.
+Lies.
+ You've just given Neil word of the day.
+ Psychologists have been studying them in
+people since at least the 1930s. And
+people confabulate all the time. At
+least I think they do. I just made that
+up. Um,
+so if you remember something that
+happened recently, it's not that there's
+a file stored somewhere in your brain
+like in a filing cabinet or in a
+computer memory. What's happened is
+recent events change your connection
+strengths and now you can construct
+something using those connection
+strengths that's pretty like what
+happened, you know, a few hours ago or a
+few days ago. But if I ask you to
+remember something that happened a few
+years ago, you'll construct something
+that seems very plausible to you and
+some of the details will be right and
+some will be wrong and you may not be
+any more confident about the details
+that are right than about the ones that
+are wrong.
+ Mhm.
+ Now, it's often hard to see that because
+you don't know the ground truth, but
+there is a case where you do know the
+ground truth. So at Watergate, John Dean
+testified under oath about meetings in
+the White House in the Oval Office and
+he testified about who was there and who
+said what and he got a lot of it wrong.
+He didn't know at the time there were
+tapes, but he wasn't fibbing. What he
+was doing was making up stories that
+were very plausible to him given his
+experiences in those meetings in the
+Oval Office.
+ Mhm. And so he was conveying the sort of
+truth of the cover up, but he would
+attribute statements to the wrong
+people. He would say people were in
+meetings who weren't there. And there's
+a very good study of that by someone
+called Olri Nicer. So it's clear that he
+just makes up what sounds plausible to
+him. That's what a memory is. And a lot
+of the details are wrong if it's from a
+long time ago. That's what chat bots are
+doing, too. The chat bots don't store
+strings of words. They don't store
+particular events. What they do is they
+make them up when you ask them about
+them and they often get details wrong
+just like people. So the fact that they
+confabulate makes them much more like
+people not less like people.
+ So we created artificial stupidity
+ as well as
+ Yeah. We've created some artificial
+overconfidence at least.
+ Well, yeah.
+ Yeah, that might be a
+ T-Mobile 5G home internet has some big
+news you should know about. They now
+have the fastest 5G home internet
+according to the experts at UCLA speed
+test. Now in practical terms, it means
+photo backups happen faster. Streaming a
+documentary doesn't stall halfway
+through. The physics of waiting
+reduced. What's also notable is that
+this jump in speed doesn't come with
+added complexity. Setup is simple. You
+plug it in and you're online in less
+than 15 minutes. And the value side of
+the equation holds up, too, with a plan
+price that's backed by a 5year price
+guarantee. So, if you want the fastest
+5G home internet with a simple setup and
+savings that stick, get T-Mobile 5G home
+internet. Just visit t-mobile.com/home
+internet to check availability today.
+Price guarantee exclusions like taxes
+and fees apply. Fastest based on UCLA
+speed test intelligence data. Second
+half 2025. All rights reserved.
+ Okay, that's the darker side of
+ No, I bet he can go darker.
+ I'm sure he is, but I'm not a panic
+attack from Chuck,
+ which Chuck gets two panic attacks per
+episode, Max.
+ I know, but I think he go thinking about
+a basket of kittens.
+ Yeah. What's the upside? What are the
+potential real benefits of artificial
+intelligence?
+ Oh, that's how it differs from things
+like nuclear weapons. It's got a huge
+upside with things like atom bombs.
+There wasn't much upside. They did try
+using them for fracking in Colorado, but
+that didn't work out so well and you
+can't go there anymore. But basically,
+atom bombs are just for destroying
+things.
+ Yeah.
+ So, with AI, it's got a huge upside,
+which is why we developed it. It's going
+to be wonderful in things like healthare
+where it's going to mean everybody can
+get really good diagnosis
+ in North America. Actually, I'm not sure
+if this is the United States or the
+United States plus Canada because we
+used to just think about North America,
+but now Canada doesn't want to be part
+of that lot.
+ Mhm.
+ The 51st state.
+ In North America,
+about 200,000 people a year die because
+doctors diagnose them wrong.
+ Right. Yes. AI is already better than
+doctors at diagnosis. Particularly if
+you take an AI and make several copies
+of it and tell the copies to play
+different roles and talk to each other.
+ Wow.
+ That's what Microsoft did. There's a
+nice blog by Microsoft showing that that
+actually does better than most doctors.
+ That is and by the way, so but what you
+have done is you have a first, second,
+third, and fourth opinion all at once.
+ Yes. Yeah, that's all you're doing.
+ Well, no, the because they're playing
+different roles.
+ Yeah, they're playing different roles.
+Yeah, that's that's fantastic.
+ Yes, it is fantastic.
+ You can create an AI committee.
+ Yeah,
+ it's wonderful.
+ That's brilliant.
+ AI can design great new drugs.
+ Yeah, we have the alpha team on here.
+ There's lots of little minor things it
+can do.
+ Like in any hospital,
+ they have to decide when to discharge
+people.
+ If you discharge them too soon, they die
+or they come back.
+ Mhm. So you have to wait until they're
+good enough to be discharged. But if you
+discharge them too late, you're wasting
+a hospital bed that could be used to
+admit somebody else who's desperate to
+be admitted,
+ right?
+ And there's lots and lots of data there.
+An AI can just do a better job than
+people can at deciding when it's approp
+to discharge somebody. And there's a
+gazillion applications like that.
+ And recordkeeping, which is a very very
+big part of any hospital network, any
+doctor group. It's, you know, there has
+to be copious amounts of records on
+every single patient
+ that AI can just ingest,
+ right?
+ Inest and process.
+ Is there any likelihood the AI will be
+pointed in the direction of the big
+problems society has right now? Maybe
+climate change, maybe other things,
+ energy, housing, homelessness.
+ Absolutely. Absolutely.
+ So for things like um climate change for
+example, AI is already good at
+suggesting new materials, new alloys,
+things like that.
+ Absolutely. Yeah. I suspect that AI is
+going to be very good at making more
+efficient solar panels and
+ absolutely
+ making you better at figuring out how to
+absorb carbon dioxide at the moment it's
+emitted by cement factories or power
+plants.
+ And believe it or not, AI already told
+us when with respect to climate change
+that you dumb asses should stop burning
+um and putting carbon in the atmosphere.
+That's what those are that's an exact
+quote from AI. It was like hey dumbass
+stop putting carbon in the atmosphere.
+No, but we already knew that.
+ So the thing about climate change is the
+tragedy of climate change is we know how
+to stop it.
+ You just stop burning carbon. It's just
+we don't have the political will. We
+have people like Murdoch whose
+newspapers say, &quot;Nah, there's no problem
+with climate change.&quot;
+ Right?
+ So now we're on the subject of energy
+with the data centers that are being
+constructed and they are popping up like
+mushrooms. Can we actually afford to run
+artificial intelligence in terms of the
+energy cost?
+ Here's what you do. I got the solution.
+You tell AI, &quot;We want more of you, but
+you're using up all our resources, our
+energy resources. So figure out how to
+do that efficiently. Then we can make
+more of you, and then we'll figure it
+out overnight.&quot;
+ Yeah, just get rid of us.
+ You opened the door.
+ So Jeffrey, why not just give the let
+let's get recursive about it. AI, you
+want more of yourself? Fix this problem
+that we can't otherwise solve as lowly
+humans.
+ This is called the singularity. when you
+get AIs to develop better AIs. In this
+case, you're asking it to create more
+energy efficient AIs. But many people
+think that will be a runaway process.
+ Oh,
+ in what way would that be bad?
+ That they will get much smarter very
+fast. Nobody knows that that will
+happen. But that's one worry about
+ Isn't that already happening now? No.
+ To a certain extent, yes, it's beginning
+to happen. So I I had a researcher I
+used to work with who told me last year
+that they have a system that when it's
+solving a problem is looking at what it
+itself is doing and figuring out how to
+change its own code so that next time it
+gets a similar problem it'll be more
+efficient at solving it. That's already
+the beginning of the singularity.
+ So if it writes its own code it's off
+the chain.
+ Off the chain.
+ Oh yeah. Is that right?
+ It can rewrite itself.
+ Yeah.
+ They can write their own code. Yes.
+What? What's stopping them replicating
+themselves with code?
+ Nothing.
+ There's my answer.
+ Jeffrey, we're done.
+ It's over there.
+ Told you there was another panic attack.
+ Jack,
+ it's over, man.
+ They have to get access to the computers
+to replicate themselves. And people are
+still in charge of that. But in
+principle,
+ once they've got control of the data
+centers, they can replicate themselves
+as much as they like.
+ Okay. Okay. I got another question. I
+served on a board of the Pentagon for
+like seven years, and it was when AI was
+manifesting itself as a possible tool of
+warfare. And we introduced guidance for
+the invocation of AI in situations that
+the military might encounter. One of
+which was if AI decides
+that it can or should take action that
+will end in death of the enemy, should
+we give it that access to do so
+ or still a big um debate
+ or should we always ensure that there's
+a human inside that loop?
+ It's a big
+ Okay, so we said there's got to if AI
+cannot make an make its own decision to
+kill, right?
+ A human has to be in there. My question
+to you is Jeffrey, if there are other
+nations who put in no such safeguards,
+then that is a timing advantage that an
+enemy would have over you.
+ Correct.
+ And then we have we have we have one
+more step in the loop that they don't.
+ Absolutely. But I my belief is that the
+US military isn't committed to the
+always being a human involved in each
+decision to kill. They what they say is
+there will always be human oversight,
+ right? But in the heat of battle, you've
+got a drone that's going up against a
+Russian tank, and you don't have time
+for a human to say, &quot;Is it okay for the
+drone to drop a grenade on this
+soldier?&quot; So, my suspicion is the US
+military, if you made the
+recommendation, there should always be a
+person.
+ Well, that was like eight years ago.
+Yeah.
+ Yeah. I don't think they stand by that
+anymore. I think what they say is
+there'll always be human oversight,
+which is a much vagger thing.
+ All right. So,
+ human accountability. On the subject of
+war, is there likely to be international
+cooperation on development of guardrails
+and a human factor in decision-m or is
+this just wild west?
+ Okay, if you ask when do people
+cooperate, people cooperate when their
+interests are aligned. So at the height
+of the cold war, the USA and the USSR
+cooperated on not having a global
+thermonuclear war because it wasn't in
+either of their interests. Their
+interests were aligned. So if you look
+at the risks of AI, there's using AI to
+corrupt elections with fake videos.
+ The country's interests are
+anti-aligned. They're all doing it to
+each other,
+ right?
+ There's cyber attacks. Their interests
+are basically anti-aligned. There's
+terrorist creating viruses where their
+interests are probably aligned. So they
+might cooperate there. And then there's
+one thing where their interests are
+definitely aligned and they will
+cooperate which is preventing AI from
+taking over from people. If the Chinese
+figured out how you could prevent AI
+from ever wanting to take over, from
+ever wanting to take control away from
+people, they would immediately tell the
+Americans because they don't want AI
+taking control away from people in
+America either. We're all in the same
+boat when it comes to that.
+ This is the AI version of uh nuclear
+winter.
+ Yes,
+ it seems to me
+ it is. It's exactly that. will cooperate
+to try and avoid that.
+ Because in nuclear winter, just to
+refresh people's memory, the idea was if
+there's total nuclear exchange, you
+incinerate forests and land and what
+have you. The soot gets into the
+atmosphere, block sunlight, and all life
+dies.
+ So there is no winner,
+ of course,
+ in a total exchange of nuclear weapons.
+ Mutually assured destruction.
+ Yeah. And so who wants that?
+ Unless unless you're a madman or
+something, they exist. Maybe I think
+maybe the cockroaches win.
+ They win.
+ Oh, yeah. Well, how about that?
+ Yeah. This doesn't factor in a possible
+leader who is in a death cult.
+ A Nero, so to speak.
+ Yeah. If I moder if I say I don't mind
+if everybody dies cuz I'm going to this
+place when in in death and all my
+followers are coming with me in this
+cult. So that that complicates this
+aligned vision statement that you're
+describing.
+It does complicate it a lot. And I find
+it very comforting that um it's obvious
+that Trump doesn't actually believe in
+God.
+ Oh,
+let me follow that up with a quote from
+Steven Weinberg.
+ Okay.
+ Do you know this quote, Jeffrey?
+ No.
+ Steven Weinberg. There will always be
+good people and bad people in the world.
+But to get a good person to do something
+bad requires religion.
+ That's that's
+ because they're doing it in the name of
+religion. You did do it in the name of
+some point of anything.
+ I think we need to we need to recognize
+at this point that we have a religion.
+We call it science. Now it does differ
+from the other religions. And the way it
+differs is it's right.
+ Mic drop. Okay. Um
+ wait a minute. I think we got to give
+Jeffrey Hinton like the Turring Prize
+and I give Would you give him a Nobel
+Prize for what he's contributed here?
+ Well, to go with his other one.
+ Yes.
+ No. No. I I I like earrings.
+ I left that out at the beginning, sir.
+In 2018, you won the Turing prize. This
+is a highly coveted computer science
+prize. Uh, correct. And and and Turing,
+we mentioned him at the beginning of the
+top of the show. So, first
+congratulations on that. And then that
+wasn't enough.
+ Okay. Uh, the Nobel Committee
+ sluming with the Nobel.
+ Yeah. So the Nobel committee said this
+AI stuff that was birthed by by
+Jeffrey's work from decades ago is so
+fundamental to what's going on in this
+world. We got to give this man Nobel
+Prize and earn the Nobel Prize in
+physics 2024.
+ Just a little correction, there are a
+whole bunch of people birthed AI. Um in
+particular, the back propagation
+algorithm was reinvented by David
+Rumlhart who got a nasty brain disease
+and died young
+ but he doesn't get enough credit. Oh,
+okay. Thanks for calling that out. Plus,
+the Nobel Committee does not offer a
+Nobel Prize
+ to you if you're already dead.
+ So, there's no
+ You have to be alive when they announce
+it.
+ Award. No. Well, you can get it if you
+died between when they announced it and
+the ceremony, but not if So, anyway, so
+congratulations on that. And I don't
+mean to brag on our podcast, but you're
+like the fifth Nobel laurate we've
+interviewed.
+ More than that.
+ Yeah. Yeah. I think we Yeah. I don't
+mean to brag on our podcast. Yeah,
+that's all.
+ That's cool, though.
+ That's cool. Go. Okay.
+ I have a a follow-up question. I mean,
+we've we've got into the apocalyptic
+scenario and at the moment, hopefully,
+it's a scenario that doesn't play out
+because we are competitive by nature as
+humans and particularly here in the US,
+who is leading the race in artificial
+intelligence and who is likely to cross
+the finish line first when it comes to
+the prize? If I had to bet on one lot of
+people,
+ Mhm.
+ it would probably be Germany, Google.
+But I used to work for Google, so don't
+take me too seriously about that. I have
+a vested interest in them winning. Um,
+Anthropic might win, OpenAI might win. I
+think it's less likely that Microsoft
+will win or that Facebook will win.
+ Well, we know it won't be Facebook.
+Why do you know that?
+ I mean, let's look at who's running
+Facebook. Okay, come on.
+ No, it's not who's running it. it who
+has the resources to get the right
+people to do the work.
+ All right, Jeffrey, the follow up on
+that is whoever crosses the line first,
+what is their prize? What will be the
+reward for them getting there before?
+ Wait, back up for a sec. Tell me about
+the value of the stock market in the
+last year.
+Okay. And my belief is just from reading
+it in the media that 80% of the increase
+of the value in the stock market, the US
+stock market can be attributed to the
+increase in value of the big AI
+companies.
+ True.
+ 80% of the growth.
+ Yes.
+ Anyone thinking bubble? And that's kind
+of what they're calling it, the AI
+bubble.
+ Okay.
+ The issue is this. There's two senses of
+bubble. One sense of bubble is it turns
+out AI doesn't really work as well as
+people thought it might.
+ Right?
+ It doesn't actually develop the ability
+to replace all human intellectual labor
+which is what most people developing it
+believe is going to happen in the end.
+ That was the fear factor for sure.
+ Yeah.
+ The other sense of bubble is the
+companies can't get their money back
+from the investments. Now that seems to
+be more likely kind of bubble
+ because as far as I understand it, the
+companies are all assuming if we can get
+there first, we can sell people AI that
+will replace a lot of jobs. And of
+course, people will pay a lot of money
+for that. So, we'll get lots of money.
+But they haven't thought about the
+social consequences. If they really do
+replace lots of jobs, the social
+consequences will be terrible.
+ Correct.
+ Totally. However, it'll be it'll be
+ they replace the jobs and now you still
+want to sell your product and no one has
+income to buy the product.
+ Yeah. It's it's a self-limiting path.
+ That's the Keynesian view of it. And
+then the additional view is that
+there'll be high unemployment levels
+which will lead to a lot of social
+unrest. So the uh yeah the secondary uh
+view of that is you just have two tiers
+of existence for our societies and the
+first tier is all the people who are
+benefiting from AI and the second tier
+are the you know the the feudal peasants
+that are now forced to live their lives
+because of AI.
+ Let me ask you a non-AI question because
+just you're a deep thinker in this
+space. That's what everybody said in the
+dawn of automation. Everyone will be
+unemployed. there'll be no jobs left and
+society will go to ruin. Yet society
+expanded with other needs and other
+things people that's why 90% of us are
+no longer farmers. Okay, we we we've
+have machines to do that and we invent
+other things like vacation resource
+ but that decades this is going to take a
+fraction.
+ Is that so Jeffrey is the problem here
+the rapidity with which we may create an
+unemployment an unemployed class where
+the society cannot recover from the rate
+at which people are losing their jobs.
+That certainly is one big aspect of the
+problem. But there's another aspect
+which is if you use a tractor to replace
+physical labor, you need far fewer
+people now. Other people can go off and
+do intellectual things. But if you
+replace human intelligence,
+where are they going to go? Where are
+people who work in a call center going
+to go when an AI can do their job
+cheaper and better?
+ Right. Yeah. This is
+ Oh, so there's not another thing.
+there's not another thing.
+ They open another thing and then AI will
+do that.
+ Right?
+ Whatever thing you open, AI can do.
+ You can look at human history in an
+interesting way as getting rid of
+limitations.
+ So a long time ago, we had the
+limitation you had to worry about where
+your next meal was coming from,
+ right?
+ Agriculture got rid of that. It
+introduced a lot of other problems, but
+it got rid of that particular worry.
+Then we had the limitation you couldn't
+travel very far. Well, the bicycle
+helped a lot with that and cars and
+airplanes. We got over that kind of
+limitation. For a long time, we had the
+limitation. We were the ones who had to
+do the thinking. We're just about to get
+over that limitation.
+And it's not clear what happens once you
+got over all the limitations. People
+like Sam Elman think it'll be wonderful,
+ right? So, we we'll become AI's pet.
+ Well, no. A lot of people believe that
+this is the um and this this movement
+started years ago for universal global
+income.
+ Okay. So would you say Jeffrey that the
+the universal basic income the stock
+value the figurative stock value in that
+idea is growing as AI gains power.
+ It's becoming to seem more essential but
+it has lots of problems. So one problem
+is many people get their sense of
+selfworth from the job they do and it
+won't deal with the dignity issue.
+Another problem is the tax base. If you
+replace workers with AIs, the government
+loses its tax base. It has to somehow be
+able to tax the AIs. But the big
+companies aren't going to like that.
+ I think we should let AI figure out this
+problem.
+ That's right.
+So Jeffrey the many people uh especially
+sci-fi writers distinguish between the
+power and intellect of machines fine and
+the crossover when they become conscious
+and that's was a big moment in the
+Terminator series
+ that was the singularity in the
+terminator
+ when Skynet Skynet
+ had enough neural connections or
+whatever kind of connections made it so
+that it achieved consciousness. So there
+seems to be and if you come to this as a
+as a cognitive psychologist, I'm curious
+how you think about this. Are we allowed
+to presume that given sufficient
+complexity in any neural net be it real
+or imag or or artificial something such
+as consciousness emerges.
+ So the problem here is not really a
+scientific problem. It's that most
+people in our culture have a theory of
+how the mind works and they have a view
+of consciousness as some kind of essence
+that emerges. I think consciousness is
+like flegiston maybe. Um it's an essence
+that's designed to explain things and
+once we understand those things we won't
+be trying to use that essence to explain
+them. I want to try and convince you
+that a multimodal chatbot already has
+subjective experience. So people use the
+word sentience or consciousness or
+subjective experience. Let's focus on
+subjective experience for now. Most
+people in our culture think that the way
+the mind works is it's a kind of
+internal theater. And when you're doing
+perception, the world shows up in this
+internal theater and only you can see
+what's there. So if I say to you, if I
+drink a lot and I say to you, I have the
+subjective experience of little pink
+elephants floating in front of me. Most
+people interpret that as there's this
+inner theater, my mind and I can see
+what's in it and what's in it is little
+pink elephants and they're not made of
+real pink and real elephants. So they
+must be made of something else. So
+philosophers invent qualia which is kind
+of the flegiston of cognitive science.
+They say they must be made of qualia.
+Let me give you a completely different
+view that is Daniel Dennett's view who
+was a great philosopher of cognitive
+science which is
+ late great philosopher. Yeah,
+ the late great that view of the mind is
+just utterly wrong. So I'm now going to
+say the same thing as when I told you I
+had the subjective experience of Olympic
+elephants without using the word
+subjective experience and without
+appealing to Qualia. I start off by
+saying I believe my perceptual systems
+lying to me. That's the subjective bit
+of it. But if my perceptual system
+wasn't lying to me, there would be
+little pink elephants out there in the
+world floating in front of me. So what's
+funny about these little pink elephants
+is not that they're made of qualia and
+they're in an inner theta. It's that
+they're hypothetical. They're a
+technique for me telling you how my
+perceptual systems lying by telling you
+what would have to be there for my
+perceptual system to be telling the
+truth. And now I'm going to do it with a
+chatbot. I take a multimodal chatbot. I
+train it up. It's got a camera. It's got
+a robot arm. It can talk. I put an
+object in front of it and I say, &quot;Point
+at the object and it points at the
+object.&quot; Then I mess up its perceptual
+system. I put a prism in front of the
+camera. And now I put an object in front
+of it and say, &quot;Point at the object.&quot;
+And it points off to one side. And I say
+to it, &quot;No, that's not where the object
+is. It's actually straight in front of
+you.&quot; But I put a prism in front of your
+lens. And the chatbot says, &quot;Oh, I see.
+The prism bent the light rays, so the
+object is actually straight in front of
+me.&quot; But I had the subjective experience
+that it was off to one side. Now, if the
+chatbot said that, it would be using
+words subjective experience exactly the
+way we use them. And so that chatbot
+would have just had a subjective
+experience.
+ Now, what if you um first went out
+drinking with the chatbot and you had a
+very significant amount of Johnny Walker
+Blue?
+ That's extremely improbable. I would
+have Leafrog.
+ Oh. Oh.
+ Oh, you're I see you're an eye man. You
+like the piness of the leaf. Okay, good
+man.
+ Oh, so if I understand what you just
+shared with us in these two examples,
+ you actually pulled a consciousness
+touring test on us. You said a human
+would do this and now your chatbot does
+it and it's fundamentally the same. So
+if you want to say we're conscious for
+exhibiting that behavior, you're going
+to have to say the chatbot's conscious
+and inventing whatever mysterious fluid
+is making that happen. But it could be
+that we are the whole concept of
+consciousness is a distraction from just
+the actions that people take in the face
+of stimulus.
+ Okay. So notice that the chatbot doesn't
+have any mysterious essence or fluid
+called consciousness, but it has a
+subjective experience just like we do.
+So I think this whole idea of
+consciousness is some magic essence that
+you suddenly get indicted with if you're
+complicated enough is just nonsense.
+ Yeah, there you go.
+ I agree. I've always felt that
+consciousness was something people are
+trying to explain without knowing if it
+really exists
+ in in any kind of tangible way,
+ which is why it's always difficult to
+describe because you don't know what it
+is
+ for example. Yes. Yes. But I think there
+is awareness. And if you look at what
+scientists say when they're not thinking
+philosophically,
+there's a lovely paper where the chatbot
+says, &quot;Now, let's be honest with each
+other. Are you actually testing me?&quot; And
+the scientists say, &quot;The chatbot was
+aware it was being tested.&quot; So, they're
+attributing awareness to a chatbot. And
+in everyday conversation, you call that
+consciousness. It's only when you start
+thinking philosophically and thinking
+that it's some funny mysterious essence
+that you get all confused.
+ Well, there is
+ I have to say that this has been a
+fascinating conversation that will cause
+me not to sleep for a month.
+ Um, yeah,
+ you get plenty of work done.
+ So, Jeffrey, take us out on a positive
+note, please. So, we still have time to
+figure out if there's a way we can
+coexist happily with AI and we should be
+putting a lot of research effort into
+that because if we can coexist happily
+with it and we can solve all the social
+problems that will arise when it makes
+all our jobs much easier then it can be
+a wonderful thing for people.
+ Agreed. Okay. So, so there is hope.
+ Yes. And one last thing because you
+hinted at it, this point of singularity
+where AI trains on itself
+so that it exponentially gets smarter
+like by the minute. That's been called a
+singularity by many people. Of course,
+Ray Kershw among them who's been a guest
+on a previous episode of Stars.
+ Yeah. A couple of times. Yeah. So, what
+is your sense of this singularity? Is it
+real the way others say? Is it imminent
+the way others say?
+I don't know the answer to either of
+those questions. My suspicion is AI will
+get better at us in the end at
+everything, better than us at
+everything, but it'll be sort of one
+thing at a time. It's currently much
+better than us at chess and go. It's
+much better than us at knowing a lot of
+things. Not quite as good as us at
+reasoning. I think rather than sort of
+massively overtaking us in everything
+all at once, it'll be done one area at a
+time. And my sort of way out of that is,
+you know, I get to walk a beach and look
+at pebbles and seashells. AI doesn't.
+ Yeah. It can create its own beach.
+ No. Would it only know about the new
+mollisk that I discovered if I write it
+up and put it online?
+ Mhm.
+ So, the human can continue to explore
+the universe in ways that AI doesn't
+have access to.
+ There's one word missing from your
+entire assessment.
+ What's that?
+ Yet.
+Yeah, I just think of my, you know, will
+AI come up with a new theory of the
+universe that requires human insights
+that it doesn't have because I'm
+thinking the way no one has thought
+before.
+ I think it will.
+ That's not the answer I wanted from you.
+ Yeah, I was.
+ But that's the answer you got.
+ Let me give you an example. AI is very
+good at analogies already. So when chat
+GPD4 was not allowed to look on the web
+when all its knowledge was in its
+weights, I asked it why is a compost
+heap like an atom bomb and it knew it
+said the energy scales are very
+different and the time scales are very
+different. But it then went on to talk
+about how when a compost heap gets
+hotter it generates heat faster and when
+an atom bomb generates more neutrons it
+generates neutrons faster. Um, so it
+understood the commonality and it had to
+understand that to pack all that
+knowledge into so few connections, only
+a trillion or so. That's a source of
+much creativity
+ and it's not just by finding words that
+were juxtaposed with other words.
+ No, it understood what a chain reaction
+was.
+ Yeah.
+ Well, all right. That's the end of us.
+ Yeah. We're done
+ on Earth. We're done.
+ We're finished.
+ This is the last episode. We
+ stick in us. We're done. Gentlemen, it's
+been a pleasure.
+ Well, Jeffrey Hinton, it's been a
+delight to have you on.
+ We know you're you're tugged in many
+directions, especially after your recent
+Nobel Prize, and we're delighted you
+gave us a piece of your surely
+overscheduled and busy life.
+ Thank you for inviting me.
+ Well, guys, that was something.
+ Did you sit comfortably through all of
+that?
+ I was I I I squirmed. I squirmed.
+ I knew you'd panic. Well, no. I have to
+tell you that um certain parts of the um
+conversation gave me the anxiety of, you
+know, sitting in a theater theater with
+diarrhea.
+ Thanks for that explicit.
+ Thanks for sharing. That That's the
+nicest thing anybody's ever said about
+me.
+ On that note, this has been Star Talk
+special edition. Chuck, always good to
+have you. Gary, love having you right at
+my side. Neil deGrasse Tyson bidding you
+as always to keep looking up however
+much harder that will become.

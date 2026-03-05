@@ -5,8 +5,7 @@ import logging
 import threading
 from typing import List, Dict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from gaia_core.config import Config, get_config
+from gaia_core.config import Config
 
 # Import the specialist tools the manager will orchestrate
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer

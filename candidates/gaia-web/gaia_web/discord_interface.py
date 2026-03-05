@@ -1,3 +1,4 @@
+import json
 """
 Discord Interface for GAIA Web Gateway
 
@@ -6,6 +7,7 @@ Discord messages are received here, converted to CognitionPackets, sent to gaia-
 for processing, and responses are routed back to Discord.
 """
 
+import math
 import os
 import time
 import uuid
@@ -20,10 +22,7 @@ import httpx
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
     OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
-    SessionHistoryRef, RelevantHistorySnippet, Cheatsheet, Constraints, Attachment, ReflectionLog,
-    Sketchpad, ResponseFragment, Evaluation, Reasoning, SelectedTool, ToolExecutionResult,
-    ToolRoutingState, ToolExecutionStatus, ToolCall, SidecarAction, Response, Safety, Signatures,
-    Audit, Privacy, Governance, Vote, Council, TokenUsage, SystemResources, Metrics, Status,
+    SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
     PacketState, TargetEngine
 )
 
@@ -31,7 +30,25 @@ logger = logging.getLogger("GAIA.Web.Discord")
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
+_client_session: Optional[httpx.AsyncClient] = None  # Persistent HTTP session
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
+
+
+async def get_core_client() -> httpx.AsyncClient:
+    """Get or create a persistent HTTP client for core communication."""
+    global _client_session
+    if _client_session is None or _client_session.is_closed:
+        # Increase timeout to 60s to match ServiceClient default
+        _client_session = httpx.AsyncClient(timeout=60.0)
+    return _client_session
+
+
+async def close_core_client():
+    """Close the persistent HTTP client."""
+    global _client_session
+    if _client_session is not None:
+        await _client_session.aclose()
+        _client_session = None
 _message_handler: Optional[Callable] = None
 _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
 _dm_blocklist = None   # DMBlocklist instance (set by start_discord_bot)
@@ -411,23 +428,62 @@ class DiscordInterface:
         packet.compute_hashes() # Compute hashes for integrity
 
         try:
-            from gaia_web.utils.retry import post_with_retry
-
-            fallback = f"{self.core_fallback_endpoint}/process_packet" if self.core_fallback_endpoint else None
+            # Persistent client handles retries and HA failover
+            core_client = await get_core_client()
+            
+            # Accumulated response for the main model
+            full_response = ""
+            completed_packet = None
+            reflex_sent = False
 
             # Show typing indicator while GAIA processes the request
             async with message_obj.channel.typing():
-                response = await post_with_retry(
+                # Use streaming POST to receive real-time tokens (Reflexes)
+                async with core_client.stream(
+                    "POST",
                     f"{self.core_endpoint}/process_packet",
                     json=packet.to_serializable_dict(),
-                    fallback_url=fallback,
-                )
+                    timeout=120.0,
+                ) as response:
+                    # Check for errors immediately
+                    if response.status_code != 200:
+                        await response.aread() # Must read body before accessing .text
+                        logger.error(f"Discord: Core error {response.status_code}: {response.text}")
+                        raise httpx.HTTPStatusError(f"Core error {response.status_code}", request=response.request, response=response)
 
-            # Expect a full CognitionPacket back
-            completed_packet_dict = response.json()
-            completed_packet = CognitionPacket.from_dict(completed_packet_dict)
+                    # Iterate over the NDJSON stream
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            event = json.loads(line)
+                            event_type = event.get("type")
+                            
+                            if event_type == "token":
+                                val = event.get("value", "")
+                                # If this is a Nano reflex, send it immediately
+                                if val.startswith("[(Reflex) Nano:"):
+                                    await self._send_response(message_obj, val, is_dm)
+                                    reflex_sent = True
+                                else:
+                                    # Accumulate main responder tokens (not yet supporting live stream-edits for Discord)
+                                    full_response += val
+                            
+                            elif event_type == "packet":
+                                # Final results
+                                packet_dict = event.get("value", {})
+                                completed_packet = CognitionPacket.from_dict(packet_dict)
+                            
+                            elif event_type == "error":
+                                raise RuntimeError(f"Core turn failed: {event.get('value')}")
+                                
+                        except json.JSONDecodeError:
+                            logger.debug(f"Discord: failed to decode stream line: {line}")
 
-            # Check for pending tool approval before sending normal response
+            if not completed_packet:
+                raise RuntimeError("Core stream finished without yielding a final packet")
+
+            # Check for pending tool approval
             approval_info = self._extract_pending_approval(completed_packet)
             if approval_info:
                 await self._send_approval_prompt(
@@ -439,12 +495,16 @@ class DiscordInterface:
                 )
                 return
 
+            # Final refined response from the main model (Prime/Operator)
+            # If reflex was sent, only send follow-up if there is extra content
             gaia_response_text = completed_packet.response.candidate
-            if not gaia_response_text:
-                gaia_response_text = "GAIA processed your request but did not generate a text response."
-
-            # Send response back to Discord
-            await self._send_response(message_obj, gaia_response_text, is_dm)
+            
+            if gaia_response_text:
+                # If we sent a reflex, and this is a refinement, the AgentCore
+                # usually already prepends the "*Refinement from Operator:*" tag.
+                await self._send_response(message_obj, gaia_response_text, is_dm)
+            elif not reflex_sent:
+                await self._send_response(message_obj, "GAIA processed your request but did not generate a text response.", is_dm)
 
             # Record GAIA reply for typing-wake 48h gate
             if is_dm and _dm_blocklist:
@@ -662,13 +722,13 @@ class DiscordInterface:
         elif result.get("error") == "action not found or expired":
             await self._send_response(
                 message_obj,
-                f"This approval has expired. Please trigger the action again.",
+                "This approval has expired. Please trigger the action again.",
                 is_dm,
             )
         elif result.get("error") == "invalid approval string":
             await self._send_response(
                 message_obj,
-                f"The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
+                "The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
                 is_dm,
             )
         else:
@@ -879,7 +939,7 @@ def get_discord_status() -> Dict[str, Any]:
         "status": "ready",
         "user": str(_bot.user) if _bot.user else None,
         "guilds": len(_bot.guilds) if _bot.guilds else 0,
-        "latency_ms": round(_bot.latency * 1000, 1) if _bot.latency else None,
+        "latency_ms": round(_bot.latency * 1000, 1) if _bot.latency and math.isfinite(_bot.latency) else None,
     }
 
 

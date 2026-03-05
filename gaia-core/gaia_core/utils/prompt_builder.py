@@ -21,16 +21,21 @@ logger = logging.getLogger("GAIA.PromptBuilder")
 
 SUMMARY_DIR = "data/shared/summaries"
 
-def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None) -> List[Dict]:
+def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
-
-    Tier 0: Core Persona & Task Instructions
-    Tier 1: Evolving Summary (Long-term Memory)
-    Tier 2: Relevant History Snippets (Short-term Memory)
-    Tier 3: User Input (The Current Task)
+    If slim_mode=True, returns a minimal Identity + User Prompt list for speed.
     """
     logger.info("--- BUILDING PROMPT FROM COGNITION PACKET ---")
+    if slim_mode:
+        from gaia_common.utils.world_state import format_world_state_snapshot
+        config = Config()
+        persona_anchor = config.get_persona_instructions() or "You are GAIA."
+        world_state = format_world_state_snapshot()
+        return [
+            {"role": "system", "content": f"{persona_anchor}\n\nCurrent World State:\n{world_state}\n\nRespond as GAIA. Be extremely concise."},
+            {"role": "user", "content": packet.content.original_prompt}
+        ]
     logger.info(packet)
     config = Config() # Assumes a singleton or default config is acceptable
     
@@ -841,11 +846,19 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None)
     sleep_context_prompt = {}
     try:
         from gaia_core.cognition.sleep_wake_manager import SleepWakeManager
+        from gaia_common.utils.immune_system import is_system_irritated
+
         checkpoint_dir = getattr(config, "SLEEP_CHECKPOINT_DIR", "/shared/sleep_state")
         checkpoint_path = os.path.join(checkpoint_dir, "prime.md")
         consumed_path = os.path.join(checkpoint_dir, ".prime_consumed")
 
-        if os.path.exists(checkpoint_path) and not os.path.exists(consumed_path):
+        # Skip restoration context for casual chat ONLY when the system is stable.
+        # If the system is irritated (score >= 8), always provide the context for awareness.
+        is_chat = packet.intent and packet.intent.user_intent == "chat"
+        irritated = is_system_irritated()
+
+        if (not is_chat or irritated) and os.path.exists(checkpoint_path) and not os.path.exists(consumed_path):
+
             with open(checkpoint_path, "r", encoding="utf-8") as f:
                 checkpoint_content = f.read().strip()
             if checkpoint_content:
@@ -1016,22 +1029,13 @@ def build_prompt(*args, **kwargs):
     if args and isinstance(args[0], dict):
         try:
             from gaia_core.cognition.packet_utils import upgrade_v2_to_v3_packet
-            from gaia_core.cognition.packet_upgrade import upgrade_packet as ensure_packet_fields
         except Exception:
             # If imports fail, fall back to legacy builder below
             return _build_prompt_core(*args, **kwargs)
 
         try:
             pkt = upgrade_v2_to_v3_packet(args[0])
-            # ensure the upgraded packet has any additional GCP fields the system expects
-            try:
-                cfg = None
-                from gaia_core.config import Config
-                cfg = Config()
-            except Exception:
-                cfg = None
-            if cfg is not None:
-                ensure_packet_fields(pkt, cfg)
+            # v0.3 CognitionPacket handles its own field validation and defaults.
             return build_from_packet(pkt, **kwargs)
         except Exception:
             # conversion failed: fall back to legacy builder
@@ -1048,7 +1052,6 @@ def build_prompt(*args, **kwargs):
         # is consistently exercised across the stack.
         try:
             from gaia_core.cognition.packet_utils import upgrade_v2_to_v3_packet
-            from gaia_core.cognition.packet_upgrade import upgrade_packet as ensure_packet_fields
             legacy = {
                 "session_id": sid,
                 "persona": cfg.persona_name or "gaia-dev",
@@ -1071,10 +1074,6 @@ def build_prompt(*args, **kwargs):
                 logger.debug("PromptBuilder: failed to seed world_state_snapshot from legacy context", exc_info=True)
 
             pkt = upgrade_v2_to_v3_packet(legacy)
-            try:
-                ensure_packet_fields(pkt, cfg)
-            except Exception:
-                logger.debug("PromptBuilder: packet upgrade normalization failed; continuing", exc_info=True)
             logger.info("PromptBuilder: using GCP builder for legacy context input")
             return build_from_packet(pkt)
         except Exception:

@@ -29,7 +29,6 @@ from .models.schemas import (
     ContainerSwapRequest,
     HandoffRequest,
     HandoffStatus,
-    HandoffPhase,
     HandoffType,
     OracleNotification,
     Notification,
@@ -734,7 +733,7 @@ async def websocket_notifications(websocket: WebSocket):
         try:
             while True:
                 # Keep connection alive, handle any client messages
-                data = await websocket.receive_text()
+                await websocket.receive_text()
                 # Echo or handle as needed
         except WebSocketDisconnect:
             await _notification_manager.disconnect(websocket)

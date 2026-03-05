@@ -1,9 +1,7 @@
 """Tests for Code Evolution — GAIA's code self-awareness utilities."""
 
-import os
 from pathlib import Path
 
-import pytest
 
 from gaia_common.utils.code_evolution import (
     _basenames,

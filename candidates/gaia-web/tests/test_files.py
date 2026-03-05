@@ -1,8 +1,6 @@
 """Tests for file browser endpoints."""
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

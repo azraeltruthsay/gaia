@@ -1,8 +1,6 @@
 """Unit tests for SleepTaskScheduler."""
 
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -46,13 +44,15 @@ def bare_scheduler(config):
 
 class TestRegistration:
     def test_default_tasks_registered(self, scheduler):
-        assert len(scheduler._tasks) == 5
+        assert len(scheduler._tasks) == 11
 
     def test_default_task_ids(self, scheduler):
         ids = {t.task_id for t in scheduler._tasks}
         assert ids == {
-            "conversation_curation", "blueprint_validation", "code_evolution",
-            "code_review", "wiki_doc_regen",
+            "auto_as_built_update", "conversation_curation", "samvega_introspection",
+            "blueprint_validation", "code_evolution", "promotion_readiness",
+            "initiative_cycle", "code_review", "knowledge_research",
+            "wiki_doc_regen", "adversarial_resilience_drill",
         }
 
     def test_register_custom_task(self, bare_scheduler):
@@ -196,7 +196,7 @@ class TestStatus:
     def test_status_shape(self, scheduler):
         status = scheduler.get_status()
         assert isinstance(status, list)
-        assert len(status) == 5
+        assert len(status) == 11
 
         for entry in status:
             assert "task_id" in entry
@@ -540,7 +540,6 @@ class TestWikiDocRegen:
 
     def test_full_regen_cycle(self, tmp_path):
         """End-to-end: YAML blueprint → markdown page + index."""
-        import yaml
 
         bp_dir = tmp_path / "blueprints"
         bp_dir.mkdir()
@@ -583,8 +582,6 @@ class TestWikiDocRegen:
 
     def test_incremental_skip(self, tmp_path):
         """Second run with unchanged blueprints should skip regeneration."""
-        import json
-        import yaml
 
         bp_dir = tmp_path / "blueprints"
         bp_dir.mkdir()

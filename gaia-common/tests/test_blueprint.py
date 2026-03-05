@@ -1,16 +1,13 @@
 """Tests for the Blueprint schema (gaia_common.models.blueprint)."""
 
 import pytest
-from datetime import datetime, timezone
 
 from gaia_common.models.blueprint import (
     BlueprintModel,
     BlueprintMeta,
     BlueprintStatus,
     ConfidenceLevel,
-    Dependencies,
     ExternalApiDependency,
-    FailureMode,
     GeneratedBy,
     GraphEdge,
     GraphTopology,
@@ -23,7 +20,6 @@ from gaia_common.models.blueprint import (
     NegotiatedTransport,
     Runtime,
     SecurityConfig,
-    SectionConfidence,
     ServiceDependency,
     ServiceStatus,
     Severity,

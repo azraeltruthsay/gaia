@@ -6,7 +6,6 @@ import pytest
 from gaia_common.utils.packet_factory import build_packet, PacketSource
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket,
-    DataField,
     OutputDestination,
     PacketState,
     SystemTask,

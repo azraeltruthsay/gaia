@@ -24,6 +24,9 @@ _RETRYABLE_EXCEPTIONS = (
     httpx.RemoteProtocolError,
 )
 
+# HTTP status codes that warrant a retry (service temporarily unavailable)
+_RETRYABLE_STATUS_CODES = (502, 503, 504)
+
 # File-based maintenance mode flag (shared Docker volume)
 _MAINTENANCE_FLAG = Path("/shared/ha_maintenance")
 
@@ -36,17 +39,13 @@ class ServiceClient:
     the primary endpoint fails with a retryable error (after exhausting
     retries), a single attempt is made against the fallback. Failover is
     suppressed when HA maintenance mode is active.
-
-    Usage:
-        client = ServiceClient("gaia-study", default_port=8766)
-        result = await client.post("/study/start", {"adapter_name": "test"})
     """
 
     def __init__(
         self,
         service_name: str,
         default_port: int = 8000,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         endpoint_env_var: Optional[str] = None,
         max_retries: int = 3,
         retry_base_delay: float = 2.0,
@@ -118,6 +117,32 @@ class ServiceClient:
             "Primary %s %s failed (%s), attempting HA fallback to %s",
             method, path, type(primary_exc).__name__, fallback_url,
         )
+
+        # [TCP] Inject failover metadata into the packet so the candidate knows its state
+        # Only for POST requests which typically contain the packet payload
+        if method.upper() == "POST" and "json" in request_kwargs:
+            payload = request_kwargs["json"]
+            try:
+                # 1. Update Header.operational_status
+                if isinstance(payload, dict) and "header" in payload:
+                    header = payload["header"]
+                    if isinstance(header, dict):
+                        if "operational_status" not in header or header["operational_status"] is None:
+                            header["operational_status"] = {"status": "failover_active"}
+                        else:
+                            header["operational_status"]["status"] = "failover_active"
+                
+                # 2. Add #Failover tag to intent
+                if isinstance(payload, dict) and "intent" in payload:
+                    intent = payload["intent"]
+                    if isinstance(intent, dict):
+                        if "tags" not in intent or intent["tags"] is None:
+                            intent["tags"] = ["#Failover"]
+                        elif "#Failover" not in intent["tags"]:
+                            intent["tags"].append("#Failover")
+            except Exception:
+                logger.debug("Failed to inject failover metadata (non-fatal)", exc_info=True)
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await getattr(client, method.lower())(fallback_url, **request_kwargs)
@@ -129,6 +154,7 @@ class ServiceClient:
                 "HA fallback also failed: %s %s (%s). Raising original error.",
                 method, fallback_url, type(fallback_exc).__name__,
             )
+            # Raise primary_exc, but with context from fallback_exc
             raise primary_exc from fallback_exc
 
     async def get(
@@ -144,6 +170,9 @@ class ServiceClient:
         async def _do_get() -> Dict[str, Any]:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url, params=params, **kwargs)
+                if response.status_code in _RETRYABLE_STATUS_CODES:
+                    # Trigger retry/failover for these codes
+                    response.raise_for_status()
                 response.raise_for_status()
                 return response.json()
 
@@ -153,11 +182,19 @@ class ServiceClient:
                     _do_get,
                     max_attempts=self.max_retries,
                     base_delay=self.retry_base_delay,
-                    retryable_exceptions=_RETRYABLE_EXCEPTIONS,
+                    retryable_exceptions=_RETRYABLE_EXCEPTIONS + (httpx.HTTPStatusError,),
                 )
             return await _do_get()
-        except _RETRYABLE_EXCEPTIONS as exc:
-            if self._can_failover():
+        except (httpx.HTTPStatusError, *_RETRYABLE_EXCEPTIONS) as exc:
+            # Check if this is a retryable status code or exception
+            is_retryable = False
+            if isinstance(exc, httpx.HTTPStatusError):
+                if exc.response.status_code in _RETRYABLE_STATUS_CODES:
+                    is_retryable = True
+            else:
+                is_retryable = True
+
+            if is_retryable and self._can_failover():
                 return await self._try_fallback("GET", path, exc, params=params, **kwargs)
             raise
 
@@ -174,6 +211,8 @@ class ServiceClient:
         async def _do_post() -> Dict[str, Any]:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(url, json=data, **kwargs)
+                if response.status_code in _RETRYABLE_STATUS_CODES:
+                    response.raise_for_status()
                 response.raise_for_status()
                 return response.json()
 
@@ -183,11 +222,18 @@ class ServiceClient:
                     _do_post,
                     max_attempts=self.max_retries,
                     base_delay=self.retry_base_delay,
-                    retryable_exceptions=_RETRYABLE_EXCEPTIONS,
+                    retryable_exceptions=_RETRYABLE_EXCEPTIONS + (httpx.HTTPStatusError,),
                 )
             return await _do_post()
-        except _RETRYABLE_EXCEPTIONS as exc:
-            if self._can_failover():
+        except (httpx.HTTPStatusError, *_RETRYABLE_EXCEPTIONS) as exc:
+            is_retryable = False
+            if isinstance(exc, httpx.HTTPStatusError):
+                if exc.response.status_code in _RETRYABLE_STATUS_CODES:
+                    is_retryable = True
+            else:
+                is_retryable = True
+
+            if is_retryable and self._can_failover():
                 return await self._try_fallback("POST", path, exc, json=data, **kwargs)
             raise
 
@@ -204,6 +250,8 @@ class ServiceClient:
         async def _do_delete() -> Dict[str, Any]:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.delete(url, params=params, **kwargs)
+                if response.status_code in _RETRYABLE_STATUS_CODES:
+                    response.raise_for_status()
                 response.raise_for_status()
                 return response.json()
 
@@ -213,11 +261,18 @@ class ServiceClient:
                     _do_delete,
                     max_attempts=self.max_retries,
                     base_delay=self.retry_base_delay,
-                    retryable_exceptions=_RETRYABLE_EXCEPTIONS,
+                    retryable_exceptions=_RETRYABLE_EXCEPTIONS + (httpx.HTTPStatusError,),
                 )
             return await _do_delete()
-        except _RETRYABLE_EXCEPTIONS as exc:
-            if self._can_failover():
+        except (httpx.HTTPStatusError, *_RETRYABLE_EXCEPTIONS) as exc:
+            is_retryable = False
+            if isinstance(exc, httpx.HTTPStatusError):
+                if exc.response.status_code in _RETRYABLE_STATUS_CODES:
+                    is_retryable = True
+            else:
+                is_retryable = True
+
+            if is_retryable and self._can_failover():
                 return await self._try_fallback("DELETE", path, exc, params=params, **kwargs)
             raise
 
@@ -262,3 +317,8 @@ def get_mcp_client(
 def get_orchestrator_client() -> ServiceClient:
     """Get a client for the gaia-orchestrator service."""
     return ServiceClient("gaia-orchestrator", default_port=6410, endpoint_env_var="ORCHESTRATOR_ENDPOINT")
+
+
+def get_audio_client() -> ServiceClient:
+    """Get a client for the gaia-audio service."""
+    return ServiceClient("gaia-audio", default_port=8080, endpoint_env_var="AUDIO_ENDPOINT")

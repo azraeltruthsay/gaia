@@ -4,15 +4,17 @@ import uuid
 import json
 import sys
 import os
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from gaia_core.memory.semantic_codex import SemanticCodex
+from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_core.memory.codex_writer import CodexWriter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Generator, Dict, Any, List, Optional
 
 from gaia_core.cognition.external_voice import ExternalVoice
-from gaia_core.cognition.self_reflection import run_self_reflection, reflect_and_refine
+from gaia_core.cognition.self_reflection import reflect_and_refine
 from gaia_core.cognition.cognitive_audit import run_cognitive_self_audit
 from gaia_core.cognition.history_review import review_history
 from gaia_core.utils.prompt_builder import build_from_packet
@@ -21,9 +23,9 @@ from gaia_core.utils.output_router import route_output, _strip_think_tags_robust
 # from app.utils.chat_logger import log_chat_entry, log_chat_entry_structured
 log_chat_entry = lambda *args, **kwargs: None  # Placeholder
 log_chat_entry_structured = lambda *args, **kwargs: None  # Placeholder
-from gaia_core.utils.stream_observer import StreamObserver, Interrupt
-from gaia_core.utils import mcp_client
-from gaia_core.config import Config, get_config
+from gaia_core.utils.stream_observer import StreamObserver
+import gaia_core.utils.mcp_client as mcp_client
+from gaia_core.config import get_config
 from gaia_common.utils.entity_validator import EntityValidator
 
 # Get constants from config for backwards compatibility
@@ -44,21 +46,18 @@ from gaia_common.protocols.cognition_packet import (
     PersonaRole, Origin, TargetEngine, SystemTask, PacketState,
     DataField, ReflectionLog, RelevantHistorySnippet, SessionHistoryRef, Cheatsheet, Constraints,
     # GCP Tool Routing System
-    ToolRoutingState, ToolExecutionStatus, SelectedTool, ToolExecutionResult,
+    ToolExecutionStatus, SelectedTool, ToolExecutionResult,
     # Output Routing (Spinal Column)
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan
-from gaia_core.utils import gaia_rescue_helper as rescue_helper
+import gaia_core.utils.gaia_rescue_helper as rescue_helper
 
 # Loop Detection System
 from gaia_core.cognition.loop_recovery import (
-    LoopRecoveryManager,
     get_recovery_manager,
-    build_loop_detection_config_from_constants,
-    LoopInterrupt
+    build_loop_detection_config_from_constants
 )
-from gaia_core.cognition.loop_detector import LoopDetectorConfig
 
 logger = logging.getLogger("GAIA.AgentCore")
 HISTORY_SUMMARY_THRESHOLD = 20
@@ -235,6 +234,9 @@ class AgentCore:
         
         # Initialize EntityValidator for noun correction
         self.entity_validator = EntityValidator.from_config(self.config)
+
+        # Initialize Identity Guardian for reflex and prompt validation
+        self.identity_guardian = CoreIdentityGuardian(self.config)
 
     def _emit_timeline_message(self, session_id: str, role: str, source: str = "") -> None:
         """Emit a message event to the timeline store (best-effort)."""
@@ -487,7 +489,7 @@ class AgentCore:
                 content.data_fields.append(DataField(key='identity_summary', value=summary[:400]))
             
             # --- NEW: Add the world state as a DataField ---
-            from gaia_core.utils.world_state import format_world_state_snapshot
+            from gaia_common.utils.world_state import format_world_state_snapshot
             world_state_text = ""
             try:
                 # Include output context so GAIA knows where she's communicating
@@ -496,8 +498,15 @@ class AgentCore:
                     "destination": destination,
                     **(_metadata or {}),
                 }
-                world_state_text = format_world_state_snapshot(output_context=output_context)
-            except Exception as e:
+                
+                # Fetch auditory context from metadata if available (TCP)
+                auditory_env = _metadata.get("auditory_environment") if _metadata else None
+                
+                world_state_text = format_world_state_snapshot(
+                    output_context=output_context,
+                    auditory_environment=auditory_env
+                )
+            except Exception:
                 self.logger.exception("AgentCore: Failed to format world state snapshot; world state will be missing from packet.")
                 world_state_text = ""
             if world_state_text:
@@ -686,7 +695,8 @@ class AgentCore:
         session_id: str,
         destination: str = "cli_chat",
         source: str = "cli",
-        metadata: dict = None
+        metadata: dict = None,
+        reflex_text: str = ""
     ) -> Generator[Dict[str, Any], None, None]:
         """
         The primary cognitive loop. Creates a packet and processes it through
@@ -717,9 +727,6 @@ class AgentCore:
         if user_input:
             user_input = self.entity_validator.correct_text(user_input)
             
-        import json
-        import os
-        import sys
         from gaia_core.utils.prompt_builder import build_from_packet # Assumes this is updated for v0.3
 
         import time as _time
@@ -809,10 +816,28 @@ class AgentCore:
                 persona_name, knowledge_base_name,
             )
 
-        # Load the selected persona
-        self.ai_manager.initialize(persona_name)
-        
-        # Role mapping (keep internal keys stable):
+        # 0. Emergency Healing Mode (The "Immune Response")
+        # If the Immune System detects a CRITICAL failure (like a SyntaxError), 
+        # we pivot the entire turn toward self-repair.
+#         emergency_irritant = self._check_immune_system_for_emergency()
+#         if emergency_irritant:
+#             yield {"type": "token", "value": "[(i) Digital Immune System: CRITICAL IRRITATION DETECTED. Entering Emergency Healing Mode...]\n\n"}
+#             # Force high-reasoning persona and model for repair
+#             persona_name = "dev"
+#             knowledge_base_name = "core"
+#             # Add emergency instructions to the user input
+#             user_input = (
+#                 f"!! COGNITIVE EMERGENCY !!\n"
+#                 f"The system has detected a structural failure: {emergency_irritant}\n"
+#                 f"PRIORITY: Identify and repair this issue immediately using your tools.\n"
+#                 f"User's original request (suspend for now): {user_input}"
+#             )
+#             logger.warning("[IMMUNE RESPONSE] Turn pivoted to emergency repair.")
+# 
+#         # Load the selected persona
+#         self.ai_manager.initialize(persona_name)
+#         
+#         # Role mapping (keep internal keys stable):
         # - "lite"  => Operator (CPU orchestrator: intent, tools, summaries, short answers)
         # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
         # - "oracle" => External/cloud escalation
@@ -820,9 +845,33 @@ class AgentCore:
         # Check if GPU is released for sleep — skip gpu_prime in all selection paths
         _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
 
-        # 1. Model Selection (Simplified)
-        # NEW: User's suggestion - if a knowledge base is triggered, prefer the GPU model.
-        if knowledge_base_name:
+        # 1. Model Selection (Prioritize Fast-Path & Overrides)
+        text_lower = user_input.lower()
+        force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
+        wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
+        
+        # Simple patterns NANO can handle reliably
+        factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time"]
+        is_factual = any(p in text_lower for p in factual_patterns)
+        is_trivial = len(user_input) < 100 and (
+            any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"]) or
+            is_factual
+        )
+
+        # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
+        if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS and not force_thinker:
+            # OPTIMIZATION: If it is factual but Nano is too small to handle it perfectly,
+            # and we have a GPU model idle, prefer the GPU model for instant response
+            # rather than grinding on CPU lite.
+            if is_factual and "gpu_prime" in self.model_pool.models and not _gpu_sleeping:
+                selected_model_name = "gpu_prime"
+                logger.info("[MODEL_SELECT] Routing factual query to gpu_prime for GPU acceleration (instant response).")
+            else:
+                selected_model_name = "nano"
+                logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+
+        # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
+        elif knowledge_base_name:
             logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
             for cand in ["gpu_prime", "prime"]:
                 if cand == "gpu_prime" and _gpu_sleeping:
@@ -835,26 +884,20 @@ class AgentCore:
         if not selected_model_name:
             # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
             backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-            logger.warning(f"[MODEL_SELECT DEBUG] backend_env={backend_env} pool_keys={list(self.model_pool.models.keys())} gpu_sleeping={_gpu_sleeping}")
             if backend_env:
                 # Skip gpu_prime when GPU is released for sleep
                 if backend_env == "gpu_prime" and _gpu_sleeping:
-                    logger.info(f"GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
+                    logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
                 elif backend_env in self.model_pool.models:
                     selected_model_name = backend_env
                 else:
                     logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
-                    logger.warning(f"[MODEL_SELECT DEBUG] pool keys at backend check: {list(self.model_pool.models.keys())}")
 
         if not selected_model_name:
-            text_lower = user_input.lower()
-            force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
-            # Explicit callouts to Thinker (GPU) if available
-            wants_thinker = force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"])
-            # Default path: Operator (lite) handles most turns; escalate to Thinker if explicitly requested.
+            # 2. Thinker / Oracle Path
             if "oracle" in text_lower and self.config.use_oracle:
                 selected_model_name = "oracle"
-            elif wants_thinker:
+            elif force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"]):
                 # Prefer GPU prime, then prime, then cpu_prime
                 for cand in ["gpu_prime", "prime", "cpu_prime"]:
                     if cand == "gpu_prime" and _gpu_sleeping:
@@ -862,7 +905,8 @@ class AgentCore:
                     if cand in self.model_pool.models:
                         selected_model_name = cand
                         break
-            # If still unset, prefer Operator (lite); fall back to prime if lite is missing.
+            
+            # Default path: Operator (lite) handles most turns.
             if not selected_model_name:
                 if "lite" in self.model_pool.models:
                     selected_model_name = "lite"
@@ -913,27 +957,45 @@ class AgentCore:
                 yield {"type": "token", "value": "I am currently unable to process your request as my primary model is unavailable."}
                 return
 
-        # Heuristic escalation: if Operator (lite) was picked but the prompt looks complex,
-        # auto-route to a Thinker when available (unless GAIA_FORCE_OPERATOR=1).
+        # --- Cascade Routing ---
+        # If no forced model was picked, we use Nano to triage the request.
+        # This implements the user's suggestion for model-driven complexity routing.
         try:
-            if selected_model_name == "lite":
-                force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
-                if not force_operator and self._should_escalate_to_thinker(user_input):
-                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                        if cand == "gpu_prime" and _gpu_sleeping:
-                            continue
-                        # Try lazy loading for escalation candidates
-                        if cand not in self.model_pool.models:
-                            try:
-                                self.model_pool.ensure_model_loaded(cand)
-                            except Exception:
-                                pass
-                        if cand in self.model_pool.models:
-                            logger.info(f"[MODEL_SELECT DEBUG] escalating from lite-> {cand} based on heuristics")
-                            selected_model_name = cand
-                            break
+            # Only cascade if we haven't already picked a 'prime' or 'oracle' model
+            # and if we aren't forcing the operator.
+            force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
+            is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
+                                any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
+            
+            if selected_model_name in ("lite", "nano") and not force_operator and not is_forced_thinker:
+                # Perform Nano triage
+                triage_result = self._nano_triage(user_input)
+                if triage_result == "COMPLEX":
+                    # Emit status message to user
+                    yield {"type": "token", "value": "[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n"}
+                    selected_model_name = "lite"
+                    
+                    # Secondary escalation: check if Lite thinks it's even MORE complex
+                    if self._should_escalate_to_thinker(user_input):
+                        for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                            if cand == "gpu_prime" and _gpu_sleeping:
+                                continue
+                            # Ensure escalation candidate is loaded
+                            if cand not in self.model_pool.models:
+                                try:
+                                    self.model_pool.ensure_model_loaded(cand)
+                                except Exception:
+                                    pass
+                            if cand in self.model_pool.models:
+                                yield {"type": "token", "value": f"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n"}
+                                selected_model_name = cand
+                                break
+                else:
+                    # Nano can handle it
+                    selected_model_name = "nano"
+                    logger.info("[CASCADE] Nano-Refiner confirmed SIMPLE request.")
         except Exception:
-            logger.debug("Heuristic escalation check failed; continuing with selected model", exc_info=True)
+            logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
 
         # Acquire the selected model. `selected_model_name` may already be a
         # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
@@ -1013,7 +1075,6 @@ class AgentCore:
         # Phase 4 dedup: if the semantic probe already found strong hits from the
         # same collection, use those as seed context and skip the redundant MCP query.
         try:
-            from gaia_core.utils import mcp_client
 
             # Extract knowledge_base_name from the packet's data_fields
             knowledge_base_name = None
@@ -1058,11 +1119,11 @@ class AgentCore:
                 if not probe_seeded:
                     # No probe seed — run the standard RAG query
                     self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
-                    retrieved_docs = mcp_client.embedding_query(
+                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
-                    )
+                    ))
                     if retrieved_docs and retrieved_docs.get("ok"):
                         docs = retrieved_docs.get("results", [])
                         if docs:
@@ -1662,8 +1723,6 @@ class AgentCore:
 
         logger.info(f"[OBSERVER] Final setup: active_stream={active_stream_observer is not None}, post_run={post_run_observer is not None}")
 
-        import json
-        import sys
         print("---PROMPT TO BE SENT TO THE MODEL---", file=sys.stderr)
         print(json.dumps(final_messages, indent=2), file=sys.stderr)
         print("------------------------------------", file=sys.stderr)
@@ -1729,6 +1788,8 @@ class AgentCore:
                             continue
                     else:
                         pieces.append(str(item))
+                        # Yield token for real-time streaming
+                        yield {"type": "token", "value": str(item)}
 
                 full_response = "".join(pieces)
                 logger.warning(
@@ -1779,6 +1840,8 @@ class AgentCore:
                                 continue
                         else:
                             pieces.append(str(item))
+                        # Yield token for real-time streaming
+                        yield {"type": "token", "value": str(item)}
                     full_response = "".join(pieces)
                 except Exception:
                     logger.exception("AgentCore: Fallback to 'lite' also failed")
@@ -1941,18 +2004,34 @@ class AgentCore:
                             warning_count = summary.count('does not exist') + summary.count('Unverified')
                             if warning_count >= max_before_warn:
                                 epistemic_warning = (
-                                    f"\n\n---\n*[Observer: Some file references in this response "
-                                    f"could not be verified against the knowledge base. "
-                                    f"Information may be from general knowledge rather than "
-                                    f"retrieved documents.]*\n---\n"
+                                    "\n\n---\n*[Observer: Some file references in this response "
+                                    "could not be verified against the knowledge base. "
+                                    "Information may be from general knowledge rather than "
+                                    "retrieved documents.]*\n---\n"
                                 )
                                 break
             except Exception:
                 logger.debug("Epistemic citation check failed", exc_info=True)
 
             _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
-            yield {"type": "token", "value": _header + user_facing_response + epistemic_warning}
-            logger.debug(f"Yielded to user: {user_facing_response}")
+            
+            # --- Speculative Response Comparison ---
+            final_yield_text = user_facing_response
+            if reflex_text:
+                # If we gave a reflex, determine if this new response adds enough value to show
+                # Value check: different enough OR significantly longer
+                from difflib import SequenceMatcher
+                ratio = SequenceMatcher(None, reflex_text, user_facing_response).ratio()
+                if ratio > 0.8 and len(user_facing_response) < (len(reflex_text) * 1.2):
+                    self.logger.info(f"AgentCore: speculative reflex was sufficient (match={ratio:.2f}); skipping follow-up.")
+                    final_yield_text = "" # Don't yield a redundant follow-up
+                else:
+                    self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
+                    final_yield_text = "\n\n---\n*Refinement from Operator:*\n" + user_facing_response
+
+            if final_yield_text:
+                yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
+                logger.debug(f"Yielded to user: {final_yield_text}")
 
             # If the response came from the Oracle path, persist it as a learned fact
             # so future turns can answer locally without another external call.
@@ -2017,7 +2096,7 @@ class AgentCore:
 
                     if loop_result and loop_result.is_loop:
                         # Update packet with loop state
-                        from gaia_common.protocols.cognition_packet import LoopState, LoopAttempt
+                        from gaia_common.protocols.cognition_packet import LoopState
                         packet.loop_state = LoopState(
                             detected_at=loop_result.evidence.get("detected_at", ""),
                             loop_type=loop_result.primary_category.value,
@@ -2091,7 +2170,7 @@ class AgentCore:
                         }, session_id)
             
             packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
-            logger.info(f"AgentCore: run_turn total took {{packet.metrics.latency_ms / 1000:.2f}}s")
+            logger.info("AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
         finally:
             # Release observer/selected models using the ModelPool API directly.
             try:
@@ -2114,7 +2193,6 @@ class AgentCore:
         """
         self.logger.info("Knowledge acquisition workflow ENTERED.")
         try:
-            from gaia_core.utils import mcp_client
             knowledge_base_name = None
             for field in packet.content.data_fields:
                 if field.key == 'knowledge_base_name':
@@ -2127,10 +2205,10 @@ class AgentCore:
 
             # Step 1: Find relevant documents
             self.logger.info(f"Searching for relevant documents for query: {packet.content.original_prompt}")
-            found_docs = mcp_client.call_jsonrpc(
+            found_docs = asyncio.run(mcp_client.call_jsonrpc(
                 "find_relevant_documents",
                 {"query": packet.content.original_prompt, "knowledge_base_name": knowledge_base_name}
-            )
+            ))
             self.logger.info(f"Found documents: {found_docs}")
 
             response_body = found_docs.get("response", {})
@@ -2144,20 +2222,20 @@ class AgentCore:
 
                 # Step 2: Embed the document
                 self.logger.info(f"Embedding document: {doc_path}")
-                embed_result = mcp_client.call_jsonrpc(
+                embed_result = asyncio.run(mcp_client.call_jsonrpc(
                     "embed_documents",
                     {"knowledge_base_name": knowledge_base_name, "file_path": doc_path}
-                )
+                ))
 
                 if embed_result and embed_result.get("ok"):
                     self.logger.info("Document embedded successfully. Re-running RAG query.")
                     
                     # Step 3: Re-run RAG query
-                    retrieved_docs = mcp_client.embedding_query(
+                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
-                    )
+                    ))
 
                     if retrieved_docs and retrieved_docs.get("ok"):
                         docs = retrieved_docs.get("results", [])
@@ -2281,6 +2359,115 @@ class AgentCore:
         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)
         return f"{tag}\n\n"
 
+    def _check_immune_system_for_emergency(self) -> Optional[str]:
+        """
+        Check the current Immune System status for CRITICAL issues or SyntaxErrors.
+        Returns the error message if an emergency is detected, else None.
+        """
+        try:
+            from gaia_common.utils import immune_system
+            health = immune_system.get_immune_summary()
+            
+            # Look for CRITICAL or SyntaxError
+            if "Immune System: CRITICAL" in health or "SyntaxError" in health:
+                logger.warning(f"[IMMUNE EMERGENCY] System irritation detected: {health}")
+                return health
+        except Exception:
+            pass
+        return None
+
+    def is_eligible_for_reflex(self, packet: CognitionPacket, history: list) -> bool:
+        """Determines if a packet should trigger an instant Nano reflex."""
+        user_input = packet.content.original_prompt
+        user_history = [m for m in history if m.get("role") == "user"]
+        is_cold = len(user_history) <= 1
+        is_short = len(user_input) < 150
+        
+        from gaia_common.utils.immune_system import is_system_irritated
+        return is_cold and is_short and not is_system_irritated() and "nano" in self.model_pool.models
+
+    def generate_instant_reflex(self, packet: CognitionPacket) -> str:
+        """
+        Executes a fast, non-streaming Nano response with a minimal packet.
+        Returns the generated text.
+        """
+        if "nano" not in self.model_pool.models:
+            return ""
+            
+        try:
+            # Create a "Thin" version of the packet for speed
+            from gaia_core.utils.prompt_builder import build_from_packet
+            reflex_messages = build_from_packet(packet, slim_mode=True)
+            
+            # Direct non-streaming call to Nano
+            res = self.model_pool.forward_to_model(
+                "nano",
+                messages=reflex_messages,
+                max_tokens=256,
+                temperature=0.0,
+            )
+            
+            if isinstance(res, dict):
+                reflex_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                # Identity and Sanity check
+                if self.identity_guardian.validate_reflex(reflex_text):
+                    return reflex_text
+                else:
+                    self.logger.warning("Speculative reflex suppressed by IdentityGuardian.")
+                    return ""
+        except Exception:
+            self.logger.debug("Speculative reflex failed", exc_info=True)
+        return ""
+
+    def _run_speculative_reflex(self, packet: CognitionPacket) -> str:
+        """Legacy internal wrapper."""
+        return self.generate_instant_reflex(packet)
+
+    def _nano_triage(self, user_input: str) -> str:
+        """
+        Use the Nano model (0.5B) to perform a quick triage of the request.
+        Returns "SIMPLE" or "COMPLEX".
+        """
+        if "nano" not in self.config.MODEL_CONFIGS:
+            return "COMPLEX" # Fallback to more capable models
+        
+        try:
+            # Ensure nano is loaded
+            self.model_pool.ensure_model_loaded("nano")
+            nano = self.model_pool.get("nano")
+            if not nano:
+                return "COMPLEX"
+
+            triage_system_prompt = """
+You are the GAIA Triage Refiner. Your job is to determine if a request is SIMPLE or COMPLEX.
+SIMPLE: Greetings, time/date, system status, simple facts, short poems, basic formatting.
+COMPLEX: Coding, debugging, architectural design, deep philosophy, multi-step planning, long-form creative writing.
+
+Respond ONLY with:
+RESULT: SIMPLE
+or
+RESULT: COMPLEX (reason: <brief reason>)
+"""
+            messages = [
+                {"role": "system", "content": triage_system_prompt},
+                {"role": "user", "content": user_input}
+            ]
+            
+            # Use forward_to_model for lifecycle management if possible, 
+            # or just call directly since it's a quick triage.
+            res = nano.create_chat_completion(
+                messages=messages,
+                max_tokens=32,
+                temperature=0.1
+            )
+            content = res["choices"][0]["message"]["content"].strip().upper()
+            if "RESULT: SIMPLE" in content:
+                return "SIMPLE"
+            return "COMPLEX"
+        except Exception:
+            logger.warning("Nano triage failed, falling back to COMPLEX", exc_info=True)
+            return "COMPLEX"
+
     def _should_escalate_to_thinker(self, text: str) -> bool:
         """
         Lightweight heuristic to decide if a request should bypass Operator (lite)
@@ -2321,7 +2508,15 @@ class AgentCore:
         force_slim = os.getenv("GAIA_FORCE_SLIM_PROMPT", "").lower() in ("1", "true", "yes")
         if force_slim:
             return True
-        if plan.intent == "recitation":
+
+        # NEW: Disable slim-prompt shortcuts if the system is IRRITATED or CRITICAL.
+        # We prioritize full cognitive awareness and diagnostic depth over speed during instability.
+        from gaia_common.utils.immune_system import is_system_irritated
+        if is_system_irritated():
+            self.logger.info("AgentCore: System is IRRITATED; disabling Slim Prompt shortcut for awareness.")
+            return False
+
+        if plan.intent in ("recitation", "chat"):
             return True
         if plan.intent in ("list_tools", "list_tree", "find_file", "list_files", "read_file"):
             return True
@@ -2347,13 +2542,12 @@ class AgentCore:
         # Direct MCP path for toolish intents
         if intent == "list_tools":
             try:
-                from gaia_core.utils import mcp_client
                 ts_write({"type": "sketch", "intent": "list_tools", "plan": [
                     "Plan: enumerate available MCP tools",
                     "1) Call MCP list_tools.",
                     "2) Return the list to the operator."
                 ]}, session_id, source=source, destination_context=_meta)
-                resp = mcp_client.call_jsonrpc("list_tools", {})
+                resp = asyncio.run(mcp_client.call_jsonrpc("list_tools", {}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     tools = resp["response"].get("result") or []
                     return "Available MCP tools:\n- " + "\n- ".join(str(t) for t in tools)
@@ -2392,7 +2586,6 @@ class AgentCore:
 
         if intent == "find_file":
             try:
-                from gaia_core.utils import mcp_client
                 ts_write({"type": "sketch", "intent": "find_file", "plan": [
                     "Plan: locate target file and summarize it",
                     "1) If an explicit path is provided, read it directly (if allowed).",
@@ -2410,7 +2603,7 @@ class AgentCore:
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
+                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -2435,7 +2628,7 @@ class AgentCore:
                 query_term = search_term or raw
 
                 # Use the derived query; bounded search on the sidecar
-                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
+                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -2445,7 +2638,7 @@ class AgentCore:
                         # If exactly one match, attempt to read and summarize it.
                         if len(matches) == 1:
                             path = matches[0]
-                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
+                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -2471,7 +2664,6 @@ class AgentCore:
 
         if intent == "read_file":
             try:
-                from gaia_core.utils import mcp_client
                 ts_write({"type": "sketch", "intent": "read_file", "plan": [
                     "Plan: read a file safely and summarize it",
                     "1) If a direct path is present, read it.",
@@ -2488,7 +2680,7 @@ class AgentCore:
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
+                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -2498,7 +2690,7 @@ class AgentCore:
                             summary_lines = preview.strip().splitlines()[:40]
                             summary_text = "\n".join(summary_lines)
                             try:
-                                rescue_helper.sketchpad_write(
+                                rescue_helper.sketch(
                                     "LastFileRead",
                                     f"Path: {p}\n\nPreview:\n{summary_text}"
                                 )
@@ -2518,7 +2710,7 @@ class AgentCore:
                     search_term = max(tokens, key=len)
                 query_term = search_term or raw
 
-                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
+                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -2527,7 +2719,7 @@ class AgentCore:
                             return "I couldn't find that file. Share a path or a more specific filename."
                         if len(matches) == 1:
                             path = matches[0]
-                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
+                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -2537,7 +2729,7 @@ class AgentCore:
                                 summary_lines = preview.strip().splitlines()[:40]
                                 summary_text = "\n".join(summary_lines)
                                 try:
-                                    rescue_helper.sketchpad_write(
+                                    rescue_helper.sketch(
                                         "LastFileRead",
                                         f"Path: {path}\n\nPreview:\n{summary_text}"
                                     )
@@ -2636,7 +2828,7 @@ class AgentCore:
                         session_id=session_id,
                         output_as_file=True,  # Long-form document recitations go to file
                     )
-                except Exception as exc:
+                except Exception:
                     self.logger.exception("Document recitation failed, falling back to standard generation")
                     # Fall through to web retrieval, then confidence-based approach
 
@@ -2653,7 +2845,7 @@ class AgentCore:
                         session_id=session_id,
                         output_as_file=True,
                     )
-                except Exception as exc:
+                except Exception:
                     self.logger.exception("Web-retrieved document recitation failed, falling back")
                     # Fall through to confidence-based approach
 
@@ -2704,7 +2896,7 @@ class AgentCore:
                         max_fragments=5,
                         output_as_file=True,  # Long-form recitations go to file
                     )
-                except Exception as exc:
+                except Exception:
                     self.logger.exception("Fragmented generation failed, falling back to standard")
                     # Fall through to standard generation
 
@@ -2820,7 +3012,6 @@ class AgentCore:
         Orchestrates: web_search → sort by trust tier → web_fetch top 3 → validate.
         Every failure path returns None so the caller can fall through gracefully.
         """
-        from gaia_core.utils import mcp_client
 
         query = self._build_recitation_search_query(user_input)
         if not query:
@@ -2846,7 +3037,7 @@ class AgentCore:
             results = []
             for search_params in search_attempts:
                 self.logger.info(f"Web recitation search: {search_params}")
-                resp = mcp_client.call_jsonrpc("web_search", search_params)
+                resp = asyncio.run(mcp_client.call_jsonrpc("web_search", search_params))
 
                 if not resp.get("ok"):
                     self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
@@ -2876,7 +3067,7 @@ class AgentCore:
                     continue
                 try:
                     self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
-                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
+                    fetch_resp = asyncio.run(mcp_client.call_jsonrpc("web_fetch", {"url": url}))
 
                     if not fetch_resp.get("ok"):
                         continue
@@ -3019,7 +3210,7 @@ Present {doc_title}:"""
 
             return content
 
-        except Exception as e:
+        except Exception:
             self.logger.exception("Document recitation generation failed")
             # Fallback: just return the raw document with a header
             fallback_content = f"Here is {doc_title}:\n\n{doc_content}"
@@ -3064,7 +3255,6 @@ Present {doc_title}:"""
             or a message with file path if output_as_file=True
         """
         import uuid
-        from gaia_core.utils import mcp_client
 
         request_id = str(uuid.uuid4())[:8]
         fragment_keys: List[str] = []
@@ -3120,7 +3310,7 @@ Present {doc_title}:"""
                     top_p=self.config.top_p,
                 )
                 content = res["choices"][0]["message"]["content"]
-            except Exception as e:
+            except Exception:
                 self.logger.exception(f"Fragment {fragment_sequence} generation failed")
                 break
 
@@ -3130,7 +3320,7 @@ Present {doc_title}:"""
             # Store fragment to sketchpad with unique key
             fragment_key = f"recitation_fragment_{request_id}_{fragment_sequence}"
             try:
-                rescue_helper.sketchpad_write(fragment_key, content)
+                rescue_helper.sketch(fragment_key, content)
                 fragment_keys.append(fragment_key)
                 self.logger.info(f"Stored fragment to sketchpad: {fragment_key}")
             except Exception as e:
@@ -3142,14 +3332,14 @@ Present {doc_title}:"""
 
             # Also store via MCP for auditing (non-critical)
             try:
-                mcp_client.call_jsonrpc("fragment_write", {
+                asyncio.run(mcp_client.call_jsonrpc("fragment_write", {
                     "parent_request_id": request_id,
                     "sequence": fragment_sequence,
                     "content": content,
                     "continuation_hint": truncation_info.get("continuation_hint", ""),
                     "is_complete": not truncation_info["truncated"],
                     "token_count": truncation_info.get("approx_tokens", 0)
-                })
+                }))
             except Exception:
                 pass  # MCP storage is optional
 
@@ -3201,7 +3391,7 @@ Present {doc_title}:"""
 
         # Cleanup: clear fragments from MCP storage
         try:
-            mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id})
+            asyncio.run(mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id}))
         except Exception:
             pass
 
@@ -3241,7 +3431,7 @@ Present {doc_title}:"""
 
             # Then try sketchpad
             try:
-                content = rescue_helper.sketchpad_read(key)
+                content = rescue_helper.show_sketchpad(key)
                 # sketchpad_read returns formatted output, extract just the content
                 if content and not content.startswith("[No sketch"):
                     # Format is "[timestamp] title\ncontent" - extract content after first newline
@@ -3294,7 +3484,7 @@ Present {doc_title}:"""
 
             # Then try sketchpad
             try:
-                content = rescue_helper.sketchpad_read(key)
+                content = rescue_helper.show_sketchpad(key)
                 if content and not content.startswith("[No sketch"):
                     lines = content.split("\n", 1)
                     fragment_text = lines[1] if len(lines) > 1 else content
@@ -3362,7 +3552,7 @@ Assembled response:"""
             assembled = strip_think_tags(assembled)
             self.logger.info(f"Assembly turn complete: {len(assembled)} chars")
             return assembled
-        except Exception as e:
+        except Exception:
             self.logger.exception("Assembly turn failed, falling back to simple concatenation")
             # Fallback to simple concatenation if assembly fails
             return self._read_fragments_from_sketchpad(fragment_keys, memory_fallback)
@@ -3386,7 +3576,6 @@ Assembled response:"""
             A message indicating the file was written and its path
         """
         import re
-        from datetime import datetime
 
         # Generate filename if not provided
         if not filename:
@@ -3413,7 +3602,7 @@ Assembled response:"""
         output_path = f"/sandbox/{filename}"
 
         # Write the file using MCP client
-        result = mcp_client.ai_write(output_path, content)
+        result = asyncio.run(mcp_client.ai_write(output_path, content))
 
         if result.get("ok"):
             file_size = result.get("bytes", len(content))
@@ -3480,7 +3669,6 @@ Assembled response:"""
 
     def _run_mcp_list_tree(self) -> str:
         """Call MCP sidecar to list a bounded directory tree with approval."""
-        from gaia_core.utils import mcp_client
         params = {"path": "/knowledge", "max_depth": 2, "max_entries": 120, "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
@@ -3494,14 +3682,14 @@ Assembled response:"""
                 preview = "\n".join(tree.splitlines()[:20])
                 target_path = "/knowledge/system_reference/tree_latest.txt"
                 # Write via MCP so it is auditable/approved
-                write_req = mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True})
+                write_req = asyncio.run(mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True}))
                 if write_req.get("ok") and write_req.get("action_id") and write_req.get("challenge"):
                     approval = write_req["challenge"][::-1]
-                    write_appr = mcp_client.approve_action_via_mcp(write_req["action_id"], approval)
+                    write_appr = asyncio.run(mcp_client.approve_action_via_mcp(write_req["action_id"], approval))
                     if not write_appr.get("ok"):
                         return f"(Saved tree skipped due to approval error: {write_appr.get('error')})\nPreview:\n{preview}"
                     try:
-                        rescue_helper.sketchpad_write(
+                        rescue_helper.sketch(
                             "DirectoryTreeLatest",
                             f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
                         )
@@ -3509,9 +3697,9 @@ Assembled response:"""
                         self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
                 elif bypass:
                     # In bypass mode, attempt direct write
-                    mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
+                    asyncio.run(mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree}))
                     try:
-                        rescue_helper.sketchpad_write(
+                        rescue_helper.sketch(
                             "DirectoryTreeLatest",
                             f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
                         )
@@ -3527,7 +3715,7 @@ Assembled response:"""
             return tree + ("\n\n(truncated)" if truncated_flag else "")
 
         if bypass:
-            resp = mcp_client.call_jsonrpc("list_tree", params)
+            resp = asyncio.run(mcp_client.call_jsonrpc("list_tree", params))
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3536,7 +3724,7 @@ Assembled response:"""
             return f"list_tree failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = mcp_client.request_approval_via_mcp("list_tree", params)
+        req = asyncio.run(mcp_client.request_approval_via_mcp("list_tree", params))
         if not req.get("ok"):
             return f"Could not request approval for list_tree: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3544,7 +3732,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = mcp_client.approve_action_via_mcp(action_id, approval)
+        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -3559,7 +3747,6 @@ Assembled response:"""
 
     def _run_mcp_list_files(self) -> str:
         """Call MCP sidecar to list files in a directory with approval."""
-        from gaia_core.utils import mcp_client
         params = {"path": "/knowledge", "_allow_pending": True}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
@@ -3570,7 +3757,7 @@ Assembled response:"""
             return "\n".join(files)
 
         if bypass:
-            resp = mcp_client.call_jsonrpc("list_files", params)
+            resp = asyncio.run(mcp_client.call_jsonrpc("list_files", params))
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -3579,7 +3766,7 @@ Assembled response:"""
             return f"list_files failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = mcp_client.request_approval_via_mcp("list_files", params)
+        req = asyncio.run(mcp_client.request_approval_via_mcp("list_files", params))
         if not req.get("ok"):
             return f"Could not request approval for list_files: {req.get('error')}"
         action_id = req.get("action_id")
@@ -3587,7 +3774,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = mcp_client.approve_action_via_mcp(action_id, approval)
+        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -4516,7 +4703,6 @@ Start your response with the first line of the file."""
             Dict with {ok, task, status_changed, audit_added, error}
         """
         from datetime import datetime, timezone
-        import json
 
         try:
             from gaia_core.memory.dev_matrix import GAIADevMatrix
@@ -4698,7 +4884,7 @@ Start your response with the first line of the file."""
             else:
                 yield {
                     "stage": "propose",
-                    "status": f"Could not propose fix",
+                    "status": "Could not propose fix",
                     "data": {
                         "file": target_file,
                         "issue": issue,
@@ -4823,7 +5009,7 @@ Start your response with the first line of the file."""
         Returns the modified packet.
         """
         from gaia_core.cognition.tool_selector import (
-            needs_tool_routing, select_tool, review_selection,
+            select_tool, review_selection,
             initialize_tool_routing, inject_tool_result_into_packet,
         )
 
@@ -5073,7 +5259,7 @@ Start your response with the first line of the file."""
             elif canonical_name == "embedding.query": canonical_name = "memory_query"
 
             if canonical_name == "read_file":
-                result = mcp_client.ai_read(tool.params.get("path", ""))
+                result = asyncio.run(mcp_client.ai_read(tool.params.get("path", "")))
 
             elif canonical_name == "write_file":
                 if not allow_write:
@@ -5081,10 +5267,10 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable."
                     )
-                result = mcp_client.ai_write(
+                result = asyncio.run(mcp_client.ai_write(
                     tool.params.get("path", ""),
                     tool.params.get("content", "")
-                )
+                ))
 
             elif canonical_name == "run_shell":
                 if not allow_execute:
@@ -5092,18 +5278,18 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Execute operations are disabled. Set TOOL_ROUTING.ALLOW_EXECUTE_TOOLS=true to enable."
                     )
-                result = mcp_client.ai_execute(
+                result = asyncio.run(mcp_client.ai_execute(
                     tool.params.get("command", ""),
                     dry_run=not allow_execute
-                )
+                ))
 
             else:
                 # Dispatch via MCP JSON-RPC for tools not handled by local shims
                 logger.info(f"Dispatching tool '{canonical_name}' via MCP JSON-RPC")
-                rpc_result = mcp_client.call_jsonrpc(
+                rpc_result = asyncio.run(mcp_client.call_jsonrpc(
                     method=canonical_name,
                     params=tool.params or {}
-                )
+                ))
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 if rpc_result.get("ok"):
                     rpc_response = rpc_result.get("response", {})
@@ -5154,7 +5340,6 @@ Start your response with the first line of the file."""
             return True
 
         # Quick heuristic check for tool-related requests
-        from gaia_core.cognition.tool_selector import needs_tool_routing
 
         # Create a minimal packet for the check
         # We don't have a full packet yet, so we check against the raw input

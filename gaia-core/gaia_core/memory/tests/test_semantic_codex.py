@@ -1,8 +1,5 @@
 import logging
 import pytest
-import os
-import shutil
-from pathlib import Path
 from unittest.mock import MagicMock
 from gaia_core.memory.semantic_codex import SemanticCodex, CodexEntry
 from gaia_core.config import Config

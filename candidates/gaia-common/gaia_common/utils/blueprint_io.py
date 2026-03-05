@@ -26,11 +26,9 @@ import yaml
 from pydantic import ValidationError
 
 from gaia_common.models.blueprint import (
-    BlueprintMeta,
     BlueprintModel,
     BlueprintStatus,
     ConfidenceLevel,
-    GeneratedBy,
     GraphEdge,
     GraphTopology,
     Interface,

@@ -9,7 +9,6 @@ This package provides:
 - tool_selector: Tool selection and routing logic
 - topic_manager: Topic tracking and management
 - packet_utils: Packet manipulation utilities
-- packet_upgrade: Packet version migration
 """
 
 # Note: Explicit imports deferred until app.* dependencies are fully migrated.
@@ -25,7 +24,6 @@ __all__ = [
     "tool_selector",
     "topic_manager",
     "packet_utils",
-    "packet_upgrade",
     "external_voice",
     "thought_seed",
 ]
@@ -38,7 +36,6 @@ from . import self_reflection
 from . import tool_selector
 from . import topic_manager
 from . import packet_utils
-from . import packet_upgrade
 from . import external_voice
 from . import thought_seed
 

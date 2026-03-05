@@ -8,7 +8,7 @@ Safety via domain allowlist + rate limits (not SENSITIVE_TOOLS).
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from gaia_common.config import Config

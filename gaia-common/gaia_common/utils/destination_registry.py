@@ -16,14 +16,11 @@ Each connector implements a simple interface:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Generator, Callable
-from dataclasses import dataclass, field
-from enum import Enum
+from typing import Dict, Optional, List, Generator, Callable
 
 from gaia_common.protocols.cognition_packet import (
     OutputDestination,
     DestinationTarget,
-    OutputRouting,
     CognitionPacket
 )
 

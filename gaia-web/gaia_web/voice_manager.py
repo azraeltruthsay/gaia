@@ -20,7 +20,6 @@ import struct
 import subprocess
 import threading
 import time
-import uuid
 import wave
 from datetime import datetime
 from pathlib import Path
@@ -364,26 +363,6 @@ class VoiceManager:
         self._connected_since: float | None = None
         self._connected_user: str | None = None
         self._processing_lock = asyncio.Lock()
-        self._timeline: list[dict] = []  # Running timeline of temporal landmarks
-        self._gap_buffer: list[dict] = []  # Utterances captured during thinking/speaking
-
-    # -- Timeline management --
-
-    def _add_landmark(self, event_type: str, content: str | None = None):
-        """Add a timestamped landmark to the session timeline."""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "event_type": event_type,
-            "content": content
-        }
-        self._timeline.append(entry)
-        logger.debug("Landmark added: %s", event_type)
-
-    def _get_packet_timeline(self) -> list[Any]:
-        """Convert internal timeline to TimelineEvent list for the packet."""
-        from gaia_common.protocols.cognition_packet import TimelineEvent
-        # Return last 20 landmarks to keep packet size manageable
-        return [TimelineEvent(**e) for e in self._timeline[-20:]]
 
     # -- Public status --
 
@@ -600,47 +579,21 @@ class VoiceManager:
 
     async def _process_utterance(self, pcm_16k_mono: bytes) -> None:
         """Transcribe -> think -> speak pipeline for a single utterance."""
-        if self._processing_lock.locked():
-            # [TCP] Interstitial Awareness: GAIA is already thinking or speaking.
-            # We transcribe this now so she knows what was said during the gap.
-            text = await self._transcribe(pcm_16k_mono)
-            if text and len(text.strip()) >= 2:
-                logger.info("Interstitial utterance detected: %s", text[:100])
-                self._add_landmark("user_interstitial", text)
-                self._gap_buffer.append({
-                    "timestamp": datetime.now().isoformat(),
-                    "text": text
-                })
-            return
-
         async with self._processing_lock:
             try:
-                # 1. Transcribe and Analyze in parallel via gaia-audio
+                # 1. Transcribe via gaia-audio
                 self._state = "transcribing"
-                
-                # TCP: Run transcription and musical analysis concurrently
-                transcribe_task = asyncio.create_task(self._transcribe(pcm_16k_mono))
-                analyze_task = asyncio.create_task(self._analyze_audio(pcm_16k_mono))
-                
-                text, musical_snapshot = await asyncio.gather(transcribe_task, analyze_task)
-
+                text = await self._transcribe(pcm_16k_mono)
                 if not text or len(text.strip()) < 2:
                     logger.debug("Transcription empty or too short; skipping")
                     self._state = "listening"
                     return
 
-                # [TCP] Pull any text from the previous gap into this turn's context
-                interstitial_context = ""
-                if self._gap_buffer:
-                    msgs = [f"[{m['timestamp']}] {m['text']}" for m in self._gap_buffer]
-                    interstitial_context = "\n".join(msgs)
-                    self._gap_buffer.clear()
-                    logger.info("Incorporated previous gap buffer into turn")
-
                 logger.info("Transcribed: %s", text[:100])
 
-                # 2. MARK LANDMARK: GAIA is now thinking
-                self._add_landmark("reasoning_start", text)
+                # 2. Pause audio capture (echo prevention)
+                if self._sink:
+                    self._sink.paused = True
 
                 # 2.5. Check core state — if not active, use Lite stalling response
                 core_state = await self._get_core_state()
@@ -649,11 +602,11 @@ class VoiceManager:
                     # Fire wake signal in background (idempotent if already waking)
                     asyncio.create_task(self._send_wake_signal())
                     self._state = "responding"
-                    response_text = await self._get_lite_stalling_response(text, interstitial_context)
+                    response_text = await self._get_lite_stalling_response(text)
                 else:
                     # 3. Process via gaia-core (Prime)
                     self._state = "responding"
-                    response_text = await self._get_response(text, interstitial_context, musical_snapshot)
+                    response_text = await self._get_response(text)
                 if not response_text:
                     logger.warning("No response from gaia-core")
                     self._state = "listening"
@@ -661,17 +614,11 @@ class VoiceManager:
 
                 logger.info("Response: %s", response_text[:100])
 
-                # 4. MARK LANDMARK: GAIA is now speaking
-                self._add_landmark("speaking_start", response_text)
-
-                # 5. Synthesize and play via Discord
+                # 4. Synthesize and play via Discord
                 self._state = "speaking"
                 await self._speak(response_text)
 
-                # 6. MARK LANDMARK: GAIA is done speaking
-                self._add_landmark("speaking_end")
-
-                # 7. Drain queued echo audio (we still want to skip her own voice if captured)
+                # 5. Drain queued echo audio before resuming capture
                 if self._audio_queue:
                     while not self._audio_queue.empty():
                         try:
@@ -682,6 +629,9 @@ class VoiceManager:
             except Exception:
                 logger.error("Utterance processing failed", exc_info=True)
             finally:
+                # Always resume audio capture
+                if self._sink:
+                    self._sink.paused = False
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
@@ -701,107 +651,13 @@ class VoiceManager:
             logger.error("Transcribe request failed", exc_info=True)
         return None
 
-    async def _analyze_audio(self, pcm_16k_mono: bytes) -> dict | None:
-        """Send audio to gaia-audio /analyze and return musical/env metrics."""
-        from gaia_common.config import get_config
-        config = get_config()
-        audio_endpoint = config.endpoints.get("audio", "http://gaia-audio:8080")
-        
-        try:
-            audio_b64 = base64.b64encode(pcm_16k_mono).decode("utf-8")
-            payload = {
-                "audio_base64": audio_b64,
-                "sample_rate": 16000,
-            }
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{audio_endpoint}/analyze",
-                    json=payload,
-                )
-                if resp.status_code == 200:
-                    return resp.json()
-                else:
-                    logger.error("Analyze failed: %d %s", resp.status_code, resp.text[:200])
-        except Exception:
-            logger.error("Analysis request failed", exc_info=True)
-        return None
-
-    async def _get_response(self, text: str, interstitial_context: str = "", musical_snapshot: dict | None = None) -> str | None:
+    async def _get_response(self, text: str) -> str | None:
         """Send transcribed text to gaia-core as a CognitionPacket and get response."""
-        from gaia_common.protocols.cognition_packet import (
-            CognitionPacket, Header, Persona, Origin, OutputRouting,
-            DestinationTarget, Content, DataField, OutputDestination,
-            PersonaRole, Routing, Model, OperationalStatus, SystemTask,
-            Intent, Context, SessionHistoryRef, Constraints, Reasoning,
-            Response, Governance, Safety, Metrics, TokenUsage, Status,
-            PacketState, ToolRoutingState, TargetEngine,
-        )
+        from gaia_common.protocols.cognition_packet import CognitionPacket
+        from gaia_common.utils.packet_factory import build_packet, PacketSource
 
-        packet_id = str(uuid.uuid4())
         user_id = self._connected_user or "voice_user"
-        session_id = f"discord_voice_{user_id}"
-
-        # Add interstitial context if available
-        data_fields = [DataField(key="user_message", value=text, type="text")]
-        if interstitial_context:
-            data_fields.append(DataField(
-                key="interstitial_context",
-                value=f"Note: The following was heard while you were last thinking or speaking:\n{interstitial_context}",
-                type="text"
-            ))
-        
-        if musical_snapshot:
-            data_fields.append(DataField(
-                key="auditory_environment",
-                value=json.dumps(musical_snapshot),
-                type="json"
-            ))
-
-        packet = CognitionPacket(
-            version="0.3",
-            header=Header(
-                datetime=datetime.now().isoformat(),
-                session_id=session_id,
-                packet_id=packet_id,
-                sub_id="0",
-                persona=Persona(
-                    identity_id="default_user",
-                    persona_id="default_persona",
-                    role=PersonaRole.DEFAULT,
-                    tone_hint="conversational",
-                ),
-                origin=Origin.USER,
-                routing=Routing(target_engine=TargetEngine.PRIME, priority=5),
-                model=Model(name="default_model", provider="default_provider", context_window_tokens=8192),
-                output_routing=OutputRouting(
-                    primary=DestinationTarget(
-                        destination=OutputDestination.AUDIO,
-                        metadata={"source": "discord_voice", "user": user_id},
-                    ),
-                    source_destination=OutputDestination.AUDIO,
-                    addressed_to_gaia=True,
-                ),
-                operational_status=OperationalStatus(status="initialized"),
-            ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
-            context=Context(
-                session_history_ref=SessionHistoryRef(type="discord_voice", value=session_id),
-                cheatsheets=[],
-                constraints=Constraints(max_tokens=512, time_budget_ms=15000, safety_mode="strict"),
-            ),
-            content=Content(
-                original_prompt=text,
-                data_fields=data_fields,
-                timeline=self._get_packet_timeline(),
-            ),
-            reasoning=Reasoning(),
-            response=Response(candidate="", confidence=0.0, stream_proposal=False),
-            governance=Governance(safety=Safety(execution_allowed=False, dry_run=True)),
-            metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
-            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-            tool_routing=ToolRoutingState(),
-        )
-        packet.compute_hashes()
+        packet = build_packet(PacketSource.VOICE_PRIME, text, user_id=user_id)
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -819,90 +675,26 @@ class VoiceManager:
             logger.error("Core request failed", exc_info=True)
         return None
 
-    async def _get_lite_stalling_response(self, text: str, interstitial_context: str = "") -> str | None:
+    async def _get_lite_stalling_response(self, text: str) -> str | None:
         """Get a quick Lite response while Prime boots.
 
         Builds a minimal CognitionPacket targeting TargetEngine.LITE with
         tight token/time budgets and a stalling system hint.
         """
-        from gaia_common.protocols.cognition_packet import (
-            CognitionPacket, Header, Persona, Origin, OutputRouting,
-            DestinationTarget, Content, DataField, OutputDestination,
-            PersonaRole, Routing, Model, OperationalStatus, SystemTask,
-            Intent, Context, SessionHistoryRef, Constraints, Reasoning,
-            Response, Governance, Safety, Metrics, TokenUsage, Status,
-            PacketState, ToolRoutingState, TargetEngine,
-        )
+        from gaia_common.protocols.cognition_packet import CognitionPacket
+        from gaia_common.utils.packet_factory import build_packet, PacketSource
 
-        packet_id = str(uuid.uuid4())
         user_id = self._connected_user or "voice_user"
-        session_id = f"discord_voice_{user_id}"
-
-        # Add interstitial context if available
-        data_fields = [
-            DataField(key="user_message", value=text, type="text"),
-            DataField(
-                key="system_hint",
-                value=(
-                    "You are waking up from sleep and not fully online yet. "
-                    "Give a brief, natural voice acknowledgment (1-2 sentences max). "
-                    "Be warm and present. Do NOT apologize or explain technical details."
-                ),
-                type="text",
+        packet = build_packet(
+            PacketSource.VOICE_LITE,
+            text,
+            user_id=user_id,
+            system_hint=(
+                "You are waking up from sleep and not fully online yet. "
+                "Give a brief, natural voice acknowledgment (1-2 sentences max). "
+                "Be warm and present. Do NOT apologize or explain technical details."
             ),
-        ]
-        if interstitial_context:
-            data_fields.append(DataField(
-                key="interstitial_context",
-                value=f"Note: The following was heard while you were last thinking or speaking:\n{interstitial_context}",
-                type="text"
-            ))
-
-        packet = CognitionPacket(
-            version="0.3",
-            header=Header(
-                datetime=datetime.now().isoformat(),
-                session_id=session_id,
-                packet_id=packet_id,
-                sub_id="0",
-                persona=Persona(
-                    identity_id="default_user",
-                    persona_id="default_persona",
-                    role=PersonaRole.DEFAULT,
-                    tone_hint="conversational",
-                ),
-                origin=Origin.USER,
-                routing=Routing(target_engine=TargetEngine.LITE, priority=8),
-                model=Model(name="lite", provider="local", context_window_tokens=4096),
-                output_routing=OutputRouting(
-                    primary=DestinationTarget(
-                        destination=OutputDestination.AUDIO,
-                        metadata={"source": "discord_voice", "user": user_id},
-                    ),
-                    source_destination=OutputDestination.AUDIO,
-                    addressed_to_gaia=True,
-                ),
-                operational_status=OperationalStatus(status="initialized"),
-            ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0),
-            context=Context(
-                session_history_ref=SessionHistoryRef(type="discord_voice", value=session_id),
-                cheatsheets=[],
-                constraints=Constraints(max_tokens=128, time_budget_ms=5000, safety_mode="strict"),
-            ),
-            content=Content(
-                original_prompt=text,
-                data_fields=data_fields,
-                timeline=self._get_packet_timeline(),
-            ),
-            reasoning=Reasoning(),
-            response=Response(candidate="", confidence=0.0, stream_proposal=False),
-            governance=Governance(safety=Safety(execution_allowed=False, dry_run=True)),
-            metrics=Metrics(token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0), latency_ms=0),
-            status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
-            tool_routing=ToolRoutingState(),
         )
-        packet.compute_hashes()
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

@@ -4,7 +4,6 @@ Tests for gaia_common.utils.blueprint_precheck
 Uses a minimal test blueprint and synthetic source files via tmp_path.
 """
 
-import pytest
 from datetime import datetime
 from pathlib import Path
 
@@ -26,8 +25,6 @@ from gaia_common.models.blueprint import (
     WebSocketInterface,
 )
 from gaia_common.utils.blueprint_precheck import (
-    PreCheckItem,
-    PreCheckResult,
     run_blueprint_precheck,
 )
 

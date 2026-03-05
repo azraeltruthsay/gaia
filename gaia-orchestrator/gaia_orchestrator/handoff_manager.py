@@ -6,7 +6,6 @@ Coordinates GPU handoff between services:
 - Live <-> Candidate for testing
 """
 
-import asyncio
 import logging
 import os
 import uuid

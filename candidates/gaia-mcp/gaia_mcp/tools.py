@@ -2,15 +2,10 @@
 GAIA MCP Tools - Tool Dispatcher and Implementations.
 """
 
-import logging
-import json
 import os
-import asyncio
 import subprocess
-import difflib
-import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from gaia_common.utils import get_logger
 from gaia_common.config import Config

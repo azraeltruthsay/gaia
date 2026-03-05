@@ -2,13 +2,10 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gaia_core.cognition.samvega import (
-    SAMVEGA_ARCHIVE_DIR,
-    SAMVEGA_DIR,
     SamvegaArtifact,
     SamvegaTrigger,
     archive_artifact,

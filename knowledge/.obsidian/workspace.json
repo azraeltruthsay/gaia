@@ -1,0 +1,223 @@
+{
+  "main": {
+    "id": "2b00cdd98a399172",
+    "type": "split",
+    "children": [
+      {
+        "id": "5062132b7373c6a7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "e913f18aae12a906",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "blueprints/GAIA_CORE.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "GAIA_CORE"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "e60792884ae42862",
+    "type": "split",
+    "children": [
+      {
+        "id": "d70ea9564ffb23ea",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0ecd4ac3948419d4",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "9cec9f1ab07edb70",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          },
+          {
+            "id": "9b29eb0d9bd7fe23",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          }
+        ],
+        "currentTab": 2
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "73fad6adbf1b54ed",
+    "type": "split",
+    "children": [
+      {
+        "id": "579a3b8e39d860c1",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "36d06bf789e073b8",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "blueprints/GAIA_CORE.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for GAIA_CORE"
+            }
+          },
+          {
+            "id": "7cf1c3ff45c32a0b",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "e222a8b248753011",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "15bb22d34d9da307",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "359179355d852426",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "36d06bf789e073b8",
+  "lastOpenFiles": [
+    "Dev_Notebook/2026-03-04_speculative_reflex_and_immune_hardening.md",
+    "Dev_Notebook/2026-03-04_promotion_journal.md",
+    "Dev_Notebook/2026-03-04_doctor_web_autoheal_and_nan_fix.md",
+    "Dev_Notebook/2026-03-04_doctor_web_autoheal_and_nan_fix.md.tmp.1328449.1772659291309",
+    "transcripts/2026-03-04_E5_Request_Temporal_Awareness.txt",
+    "transcripts/2026-03-04_E5_Request_Temporal_Awareness.txt.tmp.1001699.1772654549835",
+    "transcripts/2026-03-04_E4_GAIA_Response.txt",
+    "transcripts/2026-03-04_E4_GAIA_Response.txt.tmp.1001699.1772654504475",
+    "transcripts/2026-03-04_E4_Epistemic_Drive_and_Digital_Immune_System.txt",
+    "transcripts/2026-03-04_E4_Epistemic_Drive_and_Digital_Immune_System.txt.tmp.1001699.1772654455409",
+    "Dev_Notebook/2026-03-04_autonomous_notebooklm_feedback_loop.md",
+    "Dev_Notebook/2026-03-04_dashboard_temps_and_immune_stability.md",
+    "Dev_Notebook/2026-03-03_sovereign_shield_and_spinal_routing.md",
+    "Dev_Notebook/Blueprint_System/__pycache__/blueprint.cpython-311.pyc",
+    "Dev_Notebook/Blueprint_System/__pycache__/blueprint_io.cpython-311.pyc",
+    "system_reference/milestones_archive.json",
+    "Dev_Notebook/2026-03-03_cascade_routing_and_mri_diagnostics.md",
+    "Dev_Notebook/2026-03-02_mesh_agent_refinement.md",
+    "Dev_Notebook/2026-03-02_sovereign_autonomy_and_speed.md",
+    "system_reference/AS_BUILT_LATEST.md",
+    "Dev_Notebook/2026-03-02_sovereign_shield_hardening.md",
+    "system_reference/test_memory.md",
+    "tmp4s5j2ekx.md",
+    "system_reference/sovereign_operating_protocol.md",
+    "blueprints/GAIA_COMMON.md",
+    "blueprints/GAIA_BOOTSTRAP_INSTALL.md",
+    "creative_writing/a_chance_event/chance_character_bible.md",
+    "creative_writing/a_chance_event/chance_the_balcony_meditation.md",
+    "creative_writing/a_chance_event/gidget_character_bible.md",
+    "creative_writing/a_chance_event/00_Project_Index.md",
+    "knowledge/creative_writing/00_Story_Index.md",
+    "creative_writing/a_chance_event/chance_power_system.md",
+    "knowledge/creative_writing/a_chance_event/chance_power_system.md",
+    "creative_writing/a_chance_event/chance_origin_story.md",
+    "creative_writing/a_chance_event/villain_concepts_turning_point.md",
+    "creative_writing/a_chance_event/chance_turning_point.md"
+  ]
+}

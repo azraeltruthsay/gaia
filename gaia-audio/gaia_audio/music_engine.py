@@ -9,8 +9,7 @@ import logging
 import time
 import numpy as np
 import librosa
-from typing import Dict, Any, Optional
-import torch
+from typing import Dict, Any
 from transformers import pipeline
 
 logger = logging.getLogger("GAIA.Audio.Music")

@@ -1530,7 +1530,7 @@ It lists all classes and functions found within the active service directories.
 - `mark_task_complete`
 - `save_dev_matrix`
 
-## `gaia-core/gaia_core/utils/gaia_rescue_helper.py`
+## `gaia-core/gaia_common.utils.gaia_rescue_helper.py`
 
 ### Classes
 
@@ -1605,7 +1605,7 @@ It lists all classes and functions found within the active service directories.
 
 - `build_packet_snapshot`
 
-## `gaia-core/gaia_core/utils/packet_templates.py`
+## `gaia-core/gaia_common.utils.packet_templates.py`
 
 ### Functions
 
@@ -1647,7 +1647,7 @@ It lists all classes and functions found within the active service directories.
 - `fast_check`
 - `observe`
 
-## `gaia-core/gaia_core/utils/world_state.py`
+## `gaia-core/gaia_common.utils.world_state.py`
 
 ### Functions
 

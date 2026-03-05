@@ -1,7 +1,7 @@
 """Test that ServiceClient retry integration works correctly."""
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from gaia_common.utils.service_client import ServiceClient
 

@@ -3,7 +3,7 @@ import time
 import psutil
 import logging
 from pathlib import Path
-from gaia_core.config import Config, get_config
+from gaia_core.config import Config
 from gaia_core.memory.status_tracker import GAIAStatus
 
 logger = logging.getLogger("GAIA.TelemetricSenses")

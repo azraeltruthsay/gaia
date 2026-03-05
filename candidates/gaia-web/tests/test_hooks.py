@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, patch
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
 from gaia_web.main import app

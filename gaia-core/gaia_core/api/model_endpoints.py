@@ -4,8 +4,7 @@ Allows external services (like gaia-study) to notify the core of new models/adap
 """
 
 import logging
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from gaia_core.models.model_pool import get_model_pool

@@ -214,7 +214,6 @@ def _activity_summary(timeline_store: Any) -> str:
         return ""
 
     # Count events since wake
-    from datetime import timedelta
     events = timeline_store.events_since(last_wake, limit=500)
 
     session_count = sum(1 for e in events if e.event == "session_start")

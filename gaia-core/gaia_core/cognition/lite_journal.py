@@ -89,9 +89,6 @@ class LiteJournal:
         if self.model_pool is not None:
             try:
                 llm = self.model_pool.get_model_for_role("lite")
-                if llm and not hasattr(llm, "create_chat_completion"):
-                    logger.warning("LiteJournal: model for role 'lite' does not support chat completion")
-                    llm = None
             except Exception:
                 logger.warning("LiteJournal: could not get Lite model", exc_info=True)
 
