@@ -157,7 +157,7 @@ def run_service_tests(name: str) -> bool:
     # 1. Fast Lint Check (Fatal errors only: F821 Undefined Name, E999 Syntax)
     log.info("Running fast lint audit for %s...", name)
     try:
-        lint_cmd = ["docker", "exec", "-t", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,E999"]
+        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,E999"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             log.error("FATAL LINT ERROR in %s:\n%s", name, lint_res.stdout)
@@ -171,7 +171,7 @@ def run_service_tests(name: str) -> bool:
     try:
         # Standard GAIA test command: python -m pytest <path> -v --tb=short
         # We run it against the /app directory inside the container
-        cmd = ["docker", "exec", "-t", name, "python", "-m", "pytest", "/app", "-v", "--tb=short", "-m", "not integration"]
+        cmd = ["docker", "exec", name, "python", "-m", "pytest", "/app", "-v", "--tb=short", "-m", "not integration"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         
         if result.returncode == 0:
@@ -454,6 +454,13 @@ def poll_cycle():
             if _service_state[name]["healthy"] is False:
                 log.info("%s recovered", name)
                 _alarmed_services.discard(name)
+            elif name in _alarmed_services:
+                # Clear stale alarm if the restart window has expired naturally
+                now_t = time.monotonic()
+                in_window = [t for t in _restart_history.get(name, []) if now_t - t < PROD_RESTART_WINDOW]
+                if not in_window:
+                    log.info("%s alarm cleared — restart window expired", name)
+                    _alarmed_services.discard(name)
             _service_state[name]["healthy"] = True
         else:
             _consecutive_failures[name] += 1
