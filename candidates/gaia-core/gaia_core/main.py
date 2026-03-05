@@ -5,6 +5,7 @@ Provides the HTTP API for the cognitive loop service.
 This is The Brain - Cognitive loop and reasoning.
 """
 
+import asyncio
 import os
 import logging
 from typing import Dict, Any
@@ -446,11 +447,14 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             # --- PRE-FLIGHT: Speculative Nano Reflex ---
             # Trigger this BEFORE the heavy run_turn loop starts
+            loop = asyncio.get_event_loop()
             reflex_text = ""
             history = _ai_manager.session_manager.get_history(session_id)
             if _agent_core.is_eligible_for_reflex(packet, history):
                 logger.info("Main: Triggering instant speculative Nano reflex...")
-                reflex_text = _agent_core.generate_instant_reflex(packet)
+                reflex_text = await loop.run_in_executor(
+                    None, _agent_core.generate_instant_reflex, packet
+                )
                 if reflex_text:
                     yield json.dumps({"type": "token", "value": f"[(Reflex) Nano: {reflex_text}]\n\n---\n\n"}) + "\n"
 
@@ -458,15 +462,30 @@ async def process_packet(packet_data: Dict[str, Any]):
             response_pieces = []
             final_packet_dict = None
 
-            # AgentCore.run_turn is a normal generator returning a stream of events
-            for event in _agent_core.run_turn(
+            # AgentCore.run_turn is a synchronous generator. Each next()
+            # call may block for seconds during llama_cpp inference.
+            # Running in a thread executor prevents blocking the uvicorn
+            # event loop, keeping /health and other endpoints responsive.
+            loop = asyncio.get_event_loop()
+            gen = _agent_core.run_turn(
                 user_input=user_input,
                 session_id=session_id,
                 destination=destination,
                 source=source,
                 metadata=metadata,
                 reflex_text=reflex_text
-            ):
+            )
+
+            def _next_event():
+                try:
+                    return next(gen)
+                except StopIteration:
+                    return None
+
+            while True:
+                event = await loop.run_in_executor(None, _next_event)
+                if event is None:
+                    break
                 if isinstance(event, dict):
                     if event.get("type") == "token":
                         val = event.get("value", "")

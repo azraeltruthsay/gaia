@@ -387,24 +387,21 @@ def docker_restart(name: str) -> bool:
         log.info("Cooldown active for %s (%ds remaining), skipping restart", name, remaining)
         return False
 
-    log.warning("REMEDIATION: docker restart %s (attempt %d/%d in window)",
+    log.warning("REMEDIATION: docker compose recreate %s (attempt %d/%d in window)",
                 name, len(_restart_history[name]) + 1, PROD_RESTART_MAX)
     try:
+        # Use compose up --force-recreate to ensure correct container naming.
+        # Plain `docker restart` preserves mangled names (e.g. "2a85f751fcd3_gaia-web").
+        # Compose service name = container_name (without project prefix) in our setup.
+        project_root = str(GAIA_PROJECT_ROOT)
         result = subprocess.run(
-            ["docker", "restart", name],
-            capture_output=True, text=True, timeout=60,
+            ["docker", "compose",
+             "-p", COMPOSE_PROJECT,
+             "-f", f"{project_root}/docker-compose.yml",
+             "-f", f"{project_root}/docker-compose.override.yml",
+             "up", "-d", "--force-recreate", name],
+            capture_output=True, text=True, timeout=120,
         )
-        
-        # Fallback: if direct name fails, search for container ID (handles renames)
-        if result.returncode != 0:
-            log.info("Direct restart failed for %s, searching for container ID...", name)
-            find_cmd = ["docker", "ps", "-a", "--filter", f"name={name}", "--format", "{{.ID}}"]
-            find_res = subprocess.run(find_cmd, capture_output=True, text=True, timeout=30)
-            container_ids = find_res.stdout.strip().split("\n")
-            if container_ids and container_ids[0]:
-                target_id = container_ids[0]
-                log.warning("Found container ID %s for %s. Restarting ID...", target_id, name)
-                result = subprocess.run(["docker", "restart", target_id], capture_output=True, text=True, timeout=60)
 
         ts = time.monotonic()
         _last_restart[name] = ts
