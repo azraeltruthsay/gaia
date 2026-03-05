@@ -1791,6 +1791,8 @@ class AgentCore:
                         yield {"type": "token", "value": str(item)}
 
                 full_response = "".join(pieces)
+                # Yield a flush event to signal completion of this stream phase
+                yield {"type": "flush"}
                 logger.warning(
                     "AgentCore: collected %s stream chunks (len=%s chars)",
                     len(pieces),
@@ -2028,9 +2030,14 @@ class AgentCore:
                     self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
                     final_yield_text = "\n\n---\n*Refinement from Operator:*\n" + user_facing_response
 
+            # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
+            # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
             if final_yield_text:
-                yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
-                logger.debug(f"Yielded to user: {final_yield_text}")
+                if reflex_text or not active_stream_observer:
+                    yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
+                    logger.debug(f"Yielded to user: {final_yield_text}")
+                else:
+                    logger.debug("Suppressing final yield: already streamed.")
 
             # If the response came from the Oracle path, persist it as a learned fact
             # so future turns can answer locally without another external call.
