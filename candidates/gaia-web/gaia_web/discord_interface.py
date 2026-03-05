@@ -461,16 +461,13 @@ class DiscordInterface:
                             
                             if event_type == "token":
                                 val = event.get("value", "")
-                                # If this is a Nano reflex, send it immediately
-                                if val.startswith("[(Reflex) Nano:"):
+                                if val:
+                                    # Send any yielded tokens immediately (Reflexes, Refinements, etc.)
                                     await self._send_response(message_obj, val, is_dm)
                                     reflex_sent = True
-                                else:
-                                    # Accumulate main responder tokens (not yet supporting live stream-edits for Discord)
-                                    full_response += val
                             
                             elif event_type == "packet":
-                                # Final results
+                                # Final results for internal use
                                 packet_dict = event.get("value", {})
                                 completed_packet = CognitionPacket.from_dict(packet_dict)
                             
@@ -495,15 +492,9 @@ class DiscordInterface:
                 )
                 return
 
-            # Final refined response from the main model (Prime/Operator)
-            # If reflex was sent, only send follow-up if there is extra content
-            gaia_response_text = completed_packet.response.candidate
-            
-            if gaia_response_text:
-                # If we sent a reflex, and this is a refinement, the AgentCore
-                # usually already prepends the "*Refinement from Operator:*" tag.
-                await self._send_response(message_obj, gaia_response_text, is_dm)
-            elif not reflex_sent:
+            # Note: We NO LONGER send gaia_response_text here because all user-facing
+            # text was already yielded via 'token' events in the stream loop.
+            if not reflex_sent:
                 await self._send_response(message_obj, "GAIA processed your request but did not generate a text response.", is_dm)
 
             # Record GAIA reply for typing-wake 48h gate

@@ -64,6 +64,22 @@ class SleepTaskScheduler:
         self._tasks.append(task)
         logger.info("Registered sleep task: %s (P%d)", task.task_id, task.priority)
 
+    def _run_initiative_cycle(self) -> None:
+        """Run the autonomous initiative/goal generation cycle."""
+        if self.agent_core is None:
+            logger.warning("Initiative cycle skipped: agent_core not available")
+            return
+            
+        try:
+            # AgentCore owns the initiative engine logic
+            if hasattr(self.agent_core, "run_initiative_cycle"):
+                self.agent_core.run_initiative_cycle()
+                logger.info("Autonomous initiative cycle completed.")
+            else:
+                logger.warning("Initiative cycle skipped: AgentCore lacks run_initiative_cycle method")
+        except Exception as exc:
+            logger.error(f"Initiative cycle failed: {exc}", exc_info=True)
+
     def _register_default_tasks(self) -> None:
         """Register built-in maintenance tasks."""
 
@@ -155,6 +171,15 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_adversarial_resilience_drill,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="initiative_cycle",
+            task_type="AUTONOMOUS_GOAL_GEN",
+            priority=3,
+            interruptible=True,
+            estimated_duration_seconds=60,
+            handler=self._run_initiative_cycle,
         ))
 
     # ------------------------------------------------------------------
