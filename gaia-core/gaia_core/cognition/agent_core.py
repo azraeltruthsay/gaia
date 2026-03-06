@@ -1699,23 +1699,29 @@ class AgentCore:
                     session_id=session_id,
                 )
     
+                # ── Phase Header Yielding ──
+                # Reflex is handled by generate_instant_reflex before run_turn.
+                # Here we handle Core (Lite) vs Thinker (Prime).
+                role_label = "Thinker" if "thinker" in selected_model_name.lower() or "prime" in selected_model_name.lower() else "Core"
+                header_icon = "🧠" if role_label == "Thinker" else "🤖"
+                
+                # BICAMERAL UPGRADE: If escalate to Thinker, have Core yield an immediate status update
+                if role_label == "Thinker" and debate_turn == 1:
+                    yield {"type": "token", "value": "🤖 **[(Core) Core]** *Deep reasoning required. Escalating to Thinker...*\n"}
+                    yield {"type": "flush"}
+
+                # Use the role_label for the display name instead of the raw technical key
+                phase_header = f"\n\n{header_icon} **[({role_label}) {role_label}]**\n"
+                
+                # If this is a refinement turn, add that context
+                if reflex_text and debate_turn == 1:
+                    phase_header = f"\n\n---\n🔄 **Refinement from Council ({role_label})**\n"
+                
+                yield {"type": "token", "value": phase_header}
+
                 current_turn_pieces = []
                 try:
                     stream_generator = voice.stream_response()
-                    
-                    # ── Phase Header Yielding ──
-                    # Nano is handled by generate_instant_reflex before run_turn.
-                    # Here we handle Operator (Lite) vs Thinker (Prime).
-                    role_label = "Thinker" if "prime" in selected_model_name.lower() else "Operator"
-                    header_icon = "🧠" if role_label == "Thinker" else "🤖"
-                    phase_header = f"\n\n{header_icon} **[({role_label}) {selected_model_name.title()}]**\n"
-                    
-                    # If this is a refinement turn, add that context
-                    if reflex_text and debate_turn == 1:
-                        phase_header = f"\n\n---\n🔄 **Refinement from Council ({role_label})**\n"
-                    
-                    yield {"type": "token", "value": phase_header}
-
                     for item in stream_generator:
                         if isinstance(item, dict):
                             # item is an event dict (interruption, etc.)
@@ -1728,60 +1734,58 @@ class AgentCore:
                             current_turn_pieces.append(str(item))
                             # Yield token for real-time streaming
                             yield {"type": "token", "value": str(item)}
+                except Exception:
+                    logger.exception(f"AgentCore: Stream from {selected_model_name} failed")
+                    yield {"type": "token", "value": f"--- Error: Stream from {role_label} interrupted ---"}
 
-                    current_response = "".join(current_turn_pieces)
-                    
-                    # Yield any observer findings attached to this phase
-                    if observer_instance and hasattr(observer_instance, 'last_review') and observer_instance.last_review:
-                        rev = observer_instance.last_review
-                        obs_note = f"\n\n🔍 **[Observation]** {rev.level.upper()}: {rev.reason}"
-                        yield {"type": "token", "value": obs_note}
+                current_response = "".join(current_turn_pieces)
+                
+                # Yield any observer findings attached to this phase
+                if observer_instance and hasattr(observer_instance, 'last_review') and observer_instance.last_review:
+                    rev = observer_instance.last_review
+                    obs_note = f"\n\n🔍 **[Observation]** {rev.level.upper()}: {rev.reason}"
+                    yield {"type": "token", "value": obs_note}
 
-                    yield {"type": "flush"}
-                    # Parse current output for council tags
-                    routing_result = route_output(current_response, packet, self, session_id, destination)
-                    council_msgs = routing_result.get("council_messages", [])
-                    
-                    # Release observer before continuing
-                    if observer_model_name:
-                        self.model_pool.release_model_for_role(observer_model_name)
-    
-                    if not council_msgs:
-                        # Consensus reached: yield final cleaned response
-                        logger.info(f"AgentCore: Consensus reached by {selected_model_name} in turn {debate_turn}")
-                        full_response = current_response
-                        break
-                    
-                    # Consensus NOT reached: store peer message and swap model
-                    logger.info(f"AgentCore: Debate continues. {selected_model_name} emitted {len(council_msgs)} council messages.")
-                    for msg in council_msgs:
-                        council_history.append(f"[{selected_model_name.upper()}]: {msg}")
-                    
-                    # Model Swap: Lite <-> Prime
-                    next_model_name = "gpu_prime" if selected_model_name == "lite" else "lite"
-                    
-                    # Release current model
-                    self.model_pool.release_model_for_role(selected_model_name)
-                    
-                    # Acquire next model
-                    try:
-                        new_model = self.model_pool.acquire_model_for_role(next_model_name)
-                        if new_model:
-                            selected_model = new_model
-                            selected_model_name = next_model_name
-                        else:
-                            logger.warning(f"AgentCore: Could not acquire {next_model_name} for debate; terminating.")
-                            full_response = routing_result.get("response_to_user", "")
-                            break
-                    except Exception:
-                        logger.exception(f"AgentCore: Error swapping to {next_model_name}")
+                yield {"type": "flush"}
+                
+                # Parse current output for council tags
+                routing_result = route_output(current_response, packet, self, session_id, destination)
+                council_msgs = routing_result.get("council_messages", [])
+                
+                # Release observer before potentially continuing debate
+                if observer_model_name:
+                    self.model_pool.release_model_for_role(observer_model_name)
+
+                if not council_msgs:
+                    # Consensus reached: yield final cleaned response
+                    logger.info(f"AgentCore: Consensus reached by {selected_model_name} in turn {debate_turn}")
+                    full_response = current_response
+                    break
+                
+                # Consensus NOT reached: store peer message and swap model
+                logger.info(f"AgentCore: Debate continues. {selected_model_name} emitted {len(council_msgs)} council messages.")
+                for msg in council_msgs:
+                    council_history.append(f"[{selected_model_name.upper()}]: {msg}")
+                
+                # Model Swap: Lite <-> Prime
+                next_model_name = "gpu_prime" if selected_model_name == "lite" else "lite"
+                
+                # Release current model
+                self.model_pool.release_model_for_role(selected_model_name)
+                
+                # Acquire next model
+                try:
+                    new_model = self.model_pool.acquire_model_for_role(next_model_name)
+                    if new_model:
+                        selected_model = new_model
+                        selected_model_name = next_model_name
+                    else:
+                        logger.warning(f"AgentCore: Could not acquire {next_model_name} for debate; terminating.")
                         full_response = routing_result.get("response_to_user", "")
                         break
-                        
                 except Exception:
-                    logger.exception("AgentCore: Debate loop turn failed")
-                    if observer_model_name:
-                        self.model_pool.release_model_for_role(observer_model_name)
+                    logger.exception(f"AgentCore: Error swapping to {next_model_name}")
+                    full_response = routing_result.get("response_to_user", "")
                     break
     
             # End of while loop
@@ -2341,10 +2345,10 @@ class AgentCore:
 
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """
-        Executes a fast, non-streaming Nano response with a minimal packet.
+        Executes a fast, non-streaming Reflex response with a minimal packet.
         Returns the generated text.
         """
-        if "nano" not in self.model_pool.models:
+        if "reflex" not in self.model_pool.models and "nano" not in self.model_pool.models:
             return ""
             
         try:
@@ -2352,9 +2356,9 @@ class AgentCore:
             from gaia_core.utils.prompt_builder import build_from_packet
             reflex_messages = build_from_packet(packet, slim_mode=True)
             
-            # Direct non-streaming call to Nano
+            # Direct non-streaming call to Reflex (Nano)
             res = self.model_pool.forward_to_model(
-                "nano",
+                "reflex",
                 messages=reflex_messages,
                 max_tokens=256,
                 temperature=0.0,
@@ -2364,7 +2368,8 @@ class AgentCore:
                 reflex_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 # Identity and Sanity check
                 if self.identity_guardian.validate_reflex(reflex_text):
-                    return reflex_text
+                    # Add the poetic Reflex header
+                    return f"⚡ **[(Reflex) Reflex]**\n{reflex_text}"
                 else:
                     self.logger.warning("Speculative reflex suppressed by IdentityGuardian.")
                     return ""

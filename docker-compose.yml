@@ -311,6 +311,13 @@ services:
       retries: 3
       start_period: 30s
 
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+        reservations:
+          memory: 1024M
+
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-study: The Subconscious - Background processing
   # SOLE WRITER to vector store and LoRA adapters
@@ -588,6 +595,13 @@ services:
     hostname: gaia-doctor
     restart: unless-stopped
 
+    environment:
+      - POLL_INTERVAL=15
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      - COMPOSE_PROJECT_NAME=gaia_project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     volumes:
       # Docker socket (read-write — doctor needs to restart containers)
       - /var/run/docker.sock:/var/run/docker.sock
@@ -604,13 +618,6 @@ services:
 
     group_add:
       - "${DOCKER_GID:-962}"
-
-    environment:
-      - POLL_INTERVAL=${DOCTOR_POLL_INTERVAL:-60}
-      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
-      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
-      - COMPOSE_PROJECT_NAME=gaia_project
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
       - "6419:6419"

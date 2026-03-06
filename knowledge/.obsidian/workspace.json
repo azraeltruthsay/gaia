@@ -183,6 +183,10 @@
   },
   "active": "36d06bf789e073b8",
   "lastOpenFiles": [
+    "Dev_Notebook/2026-03-06_omnipresence_and_dark_forest_substrate.md",
+    "Dev_Notebook/2026-03-06_immune_system_3_0_hardening.md",
+    "blueprints/gaia_omnipresence_nix_mesh.md",
+    "seeds/archive/seed_20260306_022536057844.json",
     "Dev_Notebook/2026-03-05_council_deep_thought_and_operator_core.md",
     "seeds/seed_20260306_022536057844.json",
     "seeds/archive/seed_20260306_000726048976.json",
@@ -194,7 +198,6 @@
     "seeds/archive/seed_20260305_230902775406.json",
     "seeds/seed_20260305_230902775406.json",
     "seeds/seed_20260305_230902767692.json",
-    "seeds/archive/seed_20260305_205439360811.json",
     "Dev_Notebook/2026-03-05_python_feature_census.md",
     "Dev_Notebook/2026-03-05_event_loop_blocking_and_doctor_compose_fix.md",
     "Dev_Notebook/2026-03-04_workflow_lessons_and_system_foundations.md",
@@ -215,9 +218,6 @@
     "tmp4s5j2ekx.md",
     "system_reference/sovereign_operating_protocol.md",
     "blueprints/GAIA_COMMON.md",
-    "blueprints/GAIA_BOOTSTRAP_INSTALL.md",
-    "creative_writing/a_chance_event/chance_character_bible.md",
-    "creative_writing/a_chance_event/chance_the_balcony_meditation.md",
-    "creative_writing/a_chance_event/gidget_character_bible.md"
+    "blueprints/GAIA_BOOTSTRAP_INSTALL.md"
   ]
 }

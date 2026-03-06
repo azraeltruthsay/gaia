@@ -4,11 +4,13 @@ from typing import Any, Dict, List, Optional
 from enum import Enum
 import json
 import hashlib
+from datetime import datetime, timezone
 from dataclasses_json import dataclass_json
 
 # --- Enums for Type Safety ---
 class PersonaRole(Enum):
     DEFAULT = "Default"
+    ASSISTANT = "assistant"
     CODEMIND = "CodeMind"
     ANALYST = "Analyst"
     GISEA = "GISEA"
@@ -78,17 +80,17 @@ class OutputDestination(Enum):
 @dataclass_json
 @dataclass
 class Persona:
-    identity_id: str
-    persona_id: str
-    role: PersonaRole
-    tone_hint: Optional[str] = None
+    identity_id: str = "gaia"
+    persona_id: str = "gaia"
+    role: PersonaRole = PersonaRole.DEFAULT
+    tone_hint: Optional[str] = "concise"
     safety_profile_id: Optional[str] = None
     traits: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass_json
 @dataclass
 class Routing:
-    target_engine: TargetEngine
+    target_engine: TargetEngine = TargetEngine.PRIME
     allow_parallel: bool = False
     priority: int = 5
     deadline_iso: Optional[str] = None
@@ -125,9 +127,9 @@ class OutputRouting:
 @dataclass_json
 @dataclass
 class Model:
-    name: str
-    provider: str
-    context_window_tokens: int
+    name: str = "thinker"
+    provider: str = "vllm"
+    context_window_tokens: int = 8192
     max_output_tokens: Optional[int] = None
     response_buffer_tokens: Optional[int] = None
     temperature: Optional[float] = None
@@ -149,14 +151,14 @@ class OperationalStatus:
 @dataclass_json
 @dataclass
 class Header:
-    datetime: str
     session_id: str
     packet_id: str
-    sub_id: str
-    persona: Persona
-    origin: Origin
-    routing: Routing
-    model: Model
+    persona: Persona = field(default_factory=Persona)
+    routing: Routing = field(default_factory=Routing)
+    model: Model = field(default_factory=Model)
+    origin: Origin = Origin.USER
+    datetime: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    sub_id: str = field(default_factory=lambda: hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8])
     parent_packet_id: Optional[str] = None
     lineage: List[str] = field(default_factory=list)
     output_routing: Optional[OutputRouting] = None  # Spinal column destination routing
@@ -166,17 +168,17 @@ class Header:
 @dataclass_json
 @dataclass
 class Intent:
-    user_intent: str
-    system_task: SystemTask
-    confidence: float
+    user_intent: str = "chat"
+    system_task: SystemTask = SystemTask.STREAM
+    confidence: float = 1.0
     tags: List[str] = field(default_factory=list)
 
 # --- Context ---
 @dataclass_json
 @dataclass
 class SessionHistoryRef:
-    type: str
-    value: str
+    type: str = "local"
+    value: str = "active"
 
 @dataclass_json
 @dataclass
@@ -188,26 +190,26 @@ class RelevantHistorySnippet:
 @dataclass_json
 @dataclass
 class Cheatsheet:
-    id: str
-    title: str
-    version: str
-    pointer: str
+    id: str = "default"
+    title: str = "GAIA Protocol"
+    version: str = "v0.3"
+    pointer: str = "core"
     ref_type: Optional[str] = None
 
 @dataclass_json
 @dataclass
 class Constraints:
-    max_tokens: int
-    time_budget_ms: int
-    safety_mode: str
+    max_tokens: int = 2048
+    time_budget_ms: int = 60000
+    safety_mode: str = "strict"
     policies: List[str] = field(default_factory=list)
 
 @dataclass_json
 @dataclass
 class Context:
-    session_history_ref: SessionHistoryRef
-    cheatsheets: List[Cheatsheet]
-    constraints: Constraints
+    session_history_ref: SessionHistoryRef = field(default_factory=SessionHistoryRef)
+    cheatsheets: List[Cheatsheet] = field(default_factory=list)
+    constraints: Constraints = field(default_factory=Constraints)
     relevant_history_snippet: List[RelevantHistorySnippet] = field(default_factory=list)
     available_mcp_tools: Optional[List[str]] = None
 
@@ -246,6 +248,7 @@ class Content:
     data_fields: List[DataField] = field(default_factory=list)
     attachments: List[Attachment] = field(default_factory=list)
     timeline: List[TimelineEvent] = field(default_factory=list) # Temporal Context support
+    intent: Optional[Intent] = None
 
 # --- Reasoning ---
 @dataclass_json
@@ -367,9 +370,9 @@ class SidecarAction:
 @dataclass_json
 @dataclass
 class Response:
-    candidate: str
-    confidence: float
-    stream_proposal: bool
+    candidate: str = ""
+    confidence: float = 1.0
+    stream_proposal: bool = False
     tool_calls: List[ToolCall] = field(default_factory=list)
     sidecar_actions: List[SidecarAction] = field(default_factory=list)
 
@@ -377,7 +380,7 @@ class Response:
 @dataclass_json
 @dataclass
 class Safety:
-    execution_allowed: bool
+    execution_allowed: bool = False
     allowed_commands_whitelist_id: Optional[str] = None
     dry_run: bool = True
 
@@ -407,7 +410,7 @@ class Privacy:
 @dataclass_json
 @dataclass
 class Governance:
-    safety: Safety
+    safety: Safety = field(default_factory=Safety)
     signatures: Signatures = field(default_factory=Signatures)
     audit: Audit = field(default_factory=Audit)
     privacy: Privacy = field(default_factory=Privacy)
@@ -498,26 +501,26 @@ class Council:
 @dataclass_json
 @dataclass
 class TokenUsage:
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
     projected_tokens: Optional[int] = None
 
 @dataclass_json
 @dataclass
 class SystemResources:
     """Represents a snapshot of system resource usage."""
-    cpu_usage_percent: float
-    memory_usage_percent: float
-    disk_usage_percent: float
+    cpu_usage_percent: float = 0.0
+    memory_usage_percent: float = 0.0
+    disk_usage_percent: float = 0.0
     gpu_usage: Dict[str, Any] = field(default_factory=dict)
     hardware_profile: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass_json
 @dataclass
 class Metrics:
-    token_usage: TokenUsage
-    latency_ms: int
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
+    latency_ms: int = 0
     cost_estimate: Optional[float] = None
     errors: List[str] = field(default_factory=list)
     resources: Optional[SystemResources] = None
@@ -527,8 +530,8 @@ class Metrics:
 @dataclass_json
 @dataclass
 class Status:
-    finalized: bool
-    state: PacketState
+    finalized: bool = False
+    state: PacketState = PacketState.PROCESSING
     next_steps: List[str] = field(default_factory=list)
     observer_trace: List[str] = field(default_factory=list)
 
@@ -536,21 +539,24 @@ class Status:
 @dataclass_json
 @dataclass
 class CognitionPacket:
-    version: str
-    header: Header
-    intent: Intent
-    context: Context
-    content: Content
-    reasoning: Reasoning
-    response: Response
-    governance: Governance
-    metrics: Metrics
-    status: Status
+    version: str = "v0.3"
+    header: Header = field(default_factory=lambda: Header(
+        session_id="default", packet_id="default", 
+        persona=Persona(), routing=Routing(), model=Model()
+    ))
+    intent: Intent = field(default_factory=Intent)
+    context: Context = field(default_factory=Context)
+    content: Content = field(default_factory=lambda: Content(original_prompt=""))
+    reasoning: Reasoning = field(default_factory=Reasoning)
+    response: Response = field(default_factory=Response)
+    governance: Governance = field(default_factory=Governance)
+    metrics: Metrics = field(default_factory=Metrics)
+    status: Status = field(default_factory=Status)
     schema_id: Optional[str] = None
     council: Optional[Council] = None
-    tool_routing: Optional[ToolRoutingState] = None  # GCP Tool Routing System state
-    loop_state: Optional[LoopState] = None            # Loop detection and recovery state
-    goal_state: Optional[GoalState] = None            # Goal detection and carry state
+    tool_routing: Optional[ToolRoutingState] = None
+    loop_state: Optional[LoopState] = None
+    goal_state: Optional[GoalState] = None
 
     def to_json(self, **kwargs) -> str:
         """Serializes the packet to a JSON string with sorted keys for stability."""

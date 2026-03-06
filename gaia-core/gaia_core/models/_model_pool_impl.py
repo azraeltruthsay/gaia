@@ -1045,27 +1045,41 @@ class ModelPool:
             self.release_model(name)
 
     def _resolve_model_name_for_role(self, role: str) -> str | None:
+        """Resolve a logical role (reflex, core, thinker) to a physical model name."""
         name = None
-        if role in self.models:
-            name = role
+        
+        # --- Poetic Renaming Aliases ---
+        role_map = {
+            "nano": "reflex",
+            "lite": "core",
+            "operator": "core",
+            "prime": "thinker",
+            "gpu_prime": "thinker",
+            "cpu_prime": "thinker"
+        }
+        target_role = role_map.get(role.lower(), role.lower())
+
+        if target_role in self.models:
+            name = target_role
         else:
-            cfg = self.config.MODEL_CONFIGS.get(role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
+            cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
             alias = cfg.get('alias')
             if alias and alias in self.models:
                 name = alias
+        
         if not name:
-            if role == 'prime':
-                if 'prime' in self.models:
-                    name = 'prime'
+            if target_role == 'thinker':
+                if 'thinker' in self.models:
+                    name = 'thinker'
                 elif 'gpu_prime' in self.models:
                     name = 'gpu_prime'
-                elif 'cpu_prime' in self.models:
-                    name = 'cpu_prime'
+                elif 'prime' in self.models:
+                    name = 'prime'
             else:
                 share = None
                 try:
                     import os
-                    share = os.getenv('GAIA_SHARE_LITE_WITH') if role in ('lite', 'observer') else None
+                    share = os.getenv('GAIA_SHARE_LITE_WITH') if target_role in ('core', 'observer') else None
                 except Exception:
                     share = None
                 if share and share in self.models:

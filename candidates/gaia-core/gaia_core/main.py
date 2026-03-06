@@ -314,9 +314,10 @@ app.include_router(sleep_router)
 async def repair_structural_error(request: Request):
     """
     Cognitive repair endpoint for structural code errors.
-    Expects JSON: { "broken_code": "...", "error_msg": "..." }
+    Expects JSON: { "service": "...", "broken_code": "...", "error_msg": "..." }
     """
     data = await request.json()
+    service = data.get("service", "unknown")
     broken_code = data.get("broken_code")
     error_msg = data.get("error_msg")
     
@@ -326,15 +327,50 @@ async def repair_structural_error(request: Request):
     try:
         from gaia_core.cognition.structural_surgeon import StructuralSurgeon
         surgeon = StructuralSurgeon(config, model_pool)
-        fixed_code = surgeon.repair_snippet(broken_code, error_msg)
+        fixed_code = surgeon.repair_structural_failure(service, broken_code, error_msg)
         
         if fixed_code:
             return {"fixed_code": fixed_code}
         else:
-            return JSONResponse(status_code=500, content={"error": "Cognitive repair failed to generate fix"})
+            return JSONResponse(status_code=500, content={"error": "HA surgery failed to generate fix"})
     except Exception as e:
         logger.exception("Structural repair API failed")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/doctor/diagnose")
+async def doctor_diagnose(request: Request):
+    """
+    Doctor-initiated diagnostic turn.
+    Triggered when a reload loop or resource spike is detected.
+    """
+    data = await request.json()
+    service = data.get("service")
+    logs = data.get("logs")
+    
+    if not service or not logs:
+        return JSONResponse(status_code=400, content={"error": "Missing service or logs"})
+        
+    logger.critical("🚨 DOCTOR-INITIATED DIAGNOSIS: %s is in a restart loop.", service)
+    
+    # Create a specialized internal packet for self-healing
+    from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona
+    
+    diagnostics_prompt = (
+        f"URGENT SYSTEM REPAIR: The service '{service}' is caught in a recursive restart loop. "
+        f"Analyze the following logs and determine the root cause. If it is a recursive file write "
+        f"(feedback loop), propose a fix to exclude the path or change the logic. "
+        f"RECENT LOGS:\n{logs}"
+    )
+    
+    # This turn will be processed with high-reasoning priority
+    return StreamingResponse(
+        agent_core.run_turn(
+            user_input=diagnostics_prompt,
+            session_id=f"diagnostics_{service}_{int(time.time())}",
+            source="gaia-doctor"
+        ),
+        media_type="application/x-ndjson"
+    )
 
 @app.get("/health")
 async def health_check():
@@ -449,11 +485,14 @@ async def process_packet(packet_data: Dict[str, Any]):
 
     async def _run_loop_inner():
         try:
-            # Import the packet class for deserialization
-            from gaia_common.protocols.cognition_packet import CognitionPacket
-
-            # Deserialize the incoming packet
-            packet = CognitionPacket.from_dict(packet_data)
+            # 1. Deserialize the packet correctly
+            try:
+                from gaia_common.protocols.cognition_packet import CognitionPacket
+                packet = CognitionPacket.from_dict(packet_data)
+            except Exception as e:
+                logger.error(f"Failed to deserialize packet: {e}")
+                yield json.dumps({"type": "error", "value": f"Invalid packet structure: {str(e)}"}) + "\n"
+                return
 
             # Extract routing information
             user_input = packet.content.original_prompt
@@ -480,18 +519,21 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
-            # --- PRE-FLIGHT: Speculative Nano Reflex ---
+            # --- PRE-FLIGHT: Speculative Reflex ---
             # Trigger this BEFORE the heavy run_turn loop starts
             loop = asyncio.get_event_loop()
             reflex_text = ""
             history = _ai_manager.session_manager.get_history(session_id)
             if _agent_core.is_eligible_for_reflex(packet, history):
-                logger.info("Main: Triggering instant speculative Nano reflex...")
+                logger.info("Main: Triggering instant speculative Reflex...")
+                # The generate_instant_reflex method now returns the full formatted string
+                # with the ⚡ [(Reflex) Reflex] header included.
                 reflex_text = await loop.run_in_executor(
                     None, _agent_core.generate_instant_reflex, packet
                 )
                 if reflex_text:
-                    yield json.dumps({"type": "token", "value": f"[(Reflex) Nano: {reflex_text}]\n\n---\n\n"}) + "\n"
+                    yield json.dumps({"type": "token", "value": reflex_text + "\n\n---\n\n"}) + "\n"
+                    yield json.dumps({"type": "flush"}) + "\n"
 
             # Run the cognitive loop
             response_pieces = []
