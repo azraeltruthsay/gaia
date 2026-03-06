@@ -418,94 +418,107 @@ def raise_alarm(name: str, reason: str):
 
 def run_structural_audit(name: str) -> bool:
     """Perform pre-restart structural validation and autonomous repair."""
+    code_dir = SERVICE_CODE_DIRS.get(name)
+    if not code_dir or not code_dir.exists():
+        return True
+
     log.info("Performing structural audit for %s...", name)
-    project_root = Path("/gaia/GAIA_Project")
-    svc_path = project_root / name
-    if "-candidate" in name:
-        svc_path = project_root / "candidates" / name.replace("-candidate", "")
     
     try:
-        # Check every python file in the service for syntax errors
+        # Use ast.parse for a guaranteed read-only check
+        # Iterative check to find the specific failing file path
+        audit_script = f"""
+import ast
+from pathlib import Path
+import sys
+broken = False
+for p in Path('{code_dir}').rglob('*.py'):
+    try:
+        ast.parse(p.read_text())
+    except Exception as e:
+        print(f"FILE:{{p}}")
+        print(e)
+        broken = True
+        break
+if broken: sys.exit(1)
+"""
         audit_res = subprocess.run(
-            ["python", "-m", "py_compile"] + list(svc_path.rglob("*.py")),
-            capture_output=True, text=True, timeout=30
+            ["python3", "-c", audit_script],
+            capture_output=True, text=True, timeout=60
         )
         
         if audit_res.returncode != 0:
             log.warning("Structural error detected in %s. Attempting repair...", name)
             
-            # Extract broken file path from stderr
-            import re
-            match = re.search(r'File "([^"]+)"', audit_res.stderr)
-            if match:
-                broken_file = Path(match.group(1))
+            # Extract broken file path from stdout
+            broken_file = None
+            for line in audit_res.stdout.splitlines():
+                if line.startswith("FILE:"):
+                    broken_file = Path(line.replace("FILE:", "").strip())
+                    break
+            
+            if broken_file:
                 log.info("Targeting broken file for repair: %s", broken_file)
                 
-                # Tier 1 Repair: Ruff --fix
-                subprocess.run(["ruff", "check", "--fix", str(broken_file)], capture_output=True)
+                # Tier 1 Repair: Ruff --fix (if available)
+                if subprocess.run(["which", "ruff"], capture_output=True).returncode == 0:
+                    subprocess.run(["ruff", "check", "--fix", str(broken_file)], capture_output=True)
                 
                 # Re-audit
                 audit_res = subprocess.run(
-                    ["python", "-m", "py_compile", str(broken_file)],
+                    ["python3", "-c", f"import ast; ast.parse(open('{str(broken_file)}').read())"],
                     capture_output=True, text=True, timeout=10
                 )
                 
                 if audit_res.returncode == 0:
-                    log.info("✅ Tier 1 repair (ruff) successful for %s", name)
+                    log.info("✅ Tier 1 repair successful for %s", name)
                     return True
                 else:
                     # Tier 2 Repair: High-Availability Surgery
+                    # gaia-core has rw access to the project root; this container's
+                    # project mount is ro.  Send file_path so gaia-core validates
+                    # and writes the fix itself.
                     log.warning("Tier 1 repair failed for %s. Escalating to Tier 2 (HA Surgery)...", name)
                     try:
                         broken_content = broken_file.read_text()
-                        import requests
-                        repair_res = requests.post(
-                            "http://localhost:6415/api/repair/structural",
-                            json={
-                                "service": name,
-                                "broken_code": broken_content, 
-                                "error_msg": audit_res.stderr
-                            },
-                            timeout=90 # Surgery takes time
+
+                        repair_url = "http://gaia-core:6415/api/repair/structural"
+                        repair_data = json.dumps({
+                            "service": name,
+                            "broken_code": broken_content,
+                            "error_msg": audit_res.stdout + audit_res.stderr,
+                            "file_path": str(broken_file),
+                        }).encode("utf-8")
+
+                        req = Request(
+                            repair_url,
+                            data=repair_data,
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
                         )
-                        
-                        if repair_res.status_code == 200:
-                            fixed_code = repair_res.json().get("fixed_code")
-                            if fixed_code:
-                                log.info("Validating HA fix for %s...", broken_file.name)
-                                tmp_file = broken_file.with_suffix(".tmp_surgery")
-                                tmp_file.write_text(fixed_code)
-                                
-                                val_res = subprocess.run(
-                                    ["python", "-m", "py_compile", str(tmp_file)],
-                                    capture_output=True, text=True, timeout=10
-                                )
-                                
-                                if val_res.returncode == 0:
-                                    broken_file.write_text(fixed_code)
-                                    tmp_file.unlink()
+
+                        with urlopen(req, timeout=120) as response:
+                            if response.status == 200:
+                                res_body = json.loads(response.read().decode("utf-8"))
+                                if res_body.get("status") == "repaired":
                                     log.info("✅ Tier 2 repair (HA Surgery) successful for %s", name)
                                     return True
-                                else:
-                                    log.error("❌ HA fix failed validation: %s", val_res.stderr)
-                                    tmp_file.unlink()
-                                    return False
-                            else:
-                                log.error("HA surgery returned empty fix")
+                                log.error("❌ HA Surgery did not confirm write for %s: %s", name, res_body)
                                 return False
-                        else:
-                            log.error("HA surgery API failed: %d", repair_res.status_code)
-                            return False
+                            else:
+                                log.error("HA surgery API failed: %d", response.status)
+                                return False
                     except Exception as e:
                         log.error("Exception during Tier 2 surgery: %s", e)
                         return False
             
             log.critical("⛔ QUARANTINE: %s has fatal syntax errors.", name)
-            raise_alarm(name, f"Structural failure: {audit_res.stderr.strip()}. Quarantine active.")
             return False
+            
+        return True
     except Exception as e:
-        log.warning("Audit failed to run: %s", e)
-    return True
+        log.error("Error during structural audit for %s: %s", name, e)
+        return True
 
 def docker_restart(name: str) -> bool:
     """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker."""
@@ -684,7 +697,6 @@ def poll_cycle():
                 log.debug("%s failed check %d/%d", name, failures, FAILURE_THRESHOLD)
 
     # Run dissonance probe
-    global _dissonance_report
     _dissonance_report = get_dissonance_report()
     if _dissonance_report["parity_percent"] < 100.0:
         log.warning("SYSTEM DISSONANCE DETECTED: Parity at %.1f%%", _dissonance_report["parity_percent"])
