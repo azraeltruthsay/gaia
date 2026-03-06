@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for container execution (host UID mapping)
+# Create gaia user
 RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
 ENV HOME=/home/gaia
 ENV USER=gaia
@@ -29,31 +29,26 @@ WORKDIR /app
 # Install dependencies from requirements.txt (better layer caching)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Copy requirements first for better caching
-COPY gaia-core/requirements.txt .
+# 1. Copy common library first
+COPY candidates/gaia-common /gaia-common
+RUN pip install -e /gaia-common
 
-# Copy gaia-common source code so it's available to be installed by requirements.txt
-COPY gaia-common /gaia-common
-
-# Install Python dependencies
-# GPU inference is handled by gaia-prime — no GPU packages needed here
+# 2. Copy requirements and install
+COPY candidates/gaia-core/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Install development dependencies for validation (pytest, ruff, mypy)
-# ═══════════════════════════════════════════════════════════════════════════
-COPY gaia-core/pyproject.toml .
-COPY gaia-core/README.md .
+# 3. Install development dependencies
+COPY candidates/gaia-core/pyproject.toml .
+COPY candidates/gaia-core/README.md .
 RUN pip install -e ".[dev]"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Copy service code
+# Copy service code (This layer changes frequently)
 # ═══════════════════════════════════════════════════════════════════════════
 
-COPY gaia-core/gaia_core/ ./gaia_core/
-COPY gaia-core/gaia_rescue.py ./gaia_rescue.py
-# Copy canonical constants file from gaia-common (single source of truth)
-COPY gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
+COPY candidates/gaia-core/gaia_core/ ./gaia_core/
+COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
+COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
 # Create writable directories and set ownership
 RUN mkdir -p /app/.pytest_cache /logs \

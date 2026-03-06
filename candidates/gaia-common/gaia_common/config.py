@@ -131,16 +131,16 @@ class Config:
         self.endpoints.update(data.get("SERVICE_ENDPOINTS", {}))
         self.timeouts.update(data.get("TIMEOUTS", {}))
 
-        # Map System Paths
+        # Map System Paths (Defensively skip read-only properties)
         sys_cfg = data.get("SYSTEM", {})
-        self.MODELS_DIR = sys_cfg.get("MODELS_DIR", self.MODELS_DIR)
-        self.KNOWLEDGE_DIR = sys_cfg.get("KNOWLEDGE_DIR", self.KNOWLEDGE_DIR)
-        self.LOGS_DIR = sys_cfg.get("LOGS_DIR", self.LOGS_DIR)
-        self.SHARED_DIR = sys_cfg.get("SHARED_DIR", self.SHARED_DIR)
-        self.SLEEP_CHECKPOINT_DIR = sys_cfg.get("SLEEP_CHECKPOINT_DIR", self.SLEEP_CHECKPOINT_DIR)
-        self.HISTORY_DIR = sys_cfg.get("HISTORY_DIR", self.HISTORY_DIR)
-        self.IDENTITY_FILE = sys_cfg.get("IDENTITY_FILE", self.IDENTITY_FILE)
-        self.CHEAT_SHEET_FILE = sys_cfg.get("CHEAT_SHEET_FILE", self.CHEAT_SHEET_FILE)
+        for key, value in sys_cfg.items():
+            # Check if the key is a property in the current instance
+            prop = getattr(self.__class__, key, None)
+            if isinstance(prop, property):
+                logger.debug(f"Config: skipping property '{key}' in auto-mapping")
+                continue
+            if hasattr(self, key):
+                setattr(self, key, value)
 
     def _apply_env_overrides(self):
         """Apply high-priority environment variable overrides."""

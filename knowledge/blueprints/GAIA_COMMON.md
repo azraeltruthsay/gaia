@@ -62,16 +62,19 @@ gaia-common/
 The central data structure for inter-service communication. Defined in `protocols/cognition_packet.py`.
 
 **Sections**:
-- **Header**: datetime, session_id, packet_id, persona, origin, routing, model config
-- **Content**: original_prompt, system_prompt, task_instructions, data_fields
-- **Context**: conversation_history, knowledge_base, constraints, safety_profile
-- **Reasoning**: thoughts, planning, execution, reflection logs
-- **Response**: candidate text, confidence, finish_reason
-- **Governance**: safety_profile_id, approval_required, tool_execution_status
-- **Metrics**: token_usage, latency, inference_time, model_name
-- **Status**: state (initialized/processing/completed/aborted), error_message, warnings
+- **Header**: session_id, packet_id, persona (identity_id, persona_id, role, tone_hint, safety_profile_id, traits), routing (target_engine, allow_parallel, priority, deadline_iso, queue_id), model (name, provider, context_window_tokens, max_output_tokens, response_buffer_tokens, temperature, top_p, seed, stop, tool_permissions, allow_tools), origin, datetime, sub_id, parent_packet_id, lineage, output_routing, operational_status.
+- **Intent**: user_intent, system_task, confidence, tags.
+- **Context**: session_history_ref (type, value), cheatsheets, constraints (max_tokens, time_budget_ms, safety_mode, policies), relevant_history_snippet, available_mcp_tools.
+- **Content**: original_prompt, data_fields, attachments, timeline (Temporal Context support), intent (optional override).
+- **Reasoning**: reflection_log, sketchpad, evaluations.
+- **Response**: candidate, confidence, stream_proposal, tool_calls, sidecar_actions.
+- **Governance**: safety (execution_allowed, allowed_commands_whitelist_id, dry_run), signatures, audit, privacy.
+- **Metrics**: token_usage (prompt_tokens, completion_tokens, total_tokens, projected_tokens), latency_ms, cost_estimate, errors, resources, semantic_probe.
+- **Status**: finalized, state (PacketState), next_steps, observer_trace.
 
-**Key Enums**: `PersonaRole`, `SystemTask`, `TargetEngine`, `OutputDestination`, `Origin`
+**Robustness**: All sections use `default_factory` patterns to ensure 100% successful deserialization from partial JSON payloads.
+
+**Key Enums**: `PersonaRole`, `SystemTask`, `TargetEngine`, `OutputDestination`, `Origin`, `PacketState`
 
 ### Config (`config.py`)
 

@@ -259,7 +259,7 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
 
 
 def _write_file_impl(params: dict) -> dict:
-    """Write content to a file, restricted to writable data volumes."""
+    """Write content to a file, restricted to writable data volumes and enforces Production Lock."""
     path = params.get("path")
     content = params.get("content", "")
     if not path:
@@ -271,8 +271,22 @@ def _write_file_impl(params: dict) -> dict:
         p = Path("/sandbox") / p
     p = p.resolve()
 
+    # --- PRODUCTION LOCK (Sovereign Shield) ---
+    # Block direct writes to live service directories.
+    # Forces usage of /candidates/ path for development.
+    path_str = str(p)
+    is_live_code = any(segment in path_str for segment in ["/gaia-core/", "/gaia-web/", "/gaia-mcp/", "/gaia-common/"])
+    is_candidate = "/candidates/" in path_str
+    
+    if is_live_code and not is_candidate:
+        if os.getenv("BREAKGLASS_EMERGENCY") != "1":
+            logger.critical(f"🛡️ PRODUCTION LOCK: Attempted write to live code path: {p}")
+            raise PermissionError(
+                "PRODUCTION LOCK ACTIVE: Direct writes to live services are forbidden. "
+                "Modify code in /candidates/ and use the promotion pipeline instead."
+            )
+
     # Allowlist: only the writable data volumes from docker-compose.yml
-    # Excludes /app (source code) and /gaia-common, /models (read-only)
     allow_roots = [
         Path("/knowledge").resolve(), 
         Path("/sandbox").resolve(),
@@ -1069,6 +1083,20 @@ def _replace_impl(params: dict) -> dict:
 
     # 1. Resolve and validate path
     p = Path(path).resolve()
+    
+    # --- PRODUCTION LOCK (Sovereign Shield) ---
+    path_str = str(p)
+    is_live_code = any(segment in path_str for segment in ["/gaia-core/", "/gaia-web/", "/gaia-mcp/", "/gaia-common/"])
+    is_candidate = "/candidates/" in path_str
+    
+    if is_live_code and not is_candidate:
+        if os.getenv("BREAKGLASS_EMERGENCY") != "1":
+            logger.critical(f"🛡️ PRODUCTION LOCK: Attempted replace in live code path: {p}")
+            raise PermissionError(
+                "PRODUCTION LOCK ACTIVE: Direct modifications to live services are forbidden. "
+                "Modify code in /candidates/ and use the promotion pipeline instead."
+            )
+
     allow_roots = [
         Path("/knowledge").resolve(), 
         Path("/sandbox").resolve(),

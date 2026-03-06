@@ -15,10 +15,10 @@
   },
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
-  "llm_backend": "gpu_prime",
-  "max_tokens_operator": 32000,
+  "llm_backend": "thinker",
+  "max_tokens_core": 32000,
   "MODEL_CONFIGS": {
-    "gpu_prime": {
+    "thinker": {
       "enabled": true,
       "max_model_len": 16384,
       "max_num_batched_tokens": 1024,
@@ -36,18 +36,18 @@
         "max_lora_rank": 64
       }
     },
-    "operator": {
+    "core": {
       "enabled": true,
       "path": "/models/Qwen3-8B-abliterated-Q4_K_M.gguf",
       "strip_chat_template": true,
       "chat_format": "chatml",
       "type": "local",
       "n_gpu_layers": 0,
-      "description": "The Cognitive Orchestrator (CPU-first, respects Prime priority)"
+      "description": "Operator Core (CPU-first, respects Thinker priority)"
     },
     "observer": {
       "enabled": true,
-      "use_gpu_prime": true,
+      "use_thinker": true,
       "type": "vllm"
     },
     "oracle_gemini": {
@@ -70,15 +70,15 @@
     },
     "prime": {
       "enabled": true,
-      "alias": "gpu_prime",
+      "alias": "thinker",
       "type": "vllm"
     },
-    "nano": {
+    "reflex": {
       "enabled": true,
       "path": "/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
       "type": "local",
       "n_gpu_layers": 0,
-      "description": "Ultra-fast Nano-Refiner (CPU-first)"
+      "description": "Sub-second Reflex Nano (CPU-first)"
     }
   },
   "N_BATCH": 1024,

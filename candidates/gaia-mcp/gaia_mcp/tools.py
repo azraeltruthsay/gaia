@@ -25,7 +25,8 @@ from .notebooklm_tools import (
     notebooklm_list_notebooks, notebooklm_get_notebook,
     notebooklm_list_sources, notebooklm_list_notes,
     notebooklm_list_artifacts, notebooklm_chat,
-    notebooklm_download_audio, notebooklm_create_note,
+    notebooklm_download_audio, notebooklm_generate_audio,
+    notebooklm_create_note,
 )
 from .listener_tools import (
     audio_listen_start, audio_listen_stop, audio_listen_status,
@@ -45,6 +46,13 @@ _gaia_helper = GAIARescueHelper(_config_instance)
 # Placeholder for TOOLS registry (will be populated from gaia-common.utils.tools_registry)
 from gaia_common.utils.tools_registry import TOOLS
 
+# Tools that require explicit human approval before execution
+SENSITIVE_TOOLS = {
+    "ai_write", "write_file", "run_shell", "memory_rebuild_index",
+    "promotion_create_request", "kanka_create_entity", "kanka_update_entity",
+    "notebooklm_create_note", "audio_listen_start"
+}
+
 def list_tools() -> List[str]:
     """List all available tools."""
     return list(TOOLS.keys())
@@ -58,11 +66,31 @@ def describe_tool(tool_name: str) -> Dict[str, Any]:
 async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore, pre_approved: bool = False) -> Any:
     """
     Executes a tool method with the given parameters.
-    Handles sensitive tools requiring approval.
+    Handles sensitive tools requiring approval and blast shield validation.
     """
     logger.info("Executing tool '%s'", method)
     logger.debug("[DEBUG] Executing tool '%s' with params_keys=%s", method, sorted(list((params or {}).keys())))
 
+    # 1. Enforce sensitive tool policy unless pre-approved (bypass or already approved)
+    if not pre_approved and method in SENSITIVE_TOOLS:
+        raise PermissionError(f"Tool '{method}' requires explicit approval.")
+
+    # 2. Blast Shield validation (proactive safety check)
+    if approval_store:
+        try:
+            approval_store.validate_against_blast_shield(method, params)
+        except ValueError as e:
+            logger.critical(f"🛡️ BLAST SHIELD blocked execution of '{method}': {e}")
+            raise PermissionError(f"Blast Shield block: {e}")
+
+    # 3. Handle built-in discoveries
+    if method == "list_tools" or method == "rpc.discover":
+        return list(TOOLS.keys())
+
+    if method == "describe_tool":
+        return TOOLS.get(params.get("tool_name"), {"error": "Tool not found"})
+
+    # 4. Map tool implementations
     tool_map = {
         "run_shell": lambda p: run_shell_safe(p.get("command"), set(_config_instance.SAFE_EXECUTE_FUNCTIONS)),
         "read_file": lambda p: _read_file_impl(p),
@@ -72,6 +100,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "list_files": lambda p: _list_files_impl(p),
         "list_tree": lambda p: _list_tree_impl(p),
         "world_state": lambda p: world_state_detail(),
+        "gpu_status": lambda p: world_state_detail(),
         "memory_status": lambda p: _memory_status_impl(p),
         "memory_query": lambda p: _memory_query_impl(p),
         "memory_rebuild_index": lambda p: _memory_rebuild_index_impl(p),
@@ -95,6 +124,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
         "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
+        "index_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
@@ -123,6 +153,9 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "audio_listen_status": lambda p: audio_listen_status(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
+        "replace": lambda p: _replace_impl(p),
+        # Discord integration
+        "send_discord_message": lambda p: _send_discord_message_impl(p),
     }
 
     async_tool_map = {
@@ -134,26 +167,51 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "notebooklm_list_artifacts": notebooklm_list_artifacts,
         "notebooklm_chat": notebooklm_chat,
         "notebooklm_download_audio": notebooklm_download_audio,
+        "notebooklm_generate_audio": notebooklm_generate_audio,
         "notebooklm_create_note": notebooklm_create_note,
+        # Study mode / LoRA adapter tools (gateway calls to gaia-study)
+        "study_start": _study_start_impl,
+        "study_status": _study_status_impl,
+        "study_cancel": _study_cancel_impl,
+        "adapter_list": _adapter_list_impl,
+        "adapter_load": _adapter_load_impl,
+        "adapter_unload": _adapter_unload_impl,
+        "adapter_delete": _adapter_delete_impl,
+        "adapter_info": _adapter_info_impl,
     }
-
 
     if method not in tool_map and method not in async_tool_map:
         raise ValueError(f"Tool '{method}' is not a valid, implemented tool.")
 
     # Execute the tool
     if method in tool_map:
-        result = tool_map[method](params)
+        return tool_map[method](params)
     elif method in async_tool_map:
-        result = await async_tool_map[method](params)
-    else:
-        raise ValueError(f"Tool '{method}' is not a valid, implemented tool.") # Should not happen
-
-    return result
+        return await async_tool_map[method](params)
+    
+    raise ValueError(f"Tool '{method}' failed to dispatch.")
 
 
 # Tool implementations (extracted from mcp_lite_server.py)
 # =========================================================
+
+def _validate_python_content(path: str, content: str):
+    """
+    If the path ends in .py, attempt to compile the content.
+    Raises ValueError if compilation fails.
+    """
+    if path.endswith(".py"):
+        try:
+            import py_compile
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=True) as tmp:
+                tmp.write(content)
+                tmp.flush()
+                py_compile.compile(tmp.name, doraise=True)
+        except Exception as e:
+            logger.error("Sovereign Shield: Compilation failed for %s: %s", path, e)
+            raise ValueError(f"Sovereign Shield: Cannot save {path} because it contains syntax errors: {e}")
+
 
 def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
     """Perform a safe ai_write: write params['content'] to params['path'] and return metadata."""
@@ -188,6 +246,9 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
             logger.info(f"ai_write: cwd={cwd} target={path} resolved={p.resolve()}")
         except Exception:
             logger.info(f"ai_write: cwd unknown target={p}")
+        # [Sovereign Shield] Pre-compile check
+        _validate_python_content(str(p), content)
+
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
@@ -198,7 +259,7 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
 
 
 def _write_file_impl(params: dict) -> dict:
-    """Write content to a file, restricted to writable data volumes."""
+    """Write content to a file, restricted to writable data volumes and enforces Production Lock."""
     path = params.get("path")
     content = params.get("content", "")
     if not path:
@@ -210,9 +271,27 @@ def _write_file_impl(params: dict) -> dict:
         p = Path("/sandbox") / p
     p = p.resolve()
 
+    # --- PRODUCTION LOCK (Sovereign Shield) ---
+    # Block direct writes to live service directories.
+    # Forces usage of /candidates/ path for development.
+    path_str = str(p)
+    is_live_code = any(segment in path_str for segment in ["/gaia-core/", "/gaia-web/", "/gaia-mcp/", "/gaia-common/"])
+    is_candidate = "/candidates/" in path_str
+    
+    if is_live_code and not is_candidate:
+        if os.getenv("BREAKGLASS_EMERGENCY") != "1":
+            logger.critical(f"🛡️ PRODUCTION LOCK: Attempted write to live code path: {p}")
+            raise PermissionError(
+                "PRODUCTION LOCK ACTIVE: Direct writes to live services are forbidden. "
+                "Modify code in /candidates/ and use the promotion pipeline instead."
+            )
+
     # Allowlist: only the writable data volumes from docker-compose.yml
-    # Excludes /app (source code) and /gaia-common, /models (read-only)
-    allow_roots = [Path("/knowledge").resolve(), Path("/sandbox").resolve()]
+    allow_roots = [
+        Path("/knowledge").resolve(), 
+        Path("/sandbox").resolve(),
+        Path("/gaia/GAIA_Project").resolve()
+    ]
     if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
         raise ValueError(f"Path not allowed — write_file is restricted to: {[str(a) for a in allow_roots]}")
 
@@ -223,6 +302,9 @@ def _write_file_impl(params: dict) -> dict:
 
     # Create parent directories
     real.parent.mkdir(parents=True, exist_ok=True)
+
+    # [Sovereign Shield] Pre-compile check
+    _validate_python_content(str(real), content)
 
     # Write file
     with open(real, "w", encoding="utf-8") as f:
@@ -312,7 +394,6 @@ def _list_tree_impl(params: dict):
 
     lines = []
     count = 0
-    prefix_map = {}
 
     def add_line(depth, name):
         nonlocal count
@@ -351,7 +432,12 @@ def _read_file_impl(params: dict):
     if not path:
         raise ValueError("path is required")
     p = Path(path).resolve()
-    allow_roots = [Path("/knowledge").resolve(), Path("/gaia-common").resolve(), Path("/sandbox").resolve()]
+    allow_roots = [
+        Path("/knowledge").resolve(), 
+        Path("/gaia-common").resolve(), 
+        Path("/sandbox").resolve(),
+        Path("/gaia/GAIA_Project").resolve()
+    ]
     if not any(str(p).startswith(str(a)) for a in allow_roots):
         raise ValueError("Path not allowed")
     if not p.is_file():
@@ -398,7 +484,7 @@ def _memory_query_impl(params: dict):
 
 def _memory_rebuild_index_impl(params: dict):
     doc_dir = params.get("doc_dir") or "./knowledge/system_reference/GAIA_Function_Map"
-    VECTOR_INDEX_PATH = Path("/knowledge/vector_store/index.json") # Define here for now
+    Path("/knowledge/vector_store/index.json") # Define here for now
     vi = VectorIndexer.instance()
     ok = vi.build_index_from_docs(doc_dir=doc_dir)
     vi.refresh_index()
@@ -966,3 +1052,78 @@ def _promotion_request_status_impl(params: Dict) -> Dict:
         "ok": True,
         **req.to_dict(),
     }
+
+
+def _send_discord_message_impl(params: dict) -> dict:
+    """Send a message to Discord via webhook."""
+    from gaia_common.integrations.discord import DiscordConfig, DiscordWebhookSender
+    
+    content = params.get("content")
+    if not content:
+        raise ValueError("content is required")
+    
+    config = DiscordConfig.from_env()
+    if not config.webhook_url:
+        raise ValueError("DISCORD_WEBHOOK_URL is not configured")
+
+    sender = DiscordWebhookSender(config.webhook_url, config.bot_name, config.avatar_url)
+    success = sender.send(content)
+    return {"ok": success}
+
+
+def _replace_impl(params: dict) -> dict:
+    """Surgically replace text in a file with allowlist and safety checks."""
+    path = params.get("file_path")
+    old_string = params.get("old_string")
+    new_string = params.get("new_string")
+    allow_multiple = bool(params.get("allow_multiple", False))
+
+    if not all([path, old_string is not None, new_string is not None]):
+        raise ValueError("file_path, old_string, and new_string are required")
+
+    # 1. Resolve and validate path
+    p = Path(path).resolve()
+    
+    # --- PRODUCTION LOCK (Sovereign Shield) ---
+    path_str = str(p)
+    is_live_code = any(segment in path_str for segment in ["/gaia-core/", "/gaia-web/", "/gaia-mcp/", "/gaia-common/"])
+    is_candidate = "/candidates/" in path_str
+    
+    if is_live_code and not is_candidate:
+        if os.getenv("BREAKGLASS_EMERGENCY") != "1":
+            logger.critical(f"🛡️ PRODUCTION LOCK: Attempted replace in live code path: {p}")
+            raise PermissionError(
+                "PRODUCTION LOCK ACTIVE: Direct modifications to live services are forbidden. "
+                "Modify code in /candidates/ and use the promotion pipeline instead."
+            )
+
+    allow_roots = [
+        Path("/knowledge").resolve(), 
+        Path("/sandbox").resolve(),
+        Path("/gaia/GAIA_Project").resolve()
+    ]
+    if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
+        raise ValueError("Path not allowed for replace")
+
+    if not p.is_file():
+        raise ValueError(f"{path} is not a file")
+
+    # 2. Perform the replacement
+    content = p.read_text(encoding="utf-8")
+    
+    count = content.count(old_string)
+    if count == 0:
+        raise ValueError(f"Could not find exact match for: {old_string}")
+    if count > 1 and not allow_multiple:
+        raise ValueError(f"Found {count} occurrences of old_string. Set allow_multiple=True to replace all.")
+
+    new_content = content.replace(old_string, new_string)
+
+    # 3. [Sovereign Shield] Pre-compile check
+    _validate_python_content(str(p), new_content)
+
+    # 4. Save the file
+    p.write_text(new_content, encoding="utf-8")
+    
+    logger.info(f"replace: modified {p} ({count} occurrences replaced)")
+    return {"ok": True, "path": str(p), "count": count}

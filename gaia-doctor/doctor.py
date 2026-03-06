@@ -101,7 +101,54 @@ SERVICE_CODE_DIRS = {
     "gaia-mcp": GAIA_PROJECT_ROOT / "gaia-mcp",
     "gaia-study": GAIA_PROJECT_ROOT / "gaia-study",
     "gaia-orchestrator": GAIA_PROJECT_ROOT / "gaia-orchestrator",
+
+    # Candidates
+    "gaia-core-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-core",
+    "gaia-mcp-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-mcp",
 }
+
+
+def get_dissonance_report() -> dict:
+    """Compare file hashes between live and candidate directories to detect structural drift."""
+    report = {"divergent_files": [], "parity_percent": 100.0}
+    
+    # Vital Organs to monitor for drift
+    vital_organs = [
+        ("gaia-core/gaia_core/cognition/agent_core.py", "candidates/gaia-core/gaia_core/cognition/agent_core.py"),
+        ("gaia-core/gaia_core/main.py", "candidates/gaia-core/gaia_core/main.py"),
+        ("gaia-web/gaia_web/discord_interface.py", "candidates/gaia-web/gaia_web/discord_interface.py"),
+        ("gaia-common/gaia_common/protocols/cognition_packet.py", "candidates/gaia-common/gaia_common/protocols/cognition_packet.py"),
+    ]
+    
+    import hashlib
+    def get_hash(path: Path) -> str:
+        if not path.exists(): return "MISSING"
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    total = len(vital_organs)
+    matches = 0
+    
+    for live_rel, cand_rel in vital_organs:
+        live_path = GAIA_PROJECT_ROOT / live_rel
+        cand_path = GAIA_PROJECT_ROOT / cand_rel
+        
+        h_live = get_hash(live_path)
+        h_cand = get_hash(cand_path)
+        
+        if h_live == h_cand and h_live != "MISSING":
+            matches += 1
+        else:
+            report["divergent_files"].append({
+                "file": live_rel,
+                "live_hash": h_live[:8],
+                "cand_hash": h_cand[:8],
+                "status": "DIVERGENT" if h_live != h_cand else "MISSING"
+            })
+            
+    if total > 0:
+        report["parity_percent"] = (matches / total) * 100.0
+        
+    return report
 
 
 def _get_service_mtime(name: str) -> float:
@@ -305,8 +352,16 @@ def restart_candidate(name: str) -> bool:
         log.info("Maintenance mode active, skipping restart of %s", name)
         return False
 
+    # 1. Structural Integrity Check (The "Quarantine" Gate)
+    if not run_structural_audit(name):
+        return False
+
     log.warning("REMEDIATION: Restarting %s via HA compose overlay", name)
     try:
+        # Override network for candidate stack if needed
+        env = os.environ.copy()
+        env["GAIA_NETWORK"] = "gaia-network"
+        
         result = subprocess.run(
             ["docker", "compose",
              "-p", COMPOSE_PROJECT,
@@ -315,6 +370,7 @@ def restart_candidate(name: str) -> bool:
              "--profile", "ha",
              "up", "-d", name],
             capture_output=True, text=True, timeout=120,
+            env=env
         )
         _last_restart[name] = time.monotonic()
         entry = {
@@ -360,14 +416,9 @@ def raise_alarm(name: str, reason: str):
         log.debug("Failed to write alarms file", exc_info=True)
 
 
-def docker_restart(name: str) -> bool:
-    """Restart a production service via `docker restart`. Enforces syntax check and circuit breaker."""
-    if MAINTENANCE_FLAG.exists():
-        log.info("Maintenance mode active, skipping restart of %s", name)
-        return False
-
-    # 1. Structural Integrity Check (The "Quarantine" Gate)
-    log.info("Performing pre-restart syntax audit for %s...", name)
+def run_structural_audit(name: str) -> bool:
+    """Perform pre-restart structural validation and autonomous repair."""
+    log.info("Performing structural audit for %s...", name)
     project_root = Path("/gaia/GAIA_Project")
     svc_path = project_root / name
     if "-candidate" in name:
@@ -375,27 +426,25 @@ def docker_restart(name: str) -> bool:
     
     try:
         # Check every python file in the service for syntax errors
-        # Using py_compile as a fast, reliable structural check
         audit_res = subprocess.run(
             ["python", "-m", "py_compile"] + list(svc_path.rglob("*.py")),
             capture_output=True, text=True, timeout=30
         )
         
         if audit_res.returncode != 0:
-            log.warning("Structural error detected in %s. Attempting Tier 1 repair (ruff)...", name)
+            log.warning("Structural error detected in %s. Attempting repair...", name)
             
             # Extract broken file path from stderr
             import re
-            # Typical py_compile error: File "path/to/file.py", line 123
             match = re.search(r'File "([^"]+)"', audit_res.stderr)
             if match:
                 broken_file = Path(match.group(1))
                 log.info("Targeting broken file for repair: %s", broken_file)
                 
-                # Tier 1 Repair: Ruff --fix (imports, whitespace, unused vars)
+                # Tier 1 Repair: Ruff --fix
                 subprocess.run(["ruff", "check", "--fix", str(broken_file)], capture_output=True)
                 
-                # Re-audit after ruff
+                # Re-audit
                 audit_res = subprocess.run(
                     ["python", "-m", "py_compile", str(broken_file)],
                     capture_output=True, text=True, timeout=10
@@ -403,25 +452,28 @@ def docker_restart(name: str) -> bool:
                 
                 if audit_res.returncode == 0:
                     log.info("✅ Tier 1 repair (ruff) successful for %s", name)
+                    return True
                 else:
-                    # Tier 2 Repair: Cognitive Loop
-                    log.warning("Tier 1 repair failed for %s. Escalating to Tier 2 (Cognitive Repair)...", name)
+                    # Tier 2 Repair: High-Availability Surgery
+                    log.warning("Tier 1 repair failed for %s. Escalating to Tier 2 (HA Surgery)...", name)
                     try:
                         broken_content = broken_file.read_text()
-                        # Use localhost:6415 to reach gaia-core directly
                         import requests
                         repair_res = requests.post(
                             "http://localhost:6415/api/repair/structural",
-                            json={"broken_code": broken_content, "error_msg": audit_res.stderr},
-                            timeout=60
+                            json={
+                                "service": name,
+                                "broken_code": broken_content, 
+                                "error_msg": audit_res.stderr
+                            },
+                            timeout=90 # Surgery takes time
                         )
                         
                         if repair_res.status_code == 200:
                             fixed_code = repair_res.json().get("fixed_code")
                             if fixed_code:
-                                # Re-verify before applying
-                                log.info("Validating cognitive fix for %s...", broken_file.name)
-                                tmp_file = broken_file.with_suffix(".tmp_repair")
+                                log.info("Validating HA fix for %s...", broken_file.name)
+                                tmp_file = broken_file.with_suffix(".tmp_surgery")
                                 tmp_file.write_text(fixed_code)
                                 
                                 val_res = subprocess.run(
@@ -432,25 +484,71 @@ def docker_restart(name: str) -> bool:
                                 if val_res.returncode == 0:
                                     broken_file.write_text(fixed_code)
                                     tmp_file.unlink()
-                                    log.info("✅ Tier 2 repair (cognitive) successful for %s", name)
+                                    log.info("✅ Tier 2 repair (HA Surgery) successful for %s", name)
+                                    return True
                                 else:
-                                    log.error("❌ Cognitive fix failed validation: %s", val_res.stderr)
+                                    log.error("❌ HA fix failed validation: %s", val_res.stderr)
                                     tmp_file.unlink()
                                     return False
                             else:
-                                log.error("Structural repair API returned empty fix")
+                                log.error("HA surgery returned empty fix")
                                 return False
                         else:
-                            log.error("Structural repair API failed: %d", repair_res.status_code)
+                            log.error("HA surgery API failed: %d", repair_res.status_code)
                             return False
                     except Exception as e:
-                        log.error("Exception during Tier 2 repair: %s", e)
+                        log.error("Exception during Tier 2 surgery: %s", e)
                         return False
-            else:
-                log.error("Could not parse broken file from audit output: %s", audit_res.stderr)
-                return False
+            
+            log.critical("⛔ QUARANTINE: %s has fatal syntax errors.", name)
+            raise_alarm(name, f"Structural failure: {audit_res.stderr.strip()}. Quarantine active.")
+            return False
     except Exception as e:
-        log.warning("Pre-restart audit failed to run: %s. Proceeding with caution.", e)
+        log.warning("Audit failed to run: %s", e)
+    return True
+
+def docker_restart(name: str) -> bool:
+    """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker."""
+    if MAINTENANCE_FLAG.exists():
+        log.info("Maintenance mode active, skipping restart of %s", name)
+        return False
+
+    now = time.monotonic()
+
+    # 1. Reload Guard: Detect high-frequency restart loops
+    _restart_history[name] = [t for t in _restart_history[name] if now - t < PROD_RESTART_WINDOW]
+    if len(_restart_history[name]) >= PROD_RESTART_MAX:
+        log.critical("🚨 RELOAD LOOP DETECTED for %s. Quarantine active.", name)
+        if name not in _alarmed_services:
+            raise_alarm(
+                name,
+                f"Recursive restart loop detected: {len(_restart_history[name])} restarts in "
+                f"{PROD_RESTART_WINDOW // 60}min. Manual intervention required."
+            )
+            
+            # Autonomous Diagnostics
+            try:
+                log.info("Dispatching autonomous diagnostics for %s...", name)
+                # Extract last 100 lines of logs
+                log_res = subprocess.run(["docker", "logs", "--tail", "100", name], capture_output=True, text=True)
+                logs = log_res.stdout + log_res.stderr
+                
+                import requests
+                requests.post(
+                    "http://localhost:6415/api/doctor/diagnose",
+                    json={"service": name, "logs": logs},
+                    timeout=10 # Fire and forget diagnostic turn
+                )
+            except Exception as diag_err:
+                log.error("Failed to dispatch diagnostics: %s", diag_err)
+                
+        return False
+
+    # 2. Structural Integrity Check (The "Quarantine" Gate)
+    if not run_structural_audit(name):
+        return False
+
+    # Cooldown between individual restarts (reuse RESTART_COOLDOWN)
 
     now = time.monotonic()
 
@@ -566,6 +664,11 @@ def poll_cycle():
                     log.warning("%s is DOWN (%d consecutive failures)", name, failures)
                 _service_state[name]["healthy"] = False
 
+                # Enforce structural audit before ANY remediation
+                if not run_structural_audit(name):
+                    log.error("Structural audit failed for %s. Quarantine active.", name)
+                    continue
+
                 if remediation == "ha":
                     info = inspect_container(name)
                     needs_restart = (
@@ -579,6 +682,12 @@ def poll_cycle():
                     docker_restart(name)
             else:
                 log.debug("%s failed check %d/%d", name, failures, FAILURE_THRESHOLD)
+
+    # Run dissonance probe
+    global _dissonance_report
+    _dissonance_report = get_dissonance_report()
+    if _dissonance_report["parity_percent"] < 100.0:
+        log.warning("SYSTEM DISSONANCE DETECTED: Parity at %.1f%%", _dissonance_report["parity_percent"])
 
     _write_status()
 
@@ -603,6 +712,7 @@ def _build_status() -> dict:
         "maintenance_mode": MAINTENANCE_FLAG.exists(),
         "active_alarms": list(_alarmed_services),
         "irritation_count": len(_irritations),
+        "dissonance": _dissonance_report,
         "services": {
             name: {
                 "healthy": state["healthy"],
