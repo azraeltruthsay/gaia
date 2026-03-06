@@ -730,706 +730,678 @@ class AgentCore:
 
         import time as _time
         t0 = _time.perf_counter()
-        try:
-            logger.info("AgentCore: run_turn start")
-            logger.debug("[DEBUG] AgentCore.run_turn start session_id=%s input_len=%d destination=%s", session_id, len(user_input or ""), destination)
-        except Exception:
-            logger.debug("[DEBUG] AgentCore.run_turn start (metrics unavailable)")
-
-        # --- Loop Detection: Initialize and check for active recovery ---
-        try:
-            loop_config = build_loop_detection_config_from_constants(constants)
-            loop_manager = get_recovery_manager()
-            loop_manager.config = loop_config
-            loop_manager.enabled = constants.get("LOOP_DETECTION_ENABLED", True)
-        except Exception:
-            logger.debug("Loop detection initialization failed, continuing without", exc_info=True)
-            loop_manager = None
-
-        # Check for pending loop recovery context from previous reset
-        loop_recovery_context = None
-        if loop_manager:
-            try:
-                loop_recovery_context = loop_manager.get_recovery_context()
-                if loop_recovery_context:
-                    logger.info("Loop recovery context pending, will inject into prompt")
-            except Exception:
-                logger.debug("Failed to get loop recovery context", exc_info=True)
-
-        # --- Semantic Probe: pre-cognition vector lookup ---
-        # Runs BEFORE persona selection. Extracts interesting phrases from
-        # user input, probes all vector collections, and uses hits to drive
-        # persona/KB selection (context-driven rather than keyword-gated).
-        probe_result = None
-        try:
-            kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
-            probe_result = run_semantic_probe(
-                user_input=user_input,
-                knowledge_bases=kb_config,
-                session_id=session_id,
-            )
-            if probe_result and probe_result.has_hits:
-                logger.info(
-                    "SemanticProbe: %d hits, primary=%s, supplemental=%s (%.1fms)",
-                    len(probe_result.hits),
-                    probe_result.primary_collection,
-                    probe_result.supplemental_collections,
-                    probe_result.probe_time_ms,
-                )
-                ts_write({
-                    "type": "semantic_probe",
-                    "metrics": probe_result.to_metrics_dict(),
-                    "phrases": probe_result.phrases_tested,
-                    "hit_details": [
-                        {"phrase": h.phrase, "collection": h.collection,
-                         "similarity": round(h.similarity, 4), "filename": h.filename}
-                        for h in probe_result.hits
-                    ],
-                }, session_id, source=source, destination_context=_metadata)
-            else:
-                ts_write({
-                    "type": "semantic_probe",
-                    "metrics": probe_result.to_metrics_dict() if probe_result else {"skipped": True},
-                }, session_id, source=source, destination_context=_metadata)
-                logger.debug("SemanticProbe: no hits")
-        except Exception:
-            logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
-
-        # --- Persona & KB selection (probe-driven with keyword fallback) ---
-        if probe_result and probe_result.primary_collection:
-            # Probe found a dominant domain — adopt that persona
-            knowledge_base_name = probe_result.primary_collection
-            persona_name = get_persona_for_knowledge_base(knowledge_base_name)
-            if not persona_name:
-                # KB exists but no persona mapped to it — use default persona with the KB
-                persona_name = "dev"
-            logger.info(
-                "Persona selection (probe-driven): persona=%s, kb=%s",
-                persona_name, knowledge_base_name,
-            )
-        else:
-            # No probe hits — fall back to keyword matching
-            persona_name, knowledge_base_name = get_persona_for_request(user_input)
-            logger.info(
-                "Persona selection (keyword fallback): persona=%s, kb=%s",
-                persona_name, knowledge_base_name,
-            )
-
-        # 0. Emergency Healing Mode (The "Immune Response")
-        # If the Immune System detects a CRITICAL failure (like a SyntaxError), 
-        # we pivot the entire turn toward self-repair.
-#         emergency_irritant = self._check_immune_system_for_emergency()
-#         if emergency_irritant:
-#             yield {"type": "token", "value": "[(i) Digital Immune System: CRITICAL IRRITATION DETECTED. Entering Emergency Healing Mode...]\n\n"}
-#             # Force high-reasoning persona and model for repair
-#             persona_name = "dev"
-#             knowledge_base_name = "core"
-#             # Add emergency instructions to the user input
-#             user_input = (
-#                 f"!! COGNITIVE EMERGENCY !!\n"
-#                 f"The system has detected a structural failure: {emergency_irritant}\n"
-#                 f"PRIORITY: Identify and repair this issue immediately using your tools.\n"
-#                 f"User's original request (suspend for now): {user_input}"
-#             )
-#             logger.warning("[IMMUNE RESPONSE] Turn pivoted to emergency repair.")
-# 
-#         # Load the selected persona
-#         self.ai_manager.initialize(persona_name)
-#         
-#         # Role mapping (keep internal keys stable):
-        # - "lite"  => Operator (CPU orchestrator: intent, tools, summaries, short answers)
-        # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
-        # - "oracle" => External/cloud escalation
-        selected_model_name = None
-        # Check if GPU is released for sleep — skip gpu_prime in all selection paths
-        _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
-
-        # 1. Model Selection (Prioritize Fast-Path & Overrides)
-        text_lower = user_input.lower()
-        force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
-        wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
         
-        # Simple patterns NANO can handle reliably
-        factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time"]
-        is_factual = any(p in text_lower for p in factual_patterns)
-        is_trivial = len(user_input) < 100 and (
-            any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"]) or
-            is_factual
-        )
+        # Primary turn wrapper for resource management
+        try:
+            # Initialize turn variables to prevent NameErrors in finally block or loop
+            observer_model_name = None
+            observer_instance = None
+            active_stream_observer = None
+            post_run_observer = None
+            disable_observer = True # Default to safe
+            reflex_text = "" # Default to empty
+            
+            try:
+                logger.info("AgentCore: run_turn start")
+                logger.debug("[DEBUG] AgentCore.run_turn start session_id=%s input_len=%d destination=%s", session_id, len(user_input or ""), destination)
+            except Exception:
+                logger.debug("[DEBUG] AgentCore.run_turn start (metrics unavailable)")
 
-        # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
-        if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS and not force_thinker:
-            # OPTIMIZATION: If it is factual but Nano is too small to handle it perfectly,
-            # and we have a GPU model idle, prefer the GPU model for instant response
-            # rather than grinding on CPU lite.
-            if is_factual and "gpu_prime" in self.model_pool.models and not _gpu_sleeping:
-                selected_model_name = "gpu_prime"
-                logger.info("[MODEL_SELECT] Routing factual query to gpu_prime for GPU acceleration (instant response).")
-            else:
-                selected_model_name = "nano"
-                logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+            # --- Loop Detection: Initialize and check for active recovery ---
+            try:
+                loop_config = build_loop_detection_config_from_constants(constants)
+                loop_manager = get_recovery_manager()
+                loop_manager.config = loop_config
+                loop_manager.enabled = constants.get("LOOP_DETECTION_ENABLED", True)
+            except Exception:
+                logger.debug("Loop detection initialization failed, continuing without", exc_info=True)
+                loop_manager = None
 
-        # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
-        elif knowledge_base_name:
-            logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
-            for cand in ["gpu_prime", "prime"]:
-                if cand == "gpu_prime" and _gpu_sleeping:
-                    continue
-                if cand in self.config.MODEL_CONFIGS:
-                    selected_model_name = cand
-                    logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
-                    break
+            # Check for pending loop recovery context from previous reset
+            loop_recovery_context = None
+            if loop_manager:
+                try:
+                    loop_recovery_context = loop_manager.get_recovery_context()
+                    if loop_recovery_context:
+                        logger.info("Loop recovery context pending, will inject into prompt")
+                except Exception:
+                    logger.debug("Failed to get loop recovery context", exc_info=True)
 
-        if not selected_model_name:
-            # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
-            backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-            if backend_env:
-                # Skip gpu_prime when GPU is released for sleep
-                if backend_env == "gpu_prime" and _gpu_sleeping:
-                    logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
-                elif backend_env in self.model_pool.models:
-                    selected_model_name = backend_env
+            # --- Semantic Probe: pre-cognition vector lookup ---
+            # Runs BEFORE persona selection. Extracts interesting phrases from
+            # user input, probes all vector collections, and uses hits to drive
+            # persona/KB selection (context-driven rather than keyword-gated).
+            probe_result = None
+            try:
+                kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
+                probe_result = run_semantic_probe(
+                    user_input=user_input,
+                    knowledge_bases=kb_config,
+                    session_id=session_id,
+                )
+                if probe_result and probe_result.has_hits:
+                    logger.info(
+                        "SemanticProbe: %d hits, primary=%s, supplemental=%s (%.1fms)",
+                        len(probe_result.hits),
+                        probe_result.primary_collection,
+                        probe_result.supplemental_collections,
+                        probe_result.probe_time_ms,
+                    )
+                    ts_write({
+                        "type": "semantic_probe",
+                        "metrics": probe_result.to_metrics_dict(),
+                        "phrases": probe_result.phrases_tested,
+                        "hit_details": [
+                            {"phrase": h.phrase, "collection": h.collection,
+                             "similarity": round(h.similarity, 4), "filename": h.filename}
+                            for h in probe_result.hits
+                        ],
+                    }, session_id, source=source, destination_context=_metadata)
                 else:
-                    logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
+                    ts_write({
+                        "type": "semantic_probe",
+                        "metrics": probe_result.to_metrics_dict() if probe_result else {"skipped": True},
+                    }, session_id, source=source, destination_context=_metadata)
+                    logger.debug("SemanticProbe: no hits")
+            except Exception:
+                logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
 
-        if not selected_model_name:
-            # 2. Thinker / Oracle Path
-            if "oracle" in text_lower and self.config.use_oracle:
-                selected_model_name = "oracle"
-            elif force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"]):
-                # Prefer GPU prime, then prime, then cpu_prime
-                for cand in ["gpu_prime", "prime", "cpu_prime"]:
+            # --- Persona & KB selection (probe-driven with keyword fallback) ---
+            if probe_result and probe_result.primary_collection:
+            # Probe found a dominant domain — adopt that persona
+                knowledge_base_name = probe_result.primary_collection
+                persona_name = get_persona_for_knowledge_base(knowledge_base_name)
+                if not persona_name:
+                    # KB exists but no persona mapped to it — use default persona with the KB
+                    persona_name = "dev"
+                logger.info(
+                    "Persona selection (probe-driven): persona=%s, kb=%s",
+                    persona_name, knowledge_base_name,
+                )
+            else:
+                # No probe hits — fall back to keyword matching
+                persona_name, knowledge_base_name = get_persona_for_request(user_input)
+                logger.info(
+                    "Persona selection (keyword fallback): persona=%s, kb=%s",
+                    persona_name, knowledge_base_name,
+                )
+    
+            # 0. Emergency Healing Mode (The "Immune Response")
+            # If the Immune System detects a CRITICAL failure (like a SyntaxError), 
+            # we pivot the entire turn toward self-repair.
+    #         emergency_irritant = self._check_immune_system_for_emergency()
+    #         if emergency_irritant:
+    #             yield {"type": "token", "value": "[(i) Digital Immune System: CRITICAL IRRITATION DETECTED. Entering Emergency Healing Mode...]\n\n"}
+    #             # Force high-reasoning persona and model for repair
+    #             persona_name = "dev"
+    #             knowledge_base_name = "core"
+    #             # Add emergency instructions to the user input
+    #             user_input = (
+    #                 f"!! COGNITIVE EMERGENCY !!\n"
+    #                 f"The system has detected a structural failure: {emergency_irritant}\n"
+    #                 f"PRIORITY: Identify and repair this issue immediately using your tools.\n"
+    #                 f"User's original request (suspend for now): {user_input}"
+    #             )
+    #             logger.warning("[IMMUNE RESPONSE] Turn pivoted to emergency repair.")
+    # 
+    #         # Load the selected persona
+    #         self.ai_manager.initialize(persona_name)
+    #         
+    #         # Role mapping (keep internal keys stable):
+            # - "lite"  => Operator (CPU orchestrator: intent, tools, summaries, short answers)
+            # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
+            # - "oracle" => External/cloud escalation
+            selected_model_name = None
+            # Check if GPU is released for sleep — skip gpu_prime in all selection paths
+            _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
+    
+            # 1. Model Selection (Prioritize Fast-Path & Overrides)
+            text_lower = user_input.lower()
+            force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
+            wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
+            
+            # Simple patterns NANO can handle reliably
+            factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time"]
+            is_factual = any(p in text_lower for p in factual_patterns)
+            is_trivial = len(user_input) < 100 and (
+                any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"]) or
+                is_factual
+            )
+    
+            # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
+            if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS and not force_thinker:
+                # OPTIMIZATION: If it is factual but Nano is too small to handle it perfectly,
+                # and we have a GPU model idle, prefer the GPU model for instant response
+                # rather than grinding on CPU lite.
+                if is_factual and "gpu_prime" in self.model_pool.models and not _gpu_sleeping:
+                    selected_model_name = "gpu_prime"
+                    logger.info("[MODEL_SELECT] Routing factual query to gpu_prime for GPU acceleration (instant response).")
+                else:
+                    selected_model_name = "nano"
+                    logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+    
+            # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
+            elif knowledge_base_name:
+                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
+                for cand in ["gpu_prime", "prime"]:
                     if cand == "gpu_prime" and _gpu_sleeping:
                         continue
-                    if cand in self.model_pool.models:
+                    if cand in self.config.MODEL_CONFIGS:
                         selected_model_name = cand
+                        logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
                         break
-            
-            # Default path: Operator (lite) handles most turns.
+    
             if not selected_model_name:
-                if "lite" in self.model_pool.models:
-                    selected_model_name = "lite"
-                elif "prime" in self.model_pool.models:
-                    selected_model_name = "prime"
-                else:
-                    selected_model_name = "gpu_prime" if "gpu_prime" in self.model_pool.models else "cpu_prime"
-        
-        # If the chosen model isn't present yet, try sensible fallbacks
-        # Try lazy loading for the selected model first
-        if selected_model_name not in self.model_pool.models:
-            logger.info(f"Selected model '{selected_model_name}' not present in pool; attempting lazy load")
-            try:
-                self.model_pool.ensure_model_loaded(selected_model_name)
-            except Exception as e:
-                logger.warning(f"Lazy load failed for '{selected_model_name}': {e}")
-
-        if selected_model_name not in self.model_pool.models:
-            logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
-            logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
-            # Try preferred backend first
-            backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-            candidates = []
-            if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
-                candidates.append(backend_env)
-            # Prefer Operator (lite) first, then Thinker tiers, then oracle/azrael
-            candidates.extend(["lite", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
-            found = None
-            for cand in candidates:
-                if cand == "gpu_prime" and _gpu_sleeping:
-                    continue
-                logger.warning(f"[MODEL_SELECT DEBUG] checking candidate: {cand}")
-                # Try lazy loading for each candidate
-                if cand not in self.model_pool.models:
-                    logger.info(f"[MODEL_SELECT DEBUG] attempting lazy load for: {cand}")
-                    try:
-                        self.model_pool.ensure_model_loaded(cand)
-                    except Exception as e:
-                        logger.warning(f"Lazy load failed for '{cand}': {e}")
-                if cand in self.model_pool.models:
-                    found = cand
-                    logger.warning(f"[MODEL_SELECT DEBUG] candidate found: {found}")
-                    break
-            if found:
-                logger.info(f"Fallback selected model: {found}")
-                selected_model_name = found
-            else:
-                yield {"type": "token", "value": "I am currently unable to process your request as my primary model is unavailable."}
-                return
-
-        # --- Cascade Routing ---
-        # If no forced model was picked, we use Nano to triage the request.
-        # This implements the user's suggestion for model-driven complexity routing.
-        try:
-            # Only cascade if we haven't already picked a 'prime' or 'oracle' model
-            # and if we aren't forcing the operator.
-            force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
-            is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
-                                any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
+                # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
+                backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
+                if backend_env:
+                    # Skip gpu_prime when GPU is released for sleep
+                    if backend_env == "gpu_prime" and _gpu_sleeping:
+                        logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
+                    elif backend_env in self.model_pool.models:
+                        selected_model_name = backend_env
+                    else:
+                        logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
+    
+            if not selected_model_name:
+                # 2. Thinker / Oracle Path
+                if "oracle" in text_lower and self.config.use_oracle:
+                    selected_model_name = "oracle"
+                elif force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"]):
+                    # Prefer GPU prime, then prime, then cpu_prime
+                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                        if cand == "gpu_prime" and _gpu_sleeping:
+                            continue
+                        if cand in self.model_pool.models:
+                            selected_model_name = cand
+                            break
+                
+                # Default path: Operator (lite) handles most turns.
+                if not selected_model_name:
+                    if "lite" in self.model_pool.models:
+                        selected_model_name = "lite"
+                    elif "prime" in self.model_pool.models:
+                        selected_model_name = "prime"
+                    else:
+                        selected_model_name = "gpu_prime" if "gpu_prime" in self.model_pool.models else "cpu_prime"
             
-            if selected_model_name in ("lite", "nano") and not force_operator and not is_forced_thinker:
-                # Perform Nano triage
-                triage_result = self._nano_triage(user_input)
-                if triage_result == "COMPLEX":
-                    # Emit status message to user
-                    yield {"type": "token", "value": "[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n"}
-                    selected_model_name = "lite"
-                    
-                    # Secondary escalation: check if Lite thinks it's even MORE complex
-                    if self._should_escalate_to_thinker(user_input):
-                        for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                            if cand == "gpu_prime" and _gpu_sleeping:
-                                continue
-                            # Ensure escalation candidate is loaded
-                            if cand not in self.model_pool.models:
-                                try:
-                                    self.model_pool.ensure_model_loaded(cand)
-                                except Exception:
-                                    pass
-                            if cand in self.model_pool.models:
-                                yield {"type": "token", "value": f"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n"}
-                                selected_model_name = cand
-                                break
-                else:
-                    # Nano can handle it
-                    selected_model_name = "nano"
-                    logger.info("[CASCADE] Nano-Refiner confirmed SIMPLE request.")
-        except Exception:
-            logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
-
-        # Acquire the selected model. `selected_model_name` may already be a
-        # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
-        # name (e.g. 'responder'). Prefer using the acquire_model path even when
-        # the concrete key exists so we enforce status updates and runtime
-        # wrapping (ensuring callers receive a SafeModelProxy rather than a
-        # raw backend object).
-        if selected_model_name in self.model_pool.models:
-            # Use acquire_model (not get) to ensure wrapping and busy status.
-            selected_model = self.model_pool.acquire_model(selected_model_name)
-        else:
-            selected_model = self.model_pool.acquire_model_for_role(selected_model_name)
-        logger.warning(f"[MODEL_SELECT DEBUG] acquired selected_model_name={selected_model_name} -> {selected_model}")
-        logger.info(f"[RESPONDER] Selected responder model: '{selected_model_name}'")
-        logger.info("AgentCore: selected model %s", selected_model_name)
-        logger.debug("[DEBUG] AgentCore selected_model=%s", selected_model_name)
-        # Extra runtime guard: if a raw llama_cpp.Llama escaped into the pool
-        # (some scripts/tests assign directly to model_pool.models), wrap it
-        # now so downstream calls always operate on SafeModelProxy.
-        try:
-            llama_mod = __import__("llama_cpp")
-            Llama = getattr(llama_mod, "Llama", None)
-            if Llama is not None and isinstance(selected_model, Llama):
-                from gaia_core.models.model_pool import SafeModelProxy
-                wrapped = SafeModelProxy(selected_model, pool=self.model_pool, role=selected_model_name)
-                # update pool and local reference
+            # If the chosen model isn't present yet, try sensible fallbacks
+            # Try lazy loading for the selected model first
+            if selected_model_name not in self.model_pool.models:
+                logger.info(f"Selected model '{selected_model_name}' not present in pool; attempting lazy load")
                 try:
-                    self.model_pool.models[selected_model_name] = wrapped
-                except Exception:
-                    logger.debug("AgentCore: failed to replace pool entry with proxy for %s", selected_model_name, exc_info=True)
-                selected_model = wrapped
-                logger.warning("AgentCore: wrapped raw llama_cpp.Llama for '%s' into SafeModelProxy", selected_model_name)
-        except Exception:
-            # best-effort guard; continue even if wrapping fails
-            logger.debug("AgentCore: runtime wrapping guard failed for %s", selected_model_name, exc_info=True)
-        if not selected_model:
-            yield {"type": "token", "value": "I am currently unable to process your request as my primary model is busy or unavailable."}
-            return
-
-        # 2. Create the initial v0.3 Cognition Packet
-        history = self.session_manager.get_history(session_id).copy()
-
-        # Pre-injection history review: check for epistemic violations
-        try:
-            hr_cfg = self.config.constants.get("HISTORY_REVIEW", {})
-            history = review_history(history, config=hr_cfg, session_id=session_id)
-        except Exception:
-            logger.warning("AgentCore: history review failed, using raw history", exc_info=True)
-
-        packet = self._create_initial_packet(
-            user_input, session_id, history, selected_model_name,
-            source=source, destination=destination, metadata=_metadata
-        )
-        self.session_manager.add_message(session_id, "user", user_input)
-        self._emit_timeline_message(session_id, "user", source)
-
-        # Inject semantic probe result into packet (if probe found hits)
-        if probe_result and probe_result.has_hits:
-            packet.content.data_fields.append(DataField(
-                key='semantic_probe_result',
-                value=probe_result.to_dict(),
-                type='json',
-                source='semantic_probe',
-            ))
-
-        # Attach probe metrics to packet.metrics for observability
-        if probe_result:
-            packet.metrics.semantic_probe = probe_result.to_metrics_dict()
-
-        if knowledge_base_name:
-            packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
-        
-        # Enhance the packet with knowledge from the knowledge base
-        packet = enhance_packet(packet)
-
-        # RAG: Retrieve documents from vector store if a knowledge base is specified.
-        # Phase 4 dedup: if the semantic probe already found strong hits from the
-        # same collection, use those as seed context and skip the redundant MCP query.
-        try:
-
-            # Extract knowledge_base_name from the packet's data_fields
-            knowledge_base_name = None
-            for field in packet.content.data_fields:
-                if field.key == 'knowledge_base_name':
-                    knowledge_base_name = field.value
-                    break
-
+                    self.model_pool.ensure_model_loaded(selected_model_name)
+                except Exception as e:
+                    logger.warning(f"Lazy load failed for '{selected_model_name}': {e}")
+    
+            if selected_model_name not in self.model_pool.models:
+                logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
+                logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
+                # Try preferred backend first
+                backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
+                candidates = []
+                if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
+                    candidates.append(backend_env)
+                # Prefer Operator (lite) first, then Thinker tiers, then oracle/azrael
+                candidates.extend(["lite", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
+                found = None
+                for cand in candidates:
+                    if cand == "gpu_prime" and _gpu_sleeping:
+                        continue
+                    logger.warning(f"[MODEL_SELECT DEBUG] checking candidate: {cand}")
+                    # Try lazy loading for each candidate
+                    if cand not in self.model_pool.models:
+                        logger.info(f"[MODEL_SELECT DEBUG] attempting lazy load for: {cand}")
+                        try:
+                            self.model_pool.ensure_model_loaded(cand)
+                        except Exception as e:
+                            logger.warning(f"Lazy load failed for '{cand}': {e}")
+                    if cand in self.model_pool.models:
+                        found = cand
+                        logger.warning(f"[MODEL_SELECT DEBUG] candidate found: {found}")
+                        break
+                if found:
+                    logger.info(f"Fallback selected model: {found}")
+                    selected_model_name = found
+                else:
+                    yield {"type": "token", "value": "I am currently unable to process your request as my primary model is unavailable."}
+                    return
+    
+            # --- Cascade Routing ---
+            # If no forced model was picked, we use Nano to triage the request.
+            # This implements the user's suggestion for model-driven complexity routing.
+            try:
+                # Only cascade if we haven't already picked a 'prime' or 'oracle' model
+                # and if we aren't forcing the operator.
+                force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
+                is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
+                                    any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
+                
+                if selected_model_name in ("lite", "nano") and not force_operator and not is_forced_thinker:
+                    # Perform Nano triage
+                    triage_result = self._nano_triage(user_input)
+                    if triage_result == "COMPLEX":
+                        # Emit status message to user
+                        yield {"type": "token", "value": "[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n"}
+                        selected_model_name = "lite"
+                        
+                        # Secondary escalation: check if Lite thinks it's even MORE complex
+                        if self._should_escalate_to_thinker(user_input):
+                            for cand in ["gpu_prime", "prime", "cpu_prime"]:
+                                if cand == "gpu_prime" and _gpu_sleeping:
+                                    continue
+                                # Ensure escalation candidate is loaded
+                                if cand not in self.model_pool.models:
+                                    try:
+                                        self.model_pool.ensure_model_loaded(cand)
+                                    except Exception:
+                                        pass
+                                if cand in self.model_pool.models:
+                                    yield {"type": "token", "value": f"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n"}
+                                    selected_model_name = cand
+                                    break
+                    else:
+                        # Nano can handle it
+                        selected_model_name = "nano"
+                        logger.info("[CASCADE] Nano-Refiner confirmed SIMPLE request.")
+            except Exception:
+                logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
+    
+            # Acquire the selected model. `selected_model_name` may already be a
+            # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
+            # name (e.g. 'responder'). Prefer using the acquire_model path even when
+            # the concrete key exists so we enforce status updates and runtime
+            # wrapping (ensuring callers receive a SafeModelProxy rather than a
+            # raw backend object).
+            if selected_model_name in self.model_pool.models:
+                # Use acquire_model (not get) to ensure wrapping and busy status.
+                selected_model = self.model_pool.acquire_model(selected_model_name)
+            else:
+                selected_model = self.model_pool.acquire_model_for_role(selected_model_name)
+            logger.warning(f"[MODEL_SELECT DEBUG] acquired selected_model_name={selected_model_name} -> {selected_model}")
+            logger.info(f"[RESPONDER] Selected responder model: '{selected_model_name}'")
+            logger.info("AgentCore: selected model %s", selected_model_name)
+            logger.debug("[DEBUG] AgentCore selected_model=%s", selected_model_name)
+            # Extra runtime guard: if a raw llama_cpp.Llama escaped into the pool
+            # (some scripts/tests assign directly to model_pool.models), wrap it
+            # now so downstream calls always operate on SafeModelProxy.
+            try:
+                llama_mod = __import__("llama_cpp")
+                Llama = getattr(llama_mod, "Llama", None)
+                if Llama is not None and isinstance(selected_model, Llama):
+                    from gaia_core.models.model_pool import SafeModelProxy
+                    wrapped = SafeModelProxy(selected_model, pool=self.model_pool, role=selected_model_name)
+                    # update pool and local reference
+                    try:
+                        self.model_pool.models[selected_model_name] = wrapped
+                    except Exception:
+                        logger.debug("AgentCore: failed to replace pool entry with proxy for %s", selected_model_name, exc_info=True)
+                    selected_model = wrapped
+                    logger.warning("AgentCore: wrapped raw llama_cpp.Llama for '%s' into SafeModelProxy", selected_model_name)
+            except Exception:
+                # best-effort guard; continue even if wrapping fails
+                logger.debug("AgentCore: runtime wrapping guard failed for %s", selected_model_name, exc_info=True)
+            if not selected_model:
+                yield {"type": "token", "value": "I am currently unable to process your request as my primary model is busy or unavailable."}
+                return
+    
+            # 2. Create the initial v0.3 Cognition Packet
+            history = self.session_manager.get_history(session_id).copy()
+    
+            # Pre-injection history review: check for epistemic violations
+            try:
+                hr_cfg = self.config.constants.get("HISTORY_REVIEW", {})
+                history = review_history(history, config=hr_cfg, session_id=session_id)
+            except Exception:
+                logger.warning("AgentCore: history review failed, using raw history", exc_info=True)
+    
+            packet = self._create_initial_packet(
+                user_input, session_id, history, selected_model_name,
+                source=source, destination=destination, metadata=_metadata
+            )
+            self.session_manager.add_message(session_id, "user", user_input)
+            self._emit_timeline_message(session_id, "user", source)
+    
+            # Inject semantic probe result into packet (if probe found hits)
+            if probe_result and probe_result.has_hits:
+                packet.content.data_fields.append(DataField(
+                    key='semantic_probe_result',
+                    value=probe_result.to_dict(),
+                    type='json',
+                    source='semantic_probe',
+                ))
+    
+            # Attach probe metrics to packet.metrics for observability
+            if probe_result:
+                packet.metrics.semantic_probe = probe_result.to_metrics_dict()
+    
             if knowledge_base_name:
-                # Check if the probe already provided hits from this collection
-                probe_seeded = False
-                if probe_result and probe_result.has_hits:
-                    probe_hits_for_kb = [
-                        h for h in probe_result.hits
-                        if h.collection == knowledge_base_name
-                    ]
-                    if len(probe_hits_for_kb) >= 2:
-                        # Probe found multiple strong hits — use them as seed,
-                        # skip the full-prompt RAG query (which would largely overlap)
-                        seed_docs = []
-                        seen_files = set()
-                        for h in probe_hits_for_kb:
-                            # Dedup by filename to avoid repeat chunks from the same doc
-                            if h.filename not in seen_files:
-                                seen_files.add(h.filename)
-                                seed_docs.append({
-                                    "text": h.chunk_text,
-                                    "filename": h.filename,
-                                    "score": h.similarity,
-                                    "source": "semantic_probe",
-                                })
-                        if seed_docs:
-                            packet.content.data_fields.append(
-                                DataField(key='retrieved_documents', value=seed_docs, type='list')
-                            )
-                            self.logger.info(
-                                f"RAG dedup: using {len(seed_docs)} probe hits as seed context "
-                                f"for '{knowledge_base_name}' (skipped MCP query)"
-                            )
-                            probe_seeded = True
-
-                if not probe_seeded:
-                    # No probe seed — run the standard RAG query
-                    self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
-                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
-                        packet.content.original_prompt,
-                        top_k=3,
-                        knowledge_base_name=knowledge_base_name
-                    ))
-                    if retrieved_docs and retrieved_docs.get("ok"):
-                        docs = retrieved_docs.get("results", [])
-                        if docs:
-                            packet.content.data_fields.append(DataField(key='retrieved_documents', value=docs, type='list'))
-                            self.logger.info(f"Retrieved {len(docs)} documents from '{knowledge_base_name}'.")
+                packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
+            
+            # Enhance the packet with knowledge from the knowledge base
+            packet = enhance_packet(packet)
+    
+            # RAG: Retrieve documents from vector store if a knowledge base is specified.
+            # Phase 4 dedup: if the semantic probe already found strong hits from the
+            # same collection, use those as seed context and skip the redundant MCP query.
+            try:
+    
+                # Extract knowledge_base_name from the packet's data_fields
+                knowledge_base_name = None
+                for field in packet.content.data_fields:
+                    if field.key == 'knowledge_base_name':
+                        knowledge_base_name = field.value
+                        break
+    
+                if knowledge_base_name:
+                    # Check if the probe already provided hits from this collection
+                    probe_seeded = False
+                    if probe_result and probe_result.has_hits:
+                        probe_hits_for_kb = [
+                            h for h in probe_result.hits
+                            if h.collection == knowledge_base_name
+                        ]
+                        if len(probe_hits_for_kb) >= 2:
+                            # Probe found multiple strong hits — use them as seed,
+                            # skip the full-prompt RAG query (which would largely overlap)
+                            seed_docs = []
+                            seen_files = set()
+                            for h in probe_hits_for_kb:
+                                # Dedup by filename to avoid repeat chunks from the same doc
+                                if h.filename not in seen_files:
+                                    seen_files.add(h.filename)
+                                    seed_docs.append({
+                                        "text": h.chunk_text,
+                                        "filename": h.filename,
+                                        "score": h.similarity,
+                                        "source": "semantic_probe",
+                                    })
+                            if seed_docs:
+                                packet.content.data_fields.append(
+                                    DataField(key='retrieved_documents', value=seed_docs, type='list')
+                                )
+                                self.logger.info(
+                                    f"RAG dedup: using {len(seed_docs)} probe hits as seed context "
+                                    f"for '{knowledge_base_name}' (skipped MCP query)"
+                                )
+                                probe_seeded = True
+    
+                    if not probe_seeded:
+                        # No probe seed — run the standard RAG query
+                        self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
+                        retrieved_docs = asyncio.run(mcp_client.embedding_query(
+                            packet.content.original_prompt,
+                            top_k=3,
+                            knowledge_base_name=knowledge_base_name
+                        ))
+                        if retrieved_docs and retrieved_docs.get("ok"):
+                            docs = retrieved_docs.get("results", [])
+                            if docs:
+                                packet.content.data_fields.append(DataField(key='retrieved_documents', value=docs, type='list'))
+                                self.logger.info(f"Retrieved {len(docs)} documents from '{knowledge_base_name}'.")
+                            else:
+                                packet.content.data_fields.append(DataField(
+                                    key='rag_no_results',
+                                    value=True,
+                                    type='bool'
+                                ))
+                                self.logger.warning(f"RAG query returned no documents from '{knowledge_base_name}' - epistemic uncertainty flagged.")
                         else:
+                            error_msg = retrieved_docs.get("error", "Unknown error") if retrieved_docs else "No response"
+                            self.logger.warning(f"RAG query failed for '{knowledge_base_name}': {error_msg}")
                             packet.content.data_fields.append(DataField(
                                 key='rag_no_results',
                                 value=True,
                                 type='bool'
                             ))
-                            self.logger.warning(f"RAG query returned no documents from '{knowledge_base_name}' - epistemic uncertainty flagged.")
-                    else:
-                        error_msg = retrieved_docs.get("error", "Unknown error") if retrieved_docs else "No response"
-                        self.logger.warning(f"RAG query failed for '{knowledge_base_name}': {error_msg}")
-                        packet.content.data_fields.append(DataField(
-                            key='rag_no_results',
-                            value=True,
-                            type='bool'
-                        ))
-            else:
-                self.logger.info("No knowledge_base_name specified in the packet; skipping RAG query.")
-
-        except Exception as e:
-            self.logger.error(f"Failed to retrieve documents from vector store: {e}")
-
-        # If RAG query returns no results, attempt to find and embed the knowledge
-        if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
-            packet = self._knowledge_acquisition_workflow(packet)
-
-        # Epistemic gate: if RAG found nothing for a domain-specific query,
-        # check confidence before generating (prevents fabrication)
-        rag_no_results_flag = any(
-            getattr(df, 'key', '') == 'rag_no_results' and getattr(df, 'value', False)
-            for df in getattr(packet.content, 'data_fields', []) or []
-        )
-        kb_active = bool(knowledge_base_name)
-
-        if rag_no_results_flag and kb_active:
-            eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
-            if eg_config.get("pre_generation_gate", True):
-                self.logger.info("Epistemic gate: RAG returned no results for domain query — checking confidence")
-                try:
-                    conf_result = self.assess_task_confidence(
-                        "domain_query", user_input, selected_model_name, session_id
-                    )
-                    conf_threshold = eg_config.get("confidence_threshold", 0.5)
-                    conf_score = conf_result.get("confidence_score", 1.0)
-                    if conf_score < conf_threshold:
-                        alt = conf_result.get("alternative_offer", "I can try to answer from general knowledge, but I may not be accurate.")
-                        honest_response = (
-                            f"I don't have specific information about that in my knowledge base. "
-                            f"{alt}"
-                        )
-                        _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                        yield {"type": "token", "value": _header + honest_response}
-                        self.session_manager.add_message(session_id, "assistant", honest_response)
-                        return
-                except Exception:
-                    self.logger.debug("Epistemic gate confidence check failed; proceeding with generation", exc_info=True)
-
-        # ── Knowledge Ingestion Pipeline ──────────────────────────────
-        # Check for explicit save commands or auto-detected knowledge dumps
-        # before intent detection so we can short-circuit or tag the packet.
-        # If no KB was selected but the user explicitly asked to save, use a
-        # default knowledge base so the save pipeline still fires.
-        if not knowledge_base_name:
-            from gaia_core.cognition.knowledge_ingestion import detect_save_command
-            if detect_save_command(user_input):
-                knowledge_base_name = "general"
-                logger.info("No KB selected but explicit save command detected; using default KB 'general'")
-        if knowledge_base_name:
-            # 1. Explicit save: "save this about X", "remember this", legacy DOCUMENT
-            save_result = run_explicit_save(user_input, knowledge_base_name)
-            if save_result:
-                if save_result.get("action") == "dedup_blocked":
-                    existing = save_result["existing_doc"]
-                    yield {"type": "token", "value": (
-                        f"I found an existing document that closely matches this information "
-                        f"(similarity: {existing['similarity']:.0%}): **{existing['title']}**. "
-                        f"No duplicate was created. If this is genuinely new information, "
-                        f"please rephrase or add distinguishing details."
-                    )}
-                    return
-                elif save_result.get("ok"):
-                    yield {"type": "token", "value": (
-                        f"Acknowledged. I've documented '{save_result['subject']}' "
-                        f"to `{save_result['path']}`."
-                    )}
-                    if save_result.get("embed_ok"):
-                        yield {"type": "token", "value": " It's now indexed for future retrieval."}
-                    return
                 else:
-                    yield {"type": "token", "value": (
-                        f"I tried to save that information but encountered an issue: "
-                        f"{save_result.get('error', 'unknown error')}. "
-                        f"The MCP write_file tool may require approval."
-                    )}
-                    return
-
-            # 2. Auto-detect: long D&D info dump → offer to save (don't write yet)
-            auto_classification = run_auto_detect(user_input, knowledge_base_name)
-            if auto_classification:
-                packet.content.data_fields.append(DataField(
-                    key='knowledge_ingestion_offer',
-                    value=auto_classification,
-                    type='json',
-                ))
-                self.logger.info(
-                    f"Knowledge ingestion offer tagged: category={auto_classification['category']}"
-                )
-
-            # 3. Knowledge update detect: short casual updates to existing entities
-            if not auto_classification:
-                update_info = run_update_detect(user_input, knowledge_base_name)
-                if update_info:
-                    existing_doc = update_info.get("existing_doc")
-                    if existing_doc:
-                        # Ensure entity doc is in retrieved_documents
-                        already_in = False
-                        for df in packet.content.data_fields:
-                            if df.key == 'retrieved_documents':
-                                for d in (df.value or []):
-                                    if d.get("source") == existing_doc.get("source"):
-                                        already_in = True
-                                if not already_in:
-                                    df.value.append(existing_doc)
-                                break
-                        else:
-                            if not already_in:
-                                packet.content.data_fields.append(
-                                    DataField(key='retrieved_documents', value=[existing_doc], type='list'))
-
-                    # Tag packet + inject system_hint directly
-                    packet.content.data_fields.append(
-                        DataField(key='knowledge_update_detected', value=update_info, type='json'))
-
-                    entity = update_info["entity"]
-                    signal = update_info["update_signal"]
-                    has_doc = existing_doc is not None
-                    hint = (
-                        f"The user indicated that '{entity}' has been updated: {signal}. "
-                        + (
-                            "An existing document for this entity is in the Retrieved Documents above. "
-                            "Your task:\n"
-                            "1. Acknowledge the update conversationally.\n"
-                            "2. Examine the existing document to identify affected fields.\n"
-                            "3. Use D&D 5e knowledge to reason about cascading changes "
-                            "(HP, spell slots, features, proficiency, ability scores, etc.).\n"
-                            "4. Ask targeted follow-up questions about anything ambiguous.\n"
-                            "5. Offer to update the documentation with confirmed changes.\n"
-                            "Do NOT write the update yet — gather information first."
-                            if has_doc else
-                            "No existing document found. Acknowledge, ask questions, "
-                            "and offer to create documentation for this entity."
+                    self.logger.info("No knowledge_base_name specified in the packet; skipping RAG query.")
+    
+            except Exception as e:
+                self.logger.error(f"Failed to retrieve documents from vector store: {e}")
+    
+            # If RAG query returns no results, attempt to find and embed the knowledge
+            if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
+                packet = self._knowledge_acquisition_workflow(packet)
+    
+            # Epistemic gate: if RAG found nothing for a domain-specific query,
+            # check confidence before generating (prevents fabrication)
+            rag_no_results_flag = any(
+                getattr(df, 'key', '') == 'rag_no_results' and getattr(df, 'value', False)
+                for df in getattr(packet.content, 'data_fields', []) or []
+            )
+            kb_active = bool(knowledge_base_name)
+    
+            if rag_no_results_flag and kb_active:
+                eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
+                if eg_config.get("pre_generation_gate", True):
+                    self.logger.info("Epistemic gate: RAG returned no results for domain query — checking confidence")
+                    try:
+                        conf_result = self.assess_task_confidence(
+                            "domain_query", user_input, selected_model_name, session_id
                         )
-                    )
-                    packet.content.data_fields.append(
-                        DataField(key='system_hint', value=hint, type='string'))
-
+                        conf_threshold = eg_config.get("confidence_threshold", 0.5)
+                        conf_score = conf_result.get("confidence_score", 1.0)
+                        if conf_score < conf_threshold:
+                            alt = conf_result.get("alternative_offer", "I can try to answer from general knowledge, but I may not be accurate.")
+                            honest_response = (
+                                f"I don't have specific information about that in my knowledge base. "
+                                f"{alt}"
+                            )
+                            _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                            yield {"type": "token", "value": _header + honest_response}
+                            self.session_manager.add_message(session_id, "assistant", honest_response)
+                            return
+                    except Exception:
+                        self.logger.debug("Epistemic gate confidence check failed; proceeding with generation", exc_info=True)
+    
+            # ── Knowledge Ingestion Pipeline ──────────────────────────────
+            # Check for explicit save commands or auto-detected knowledge dumps
+            # before intent detection so we can short-circuit or tag the packet.
+            # If no KB was selected but the user explicitly asked to save, use a
+            # default knowledge base so the save pipeline still fires.
+            if not knowledge_base_name:
+                from gaia_core.cognition.knowledge_ingestion import detect_save_command
+                if detect_save_command(user_input):
+                    knowledge_base_name = "general"
+                    logger.info("No KB selected but explicit save command detected; using default KB 'general'")
+            if knowledge_base_name:
+                # 1. Explicit save: "save this about X", "remember this", legacy DOCUMENT
+                save_result = run_explicit_save(user_input, knowledge_base_name)
+                if save_result:
+                    if save_result.get("action") == "dedup_blocked":
+                        existing = save_result["existing_doc"]
+                        yield {"type": "token", "value": (
+                            f"I found an existing document that closely matches this information "
+                            f"(similarity: {existing['similarity']:.0%}): **{existing['title']}**. "
+                            f"No duplicate was created. If this is genuinely new information, "
+                            f"please rephrase or add distinguishing details."
+                        )}
+                        return
+                    elif save_result.get("ok"):
+                        yield {"type": "token", "value": (
+                            f"Acknowledged. I've documented '{save_result['subject']}' "
+                            f"to `{save_result['path']}`."
+                        )}
+                        if save_result.get("embed_ok"):
+                            yield {"type": "token", "value": " It's now indexed for future retrieval."}
+                        return
+                    else:
+                        yield {"type": "token", "value": (
+                            f"I tried to save that information but encountered an issue: "
+                            f"{save_result.get('error', 'unknown error')}. "
+                            f"The MCP write_file tool may require approval."
+                        )}
+                        return
+    
+                # 2. Auto-detect: long D&D info dump → offer to save (don't write yet)
+                auto_classification = run_auto_detect(user_input, knowledge_base_name)
+                if auto_classification:
+                    packet.content.data_fields.append(DataField(
+                        key='knowledge_ingestion_offer',
+                        value=auto_classification,
+                        type='json',
+                    ))
                     self.logger.info(
-                        f"Knowledge update tagged + hint injected: entity={entity}"
+                        f"Knowledge ingestion offer tagged: category={auto_classification['category']}"
                     )
-        # ── End Knowledge Ingestion Pipeline ──────────────────────────
-
-        # Compatibility shims removed: callers should use the v0.3 packet
-        # contract (header.persona, context.cheatsheets, content.original_prompt,
-        # and reasoning.reflection_log). The StreamObserver and other helpers
-        # already check for legacy attributes via hasattr when needed.
-
-        # Normalization is handled centrally by build_from_packet() in the prompt builder.
-        # AgentCore no longer performs message role normalization here.
-
-        # 3. Intent Detection
-        # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
-        lite_llm = None
-        try:
-            # Lazy-load lite model on demand (GAIA_AUTOLOAD_MODELS may be 0)
-            if self.model_pool.ensure_model_loaded("lite"):
-                lite_llm = self.model_pool.models.get("lite")
-            if lite_llm:
-                self.model_pool.set_status("lite", "busy")
-        except Exception:
+    
+                # 3. Knowledge update detect: short casual updates to existing entities
+                if not auto_classification:
+                    update_info = run_update_detect(user_input, knowledge_base_name)
+                    if update_info:
+                        existing_doc = update_info.get("existing_doc")
+                        if existing_doc:
+                            # Ensure entity doc is in retrieved_documents
+                            already_in = False
+                            for df in packet.content.data_fields:
+                                if df.key == 'retrieved_documents':
+                                    for d in (df.value or []):
+                                        if d.get("source") == existing_doc.get("source"):
+                                            already_in = True
+                                    if not already_in:
+                                        df.value.append(existing_doc)
+                                    break
+                            else:
+                                if not already_in:
+                                    packet.content.data_fields.append(
+                                        DataField(key='retrieved_documents', value=[existing_doc], type='list'))
+    
+                        # Tag packet + inject system_hint directly
+                        packet.content.data_fields.append(
+                            DataField(key='knowledge_update_detected', value=update_info, type='json'))
+    
+                        entity = update_info["entity"]
+                        signal = update_info["update_signal"]
+                        has_doc = existing_doc is not None
+                        hint = (
+                            f"The user indicated that '{entity}' has been updated: {signal}. "
+                            + (
+                                "An existing document for this entity is in the Retrieved Documents above. "
+                                "Your task:\n"
+                                "1. Acknowledge the update conversationally.\n"
+                                "2. Examine the existing document to identify affected fields.\n"
+                                "3. Use D&D 5e knowledge to reason about cascading changes "
+                                "(HP, spell slots, features, proficiency, ability scores, etc.).\n"
+                                "4. Ask targeted follow-up questions about anything ambiguous.\n"
+                                "5. Offer to update the documentation with confirmed changes.\n"
+                                "Do NOT write the update yet — gather information first."
+                                if has_doc else
+                                "No existing document found. Acknowledge, ask questions, "
+                                "and offer to create documentation for this entity."
+                            )
+                        )
+                        packet.content.data_fields.append(
+                            DataField(key='system_hint', value=hint, type='string'))
+    
+                        self.logger.info(
+                            f"Knowledge update tagged + hint injected: entity={entity}"
+                        )
+            # ── End Knowledge Ingestion Pipeline ──────────────────────────
+    
+            # Compatibility shims removed: callers should use the v0.3 packet
+            # contract (header.persona, context.cheatsheets, content.original_prompt,
+            # and reasoning.reflection_log). The StreamObserver and other helpers
+            # already check for legacy attributes via hasattr when needed.
+    
+            # Normalization is handled centrally by build_from_packet() in the prompt builder.
+            # AgentCore no longer performs message role normalization here.
+    
+            # 3. Intent Detection
+            # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
             lite_llm = None
-        prime_llm = None  # do not use prime for intent detection
-        fallback_llm = lite_llm or selected_model
-
-        # Build a short probe context hint for the intent detector
-        _probe_context = ""
-        if probe_result and probe_result.has_hits:
-            matched_phrases = [h.phrase for h in probe_result.hits[:5]]
-            unique_phrases = list(dict.fromkeys(matched_phrases))  # dedup preserving order
-            _probe_context = (
-                f"User references {probe_result.primary_collection} entities "
-                f"({', '.join(unique_phrases)})"
-            )
-
-        # Grab the embedding model for intent classification (non-blocking)
-        _embed_model = None
-        try:
-            _embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
-        except Exception:
-            pass
-
-        plan = None
-        try:
-            plan = detect_intent(
-                user_input,
-                self.config,
-                lite_llm=lite_llm,
-                full_llm=prime_llm,
-                fallback_llm=fallback_llm,
-                probe_context=_probe_context,
-                embed_model=_embed_model,
-            )
-        finally:
-            # Use role-aware release via ModelPool API; let exceptions be logged but
-            # don't rely on hasattr guards anymore since ModelPool now provides
-            # `release_model_for_role`.
             try:
+                # Lazy-load lite model on demand (GAIA_AUTOLOAD_MODELS may be 0)
+                if self.model_pool.ensure_model_loaded("lite"):
+                    lite_llm = self.model_pool.models.get("lite")
                 if lite_llm:
-                    self.model_pool.release_model_for_role("lite")
-                self.model_pool.release_model_for_role("prime")
+                    self.model_pool.set_status("lite", "busy")
             except Exception:
-                self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
-        
-        # 3a. Fast local knowledge check: if a fact exists for this question,
-        # bypass the model and respond immediately.
-        try:
-            local_fact = rescue_helper.recall_fact(key=user_input, limit=1)
-        except Exception:
-            local_fact = ""
-        if local_fact and not local_fact.strip().startswith("🧠 Memory store is empty"):
-            yield {"type": "token", "value": local_fact}
-            # Also record in history as assistant reply
-            self.session_manager.add_message(session_id, "assistant", local_fact)
-            return
-
-        packet.intent.user_intent = plan.intent
-        packet.intent.confidence = 0.9 # Placeholder
-        packet.status.state = PacketState.PROCESSING
-        packet.content.data_fields.append(DataField(key='read_only_intent', value=plan.read_only, type='boolean'))
-        ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
-
-        # 3a-bis. Goal Detection — identify overarching user goal
-        try:
-            from gaia_core.cognition.goal_detector import GoalDetector
-            goal_detector = GoalDetector(config=self.config)
-            packet.goal_state = goal_detector.detect(
-                packet=packet,
-                session_manager=self.session_manager,
-                session_id=session_id,
-                model_pool=self.model_pool,
-            )
-            if packet.goal_state and packet.goal_state.current_goal:
-                ts_write({
-                    "type": "goal_detect",
-                    "goal": packet.goal_state.current_goal.goal_id,
-                    "confidence": packet.goal_state.current_goal.confidence.value,
-                    "source": packet.goal_state.current_goal.source,
-                }, session_id, source=source, destination_context=_metadata)
-        except Exception:
-            logger.debug("Goal detection failed (non-fatal)", exc_info=True)
-
-        # 3b. GCP Tool Routing System: Check if request needs MCP tools
-        # This runs before the slim prompt path to properly route tool-related requests
-        if self._should_use_tool_routing(plan, user_input):
-            logger.info(f"Tool routing triggered for intent: {plan.intent}")
-            packet = self._run_tool_routing_loop(
-                packet=packet,
-                user_input=user_input,
-                session_id=session_id,
-                source=source,
-                metadata=_metadata
-            )
-
-            # If tool was executed successfully, we may have results to include
-            if packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED:
-                # Tool was executed - the result is now in the packet
-                # Continue to normal processing which will include the tool result in context
-                logger.info("Tool executed successfully, continuing with enhanced context")
-                ts_write({
-                    "type": "tool_routing",
-                    "stage": "continuing_with_result",
-                    "tool": packet.tool_routing.selected_tool.tool_name if packet.tool_routing.selected_tool else None
-                }, session_id, source=source, destination_context=_metadata)
-
-        # Fast-path slim prompt: low-complexity intents (incl. list_tools) avoid the heavy
-        # planning/reflector stack. Uses minimal identity + MCP summary + user input.
-        # Skip slim prompt when tool routing already executed — tool results need the
-        # full ExternalVoice pipeline to be properly incorporated into the response.
-        tool_already_executed = (
-            packet.tool_routing
-            and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
-        )
-        if not tool_already_executed and self._should_use_slim_prompt(plan, user_input):
-            text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
-            if text is not None:
-                _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                yield {"type": "token", "value": _header + text}
-                self.session_manager.add_message(session_id, "assistant", text)
+                lite_llm = None
+            prime_llm = None  # do not use prime for intent detection
+            fallback_llm = lite_llm or selected_model
+    
+            # Build a short probe context hint for the intent detector
+            _probe_context = ""
+            if probe_result and probe_result.has_hits:
+                matched_phrases = [h.phrase for h in probe_result.hits[:5]]
+                unique_phrases = list(dict.fromkeys(matched_phrases))  # dedup preserving order
+                _probe_context = (
+                    f"User references {probe_result.primary_collection} entities "
+                    f"({', '.join(unique_phrases)})"
+                )
+    
+            # Grab the embedding model for intent classification (non-blocking)
+            _embed_model = None
+            try:
+                _embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+            except Exception:
+                pass
+    
+            plan = None
+            try:
+                plan = detect_intent(
+                    user_input,
+                    self.config,
+                    lite_llm=lite_llm,
+                    full_llm=prime_llm,
+                    fallback_llm=fallback_llm,
+                    probe_context=_probe_context,
+                    embed_model=_embed_model,
+                )
+            finally:
+                # Use role-aware release via ModelPool API; let exceptions be logged but
+                # don't rely on hasattr guards anymore since ModelPool now provides
+                # `release_model_for_role`.
+                try:
+                    if lite_llm:
+                        self.model_pool.release_model_for_role("lite")
+                    self.model_pool.release_model_for_role("prime")
+                except Exception:
+                    self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
+            
+            # 3a. Fast local knowledge check: if a fact exists for this question,
+            # bypass the model and respond immediately.
+            try:
+                local_fact = rescue_helper.recall_fact(key=user_input, limit=1)
+            except Exception:
+                local_fact = ""
+            if local_fact and not local_fact.strip().startswith("🧠 Memory store is empty"):
+                yield {"type": "token", "value": local_fact}
+                # Also record in history as assistant reply
+                self.session_manager.add_message(session_id, "assistant", local_fact)
                 return
-            # _run_slim_prompt returned None — slim path declined (e.g. low
-            # confidence recitation).  Attempt tool routing (web_search) to
-            # gather real content before falling through to ExternalVoice.
-            if not (packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED):
-                logger.info("Slim prompt declined — attempting tool routing for web_search")
+    
+            packet.intent.user_intent = plan.intent
+            packet.intent.confidence = 0.9 # Placeholder
+            packet.status.state = PacketState.PROCESSING
+            packet.content.data_fields.append(DataField(key='read_only_intent', value=plan.read_only, type='boolean'))
+            ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
+    
+            # 3a-bis. Goal Detection — identify overarching user goal
+            try:
+                from gaia_core.cognition.goal_detector import GoalDetector
+                goal_detector = GoalDetector(config=self.config)
+                packet.goal_state = goal_detector.detect(
+                    packet=packet,
+                    session_manager=self.session_manager,
+                    session_id=session_id,
+                    model_pool=self.model_pool,
+                )
+                if packet.goal_state and packet.goal_state.current_goal:
+                    ts_write({
+                        "type": "goal_detect",
+                        "goal": packet.goal_state.current_goal.goal_id,
+                        "confidence": packet.goal_state.current_goal.confidence.value,
+                        "source": packet.goal_state.current_goal.source,
+                    }, session_id, source=source, destination_context=_metadata)
+            except Exception:
+                logger.debug("Goal detection failed (non-fatal)", exc_info=True)
+    
+            # 3b. GCP Tool Routing System: Check if request needs MCP tools
+            # This runs before the slim prompt path to properly route tool-related requests
+            if self._should_use_tool_routing(plan, user_input):
+                logger.info(f"Tool routing triggered for intent: {plan.intent}")
                 packet = self._run_tool_routing_loop(
                     packet=packet,
                     user_input=user_input,
@@ -1437,424 +1409,396 @@ class AgentCore:
                     source=source,
                     metadata=_metadata
                 )
+    
+                # If tool was executed successfully, we may have results to include
                 if packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED:
-                    logger.info("Tool routing succeeded after slim prompt decline — continuing with enhanced context")
-
-        # 4. Initial Planning & Reflection
-        if plan.intent:
-            codex = SemanticCodex.instance(self.config)
-            codex_symbol = f"§INTENT/{plan.intent.upper()}"
-            entry = codex.get(codex_symbol)
-            if entry:
-                packet.content.data_fields.append(DataField(key='proactive_codex', value=entry.body, type='text'))
-                logger.info(f"Proactively loaded codex entry '{codex_symbol}' for intent '{plan.intent}'.")
-
-        # Dump the packet identity and data_fields so we can verify identity propagation
-        try:
-            pid = getattr(packet.header.persona, 'identity_id', None)
-            df_repr = [(getattr(df, 'key', None), getattr(df, 'value', None)) for df in getattr(packet.content, 'data_fields', [])]
-            logger.warning("AgentCore: packet persona.identity_id=%s, content.data_fields=%s", pid, df_repr)
-        except Exception:
-            logger.exception("AgentCore: failed to log packet identity/data_fields")
-
-        plan_messages = build_from_packet(packet, task_instruction_key="initial_planning")
-        # Emit the assembled plan messages to stderr for debugging so we can
-        # confirm exactly what the model receives (ensures system message is first).
-        try:
-            _s = json.dumps(plan_messages, default=str, ensure_ascii=False, indent=2)
-            print("===ASSEMBLED_PLAN_MESSAGES_START===", file=sys.stderr)
-            # truncate to avoid excessive output
-            print(_s[:20000], file=sys.stderr)
-            print("===ASSEMBLED_PLAN_MESSAGES_END===", file=sys.stderr)
-        except Exception:
-            logger.exception("AgentCore: failed to dump plan_messages to stderr")
-        # build_from_packet() now normalizes roles/alternation for chat formatters.
-        # create_chat_completion may return a dict (non-stream) or a generator (stream).
-        import types
-        # Use ModelPool.forward_to_model to centralize acquisition, wrapping,
-        # and release semantics (this avoids directly invoking backend objects
-        # that may bypass our SafeModelProxy protections).
-        logger.warning("AgentCore: entering planning call with model=%s", selected_model_name)
-        try:
-            # Release any earlier acquisition so forward_to_model manages lifecycle.
-            try:
-                self.model_pool.release_model(selected_model_name)
-            except Exception:
-                pass
-            plan_res = self.model_pool.forward_to_model(
-                selected_model_name,
-                messages=plan_messages,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
+                    # Tool was executed - the result is now in the packet
+                    # Continue to normal processing which will include the tool result in context
+                    logger.info("Tool executed successfully, continuing with enhanced context")
+                    ts_write({
+                        "type": "tool_routing",
+                        "stage": "continuing_with_result",
+                        "tool": packet.tool_routing.selected_tool.tool_name if packet.tool_routing.selected_tool else None
+                    }, session_id, source=source, destination_context=_metadata)
+    
+            # Fast-path slim prompt: low-complexity intents (incl. list_tools) avoid the heavy
+            # planning/reflector stack. Uses minimal identity + MCP summary + user input.
+            # Skip slim prompt when tool routing already executed — tool results need the
+            # full ExternalVoice pipeline to be properly incorporated into the response.
+            tool_already_executed = (
+                packet.tool_routing
+                and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
             )
-        except Exception as exc:
-            logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
-            yield {"type": "token", "value": f"[plan-error] {type(exc).__name__}: {exc}"}
-            return
-        logger.warning("AgentCore: planning call returned type=%s", type(plan_res))
-        ts_write({"type": "planning_raw_response", "response": str(plan_res)}, session_id, source=source, destination_context=_metadata)
-        if isinstance(plan_res, types.GeneratorType):
-            pieces = []
-            for item in plan_res:
-                # item may be streaming delta dicts: {"choices":[{"delta": {"content": "..."}}]}
+            if not tool_already_executed and self._should_use_slim_prompt(plan, user_input):
+                text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
+                if text is not None:
+                    _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                    yield {"type": "token", "value": _header + text}
+                    self.session_manager.add_message(session_id, "assistant", text)
+                    return
+                # _run_slim_prompt returned None — slim path declined (e.g. low
+                # confidence recitation).  Attempt tool routing (web_search) to
+                # gather real content before falling through to ExternalVoice.
+                if not (packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED):
+                    logger.info("Slim prompt declined — attempting tool routing for web_search")
+                    packet = self._run_tool_routing_loop(
+                        packet=packet,
+                        user_input=user_input,
+                        session_id=session_id,
+                        source=source,
+                        metadata=_metadata
+                    )
+                    if packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED:
+                        logger.info("Tool routing succeeded after slim prompt decline — continuing with enhanced context")
+    
+            # 4. Initial Planning & Reflection
+            if plan.intent:
+                codex = SemanticCodex.instance(self.config)
+                codex_symbol = f"§INTENT/{plan.intent.upper()}"
+                entry = codex.get(codex_symbol)
+                if entry:
+                    packet.content.data_fields.append(DataField(key='proactive_codex', value=entry.body, type='text'))
+                    logger.info(f"Proactively loaded codex entry '{codex_symbol}' for intent '{plan.intent}'.")
+    
+            # Dump the packet identity and data_fields so we can verify identity propagation
+            try:
+                pid = getattr(packet.header.persona, 'identity_id', None)
+                df_repr = [(getattr(df, 'key', None), getattr(df, 'value', None)) for df in getattr(packet.content, 'data_fields', [])]
+                logger.warning("AgentCore: packet persona.identity_id=%s, content.data_fields=%s", pid, df_repr)
+            except Exception:
+                logger.exception("AgentCore: failed to log packet identity/data_fields")
+    
+            plan_messages = build_from_packet(packet, task_instruction_key="initial_planning")
+            # Emit the assembled plan messages to stderr for debugging so we can
+            # confirm exactly what the model receives (ensures system message is first).
+            try:
+                _s = json.dumps(plan_messages, default=str, ensure_ascii=False, indent=2)
+                print("===ASSEMBLED_PLAN_MESSAGES_START===", file=sys.stderr)
+                # truncate to avoid excessive output
+                print(_s[:20000], file=sys.stderr)
+                print("===ASSEMBLED_PLAN_MESSAGES_END===", file=sys.stderr)
+            except Exception:
+                logger.exception("AgentCore: failed to dump plan_messages to stderr")
+            # build_from_packet() now normalizes roles/alternation for chat formatters.
+            # create_chat_completion may return a dict (non-stream) or a generator (stream).
+            import types
+            # Use ModelPool.forward_to_model to centralize acquisition, wrapping,
+            # and release semantics (this avoids directly invoking backend objects
+            # that may bypass our SafeModelProxy protections).
+            logger.warning("AgentCore: entering planning call with model=%s", selected_model_name)
+            try:
+                # Release any earlier acquisition so forward_to_model manages lifecycle.
                 try:
-                    delta = item.get("choices", [{}])[0].get("delta", {})
-                    text = delta.get("content")
-                    if text:
-                        pieces.append(text)
-                        continue
+                    self.model_pool.release_model(selected_model_name)
                 except Exception:
                     pass
-                # fallback to non-stream shape
-                try:
-                    text = item.get("choices", [{}])[0].get("message", {}).get("content")
-                    if text:
-                        pieces.append(text)
-                except Exception:
-                    pass
-            initial_plan_text = "".join(pieces).strip()
-        else:
-            try:
-                initial_plan_text = plan_res["choices"][0]["message"]["content"].strip()
-            except Exception as exc:
-                logger.exception("AgentCore: failed to parse plan response (%s)", type(plan_res))
-                yield {"type": "token", "value": f"[plan-parse-error] {type(exc).__name__}: {exc}"} 
-                return
-        packet.reasoning.reflection_log.append(ReflectionLog(step="initial_plan", summary=initial_plan_text, confidence=0.8)) # Placeholder confidence
-
-        # --- Cognitive Self-Audit ---
-        audit_cfg = self.config.constants.get("COGNITIVE_AUDIT", {})
-        is_slim_prompt = getattr(self.config, '_slim_prompt', False)
-        logger.warning("AgentCore: cognitive audit gate — enabled=%s, skip_for_slim=%s, is_slim=%s",
-                     audit_cfg.get("enabled", False), audit_cfg.get("skip_for_slim_prompt", True), is_slim_prompt)
-        if audit_cfg.get("enabled", False) and not (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt):
-            try:
-                logger.warning("AgentCore: running cognitive self-audit...")
-                run_cognitive_self_audit(
-                    packet=packet,
-                    plan_text=initial_plan_text,
-                    config=self.config,
-                    llm=selected_model,
+                plan_res = self.model_pool.forward_to_model(
+                    selected_model_name,
+                    messages=plan_messages,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    top_p=self.config.top_p,
                 )
-                logger.warning("AgentCore: cognitive self-audit completed successfully")
-            except Exception:
-                logger.warning("AgentCore: cognitive self-audit failed, continuing", exc_info=True)
-
-        # pick a reflection model that's idle and not the selected model; prefer role resolution
-        # Pick a reflection model that's idle and not the selected model.
-        # Rely on `get_idle_model` being present on ModelPool; fall back to a
-        # simple pool-key scan only if the call fails at runtime.
-        reflection_model_name = None
-        reflection_model = None
-        preferred_reflector = os.getenv("GAIA_REFLECTION_MODEL", "").strip().lower()
-        if preferred_reflector in ("", "prime", "gpu_prime", "selected", selected_model_name.lower()):
-            reflection_model = selected_model
-        elif preferred_reflector:
-            try:
-                reflection_model = self.model_pool.acquire_model_for_role(preferred_reflector)
-                reflection_model_name = preferred_reflector
-            except Exception:
-                reflection_model = None
-                reflection_model_name = None
-        if reflection_model is None:
-            try:
-                reflection_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
-            except Exception:
-                reflection_model_name = None
+            except Exception as exc:
+                logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
+                yield {"type": "token", "value": f"[plan-error] {type(exc).__name__}: {exc}"}
+                return
+            logger.warning("AgentCore: planning call returned type=%s", type(plan_res))
+            ts_write({"type": "planning_raw_response", "response": str(plan_res)}, session_id, source=source, destination_context=_metadata)
+            if isinstance(plan_res, types.GeneratorType):
+                pieces = []
+                for item in plan_res:
+                    # item may be streaming delta dicts: {"choices":[{"delta": {"content": "..."}}]}
+                    try:
+                        delta = item.get("choices", [{}])[0].get("delta", {})
+                        text = delta.get("content")
+                        if text:
+                            pieces.append(text)
+                            continue
+                    except Exception:
+                        pass
+                    # fallback to non-stream shape
+                    try:
+                        text = item.get("choices", [{}])[0].get("message", {}).get("content")
+                        if text:
+                            pieces.append(text)
+                    except Exception:
+                        pass
+                initial_plan_text = "".join(pieces).strip()
+            else:
                 try:
-                    pool_keys = list(getattr(self.model_pool, "models", {}).keys())
-                    candidates = [k for k in pool_keys if k != selected_model_name and k != "embed"]
-                    reflection_model_name = candidates[0] if candidates else None
+                    initial_plan_text = plan_res["choices"][0]["message"]["content"].strip()
+                except Exception as exc:
+                    logger.exception("AgentCore: failed to parse plan response (%s)", type(plan_res))
+                    yield {"type": "token", "value": f"[plan-parse-error] {type(exc).__name__}: {exc}"} 
+                    return
+            packet.reasoning.reflection_log.append(ReflectionLog(step="initial_plan", summary=initial_plan_text, confidence=0.8)) # Placeholder confidence
+    
+            # --- Cognitive Self-Audit ---
+            audit_cfg = self.config.constants.get("COGNITIVE_AUDIT", {})
+            is_slim_prompt = getattr(self.config, '_slim_prompt', False)
+            logger.warning("AgentCore: cognitive audit gate — enabled=%s, skip_for_slim=%s, is_slim=%s",
+                         audit_cfg.get("enabled", False), audit_cfg.get("skip_for_slim_prompt", True), is_slim_prompt)
+            if audit_cfg.get("enabled", False) and not (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt):
+                try:
+                    logger.warning("AgentCore: running cognitive self-audit...")
+                    run_cognitive_self_audit(
+                        packet=packet,
+                        plan_text=initial_plan_text,
+                        config=self.config,
+                        llm=selected_model,
+                    )
+                    logger.warning("AgentCore: cognitive self-audit completed successfully")
+                except Exception:
+                    logger.warning("AgentCore: cognitive self-audit failed, continuing", exc_info=True)
+    
+            # pick a reflection model that's idle and not the selected model; prefer role resolution
+            # Pick a reflection model that's idle and not the selected model.
+            # Rely on `get_idle_model` being present on ModelPool; fall back to a
+            # simple pool-key scan only if the call fails at runtime.
+            reflection_model_name = None
+            reflection_model = None
+            preferred_reflector = os.getenv("GAIA_REFLECTION_MODEL", "").strip().lower()
+            if preferred_reflector in ("", "prime", "gpu_prime", "selected", selected_model_name.lower()):
+                reflection_model = selected_model
+            elif preferred_reflector:
+                try:
+                    reflection_model = self.model_pool.acquire_model_for_role(preferred_reflector)
+                    reflection_model_name = preferred_reflector
+                except Exception:
+                    reflection_model = None
+                    reflection_model_name = None
+            if reflection_model is None:
+                try:
+                    reflection_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
                 except Exception:
                     reflection_model_name = None
-            if reflection_model_name:
-                # get() now supports lazy loading - no need to pre-check pool
-                reflection_model = self.model_pool.get(reflection_model_name)
+                    try:
+                        pool_keys = list(getattr(self.model_pool, "models", {}).keys())
+                        candidates = [k for k in pool_keys if k != selected_model_name and k != "embed"]
+                        reflection_model_name = candidates[0] if candidates else None
+                    except Exception:
+                        reflection_model_name = None
+                if reflection_model_name:
+                    # get() now supports lazy loading - no need to pre-check pool
+                    reflection_model = self.model_pool.get(reflection_model_name)
+                    if reflection_model is None:
+                        reflection_model = self.model_pool.acquire_model_for_role(reflection_model_name)
                 if reflection_model is None:
-                    reflection_model = self.model_pool.acquire_model_for_role(reflection_model_name)
-            if reflection_model is None:
-                reflection_model = selected_model
-        try:
-            refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
-            # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
+                    reflection_model = selected_model
             try:
-                packet.reasoning.reflection_log.append(ReflectionLog(step="refined_plan", summary=refined_plan_text, confidence=0.88))
-            except Exception:
-                logger.debug("AgentCore: failed to append refined_plan reflection log")
-            logger.debug(f"Reflection output: {refined_plan_text}")
-            # Mark packet as ready to stream after successful reflection
-            try:
-                packet.status.state = PacketState.READY_TO_STREAM
-                packet.status.next_steps.append("Ready for final generation")
-            except Exception:
-                logger.debug("AgentCore: failed to set packet to READY_TO_STREAM")
-        finally:
-            if reflection_model_name:
+                refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
+                # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
                 try:
-                    self.model_pool.release_model_for_role(reflection_model_name)
+                    packet.reasoning.reflection_log.append(ReflectionLog(step="refined_plan", summary=refined_plan_text, confidence=0.88))
                 except Exception:
-                    logger.debug("release_model_for_role failed", exc_info=True)
-        ts_write({"type": "reflection-pre", "packet_id": packet.header.packet_id, "out": refined_plan_text}, session_id, source=source, destination_context=_metadata)
-
-        # 5. Final Response Generation
-        final_messages = build_from_packet(packet)
-        # Also print the final assembled messages immediately before generation.
-        try:
-            with open("final_prompt_for_review.json", "w") as f:
-                _s = json.dumps(final_messages, default=str, ensure_ascii=False, indent=2)
-                f.write(_s)
-        except Exception:
-            logger.exception("AgentCore: failed to write final_messages to file")
-        # build_from_packet() normalizes messages; no runtime normalization required here.
-
-        # Assemble a simple prompt string for guardian/sentinel checks (concatenate message contents)
-        try:
-            assembled_prompt = "\n".join([m.get('content', '') for m in final_messages if isinstance(m, dict)])
-        except Exception:
-            assembled_prompt = packet.content.original_prompt or ""
-
-        # Pre-generation safety check: prefer EthicalSentinel (which may call the CoreIdentityGuardian)
-        ok, reason = self._run_pre_generation_safety_check(packet, assembled_prompt)
-        if not ok:
-            # Fail closed: block generation and return a clear, distinct message based on reason
-            packet.status.finalized = True
-            packet.status.state = PacketState.ABORTED
-            packet.status.next_steps.append(f"Blocked by safety check: {reason}")
-            packet.metrics.errors.append(f"blocked:{reason}")
-            if reason == 'identity_violation':
-                user_msg = "I can't comply with that request because it would violate my core identity constraints."
-            elif reason == 'system_condition':
-                user_msg = "I can't process that right now due to system safety conditions (resource/loop/error)."
-            else:
-                user_msg = "I can't process that request due to an internal safety check failure."
-
-            logger.error(f"[CoreIdentityGuardian] Blocking generation: {reason}")
-            yield {"type": "token", "value": user_msg}
-            return
-
-        # pick an observer model that's idle if possible; fall back to config-based selection
-        logger.info(f"[OBSERVER] Selecting observer model. Responder is '{selected_model_name}'")
-        logger.info(f"[OBSERVER] Available models in pool: {list(getattr(self.model_pool, 'models', {}).keys())}")
-        logger.info(f"[OBSERVER] Model statuses: {getattr(self.model_pool, 'model_status', {})}")
-
-        # Check observer config for explicit model preference
-        observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
-        observer_enabled = observer_config.get("enabled", False)
-        use_lite_for_observer = observer_config.get("use_lite", True)
-        logger.info(f"[OBSERVER] Observer config: enabled={observer_enabled}, use_lite={use_lite_for_observer}")
-
-        observer_model_name = None
-
-        # Prefer Lite for observation — it's lighter and keeps Prime free for generation
-        if observer_enabled and use_lite_for_observer:
-            logger.info("[OBSERVER] Attempting to load lite model for observer role")
-            try:
-                if self.model_pool.ensure_model_loaded("lite"):
-                    observer_model_name = "lite"
-                    logger.info("[OBSERVER] Successfully loaded lite for observer role")
-                else:
-                    logger.warning("[OBSERVER] Failed to load lite for observer role")
-            except Exception as e:
-                logger.warning(f"[OBSERVER] Exception loading lite: {e}")
-
-        # Fallback: try get_idle_model (excludes the responder)
-        if observer_model_name is None:
-            try:
-                observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
-                logger.info(f"[OBSERVER] get_idle_model returned: '{observer_model_name}'")
-            except Exception as e:
-                logger.warning(f"[OBSERVER] get_idle_model failed: {e}")
-
-        # Final fallback: scan pool for any available model
-        if observer_model_name is None:
-            try:
-                pool_keys = list(getattr(self.model_pool, "models", {}).keys())
-                candidates = [k for k in pool_keys if k != selected_model_name and k != "embed"]
-                observer_model_name = candidates[0] if candidates else None
-                logger.info(f"[OBSERVER] Fallback selection from candidates {candidates}: '{observer_model_name}'")
-            except Exception as e2:
-                logger.error(f"[OBSERVER] Fallback selection also failed: {e2}")
-                observer_model_name = None
-
-        def _env_bool(name: str) -> Optional[bool]:
-            val = os.getenv(name)
-            if val is None:
-                return None
-            return str(val).strip().lower() in ("1", "true", "yes", "on")
-
-        observer_model = None
-        if observer_model_name:
-            # get() now supports lazy loading - no need to pre-check pool
-            observer_model = self.model_pool.get(observer_model_name)
-            if observer_model is None:
-                observer_model = self.model_pool.acquire_model_for_role(observer_model_name)
-            logger.info(f"[OBSERVER] Acquired observer model '{observer_model_name}': {observer_model is not None}")
-        else:
-            logger.warning("[OBSERVER] No observer model available")
-
-        disable_observer_env = _env_bool("GAIA_DISABLE_OBSERVER")
-        disable_observer_const = self.config.constants.get("OBSERVER_DISABLE_DEFAULT", False)
-        if isinstance(disable_observer_const, str):
-            disable_observer_const = disable_observer_const.strip().lower() in ("1", "true", "yes", "on")
-        disable_observer = disable_observer_env if disable_observer_env is not None else bool(disable_observer_const)
-
-        observer_use_llm = self.config.constants.get("OBSERVER_USE_LLM", False)
-        logger.info(f"[OBSERVER] Config: disable_observer={disable_observer}, OBSERVER_USE_LLM={observer_use_llm}")
-
-        post_stream_override = _env_bool("GAIA_OBSERVER_POST_STREAM")
-        post_stream_const = self.config.constants.get("OBSERVER_POST_STREAM_DEFAULT", False)
-        if isinstance(post_stream_const, str):
-            post_stream_const = post_stream_const.strip().lower() in ("1", "true", "yes", "on")
-        post_stream_observer = post_stream_override if post_stream_override is not None else bool(post_stream_const)
-
-        observer_instance = None
-        if not disable_observer and observer_model is not None:
-            observer_instance = StreamObserver(config=self.config, llm=observer_model, name="AgentCore-Observer")
-            observer_instance.post_stream_only = post_stream_observer
-            logger.info(f"[OBSERVER] StreamObserver created: model='{observer_model_name}', post_stream_only={post_stream_observer}")
-        else:
-            reason = "disabled" if disable_observer else "no model available"
-            logger.warning(f"[OBSERVER] StreamObserver NOT created: {reason}")
-
-        active_stream_observer = None if post_stream_observer else observer_instance
-        post_run_observer = observer_instance if post_stream_observer else None
-
-        logger.info(f"[OBSERVER] Final setup: active_stream={active_stream_observer is not None}, post_run={post_run_observer is not None}")
-
-        print("---PROMPT TO BE SENT TO THE MODEL---", file=sys.stderr)
-        print(json.dumps(final_messages, indent=2), file=sys.stderr)
-        print("------------------------------------", file=sys.stderr)
-
-        voice = ExternalVoice(
-            model=selected_model,
-            model_pool=self.model_pool,
-            config=self.config,
-            messages=final_messages,
-            source="agent_core",
-            observer=active_stream_observer,
-            context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
-            session_id=session_id,
-        )
-        lite_fallback_used = False
-        lite_fallback_model_name = None
-        lite_fallback_acquired = False
-        try:
-            try:
-                stream_generator = voice.stream_response()
-                pieces: List[str] = []
-                # consume the generator and handle interruption events
-                for item in stream_generator:
-                    # item can be a token string or an event dict
-                    if isinstance(item, dict):
-                        ev = item.get("event")
-                        if ev == "interruption":
-                            reason_data = item.get("data", "observer interruption")
-                            # data may be a dict with reason and suggestion (explain mode)
-                            if isinstance(reason_data, dict):
-                                reason = reason_data.get("reason") or reason_data.get("reason", "observer interruption")
-                                suggestion = reason_data.get("suggestion")
-                                interrupt_type = reason_data.get("type", "")
-                            else:
-                                reason = reason_data
-                                suggestion = None
-                                interrupt_type = ""
-
-                            logger.warning(f"AgentCore: Observer interruption during stream: {reason}")
-                            # record in packet status if available
-                            try:
-                                packet.status.observer_trace.append(f"STREAM_INTERRUPT: {reason}")
-                                packet.status.next_steps.append(f"Observer interruption: {reason}")
-                            except Exception:
-                                logger.debug("AgentCore: failed to update packet status with observer interruption")
-
-                            # Think-tag loops: don't surface to user — let the
-                            # existing think-tag-only recovery at post-stream
-                            # handle the retry silently.
-                            if interrupt_type == "think_tag_loop":
-                                logger.info("AgentCore: Think-tag circuit breaker fired; will retry with no-thinking instruction")
-                                break
-
-                            # surface a user-facing notification; include suggestion when present
-                            user_msg = f"--- Stream interrupted by observer: {reason} ---"
-                            if suggestion:
-                                user_msg += f"\nSuggestion: {suggestion}"
-                            yield {"type": "token", "value": user_msg}
-                            # abort consuming further stream tokens
-                            break
-                        else:
-                            logger.debug(f"AgentCore: stream event ignored: {ev}")
-                            continue
-                    else:
-                        pieces.append(str(item))
-                        # Yield token for real-time streaming
-                        yield {"type": "token", "value": str(item)}
-
-                full_response = "".join(pieces)
-                # Yield a flush event to signal completion of this stream phase
-                yield {"type": "flush"}
-                logger.warning(
-                    "AgentCore: collected %s stream chunks (len=%s chars)",
-                    len(pieces),
-                    len(full_response),
-                )
-            except Exception:
-                # If the GPU/backed engine dies or the stream raises, attempt a
-                # graceful fallback to the 'lite' CPU model so the session stays
-                # usable. We surface a brief user-facing message and then try to
-                # re-run generation on the lite model.
-                logger.exception("AgentCore: Primary model stream failed; attempting fallback to 'lite' model")
-                yield {"type": "token", "value": "Primary model failed during generation; falling back to CPU model (lite)."}
+                    logger.debug("AgentCore: failed to append refined_plan reflection log")
+                logger.debug(f"Reflection output: {refined_plan_text}")
+                # Mark packet as ready to stream after successful reflection
                 try:
-                    # Acquire lite for fallback
-                    lite_model = self.model_pool.acquire_model_for_role("lite")
-                    lite_fallback_acquired = True
-                    lite_fallback_used = True
-                    lite_fallback_model_name = "lite"
-                    fallback_voice = ExternalVoice(model=lite_model, model_pool=self.model_pool, config=self.config, messages=final_messages, source="agent_core_fallback", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
-                    pieces = []
-                    stream_generator = fallback_voice.stream_response()
+                    packet.status.state = PacketState.READY_TO_STREAM
+                    packet.status.next_steps.append("Ready for final generation")
+                except Exception:
+                    logger.debug("AgentCore: failed to set packet to READY_TO_STREAM")
+            finally:
+                if reflection_model_name:
+                    try:
+                        self.model_pool.release_model_for_role(reflection_model_name)
+                    except Exception:
+                        logger.debug("release_model_for_role failed", exc_info=True)
+            ts_write({"type": "reflection-pre", "packet_id": packet.header.packet_id, "out": refined_plan_text}, session_id, source=source, destination_context=_metadata)
+    
+            # 5. Final Response Generation (with Iterative Council Debate)
+            debate_turn = 0
+            MAX_DEBATE_TURNS = 3
+            council_history = []
+            full_response = ""
+            
+            while debate_turn < MAX_DEBATE_TURNS:
+                debate_turn += 1
+                logger.info(f"--- Council Debate Turn {debate_turn} (Model: {selected_model_name}) ---")
+                
+                # Update packet with peer's council context if this is a follow-up turn
+                if council_history:
+                    # Add or update council context field
+                    found = False
+
+                    for field in packet.content.data_fields:
+                        if field.key == "council_debate_history":
+                            field.value = "\n".join(council_history)
+                            found = True
+                            break
+                    if not found:
+                        packet.content.data_fields.append(DataField(
+                            key="council_debate_history",
+                            value="\n".join(council_history)
+                        ))
+    
+                final_messages = build_from_packet(packet)
+                
+                # Assemble a simple prompt string for guardian/sentinel checks (concatenate message contents)
+                try:
+                    assembled_prompt = "\n".join([m.get('content', '') for m in final_messages if isinstance(m, dict)])
+                except Exception:
+                    assembled_prompt = packet.content.original_prompt or ""
+    
+                # Pre-generation safety check: prefer EthicalSentinel (which may call the CoreIdentityGuardian)
+                ok, reason = self._run_pre_generation_safety_check(packet, assembled_prompt)
+                if not ok:
+                    # Fail closed: block generation and return a clear, distinct message based on reason
+                    packet.status.finalized = True
+                    packet.status.state = PacketState.ABORTED
+                    packet.status.next_steps.append(f"Blocked by safety check: {reason}")
+                    packet.metrics.errors.append(f"blocked:{reason}")
+                    if reason == 'identity_violation':
+                        user_msg = "I can't comply with that request because it would violate my core identity constraints."
+                    elif reason == 'system_condition':
+                        user_msg = "I can't process that right now due to system safety conditions (resource/loop/error)."
+                    else:
+                        user_msg = "I can't process that request due to an internal safety check failure."
+    
+                    logger.error(f"[CoreIdentityGuardian] Blocking generation: {reason}")
+                    yield {"type": "token", "value": user_msg}
+                    return
+    
+                # pick an observer model that's idle if possible; fall back to config-based selection
+                observer_model_name = None
+                observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})
+                observer_enabled = observer_config.get("enabled", False)
+                use_lite_for_observer = observer_config.get("use_lite", True)
+    
+                if observer_enabled and use_lite_for_observer:
+                    try:
+                        if self.model_pool.ensure_model_loaded("lite"):
+                            observer_model_name = "lite"
+                    except Exception:
+                        pass
+    
+                if observer_model_name is None:
+                    try:
+                        observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
+                    except Exception:
+                        pass
+    
+                observer_model = None
+                if observer_model_name:
+                    observer_model = self.model_pool.acquire_model_for_role(observer_model_name)
+    
+                observer_instance = None
+                if observer_model is not None:
+                    observer_instance = StreamObserver(config=self.config, llm=observer_model, name=f"AgentCore-Observer-Turn{debate_turn}")
+                
+                voice = ExternalVoice(
+                    model=selected_model,
+                    model_pool=self.model_pool,
+                    config=self.config,
+                    messages=final_messages,
+                    source=f"agent_core_debate_{debate_turn}",
+                    observer=observer_instance,
+                    context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
+                    session_id=session_id,
+                )
+    
+                current_turn_pieces = []
+                try:
+                    stream_generator = voice.stream_response()
+                    
+                    # ── Phase Header Yielding ──
+                    # Nano is handled by generate_instant_reflex before run_turn.
+                    # Here we handle Operator (Lite) vs Thinker (Prime).
+                    role_label = "Thinker" if "prime" in selected_model_name.lower() else "Operator"
+                    header_icon = "🧠" if role_label == "Thinker" else "🤖"
+                    phase_header = f"\n\n{header_icon} **[({role_label}) {selected_model_name.title()}]**\n"
+                    
+                    # If this is a refinement turn, add that context
+                    if reflex_text and debate_turn == 1:
+                        phase_header = f"\n\n---\n🔄 **Refinement from Council ({role_label})**\n"
+                    
+                    yield {"type": "token", "value": phase_header}
+
                     for item in stream_generator:
                         if isinstance(item, dict):
+                            # item is an event dict (interruption, etc.)
                             ev = item.get("event")
                             if ev == "interruption":
                                 reason_data = item.get("data", "observer interruption")
-                                if isinstance(reason_data, dict):
-                                    reason = reason_data.get("reason") or reason_data.get("reason", "observer interruption")
-                                    suggestion = reason_data.get("suggestion")
-                                else:
-                                    reason = reason_data
-                                    suggestion = None
-                                logger.warning(f"AgentCore: Observer interruption during fallback stream: {reason}")
-                                try:
-                                    packet.status.observer_trace.append(f"STREAM_INTERRUPT: {reason}")
-                                    packet.status.next_steps.append(f"Observer interruption: {reason}")
-                                except Exception:
-                                    logger.debug("AgentCore: failed to update packet status with observer interruption")
-                                user_msg = f"--- Stream interrupted by observer: {reason} ---"
-                                if suggestion:
-                                    user_msg += f"\nSuggestion: {suggestion}"
-                                yield {"type": "token", "value": user_msg}
+                                logger.warning(f"AgentCore: Observer interruption during debate turn {debate_turn}: {reason_data}")
                                 break
-                            else:
-                                logger.debug(f"AgentCore: fallback stream event ignored: {ev}")
-                                continue
                         else:
-                            pieces.append(str(item))
-                        # Yield token for real-time streaming
-                        yield {"type": "token", "value": str(item)}
-                    full_response = "".join(pieces)
+                            current_turn_pieces.append(str(item))
+                            # Yield token for real-time streaming
+                            yield {"type": "token", "value": str(item)}
+
+                    current_response = "".join(current_turn_pieces)
+                    
+                    # Yield any observer findings attached to this phase
+                    if observer_instance and hasattr(observer_instance, 'last_review') and observer_instance.last_review:
+                        rev = observer_instance.last_review
+                        obs_note = f"\n\n🔍 **[Observation]** {rev.level.upper()}: {rev.reason}"
+                        yield {"type": "token", "value": obs_note}
+
+                    yield {"type": "flush"}
+                    # Parse current output for council tags
+                    routing_result = route_output(current_response, packet, self, session_id, destination)
+                    council_msgs = routing_result.get("council_messages", [])
+                    
+                    # Release observer before continuing
+                    if observer_model_name:
+                        self.model_pool.release_model_for_role(observer_model_name)
+    
+                    if not council_msgs:
+                        # Consensus reached: yield final cleaned response
+                        logger.info(f"AgentCore: Consensus reached by {selected_model_name} in turn {debate_turn}")
+                        full_response = current_response
+                        break
+                    
+                    # Consensus NOT reached: store peer message and swap model
+                    logger.info(f"AgentCore: Debate continues. {selected_model_name} emitted {len(council_msgs)} council messages.")
+                    for msg in council_msgs:
+                        council_history.append(f"[{selected_model_name.upper()}]: {msg}")
+                    
+                    # Model Swap: Lite <-> Prime
+                    next_model_name = "gpu_prime" if selected_model_name == "lite" else "lite"
+                    
+                    # Release current model
+                    self.model_pool.release_model_for_role(selected_model_name)
+                    
+                    # Acquire next model
+                    try:
+                        new_model = self.model_pool.acquire_model_for_role(next_model_name)
+                        if new_model:
+                            selected_model = new_model
+                            selected_model_name = next_model_name
+                        else:
+                            logger.warning(f"AgentCore: Could not acquire {next_model_name} for debate; terminating.")
+                            full_response = routing_result.get("response_to_user", "")
+                            break
+                    except Exception:
+                        logger.exception(f"AgentCore: Error swapping to {next_model_name}")
+                        full_response = routing_result.get("response_to_user", "")
+                        break
+                        
                 except Exception:
-                    logger.exception("AgentCore: Fallback to 'lite' also failed")
-                    yield {"type": "token", "value": "Fallback to CPU model also failed; I'm unable to complete your request right now."}
-                    # Ensure any fallback acquisition is released in finally block
-                    return
+                    logger.exception("AgentCore: Debate loop turn failed")
+                    if observer_model_name:
+                        self.model_pool.release_model_for_role(observer_model_name)
+                    break
+    
+            # End of while loop
+            if debate_turn >= MAX_DEBATE_TURNS:
+                logger.warning(f"AgentCore: Max debate turns ({MAX_DEBATE_TURNS}) reached without consensus.")
+            
+            # Release the final model used
+            self.model_pool.release_model_for_role(selected_model_name)
+
+            # --- Finalize response processing ---
             full_response = self._suppress_repetition(full_response)
             logger.info(f"Full LLM response before routing: {full_response}")
 
             # ── Think-tag-only recovery ──────────────────────────────────
-            # If the model generated only <think> reasoning without any
-            # visible response, retry once with an explicit instruction.
+
+                # If the model generated only <think> reasoning without any
+                # visible response, retry once with an explicit instruction.
             stripped_check = strip_think_tags(full_response).strip()
             if full_response.strip() and not stripped_check:
                 logger.warning(
@@ -1976,207 +1920,207 @@ class AgentCore:
                                 full_response = _re_scrub.sub(
                                     r'[^\n.]*' + escaped + r'[^\n.]*[.\n]?',
                                     '', full_response
-                                )
-                            full_response = full_response.strip()
-                            logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
+                                    )
+                                full_response = full_response.strip()
+                                logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
-
-            # This function now needs to handle the v0.3 packet
-            routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
-            user_facing_response = routed_output["response_to_user"]
-            execution_results = routed_output["execution_results"]
-
-            packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
-
-            logger.debug(f"User-facing response after routing: {user_facing_response}")
-
-            # Epistemic citation check — warn user if fabricated citations detected
-            epistemic_warning = ""
-            try:
-                eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
-                if eg_config.get("annotate_unverified_citations", True):
-                    max_before_warn = eg_config.get("max_unverified_citations_before_warning", 1)
-                    reflection_logs = getattr(packet.reasoning, 'reflection_log', []) or []
-                    for log_entry in reflection_logs:
-                        step = getattr(log_entry, 'step', '') if hasattr(log_entry, 'step') else log_entry.get('step', '')
-                        summary = getattr(log_entry, 'summary', '') if hasattr(log_entry, 'summary') else log_entry.get('summary', '')
-                        if step in ('observer_path_validation', 'observer_citation_verification'):
-                            warning_count = summary.count('does not exist') + summary.count('Unverified')
-                            if warning_count >= max_before_warn:
-                                epistemic_warning = (
-                                    "\n\n---\n*[Observer: Some file references in this response "
-                                    "could not be verified against the knowledge base. "
-                                    "Information may be from general knowledge rather than "
-                                    "retrieved documents.]*\n---\n"
-                                )
-                                break
-            except Exception:
-                logger.debug("Epistemic citation check failed", exc_info=True)
-
-            _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
-            
-            # --- Speculative Response Comparison ---
-            final_yield_text = user_facing_response
-            if reflex_text:
-                # If we gave a reflex, determine if this new response adds enough value to show
-                # Value check: different enough OR significantly longer
-                from difflib import SequenceMatcher
-                ratio = SequenceMatcher(None, reflex_text, user_facing_response).ratio()
-                if ratio > 0.8 and len(user_facing_response) < (len(reflex_text) * 1.2):
-                    self.logger.info(f"AgentCore: speculative reflex was sufficient (match={ratio:.2f}); skipping follow-up.")
-                    final_yield_text = "" # Don't yield a redundant follow-up
-                else:
-                    self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
-                    final_yield_text = "\n\n---\n*Refinement from Operator:*\n" + user_facing_response
-
-            # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
-            # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
-            if final_yield_text:
-                if reflex_text or not active_stream_observer:
-                    yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
-                    logger.debug(f"Yielded to user: {final_yield_text}")
-                else:
-                    logger.debug("Suppressing final yield: already streamed.")
-
-            # If the response came from the Oracle path, persist it as a learned fact
-            # so future turns can answer locally without another external call.
-            try:
-                backend_env = (os.getenv("GAIA_BACKEND") or "").lower()
-                if "oracle" in (selected_model_name or "").lower() or backend_env.startswith("oracle"):
-                    rescue_helper.remember_fact(key=user_input, value=user_facing_response, note="sourced_from=oracle")
-            except Exception:
-                logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
-            
-            # Use the routed user-facing response for all persistence.
-            # full_response may be empty if the LLM stream yielded nothing,
-            # but user_facing_response always has content (route_output provides fallbacks).
-            packet.response.candidate = user_facing_response
-            packet.response.confidence = 0.93 # Placeholder
-            self.ai_manager.status["last_response"] = user_facing_response
-            self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
-            self._emit_timeline_message(session_id, "assistant", source)
-
-            if execution_results:
-                process_execution_results(execution_results, self.session_manager, session_id, packet)
-
-                messages = build_from_packet(packet, task_instruction_key="execution_feedback")
-                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
-                stream_generator = voice.stream_response()
-                concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
-                yield {"type": "token", "value": concluding_response}
-                self.session_manager.add_message(session_id, "assistant", concluding_response)
-
-            log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
-            log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
-            turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
-            probe_stats = get_session_probe_stats(session_id)
-            if probe_stats:
-                turn_end_event["probe_session_stats"] = probe_stats
-            ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
-            self.session_manager.record_last_activity()
-
-            # --- Loop Detection: Record output and check for loops ---
-            if loop_manager and loop_manager.enabled:
+    
+                # This function now needs to handle the v0.3 packet
+                routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
+                user_facing_response = routed_output["response_to_user"]
+                execution_results = routed_output["execution_results"]
+    
+                packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
+    
+                logger.debug(f"User-facing response after routing: {user_facing_response}")
+    
+                # Epistemic citation check — warn user if fabricated citations detected
+                epistemic_warning = ""
                 try:
-                    # Record the output for similarity detection
-                    loop_manager.record_output(full_response)
-
-                    # Record state snapshot
-                    loop_manager.record_state(
-                        goal=plan.intent if plan else "",
-                        state_snapshot={
-                            "packet_id": packet.header.packet_id,
-                            "session_id": session_id,
-                            "tool_routing": packet.tool_routing.execution_status.value if packet.tool_routing else None
-                        }
-                    )
-
-                    # Check for loop patterns
-                    loop_result = loop_manager.check_and_handle(
-                        session_id=session_id,
-                        packet_id=packet.header.packet_id,
-                        goal=plan.intent if plan else "",
-                        last_output=full_response
-                    )
-
-                    if loop_result and loop_result.is_loop:
-                        # Update packet with loop state
-                        from gaia_common.protocols.cognition_packet import LoopState
-                        packet.loop_state = LoopState(
-                            detected_at=loop_result.evidence.get("detected_at", ""),
-                            loop_type=loop_result.primary_category.value,
-                            pattern=loop_result.pattern,
-                            reset_count=loop_result.reset_count,
-                            confidence=loop_result.confidence,
-                            triggered_by=loop_result.triggered_by,
-                            in_recovery=not loop_result.should_warn,
-                            warned=loop_result.should_warn
-                        )
-
-                        # Notify user
-                        notification = loop_manager.get_notification(loop_result)
-                        if loop_result.should_warn:
-                            # Warning only - add note to output
-                            warn_msg = f"\n\n---\n⚠️ **Loop Warning**: {notification.get('toast', {}).get('body', 'Repetitive pattern detected.')}\n---"
-                            yield {"type": "token", "value": warn_msg}
-                            logger.warning(f"Loop warning issued: {notification.get('status_line', '')}")
-                        else:
-                            # Reset triggered - will inject recovery context next turn
-                            reset_msg = f"\n\n---\n🔄 **Loop Detected**: {notification.get('toast', {}).get('body', 'Resetting to try a different approach.')}\n---"
-                            yield {"type": "token", "value": reset_msg}
-                            logger.warning(f"Loop reset triggered: {notification.get('status_line', '')}")
-
-                        ts_write({
-                            "type": "loop_detection",
-                            "pattern": loop_result.pattern,
-                            "confidence": loop_result.confidence,
-                            "action": "warn" if loop_result.should_warn else "reset",
-                            "reset_count": loop_result.reset_count
-                        }, session_id, source=source, destination_context=_metadata)
-
-                    # Clear recovery context if we successfully completed without looping
-                    if not loop_result or not loop_result.is_loop:
-                        loop_manager.clear_recovery_context()
-
+                    eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
+                    if eg_config.get("annotate_unverified_citations", True):
+                        max_before_warn = eg_config.get("max_unverified_citations_before_warning", 1)
+                        reflection_logs = getattr(packet.reasoning, 'reflection_log', []) or []
+                        for log_entry in reflection_logs:
+                            step = getattr(log_entry, 'step', '') if hasattr(log_entry, 'step') else log_entry.get('step', '')
+                            summary = getattr(log_entry, 'summary', '') if hasattr(log_entry, 'summary') else log_entry.get('summary', '')
+                            if step in ('observer_path_validation', 'observer_citation_verification'):
+                                warning_count = summary.count('does not exist') + summary.count('Unverified')
+                                if warning_count >= max_before_warn:
+                                    epistemic_warning = (
+                                        "\n\n---\n*[Observer: Some file references in this response "
+                                        "could not be verified against the knowledge base. "
+                                        "Information may be from general knowledge rather than "
+                                        "retrieved documents.]*\n---\n"
+                                    )
+                                    break
                 except Exception:
-                    logger.debug("Loop detection: post-turn check failed", exc_info=True)
-
-            packet.status.finalized = True
-            packet.status.state = PacketState.COMPLETED
-            packet.compute_hashes() # Compute final integrity hashes
-            logger.info(f"🧠 Final CognitionPacket: {packet.to_json()}")
-
-            # Write a serializable version to thoughtstream to avoid Enum serialization issues
-            try:
-                ts_write({"type": "cognition_packet", "packet": packet.to_serializable_dict()}, session_id, source=source, destination_context=_metadata)
-            except Exception:
-                logger.exception("Failed to write cognition_packet to thoughtstream using serializable dict")
-
-            # Analyze dev_matrix for task completion
-            # TODO: [GAIA-REFACTOR] dev_matrix_analyzer.py module not yet migrated.
-            try:
-                from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
-                dev_matrix_analyzer = DevMatrixAnalyzer(self.config)
-                newly_resolved = dev_matrix_analyzer.analyze_and_update()
-            except ImportError:
-                newly_resolved = []  # Placeholder until migration
-
-            # If we're in Discord and the Discord task was just resolved, log it prominently
-            if newly_resolved and "discord" in source.lower():
-                for task in newly_resolved:
-                    task_name = task.get('task', '')
-                    if 'discord' in task_name.lower():
-                        logger.info(f"🎉 GAIA autonomously marked '{task_name}' as resolved while using Discord!")
-                        ts_write({
-                            "type": "autonomous_task_completion",
-                            "task": task_name,
-                            "context": "Resolved while actively using Discord integration",
-                            "source": source,
-                        }, session_id)
-            
-            packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
-            logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
+                    logger.debug("Epistemic citation check failed", exc_info=True)
+    
+                _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
+                
+                # --- Speculative Response Comparison ---
+                final_yield_text = user_facing_response
+                if reflex_text:
+                    # If we gave a reflex, determine if this new response adds enough value to show
+                    # Value check: different enough OR significantly longer
+                    from difflib import SequenceMatcher
+                    ratio = SequenceMatcher(None, reflex_text, user_facing_response).ratio()
+                    if ratio > 0.8 and len(user_facing_response) < (len(reflex_text) * 1.2):
+                        self.logger.info(f"AgentCore: speculative reflex was sufficient (match={ratio:.2f}); skipping follow-up.")
+                        final_yield_text = "" # Don't yield a redundant follow-up
+                    else:
+                        self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
+                        final_yield_text = "\n\n---\n*Refinement from Operator:*\n" + user_facing_response
+    
+                # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
+                # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
+                if final_yield_text:
+                    if reflex_text or not active_stream_observer:
+                        yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
+                        logger.debug(f"Yielded to user: {final_yield_text}")
+                    else:
+                        logger.debug("Suppressing final yield: already streamed.")
+    
+                # If the response came from the Oracle path, persist it as a learned fact
+                # so future turns can answer locally without another external call.
+                try:
+                    backend_env = (os.getenv("GAIA_BACKEND") or "").lower()
+                    if "oracle" in (selected_model_name or "").lower() or backend_env.startswith("oracle"):
+                        rescue_helper.remember_fact(key=user_input, value=user_facing_response, note="sourced_from=oracle")
+                except Exception:
+                    logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
+                
+                # Use the routed user-facing response for all persistence.
+                # full_response may be empty if the LLM stream yielded nothing,
+                # but user_facing_response always has content (route_output provides fallbacks).
+                packet.response.candidate = user_facing_response
+                packet.response.confidence = 0.93 # Placeholder
+                self.ai_manager.status["last_response"] = user_facing_response
+                self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
+                self._emit_timeline_message(session_id, "assistant", source)
+    
+                if execution_results:
+                    process_execution_results(execution_results, self.session_manager, session_id, packet)
+    
+                    messages = build_from_packet(packet, task_instruction_key="execution_feedback")
+                    voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
+                    stream_generator = voice.stream_response()
+                    concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
+                    yield {"type": "token", "value": concluding_response}
+                    self.session_manager.add_message(session_id, "assistant", concluding_response)
+    
+                log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+                log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+                turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
+                probe_stats = get_session_probe_stats(session_id)
+                if probe_stats:
+                    turn_end_event["probe_session_stats"] = probe_stats
+                ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
+                self.session_manager.record_last_activity()
+    
+                # --- Loop Detection: Record output and check for loops ---
+                if loop_manager and loop_manager.enabled:
+                    try:
+                        # Record the output for similarity detection
+                        loop_manager.record_output(full_response)
+    
+                        # Record state snapshot
+                        loop_manager.record_state(
+                            goal=plan.intent if plan else "",
+                            state_snapshot={
+                                "packet_id": packet.header.packet_id,
+                                "session_id": session_id,
+                                "tool_routing": packet.tool_routing.execution_status.value if packet.tool_routing else None
+                            }
+                        )
+    
+                        # Check for loop patterns
+                        loop_result = loop_manager.check_and_handle(
+                            session_id=session_id,
+                            packet_id=packet.header.packet_id,
+                            goal=plan.intent if plan else "",
+                            last_output=full_response
+                        )
+    
+                        if loop_result and loop_result.is_loop:
+                            # Update packet with loop state
+                            from gaia_common.protocols.cognition_packet import LoopState
+                            packet.loop_state = LoopState(
+                                detected_at=loop_result.evidence.get("detected_at", ""),
+                                loop_type=loop_result.primary_category.value,
+                                pattern=loop_result.pattern,
+                                reset_count=loop_result.reset_count,
+                                confidence=loop_result.confidence,
+                                triggered_by=loop_result.triggered_by,
+                                in_recovery=not loop_result.should_warn,
+                                warned=loop_result.should_warn
+                            )
+    
+                            # Notify user
+                            notification = loop_manager.get_notification(loop_result)
+                            if loop_result.should_warn:
+                                # Warning only - add note to output
+                                warn_msg = f"\n\n---\n⚠️ **Loop Warning**: {notification.get('toast', {}).get('body', 'Repetitive pattern detected.')}\n---"
+                                yield {"type": "token", "value": warn_msg}
+                                logger.warning(f"Loop warning issued: {notification.get('status_line', '')}")
+                            else:
+                                # Reset triggered - will inject recovery context next turn
+                                reset_msg = f"\n\n---\n🔄 **Loop Detected**: {notification.get('toast', {}).get('body', 'Resetting to try a different approach.')}\n---"
+                                yield {"type": "token", "value": reset_msg}
+                                logger.warning(f"Loop reset triggered: {notification.get('status_line', '')}")
+    
+                            ts_write({
+                                "type": "loop_detection",
+                                "pattern": loop_result.pattern,
+                                "confidence": loop_result.confidence,
+                                "action": "warn" if loop_result.should_warn else "reset",
+                                "reset_count": loop_result.reset_count
+                            }, session_id, source=source, destination_context=_metadata)
+    
+                        # Clear recovery context if we successfully completed without looping
+                        if not loop_result or not loop_result.is_loop:
+                            loop_manager.clear_recovery_context()
+    
+                    except Exception:
+                        logger.debug("Loop detection: post-turn check failed", exc_info=True)
+    
+                packet.status.finalized = True
+                packet.status.state = PacketState.COMPLETED
+                packet.compute_hashes() # Compute final integrity hashes
+                logger.info(f"🧠 Final CognitionPacket: {packet.to_json()}")
+    
+                # Write a serializable version to thoughtstream to avoid Enum serialization issues
+                try:
+                    ts_write({"type": "cognition_packet", "packet": packet.to_serializable_dict()}, session_id, source=source, destination_context=_metadata)
+                except Exception:
+                    logger.exception("Failed to write cognition_packet to thoughtstream using serializable dict")
+    
+                # Analyze dev_matrix for task completion
+                # TODO: [GAIA-REFACTOR] dev_matrix_analyzer.py module not yet migrated.
+                try:
+                    from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
+                    dev_matrix_analyzer = DevMatrixAnalyzer(self.config)
+                    newly_resolved = dev_matrix_analyzer.analyze_and_update()
+                except ImportError:
+                    newly_resolved = []  # Placeholder until migration
+    
+                # If we're in Discord and the Discord task was just resolved, log it prominently
+                if newly_resolved and "discord" in source.lower():
+                    for task in newly_resolved:
+                        task_name = task.get('task', '')
+                        if 'discord' in task_name.lower():
+                            logger.info(f"🎉 GAIA autonomously marked '{task_name}' as resolved while using Discord!")
+                            ts_write({
+                                "type": "autonomous_task_completion",
+                                "task": task_name,
+                                "context": "Resolved while actively using Discord integration",
+                                "source": source,
+                            }, session_id)
+                
+                packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
+                logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
             
             # YIELD THE FINAL PACKET
             yield {"type": "packet", "value": packet.to_serializable_dict()}

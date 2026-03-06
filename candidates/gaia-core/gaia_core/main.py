@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import json
@@ -309,6 +309,32 @@ app.include_router(gpu_router)
 from gaia_core.api.sleep_endpoints import router as sleep_router
 app.include_router(sleep_router)
 
+
+@app.post("/api/repair/structural")
+async def repair_structural_error(request: Request):
+    """
+    Cognitive repair endpoint for structural code errors.
+    Expects JSON: { "broken_code": "...", "error_msg": "..." }
+    """
+    data = await request.json()
+    broken_code = data.get("broken_code")
+    error_msg = data.get("error_msg")
+    
+    if not broken_code or not error_msg:
+        return JSONResponse(status_code=400, content={"error": "Missing broken_code or error_msg"})
+        
+    try:
+        from gaia_core.cognition.structural_surgeon import StructuralSurgeon
+        surgeon = StructuralSurgeon(config, model_pool)
+        fixed_code = surgeon.repair_snippet(broken_code, error_msg)
+        
+        if fixed_code:
+            return {"fixed_code": fixed_code}
+        else:
+            return JSONResponse(status_code=500, content={"error": "Cognitive repair failed to generate fix"})
+    except Exception as e:
+        logger.exception("Structural repair API failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/health")
 async def health_check():

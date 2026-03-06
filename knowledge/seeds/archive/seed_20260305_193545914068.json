@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-05T19:35:45.914088+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "bd7e0cbd-faf9-4156-ac5b-3622094d6ea6",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 How to optimally balance speed and stability in the Specialist Agent Mesh v2. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-05T19:58:45.200237+00:00"
+}

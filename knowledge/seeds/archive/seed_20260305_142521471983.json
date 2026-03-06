@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-05T14:25:21.472009+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "06914af1-cbf1-4136-b626-11fa3e620b81",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Cernunnos's specific role and attributes in relation to other Greek gods. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-05T14:30:57.212330+00:00"
+}

@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-05T20:21:35.238733+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "c4c4ba51-aaa9-4ad3-a52c-f1d3be10d59d",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Zeus's integration into D&D lore. Could be researched and added to knowledge base.**",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-05T20:55:44.923355+00:00"
+}

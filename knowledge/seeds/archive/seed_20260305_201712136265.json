@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-05T20:17:12.136300+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "32dbc8f3-bab7-4f1b-84a6-b7e580b26b0a",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Zeus's role in specific D&D campaigns. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-05T20:21:24.179415+00:00"
+}
