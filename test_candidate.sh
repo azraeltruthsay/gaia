@@ -48,8 +48,8 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_inject() { echo -e "${CYAN}[INJECT]${NC} $1"; }
 
 PROJECT_ROOT="/gaia/GAIA_Project"
-CANDIDATE_DIR="${PROJECT_ROOT}/candidates/gaia-${SERVICE}"
-ACTIVE_DIR="${PROJECT_ROOT}/gaia-${SERVICE}"
+CANDIDATE_DIR="${PROJECT_ROOT}/candidates/${SERVICE}"
+ACTIVE_DIR="${PROJECT_ROOT}/${SERVICE}"
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.candidate.yml"
 LIVE_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
 
@@ -210,18 +210,18 @@ start_candidate() {
         log_success "Full candidate stack is running!"
         echo ""
         echo "Candidate Endpoints (parallel mode - isolated from live):"
-        echo "  - Web:   http://localhost:6417"
-        echo "  - Core:  http://localhost:6416"
-        echo "  - MCP:   http://localhost:8767"
-        echo "  - Study: http://localhost:8768"
+        echo "  - Web:   http://localhost:${port}"
+        echo "  - Core:  http://localhost:${port}"
+        echo "  - MCP:   http://localhost:${port}"
+        echo "  - Study: http://localhost:${port}"
     else
-        log_info "Starting gaia-${SERVICE}-candidate container..."
+        log_info "Starting ${SERVICE}-candidate container..."
 
         if [ "$gpu_flag" = "1" ]; then
             log_warn "GPU mode enabled - ensure active GPU model is unloaded!"
-            GAIA_CANDIDATE_GPU=1 docker compose -f "$COMPOSE_FILE" up -d "gaia-${SERVICE}-candidate"
+            GAIA_CANDIDATE_GPU=1 docker compose -f "$COMPOSE_FILE" up -d "${SERVICE}-candidate"
         else
-            GAIA_CANDIDATE_GPU=0 docker compose -f "$COMPOSE_FILE" up -d "gaia-${SERVICE}-candidate"
+            GAIA_CANDIDATE_GPU=0 docker compose -f "$COMPOSE_FILE" up -d "${SERVICE}-candidate"
         fi
 
         log_info "Waiting for health check..."
@@ -234,8 +234,8 @@ start_candidate() {
             study) port=8768 ;;
         esac
 
-        if ! wait_for_health "http://localhost:${port}/health" "gaia-${SERVICE}-candidate" 6 5; then
-            docker compose -f "$COMPOSE_FILE" logs "gaia-${SERVICE}-candidate" --tail=50
+        if ! wait_for_health "http://localhost:${port}/health" "${SERVICE}-candidate" 6 5; then
+            docker compose -f "$COMPOSE_FILE" logs "${SERVICE}-candidate" --tail=50
             exit 1
         fi
     fi
@@ -257,10 +257,10 @@ inject_candidate() {
         exit 1
     }
 
-    log_inject "Injecting gaia-${SERVICE}-candidate into live flow..."
+    log_inject "Injecting ${SERVICE}-candidate into live flow..."
 
     # Start just the candidate container
-    docker compose -f "$COMPOSE_FILE" up -d "gaia-${SERVICE}-candidate"
+    docker compose -f "$COMPOSE_FILE" up -d "${SERVICE}-candidate"
 
     log_info "Waiting for candidate health check..."
     sleep 5
@@ -287,17 +287,17 @@ inject_candidate() {
             ;;
         web)
             port=6417
-            log_warn "Web candidate doesn't need injection - access directly at http://localhost:6417"
+            log_warn "Web candidate doesn't need injection - access directly at http://localhost:${port}"
             log_info "Configure web candidate to point at live or candidate core as needed"
             return
             ;;
     esac
 
     if curl -sf "http://localhost:${port}/health" > /dev/null; then
-        log_success "gaia-${SERVICE}-candidate is healthy"
+        log_success "${SERVICE}-candidate is healthy"
     else
         log_error "Candidate health check failed"
-        docker compose -f "$COMPOSE_FILE" logs "gaia-${SERVICE}-candidate" --tail=50
+        docker compose -f "$COMPOSE_FILE" logs "${SERVICE}-candidate" --tail=50
         exit 1
     fi
 
@@ -305,7 +305,7 @@ inject_candidate() {
     log_inject "Candidate is running on the live network!"
     echo ""
     echo "The candidate is now reachable by live services via hostname:"
-    echo "  gaia-${SERVICE}-candidate"
+    echo "  ${SERVICE}-candidate"
     echo ""
     echo "To route live traffic through the candidate, restart the calling service:"
     echo ""
@@ -344,11 +344,11 @@ eject_candidate() {
         exit 1
     fi
 
-    log_inject "Ejecting gaia-${SERVICE}-candidate from live flow..."
+    log_inject "Ejecting ${SERVICE}-candidate from live flow..."
 
     # Stop the candidate
-    docker compose -f "$COMPOSE_FILE" stop "gaia-${SERVICE}-candidate" 2>/dev/null || true
-    docker compose -f "$COMPOSE_FILE" rm -f "gaia-${SERVICE}-candidate" 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" stop "${SERVICE}-candidate" 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" rm -f "${SERVICE}-candidate" 2>/dev/null || true
 
     # Restart the live service caller with default endpoints
     case "$SERVICE" in
@@ -379,9 +379,9 @@ stop_candidate() {
         docker compose -f "$COMPOSE_FILE" --profile full down 2>/dev/null || true
         log_success "Candidate stack stopped"
     else
-        log_info "Stopping gaia-${SERVICE}-candidate..."
-        docker compose -f "$COMPOSE_FILE" stop "gaia-${SERVICE}-candidate" 2>/dev/null || true
-        docker compose -f "$COMPOSE_FILE" rm -f "gaia-${SERVICE}-candidate" 2>/dev/null || true
+        log_info "Stopping ${SERVICE}-candidate..."
+        docker compose -f "$COMPOSE_FILE" stop "${SERVICE}-candidate" 2>/dev/null || true
+        docker compose -f "$COMPOSE_FILE" rm -f "${SERVICE}-candidate" 2>/dev/null || true
     fi
 }
 
@@ -390,7 +390,7 @@ view_logs() {
     if [ "$SERVICE" = "all" ]; then
         docker compose -f "$COMPOSE_FILE" logs -f
     else
-        docker compose -f "$COMPOSE_FILE" logs -f "gaia-${SERVICE}-candidate"
+        docker compose -f "$COMPOSE_FILE" logs -f "${SERVICE}-candidate"
     fi
 }
 
@@ -475,7 +475,7 @@ promote_candidate() {
         log_success "All candidates promoted to active!"
         log_info "Restart active stack with: docker compose up -d"
     else
-        log_warn "This will overwrite active gaia-${SERVICE} with candidate code!"
+        log_warn "This will overwrite active ${SERVICE} with candidate code!"
 
         # Run validation before prompting for confirmation
         run_pre_promotion_checks "$SERVICE"
@@ -495,7 +495,7 @@ promote_candidate() {
             "$CANDIDATE_DIR/" "$ACTIVE_DIR/"
 
         log_success "Candidate promoted to active!"
-        log_info "Restart active service with: docker compose restart gaia-${SERVICE}"
+        log_info "Restart active service with: docker compose restart ${SERVICE}"
     fi
 }
 
@@ -527,49 +527,49 @@ run_validation() {
     log_info "Running inter-service communication tests..."
 
     log_info "Testing web -> core communication..."
-    if curl -sf "http://localhost:6417/health" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${port}/health" > /dev/null 2>&1; then
         log_success "Web candidate health OK"
     else
         log_warn "Web candidate health check inconclusive"
     fi
 
     log_info "Testing core health..."
-    if curl -sf "http://localhost:6416/health" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${port}/health" > /dev/null 2>&1; then
         log_success "Core candidate health OK"
     else
         log_warn "Core candidate health check inconclusive"
     fi
 
     log_info "Testing MCP health..."
-    if curl -sf "http://localhost:8767/health" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${port}/health" > /dev/null 2>&1; then
         log_success "MCP candidate health OK"
     else
         log_warn "MCP candidate health check inconclusive"
     fi
 
     log_info "Testing study health..."
-    if curl -sf "http://localhost:8768/health" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${port}/health" > /dev/null 2>&1; then
         log_success "Study candidate health OK"
     else
         log_warn "Study candidate health check inconclusive"
     fi
 
     log_info "Testing core -> mcp communication..."
-    if curl -sf "http://localhost:6416/health" | grep -q "mcp"; then
+    if curl -sf "http://localhost:${port}/health" | grep -q "mcp"; then
         log_success "Core -> MCP communication OK"
     else
         log_warn "Core -> MCP communication check inconclusive"
     fi
 
     log_info "Testing core -> study communication..."
-    if curl -sf "http://localhost:6416/health" | grep -q "study"; then
+    if curl -sf "http://localhost:${port}/health" | grep -q "study"; then
         log_success "Core -> Study communication OK"
     else
         log_warn "Core -> Study communication check inconclusive"
     fi
 
     log_info "Testing mcp -> study communication..."
-    if curl -sf "http://localhost:8767/health" | grep -q "study"; then
+    if curl -sf "http://localhost:${port}/health" | grep -q "study"; then
         log_success "MCP -> Study communication OK"
     else
         log_warn "MCP -> Study communication check inconclusive"
@@ -612,7 +612,7 @@ show_status() {
 release_live_gpu() {
     log_info "Releasing GPU from live gaia-core service..."
 
-    local live_core_url="http://localhost:6415"
+    local live_core_url="http://localhost:${port}"
 
     # Check if live core is running
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
@@ -655,7 +655,7 @@ release_live_gpu() {
 reclaim_live_gpu() {
     log_info "Reclaiming GPU for live gaia-core service..."
 
-    local live_core_url="http://localhost:6415"
+    local live_core_url="http://localhost:${port}"
 
     # Check if live core is running
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
@@ -697,7 +697,7 @@ reclaim_live_gpu() {
 
 # Show GPU status from live service
 show_gpu_status() {
-    local live_core_url="http://localhost:6415"
+    local live_core_url="http://localhost:${port}"
 
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
         log_error "Live gaia-core is not running at ${live_core_url}"

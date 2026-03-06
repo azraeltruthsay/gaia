@@ -48,13 +48,32 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # This anchor is intentionally compact so tokenizers see it early and it biases
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
+    
+    # Check for Council Debate context
+    council_debate_history = ""
+    for df in getattr(packet.content, 'data_fields', []) or []:
+        if getattr(df, 'key', '') == 'council_debate_history':
+            council_debate_history = getattr(df, 'value', '')
+            break
+            
+    council_scaffolding = ""
+    if council_debate_history:
+        council_scaffolding = (
+            "\n\n[COUNCIL DEBATE ACTIVE]\n"
+            "You are currently debating this topic with your counterpart model to reach consensus.\n"
+            "Review the previous debate turns below:\n"
+            f"{council_debate_history}\n\n"
+            "INSTRUCTION: If you disagree or have refinements, provide your counterpoints wrapped in <council>...</council> tags. "
+            "If you agree and have reached consensus, output your final response directly to the user WITHOUT council tags."
+        )
+
     # Be defensive: packets used by test harnesses may be lightweight. Use safe accessors.
     header = getattr(packet, "header", None)
     persona = getattr(header, "persona", None) if header else None
     persona_id = getattr(persona, "persona_id", "GAIA") if persona else "GAIA"
     role_val = getattr(getattr(persona, "role", None), "value", "assistant") if persona else "assistant"
     tone_hint = getattr(persona, "tone_hint", "concise") if persona else "concise"
-    persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}\n\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
+    persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}{council_scaffolding}\n\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
 
     # Compact mode trims optional identity/context to reduce repetition and token usage during planning/reflect phases.
     compact_mode = task_instruction_key in {
@@ -177,7 +196,6 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             except Exception:
                 pass
                 
-            from gaia_common.utils.world_state import format_world_state_snapshot
             world_state_block_content = format_world_state_snapshot(
                 max_lines=8,
                 sleep_manager_status=_tc_sleep_status

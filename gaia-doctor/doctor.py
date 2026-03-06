@@ -361,10 +361,96 @@ def raise_alarm(name: str, reason: str):
 
 
 def docker_restart(name: str) -> bool:
-    """Restart a production service via `docker restart`. Enforces circuit breaker."""
+    """Restart a production service via `docker restart`. Enforces syntax check and circuit breaker."""
     if MAINTENANCE_FLAG.exists():
         log.info("Maintenance mode active, skipping restart of %s", name)
         return False
+
+    # 1. Structural Integrity Check (The "Quarantine" Gate)
+    log.info("Performing pre-restart syntax audit for %s...", name)
+    project_root = Path("/gaia/GAIA_Project")
+    svc_path = project_root / name
+    if "-candidate" in name:
+        svc_path = project_root / "candidates" / name.replace("-candidate", "")
+    
+    try:
+        # Check every python file in the service for syntax errors
+        # Using py_compile as a fast, reliable structural check
+        audit_res = subprocess.run(
+            ["python", "-m", "py_compile"] + list(svc_path.rglob("*.py")),
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if audit_res.returncode != 0:
+            log.warning("Structural error detected in %s. Attempting Tier 1 repair (ruff)...", name)
+            
+            # Extract broken file path from stderr
+            import re
+            # Typical py_compile error: File "path/to/file.py", line 123
+            match = re.search(r'File "([^"]+)"', audit_res.stderr)
+            if match:
+                broken_file = Path(match.group(1))
+                log.info("Targeting broken file for repair: %s", broken_file)
+                
+                # Tier 1 Repair: Ruff --fix (imports, whitespace, unused vars)
+                subprocess.run(["ruff", "check", "--fix", str(broken_file)], capture_output=True)
+                
+                # Re-audit after ruff
+                audit_res = subprocess.run(
+                    ["python", "-m", "py_compile", str(broken_file)],
+                    capture_output=True, text=True, timeout=10
+                )
+                
+                if audit_res.returncode == 0:
+                    log.info("✅ Tier 1 repair (ruff) successful for %s", name)
+                else:
+                    # Tier 2 Repair: Cognitive Loop
+                    log.warning("Tier 1 repair failed for %s. Escalating to Tier 2 (Cognitive Repair)...", name)
+                    try:
+                        broken_content = broken_file.read_text()
+                        # Use localhost:6415 to reach gaia-core directly
+                        import requests
+                        repair_res = requests.post(
+                            "http://localhost:6415/api/repair/structural",
+                            json={"broken_code": broken_content, "error_msg": audit_res.stderr},
+                            timeout=60
+                        )
+                        
+                        if repair_res.status_code == 200:
+                            fixed_code = repair_res.json().get("fixed_code")
+                            if fixed_code:
+                                # Re-verify before applying
+                                log.info("Validating cognitive fix for %s...", broken_file.name)
+                                tmp_file = broken_file.with_suffix(".tmp_repair")
+                                tmp_file.write_text(fixed_code)
+                                
+                                val_res = subprocess.run(
+                                    ["python", "-m", "py_compile", str(tmp_file)],
+                                    capture_output=True, text=True, timeout=10
+                                )
+                                
+                                if val_res.returncode == 0:
+                                    broken_file.write_text(fixed_code)
+                                    tmp_file.unlink()
+                                    log.info("✅ Tier 2 repair (cognitive) successful for %s", name)
+                                else:
+                                    log.error("❌ Cognitive fix failed validation: %s", val_res.stderr)
+                                    tmp_file.unlink()
+                                    return False
+                            else:
+                                log.error("Structural repair API returned empty fix")
+                                return False
+                        else:
+                            log.error("Structural repair API failed: %d", repair_res.status_code)
+                            return False
+                    except Exception as e:
+                        log.error("Exception during Tier 2 repair: %s", e)
+                        return False
+            else:
+                log.error("Could not parse broken file from audit output: %s", audit_res.stderr)
+                return False
+    except Exception as e:
+        log.warning("Pre-restart audit failed to run: %s. Proceeding with caution.", e)
 
     now = time.monotonic()
 

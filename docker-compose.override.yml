@@ -29,7 +29,7 @@ services:
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Enable uvicorn reload
-    command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core"]
+    command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core", "--reload-exclude", "knowledge/*"]
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-web: Development overrides

@@ -12,7 +12,7 @@ import logging
 import os
 
 
-from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
+  from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
 
 from .server import create_app
 from .approval import ApprovalStore
