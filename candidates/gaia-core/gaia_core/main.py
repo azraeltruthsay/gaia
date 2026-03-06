@@ -170,13 +170,21 @@ async def lifespan(app: FastAPI):
     if not success:
         logger.error("Cognitive system failed to initialize - endpoints will return errors")
 
+    # Fetch critical instances for app.state
+    from gaia_core.config import get_config
+    from gaia_core.models.model_pool import get_model_pool
+    
+    config = get_config()
+    pool = get_model_pool()
+
+    # Store critical instances on app.state for endpoint access
+    app.state.config = config
+    app.state.model_pool = pool
+
     # Start sleep cycle loop
     _sleep_loop = None
     try:
-        from gaia_core.config import get_config
         from gaia_core.cognition.sleep_cycle_loop import SleepCycleLoop
-
-        config = get_config()
         sleep_enabled = getattr(config, "SLEEP_ENABLED", True)
         if sleep_enabled:
             _sleep_loop = SleepCycleLoop(
@@ -185,7 +193,7 @@ async def lifespan(app: FastAPI):
                 agent_core=_agent_core,
                 session_manager=_ai_manager.session_manager if _ai_manager else None,
             )
-            # Store on app.state for endpoint access
+            # Store sleep-specific instances on app.state
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
             app.state.idle_monitor = _sleep_loop.idle_monitor
             app.state.sleep_cycle_loop = _sleep_loop
@@ -314,25 +322,43 @@ app.include_router(sleep_router)
 async def repair_structural_error(request: Request):
     """
     Cognitive repair endpoint for structural code errors.
-    Expects JSON: { "service": "...", "broken_code": "...", "error_msg": "..." }
+    Expects JSON: { "service": "...", "broken_code": "...", "error_msg": "...", "file_path": "..." }
+    If file_path is provided, gaia-core validates and writes the fix directly (avoids ro-mount
+    issues in the caller). Returns { "status": "repaired", "file_path": "..." } on success.
+    If file_path is omitted, returns { "fixed_code": "..." } for the caller to handle.
     """
+    import ast as _ast
+    from pathlib import Path as _Path
+
     data = await request.json()
     service = data.get("service", "unknown")
     broken_code = data.get("broken_code")
     error_msg = data.get("error_msg")
-    
+    file_path = data.get("file_path")  # optional: let gaia-core write the fix
+
     if not broken_code or not error_msg:
         return JSONResponse(status_code=400, content={"error": "Missing broken_code or error_msg"})
-        
+
     try:
         from gaia_core.cognition.structural_surgeon import StructuralSurgeon
-        surgeon = StructuralSurgeon(config, model_pool)
+        surgeon = StructuralSurgeon(request.app.state.config, request.app.state.model_pool)
         fixed_code = surgeon.repair_structural_failure(service, broken_code, error_msg)
-        
-        if fixed_code:
-            return {"fixed_code": fixed_code}
-        else:
+
+        if not fixed_code:
             return JSONResponse(status_code=500, content={"error": "HA surgery failed to generate fix"})
+
+        if file_path:
+            # Validate then write — gaia-core has rw access to the project root
+            try:
+                _ast.parse(fixed_code)
+            except SyntaxError as e:
+                return JSONResponse(status_code=422, content={"error": f"Fix failed validation: {e}"})
+            target = _Path(file_path)
+            target.write_text(fixed_code)
+            logger.info("Structural repair: wrote fix to %s", file_path)
+            return {"status": "repaired", "file_path": file_path}
+
+        return {"fixed_code": fixed_code}
     except Exception as e:
         logger.exception("Structural repair API failed")
         return JSONResponse(status_code=500, content={"error": str(e)})

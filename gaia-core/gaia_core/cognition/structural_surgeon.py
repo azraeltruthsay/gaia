@@ -1,92 +1,139 @@
+import ast
 import logging
 import re
-from typing import Optional
-from gaia_core.models.model_pool import ModelPool
+from typing import List, Optional
+
 from gaia_core.config import Config
+from gaia_core.models.model_pool import ModelPool
 
 logger = logging.getLogger("GAIA.StructuralSurgeon")
 
+
 class StructuralSurgeon:
-    """Specialized utility for fixing IndentationError and SyntaxError via LLM."""
-    
+    """Windowed LLM repair for Python syntax/structural failures."""
+
     def __init__(self, config: Config, model_pool: ModelPool):
         self.config = config
         self.model_pool = model_pool
 
     def repair_structural_failure(self, service: str, broken_code: str, error_msg: str) -> Optional[str]:
         """
-        HA Surgeon: Perform deep analysis of a structural failure.
-        Injects the latest CognitionPacket v0.3 blueprint for grounding.
+        HA Surgeon: Windowed repair that targets ALL error-bearing lines.
+
+        1. Collects every error line from ast.parse + error_msg mentions.
+        2. Builds a window that covers all of them with padding.
+        3. Prompts the LLM to find and remove ALL visible stray syntax.
+        4. Splices the fixed snippet back into the full file.
         """
-        logger.info(f"StructuralSurgeon: Initiating HA surgery for {service}...")
-        
-        # 1. Acquire Thinker model (System 2 high-reasoning)
+        logger.info("StructuralSurgeon: Initiating HA surgery for %s...", service)
+
+        error_lines = self._collect_error_lines(broken_code, error_msg)
+        if not error_lines:
+            error_lines = [1]
+        logger.info("StructuralSurgeon: Error lines detected: %s", error_lines)
+
+        lines = broken_code.splitlines()
+        start = max(0, min(error_lines) - 40)
+        end = min(len(lines), max(error_lines) + 40)
+
+        # Snap end forward to the next blank line so we never cut mid-docstring
+        # or mid-multiline-string.
+        while end < len(lines) and lines[end].strip() != "":
+            end += 1
+        end = min(end, len(lines))
+
+        window_code = "\n".join(lines[start:end])
+
         model = self.model_pool.acquire_model_for_role("thinker")
         if not model:
-            logger.error("StructuralSurgeon: Thinker model unavailable for surgery.")
+            logger.error("StructuralSurgeon: Thinker model unavailable.")
             return None
-            
-        try:
-            # 2. Load the latest blueprint for grounding
-            blueprint_path = "/knowledge/blueprints/GAIA_COMMON.md"
-            blueprint_content = ""
-            try:
-                with open(blueprint_path, "r") as f:
-                    blueprint_content = f.read()
-            except Exception:
-                logger.warning("StructuralSurgeon: Could not load blueprint for grounding.")
 
-            # 3. Assemble surgical prompt
+        try:
+            error_summary = ", ".join(f"line {l}" for l in error_lines[:5])
+
             system_prompt = (
-                "You are the GAIA HA Surgeon. Your purpose is to repair fatal Python errors (SyntaxError, IndentationError, KeyError, NameError) "
-                "in the Candidate stack by leveraging your stable Production knowledge. "
-                "GROUNDING CONTEXT: You must ensure all protocol changes align with the CognitionPacket v0.3 blueprint provided below. "
-                "RULES:\n"
-                "1. PRESERVE all logic, comments, and strings.\n"
-                "2. Correct ONLY the structural flaw identified in the error message.\n"
-                "3. If a field is missing in a constructor, add it with a safe default factory based on the blueprint.\n"
-                "4. Output ONLY the fully corrected Python code. No explanation, no markdown blocks."
+                "You are a Python code surgeon. Your only job is to remove injected syntax "
+                "errors (stray parentheses, extra brackets, mismatched delimiters) from Python "
+                "snippets. Output ONLY the corrected snippet. No markdown fences, no explanations."
             )
-            
+
             user_prompt = (
-                f"SERVICE: {service}\n"
-                f"LATEST BLUEPRINT (v0.3):\n{blueprint_content}\n\n"
-                f"ERROR MESSAGE:\n{error_msg}\n\n"
-                f"BROKEN SOURCE CODE:\n{broken_code}\n\n"
-                "FIXED SOURCE CODE:"
+                f"REPORTED ERRORS AT: {error_summary}\n"
+                f"ERROR DETAIL: {error_msg.strip()[:400]}\n\n"
+                f"SNIPPET (lines {start + 1}–{end}):\n{window_code}\n\n"
+                "TASK: Carefully examine EVERY LINE for stray characters, extra parentheses, "
+                "or mismatched brackets injected into the code. Remove ALL of them. "
+                "Do not change any other logic.\n\n"
+                "FIXED SNIPPET:"
             )
-            
+
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ]
-            
-            # 4. Request surgical fix
-            res = model.create_chat_completion(
-                messages=messages,
-                temperature=0.0, # Deterministic repair
-                max_tokens=8192  # Support full files
-            )
-            
-            fixed_code = ""
+
+            res = model.create_chat_completion(messages=messages, temperature=0.0, max_tokens=2048)
+
+            fixed_snippet = ""
             if isinstance(res, dict):
-                fixed_code = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+                fixed_snippet = res.get("choices", [{}])[0].get("message", {}).get("content", "")
             else:
-                # Handle stream
-                fixed_code = "".join([str(chunk) for m in res for chunk in m])
-                
-            # Clean up output
-            fixed_code = re.sub(r'^```python\n', '', fixed_code)
-            fixed_code = re.sub(r'^```\n', '', fixed_code)
-            fixed_code = re.sub(r'\n```$', '', fixed_code).strip()
-            
-            if fixed_code:
-                logger.info(f"StructuralSurgeon: Surgery complete for {service} (len={len(fixed_code)})")
-                return fixed_code
-            return None
-            
+                fixed_snippet = "".join([str(chunk) for m in res for chunk in m])
+
+            fixed_snippet = re.sub(
+                r'^```python\s*|^```\s*|```$', '', fixed_snippet, flags=re.MULTILINE
+            ).strip()
+
+            if not fixed_snippet:
+                logger.warning("StructuralSurgeon: Empty response from LLM.")
+                return None
+
+            lines[start:end] = fixed_snippet.splitlines()
+            reassembled = "\n".join(lines)
+            logger.info("StructuralSurgeon: Surgery complete for %s (len=%d)", service, len(reassembled))
+            return reassembled
+
         except Exception:
             logger.exception("StructuralSurgeon: HA surgery failed")
             return None
         finally:
             self.model_pool.release_model_for_role("thinker")
+
+    def _collect_error_lines(self, code: str, error_msg: str) -> List[int]:
+        """
+        Gather all probable error line numbers.
+
+        Uses ast.parse as the authoritative source (lineno + any line number
+        embedded in the exception message), then supplements with error_msg
+        mentions that are within 100 lines of the primary error — filtering
+        out spurious numbers from file paths and unrelated text.
+        """
+        found: set = set()
+        primary_line: int = 0
+
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            if e.lineno:
+                found.add(e.lineno)
+                primary_line = e.lineno
+            if e.end_lineno and e.end_lineno != e.lineno:
+                found.add(e.end_lineno)
+            # The SyntaxError message itself often says "on line N" for the
+            # mismatching bracket — extract it directly from the structured msg.
+            if e.msg:
+                for m in re.finditer(r'\bline\s+(\d+)', e.msg, re.IGNORECASE):
+                    found.add(int(m.group(1)))
+        except Exception:
+            pass
+
+        # Supplement with error_msg string mentions, but only near the primary error
+        # to avoid noise from file paths or unrelated content.
+        if primary_line:
+            for m in re.finditer(r'\bline\s+(\d+)', error_msg, re.IGNORECASE):
+                ln = int(m.group(1))
+                if abs(ln - primary_line) <= 100:
+                    found.add(ln)
+
+        return sorted(found)
