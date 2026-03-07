@@ -500,7 +500,7 @@ class AgentCore:
                 }
                 
                 # Fetch auditory context from metadata if available (TCP)
-                auditory_env = _metadata.get("auditory_environment") if _metadata else None
+                _metadata.get("auditory_environment") if _metadata else None
                 
                 world_state_text = format_world_state_snapshot(
                     output_context=output_context
@@ -718,6 +718,8 @@ class AgentCore:
                 "value": "My cognitive loop is currently locked for safety following a diagnostic spiral. Manual triage by the Architect (Azrael) is required to restore my integrity."
             }
             return
+
+        lite_fallback_acquired = False
 
         # Normalize metadata
         _metadata = metadata or {}

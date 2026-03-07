@@ -1,8 +1,6 @@
 import pytest
-import json
 from unittest.mock import MagicMock, patch
 from gaia_core.cognition.agent_core import AgentCore
-from gaia_common.protocols.cognition_packet import CognitionPacket
 
 @pytest.fixture
 def mock_agent_core():

@@ -170,7 +170,7 @@ class ModelManager:
                 # Capture exception and attempt spawn fallback
                 import traceback
 
-                trace = traceback.format_exc()
+                traceback.format_exc()
                 logger.warning("In-process prime load failed; attempting spawn fallback: %s", e)
                 self._last_load_error = str(e)
 

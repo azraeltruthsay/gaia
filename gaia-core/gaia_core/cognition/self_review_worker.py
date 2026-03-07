@@ -59,7 +59,7 @@ def run_review_once(config: Config = None):
     from gaia_core.config import Config
     import logging
     logger = logging.getLogger("GAIA.SelfReviewWorker")
-    config = Config()
+    Config()
 
     seeds = thought_seed.list_unreviewed_seeds()
     if not seeds:
@@ -172,7 +172,7 @@ def run_review_with_prompt(prompt: str, task_key: str = "thought_seed_system", s
     from gaia_core.config import Config
     from gaia_core.utils.mcp_client import request_approval_via_mcp
     import os
-    config = Config()
+    Config()
     persona = Persona(
         identity_id="gaia-core",
         persona_id=persona_id,
@@ -201,7 +201,7 @@ def run_review_with_prompt(prompt: str, task_key: str = "thought_seed_system", s
         "Explain your reasoning in detail."
     )
     content = Content(original_prompt=f"{instruction}\n\n{prompt}")
-    packet = CognitionPacket(header=header, context=context, content=content)
+    CognitionPacket(header=header, context=context, content=content)
     # Simulate LLM call: in real use, would call model with packet
     # For PoC, mark as complete if task_key found
     old, new, diff = mark_task_complete(task_key, prompt)

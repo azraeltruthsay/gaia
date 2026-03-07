@@ -213,7 +213,7 @@ class TestInterviewFlow:
         mock_llm.create_chat_completion.side_effect = RuntimeError("boom")
 
         # Should not crash
-        transcript = interviewer.conduct_interview()
+        interviewer.conduct_interview()
 
         # State restore must have been called (load_state for past + restore)
         assert mock_llm.load_state.call_count >= 2

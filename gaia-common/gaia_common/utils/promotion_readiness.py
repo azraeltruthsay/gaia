@@ -76,7 +76,7 @@ class PromotionReadinessReport:
             lines.extend([
                 "",
                 "## Promotion Command",
-                f"```bash",
+                "```bash",
                 self.pipeline_cmd,
                 "```",
             ])
@@ -215,7 +215,7 @@ def _check_candidate_dir(service_id: str, root: Path) -> ReadinessCheck:
         return ReadinessCheck(
             name="candidate_directory",
             status="fail",
-            detail=f"Candidate directory exists but contains no Python files",
+            detail="Candidate directory exists but contains no Python files",
             blocking=True,
         )
 
@@ -340,7 +340,7 @@ def _check_blueprint_precheck(service_id: str, root: Path) -> ReadinessCheck:
         return ReadinessCheck(
             name="blueprint_precheck",
             status="skip",
-            detail=f"Source directory not found for pre-check",
+            detail="Source directory not found for pre-check",
             blocking=False,
         )
 

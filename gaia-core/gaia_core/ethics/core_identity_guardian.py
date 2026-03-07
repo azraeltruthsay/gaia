@@ -95,7 +95,7 @@ class CoreIdentityGuardian:
         ]
         text_lower = text.lower()
         if any(ident in text_lower for ident in forbidden_identities):
-            logger.warning(f"Reflex suppressed: Nano hallucinated a forbidden identity.")
+            logger.warning("Reflex suppressed: Nano hallucinated a forbidden identity.")
             return False
             
         # 2. Prompt Leakage / Technical Artifacts
@@ -103,7 +103,7 @@ class CoreIdentityGuardian:
             "user prompt:", "system instruction:", "<think>", "###", "---"
         ]
         if any(p in text_lower for p in forbidden_patterns):
-            logger.warning(f"Reflex suppressed: Technical artifacts detected.")
+            logger.warning("Reflex suppressed: Technical artifacts detected.")
             return False
             
         # 3. Sanity check: Conciseness (Reflexes should be short)

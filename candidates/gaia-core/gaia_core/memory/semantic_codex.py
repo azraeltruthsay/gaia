@@ -139,7 +139,7 @@ class SemanticCodex:
                         else:
                             logger.debug(f"Markdown codex file {path} has empty or invalid YAML front matter.")
 
-                    except yaml.YAMLError as e:
+                    except yaml.YAMLError:
                         logger.debug(f"Markdown file {path} has non-codex front matter, skipping")
                     except Exception as e:
                         logger.warning(f"Error processing Markdown codex file {path}: {e}")

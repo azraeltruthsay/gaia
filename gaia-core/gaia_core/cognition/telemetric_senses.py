@@ -145,7 +145,7 @@ def get_telemetry_summary() -> str:
     disk = GAIAStatus.get("disk_usage", 0)
 
     summary = [
-        f"[Telemetry Summary]",
+        "[Telemetry Summary]",
         f"Ticks since boot: {tick_count}",
         f"Last token usage: {token_use} tokens",
         f"System Load — CPU: {cpu}%, Mem: {mem}%, Disk: {disk}%",

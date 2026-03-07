@@ -317,7 +317,7 @@ def generate_samvega_analysis(
         )
 
         # LLM call
-        timeout = samvega_cfg.get("llm_timeout_seconds", 8)
+        samvega_cfg.get("llm_timeout_seconds", 8)
         max_tokens = samvega_cfg.get("max_tokens", 256)
         temperature = samvega_cfg.get("temperature", 0.3)
 

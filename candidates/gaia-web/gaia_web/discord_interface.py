@@ -434,7 +434,6 @@ class DiscordInterface:
             # Accumulated response for the main model
             full_response = ""
             completed_packet = None
-            reflex_sent = False
 
             # Show typing indicator while GAIA processes the request
             async with message_obj.channel.typing():
@@ -465,7 +464,6 @@ class DiscordInterface:
                                     # If this is an explicit Reflex block, send it immediately
                                     if val.startswith("⚡ **[(Reflex)"):
                                         await self._send_response(message_obj, val, is_dm)
-                                        reflex_sent = True
                                     else:
                                         # Accumulate Core/Thinker tokens to send as a block
                                         full_response += val
@@ -475,7 +473,6 @@ class DiscordInterface:
                                 if full_response.strip():
                                     await self._send_response(message_obj, full_response.strip(), is_dm)
                                     full_response = ""
-                                    reflex_sent = True
                             
                             elif event_type == "packet":
                                 # Final results for internal use
@@ -494,7 +491,6 @@ class DiscordInterface:
             # Finalize the accumulated response
             if full_response.strip():
                 await self._send_response(message_obj, full_response.strip(), is_dm)
-                reflex_sent = True
 
             # Record GAIA reply for typing-wake 48h gate
             if is_dm and _dm_blocklist:

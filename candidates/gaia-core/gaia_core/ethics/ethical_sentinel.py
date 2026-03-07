@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 """
 ethics/ethical_sentinel.py
 
@@ -39,7 +40,6 @@ class EthicalSentinel:
 
     def check_loop_counter(self) -> bool:
         """Ensure GAIA is not looping uncontrollably."""
-        from datetime import datetime
         self.loop_counter += 1
         logger.debug(f"🔁 Loop Count: {self.loop_counter}")
 

@@ -322,14 +322,12 @@ class VLLMChatModel:
             prompt = messages[-1]["content"]
 
         # Detect long-form content requests for better generation params
-        longform = False
         pp = 0.0  # presence penalty
         rp = float(os.getenv("GAIA_VLLM_REPETITION_PENALTY", "1.15"))
         try:
             plower = prompt.lower()
             longform_markers = ("jabberwocky", "poem", "recite", "story", "long-form", "raven", "verse", "lyrics", "ballad", "sonnet")
             if any(key in plower for key in longform_markers):
-                longform = True
                 max_tokens = max(max_tokens, 2048)
                 pp = 0.8  # Higher presence penalty
                 rp = max(rp, 1.25)  # Stronger repetition penalty

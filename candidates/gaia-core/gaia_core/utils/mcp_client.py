@@ -11,7 +11,10 @@ import os
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gaia_core.config import Config
 
 from gaia_common.protocols.cognition_packet import CognitionPacket
 from gaia_core.config import get_config
@@ -208,7 +211,7 @@ def ai_write(path: str, content: str) -> Dict:
     resolved = os.path.realpath(path)
     if not any(resolved.startswith(d) for d in _WRITABLE_DIRS):
         logger.warning(f"MCP.ai_write blocked: {path} resolves to {resolved} (outside allowed dirs)")
-        return {"ok": False, "op": "ai.write", "path": path, "error": f"Write blocked: path outside allowed directories"}
+        return {"ok": False, "op": "ai.write", "path": path, "error": "Write blocked: path outside allowed directories"}
     try:
         dirname = os.path.dirname(resolved)
         if dirname:

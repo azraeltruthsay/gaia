@@ -328,7 +328,6 @@ def _list_tree_impl(params: dict):
 
     lines = []
     count = 0
-    prefix_map = {}
 
     def add_line(depth, name):
         nonlocal count
@@ -754,7 +753,7 @@ def _promotion_create_request_impl(params: dict) -> dict:
         "ok": True,
         "request_id": req.request_id,
         "status": req.status,
-        "message": f"Promotion request created. Awaiting human approval (Gate 1).",
+        "message": "Promotion request created. Awaiting human approval (Gate 1).",
     }
 
 

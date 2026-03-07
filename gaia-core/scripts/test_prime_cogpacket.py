@@ -324,7 +324,7 @@ def main():
     packet = fill_response_into_packet(packet, result)
 
     # 5. Print results
-    print(f"\n=== Response ===")
+    print("\n=== Response ===")
     if not args.stream:
         print(f"GAIA> {result['content']}")
     print(f"\n    Duration:   {result['duration_s']}s")
