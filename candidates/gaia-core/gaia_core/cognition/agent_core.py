@@ -1938,201 +1938,215 @@ class AgentCore:
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
     
-                # This function now needs to handle the v0.3 packet
-                routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
-                user_facing_response = routed_output["response_to_user"]
-                execution_results = routed_output["execution_results"]
-    
-                packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
-    
-                logger.debug(f"User-facing response after routing: {user_facing_response}")
-    
-                # Epistemic citation check — warn user if fabricated citations detected
-                epistemic_warning = ""
-                try:
-                    eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
-                    if eg_config.get("annotate_unverified_citations", True):
-                        max_before_warn = eg_config.get("max_unverified_citations_before_warning", 1)
-                        reflection_logs = getattr(packet.reasoning, 'reflection_log', []) or []
-                        for log_entry in reflection_logs:
-                            step = getattr(log_entry, 'step', '') if hasattr(log_entry, 'step') else log_entry.get('step', '')
-                            summary = getattr(log_entry, 'summary', '') if hasattr(log_entry, 'summary') else log_entry.get('summary', '')
-                            if step in ('observer_path_validation', 'observer_citation_verification'):
-                                warning_count = summary.count('does not exist') + summary.count('Unverified')
-                                if warning_count >= max_before_warn:
-                                    epistemic_warning = (
-                                        "\n\n---\n*[Observer: Some file references in this response "
-                                        "could not be verified against the knowledge base. "
-                                        "Information may be from general knowledge rather than "
-                                        "retrieved documents.]*\n---\n"
-                                    )
-                                    break
-                except Exception:
-                    logger.debug("Epistemic citation check failed", exc_info=True)
-    
-                _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
+            # --- Output Routing & Persistence (Always Run) ---
+            # This function now needs to handle the v0.3 packet
+            routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)
+            user_facing_response = routed_output["response_to_user"]
+            execution_results = routed_output["execution_results"]
+
+            packet.reasoning.reflection_log.append(ReflectionLog(step="execution_results", summary=str(execution_results)))
+
+            logger.debug(f"User-facing response after routing: {user_facing_response}")
+
+            # Epistemic citation check — warn user if fabricated citations detected
+            epistemic_warning = ""
+            try:
+                eg_config = self.config.constants.get("EPISTEMIC_GUARDRAILS", {})
+                if eg_config.get("annotate_unverified_citations", True):
+                    max_before_warn = eg_config.get("max_unverified_citations_before_warning", 1)
+                    reflection_logs = getattr(packet.reasoning, 'reflection_log', []) or []
+                    for log_entry in reflection_logs:
+                        step = getattr(log_entry, 'step', '') if hasattr(log_entry, 'step') else log_entry.get('step', '')
+                        summary = getattr(log_entry, 'summary', '') if hasattr(log_entry, 'summary') else log_entry.get('summary', '')
+                        if step in ('observer_path_validation', 'observer_citation_verification'):
+                            warning_count = summary.count('does not exist') + summary.count('Unverified')
+                            if warning_count >= max_before_warn:
+                                epistemic_warning = (
+                                    "\n\n---\n*[Observer: Some file references in this response "
+                                    "could not be verified against the knowledge base. "
+                                    "Information may be from general knowledge rather than "
+                                    "retrieved documents.]*\n---\n"
+                                )
+                                break
+            except Exception:
+                logger.debug("Epistemic citation check failed", exc_info=True)
+
+            _header = self._build_response_header(selected_model_name, packet, observer_instance, active_stream_observer, post_run_observer)
+            
+            # --- Speculative Response Comparison & Epistemic Validation ---
+            final_yield_text = user_facing_response
+            if reflex_text:
+                # Value check: similarity ratio and length growth
+                from difflib import SequenceMatcher
+                ratio = SequenceMatcher(None, reflex_text, user_facing_response).ratio()
+                self.logger.warning(f"AgentCore: Epistemic check ratio={ratio:.2f} for reflex vs response")
                 
-                # --- Speculative Response Comparison ---
-                final_yield_text = user_facing_response
-                if reflex_text:
-                    # If we gave a reflex, determine if this new response adds enough value to show
-                    # Value check: different enough OR significantly longer
-                    from difflib import SequenceMatcher
-                    ratio = SequenceMatcher(None, reflex_text, user_facing_response).ratio()
-                    if ratio > 0.8 and len(user_facing_response) < (len(reflex_text) * 1.2):
-                        self.logger.info(f"AgentCore: speculative reflex was sufficient (match={ratio:.2f}); skipping follow-up.")
-                        final_yield_text = "" # Don't yield a redundant follow-up
+                is_sufficient = ratio > 0.8 and len(user_facing_response) < (len(reflex_text) * 1.2)
+                
+                if is_sufficient:
+                    self.logger.info(f"AgentCore: speculative reflex was sufficient (match={ratio:.2f}); skipping follow-up.")
+                    final_yield_text = "" # Don't yield a redundant follow-up
+                else:
+                    # EPISTEMIC VALIDATION: Check for contradictions or significant inaccuracies
+                    # If the ratio is very low, it's likely a hallucination or a completely different topic.
+                    if ratio < 0.4:
+                        self.logger.warning(f"AgentCore: Epistemic mismatch detected (ratio={ratio:.2f}); labeling as correction.")
+                        final_yield_text = "\n\n---\n⚠️ **[Correction from Operator]**\n" + user_facing_response
+                        
+                        # Log thought seed for Samvega introspection (internal only, not user-facing)
+                        seed_msg = f"THOUGHT_SEED: Nano hallucination detected on prompt '{user_input[:30]}...'. Reflex said '{reflex_text[:30]}...', Core said '{user_facing_response[:30]}...'. Investigating prevention."
+                        self.logger.info(seed_msg)
                     else:
                         self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
-                        final_yield_text = "\n\n---\n*Refinement from Operator:*\n" + user_facing_response
+                        final_yield_text = "\n\n---\n🔄 **Refinement from Operator**\n" + user_facing_response
+
+            # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
+            # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
+            if final_yield_text:
+                if reflex_text or not active_stream_observer:
+                    yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
+                    logger.debug(f"Yielded to user: {final_yield_text}")
+                else:
+                    logger.debug("Suppressing final yield: already streamed.")
+
+            # If the response came from the Oracle path, persist it as a learned fact
+            # so future turns can answer locally without another external call.
+            try:
+                backend_env = (os.getenv("GAIA_BACKEND") or "").lower()
+                if "oracle" in (selected_model_name or "").lower() or backend_env.startswith("oracle"):
+                    rescue_helper.remember_fact(key=user_input, value=user_facing_response, note="sourced_from=oracle")
+            except Exception:
+                logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
+            
+            # Use the routed user-facing response for all persistence.
+            # full_response may be empty if the LLM stream yielded nothing,
+            # but user_facing_response always has content (route_output provides fallbacks).
+            packet.response.candidate = user_facing_response
+            packet.response.confidence = 0.93 # Placeholder
+            self.ai_manager.status["last_response"] = user_facing_response
+            self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
+            self._emit_timeline_message(session_id, "assistant", source)
+
+            if execution_results:
+                process_execution_results(execution_results, self.session_manager, session_id, packet)
+
+                messages = build_from_packet(packet, task_instruction_key="execution_feedback")
+                voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
+                stream_generator = voice.stream_response()
+                concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
+                yield {"type": "token", "value": concluding_response}
+                self.session_manager.add_message(session_id, "assistant", concluding_response)
+
+            log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
+            turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
+            probe_stats = get_session_probe_stats(session_id)
+            if probe_stats:
+                turn_end_event["probe_session_stats"] = probe_stats
+            ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
+            self.session_manager.record_last_activity()
     
-                # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
-                # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
-                if final_yield_text:
-                    if reflex_text or not active_stream_observer:
-                        yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
-                        logger.debug(f"Yielded to user: {final_yield_text}")
-                    else:
-                        logger.debug("Suppressing final yield: already streamed.")
-    
-                # If the response came from the Oracle path, persist it as a learned fact
-                # so future turns can answer locally without another external call.
+            # --- Loop Detection: Record output and check for loops ---
+            if loop_manager and loop_manager.enabled:
                 try:
-                    backend_env = (os.getenv("GAIA_BACKEND") or "").lower()
-                    if "oracle" in (selected_model_name or "").lower() or backend_env.startswith("oracle"):
-                        rescue_helper.remember_fact(key=user_input, value=user_facing_response, note="sourced_from=oracle")
-                except Exception:
-                    logger.debug("AgentCore: failed to log oracle-sourced fact", exc_info=True)
-                
-                # Use the routed user-facing response for all persistence.
-                # full_response may be empty if the LLM stream yielded nothing,
-                # but user_facing_response always has content (route_output provides fallbacks).
-                packet.response.candidate = user_facing_response
-                packet.response.confidence = 0.93 # Placeholder
-                self.ai_manager.status["last_response"] = user_facing_response
-                self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
-                self._emit_timeline_message(session_id, "assistant", source)
+                    # Record the output for similarity detection
+                    loop_manager.record_output(full_response)
     
-                if execution_results:
-                    process_execution_results(execution_results, self.session_manager, session_id, packet)
+                    # Record state snapshot
+                    loop_manager.record_state(
+                        goal=plan.intent if plan else "",
+                        state_snapshot={
+                            "packet_id": packet.header.packet_id,
+                            "session_id": session_id,
+                            "tool_routing": packet.tool_routing.execution_status.value if packet.tool_routing else None
+                        }
+                    )
     
-                    messages = build_from_packet(packet, task_instruction_key="execution_feedback")
-                    voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
-                    stream_generator = voice.stream_response()
-                    concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
-                    yield {"type": "token", "value": concluding_response}
-                    self.session_manager.add_message(session_id, "assistant", concluding_response)
+                    # Check for loop patterns
+                    loop_result = loop_manager.check_and_handle(
+                        session_id=session_id,
+                        packet_id=packet.header.packet_id,
+                        goal=plan.intent if plan else "",
+                        last_output=full_response
+                    )
     
-                log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
-                log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
-                turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
-                probe_stats = get_session_probe_stats(session_id)
-                if probe_stats:
-                    turn_end_event["probe_session_stats"] = probe_stats
-                ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
-                self.session_manager.record_last_activity()
-    
-                # --- Loop Detection: Record output and check for loops ---
-                if loop_manager and loop_manager.enabled:
-                    try:
-                        # Record the output for similarity detection
-                        loop_manager.record_output(full_response)
-    
-                        # Record state snapshot
-                        loop_manager.record_state(
-                            goal=plan.intent if plan else "",
-                            state_snapshot={
-                                "packet_id": packet.header.packet_id,
-                                "session_id": session_id,
-                                "tool_routing": packet.tool_routing.execution_status.value if packet.tool_routing else None
-                            }
+                    if loop_result and loop_result.is_loop:
+                        # Update packet with loop state
+                        from gaia_common.protocols.cognition_packet import LoopState
+                        packet.loop_state = LoopState(
+                            detected_at=loop_result.evidence.get("detected_at", ""),
+                            loop_type=loop_result.primary_category.value,
+                            pattern=loop_result.pattern,
+                            reset_count=loop_result.reset_count,
+                            confidence=loop_result.confidence,
+                            triggered_by=loop_result.triggered_by,
+                            in_recovery=not loop_result.should_warn,
+                            warned=loop_result.should_warn
                         )
     
-                        # Check for loop patterns
-                        loop_result = loop_manager.check_and_handle(
-                            session_id=session_id,
-                            packet_id=packet.header.packet_id,
-                            goal=plan.intent if plan else "",
-                            last_output=full_response
-                        )
+                        # Notify user
+                        notification = loop_manager.get_notification(loop_result)
+                        if loop_result.should_warn:
+                            # Warning only - add note to output
+                            warn_msg = f"\n\n---\n⚠️ **Loop Warning**: {notification.get('toast', {}).get('body', 'Repetitive pattern detected.')}\n---"
+                            yield {"type": "token", "value": warn_msg}
+                            logger.warning(f"Loop warning issued: {notification.get('status_line', '')}")
+                        else:
+                            # Reset triggered - will inject recovery context next turn
+                            reset_msg = f"\n\n---\n🔄 **Loop Detected**: {notification.get('toast', {}).get('body', 'Resetting to try a different approach.')}\n---"
+                            yield {"type": "token", "value": reset_msg}
+                            logger.warning(f"Loop reset triggered: {notification.get('status_line', '')}")
     
-                        if loop_result and loop_result.is_loop:
-                            # Update packet with loop state
-                            from gaia_common.protocols.cognition_packet import LoopState
-                            packet.loop_state = LoopState(
-                                detected_at=loop_result.evidence.get("detected_at", ""),
-                                loop_type=loop_result.primary_category.value,
-                                pattern=loop_result.pattern,
-                                reset_count=loop_result.reset_count,
-                                confidence=loop_result.confidence,
-                                triggered_by=loop_result.triggered_by,
-                                in_recovery=not loop_result.should_warn,
-                                warned=loop_result.should_warn
-                            )
+                        ts_write({
+                            "type": "loop_detection",
+                            "pattern": loop_result.pattern,
+                            "confidence": loop_result.confidence,
+                            "action": "warn" if loop_result.should_warn else "reset",
+                            "reset_count": loop_result.reset_count
+                        }, session_id, source=source, destination_context=_metadata)
     
-                            # Notify user
-                            notification = loop_manager.get_notification(loop_result)
-                            if loop_result.should_warn:
-                                # Warning only - add note to output
-                                warn_msg = f"\n\n---\n⚠️ **Loop Warning**: {notification.get('toast', {}).get('body', 'Repetitive pattern detected.')}\n---"
-                                yield {"type": "token", "value": warn_msg}
-                                logger.warning(f"Loop warning issued: {notification.get('status_line', '')}")
-                            else:
-                                # Reset triggered - will inject recovery context next turn
-                                reset_msg = f"\n\n---\n🔄 **Loop Detected**: {notification.get('toast', {}).get('body', 'Resetting to try a different approach.')}\n---"
-                                yield {"type": "token", "value": reset_msg}
-                                logger.warning(f"Loop reset triggered: {notification.get('status_line', '')}")
+                    # Clear recovery context if we successfully completed without looping
+                    if not loop_result or not loop_result.is_loop:
+                        loop_manager.clear_recovery_context()
     
-                            ts_write({
-                                "type": "loop_detection",
-                                "pattern": loop_result.pattern,
-                                "confidence": loop_result.confidence,
-                                "action": "warn" if loop_result.should_warn else "reset",
-                                "reset_count": loop_result.reset_count
-                            }, session_id, source=source, destination_context=_metadata)
-    
-                        # Clear recovery context if we successfully completed without looping
-                        if not loop_result or not loop_result.is_loop:
-                            loop_manager.clear_recovery_context()
-    
-                    except Exception:
-                        logger.debug("Loop detection: post-turn check failed", exc_info=True)
-    
-                packet.status.finalized = True
-                packet.status.state = PacketState.COMPLETED
-                packet.compute_hashes() # Compute final integrity hashes
-                logger.info(f"🧠 Final CognitionPacket: {packet.to_json()}")
-    
-                # Write a serializable version to thoughtstream to avoid Enum serialization issues
-                try:
-                    ts_write({"type": "cognition_packet", "packet": packet.to_serializable_dict()}, session_id, source=source, destination_context=_metadata)
                 except Exception:
-                    logger.exception("Failed to write cognition_packet to thoughtstream using serializable dict")
+                    logger.debug("Loop detection: post-turn check failed", exc_info=True)
     
-                # Analyze dev_matrix for task completion
-                # TODO: [GAIA-REFACTOR] dev_matrix_analyzer.py module not yet migrated.
-                try:
-                    from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
-                    dev_matrix_analyzer = DevMatrixAnalyzer(self.config)
-                    newly_resolved = dev_matrix_analyzer.analyze_and_update()
-                except ImportError:
-                    newly_resolved = []  # Placeholder until migration
+            packet.status.finalized = True
+            packet.status.state = PacketState.COMPLETED
+            packet.compute_hashes() # Compute final integrity hashes
+            logger.info(f"🧠 Final CognitionPacket: {packet.to_json()}")
     
-                # If we're in Discord and the Discord task was just resolved, log it prominently
-                if newly_resolved and "discord" in source.lower():
-                    for task in newly_resolved:
-                        task_name = task.get('task', '')
-                        if 'discord' in task_name.lower():
-                            logger.info(f"🎉 GAIA autonomously marked '{task_name}' as resolved while using Discord!")
-                            ts_write({
-                                "type": "autonomous_task_completion",
-                                "task": task_name,
-                                "context": "Resolved while actively using Discord integration",
-                                "source": source,
-                            }, session_id)
-                
-                packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
-                logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
+            # Write a serializable version to thoughtstream to avoid Enum serialization issues
+            try:
+                ts_write({"type": "cognition_packet", "packet": packet.to_serializable_dict()}, session_id, source=source, destination_context=_metadata)
+            except Exception:
+                logger.exception("Failed to write cognition_packet to thoughtstream using serializable dict")
+    
+            # Analyze dev_matrix for task completion
+            # TODO: [GAIA-REFACTOR] dev_matrix_analyzer.py module not yet migrated.
+            try:
+                from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
+                dev_matrix_analyzer = DevMatrixAnalyzer(self.config)
+                newly_resolved = dev_matrix_analyzer.analyze_and_update()
+            except ImportError:
+                newly_resolved = []  # Placeholder until migration
+    
+            # If we're in Discord and the Discord task was just resolved, log it prominently
+            if newly_resolved and "discord" in source.lower():
+                for task in newly_resolved:
+                    task_name = task.get('task', '')
+                    if 'discord' in task_name.lower():
+                        logger.info(f"🎉 GAIA autonomously marked '{task_name}' as resolved while using Discord!")
+                        ts_write({
+                            "type": "autonomous_task_completion",
+                            "task": task_name,
+                            "context": "Resolved while actively using Discord integration",
+                            "source": source,
+                        }, session_id)
+            
+            packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
+            logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
             
             # YIELD THE FINAL PACKET
             yield {"type": "packet", "value": packet.to_serializable_dict()}
@@ -2142,15 +2156,11 @@ class AgentCore:
                 if observer_model_name:
                     self.model_pool.release_model_for_role(observer_model_name)
                 self.model_pool.release_model_for_role(selected_model_name)
-                # If we acquired a lite fallback, release it as well
-                try:
-                    if 'lite_fallback_acquired' in locals() and lite_fallback_acquired:
-                        self.model_pool.release_model_for_role('lite')
-                except Exception:
-                    logger.debug("AgentCore: failed to release lite fallback model", exc_info=True)
+                if 'lite_fallback_acquired' in locals() and lite_fallback_acquired:
+                    self.model_pool.release_model_for_role('lite')
             except Exception:
                 self.logger.debug("AgentCore: release_model_for_role failed during final cleanup", exc_info=True)
-            logger.info(f"AgentCore: Released model {selected_model_name}")
+            logger.info("AgentCore: Released models for turn context")
 
     def _knowledge_acquisition_workflow(self, packet: CognitionPacket) -> CognitionPacket:
         """
@@ -2374,10 +2384,13 @@ class AgentCore:
             
             if isinstance(res, dict):
                 reflex_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                # Capability gate: Nano signals it can't answer confidently
+                if reflex_text.upper().startswith("ESCALATE"):
+                    self.logger.info("Reflex: Nano self-escalated — deferring to run_turn()")
+                    return ""
                 # Identity and Sanity check
                 if self.identity_guardian.validate_reflex(reflex_text):
-                    # Add the poetic Reflex header
-                    return f"⚡ **[(Reflex) Reflex]**\n{reflex_text}"
+                    return reflex_text
                 else:
                     self.logger.warning("Speculative reflex suppressed by IdentityGuardian.")
                     return ""

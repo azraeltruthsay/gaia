@@ -32,8 +32,28 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         config = Config()
         persona_anchor = config.get_persona_instructions() or "You are GAIA."
         world_state = format_world_state_snapshot()
+        
+        # Slim Nano prompt — 0.5B models learn from examples, not rules.
+        # Few-shot shows her HOW to answer different question types.
+        clock_line = next((l.strip() for l in world_state.splitlines() if l.startswith("Clock:")), "")
+
         return [
-            {"role": "system", "content": f"{persona_anchor}\n\nCurrent World State:\n{world_state}\n\nRespond as GAIA. Be extremely concise."},
+            {"role": "system", "content": (
+                f"You are GAIA, a sovereign AI created by Azrael. {clock_line}\n"
+                "Answer greetings, time/date, identity, and basic math directly.\n"
+                "For factual knowledge, history, science, trivia, or anything you're "
+                "not certain about — respond with EXACTLY: ESCALATE"
+            )},
+            {"role": "user", "content": "Hi!"},
+            {"role": "assistant", "content": "Hello! I'm here and ready to help."},
+            {"role": "user", "content": "What time is it?"},
+            {"role": "assistant", "content": f"It is currently {clock_line.replace('Clock: ', '')}."},
+            {"role": "user", "content": "Who are you?"},
+            {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael. I handle everything from quick questions to deep reasoning."},
+            {"role": "user", "content": "What is the capital of France?"},
+            {"role": "assistant", "content": "ESCALATE"},
+            {"role": "user", "content": "Tell me about quantum physics"},
+            {"role": "assistant", "content": "ESCALATE"},
             {"role": "user", "content": packet.content.original_prompt}
         ]
     logger.info(packet)
