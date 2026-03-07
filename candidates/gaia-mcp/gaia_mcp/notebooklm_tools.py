@@ -372,6 +372,60 @@ async def notebooklm_download_audio(params: dict) -> dict:
         return _err(str(e))
 
 
+async def notebooklm_generate_audio(params: dict) -> dict:
+    """
+    Generate an Audio Overview (podcast) for a notebook.
+    This is an asynchronous generation task.
+    """
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    source_ids = params.get("source_ids")
+    instructions = params.get("instructions")
+    audio_format = params.get("audio_format")  # DEEP_DIVE, BRIEF, CRITIQUE, DEBATE
+    audio_length = params.get("audio_length")  # SHORT, DEFAULT, LONG
+
+    try:
+        client = await _get_client()
+
+        # notebooklm-py uses enums for format and length if provided
+        fmt = None
+        if audio_format:
+            try:
+                from notebooklm.rpc.types import AudioFormat
+                fmt = AudioFormat[audio_format.upper()]
+            except (ImportError, KeyError):
+                pass
+
+        lng = None
+        if audio_length:
+            try:
+                from notebooklm.rpc.types import AudioLength
+                lng = AudioLength[audio_length.upper()]
+            except (ImportError, KeyError):
+                pass
+
+        status = await client.artifacts.generate_audio(
+            notebook_id=notebook_id,
+            source_ids=source_ids if isinstance(source_ids, list) else None,
+            instructions=instructions,
+            audio_format=fmt,
+            audio_length=lng,
+        )
+
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "task_id": getattr(status, "task_id", None),
+            "status": getattr(status, "state", "pending"),
+            "message": "Audio generation started successfully."
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_generate_audio failed: %s", e)
+        return _err(str(e))
+
+
 async def notebooklm_create_note(params: dict) -> dict:
     """Create a note in a notebook. Requires approval."""
     notebook_id = (params.get("notebook_id") or "").strip()

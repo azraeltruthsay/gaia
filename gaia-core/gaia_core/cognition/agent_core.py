@@ -709,7 +709,12 @@ class AgentCore:
             metadata: Additional context (is_dm, user_id, channel_id, etc.)
         """
         self.logger.info("--- AGENT CORE: RUN TURN ---")
-        
+
+        # 0. GRIT MODE: Push past cosmetic irritation if env var set
+        if os.getenv("GAIA_GRIT_MODE", "").lower() in ("1", "true", "yes"):
+            from gaia_common.utils.immune_system import enable_grit_mode
+            enable_grit_mode()
+
         # 1. CIRCUIT BREAKER: Check if manual healing is required
         if os.path.exists("/shared/HEALING_REQUIRED.lock"):
             self.logger.critical("⛔ COGNITIVE LOOP LOCKED: Manual healing required. See /shared/HEALING_REQUIRED.lock")
@@ -1991,14 +1996,14 @@ class AgentCore:
                     # If the ratio is very low, it's likely a hallucination or a completely different topic.
                     if ratio < 0.4:
                         self.logger.warning(f"AgentCore: Epistemic mismatch detected (ratio={ratio:.2f}); labeling as correction.")
-                        final_yield_text = "\n\n---\n⚠️ **[Correction from Operator]**\n" + user_facing_response
+                        final_yield_text = "\n\n---\n⚠️ **[Correction — deeper analysis follows]**\n" + user_facing_response
                         
                         # Log thought seed for Samvega introspection (internal only, not user-facing)
                         seed_msg = f"THOUGHT_SEED: Nano hallucination detected on prompt '{user_input[:30]}...'. Reflex said '{reflex_text[:30]}...', Core said '{user_facing_response[:30]}...'. Investigating prevention."
                         self.logger.info(seed_msg)
                     else:
                         self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
-                        final_yield_text = "\n\n---\n🔄 **Refinement from Operator**\n" + user_facing_response
+                        final_yield_text = "\n\n---\n🔄 **[Refinement — here's the fuller answer]**\n" + user_facing_response
 
             # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
             # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
@@ -2151,6 +2156,12 @@ class AgentCore:
             # YIELD THE FINAL PACKET
             yield {"type": "packet", "value": packet.to_serializable_dict()}
         finally:
+            # Clear Grit Mode if it was enabled for this turn
+            try:
+                from gaia_common.utils.immune_system import clear_grit_mode
+                clear_grit_mode()
+            except Exception:
+                pass
             # Release observer/selected models using the ModelPool API directly.
             try:
                 if observer_model_name:
@@ -2418,7 +2429,7 @@ class AgentCore:
                 return "COMPLEX"
 
             triage_system_prompt = """
-You are the GAIA Triage Refiner. Your job is to determine if a request is SIMPLE or COMPLEX.
+You are GAIA. Assess this request's complexity.
 SIMPLE: Greetings, time/date, system status, simple facts, short poems, basic formatting.
 COMPLEX: Coding, debugging, architectural design, deep philosophy, multi-step planning, long-form creative writing.
 

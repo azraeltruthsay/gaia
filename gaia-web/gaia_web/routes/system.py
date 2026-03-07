@@ -1,0 +1,131 @@
+"""
+System status routes for Mission Control dashboard.
+
+Aggregates health data from gaia-doctor and gaia-orchestrator to provide
+the three endpoints the frontend polls: /services, /sleep, /status.
+"""
+
+import logging
+import os
+
+import httpx
+from fastapi import APIRouter
+
+logger = logging.getLogger("GAIA.Web.System")
+
+router = APIRouter()
+
+DOCTOR_URL = os.getenv("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+CORE_URL = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+
+# Map doctor service names to display-friendly IDs
+_SERVICE_DISPLAY = {
+    "gaia-core": "gaia-core",
+    "gaia-web": "gaia-web",
+    "gaia-mcp": "gaia-mcp",
+    "gaia-prime": "gaia-prime",
+    "gaia-audio": "gaia-audio",
+    "gaia-core-candidate": "gaia-core-candidate",
+    "gaia-mcp-candidate": "gaia-mcp-candidate",
+}
+
+
+@router.get("/services")
+async def system_services():
+    """Aggregate service health from gaia-doctor status endpoint."""
+    services = []
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/status")
+            if resp.status_code == 200:
+                data = resp.json()
+                for name, info in data.get("services", {}).items():
+                    healthy = info.get("healthy")
+                    if healthy is True:
+                        status = "online"
+                    elif healthy is False:
+                        status = "offline"
+                    else:
+                        status = "unknown"
+
+                    entry = {
+                        "id": _SERVICE_DISPLAY.get(name, name),
+                        "status": status,
+                        "latency_ms": None,
+                        "candidate": "candidate" in name,
+                        "consecutive_failures": info.get("consecutive_failures", 0),
+                        "alarmed": info.get("alarmed", False),
+                        "restarts_in_window": info.get("restarts_in_window", 0),
+                    }
+                    services.append(entry)
+
+                # Add doctor itself as healthy (if we got here, it's up)
+                services.append({
+                    "id": "gaia-doctor",
+                    "status": "online",
+                    "latency_ms": None,
+                    "candidate": False,
+                })
+
+    except Exception as e:
+        logger.debug("Failed to fetch doctor status: %s", e)
+
+    return services
+
+
+@router.get("/sleep")
+async def system_sleep():
+    """Get sleep state from gaia-core."""
+    result = {"state": "unknown", "gpu_owner": "--"}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Try gaia-core for sleep state
+            resp = await client.get(f"{CORE_URL}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                result["state"] = data.get("sleep_state", data.get("state", "active"))
+
+            # Try orchestrator for GPU owner
+            resp = await client.get(f"{ORCHESTRATOR_URL}/status")
+            if resp.status_code == 200:
+                orch = resp.json()
+                gpu = orch.get("gpu", {})
+                owner = gpu.get("owner", "none")
+                result["gpu_owner"] = owner if owner != "none" else "--"
+
+    except Exception as e:
+        logger.debug("Failed to fetch sleep/GPU status: %s", e)
+
+    return result
+
+
+@router.get("/status")
+async def system_status():
+    """Get orchestrator status (GPU owner, general health) + serenity state."""
+    result = {"gpu_owner": "--", "status": "unknown", "serenity": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/status")
+            if resp.status_code == 200:
+                data = resp.json()
+                result["status"] = data.get("status", "unknown")
+                gpu = data.get("gpu", {})
+                owner = gpu.get("owner", "none")
+                result["gpu_owner"] = owner if owner != "none" else "--"
+    except Exception as e:
+        logger.debug("Failed to fetch orchestrator status: %s", e)
+
+    # Fetch serenity state from doctor
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/serenity")
+            if resp.status_code == 200:
+                result["serenity"] = resp.json()
+    except Exception:
+        pass
+
+    return result

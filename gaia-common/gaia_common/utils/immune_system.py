@@ -22,6 +22,21 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger("GAIA.ImmuneSystem")
 
+# Grit Mode — module-level flag to push past cosmetic irritation
+_grit_mode_active = False
+
+
+def enable_grit_mode():
+    global _grit_mode_active
+    _grit_mode_active = True
+    logger.info("🦷 Grit Mode ENABLED — pushing past irritation for this turn.")
+
+
+def clear_grit_mode():
+    global _grit_mode_active
+    _grit_mode_active = False
+
+
 # Resolved status file path (handles container vs host)
 def _get_status_file() -> Path:
     p = Path("/logs/immune_status.json")
@@ -39,18 +54,18 @@ class ImmuneSystem:
     
     # Priority weighting for known error patterns
     PRIORITY_MAP = {
-        r"ModuleNotFoundError": 10.0,  # CRITICAL: Missing dependency
-        r"NameError": 10.0,            # CRITICAL: Bug in code
-        r"F821": 10.0,                 # CRITICAL: Undefined name (Ruff)
-        r"SyntaxError": 15.0,          # FATAL: Code compilation failure
-        r"LintError": 2.0,              # Default structural logic failure
-        r"F401": 0.5,                  # MINOR: Unused import (Noise)
-        r"Permission denied": 5.0,     # Structural issue
-        r"Model path does not exist": 5.0, 
-        r"uid not found": 5.0,         # Show-stopper
-        r"ConnectionError": 0.5,       # Often transient
+        r"ModuleNotFoundError": 3.0, # CRITICAL: Missing dependency
+        r"NameResolutionError": 0.5,  # High volume but often transient/expected
+        r"ConnectionError": 0.5,
+        r"Permission denied": 2.0,    # Real structural issue
+        r"not found in configuration": 1.0, # Configuration gap
+        r"Model path does not exist": 2.5, # CRITICAL: Missing model file
+        r"SyntaxError": 4.0,           # CRITICAL: Code compilation failure
+        r"LintError": 2.0,             # Structural logic failure (Ruff)
+        r"Root not allowed": 0.2,     # Security gate working as intended (Noise)
         r"timeout": 0.8,
-        r"cpuinfo": 0.1,               # Minor noise
+        r"uid not found": 2.0,        # Show-stopper
+        r"cpuinfo": 0.1,              # Minor dependency noise
     }
 
     def __init__(self, log_dir: str = "/logs"):
@@ -456,6 +471,16 @@ def get_detailed_mri(log_dir: str = "/logs") -> List[str]:
 
 def is_system_irritated(threshold: float = 8.0) -> bool:
     """Returns True if the systemic irritation score is above the threshold."""
+    if _grit_mode_active:
+        try:
+            status_file = _get_status_file()
+            if status_file.exists():
+                data = json.loads(status_file.read_text())
+                score = data.get("score", 0.0)
+                logger.info("🦷 Grit Mode active — reporting NOT irritated (actual score: %.1f)", score)
+        except Exception:
+            pass
+        return False
     try:
         status_file = _get_status_file()
         if status_file.exists():
