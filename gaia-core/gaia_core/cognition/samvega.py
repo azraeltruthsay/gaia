@@ -321,12 +321,25 @@ def generate_samvega_analysis(
         max_tokens = samvega_cfg.get("max_tokens", 256)
         temperature = samvega_cfg.get("temperature", 0.3)
 
-        response_text = llm.generate(
-            prompt,
+        messages = [{"role": "user", "content": prompt}]
+        raw_res = llm.create_chat_completion(
+            messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-            timeout=timeout,
         )
+
+        # Extract text from response
+        response_text = ""
+        if isinstance(raw_res, dict) and "choices" in raw_res and len(raw_res["choices"]) > 0:
+            choice = raw_res["choices"][0]
+            if "message" in choice:
+                response_text = choice["message"].get("content", "")
+            else:
+                response_text = choice.get("text", "")
+        
+        if not response_text:
+            logger.warning("Samvega: LLM returned empty response")
+            return None
 
         # Parse JSON response
         parsed = json.loads(response_text.strip())

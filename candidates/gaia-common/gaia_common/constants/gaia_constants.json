@@ -29,7 +29,7 @@
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm_remote",
-      "endpoint": "http://gaia-prime:7777/v1",
+      "endpoint": "http://gaia-prime:7777",
       "lora_config": {
         "enabled": true,
         "adapter_dir": "/models/lora_adapters",
