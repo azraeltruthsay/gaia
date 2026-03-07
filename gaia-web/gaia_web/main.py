@@ -29,6 +29,7 @@ from gaia_web.routes.generation import router as generation_router
 from gaia_web.routes.logs import router as logs_router
 from gaia_web.routes.audio import router as audio_router
 from gaia_web.routes.discord import router as discord_router
+from gaia_web.routes.system import router as system_router
 
 # Setup logging
 try:
@@ -84,16 +85,20 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Include routers
-app.include_router(blueprints_router, prefix="/api/blueprints", tags=["blueprints"])
-app.include_router(files_router, prefix="/api/files", tags=["files"])
-app.include_router(hooks_router, prefix="/api/hooks", tags=["hooks"])
-app.include_router(terminal_router, prefix="/api/terminal", tags=["terminal"])
-app.include_router(voice_router, prefix="/api/voice", tags=["voice"])
-app.include_router(wiki_router, prefix="/api/wiki", tags=["wiki"])
-app.include_router(generation_router, prefix="/api/generation", tags=["generation"])
-app.include_router(logs_router, prefix="/api/logs", tags=["logs"])
-app.include_router(audio_router, prefix="/api/audio", tags=["audio"])
-app.include_router(discord_router, prefix="/api/discord", tags=["discord"])
+# NOTE: Most routers define their own /api/<name> prefix internally,
+# so we mount them at root to avoid double-prefixing.
+app.include_router(blueprints_router, tags=["blueprints"])
+app.include_router(files_router, tags=["files"])
+app.include_router(hooks_router, tags=["hooks"])
+app.include_router(terminal_router, tags=["terminal"])
+app.include_router(voice_router, tags=["voice"])
+app.include_router(wiki_router, tags=["wiki"])
+app.include_router(generation_router, tags=["generation"])
+app.include_router(logs_router, tags=["logs"])
+app.include_router(audio_router, tags=["audio"])
+app.include_router(discord_router, tags=["discord"])
+# system_router uses relative paths, so it needs the prefix
+app.include_router(system_router, prefix="/api/system", tags=["system"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):

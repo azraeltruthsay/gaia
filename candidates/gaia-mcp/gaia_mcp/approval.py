@@ -52,24 +52,38 @@ class ApprovalStore:
         """Generate a 5-character alphabetic challenge code."""
         return ''.join(random.choice(string.ascii_uppercase) for _ in range(5))
 
+    def validate_against_blast_shield(self, method: str, params: Dict[str, Any]):
+        """
+        VouchCore Pattern: Deterministic pre-flight safety check.
+        Raises ValueError if action is forbidden regardless of LLM reasoning.
+        """
+        if method == "run_shell":
+            cmd = str(params.get("command", "")).lower()
+            forbidden = ["rm -rf", "sudo ", "mkfs", "dd ", "> /dev/sd"]
+            for pattern in forbidden:
+                if pattern in cmd:
+                    logger.critical(f"🛡️ BLAST SHIELD: Forbidden command pattern detected: {pattern}")
+                    raise ValueError(f"Blast Shield: Forbidden command pattern '{pattern}' detected.")
+        
+        if method == "write_file":
+            path = str(params.get("path", ""))
+            if path.startswith("/etc") or path.startswith("/boot") or ".ssh" in path:
+                logger.critical(f"🛡️ BLAST SHIELD: Attempt to write to system path: {path}")
+                raise ValueError("Blast Shield: Writing to system configuration paths is forbidden.")
+
     def create_pending(
         self,
         method: str,
         params: Dict[str, Any],
         proposal: Optional[str] = None,
-        allow_pending: bool = False # This param is from request_approval, not here. Removing it.
+        allow_pending: bool = False
     ) -> Tuple[str, str, float, float]:
         """
         Create a pending action awaiting approval.
-
-        Args:
-            method: The tool method name
-            params: The tool parameters
-            proposal: Optional human-readable description of the action
-
-        Returns:
-            Tuple of (action_id, challenge, created_at, expiry)
         """
+        # ── 🛡️ BLAST SHIELD CHECK ──
+        self.validate_against_blast_shield(method, params)
+
         with self._lock:
             action_id = str(uuid.uuid4())
             challenge = self._gen_challenge()
@@ -84,37 +98,6 @@ class ApprovalStore:
                 except Exception:
                     proposal = str(params)
 
-            # This part for ai_write diff should go into the request_approval endpoint where `params` is parsed.
-            # Not in the core approval store logic.
-            # If this is an ai_write we can generate a unified diff between
-            # the existing file (if any) and the proposed content.
-            # if method == "ai_write" and isinstance(params, dict):
-            #     path = params.get("path")
-            #     content = params.get("content")
-            #     if path and content is not None:
-            #         try:
-            #             from pathlib import Path
-            #             import difflib
-            #             p = Path(path)
-            #             if p.exists():
-            #                 with open(p, "r", encoding="utf-8", errors="replace") as fh:
-            #                     old_lines = fh.read().splitlines()
-            #             else:
-            #                 old_lines = []
-            #             new_lines = str(content).splitlines()
-            #             diff_lines = list(difflib.unified_diff(old_lines, new_lines, fromfile=str(p), tofile=f"{str(p)} (proposed)"))
-            #             if diff_lines:
-            #                 proposal = "\n".join(diff_lines)
-            #             else:
-            #                 # No diff (identical) — show a short preview
-            #                 proposal = f"(no changes detected for {path})"
-            #         except Exception:
-            #             proposal = json.dumps(params, indent=2, ensure_ascii=False)
-            # # Fallback: pretty-print params for human review
-            # if not proposal:
-            #     proposal = json.dumps(params or {}, indent=2, ensure_ascii=False)
-
-
             self._store[action_id] = {
                 "method": method,
                 "params": params,
@@ -122,6 +105,7 @@ class ApprovalStore:
                 "created_at": now,
                 "expiry": expiry,
                 "proposal": proposal,
+                "allow_pending": allow_pending
             }
 
             logger.info(

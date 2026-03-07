@@ -398,6 +398,71 @@ async def doctor_diagnose(request: Request):
         media_type="application/x-ndjson"
     )
 
+@app.post("/api/doctor/review")
+async def doctor_review(request: Request):
+    """
+    Cognitive veto point for sovereign promotion.
+    Doctor submits candidate→production diffs; GAIA (Prime) reviews and approves/denies.
+    Expects JSON: { "diffs": [...], "source": "doctor_sovereign_promote", "file_count": N }
+    Returns: { "approved": true/false, "reason": "..." }
+    """
+    data = await request.json()
+    diffs = data.get("diffs", [])
+    source = data.get("source", "unknown")
+
+    if not diffs:
+        return JSONResponse(status_code=400, content={"error": "No diffs provided"})
+
+    logger.info("🔱 SOVEREIGN REVIEW: %d files from %s", len(diffs), source)
+
+    # Build a review prompt for GAIA Prime
+    diff_summary = []
+    for d in diffs[:10]:  # Cap at 10 files to stay within context
+        vital_tag = " [VITAL ORGAN]" if d.get("vital") else ""
+        diff_summary.append(f"### {d['file']}{vital_tag}\n```diff\n{d['diff'][:4000]}\n```")
+
+    review_prompt = (
+        "SOVEREIGN PROMOTION REVIEW\n\n"
+        "The Doctor has detected that candidate files differ from production. "
+        "Review the following diffs and determine if they should be promoted.\n\n"
+        "Approve ONLY if:\n"
+        "- Changes are syntactically valid\n"
+        "- No obvious regressions or security issues\n"
+        "- Changes appear intentional (not corruption)\n\n"
+        "Respond with EXACTLY one line:\n"
+        "APPROVED: <brief reason>\n"
+        "or\n"
+        "DENIED: <brief reason>\n\n"
+        + "\n\n".join(diff_summary)
+    )
+
+    try:
+        # Use the agent core for cognitive review
+        response_text = ""
+        for chunk in _agent_core.run_turn(
+            user_input=review_prompt,
+            session_id=f"sovereign_review_{int(time.time())}",
+            source="gaia-doctor",
+        ):
+            if chunk.get("type") == "token":
+                response_text += chunk.get("value", "")
+
+        # Parse the response
+        response_upper = response_text.upper()
+        if "APPROVED" in response_upper:
+            reason = response_text.strip().split(":", 1)[-1].strip() if ":" in response_text else "Approved by GAIA"
+            logger.info("🔱 SOVEREIGN REVIEW: APPROVED — %s", reason[:200])
+            return {"approved": True, "reason": reason[:500]}
+        else:
+            reason = response_text.strip().split(":", 1)[-1].strip() if ":" in response_text else "Denied by GAIA"
+            logger.warning("🔱 SOVEREIGN REVIEW: DENIED — %s", reason[:200])
+            return {"approved": False, "reason": reason[:500]}
+
+    except Exception as e:
+        logger.exception("Sovereign review failed")
+        return JSONResponse(status_code=500, content={"approved": False, "reason": str(e)})
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for container orchestration."""

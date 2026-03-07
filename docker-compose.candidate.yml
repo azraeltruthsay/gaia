@@ -26,6 +26,7 @@ services:
       - ./logs:/logs:rw
 
     environment:
+      - PYTHONPATH=/gaia-common
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CORE_ENDPOINT=http://gaia-core-candidate:6415
@@ -100,7 +101,7 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app:/app/gaia-common
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - GAIA_SERVICE=mcp

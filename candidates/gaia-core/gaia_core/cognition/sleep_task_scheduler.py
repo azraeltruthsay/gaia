@@ -64,12 +64,32 @@ class SleepTaskScheduler:
         self._tasks.append(task)
         logger.info("Registered sleep task: %s (P%d)", task.task_id, task.priority)
 
+    def _is_serene(self) -> bool:
+        """Check if GAIA is in Serenity state by reading the shared flag file."""
+        try:
+            import json
+            from pathlib import Path
+            serenity_file = Path(os.getenv("SHARED_DIR", "/shared")) / "doctor" / "serenity.json"
+            if serenity_file.exists():
+                data = json.loads(serenity_file.read_text())
+                return data.get("serene", False)
+        except Exception:
+            pass
+        return False
+
     def _run_initiative_cycle(self) -> None:
-        """Run the autonomous initiative/goal generation cycle."""
+        """Run the autonomous initiative/goal generation cycle.
+
+        Gated on Serenity: only runs when GAIA has proven resilience, ensuring
+        autonomous goal-setting happens from a trusted cognitive baseline.
+        """
+        if not self._is_serene():
+            logger.info("Initiative cycle: skipping — GAIA is not Serene (earn serenity through Defensive Meditation)")
+            return
         if self.agent_core is None:
             logger.warning("Initiative cycle skipped: agent_core not available")
             return
-            
+
         try:
             # AgentCore owns the initiative engine logic
             if hasattr(self.agent_core, "run_initiative_cycle"):
@@ -1537,7 +1557,14 @@ class SleepTaskScheduler:
                            filepath, exc_info=True)
 
     def _run_code_evolution(self) -> None:
-        """Generate code evolution snapshot for temporal self-awareness."""
+        """Generate code evolution snapshot for temporal self-awareness.
+
+        Gated on Serenity: only runs when GAIA has proven resilience through
+        Defensive Meditation, ensuring self-modification happens from a trusted baseline.
+        """
+        if not self._is_serene():
+            logger.info("Code evolution: skipping — GAIA is not Serene (earn serenity through Defensive Meditation)")
+            return
         try:
             from gaia_common.utils.code_evolution import generate_code_evolution_snapshot
 
@@ -1644,6 +1671,12 @@ class SleepTaskScheduler:
         from gaia_core.cognition.candidate_checkpoint import CandidateCheckpointManager
 
         logger.info("Starting adversarial resilience drill (Chaos Monkey)...")
+
+        # Chaos Monkey only fires from a clean baseline
+        from gaia_common.utils.immune_system import is_system_irritated
+        if is_system_irritated():
+            logger.info("Chaos Monkey: System is irritated — skipping drill (heal first)")
+            return
 
         # All candidate services that this drill may touch.
         # Extend this list as the fix logic grows to cover more services.

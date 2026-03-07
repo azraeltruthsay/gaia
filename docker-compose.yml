@@ -425,7 +425,7 @@ services:
       # Shared state
       - gaia-shared:/shared:rw
       # NotebookLM auth (Playwright storage state, read-only)
-      - ${HOME}/.notebooklm:/auth/notebooklm:ro
+      - /home/azrael/.notebooklm:/auth/notebooklm:ro
 
     environment:
       - HOME=/tmp
@@ -445,6 +445,7 @@ services:
       - KANKA_API_KEY=${KANKA_API_KEY:-}
       # NotebookLM auth
       - NOTEBOOKLM_HOME=/auth/notebooklm
+      - NOTEBOOKLM_STORAGE_STATE=/auth/notebooklm/storage_state.json
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

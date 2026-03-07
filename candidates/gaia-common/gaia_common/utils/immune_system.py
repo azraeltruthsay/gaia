@@ -22,6 +22,21 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger("GAIA.ImmuneSystem")
 
+# Grit Mode — module-level flag to push past cosmetic irritation
+_grit_mode_active = False
+
+
+def enable_grit_mode():
+    global _grit_mode_active
+    _grit_mode_active = True
+    logger.info("🦷 Grit Mode ENABLED — pushing past irritation for this turn.")
+
+
+def clear_grit_mode():
+    global _grit_mode_active
+    _grit_mode_active = False
+
+
 # Resolved status file path (handles container vs host)
 def _get_status_file() -> Path:
     p = Path("/logs/immune_status.json")
@@ -456,6 +471,16 @@ def get_detailed_mri(log_dir: str = "/logs") -> List[str]:
 
 def is_system_irritated(threshold: float = 8.0) -> bool:
     """Returns True if the systemic irritation score is above the threshold."""
+    if _grit_mode_active:
+        try:
+            status_file = _get_status_file()
+            if status_file.exists():
+                data = json.loads(status_file.read_text())
+                score = data.get("score", 0.0)
+                logger.info("🦷 Grit Mode active — reporting NOT irritated (actual score: %.1f)", score)
+        except Exception:
+            pass
+        return False
     try:
         status_file = _get_status_file()
         if status_file.exists():
