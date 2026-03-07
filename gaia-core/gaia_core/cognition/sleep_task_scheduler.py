@@ -747,10 +747,10 @@ class SleepTaskScheduler:
         5. Parse ReviewResult and surface discrepancies
         """
         try:
-            from gaia_common.utils.ast_summarizer import summarize_file
-            from gaia_common.utils.blueprint_io import load_blueprint, save_blueprint
-            from gaia_common.utils.blueprint_precheck import run_blueprint_precheck
-            from gaia_common.utils.review_prompt_builder import ReviewResult, build_review_prompt
+            from gaia_common.utils.ast_summarizer import summarize_file # noqa: F401
+            from gaia_common.utils.blueprint_io import load_blueprint, save_blueprint # noqa: F401
+            from gaia_common.utils.blueprint_precheck import run_blueprint_precheck # noqa: F401
+            from gaia_common.utils.review_prompt_builder import ReviewResult, build_review_prompt # noqa: F401
         except ImportError:
             logger.debug("Code review dependencies not available, skipping")
             return

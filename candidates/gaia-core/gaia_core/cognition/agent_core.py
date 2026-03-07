@@ -2349,7 +2349,7 @@ class AgentCore:
         is_short = len(user_input) < 150
         
         from gaia_common.utils.immune_system import is_system_irritated
-        return is_cold and is_short and not is_system_irritated() and "nano" in self.model_pool.models
+        return is_cold and is_short and not is_system_irritated() and "reflex" in self.model_pool.models
 
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """
