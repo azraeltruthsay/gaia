@@ -560,6 +560,13 @@ async def process_packet(packet_data: Dict[str, Any]):
                 if reflex_text:
                     yield json.dumps({"type": "token", "value": reflex_text + "\n\n---\n\n"}) + "\n"
                     yield json.dumps({"type": "flush"}) + "\n"
+                    
+                    # FINALIZATION: Skip run_turn if reflex already provided the answer
+                    # Update status and yield final packet
+                    packet.status.state = "finalized"
+                    packet.response.candidate = reflex_text
+                    yield json.dumps({"type": "packet", "value": packet.to_dict()}) + "\n"
+                    return
 
             # Run the cognitive loop
             response_pieces = []
