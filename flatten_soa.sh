@@ -142,7 +142,7 @@ FILE_LIST=$(
 )
 
 # 2. ADD ROOT LEVEL FILES
-ROOT_FILES="docker-compose.yml README.md .env.example gaia_start.sh"
+ROOT_FILES="docker-compose.yml README.md .env.example gaia_start.sh flatten_soa.sh start_notebooklm_sync.sh"
 ROOT_FOUND=""
 for f in $ROOT_FILES; do
     [ -f "$f" ] && ROOT_FOUND="${ROOT_FOUND}${f}"$'\n'

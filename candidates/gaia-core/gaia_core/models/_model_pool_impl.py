@@ -1046,8 +1046,6 @@ class ModelPool:
 
     def _resolve_model_name_for_role(self, role: str) -> str | None:
         """Resolve a logical role (reflex, core, thinker) to a physical model name."""
-        name = None
-        
         # --- Poetic Renaming Aliases ---
         role_map = {
             "nano": "reflex",
@@ -1059,32 +1057,31 @@ class ModelPool:
         }
         target_role = role_map.get(role.lower(), role.lower())
 
+        # 1. If it's already a loaded key, return it
         if target_role in self.models:
-            name = target_role
-        else:
-            cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
-            alias = cfg.get('alias')
-            if alias and alias in self.models:
-                name = alias
+            return target_role
+
+        # 2. Check MODEL_CONFIGS for alias or direct entry
+        cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
         
-        if not name:
-            if target_role == 'thinker':
-                if 'thinker' in self.models:
-                    name = 'thinker'
-                elif 'gpu_prime' in self.models:
-                    name = 'gpu_prime'
-                elif 'prime' in self.models:
-                    name = 'prime'
-            else:
-                share = None
-                try:
-                    import os
-                    share = os.getenv('GAIA_SHARE_LITE_WITH') if target_role in ('core', 'observer') else None
-                except Exception:
-                    share = None
-                if share and share in self.models:
-                    name = share
-        return name
+        # If it's a remote model, return the role itself as the name (we'll handle lazy load next)
+        if cfg.get("type") == "vllm_remote":
+            return target_role
+
+        alias = cfg.get('alias')
+        if alias and alias in self.models:
+            return alias
+        
+        # 3. Fallback logic for thinker
+        if target_role == 'thinker':
+            for cand in ['thinker', 'gpu_prime', 'prime']:
+                if cand in self.models:
+                    return cand
+                # Check config for remote candidate
+                if self.config.MODEL_CONFIGS.get(cand, {}).get("type") == "vllm_remote":
+                    return cand
+        
+        return None
 
     def acquire_model_for_role(self, role: str, lazy_load: bool = True):
         """Resolve role to a model name and acquire it (mark busy). Returns the model instance or None.
@@ -1096,12 +1093,27 @@ class ModelPool:
         """
         name = self._resolve_model_name_for_role(role)
 
-        # If no model resolved, try lazy loading first
+        # 1. Check if this is a remote vLLM model
+        cfg = self.config.MODEL_CONFIGS.get(name or role, {})
+        if cfg.get("type") == "vllm_remote":
+            logger.info(f"ModelPool: Initializing remote model proxy for role '{role}' (model: '{name}')")
+            try:
+                from .vllm_remote_model import VLLMRemoteModel
+                return VLLMRemoteModel(
+                    endpoint=cfg.get("endpoint", ""),
+                    model=cfg.get("path", ""),
+                    api_key=cfg.get("api_key")
+                )
+            except Exception as e:
+                logger.error(f"ModelPool: Failed to initialize VLLMRemoteModel: {e}")
+                return None
+
+        # 2. If no model resolved and it's a local role, try lazy loading
         if not name and lazy_load:
             if self.ensure_model_loaded(role):
                 name = self._resolve_model_name_for_role(role)
 
-        # FALLBACK CHAIN: If primary model unavailable for prime roles, try fallbacks
+        # 3. FALLBACK CHAIN: If primary model unavailable for prime roles, try fallbacks
         if not name or name not in self.models:
             if role in ('prime', 'gpu_prime', 'cpu_prime'):
                 fallback_chain = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
