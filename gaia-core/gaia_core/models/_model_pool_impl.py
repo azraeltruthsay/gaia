@@ -1093,19 +1093,13 @@ class ModelPool:
         """
         name = self._resolve_model_name_for_role(role)
 
-        # 1. Check if this is a remote vLLM model
+        # 1. Check if this is a remote vLLM model - ensure it's loaded in the pool
         cfg = self.config.MODEL_CONFIGS.get(name or role, {})
         if cfg.get("type") == "vllm_remote":
-            logger.info(f"ModelPool: Initializing remote model proxy for role '{role}' (model: '{name}')")
-            try:
-                from .vllm_remote_model import VLLMRemoteModel
-                return VLLMRemoteModel(
-                    endpoint=cfg.get("endpoint", ""),
-                    model=cfg.get("path", ""),
-                    api_key=cfg.get("api_key")
-                )
-            except Exception as e:
-                logger.error(f"ModelPool: Failed to initialize VLLMRemoteModel: {e}")
+            if self.ensure_model_loaded(name or role):
+                name = name or role
+            else:
+                logger.error(f"ModelPool: Failed to lazy-load remote model for role '{role}'")
                 return None
 
         # 2. If no model resolved and it's a local role, try lazy loading

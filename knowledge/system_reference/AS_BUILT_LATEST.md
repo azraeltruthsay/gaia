@@ -1,5 +1,5 @@
 # Code Evolution Snapshot
-Generated: 2026-03-07T00:49:57.849374+00:00
+Generated: 2026-03-07T02:19:16.550452+00:00
 
 ## Pending Candidate Changes
 - **gaia-common**: 1 changed (immune_system.py), 1 removed
@@ -8,6 +8,7 @@ Generated: 2026-03-07T00:49:57.849374+00:00
 - **gaia-orchestrator**: 1 changed (main.py), 4 removed
 
 ## Recent Commits
+- `aa104da` (2026-03-06): chore: Immune System 3.0 hardening and Chaos Monkey 5/6 surgical repair
 - `ebdff9d` (2026-03-06): fix: Harden HA Surgeon — context windowing, rw write authority, py_compile gate
 - `c23e33d` (2026-03-06): feat: Implement Bicameral Mind Support & Immune System 3.0 Hardening
 - `5ac9755` (2026-03-05): feat: Implement Council Deep Thought & Labeled Sequential Streaming
@@ -17,7 +18,6 @@ Generated: 2026-03-07T00:49:57.849374+00:00
 - `8dc8543` (2026-03-04): fix: gaia-doctor stale alarm expiry and docker exec TTY flag
 - `85f03ae` (2026-03-04): fix: Resolve steady-state stability issues & clean Discord streaming
 - `78b8c2f` (2026-03-04): feat: Implement Speculative Nano-First Pipeline & Hardened Immune System
-- `5c00790` (2026-03-04): chore: promotion pipeline 2026-03-04 — services: gaia-common,gaia-core,gaia-web
 
 ## Backup History
 - 122 .bak files (oldest: 2026-01-07, newest: 2026-01-27)
