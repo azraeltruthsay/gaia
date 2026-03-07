@@ -196,7 +196,7 @@ def audit_code():
                     restart_candidate(name)
             else:
                 log.warning("Tests FAILED for %s code changes. Auto-restart ABORTED.", name)
-                _record_irritation(name, f"Code changes detected but tests failed", "CodeAudit: Tests Failed")
+                _record_irritation(name, "Code changes detected but tests failed", "CodeAudit: Tests Failed")
 
 
 def run_service_tests(name: str) -> bool:

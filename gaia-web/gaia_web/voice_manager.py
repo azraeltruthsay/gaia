@@ -604,9 +604,19 @@ class VoiceManager:
                     self._state = "responding"
                     response_text = await self._get_lite_stalling_response(text)
                 else:
-                    # 3. Process via gaia-core (Prime)
-                    self._state = "responding"
-                    response_text = await self._get_response(text)
+                    # 3. Try Nano reflex fast-path for short utterances
+                    response_text = None
+                    if len(text.strip()) < 150:
+                        t0 = time.monotonic()
+                        response_text = await self._get_reflex_response(text)
+                        if response_text:
+                            reflex_ms = (time.monotonic() - t0) * 1000
+                            logger.info("Voice: Nano reflex (%.0fms): %s", reflex_ms, response_text[:80])
+
+                    if not response_text:
+                        # Fall through to full Prime
+                        self._state = "responding"
+                        response_text = await self._get_response(text)
                 if not response_text:
                     logger.warning("No response from gaia-core")
                     self._state = "listening"
@@ -651,9 +661,75 @@ class VoiceManager:
             logger.error("Transcribe request failed", exc_info=True)
         return None
 
+    @staticmethod
+    async def _parse_ndjson_response(resp: httpx.Response) -> str | None:
+        """Parse an NDJSON stream from /process_packet, return clean text."""
+        response_text = ""
+        async for line in resp.aiter_lines():
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "token":
+                response_text += event.get("value", "")
+            elif event.get("type") == "packet":
+                candidate = event.get("value", {}).get("response", {}).get("candidate")
+                if candidate:
+                    return candidate
+        return response_text.strip() or None
+
+    async def _get_reflex_response(self, text: str) -> str | None:
+        """Try Nano reflex fast-path with a fresh session for cold-start eligibility.
+
+        Uses a unique session_id per utterance so is_eligible_for_reflex sees
+        an empty history (cold start). Tight 5s timeout since reflex should
+        respond in <1s. Returns clean text or None if reflex didn't fire.
+        """
+        import uuid
+        from gaia_common.utils.packet_factory import build_packet, PacketSource
+
+        user_id = self._connected_user or "voice_user"
+        packet = build_packet(
+            PacketSource.VOICE_PRIME,
+            text,
+            user_id=user_id,
+            session_id=f"voice_reflex_{uuid.uuid4().hex[:12]}",
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.core_endpoint}/process_packet",
+                    json=packet.to_serializable_dict(),
+                    headers={"Content-Type": "application/json"},
+                ) as resp:
+                    if resp.status_code != 200:
+                        return None
+                    raw = await self._parse_ndjson_response(resp)
+        except Exception:
+            logger.debug("Reflex request failed (falling back to Prime)", exc_info=True)
+            return None
+
+        if not raw:
+            return None
+
+        # Strip reflex formatting header: ⚡ **[(Reflex) Reflex]**\n...
+        clean = raw.strip()
+        prefix = "⚡ **[(Reflex) Reflex]**"
+        if clean.startswith(prefix):
+            clean = clean[len(prefix):].lstrip("\n")
+        # Strip trailing markdown separator
+        clean = clean.rstrip("-").rstrip("\n").strip()
+        return clean or None
+
     async def _get_response(self, text: str) -> str | None:
-        """Send transcribed text to gaia-core as a CognitionPacket and get response."""
-        from gaia_common.protocols.cognition_packet import CognitionPacket
+        """Send transcribed text to gaia-core as a CognitionPacket and get response.
+
+        Parses the NDJSON streaming response from /process_packet.
+        """
         from gaia_common.utils.packet_factory import build_packet, PacketSource
 
         user_id = self._connected_user or "voice_user"
@@ -661,16 +737,16 @@ class VoiceManager:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{self.core_endpoint}/process_packet",
                     json=packet.to_serializable_dict(),
                     headers={"Content-Type": "application/json"},
-                )
-                if resp.status_code == 200:
-                    result = resp.json()
-                    completed = CognitionPacket.from_dict(result)
-                    return completed.response.candidate or None
-                logger.error("Core response failed: %d", resp.status_code)
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.error("Core response failed: %d", resp.status_code)
+                        return None
+                    return await self._parse_ndjson_response(resp)
         except Exception:
             logger.error("Core request failed", exc_info=True)
         return None
@@ -680,8 +756,8 @@ class VoiceManager:
 
         Builds a minimal CognitionPacket targeting TargetEngine.LITE with
         tight token/time budgets and a stalling system hint.
+        Parses the NDJSON streaming response from /process_packet.
         """
-        from gaia_common.protocols.cognition_packet import CognitionPacket
         from gaia_common.utils.packet_factory import build_packet, PacketSource
 
         user_id = self._connected_user or "voice_user"
@@ -698,16 +774,16 @@ class VoiceManager:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{self.core_endpoint}/process_packet",
                     json=packet.to_serializable_dict(),
                     headers={"Content-Type": "application/json"},
-                )
-                if resp.status_code == 200:
-                    result = resp.json()
-                    completed = CognitionPacket.from_dict(result)
-                    return completed.response.candidate or None
-                logger.error("Lite stalling response failed: %d", resp.status_code)
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.error("Lite stalling response failed: %d", resp.status_code)
+                        return None
+                    return await self._parse_ndjson_response(resp)
         except Exception:
             logger.error("Lite stalling request failed", exc_info=True)
         return None
