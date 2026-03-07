@@ -1767,24 +1767,30 @@ class AgentCore:
                 for msg in council_msgs:
                     council_history.append(f"[{selected_model_name.upper()}]: {msg}")
                 
-                # Model Swap: Lite <-> Prime
-                next_model_name = "gpu_prime" if selected_model_name == "lite" else "lite"
+                # Model Swap: Core <-> Thinker (or Core <-> Core if Prime down)
+                next_model_role = "thinker" if selected_model_name == "core" else "core"
                 
                 # Release current model
                 self.model_pool.release_model_for_role(selected_model_name)
                 
                 # Acquire next model
                 try:
-                    new_model = self.model_pool.acquire_model_for_role(next_model_name)
+                    new_model = self.model_pool.acquire_model_for_role(next_model_role)
+                    if not new_model and next_model_role == "thinker":
+                        logger.warning("AgentCore: Thinker (Prime) unavailable. Falling back to Monastic Reasoning (Core solo-debate).")
+                        # Fallback to Core for self-reflection
+                        new_model = self.model_pool.acquire_model_for_role("core")
+                        next_model_role = "core"
+
                     if new_model:
                         selected_model = new_model
-                        selected_model_name = next_model_name
+                        selected_model_name = next_model_role
                     else:
-                        logger.warning(f"AgentCore: Could not acquire {next_model_name} for debate; terminating.")
+                        logger.warning(f"AgentCore: Could not acquire {next_model_role} for debate; terminating.")
                         full_response = routing_result.get("response_to_user", "")
                         break
                 except Exception:
-                    logger.exception(f"AgentCore: Error swapping to {next_model_name}")
+                    logger.exception(f"AgentCore: Error swapping to {next_model_role}")
                     full_response = routing_result.get("response_to_user", "")
                     break
     

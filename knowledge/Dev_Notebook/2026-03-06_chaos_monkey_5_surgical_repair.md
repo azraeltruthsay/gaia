@@ -137,4 +137,7 @@ Both stray parenthesis injections removed. File passes `py_compile` and `ruff ch
 - **Self-Healing:** EMPIRICALLY PROVEN (Chaos Monkey 5 passed)
 - **Surgeon Context Budget:** 1,441–1,976 tokens per repair (vs. 17,206 before)
 - **Repair Write Authority:** gaia-core (rw mount) — doctor no longer needs write access
-- **Next:** Consider multi-pass repair for cases where a single windowed fix leaves secondary errors; consider py_compile gate on all doctor.py deployments
+
+## Post-Script: Residual Issues Found in Rounds 6–7
+
+Chaos Monkey 5 proved autonomous self-repair, but follow-up testing (see `2026-03-06_immune_system_3_0_hardening.md`) revealed that the Surgeon only partially cleaned the injection — a stray `(` remained on line 105. Additionally, three bugs in doctor.py itself were found: wrong gaia-web health URL (`localhost` instead of Docker hostname), `import requests` violating stdlib-only constraint, and missing post-remediation health verification. All fixed and verified in the Immune System 3.0 hardening session.

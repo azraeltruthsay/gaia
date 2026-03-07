@@ -463,11 +463,11 @@ class DiscordInterface:
                                 val = event.get("value", "")
                                 if val:
                                     # If this is an explicit Reflex block, send it immediately
-                                    if val.startswith("[(Reflex) Nano:"):
+                                    if val.startswith("⚡ **[(Reflex)"):
                                         await self._send_response(message_obj, val, is_dm)
                                         reflex_sent = True
                                     else:
-                                        # Accumulate Prime/Operator tokens to send as a block
+                                        # Accumulate Core/Thinker tokens to send as a block
                                         full_response += val
                             
                             elif event_type == "flush":

@@ -28,7 +28,8 @@
       "path": "/models/Qwen3-8B-abliterated-AWQ",
       "trust_remote_code": true,
       "template": "raw",
-      "type": "vllm",
+      "type": "vllm_remote",
+      "endpoint": "http://gaia-prime:7777/v1",
       "lora_config": {
         "enabled": true,
         "adapter_dir": "/models/lora_adapters",

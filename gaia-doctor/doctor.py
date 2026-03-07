@@ -54,7 +54,7 @@ SERVICES = {
     # name: (health_url, remediation)
     # remediation: None = observe only, "restart" = docker restart, "ha" = compose HA overlay
     "gaia-core": ("http://gaia-core:6415/health", "restart"),
-    "gaia-web": ("http://localhost:6414/health", "restart"),
+    "gaia-web": ("http://gaia-web:6414/health", "restart"),
     "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
     "gaia-audio": ("http://gaia-audio:8080/health", None),
@@ -385,6 +385,8 @@ def restart_candidate(name: str) -> bool:
 
         if result.returncode == 0:
             log.info("Successfully restarted %s", name)
+            url = SERVICES[name][0]
+            _verify_recovery(name, url)
             return True
         else:
             log.error("Failed to restart %s: %s", name, result.stderr.strip()[:200])
@@ -520,6 +522,19 @@ if broken: sys.exit(1)
         log.error("Error during structural audit for %s: %s", name, e)
         return True
 
+def _verify_recovery(name: str, url: str, delay: int = 5):
+    """Post-remediation health check — confirms recovery immediately instead of waiting for next poll."""
+    time.sleep(delay)
+    healthy = check_health(name, url)
+    if healthy:
+        _consecutive_failures[name] = 0
+        _service_state[name]["healthy"] = True
+        _alarmed_services.discard(name)
+        log.info("POST-REMEDIATION: %s confirmed healthy", name)
+    else:
+        log.warning("POST-REMEDIATION: %s still unhealthy after %ds — next poll will retry", name, delay)
+
+
 def docker_restart(name: str) -> bool:
     """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker."""
     if MAINTENANCE_FLAG.exists():
@@ -546,12 +561,14 @@ def docker_restart(name: str) -> bool:
                 log_res = subprocess.run(["docker", "logs", "--tail", "100", name], capture_output=True, text=True)
                 logs = log_res.stdout + log_res.stderr
                 
-                import requests
-                requests.post(
-                    "http://localhost:6415/api/doctor/diagnose",
-                    json={"service": name, "logs": logs},
-                    timeout=10 # Fire and forget diagnostic turn
+                diag_data = json.dumps({"service": name, "logs": logs}).encode("utf-8")
+                diag_req = Request(
+                    "http://gaia-core:6415/api/doctor/diagnose",
+                    data=diag_data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
                 )
+                urlopen(diag_req, timeout=10)
             except Exception as diag_err:
                 log.error("Failed to dispatch diagnostics: %s", diag_err)
                 
@@ -617,8 +634,9 @@ def docker_restart(name: str) -> bool:
 
         if result.returncode == 0:
             log.info("Successfully restarted %s", name)
-            # Clear alarm state on successful restart if previously alarmed
             _alarmed_services.discard(name)
+            url = SERVICES[name][0]
+            _verify_recovery(name, url)
             return True
         else:
             log.error("Failed to restart %s: %s", name, result.stderr.strip()[:200])
