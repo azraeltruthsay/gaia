@@ -338,7 +338,7 @@ def _check_failure_modes(
 ) -> list[PreCheckItem]:
     """Check that each blueprint failure mode has a matching handler in source."""
     items: list[PreCheckItem] = []
-    all_source = "\n".join(source_files.values())
+    "\n".join(source_files.values())
 
     for fm in blueprint.failure_modes:
         claim = fm.condition

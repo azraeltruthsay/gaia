@@ -61,7 +61,6 @@ class PatternClassifier:
         Classify the aggregated detection result and generate descriptions.
         """
         category = result.primary_category
-        evidence = result.evidence or {}
 
         # Route to specific classifier based on category
         if category in (LoopCategory.TOOL_REPETITION, LoopCategory.TOOL_PING_PONG,
@@ -148,7 +147,7 @@ class PatternClassifier:
                     pattern=f"You called `{tool}` {count} times consecutively",
                     details=[
                         f"**Arguments**: `{args_summary}`" if args_summary else "",
-                        f"**Result**: Each call returned the same output."
+                        "**Result**: Each call returned the same output."
                     ],
                     what_went_wrong=(
                         "The tool output didn't change between calls. "
@@ -274,8 +273,8 @@ class PatternClassifier:
             template = DescriptionTemplate(
                 brief=f"Goal oscillating {osc_count}x",
                 summary=(
-                    f"Your goal has been flip-flopping back and forth. "
-                    f"This suggests uncertainty about what you should be doing."
+                    "Your goal has been flip-flopping back and forth. "
+                    "This suggests uncertainty about what you should be doing."
                 ),
                 full=self._build_full_template(
                     title="Goal Oscillation",
@@ -370,7 +369,7 @@ class PatternClassifier:
                     title="Error Whack-a-Mole",
                     pattern="Fixing one error causes another, and vice versa",
                     details=[
-                        f"**Errors involved**:",
+                        "**Errors involved**:",
                         f"  1. {error_a}",
                         f"  2. {error_b}",
                         f"**Oscillations**: {oscillations} cycles"
@@ -451,7 +450,7 @@ class PatternClassifier:
                 ),
                 full=self._build_full_template(
                     title="Recurring Error",
-                    pattern=f"Same error type occurring repeatedly",
+                    pattern="Same error type occurring repeatedly",
                     details=[
                         f"**Error type**: {error_type}",
                         f"**Occurrences**: {count}",

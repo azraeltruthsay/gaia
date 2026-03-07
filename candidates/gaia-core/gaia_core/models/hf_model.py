@@ -35,7 +35,6 @@ class HFModel:
             torch_dtype = None
 
         # Attempt an accelerate/device_map GPU-aware load, but fall back to CPU if it fails
-        tried_device_map = device_map
         last_exc = None
         for attempt in (0, 1):
             try:
@@ -189,7 +188,7 @@ class HFModel:
             raise RuntimeError(f"streaming generation requires transformers.TextIteratorStreamer: {e}")
 
         # Tokenize input; prefer returning PyTorch tensors to leverage device map
-        inputs = self.tokenizer(prompt, return_tensors="pt")
+        self.tokenizer(prompt, return_tensors="pt")
 
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 

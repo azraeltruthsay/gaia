@@ -2,15 +2,10 @@
 gaia-mcp: The Hands - Sandboxed tool execution service.
 """
 
-import os
 import logging
-from typing import Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import json
+from fastapi import FastAPI
 
           # Setup logging
 try:

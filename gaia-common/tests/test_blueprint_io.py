@@ -135,7 +135,7 @@ class TestLoadSave:
 
     def test_save_live_downgrades_if_candidate_dir(self, bp_root):
         bp = _minimal_blueprint(meta=_minimal_meta(status=BlueprintStatus.LIVE))
-        path = save_blueprint(bp, candidate=True)
+        save_blueprint(bp, candidate=True)
         loaded = load_blueprint("gaia-test", candidate=True)
         # Should have been downgraded to CANDIDATE
         assert loaded.meta.status == BlueprintStatus.CANDIDATE

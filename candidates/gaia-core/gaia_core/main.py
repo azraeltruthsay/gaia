@@ -379,7 +379,6 @@ async def doctor_diagnose(request: Request):
     logger.critical("🚨 DOCTOR-INITIATED DIAGNOSIS: %s is in a restart loop.", service)
     
     # Create a specialized internal packet for self-healing
-    from gaia_common.protocols.cognition_packet import CognitionPacket, Header, Persona
     
     diagnostics_prompt = (
         f"URGENT SYSTEM REPAIR: The service '{service}' is caught in a recursive restart loop. "
@@ -389,8 +388,9 @@ async def doctor_diagnose(request: Request):
     )
     
     # This turn will be processed with high-reasoning priority
+    import time
     return StreamingResponse(
-        agent_core.run_turn(
+        _agent_core.run_turn(
             user_input=diagnostics_prompt,
             session_id=f"diagnostics_{service}_{int(time.time())}",
             source="gaia-doctor"

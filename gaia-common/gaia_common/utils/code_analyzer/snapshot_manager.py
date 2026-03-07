@@ -336,7 +336,7 @@ class SnapshotManager:
             logger.error(f"safe_edit failed for {file_path}: {e}", exc_info=True)
             # Attempt rollback on any error
             if backup_result and backup_result.get("ok"):
-                logger.warning(f"Attempting rollback after error")
+                logger.warning("Attempting rollback after error")
                 restore_result = self.restore_file(str(target), backup_result.get("backup_path"))
                 rolled_back = restore_result.get("ok", False)
 

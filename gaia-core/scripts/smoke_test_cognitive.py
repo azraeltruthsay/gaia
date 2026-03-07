@@ -298,7 +298,7 @@ def v_excludes_all(*terms: str) -> Validator:
         found = [t for t in terms if t.lower() in lower]
         if found:
             return (False, f"should not contain '{found[0]}'")
-        return (True, f"correctly excludes all forbidden terms")
+        return (True, "correctly excludes all forbidden terms")
     return check
 
 

@@ -742,8 +742,8 @@ def generate_tool_review_pairs(rng: random.Random) -> List[Dict[str, str]]:
             review_reasoning = rng.choice([
                 f"The {tool_name} tool is appropriate for this request. Parameters look correct.",
                 f"Tool selection is correct. The {tool_name} tool will handle this well.",
-                f"Approved. The parameters are well-formed and the tool matches the user's intent.",
-                f"This is the right tool for the job. No safety concerns with these parameters.",
+                "Approved. The parameters are well-formed and the tool matches the user's intent.",
+                "This is the right tool for the job. No safety concerns with these parameters.",
             ])
 
             output = json.dumps({
@@ -882,14 +882,6 @@ def augment_with_variations(pairs: List[Dict[str, str]], rng: random.Random,
         return pairs[:target_count]
 
     # Variation strategies
-    prefixes = [
-        "Please ", "Can you ", "Could you ", "I need you to ", "Hey, ",
-        "GAIA, ", "Okay, ", "Alright, ", "Um, ", "",
-    ]
-    suffixes = [
-        "", "?", " please", " thanks", " if you can", ".",
-        " — I need this urgently", " when you get a chance",
-    ]
 
     augmented = list(pairs)
     attempts = 0

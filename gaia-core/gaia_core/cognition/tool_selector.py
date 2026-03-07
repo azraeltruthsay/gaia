@@ -491,7 +491,7 @@ def _build_tool_catalog() -> str:
         if info['params']:
             lines.append(f"  Parameters: {', '.join(info['params'])}")
         if info.get("requires_approval"):
-            lines.append(f"  Note: Requires user approval")
+            lines.append("  Note: Requires user approval")
     return "\n".join(lines)
 
 

@@ -362,19 +362,19 @@ def _detect_tool_routing_request(text: str) -> bool:
     # Check knowledge save patterns
     for pattern in knowledge_save_patterns:
         if re.search(pattern, lowered):
-            logger.debug(f"Tool routing detected: knowledge save pattern")
+            logger.debug("Tool routing detected: knowledge save pattern")
             return True
 
     # Check strong file patterns
     for pattern in strong_file_patterns:
         if re.search(pattern, lowered):
-            logger.debug(f"Tool routing detected: file pattern")
+            logger.debug("Tool routing detected: file pattern")
             return True
 
     # Check execution patterns
     for pattern in exec_patterns:
         if re.search(pattern, lowered):
-            logger.debug(f"Tool routing detected: exec pattern")
+            logger.debug("Tool routing detected: exec pattern")
             return True
 
     return False

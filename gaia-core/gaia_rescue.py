@@ -1232,7 +1232,6 @@ def main():
         # Backwards-compatible: the helper may return (approval_id, diff) or
         # the extended form (approval_id, diff, proposal, created_at, expiry).
         approval_id = None
-        diff = None
         proposal = None
         created_at = None
         expiry = None

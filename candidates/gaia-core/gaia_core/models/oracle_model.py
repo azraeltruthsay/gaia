@@ -11,8 +11,8 @@ class GPTAPIModel:
         api_key = self.config.get_api_key("openai")
         if not api_key:
             raise ValueError(
-                f"OpenAI API key not configured. Set OPENAI_API_KEY environment variable "
-                f"or configure 'openai' in API_KEYS."
+                "OpenAI API key not configured. Set OPENAI_API_KEY environment variable "
+                "or configure 'openai' in API_KEYS."
             )
         self.client = openai.OpenAI(api_key=api_key)
         self.logger = logging.getLogger(__name__)

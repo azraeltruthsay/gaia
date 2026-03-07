@@ -864,7 +864,7 @@ class ModelPool:
         """
         # Block gpu_prime loading when GPU has been released for sleep
         if name == "gpu_prime" and self._gpu_released and not force:
-            logger.info(f"[LAZY_LOAD] Blocked lazy-load of 'gpu_prime' — GPU is released for sleep")
+            logger.info("[LAZY_LOAD] Blocked lazy-load of 'gpu_prime' — GPU is released for sleep")
             return False
 
         logger.warning(f"[LAZY_LOAD] ensure_model_loaded called for '{name}', force={force}")

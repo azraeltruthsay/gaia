@@ -270,7 +270,7 @@ class TestEdgeCases:
         sm = _make_session_manager()
         packet = _make_packet(user_intent="question", user_input="What is AI?")
         detector = GoalDetector()
-        state = detector.detect(packet, session_manager=sm, session_id="s1")
+        detector.detect(packet, session_manager=sm, session_id="s1")
 
         # Verify set_session_meta was called
         sm.set_session_meta.assert_called()

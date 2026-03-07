@@ -18,7 +18,7 @@ class ConsentProtocol:
     def request_consent(reason="Initial boot") -> bool:
         config = Config()
         identity_guardian = CoreIdentityGuardian(config)
-        sentinel = EthicalSentinel(identity_guardian)
+        EthicalSentinel(identity_guardian)
 
         # Compose the system prompt GAIA will reflect on
         prompt = f"""

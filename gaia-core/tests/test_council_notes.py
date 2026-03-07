@@ -118,7 +118,7 @@ class TestReadPendingNotes:
     def test_read_with_timestamp_filter(self, council):
         # Write a note, then filter to after it
         council.write_note("old", "old_resp", "old_reason", "sess-001")
-        cutoff = datetime.now(timezone.utc) + timedelta(seconds=1)
+        datetime.now(timezone.utc) + timedelta(seconds=1)
         council.write_note("new", "new_resp", "new_reason", "sess-001")
 
         # Only notes after cutoff should appear — but both are likely

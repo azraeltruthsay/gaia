@@ -328,7 +328,7 @@ def print_report(report: ValidationReport, verbose: bool = False):
     print(f"  Value accuracy:   {report.avg_value_accuracy:.1%}")
     print(f"  Composite score:  {report.avg_score:.3f}")
 
-    print(f"\n  Per-category scores:")
+    print("\n  Per-category scores:")
     for cat, score in sorted(report.category_scores.items()):
         count = sum(1 for r in report.results if r.category == cat)
         print(f"    {cat:.<30s} {score:.3f}  (n={count})")
