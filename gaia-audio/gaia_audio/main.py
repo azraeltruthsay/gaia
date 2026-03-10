@@ -1,7 +1,9 @@
 """gaia-audio — GAIA sensory service for STT/TTS.
 
-Half-duplex audio processing with GPU management, real-time status
-streaming, and sleep-state governance integration.
+Three-tier audio architecture:
+  - Listener:      Qwen3-ASR 0.6B (GPU, always-on, coexists with Prime LLM)
+  - Nano Speaker:  Qwen3-TTS 0.6B (CPU, always-on, instant short phrases)
+  - Prime Speaker: Qwen3-TTS 1.7B (GPU, on-demand, high-quality long-form)
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from gaia_audio.models import (
 )
 from gaia_audio.status import status_tracker
 from gaia_audio.stt_engine import STTEngine, audio_bytes_to_array
-from gaia_audio.tts_engine import TTSEngine
+from gaia_audio.tts_engine import NanoSpeaker, PrimeSpeaker, EspeakFallback
 from gaia_audio.refiner_engine import RefinerEngine
 from gaia_audio.music_engine import MusicEngine
 
@@ -46,7 +48,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 config: AudioConfig | None = None
 gpu_manager: GPUManager | None = None
 stt_engine: STTEngine | None = None
-tts_engine: TTSEngine | None = None
+nano_speaker: NanoSpeaker | None = None
+prime_speaker: PrimeSpeaker | None = None
+espeak_fallback: EspeakFallback | None = None
 refiner_engine: RefinerEngine | None = None
 music_engine: MusicEngine | None = None
 
@@ -57,27 +61,41 @@ music_engine: MusicEngine | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    global config, gpu_manager, stt_engine, tts_engine, refiner_engine, music_engine
+    global config, gpu_manager, stt_engine, nano_speaker, prime_speaker
+    global espeak_fallback, refiner_engine, music_engine
 
     config = AudioConfig.from_constants()
-    logger.info("Audio config loaded: stt=%s, tts=%s, vram_budget=%dMB",
-                config.stt_model, config.tts_engine, config.vram_budget_mb)
+    logger.info("Audio config loaded: listener=%s, nano_speaker=%s, prime_speaker=%s",
+                config.listener_model_path, config.nano_speaker_model_path,
+                config.prime_speaker_model_path)
 
+    # Initialize three-tier engines
     stt_engine = STTEngine(
-        model_size=config.stt_model,
-        device="cuda",
-        compute_type="int8",
+        model_path=config.listener_model_path,
+        device=config.listener_device,
     )
-    tts_engine = TTSEngine(
-        engine_type=config.tts_engine,
-        voice=config.tts_voice,
+    nano_speaker = NanoSpeaker(
+        model_path=config.nano_speaker_model_path,
+        voice_ref_audio=config.voice_ref_audio,
+        voice_ref_text=config.voice_ref_text,
     )
+    prime_speaker = PrimeSpeaker(
+        model_path=config.prime_speaker_model_path,
+        voice_ref_audio=config.voice_ref_audio,
+        voice_ref_text=config.voice_ref_text,
+    )
+    espeak_fallback = EspeakFallback()
+
     gpu_manager = GPUManager(
         stt_engine=stt_engine,
-        tts_engine=tts_engine,
-        vram_budget_mb=config.vram_budget_mb,
-        half_duplex=config.half_duplex,
+        nano_speaker=nano_speaker,
+        prime_speaker=prime_speaker,
+        espeak_fallback=espeak_fallback,
+        prime_speaker_timeout=config.prime_speaker_timeout,
     )
+
+    # Boot: load Listener (GPU) + Nano Speaker (CPU)
+    await gpu_manager.startup()
 
     # Initialize Nano-Refiner (via gaia-nano HTTP endpoint)
     nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
@@ -94,16 +112,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to load MusicEngine: {e}")
 
-    duplex_mode = "half-duplex" if config.half_duplex else "full-duplex"
-    await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine}, {duplex_mode})")
+    await status_tracker.emit("startup", "gaia-audio ready (three-tier Qwen3 architecture)")
 
     # Register with orchestrator (best-effort)
     await _register_with_orchestrator()
 
     yield
 
-    # Shutdown: release GPU resources
-    logger.info("Shutting down gaia-audio — releasing GPU resources")
+    # Shutdown: release all resources
+    logger.info("Shutting down gaia-audio — releasing all resources")
     if gpu_manager:
         await gpu_manager.release()
     await status_tracker.emit("shutdown", "gaia-audio stopped")
@@ -111,8 +128,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="gaia-audio",
-    description="GAIA sensory service — half-duplex STT/TTS with GPU management",
-    version="0.1.0",
+    description="GAIA sensory service — three-tier Qwen3 STT/TTS",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -147,7 +164,7 @@ async def status():
                 detail=e["detail"],
                 latency_ms=e["latency_ms"],
             )
-            for e in snap["events"][-20:]  # Last 20 events
+            for e in snap["events"][-20:]
         ],
     )
 
@@ -168,7 +185,6 @@ async def status_ws(websocket: WebSocket):
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
                 await websocket.send_json(event)
             except asyncio.TimeoutError:
-                # Send keepalive ping
                 await websocket.send_json({"event_type": "keepalive", "timestamp": ""})
     except WebSocketDisconnect:
         logger.debug("Dashboard WebSocket disconnected")
@@ -183,7 +199,7 @@ async def status_ws(websocket: WebSocket):
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(request: TranscribeRequest):
-    """Transcribe audio to text.
+    """Transcribe audio to text using Qwen3-ASR (Listener).
 
     Accepts base64-encoded audio (WAV, MP3, FLAC, OGG, or raw PCM).
     """
@@ -201,11 +217,9 @@ async def transcribe(request: TranscribeRequest):
     await status_tracker.emit("stt_start", f"Transcribing audio ({len(request.audio_base64)} chars base64)")
 
     try:
-        # Decode audio
         audio_bytes = base64.b64decode(request.audio_base64)
         audio_array = audio_bytes_to_array(audio_bytes, request.sample_rate)
 
-        # Run transcription with GPU management
         result = await gpu_manager.run_stt(
             stt_engine.transcribe_sync,
             audio_array=audio_array,
@@ -215,7 +229,7 @@ async def transcribe(request: TranscribeRequest):
 
         latency_ms = (time.monotonic() - t0) * 1000
         status_tracker.state = "idle"
-        status_tracker.last_transcription = result["text"][:200]  # Truncate for status
+        status_tracker.last_transcription = result["text"][:200]
         await status_tracker.emit("stt_complete", result["text"][:80], latency_ms)
 
         # Signal wake to gaia-core (voice activity detected)
@@ -251,11 +265,9 @@ async def analyze_audio(request: AnalyzeAudioRequest):
     await status_tracker.emit("analyze_start", f"Analyzing audio sample ({request.sample_rate}Hz)")
 
     try:
-        # Convert base64 to numpy array
         audio_bytes = base64.b64decode(request.audio_base64)
         audio_array = audio_bytes_to_array(audio_bytes, request.sample_rate)
 
-        # Run analysis in executor (CPU intensive)
         analysis_result = await asyncio.get_event_loop().run_in_executor(
             None,
             music_engine.analyze,
@@ -267,9 +279,7 @@ async def analyze_audio(request: AnalyzeAudioRequest):
         status_tracker.state = "idle"
         await status_tracker.emit("analyze_complete", f"BPM: {analysis_result['bpm']}, Key: {analysis_result['key']}", latency_ms)
 
-        return AnalyzeAudioResponse(
-            **analysis_result
-        )
+        return AnalyzeAudioResponse(**analysis_result)
 
     except Exception as e:
         status_tracker.state = "idle"
@@ -283,11 +293,10 @@ async def analyze_audio(request: AnalyzeAudioRequest):
 
 @app.post("/refine", response_model=RefineResponse)
 async def refine(request: RefineRequest):
-    """Clean up and format a transcript using the nano-refiner (CPU)."""
+    """Clean up and format a transcript using the nano-refiner."""
     global refiner_engine
     logger.info(f"Refine request received. Engine initialized: {refiner_engine is not None}")
     if not refiner_engine:
-        # Emergency initialization if lifespan missed it or global state was lost
         nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
         logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_endpoint}")
         refiner_engine = RefinerEngine(endpoint=nano_endpoint)
@@ -298,11 +307,10 @@ async def refine(request: RefineRequest):
     await status_tracker.emit("refine_start", f"Refining text ({len(request.text)} chars)")
 
     try:
-        # The refiner runs on CPU, so it doesn't need gpu_manager synchronization
         refined_text = await asyncio.get_event_loop().run_in_executor(
-            None, 
-            refiner_engine.refine, 
-            request.text, 
+            None,
+            refiner_engine.refine,
+            request.text,
             request.max_tokens
         )
 
@@ -321,62 +329,79 @@ async def refine(request: RefineRequest):
         raise HTTPException(500, f"Refinement failed: {e}") from e
 
 
-# ── Synthesis (TTS) ───────────────────────────────────────────────────
+# ── Synthesis (TTS) — Three-Tier Routing ─────────────────────────────
 
 
 @app.post("/synthesize")
 async def synthesize(request: SynthesizeRequest):
-    """Synthesize text to speech.
+    """Synthesize text to speech with three-tier routing.
 
-    Returns audio as base64 JSON or raw bytes (based on Accept header).
+    Tier routing:
+      - auto:  len(text) ≤ threshold → Nano, else → Prime (Nano fallback)
+      - nano:  force CPU (Qwen3-TTS 0.6B)
+      - prime: force GPU (Qwen3-TTS 1.7B), 503 if unavailable after timeout
     """
-    if not gpu_manager or not tts_engine:
+    if not gpu_manager:
         raise HTTPException(503, "Audio service not initialized")
-
-    if not tts_engine.loaded:
-        logger.info("TTS engine not loaded; loading on-demand")
-        await gpu_manager.run_tts(tts_engine.load)
 
     t0 = time.monotonic()
     status_tracker.state = "synthesizing"
     await status_tracker.emit("tts_start", request.text[:80])
 
     try:
-        # Use requested engine override or default
-        engine = tts_engine
-        if request.engine and request.engine != tts_engine.engine_type:
-            # Check for cloud fallback providers
-            if request.engine in ["elevenlabs", "openai"]:
-                logger.info("Using cloud TTS provider: %s", request.engine)
-                # Cloud providers would be handled via a separate CloudTTSEngine class
-                # For now, we fallback to local but log the intent
-                logger.warning("%s requested but dynamic cloud switching not fully implemented; falling back to %s",
-                               request.engine, tts_engine.engine_type)
-            else:
-                logger.warning("Engine override requested (%s) not supported; using %s",
-                               request.engine, tts_engine.engine_type)
+        tier = request.tier
+        threshold = config.tts_auto_threshold if config else 200
+        result = None
+        tier_used = "nano"
 
-        result = await gpu_manager.run_tts(
-            engine.synthesize_sync,
-            text=request.text,
-            voice=request.voice,
-        )
+        if tier == "prime" or (tier == "auto" and len(request.text) > threshold):
+            # Try Prime Speaker (GPU)
+            result = await gpu_manager.run_tts_prime(
+                prime_speaker.synthesize_sync,
+                text=request.text,
+                voice=request.voice,
+            )
+            if result is not None:
+                tier_used = "prime"
+
+        if result is None:
+            # Use Nano Speaker (CPU) — either by request, auto-routing, or Prime fallback
+            if nano_speaker and nano_speaker.loaded:
+                result = await gpu_manager.run_tts_nano(
+                    nano_speaker.synthesize_sync,
+                    text=request.text,
+                    voice=request.voice,
+                )
+                tier_used = "nano"
+            elif espeak_fallback and espeak_fallback.loaded:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    espeak_fallback.synthesize_sync,
+                    request.text,
+                    request.voice,
+                )
+                tier_used = "espeak"
+            else:
+                raise HTTPException(503, "No TTS engine available")
 
         latency_ms = (time.monotonic() - t0) * 1000
         status_tracker.state = "idle"
         status_tracker.last_synthesis_text = request.text[:200]
-        await status_tracker.emit("tts_complete", request.text[:80], latency_ms)
+        await status_tracker.emit("tts_complete", f"{tier_used}: {request.text[:60]}", latency_ms)
 
         audio_b64 = base64.b64encode(result["audio_bytes"]).decode("ascii")
 
         return SynthesizeResponse(
             audio_base64=audio_b64,
-            sample_rate=result.get("sample_rate", 22050),
+            sample_rate=result.get("sample_rate", 24000),
             duration_seconds=result.get("duration_seconds", 0.0),
             latency_ms=latency_ms,
-            engine_used=result.get("engine_used", tts_engine.engine_type),
+            engine_used=result.get("engine_used", "nano_speaker"),
+            tier_used=tier_used,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         status_tracker.state = "idle"
         await status_tracker.emit("error", f"TTS failed: {e}")
@@ -388,11 +413,15 @@ async def synthesize(request: SynthesizeRequest):
 
 @app.get("/voices", response_model=list[VoiceInfo])
 async def list_voices():
-    """List available TTS voices."""
-    if not tts_engine:
-        return []
-    raw = tts_engine.list_voices()
-    return [VoiceInfo(**v) for v in raw]
+    """List available TTS voices across all tiers."""
+    voices = []
+    if nano_speaker:
+        voices.extend([VoiceInfo(**v) for v in nano_speaker.list_voices()])
+    if prime_speaker:
+        voices.extend([VoiceInfo(**v) for v in prime_speaker.list_voices()])
+    if espeak_fallback and espeak_fallback.loaded:
+        voices.extend([VoiceInfo(**v) for v in espeak_fallback.list_voices()])
+    return voices
 
 
 # ── Config ────────────────────────────────────────────────────────────
@@ -404,12 +433,15 @@ async def get_config():
     if not config:
         return {}
     return {
-        "stt_model": config.stt_model,
-        "tts_engine": config.tts_engine,
-        "tts_voice": config.tts_voice,
+        "listener_model": config.listener_model_path,
+        "listener_device": config.listener_device,
+        "nano_speaker_model": config.nano_speaker_model_path,
+        "prime_speaker_model": config.prime_speaker_model_path,
+        "voice_ref_audio": config.voice_ref_audio,
+        "tts_auto_threshold": config.tts_auto_threshold,
+        "prime_speaker_timeout": config.prime_speaker_timeout,
         "sample_rate": config.sample_rate,
         "vram_budget_mb": config.vram_budget_mb,
-        "half_duplex": config.half_duplex,
         "mute_on_sleep": config.mute_on_sleep,
     }
 
@@ -440,7 +472,7 @@ async def unmute():
 
 @app.post("/sleep")
 async def sleep_mode():
-    """Deep sleep: mute + unload all GPU models to free VRAM.
+    """Deep sleep: mute + unload Listener from GPU. Nano Speaker stays on CPU.
 
     Called by gaia-core when entering ASLEEP/DREAMING states.
     Idempotent — safe to call multiple times.
@@ -450,49 +482,45 @@ async def sleep_mode():
     await status_tracker.emit("sleep_start", "Entering deep sleep — unloading GPU models")
 
     if gpu_manager:
-        await gpu_manager.release()
+        await gpu_manager.sleep()
 
-    await status_tracker.emit("sleep_complete", "GPU models unloaded — VRAM freed")
-    logger.info("Audio deep sleep: models unloaded, VRAM freed")
-    return {"status": "sleeping", "vram_freed": True}
+    await status_tracker.emit("sleep_complete", "GPU models unloaded — Nano Speaker still on CPU")
+    logger.info("Audio deep sleep: Listener unloaded, Nano Speaker available on CPU")
+    return {"status": "sleeping", "vram_freed": True, "nano_available": True}
 
 
 @app.post("/wake")
 async def wake_mode():
-    """Wake from deep sleep: unmute + eagerly reload GPU models in background.
+    """Wake from deep sleep: unmute + reload Listener on GPU in background.
 
-    Returns immediately — model reload runs as a background task (~11s)
-    which is hidden behind Prime's ~37s cold-start.
+    Returns immediately — model reload runs as a background task.
     Idempotent — safe to call multiple times.
     """
     status_tracker.muted = False
     status_tracker.state = "waking"
-    await status_tracker.emit("wake_start", "Waking — starting background model reload")
-    logger.info("Audio wake: starting background model reload")
+    await status_tracker.emit("wake_start", "Waking — starting background Listener reload")
+    logger.info("Audio wake: starting background Listener reload")
 
     if gpu_manager:
-        asyncio.create_task(_background_reload())
+        asyncio.create_task(_background_wake())
 
     return {"status": "waking", "reload_started": True}
 
 
-async def _background_reload():
-    """Reload GPU models in background after wake.
-
-    Non-fatal on failure — lazy loading will catch up on next request.
-    """
+async def _background_wake():
+    """Reload Listener on GPU in background after wake."""
     try:
         t0 = time.monotonic()
         if gpu_manager:
-            await gpu_manager.acquire_for_stt()  # full-duplex: loads both
+            await gpu_manager.wake()
         elapsed = (time.monotonic() - t0) * 1000
         status_tracker.state = "idle"
-        await status_tracker.emit("wake_complete", f"Models reloaded ({elapsed:.0f}ms)", elapsed)
-        logger.info("Background model reload complete in %.0fms", elapsed)
+        await status_tracker.emit("wake_complete", f"Listener reloaded ({elapsed:.0f}ms)", elapsed)
+        logger.info("Background Listener reload complete in %.0fms", elapsed)
     except Exception:
-        logger.error("Background model reload failed (non-fatal)", exc_info=True)
+        logger.error("Background Listener reload failed (non-fatal)", exc_info=True)
         status_tracker.state = "idle"
-        await status_tracker.emit("wake_error", "Background reload failed — will lazy-load on demand")
+        await status_tracker.emit("wake_error", "Listener reload failed — will lazy-load on demand")
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
@@ -521,7 +549,7 @@ async def _register_with_orchestrator():
                     "service_id": "gaia-audio",
                     "endpoint": config.endpoint,
                     "health_endpoint": f"{config.endpoint}/health",
-                    "capabilities": ["stt", "tts"],
+                    "capabilities": ["stt", "tts", "tts_nano", "tts_prime"],
                 },
             )
         logger.info("Registered with orchestrator")

@@ -541,7 +541,7 @@ services:
       - .:/gaia/GAIA_Project:rw
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
-      - ./gaia-models/voice:/models/voice:ro
+      - ./gaia-models:/models:ro
 
     environment:
       - PYTHONPATH=/app:/gaia-common

@@ -1,19 +1,19 @@
-"""Text-to-Speech engine wrapping RealtimeTTS backends.
+"""Text-to-Speech engines using Qwen3-TTS.
 
-Supports multiple engines with automatic fallback:
-  - system:     espeak-ng via subprocess (zero VRAM, headless-safe)
-  - coqui:      XTTS v2 via Coqui TTS library (~2-4GB VRAM, headless-safe)
-  - elevenlabs: ElevenLabs API via RealtimeTTS (zero VRAM, requires API key)
+Three-tier architecture:
+  - NanoSpeaker:    Qwen3-TTS 0.6B on CPU — always-on, instant short phrases
+  - PrimeSpeaker:   Qwen3-TTS 1.7B on GPU — on-demand, high-quality long-form
+  - EspeakFallback: espeak-ng subprocess — emergency fallback if both fail
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import time
-from typing import Any
 
 import numpy as np
 
@@ -21,208 +21,302 @@ from gaia_audio.status import status_tracker
 
 logger = logging.getLogger("GAIA.Audio.TTS")
 
-# Approximate VRAM usage by engine
-ENGINE_VRAM_MB: dict[str, int] = {
-    "system": 0,
-    "coqui": 3000,
-    "elevenlabs": 0,
-}
+
+def _sanitize_for_speech(text: str) -> str:
+    """Strip markdown and structural artifacts that shouldn't be spoken."""
+    # Remove ALL hashes
+    text = text.replace("#", "")
+
+    # Remove bold/italic markers
+    text = text.replace("**", "").replace("__", "").replace("*", "").replace("_", "")
+
+    # Convert numbered list items into pauses
+    text = re.sub(r'^[ \t]*\d+\.\s+', '... ', text, flags=re.MULTILINE)
+
+    # Clean up list markers
+    text = re.sub(r'^[ \t]*[-*+]\s+', ', ', text, flags=re.MULTILINE)
+
+    # Remove blockquote markers
+    text = re.sub(r'^[ \t]*>\s*', '', text, flags=re.MULTILINE)
+
+    # Remove model tags
+    text = text.replace("[Prime]", "").replace("[Lite]", "").replace("[Observer]", "")
+
+    # Ensure sentences end with punctuation
+    lines = []
+    for line in text.split('\n'):
+        line = line.strip()
+        if line and line[-1] not in ".!?,:;":
+            line += ","
+        lines.append(line)
+    text = " ".join(lines)
+
+    # Normalize whitespace
+    text = re.sub(r',\s*,', ',', text)
+    text = re.sub(r'\.\s*\.', '.', text)
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
 
 
-class TTSEngine:
-    """Text-to-speech with lazy loading and engine swapping."""
+class NanoSpeaker:
+    """Qwen3-TTS 0.6B on CPU — always-on, instant for short phrases."""
 
     def __init__(
         self,
-        engine_type: str = "system",
-        voice: str | None = None,
-        cloud_api_key_env: str = "ELEVENLABS_API_KEY",
+        model_path: str = "/models/Qwen3-TTS-12Hz-0.6B-Base",
+        voice_ref_audio: str | None = None,
+        voice_ref_text: str | None = None,
     ) -> None:
-        self.engine_type = engine_type
-        self.voice = voice
-        self.cloud_api_key_env = cloud_api_key_env
-        self._engine: Any = None
-        self._stream: Any = None
+        self.model_path = model_path
+        self.voice_ref_audio = voice_ref_audio
+        self.voice_ref_text = voice_ref_text
+        self._model = None
 
     @property
     def loaded(self) -> bool:
-        return self._engine is not None
+        return self._model is not None
 
     @property
     def vram_mb(self) -> int:
-        return ENGINE_VRAM_MB.get(self.engine_type, 0)
+        return 0  # CPU only
 
     def load(self) -> None:
-        """Load the TTS engine. Called by GPUManager."""
-        if self._engine is not None:
+        """Load Qwen3-TTS 0.6B on CPU."""
+        if self._model is not None:
             return
-
-        logger.info("Loading TTS engine: %s", self.engine_type)
+        logger.info("Loading NanoSpeaker (Qwen3-TTS 0.6B) on CPU from %s", self.model_path)
         t0 = time.monotonic()
-
-        try:
-            if self.engine_type == "system":
-                self._load_system()
-            elif self.engine_type == "coqui":
-                self._load_coqui()
-            elif self.engine_type == "elevenlabs":
-                self._load_elevenlabs()
-            else:
-                raise ValueError(f"Unknown TTS engine type: {self.engine_type}")
-
-            elapsed = (time.monotonic() - t0) * 1000
-            logger.info("TTS engine %s loaded in %.0fms", self.engine_type, elapsed)
-            status_tracker.tts_engine = self.engine_type
-        except Exception:
-            logger.error("Failed to load TTS engine %s", self.engine_type, exc_info=True)
-            self._engine = None
-            raise
-
-    def _load_system(self) -> None:
-        """Load espeak-ng system engine (zero VRAM, headless-safe).
-
-        Uses espeak-ng directly via subprocess — no PortAudio device needed.
-        """
-        # Verify espeak-ng is available
-        try:
-            subprocess.run(["espeak-ng", "--version"], capture_output=True, check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-            raise RuntimeError("espeak-ng not found in container") from exc
-        self._engine = "espeak-ng"  # Sentinel — synthesis handled in synthesize_sync
-
-    def _load_coqui(self) -> None:
-        """Load Coqui XTTS v2 engine (GPU, ~2-4GB VRAM, headless-safe).
-
-        Uses the TTS library directly — no PortAudio or playback device needed.
-        The model downloads from HuggingFace on first load (~1.8GB).
-        """
-        import torch
-
-        # PyTorch >=2.6 defaults weights_only=True which breaks TTS model loading.
-        # Temporarily allow unsafe load for the trusted Coqui XTTS checkpoint.
-        _orig_load = torch.load
-        torch.load = lambda *a, **kw: _orig_load(*a, **{**kw, "weights_only": False})
-
-        try:
-            from TTS.api import TTS
-
-            use_gpu = torch.cuda.is_available()
-            device = "cuda" if use_gpu else "cpu"
-            logger.info("Loading XTTS v2 (device=%s)...", device)
-
-            tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-            self._engine = tts
-            self._coqui_sample_rate = 24000  # XTTS v2 native output rate
-        finally:
-            torch.load = _orig_load
-
-    def _load_elevenlabs(self) -> None:
-        """Load ElevenLabs cloud TTS engine."""
-        api_key = os.environ.get(self.cloud_api_key_env)
-        if not api_key:
-            raise RuntimeError(f"ElevenLabs API key not found in env var {self.cloud_api_key_env}")
-        from RealtimeTTS import ElevenlabsEngine, TextToAudioStream
-
-        self._engine = ElevenlabsEngine(api_key=api_key)
-        self._stream = TextToAudioStream(self._engine)
-
-    def unload(self) -> None:
-        """Free resources. Called by GPUManager before STT load."""
-        if self._engine is None:
-            return
-        logger.info("Unloading TTS engine: %s", self.engine_type)
-        try:
-            if self._stream is not None:
-                self._stream.stop()
-                self._stream = None
-            # Coqui TTS: move model off GPU before dropping reference
-            if self.engine_type == "coqui" and hasattr(self._engine, "synthesizer"):
-                try:
-                    self._engine.synthesizer.tts_model.cpu()
-                except Exception:
-                    pass
-            self._engine = None
-        except Exception:
-            logger.debug("TTS unload cleanup error", exc_info=True)
         try:
             import torch
+            from qwen_tts import Qwen3TTSModel
 
+            self._model = Qwen3TTSModel.from_pretrained(
+                self.model_path,
+                device_map="cpu",
+                dtype=torch.float32,
+            )
+            elapsed = (time.monotonic() - t0) * 1000
+            logger.info("NanoSpeaker loaded in %.0fms", elapsed)
+        except Exception:
+            logger.error("Failed to load NanoSpeaker", exc_info=True)
+            self._model = None
+            raise
+
+    def unload(self) -> None:
+        """Free memory."""
+        if self._model is None:
+            return
+        logger.info("Unloading NanoSpeaker")
+        del self._model
+        self._model = None
+
+    def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
+        """Synthesize text on CPU. Run in executor for async context."""
+        if self._model is None:
+            raise RuntimeError("NanoSpeaker not loaded — call load() first")
+
+        text = _sanitize_for_speech(text)
+        if not text:
+            raise ValueError("Text is empty after sanitization")
+
+        ref_audio = voice or self.voice_ref_audio
+        ref_text = self.voice_ref_text
+
+        t0 = time.monotonic()
+
+        if ref_audio and os.path.isfile(ref_audio):
+            wavs, sr = self._model.generate_voice_clone(
+                text=text,
+                language="English",
+                ref_audio=ref_audio,
+                ref_text=ref_text or "",
+            )
+        else:
+            # No reference audio — use generate if available, else voice clone with defaults
+            wavs, sr = self._model.generate_voice_clone(
+                text=text,
+                language="English",
+                ref_audio=ref_audio or "",
+                ref_text=ref_text or "",
+            )
+
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.debug("NanoSpeaker synthesized %d chars in %.0fms", len(text), elapsed_ms)
+
+        wav_array = wavs[0] if isinstance(wavs[0], np.ndarray) else np.array(wavs[0], dtype=np.float32)
+        # Convert to 16-bit PCM
+        pcm = (wav_array * 32767).clip(-32768, 32767).astype(np.int16)
+        audio_bytes = pcm.tobytes()
+        duration_seconds = len(pcm) / sr
+
+        return {
+            "audio_bytes": audio_bytes,
+            "sample_rate": sr,
+            "duration_seconds": duration_seconds,
+            "engine_used": "nano_speaker",
+        }
+
+    def list_voices(self) -> list[dict]:
+        """List available voices."""
+        voices = [{"voice_id": "default", "name": "Qwen3-TTS Nano", "engine": "nano_speaker",
+                    "language": "multilingual", "description": "Qwen3-TTS 0.6B (CPU)"}]
+        if self.voice_ref_audio:
+            voices.append({"voice_id": "clone", "name": "Voice Clone", "engine": "nano_speaker",
+                           "language": "multilingual", "description": "Voice cloning via reference audio"})
+        return voices
+
+
+class PrimeSpeaker:
+    """Qwen3-TTS 1.7B on GPU — on-demand, high-quality long-form."""
+
+    def __init__(
+        self,
+        model_path: str = "/models/Qwen3-TTS-12Hz-1.7B-Base",
+        voice_ref_audio: str | None = None,
+        voice_ref_text: str | None = None,
+    ) -> None:
+        self.model_path = model_path
+        self.voice_ref_audio = voice_ref_audio
+        self.voice_ref_text = voice_ref_text
+        self._model = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    @property
+    def vram_mb(self) -> int:
+        return 4300 if self._model is not None else 0
+
+    def load(self) -> None:
+        """Load Qwen3-TTS 1.7B on GPU."""
+        if self._model is not None:
+            return
+        logger.info("Loading PrimeSpeaker (Qwen3-TTS 1.7B) on GPU from %s", self.model_path)
+        t0 = time.monotonic()
+        try:
+            import torch
+            from qwen_tts import Qwen3TTSModel
+
+            self._model = Qwen3TTSModel.from_pretrained(
+                self.model_path,
+                device_map="cuda:0",
+                dtype=torch.bfloat16,
+            )
+            elapsed = (time.monotonic() - t0) * 1000
+            logger.info("PrimeSpeaker loaded in %.0fms", elapsed)
+        except Exception:
+            logger.error("Failed to load PrimeSpeaker", exc_info=True)
+            self._model = None
+            raise
+
+    def unload(self) -> None:
+        """Free GPU memory."""
+        if self._model is None:
+            return
+        logger.info("Unloading PrimeSpeaker")
+        del self._model
+        self._model = None
+        try:
+            import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
             pass
-        status_tracker.tts_engine = None
-
-    def _sanitize_for_speech(self, text: str) -> str:
-        """Strip markdown and structural artifacts that shouldn't be spoken."""
-        import re
-        
-        # 1. Remove ALL hashes, wherever they are
-        text = text.replace("#", "")
-        
-        # 2. Remove ALL asterisks and underscores
-        text = text.replace("**", "").replace("__", "").replace("*", "").replace("_", "")
-        
-        # 3. Convert list numbers (1., 2.) into conversational pauses or words
-        # "1. Architecture" -> "First, Architecture" or just "Architecture" with a pause
-        text = re.sub(r'^[ \t]*\d+\.\s+', '... ', text, flags=re.MULTILINE)
-        
-        # 4. Clean up list markers (- , *) at start of lines and replace with a comma for a pause
-        text = re.sub(r'^[ \t]*[-*+]\s+', ', ', text, flags=re.MULTILINE)
-        
-        # 5. Remove blockquote markers
-        text = re.sub(r'^[ \t]*>\s*', '', text, flags=re.MULTILINE)
-        
-        # 6. Remove model tags or other metadata brackets
-        text = text.replace("[Prime]", "").replace("[Lite]", "").replace("[Observer]", "")
-        
-        # 7. Conversational Warmth: ensure sentences end with punctuation that XTTS likes
-        # If a line doesn't end in punctuation, add a comma
-        lines = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if line and not line[-1] in ".!?,:;":
-                line += ","
-            lines.append(line)
-        text = " ".join(lines)
-
-        # 8. Final cleanup: normalize whitespace and remove multiple commas/dots
-        text = re.sub(r',\s*,', ',', text)
-        text = re.sub(r'\.\s*\.', '.', text)
-        text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
 
     def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
-        """Synchronous synthesis — run in executor for async context.
+        """Synthesize text on GPU. Run in executor for async context."""
+        if self._model is None:
+            raise RuntimeError("PrimeSpeaker not loaded — call load() first")
 
-        Args:
-            text: The text to synthesize.
-            voice: Optional voice override.
-
-        Returns:
-            Dict with keys: audio_bytes, sample_rate, duration_seconds, engine_used.
-        """
-        if self._engine is None:
-            raise RuntimeError("TTS engine not loaded — call load() first")
-
-        # Sanitize text before sending to any engine
-        text = self._sanitize_for_speech(text)
+        text = _sanitize_for_speech(text)
         if not text:
             raise ValueError("Text is empty after sanitization")
 
-        try:
-            if self._engine == "espeak-ng":
-                return self._synthesize_espeak(text, voice)
-            if self.engine_type == "coqui":
-                return self._synthesize_coqui(text, voice)
-            return self._synthesize_realtimetts(text, voice)
-        except Exception:
-            logger.error("TTS synthesis failed", exc_info=True)
-            raise
+        ref_audio = voice or self.voice_ref_audio
+        ref_text = self.voice_ref_text
 
-    def _synthesize_espeak(self, text: str, voice: str | None = None) -> dict:
-        """Generate audio via espeak-ng subprocess (headless-safe)."""
+        t0 = time.monotonic()
+
+        if ref_audio and os.path.isfile(ref_audio):
+            wavs, sr = self._model.generate_voice_clone(
+                text=text,
+                language="English",
+                ref_audio=ref_audio,
+                ref_text=ref_text or "",
+            )
+        else:
+            wavs, sr = self._model.generate_voice_clone(
+                text=text,
+                language="English",
+                ref_audio=ref_audio or "",
+                ref_text=ref_text or "",
+            )
+
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.debug("PrimeSpeaker synthesized %d chars in %.0fms", len(text), elapsed_ms)
+
+        wav_array = wavs[0] if isinstance(wavs[0], np.ndarray) else np.array(wavs[0], dtype=np.float32)
+        pcm = (wav_array * 32767).clip(-32768, 32767).astype(np.int16)
+        audio_bytes = pcm.tobytes()
+        duration_seconds = len(pcm) / sr
+
+        return {
+            "audio_bytes": audio_bytes,
+            "sample_rate": sr,
+            "duration_seconds": duration_seconds,
+            "engine_used": "prime_speaker",
+        }
+
+    def list_voices(self) -> list[dict]:
+        """List available voices."""
+        voices = [{"voice_id": "default", "name": "Qwen3-TTS Prime", "engine": "prime_speaker",
+                    "language": "multilingual", "description": "Qwen3-TTS 1.7B (GPU)"}]
+        if self.voice_ref_audio:
+            voices.append({"voice_id": "clone", "name": "Voice Clone", "engine": "prime_speaker",
+                           "language": "multilingual", "description": "Voice cloning via reference audio"})
+        return voices
+
+
+class EspeakFallback:
+    """espeak-ng subprocess — emergency fallback if Qwen3-TTS fails."""
+
+    def __init__(self) -> None:
+        self._ready: bool = False
+
+    @property
+    def loaded(self) -> bool:
+        return self._ready
+
+    @property
+    def vram_mb(self) -> int:
+        return 0
+
+    def load(self) -> None:
+        """Verify espeak-ng is available."""
+        if self._ready:
+            return
+        try:
+            subprocess.run(["espeak-ng", "--version"], capture_output=True, check=True)
+            self._ready = True
+            logger.info("EspeakFallback ready")
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("espeak-ng not found in container") from exc
+
+    def unload(self) -> None:
+        """No-op."""
+        self._ready = False
+
+    def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
+        """Generate audio via espeak-ng subprocess."""
+        if not self._ready:
+            raise RuntimeError("EspeakFallback not ready — call load() first")
+
+        text = _sanitize_for_speech(text)
+        if not text:
+            raise ValueError("Text is empty after sanitization")
+
         sample_rate = 22050
         espeak_voice = voice or "en"
 
@@ -238,142 +332,24 @@ class TTSEngine:
             data, file_sr = sf.read(tmp_path, dtype="int16")
             audio_bytes = data.tobytes()
             duration_seconds = len(data) / file_sr
-            # Resample if needed
+
             if file_sr != sample_rate:
                 from scipy.signal import resample
                 num_samples = int(len(data) * sample_rate / file_sr)
                 data = resample(data, num_samples).astype(np.int16)
                 audio_bytes = data.tobytes()
                 duration_seconds = len(data) / sample_rate
+
             return {
                 "audio_bytes": audio_bytes,
                 "sample_rate": sample_rate,
                 "duration_seconds": duration_seconds,
-                "engine_used": "system",
+                "engine_used": "espeak_fallback",
             }
         finally:
             os.unlink(tmp_path)
 
-    def _synthesize_coqui(self, text: str, voice: str | None = None) -> dict:
-        """Generate audio via Coqui XTTS v2 (headless, GPU-accelerated).
-
-        Args:
-            voice: Path to a reference WAV file for voice cloning,
-                   or None for the default XTTS voice.
-        """
-        from TTS.api import TTS
-
-        tts: TTS = self._engine
-        sample_rate = self._coqui_sample_rate  # 24000 Hz
-
-        # XTTS v2 supports voice cloning from a reference audio file,
-        # or one of the built-in speakers (e.g. "Claribel Dervla").
-        speaker_wav = voice or self.voice  # path to reference WAV or speaker name
-        kwargs: dict = {"text": text, "language": "en"}
-        if speaker_wav and os.path.isfile(speaker_wav):
-            kwargs["speaker_wav"] = speaker_wav
-            logger.debug("Using voice reference: %s", speaker_wav)
-        elif speaker_wav and hasattr(tts, "speakers") and speaker_wav in (tts.speakers or []):
-            kwargs["speaker"] = speaker_wav
-            logger.debug("Using built-in speaker: %s", speaker_wav)
-        else:
-            # Default to a built-in speaker when no voice reference is given
-            kwargs["speaker"] = "Claribel Dervla"
-
-        wav_list = tts.tts(**kwargs)
-
-        # tts.tts() returns a list of floats in [-1, 1]
-        wav_array = np.array(wav_list, dtype=np.float32)
-        # Convert to 16-bit PCM
-        pcm = (wav_array * 32767).clip(-32768, 32767).astype(np.int16)
-        audio_bytes = pcm.tobytes()
-        duration_seconds = len(pcm) / sample_rate
-
-        return {
-            "audio_bytes": audio_bytes,
-            "sample_rate": sample_rate,
-            "duration_seconds": duration_seconds,
-            "engine_used": "coqui",
-        }
-
-    def _synthesize_realtimetts(self, text: str, voice: str | None = None) -> dict:
-        """Generate audio via RealtimeTTS (requires audio device or muted mode)."""
-        audio_chunks: list[bytes] = []
-
-        def on_audio_chunk(chunk: bytes) -> None:
-            audio_chunks.append(chunk)
-
-        if self._stream is not None:
-            self._stream.feed(text)
-            self._stream.play(
-                on_audio_chunk=on_audio_chunk,
-                muted=True,
-            )
-
-        if audio_chunks:
-            audio_bytes = b"".join(audio_chunks)
-        else:
-            logger.warning("TTS produced no audio; generating silence")
-            sample_rate = 22050
-            duration = max(0.5, len(text) * 0.06)
-            samples = int(sample_rate * duration)
-            silence = np.zeros(samples, dtype=np.int16)
-            audio_bytes = silence.tobytes()
-
-        sample_rate = 22050
-        duration_seconds = len(audio_bytes) / (sample_rate * 2)
-
-        return {
-            "audio_bytes": audio_bytes,
-            "sample_rate": sample_rate,
-            "duration_seconds": duration_seconds,
-            "engine_used": self.engine_type,
-        }
-
     def list_voices(self) -> list[dict]:
-        """List available voices for the current engine."""
-        voices = []
-        if self.engine_type == "system":
-            voices.append({
-                "voice_id": "default",
-                "name": "System Default",
-                "engine": "system",
-                "language": "en",
-                "description": "espeak-ng default voice",
-            })
-        elif self.engine_type == "coqui":
-            # List built-in XTTS speakers if model is loaded
-            if self._engine is not None and hasattr(self._engine, "speakers") and self._engine.speakers:
-                for speaker in self._engine.speakers:
-                    voices.append({
-                        "voice_id": speaker,
-                        "name": speaker,
-                        "engine": "coqui",
-                        "language": "multilingual",
-                        "description": f"XTTS v2 built-in speaker: {speaker}",
-                    })
-            else:
-                voices.append({
-                    "voice_id": "default",
-                    "name": "Claribel Dervla",
-                    "engine": "coqui",
-                    "language": "multilingual",
-                    "description": "Coqui XTTS v2 default speaker",
-                })
-            # Voice cloning option
-            voices.append({
-                "voice_id": "clone",
-                "name": "Voice Clone",
-                "engine": "coqui",
-                "language": "multilingual",
-                "description": "XTTS v2 voice cloning (provide speaker_wav path)",
-            })
-        elif self.engine_type == "elevenlabs":
-            voices.append({
-                "voice_id": "default",
-                "name": "ElevenLabs Default",
-                "engine": "elevenlabs",
-                "language": "en",
-                "description": "ElevenLabs default voice (API)",
-            })
-        return voices
+        """List available voices."""
+        return [{"voice_id": "default", "name": "System Default", "engine": "espeak_fallback",
+                 "language": "en", "description": "espeak-ng emergency fallback"}]

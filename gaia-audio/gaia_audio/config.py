@@ -30,29 +30,51 @@ class AudioConfig(CommonConfig):
     def endpoint(self) -> str:
         return self.audio_cfg.get("endpoint", "http://gaia-audio:8080")
 
-    @property
-    def stt_model(self) -> str:
-        return self.audio_cfg.get("stt_model", "base.en")
+    # ── Three-Tier Model Paths ──────────────────────────────────────
 
     @property
-    def tts_engine(self) -> str:
-        return self.audio_cfg.get("tts_engine", "coqui")
+    def listener_model_path(self) -> str:
+        return self.audio_cfg.get("listener_model_path", "/models/Qwen3-ASR-0.6B")
 
     @property
-    def tts_voice(self) -> str | None:
-        return self.audio_cfg.get("tts_voice")
+    def listener_device(self) -> str:
+        return self.audio_cfg.get("listener_device", "auto")
+
+    @property
+    def nano_speaker_model_path(self) -> str:
+        return self.audio_cfg.get("nano_speaker_model_path", "/models/Qwen3-TTS-12Hz-0.6B-Base")
+
+    @property
+    def prime_speaker_model_path(self) -> str:
+        return self.audio_cfg.get("prime_speaker_model_path", "/models/Qwen3-TTS-12Hz-1.7B-Base")
+
+    @property
+    def voice_ref_audio(self) -> str | None:
+        return self.audio_cfg.get("voice_ref_audio")
+
+    @property
+    def voice_ref_text(self) -> str | None:
+        return self.audio_cfg.get("voice_ref_text")
+
+    @property
+    def tts_auto_threshold(self) -> int:
+        """Character count: below = Nano Speaker, above = Prime Speaker."""
+        return self.audio_cfg.get("tts_auto_threshold", 200)
+
+    @property
+    def prime_speaker_timeout(self) -> int:
+        """Seconds to wait for GPU before Nano fallback."""
+        return self.audio_cfg.get("prime_speaker_timeout", 30)
+
+    # ── General Audio Settings ──────────────────────────────────────
 
     @property
     def sample_rate(self) -> int:
-        return self.audio_cfg.get("sample_rate", 16000)
+        return self.audio_cfg.get("sample_rate", 24000)
 
     @property
     def vram_budget_mb(self) -> int:
-        return self.audio_cfg.get("vram_budget_mb", 5600)
-
-    @property
-    def half_duplex(self) -> bool:
-        return self.audio_cfg.get("half_duplex", False)
+        return self.audio_cfg.get("vram_budget_mb", 16000)
 
     @property
     def mute_on_sleep(self) -> bool:

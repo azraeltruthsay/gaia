@@ -19,9 +19,9 @@ class SynthesizeRequest(BaseModel):
     """Text to synthesize into speech."""
 
     text: str = Field(..., description="Text to convert to speech")
-    voice: str | None = Field(None, description="Voice ID or name")
-    engine: str | None = Field(None, description="Override TTS engine (system/coqui/elevenlabs)")
-    sample_rate: int = Field(22050, description="Desired output sample rate")
+    voice: str | None = Field(None, description="Voice ID or reference audio path")
+    tier: str = Field("auto", description="TTS tier: 'auto', 'nano', or 'prime'")
+    sample_rate: int = Field(24000, description="Desired output sample rate")
 
 
 class RefineRequest(BaseModel):
@@ -57,10 +57,11 @@ class SynthesizeResponse(BaseModel):
     """Synthesis result (audio returned separately as streaming bytes)."""
 
     audio_base64: str
-    sample_rate: int = 22050
+    sample_rate: int = 24000
     duration_seconds: float = 0.0
     latency_ms: float = 0.0
-    engine_used: str = "system"
+    engine_used: str = "nano_speaker"
+    tier_used: str = "nano"
 
 
 class RefineResponse(BaseModel):

@@ -5,16 +5,12 @@ httpx>=0.25.0
 pydantic>=2.0
 dataclasses-json
 
-# STT - faster-whisper (Whisper CTranslate2 backend)
-faster-whisper>=1.0.0
-transformers==4.44.2
+# STT - Qwen3-ASR
+qwen-asr>=0.1.0
+transformers>=4.57.0
 
-# TTS - Coqui XTTS v2 via community fork (local GPU, headless-safe)
-coqui-tts>=0.24.2
-torchcodec>=0.10.0
-
-# TTS - RealtimeTTS (ElevenLabs cloud fallback only)
-RealtimeTTS[system]>=0.4.0
+# TTS - Qwen3-TTS (NanoSpeaker + PrimeSpeaker)
+qwen-tts>=0.1.0
 
 # Audio processing
 numpy
@@ -31,4 +27,3 @@ pillow
 
 # WebSocket for dashboard status stream
 websockets>=12.0
-scipy>=1.10.0

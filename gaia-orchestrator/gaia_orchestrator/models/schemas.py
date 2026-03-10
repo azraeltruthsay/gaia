@@ -23,6 +23,7 @@ class GPUOwner(str, Enum):
     CORE_CANDIDATE = "gaia-core-candidate"
     STUDY = "gaia-study"
     STUDY_CANDIDATE = "gaia-study-candidate"
+    AUDIO = "gaia-audio"
 
 
 class GPUAcquireRequest(BaseModel):

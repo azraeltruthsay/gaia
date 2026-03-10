@@ -1,22 +1,18 @@
-"""GPU manager for STT/TTS audio models.
+"""Three-tier GPU manager for gaia-audio.
 
-Supports two modes controlled by the ``half_duplex`` flag:
+Architecture:
+  - Listener (Qwen3-ASR 0.6B) — always on GPU, coexists with Prime LLM (~1.8GB)
+  - Nano Speaker (Qwen3-TTS 0.6B) — always on CPU, no GPU contention
+  - Prime Speaker (Qwen3-TTS 1.7B) — on-demand GPU, requires Prime LLM to yield
 
-  full-duplex (half_duplex=False, default):
-      Both Whisper STT and XTTS TTS stay loaded on the GPU simultaneously.
-      RTX 5080 VRAM budget: Prime ~11.5 GB + Whisper ~0.15 GB + XTTS ~1.8 GB
-      = ~13.5 GB of 16 GB — comfortable.
-
-  half-duplex (half_duplex=True):
-      Only one audio model at a time.  Used when VRAM is tight (e.g. larger
-      Whisper model or lower-VRAM GPU).
-
-State transitions (half-duplex):
-    idle  → stt   (load Whisper)
-    idle  → tts   (load TTS)
-    stt   → tts   (unload Whisper, load TTS)
-    tts   → stt   (unload TTS, load Whisper)
-    any   → idle  (unload everything)
+State transitions:
+    startup()  → load Listener (GPU) + Nano Speaker (CPU)
+    run_stt()  → Listener always loaded, just run
+    run_tts_nano() → Nano Speaker always loaded, just run
+    run_tts_prime() → acquire GPU → load Prime Speaker → run → unload → release
+    sleep()    → unload Listener from GPU, keep Nano Speaker
+    wake()     → reload Listener on GPU
+    release()  → unload all
 """
 
 from __future__ import annotations
@@ -27,164 +23,202 @@ import logging
 import time
 from typing import Literal
 
+import httpx
+
 from gaia_audio.status import status_tracker
 from gaia_audio.stt_engine import STTEngine
-from gaia_audio.tts_engine import TTSEngine
+from gaia_audio.tts_engine import NanoSpeaker, PrimeSpeaker, EspeakFallback
 
 logger = logging.getLogger("GAIA.Audio.GPU")
 
 
 class GPUManager:
-    """Manages GPU allocation between STT and TTS."""
+    """Three-tier GPU management for STT + TTS."""
 
     def __init__(
         self,
         stt_engine: STTEngine,
-        tts_engine: TTSEngine,
-        vram_budget_mb: int = 5600,
-        half_duplex: bool = False,
+        nano_speaker: NanoSpeaker,
+        prime_speaker: PrimeSpeaker,
+        espeak_fallback: EspeakFallback,
+        orchestrator_endpoint: str = "http://gaia-orchestrator:6410",
+        prime_speaker_timeout: int = 30,
     ) -> None:
         self.stt = stt_engine
-        self.tts = tts_engine
-        self.vram_budget_mb = vram_budget_mb
-        self.half_duplex = half_duplex
-        self.current_mode: Literal["idle", "stt", "tts", "full"] = "idle"
+        self.nano = nano_speaker
+        self.prime = prime_speaker
+        self.espeak = espeak_fallback
+        self.orchestrator_endpoint = orchestrator_endpoint
+        self.prime_speaker_timeout = prime_speaker_timeout
         self._lock = asyncio.Lock()
+        self._gpu_lease_id: str | None = None
 
-    async def _ensure_loaded(self, engine, label: str) -> float:
-        """Load an engine if not already loaded.  Returns load time in ms."""
-        if engine.loaded:
-            return 0.0
-        t0 = time.monotonic()
-        await asyncio.get_event_loop().run_in_executor(None, engine.load)
-        return (time.monotonic() - t0) * 1000
+    async def startup(self) -> None:
+        """Boot-time initialization: Listener (GPU) + Nano Speaker (CPU).
 
-    # ── Full-duplex helpers ───────────────────────────────────────────
-
-    async def _ensure_both_loaded(self) -> None:
-        """Load both STT and TTS if not already loaded (full-duplex).
-
-        TTS load failures are non-fatal — STT will still work.
+        Prime Speaker stays unloaded until needed.
         """
         async with self._lock:
-            if self.current_mode == "full" and self.stt.loaded and self.tts.loaded:
-                return
+            loop = asyncio.get_event_loop()
 
+            # Load Listener (GPU) — coexists with Prime LLM
             t0 = time.monotonic()
-            stt_ms = await self._ensure_loaded(self.stt, "STT")
-
-            tts_ms = 0.0
             try:
-                tts_ms = await self._ensure_loaded(self.tts, "TTS")
+                await loop.run_in_executor(None, self.stt.load)
+                logger.info("Listener (Qwen3-ASR) loaded on GPU")
             except Exception:
-                logger.warning(
-                    "TTS failed to load — STT will work but TTS unavailable",
-                    exc_info=True,
-                )
+                logger.error("Failed to load Listener — STT unavailable", exc_info=True)
 
-            total_ms = (time.monotonic() - t0) * 1000
-
-            self.current_mode = "full"
-            status_tracker.gpu_mode = "full-duplex"
-            vram = float(self.stt.vram_mb)
-            if self.tts.loaded:
-                vram += float(self.tts.vram_mb)
-            status_tracker.vram_used_mb = vram
-
-            if stt_ms > 0 or tts_ms > 0:
-                tts_label = self.tts.engine_type if self.tts.loaded else "FAILED"
-                logger.info(
-                    "Full-duplex: STT(%s) + TTS(%s) loaded (%.0fms)",
-                    self.stt.model_size, tts_label, total_ms,
-                )
-                await status_tracker.emit(
-                    "gpu_acquire",
-                    f"Full-duplex: STT({self.stt.model_size}) + TTS({tts_label})",
-                    total_ms,
-                )
-
-    # ── Half-duplex helpers ───────────────────────────────────────────
-
-    async def _acquire_half_duplex_stt(self) -> None:
-        """Half-duplex: ensure STT loaded, unloading TTS if needed."""
-        async with self._lock:
-            if self.current_mode == "stt" and self.stt.loaded:
-                return
-
-            t0 = time.monotonic()
-
-            if self.tts.loaded:
-                logger.info("GPU swap: TTS → STT")
-                await asyncio.get_event_loop().run_in_executor(None, self.tts.unload)
-                await status_tracker.emit("gpu_swap", "TTS unloaded for STT")
-
-            await self._ensure_loaded(self.stt, "STT")
-
-            self.current_mode = "stt"
-            status_tracker.gpu_mode = "stt"
-            status_tracker.vram_used_mb = float(self.stt.vram_mb)
+            # Load Nano Speaker (CPU) — always available
+            try:
+                await loop.run_in_executor(None, self.nano.load)
+                logger.info("Nano Speaker loaded on CPU")
+            except Exception:
+                logger.error("Failed to load Nano Speaker — falling back to espeak", exc_info=True)
+                try:
+                    await loop.run_in_executor(None, self.espeak.load)
+                except Exception:
+                    logger.error("EspeakFallback also failed", exc_info=True)
 
             elapsed = (time.monotonic() - t0) * 1000
-            await status_tracker.emit("gpu_acquire", f"STT mode ({self.stt.model_size})", elapsed)
+            status_tracker.gpu_mode = "three-tier"
+            status_tracker.vram_used_mb = float(self.stt.vram_mb)
+            status_tracker.stt_model = "Qwen3-ASR-0.6B" if self.stt.loaded else None
+            status_tracker.tts_engine = "nano_speaker" if self.nano.loaded else "espeak_fallback"
+            await status_tracker.emit("startup", f"Three-tier audio ready ({elapsed:.0f}ms)", elapsed)
 
-    async def _acquire_half_duplex_tts(self) -> None:
-        """Half-duplex: ensure TTS loaded, unloading STT if needed."""
+    async def run_stt(self, func, *args, **kwargs):
+        """Run STT function. Listener is always loaded, no contention."""
+        if not self.stt.loaded:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.stt.load)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+    async def run_tts_nano(self, func, *args, **kwargs):
+        """Run Nano TTS function. Always on CPU, no contention."""
+        if not self.nano.loaded:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.nano.load)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+    async def run_tts_prime(self, func, *args, **kwargs):
+        """Run Prime TTS function. Acquires GPU from orchestrator, loads model,
+        runs, unloads, releases GPU."""
         async with self._lock:
-            if self.current_mode == "tts" and self.tts.loaded:
-                return
+            loop = asyncio.get_event_loop()
 
-            t0 = time.monotonic()
+            # Acquire GPU lease from orchestrator
+            lease_acquired = await self._acquire_gpu_lease()
+            if not lease_acquired:
+                logger.warning("Could not acquire GPU for Prime Speaker — falling back to Nano")
+                return None  # Caller handles fallback
+
+            try:
+                t0 = time.monotonic()
+                await loop.run_in_executor(None, self.prime.load)
+                status_tracker.vram_used_mb = float(self.stt.vram_mb + self.prime.vram_mb)
+
+                result = await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+                elapsed = (time.monotonic() - t0) * 1000
+                await status_tracker.emit("tts_prime", f"Prime Speaker synthesized ({elapsed:.0f}ms)", elapsed)
+                return result
+            finally:
+                # Always unload and release
+                await loop.run_in_executor(None, self.prime.unload)
+                status_tracker.vram_used_mb = float(self.stt.vram_mb)
+                await self._release_gpu_lease()
+
+    async def sleep(self) -> None:
+        """Deep sleep: unload Listener from GPU. Keep Nano Speaker on CPU."""
+        async with self._lock:
+            loop = asyncio.get_event_loop()
 
             if self.stt.loaded:
-                logger.info("GPU swap: STT → TTS")
-                await asyncio.get_event_loop().run_in_executor(None, self.stt.unload)
-                await status_tracker.emit("gpu_swap", "STT unloaded for TTS")
+                await loop.run_in_executor(None, self.stt.unload)
+                logger.info("Listener unloaded for sleep")
 
-            await self._ensure_loaded(self.tts, "TTS")
+            if self.prime.loaded:
+                await loop.run_in_executor(None, self.prime.unload)
+                logger.info("Prime Speaker unloaded for sleep")
 
-            self.current_mode = "tts"
-            status_tracker.gpu_mode = "tts"
-            status_tracker.vram_used_mb = float(self.tts.vram_mb)
+            status_tracker.vram_used_mb = 0.0
+            status_tracker.gpu_mode = "sleeping"
+            await status_tracker.emit("sleep", "GPU models unloaded — Nano Speaker still on CPU")
 
-            elapsed = (time.monotonic() - t0) * 1000
-            await status_tracker.emit("gpu_acquire", f"TTS mode ({self.tts.engine_type})", elapsed)
+    async def wake(self) -> None:
+        """Wake from sleep: reload Listener on GPU."""
+        async with self._lock:
+            loop = asyncio.get_event_loop()
 
-    # ── Public API ────────────────────────────────────────────────────
+            try:
+                await loop.run_in_executor(None, self.stt.load)
+                logger.info("Listener reloaded after wake")
+            except Exception:
+                logger.error("Failed to reload Listener on wake", exc_info=True)
 
-    async def acquire_for_stt(self) -> None:
-        """Ensure STT model is loaded and ready."""
-        if self.half_duplex:
-            await self._acquire_half_duplex_stt()
-        else:
-            await self._ensure_both_loaded()
-
-    async def acquire_for_tts(self) -> None:
-        """Ensure TTS model is loaded and ready."""
-        if self.half_duplex:
-            await self._acquire_half_duplex_tts()
-        else:
-            await self._ensure_both_loaded()
+            status_tracker.vram_used_mb = float(self.stt.vram_mb)
+            status_tracker.gpu_mode = "three-tier"
+            await status_tracker.emit("wake", "Listener reloaded on GPU")
 
     async def release(self) -> None:
-        """Unload all models and free VRAM."""
+        """Unload all models and free everything."""
         async with self._lock:
+            loop = asyncio.get_event_loop()
+
             if self.stt.loaded:
-                await asyncio.get_event_loop().run_in_executor(None, self.stt.unload)
-            if self.tts.loaded:
-                await asyncio.get_event_loop().run_in_executor(None, self.tts.unload)
-            self.current_mode = "idle"
+                await loop.run_in_executor(None, self.stt.unload)
+            if self.nano.loaded:
+                await loop.run_in_executor(None, self.nano.unload)
+            if self.prime.loaded:
+                await loop.run_in_executor(None, self.prime.unload)
+
             status_tracker.gpu_mode = "idle"
             status_tracker.vram_used_mb = 0.0
             await status_tracker.emit("gpu_release", "All audio models unloaded")
 
-    async def run_stt(self, func, *args, **kwargs):
-        """Acquire STT, run a function, return result."""
-        await self.acquire_for_stt()
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+    # ── Orchestrator GPU lease ───────────────────────────────────────
 
-    async def run_tts(self, func, *args, **kwargs):
-        """Acquire TTS, run a function, return result."""
-        await self.acquire_for_tts()
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+    async def _acquire_gpu_lease(self) -> bool:
+        """Request GPU lease from orchestrator for Prime Speaker."""
+        try:
+            async with httpx.AsyncClient(timeout=self.prime_speaker_timeout) as client:
+                resp = await client.post(
+                    f"{self.orchestrator_endpoint}/gpu/acquire",
+                    json={
+                        "requester": "gaia-audio",
+                        "reason": "Prime Speaker TTS synthesis",
+                        "timeout_seconds": self.prime_speaker_timeout,
+                        "priority": 0,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success"):
+                        self._gpu_lease_id = data.get("lease_id")
+                        logger.info("GPU lease acquired: %s", self._gpu_lease_id)
+                        return True
+                logger.warning("GPU lease denied: %s", resp.text)
+                return False
+        except Exception as e:
+            logger.warning("Could not contact orchestrator for GPU lease: %s", e)
+            # If orchestrator unreachable, try loading anyway (best effort)
+            return True
+
+    async def _release_gpu_lease(self) -> None:
+        """Release GPU lease back to orchestrator."""
+        if not self._gpu_lease_id:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{self.orchestrator_endpoint}/gpu/release",
+                    json={"lease_id": self._gpu_lease_id},
+                )
+                logger.info("GPU lease released: %s", self._gpu_lease_id)
+        except Exception as e:
+            logger.warning("Failed to release GPU lease: %s", e)
+        finally:
+            self._gpu_lease_id = None
