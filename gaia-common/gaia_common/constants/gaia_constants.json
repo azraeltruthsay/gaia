@@ -185,17 +185,20 @@
     "audio": {
       "enabled": true,
       "endpoint": "http://gaia-audio:8080",
-      "stt_model": "base.en",
-      "tts_engine": "coqui",
-      "tts_voice": "/models/voice/gaia_identity.wav",
-      "sample_rate": 16000,
-      "vram_budget_mb": 5600,
-      "half_duplex": false,
+      "listener_model_path": "/models/Qwen3-ASR-0.6B",
+      "listener_device": "auto",
+      "nano_speaker_model_path": "/models/Qwen3-TTS-12Hz-0.6B-Base",
+      "prime_speaker_model_path": "/models/Qwen3-TTS-12Hz-1.7B-Base",
+      "voice_ref_audio": "/models/voice/gaia_identity.wav",
+      "voice_ref_text": null,
+      "tts_auto_threshold": 200,
+      "prime_speaker_timeout": 30,
+      "sample_rate": 24000,
+      "vram_budget_mb": 16000,
       "mute_on_sleep": true,
       "cloud_fallback": {
         "provider": "elevenlabs",
-        "enabled": false,
-        "api_key_env": "ELEVENLABS_API_KEY"
+        "enabled": false
       }
     }
   },

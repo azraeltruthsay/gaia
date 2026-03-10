@@ -1,7 +1,7 @@
-"""Speech-to-Text engine wrapping faster-whisper.
+"""Speech-to-Text engine wrapping Qwen3-ASR.
 
-Uses the same backend as RealtimeSTT but provides a clean async interface
-for HTTP-based audio transcription (microservice mode).
+Uses the qwen_asr package for high-quality multilingual transcription
+with streaming/offline unified inference.
 """
 
 from __future__ import annotations
@@ -15,38 +15,21 @@ import numpy as np
 
 from gaia_audio.status import status_tracker
 
-if TYPE_CHECKING:
-    from faster_whisper import WhisperModel
-
 logger = logging.getLogger("GAIA.Audio.STT")
-
-# VRAM estimates by model size (approximate, int8 quantized)
-MODEL_VRAM_MB: dict[str, int] = {
-    "tiny": 75,
-    "tiny.en": 75,
-    "base": 150,
-    "base.en": 150,
-    "small": 500,
-    "small.en": 500,
-    "medium": 1500,
-    "medium.en": 1500,
-    "large-v3": 3000,
-}
 
 
 class STTEngine:
-    """Whisper-based speech-to-text with lazy GPU loading."""
+    """Qwen3-ASR speech-to-text with lazy loading."""
 
     def __init__(
         self,
-        model_size: str = "base.en",
-        device: str = "cuda",
-        compute_type: str = "int8",
+        model_path: str = "/models/Qwen3-ASR-0.6B",
+        device: str = "auto",
     ) -> None:
-        self.model_size = model_size
+        self.model_path = model_path
         self.device = device
-        self.compute_type = compute_type
-        self._model: WhisperModel | None = None
+        self._model = None
+        self._on_gpu: bool = False
 
     @property
     def loaded(self) -> bool:
@@ -54,41 +37,51 @@ class STTEngine:
 
     @property
     def vram_mb(self) -> int:
-        """Estimated VRAM usage when loaded."""
-        return MODEL_VRAM_MB.get(self.model_size, 200)
+        """Estimated VRAM usage when loaded on GPU."""
+        return 1800 if self._on_gpu else 0
 
     def load(self) -> None:
-        """Load Whisper model onto device. Called by GPUManager."""
+        """Load Qwen3-ASR model. Called by GPUManager."""
         if self._model is not None:
             return
-        logger.info("Loading Whisper model %s on %s (%s)", self.model_size, self.device, self.compute_type)
+        logger.info("Loading Qwen3-ASR from %s (device=%s)", self.model_path, self.device)
         t0 = time.monotonic()
         try:
-            from faster_whisper import WhisperModel
+            import torch
+            from qwen_asr import Qwen3ASRModel
 
-            self._model = WhisperModel(
-                self.model_size,
-                device=self.device,
-                compute_type=self.compute_type,
+            # Determine device
+            if self.device == "auto":
+                device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
+            else:
+                device_map = self.device
+
+            self._on_gpu = "cuda" in str(device_map)
+            dtype = torch.bfloat16 if self._on_gpu else torch.float32
+
+            self._model = Qwen3ASRModel.from_pretrained(
+                self.model_path,
+                dtype=dtype,
+                device_map=device_map,
             )
             elapsed = (time.monotonic() - t0) * 1000
-            logger.info("Whisper model loaded in %.0fms", elapsed)
-            status_tracker.stt_model = self.model_size
+            logger.info("Qwen3-ASR loaded in %.0fms (device=%s)", elapsed, device_map)
+            status_tracker.stt_model = "Qwen3-ASR-0.6B"
         except Exception:
-            logger.error("Failed to load Whisper model %s", self.model_size, exc_info=True)
+            logger.error("Failed to load Qwen3-ASR from %s", self.model_path, exc_info=True)
             self._model = None
             raise
 
     def unload(self) -> None:
-        """Free GPU memory. Called by GPUManager before TTS load."""
+        """Free GPU memory. Called by GPUManager."""
         if self._model is None:
             return
-        logger.info("Unloading Whisper model %s", self.model_size)
+        logger.info("Unloading Qwen3-ASR")
         del self._model
         self._model = None
+        self._on_gpu = False
         try:
             import torch
-
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -109,94 +102,64 @@ class STTEngine:
             language: Optional language hint.
 
         Returns:
-            Dict with keys: text, language, confidence, duration_seconds.
+            Dict with keys: text, language, confidence, duration_seconds,
+            segments, context_markers.
         """
         if self._model is None:
             raise RuntimeError("STT model not loaded — call load() first")
 
-        # Resample to 16kHz if needed (Whisper expects 16kHz)
-        if sample_rate != 16000:
-            try:
-                from scipy.signal import resample
+        duration_seconds = len(audio_array) / sample_rate
 
-                num_samples = int(len(audio_array) * 16000 / sample_rate)
-                audio_array = resample(audio_array, num_samples).astype(np.float32)
-            except ImportError:
-                logger.warning("scipy not available for resampling; passing raw audio")
-
-        duration_seconds = len(audio_array) / 16000.0
-
-        segments, info = self._model.transcribe(
-            audio_array,
+        # Qwen3-ASR accepts (np.ndarray, sample_rate) tuple or file path
+        results = self._model.transcribe(
+            audio=(audio_array, sample_rate),
             language=language,
-            beam_size=5,
-            vad_filter=True,
-            word_timestamps=True,
-            condition_on_previous_text=False,  # Mitigate Whisper hallucination loops
-            suppress_tokens=[],  # Preserve non-speech markers ([Music], [Laughter], etc.)
         )
 
-        # Collect segment text + rich metadata
+        # Build response from Qwen3-ASR results
         texts = []
-        total_confidence = 0.0
-        n_segments = 0
         segment_details = []
-        prev_end = 0.0
         total_words = 0
         total_speech_duration = 0.0
 
-        for segment in segments:
-            texts.append(segment.text.strip())
-            total_confidence += segment.avg_logprob
-            n_segments += 1
+        for result in results:
+            text = result.text.strip()
+            texts.append(text)
 
-            pause = segment.start - prev_end if prev_end > 0 else 0.0
-            seg_duration = segment.end - segment.start
-
-            # Word-level stats
-            word_count = 0
-            words_data = []
-            if segment.words:
-                word_count = len(segment.words)
-                for w in segment.words:
-                    words_data.append({
-                        "word": w.word,
-                        "start": round(w.start, 2),
-                        "end": round(w.end, 2),
-                        "probability": round(w.probability, 3),
-                    })
-
-            speaking_rate = (word_count / seg_duration) if seg_duration > 0 else 0.0
+            # Word count estimate
+            word_count = len(text.split()) if text else 0
             total_words += word_count
-            total_speech_duration += seg_duration
 
             seg_info = {
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "text": segment.text.strip(),
-                "no_speech_prob": round(segment.no_speech_prob, 3),
-                "avg_logprob": round(segment.avg_logprob, 3),
-                "compression_ratio": round(segment.compression_ratio, 3),
-                "speaking_rate_wps": round(speaking_rate, 1),
+                "text": text,
+                "language": getattr(result, "language", None),
             }
-            if pause > 0.5:
-                seg_info["pause_before"] = round(pause, 2)
-            if words_data:
-                seg_info["words"] = words_data
+
+            # Extract timestamps if available
+            if hasattr(result, "time_stamps") and result.time_stamps:
+                stamps = result.time_stamps
+                if stamps:
+                    seg_start = stamps[0].get("start", 0.0) if isinstance(stamps[0], dict) else 0.0
+                    seg_end = stamps[-1].get("end", duration_seconds) if isinstance(stamps[-1], dict) else duration_seconds
+                    seg_info["start"] = round(seg_start, 2)
+                    seg_info["end"] = round(seg_end, 2)
+                    seg_duration = seg_end - seg_start
+                    total_speech_duration += seg_duration
+                    if seg_duration > 0:
+                        seg_info["speaking_rate_wps"] = round(word_count / seg_duration, 1)
+
             segment_details.append(seg_info)
 
-            prev_end = segment.end
+        full_text = " ".join(texts)
+        detected_language = results[0].language if results else language
 
-        text = " ".join(texts)
-        avg_confidence = (total_confidence / n_segments) if n_segments > 0 else 0.0
-
-        # Derive context markers from segment metadata
+        # Derive context markers
         context_markers = _extract_context_markers(segment_details, total_words, total_speech_duration)
 
         return {
-            "text": text,
-            "language": info.language,
-            "confidence": avg_confidence,
+            "text": full_text,
+            "language": detected_language,
+            "confidence": 0.0,  # Qwen3-ASR doesn't expose logprob; 0.0 as neutral
             "duration_seconds": duration_seconds,
             "segments": segment_details,
             "context_markers": context_markers,
@@ -208,11 +171,7 @@ def _extract_context_markers(
     total_words: int,
     total_speech_duration: float,
 ) -> list[str]:
-    """Derive human-readable context markers from segment metadata.
-
-    Extracts signals like speaking pace, pauses, low-confidence speech,
-    non-speech events, and noise without requiring additional models.
-    """
+    """Derive human-readable context markers from segment metadata."""
     markers = []
 
     if not segments:
@@ -226,44 +185,11 @@ def _extract_context_markers(
         elif overall_wps < 1.5 and total_words > 0:
             markers.append("slow_speech")
 
-    # Scan segments for notable patterns
-    long_pauses = 0
-    noise_segments = 0
-    low_confidence_segments = 0
-
-    for seg in segments:
-        # Long pauses (> 2s)
-        if seg.get("pause_before", 0) > 2.0:
-            long_pauses += 1
-
-        # High no_speech_prob → likely music, noise, or ambient sound
-        if seg.get("no_speech_prob", 0) > 0.6:
-            noise_segments += 1
-
-        # Low avg_logprob → mumbling, whispering, or unclear speech
-        if seg.get("avg_logprob", 0) < -1.0:
-            low_confidence_segments += 1
-
-        # High compression ratio → repetitive content (stuttering, loops)
-        if seg.get("compression_ratio", 0) > 2.5:
-            markers.append("repetitive_segment")
-
-    if long_pauses > 0:
-        markers.append(f"long_pauses:{long_pauses}")
-    if noise_segments > 0:
-        markers.append(f"non_speech_segments:{noise_segments}")
-    if low_confidence_segments > 0:
-        markers.append(f"unclear_speech:{low_confidence_segments}")
-
     return markers
 
 
 def _ffmpeg_to_wav(audio_bytes: bytes) -> bytes | None:
-    """Transcode arbitrary audio to WAV via ffmpeg.
-
-    Handles m4a/AAC, opus, webm, and any other format ffmpeg supports.
-    Returns WAV bytes on success, None on failure.
-    """
+    """Transcode arbitrary audio to WAV via ffmpeg."""
     import subprocess
 
     try:
@@ -273,7 +199,7 @@ def _ffmpeg_to_wav(audio_bytes: bytes) -> bytes | None:
             capture_output=True,
             timeout=30,
         )
-        if result.returncode == 0 and len(result.stdout) > 44:  # WAV header = 44 bytes
+        if result.returncode == 0 and len(result.stdout) > 44:
             return result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError):
         logger.debug("ffmpeg transcode failed", exc_info=True)
@@ -293,12 +219,12 @@ def audio_bytes_to_array(audio_bytes: bytes, sample_rate: int = 16000) -> np.nda
     try:
         audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
         if audio_array.ndim > 1:
-            audio_array = audio_array.mean(axis=1)  # Stereo to mono
+            audio_array = audio_array.mean(axis=1)
         return audio_array
     except Exception:
         pass
 
-    # Transcode via ffmpeg (handles m4a, AAC, opus, webm, etc.)
+    # Transcode via ffmpeg
     wav_bytes = _ffmpeg_to_wav(audio_bytes)
     if wav_bytes is not None:
         try:
