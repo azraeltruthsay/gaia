@@ -21,9 +21,6 @@ numpy
 soundfile
 scipy
 
-# LLM - llama-cpp-python for Nano Refiner
-llama-cpp-python>=0.2.0
-
 # GPU management
 torch>=2.0.0
 torchaudio>=2.0.0

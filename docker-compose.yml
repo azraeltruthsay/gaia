@@ -533,6 +533,8 @@ services:
     container_name: gaia-audio
     hostname: gaia-audio
     restart: unless-stopped
+    depends_on:
+      - gaia-nano
 
     volumes:
       # Project root for unified access
@@ -540,7 +542,6 @@ services:
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
       - ./gaia-models/voice:/models/voice:ro
-      - ./gaia-models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf:/models/nano_refiner.gguf:ro
 
     environment:
       - PYTHONPATH=/app:/gaia-common
@@ -549,7 +550,7 @@ services:
       - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-      - NANO_MODEL_PATH=/models/nano_refiner.gguf
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
