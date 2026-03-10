@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-10T14:08:38.147342+00:00",
+  "session_id": "test_cognitive_001",
+  "packet_id": "ab6e1a38-f8f9-4978-92c1-cc6aa5adc3ed",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "**Summary**\n\nThe \u201cCulture & Commuter\u201d revitalization project is currently focused on outreach, budget alignment, and community engagement, with a community workshop scheduled for June and a launch expected in September. The system\u2019s immune\u2011system health score is 29.9/100 (critical), and 11 unique issues have been identified across 92 events. Uptime is 86\u202f796\u202fs, load is 4.91/5.70/5.33, and memory/swap are within acceptable limits.\n\n**Action Items**\n\n1. Finalize venue selection for the community w",
+  "what_went_wrong": "GAIA\u2019s output failed to align the community workshop details with the user\u2019s implicit need for clear, actionable next steps, resulting in a vague and under\u2011refined response.",
+  "root_cause": "The underlying reason is a lack of contextual sensitivity to the user\u2019s underlying need for actionable guidance, combined with insufficient confidence calibration during the confidence_mismatch trigger.",
+  "values_misaligned": [
+    "contextual_sensitivity",
+    "user_understanding",
+    "accuracy"
+  ],
+  "corrected_understanding": "A better response would explicitly map the community workshop\u2019s objectives to the user\u2019s goals, provide a concise action plan with deadlines, and include a confidence metric that reflects the clarity of the suggested next steps.",
+  "harmonic_context": {},
+  "auditory_notes": "The absence of detected auditory cues likely contributed to the error by limiting the system\u2019s ability to gauge emotional tone and pacing; the tempo and key of the auditory environment should have been considered to shape the response\u2019s rhythm and clarity.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}

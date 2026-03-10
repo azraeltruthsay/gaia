@@ -34,7 +34,7 @@ class TestMindTags:
     def test_lite_tag(self):
         ac = _make_agent_core()
         header = ac._build_response_header("lite", _make_packet(), None, None, None)
-        assert header == "[Lite]\n\n"
+        assert header == "[Core]\n\n"
 
     def test_gpu_prime_tag(self):
         ac = _make_agent_core()
@@ -83,7 +83,7 @@ class TestHeaderFormat:
     def test_header_uses_mind_tag_format(self):
         ac = _make_agent_core()
         header = ac._build_response_header("lite", _make_packet(), None, None, None)
-        expected = ac.MIND_TAG_FORMAT.format(mind="Lite") + "\n\n"
+        expected = ac.MIND_TAG_FORMAT.format(mind="Core") + "\n\n"
         assert header == expected
 
     def test_no_verbose_debug_in_header(self):

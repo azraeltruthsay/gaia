@@ -207,9 +207,15 @@ class AgentCore:
         "gpu_prime": "Prime",
         "cpu_prime": "Prime",
         "prime": "Prime",
-        "lite": "Lite",
+        "lite": "Core",
         "oracle": "Oracle",
     }
+
+    # ── Always-on LoRA adapter for identity/persona ────────────────────────
+    _DEFAULT_ADAPTER = "gaia_persona_v1"
+    _ADAPTER_BASE_PATH = Path("/models/lora_adapters/tier1_global")
+    # Models that support LoRA adapters (vLLM-backed)
+    _ADAPTER_ELIGIBLE_MODELS = frozenset({"gpu_prime", "prime", "cpu_prime", "thinker"})
 
     def __init__(self, ai_manager, ethical_sentinel=None):
         self.ai_manager = ai_manager
@@ -237,6 +243,23 @@ class AgentCore:
 
         # Initialize Identity Guardian for reflex and prompt validation
         self.identity_guardian = CoreIdentityGuardian(self.config)
+
+    def _resolve_adapter(self, model_name: str) -> Optional[str]:
+        """Return the LoRA adapter name to use for the given model, or None.
+
+        Only Prime/Thinker (vLLM-backed) models can use adapters.  Returns
+        None if the model is ineligible or the adapter hasn't been trained yet
+        (no adapter_model.safetensors on disk).
+        """
+        # Only vLLM-backed models support LoRA
+        resolved = model_name.lower()
+        if not any(tag in resolved for tag in ("prime", "thinker", "gpu")):
+            return None
+        # Check that the adapter actually exists on disk (real weights, not just config)
+        adapter_dir = self._ADAPTER_BASE_PATH / self._DEFAULT_ADAPTER
+        if not (adapter_dir / "adapter_config.json").exists():
+            return None
+        return self._DEFAULT_ADAPTER
 
     def _emit_timeline_message(self, session_id: str, role: str, source: str = "") -> None:
         """Emit a message event to the timeline store (best-effort)."""
@@ -868,27 +891,27 @@ class AgentCore:
             wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
             
             # Simple patterns NANO can handle reliably
-            factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time"]
+            factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time", "what time"]
             is_factual = any(p in text_lower for p in factual_patterns)
             is_trivial = len(user_input) < 100 and (
-                any(w in text_lower for w in ["hello", "hi", "status", "uptime", "who are you"]) or
-                is_factual
+                any(w in text_lower for w in [
+                    "hello", "hi", "hey", "status", "uptime", "who are you",
+                    "how are you", "good morning", "good afternoon", "good evening",
+                    "good night", "thanks", "thank you",
+                ]) or is_factual
             )
     
             # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
+            # Trivial/factual queries go to Nano first; cascade triage will
+            # escalate later if the question turns out to be complex.
             if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS and not force_thinker:
-                # OPTIMIZATION: If it is factual but Nano is too small to handle it perfectly,
-                # and we have a GPU model idle, prefer the GPU model for instant response
-                # rather than grinding on CPU lite.
-                if is_factual and "gpu_prime" in self.model_pool.models and not _gpu_sleeping:
-                    selected_model_name = "gpu_prime"
-                    logger.info("[MODEL_SELECT] Routing factual query to gpu_prime for GPU acceleration (instant response).")
-                else:
-                    selected_model_name = "nano"
-                    logger.info(f"[MODEL_SELECT] Routing to Nano-Refiner (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
-    
+                selected_model_name = "nano"
+                logger.info(f"[MODEL_SELECT] Routing to Reflex Nano (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+
             # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
-            elif knowledge_base_name:
+            # Only escalate if the query is non-trivial — a spurious KB match
+            # on a simple greeting/question shouldn't force the heavy pipeline.
+            elif knowledge_base_name and not is_trivial:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
                 for cand in ["gpu_prime", "prime"]:
                     if cand == "gpu_prime" and _gpu_sleeping:
@@ -897,6 +920,8 @@ class AgentCore:
                         selected_model_name = cand
                         logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
                         break
+            elif knowledge_base_name and is_trivial:
+                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping gpu_prime override.")
     
             if not selected_model_name:
                 # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
@@ -989,7 +1014,7 @@ class AgentCore:
                     triage_result = self._nano_triage(user_input)
                     if triage_result == "COMPLEX":
                         # Emit status message to user
-                        yield {"type": "token", "value": "[(i) Nano-Refiner: Complexity detected. Routing to Operator model...]\n\n"}
+                        yield {"type": "token", "value": "[(i) Reflex Nano: Complexity detected. Routing to Operator Core...]\n\n"}
                         selected_model_name = "lite"
                         
                         # Secondary escalation: check if Lite thinks it's even MORE complex
@@ -1004,13 +1029,13 @@ class AgentCore:
                                     except Exception:
                                         pass
                                 if cand in self.model_pool.models:
-                                    yield {"type": "token", "value": f"[(i) Operator: High-reasoning required. Escalating to {cand.replace('_', ' ').title()}...]\n\n"}
+                                    yield {"type": "token", "value": "[(i) Operator Core: Deep reasoning required. Escalating to Thinker Prime...]\n\n"}
                                     selected_model_name = cand
                                     break
                     else:
                         # Nano can handle it
                         selected_model_name = "nano"
-                        logger.info("[CASCADE] Nano-Refiner confirmed SIMPLE request.")
+                        logger.info("[CASCADE] Reflex Nano confirmed SIMPLE request.")
             except Exception:
                 logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
     
@@ -1505,6 +1530,7 @@ class AgentCore:
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
+                    adapter_name=self._resolve_adapter(selected_model_name),
                 )
             except Exception as exc:
                 logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
@@ -1683,7 +1709,8 @@ class AgentCore:
     
                 if observer_model_name is None:
                     try:
-                        observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name])
+                        # Exclude embed (SentenceTransformer) — it can't do chat completion
+                        observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name, "embed"])
                     except Exception:
                         pass
     
@@ -1694,35 +1721,41 @@ class AgentCore:
                 observer_instance = None
                 if observer_model is not None:
                     observer_instance = StreamObserver(config=self.config, llm=observer_model, name=f"AgentCore-Observer-Turn{debate_turn}")
-                
+
+                # ── Phase Header Yielding ──
+                # Naming convention: [(Role) Identity]
+                #   Nano=Reflex, Core=Operator, Prime=Thinker
+                _is_prime = "thinker" in selected_model_name.lower() or "prime" in selected_model_name.lower()
+                role_label = "Thinker" if _is_prime else "Operator"
+                identity_label = "Prime" if _is_prime else "Core"
+                header_icon = "🧠" if _is_prime else "🤖"
+
+                # ── Adapter activation for ExternalVoice streaming ──
+                _stream_adapter = self._resolve_adapter(selected_model_name)
+                if _stream_adapter and hasattr(selected_model, 'set_active_adapter'):
+                    selected_model.set_active_adapter(_stream_adapter)
+
                 voice = ExternalVoice(
                     model=selected_model,
                     model_pool=self.model_pool,
                     config=self.config,
                     messages=final_messages,
-                    source=f"agent_core_debate_{debate_turn}",
+                    source=identity_label.lower(),  # "prime" or "core" for generation stream
                     observer=observer_instance,
                     context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
                     session_id=session_id,
                 )
-    
-                # ── Phase Header Yielding ──
-                # Reflex is handled by generate_instant_reflex before run_turn.
-                # Here we handle Core (Lite) vs Thinker (Prime).
-                role_label = "Thinker" if "thinker" in selected_model_name.lower() or "prime" in selected_model_name.lower() else "Core"
-                header_icon = "🧠" if role_label == "Thinker" else "🤖"
-                
-                # BICAMERAL UPGRADE: If escalate to Thinker, have Core yield an immediate status update
-                if role_label == "Thinker" and debate_turn == 1:
-                    yield {"type": "token", "value": "🤖 **[(Core) Core]** *Deep reasoning required. Escalating to Thinker...*\n"}
+
+                # BICAMERAL UPGRADE: If escalate to Thinker, have Operator yield a status update
+                if _is_prime and debate_turn == 1:
+                    yield {"type": "token", "value": "🤖 **[(Operator) Core]** *Deep reasoning required. Escalating to Thinker...*\n"}
                     yield {"type": "flush"}
 
-                # Use the role_label for the display name instead of the raw technical key
-                phase_header = f"\n\n{header_icon} **[({role_label}) {role_label}]**\n"
-                
+                phase_header = f"\n\n{header_icon} **[({role_label}) {identity_label}]**\n"
+
                 # If this is a refinement turn, add that context
                 if reflex_text and debate_turn == 1:
-                    phase_header = f"\n\n---\n🔄 **Refinement from Council ({role_label})**\n"
+                    phase_header = f"\n\n---\n🔄 **Refinement from Council ({role_label} {identity_label})**\n"
                 
                 yield {"type": "token", "value": phase_header}
 
@@ -1743,10 +1776,14 @@ class AgentCore:
                             yield {"type": "token", "value": str(item)}
                 except Exception:
                     logger.exception(f"AgentCore: Stream from {selected_model_name} failed")
-                    yield {"type": "token", "value": f"--- Error: Stream from {role_label} interrupted ---"}
+                    yield {"type": "token", "value": f"--- Error: Stream from {role_label} {identity_label} interrupted ---"}
 
                 current_response = "".join(current_turn_pieces)
-                
+
+                # ── Clear adapter after streaming ──
+                if _stream_adapter and hasattr(selected_model, 'set_active_adapter'):
+                    selected_model.set_active_adapter(None)
+
                 # Yield any observer findings attached to this phase
                 if observer_instance and hasattr(observer_instance, 'last_review') and observer_instance.last_review:
                     rev = observer_instance.last_review
@@ -1875,6 +1912,7 @@ class AgentCore:
                         max_tokens=self.config.max_tokens,
                         temperature=max(self.config.temperature - 0.1, 0.1),
                         top_p=self.config.top_p,
+                        adapter_name=self._resolve_adapter(selected_model_name),
                     )
                     # Extract text from the retry result
                     retry_text = ""
@@ -2499,11 +2537,12 @@ RESULT: COMPLEX (reason: <brief reason>)
         if force_slim:
             return True
 
-        # NEW: Disable slim-prompt shortcuts if the system is IRRITATED or CRITICAL.
-        # We prioritize full cognitive awareness and diagnostic depth over speed during instability.
+        # Disable slim-prompt shortcuts only when truly CRITICAL (score >= 25).
+        # IRRITATED (8-25) should still allow slim prompts — the debate loop
+        # generates repetitive output for simple queries under irritation.
         from gaia_common.utils.immune_system import is_system_irritated
-        if is_system_irritated():
-            self.logger.info("AgentCore: System is IRRITATED; disabling Slim Prompt shortcut for awareness.")
+        if is_system_irritated(threshold=25.0):
+            self.logger.info("AgentCore: System is CRITICAL; disabling Slim Prompt shortcut for awareness.")
             return False
 
         if plan.intent in ("recitation", "chat"):
@@ -2917,6 +2956,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 max_tokens=min(self.config.max_tokens, max_resp_tokens),
                 temperature=self.config.temperature,
                 top_p=self.config.top_p,
+                adapter_name=self._resolve_adapter(selected_model_name),
             )
             content = res["choices"][0]["message"]["content"]
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
@@ -2943,6 +2983,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                             max_tokens=min(self.config.max_tokens, 200),
                             temperature=self.config.temperature,
                             top_p=self.config.top_p,
+                            adapter_name=self._resolve_adapter(thinker_name),
                         )
                         content = polished["choices"][0]["message"]["content"]
             except Exception:
@@ -3172,6 +3213,7 @@ Present {doc_title}:"""
                 max_tokens=recitation_max_tokens,
                 temperature=self.config.temperature * 0.7,  # Lower temp for faithful recitation
                 top_p=self.config.top_p,
+                adapter_name=self._resolve_adapter(selected_model_name),
             )
             content = res["choices"][0]["message"]["content"]
 
@@ -3298,6 +3340,7 @@ Present {doc_title}:"""
                     max_tokens=min(self.config.max_tokens, max_resp_tokens),
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
+                    adapter_name=self._resolve_adapter(selected_model_name),
                 )
                 content = res["choices"][0]["message"]["content"]
             except Exception:
@@ -3536,6 +3579,7 @@ Assembled response:"""
                 max_tokens=assembly_max_tokens,
                 temperature=self.config.temperature * 0.8,  # Slightly lower temp for assembly
                 top_p=self.config.top_p,
+                adapter_name=self._resolve_adapter(selected_model_name),
             )
             assembled = res["choices"][0]["message"]["content"]
             # Strip any <think> reasoning blocks from the assembled output
@@ -3981,6 +4025,7 @@ ALTERNATIVE: [if low confidence: what could you do instead?]"""
                 messages=messages,
                 max_tokens=400,
                 temperature=0.3,
+                adapter_name=self._resolve_adapter(model_name),
             )
 
             assessment_text = response["choices"][0]["message"]["content"]
@@ -4131,6 +4176,7 @@ REASONING: [Brief explanation of your analysis]"""
                 messages=messages,
                 max_tokens=500,
                 temperature=0.3,  # Lower temperature for more consistent analysis
+                adapter_name=self._resolve_adapter(model_name),
             )
 
             reflection_text = response["choices"][0]["message"]["content"]

@@ -18,6 +18,11 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+try:
+    from gaia_common.utils.memory_guard import require_memory as _require_memory
+except ImportError:
+    _require_memory = None  # type: ignore[assignment]
+
 # Lazy imports to avoid loading heavy libraries unless needed
 transformers = None
 peft = None
@@ -79,6 +84,10 @@ class QLoRAConfig:
     logging_steps: int = 10
     save_steps: int = 50
 
+    # Convergence / early stopping
+    target_loss: float = 0.05          # Stop when loss drops below this
+    convergence_patience: int = 3      # Must stay below target_loss for N consecutive log checks
+
     def __post_init__(self):
         if self.target_modules is None:
             self.target_modules = ["q_proj", "v_proj"]
@@ -104,6 +113,8 @@ class QLoRAConfig:
             max_seq_length=config.get("max_seq_length", 512),
             logging_steps=config.get("logging_steps", 10),
             save_steps=config.get("save_steps", 50),
+            target_loss=config.get("target_loss", 0.05),
+            convergence_patience=config.get("convergence_patience", 3),
         )
 
 
@@ -130,7 +141,8 @@ class QLoRATrainer:
         base_model_path: str,
         config: QLoRAConfig,
         output_dir: str,
-        progress_callback: Optional[Callable[[TrainingProgress], None]] = None
+        progress_callback: Optional[Callable[[TrainingProgress], None]] = None,
+        resume_from: Optional[str] = None,
     ):
         """
         Initialize the QLoRA trainer.
@@ -140,11 +152,13 @@ class QLoRATrainer:
             config: QLoRA configuration
             output_dir: Directory to save the trained adapter
             progress_callback: Optional callback for training progress updates
+            resume_from: Path to existing adapter to resume from (incremental training)
         """
         self.base_model_path = base_model_path
         self.config = config
         self.output_dir = Path(output_dir)
         self.progress_callback = progress_callback
+        self.resume_from = resume_from
 
         self.model = None
         self.tokenizer = None
@@ -163,19 +177,23 @@ class QLoRATrainer:
         _lazy_import()
 
         try:
+            # Pre-flight: verify enough system RAM for BnB NF4 loading (~8GB for 9B model)
+            if _require_memory is not None:
+                _require_memory(needed_mb=8000, label="QLoRA training setup")
+
             logger.info("Setting up QLoRA training for %s", self.base_model_path)
 
-            # Configure quantization
-            bnb_config = None
-            if self.config.load_in_4bit and bitsandbytes is not None:
-                compute_dtype = getattr(torch, self.config.bnb_4bit_compute_dtype, torch.bfloat16)
-                bnb_config = transformers.BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=compute_dtype,
-                    bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
-                    bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
-                )
-                logger.info("Using 4-bit quantization with %s", self.config.bnb_4bit_quant_type)
+            # Detect if model is already quantized (AWQ, GPTQ, etc.)
+            model_config_path = Path(self.base_model_path) / "config.json"
+            is_prequantized = False
+            if model_config_path.exists():
+                import json as _json
+                with open(model_config_path) as f:
+                    model_cfg = _json.load(f)
+                if "quantization_config" in model_cfg:
+                    quant_method = model_cfg["quantization_config"].get("quant_method", "")
+                    logger.info("Model already quantized with %s — skipping BitsAndBytes", quant_method)
+                    is_prequantized = True
 
             # Load tokenizer
             self.tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -185,40 +203,104 @@ class QLoRATrainer:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Load model with quantization
-            model_kwargs = {
-                "trust_remote_code": True,
-                "torch_dtype": torch.bfloat16,
-                "device_map": "auto",
-            }
-            if bnb_config:
-                model_kwargs["quantization_config"] = bnb_config
+            # Configure memory allocation for training headroom
+            import os
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-            self.model = transformers.AutoModelForCausalLM.from_pretrained(
-                self.base_model_path,
-                **model_kwargs
+            gpu_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            # Reserve 4GB for LoRA params + optimizer states + activations
+            training_headroom_gb = 4
+            max_gpu_gb = int(gpu_total_gb) - training_headroom_gb
+            logger.info(
+                "GPU total: %.1fGiB, limiting model to %dGiB (%dGiB training headroom)",
+                gpu_total_gb, max_gpu_gb, training_headroom_gb
             )
 
-            # Enable gradient checkpointing for memory efficiency
-            if self.config.gradient_checkpointing:
+            if is_prequantized:
+                # Pre-quantized models (AWQ/GPTQ) have broken gradient flow —
+                # their GEMM kernels don't implement backward pass, causing
+                # grad_norm: inf and no learning. Use the bf16 base model with
+                # BnB NF4 for training instead. Set BASE_MODEL_PATH to bf16 weights.
+                raise ValueError(
+                    f"Model at {self.base_model_path} is pre-quantized ({model_cfg['quantization_config'].get('quant_method', 'unknown')}). "
+                    "Pre-quantized models cannot be fine-tuned (no gradient flow through GEMM kernels). "
+                    "Set BASE_MODEL_PATH to the bf16 base model — BnB NF4 will quantize it for training, "
+                    "and the trained LoRA adapter can be applied to the AWQ model at inference time."
+                )
+
+            if self.config.load_in_4bit and bitsandbytes is not None:
+                # QLoRA: BnB NF4 quantization on bf16 base model (~4-5GB final VRAM)
+                # This is the canonical QLoRA technique — proper gradient flow via STE.
+                bnb_config = transformers.BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=getattr(torch, self.config.bnb_4bit_compute_dtype),
+                    bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
+                    bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
+                )
+                # BnB quantizes bf16→NF4 per-shard during loading (~4-5GB final).
+                # Pinned to transformers <5.0 because 5.3.0 has a regression that
+                # bulk-loads ALL bf16 weights to GPU before quantizing (OOM on 16GB).
+                logger.info(
+                    "Loading bf16 model with BnB NF4 quantization "
+                    "(GPU budget: %dGiB, ~4-5GiB quantized, %dGiB training headroom)",
+                    max_gpu_gb, training_headroom_gb
+                )
+                self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                    self.base_model_path,
+                    trust_remote_code=True,
+                    quantization_config=bnb_config,
+                    device_map="auto",
+                    max_memory={0: f"{max_gpu_gb}GiB", "cpu": "30GiB"},
+                    low_cpu_mem_usage=True,
+                    torch_dtype=torch.bfloat16,
+                )
+            else:
+                # Fallback: bf16 directly to GPU (only works for small models)
+                logger.info("Loading model in bf16 to GPU (no quantization)")
+                self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                    self.base_model_path,
+                    trust_remote_code=True,
+                    dtype=torch.bfloat16,
+                    device_map={"": 0},
+                    low_cpu_mem_usage=True,
+                )
+
+            gpu_mem_gb = torch.cuda.memory_allocated(0) / (1024 ** 3)
+            logger.info("Model loaded: %.1f GiB on GPU", gpu_mem_gb)
+
+            # Prepare quantized model for training (casts layernorm to fp32, etc.)
+            if self.config.load_in_4bit and bitsandbytes is not None:
+                self.model = peft.prepare_model_for_kbit_training(
+                    self.model,
+                    use_gradient_checkpointing=self.config.gradient_checkpointing,
+                )
+                logger.info("Model prepared for k-bit training")
+            elif self.config.gradient_checkpointing:
                 self.model.gradient_checkpointing_enable()
 
-            # Prepare model for k-bit training
-            if self.config.load_in_4bit:
-                self.model = peft.prepare_model_for_kbit_training(self.model)
-
-            # Configure LoRA
-            lora_config = peft.LoraConfig(
-                r=self.config.lora_r,
-                lora_alpha=self.config.lora_alpha,
-                lora_dropout=self.config.lora_dropout,
-                target_modules=self.config.target_modules,
-                bias="none",
-                task_type="CAUSAL_LM",
-            )
-
-            # Apply LoRA
-            self.model = peft.get_peft_model(self.model, lora_config)
+            # Apply LoRA — either resume from existing adapter or create fresh
+            if self.resume_from and Path(self.resume_from).exists():
+                logger.info("Resuming from existing adapter: %s", self.resume_from)
+                self.model = peft.PeftModel.from_pretrained(
+                    self.model,
+                    self.resume_from,
+                    is_trainable=True,
+                )
+            else:
+                if self.resume_from:
+                    logger.warning(
+                        "resume_from=%s not found, falling back to fresh LoRA",
+                        self.resume_from,
+                    )
+                lora_config = peft.LoraConfig(
+                    r=self.config.lora_r,
+                    lora_alpha=self.config.lora_alpha,
+                    lora_dropout=self.config.lora_dropout,
+                    target_modules=self.config.target_modules,
+                    bias="none",
+                    task_type="CAUSAL_LM",
+                )
+                self.model = peft.get_peft_model(self.model, lora_config)
 
             trainable_params, all_params = self._count_parameters()
             logger.info(
@@ -334,7 +416,7 @@ class QLoRATrainer:
                 logging_steps=self.config.logging_steps,
                 save_steps=self.config.save_steps,
                 bf16=True,
-                optim="paged_adamw_8bit" if self.config.load_in_4bit else "adamw_torch",
+                optim="adamw_torch",
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 report_to="none",  # Disable wandb/tensorboard
                 remove_unused_columns=False,
@@ -347,41 +429,68 @@ class QLoRATrainer:
                 mlm=False,
             )
 
-            # Custom callback for progress reporting
+            # Custom callback for progress reporting and convergence detection
             class ProgressCallback(transformers.TrainerCallback):
                 def __init__(callback_self, trainer_instance):
                     callback_self.trainer_instance = trainer_instance
+                    callback_self._consecutive_below_target = 0
+                    callback_self.stop_reason = "max_steps"  # default
 
                 def on_log(callback_self, args, state, control, logs=None, **kwargs):
                     if logs and "loss" in logs:
-                        callback_self.trainer_instance._losses.append(logs["loss"])
+                        ti = callback_self.trainer_instance
+                        current_loss = logs["loss"]
+                        ti._losses.append(current_loss)
 
-                        elapsed = time.time() - callback_self.trainer_instance._start_time
+                        elapsed = time.time() - ti._start_time
+
+                        # Check 1: Time limit
                         if elapsed > timeout_seconds:
                             logger.warning("Training timeout reached (%ds)", timeout_seconds)
+                            callback_self.stop_reason = "timeout"
                             control.should_training_stop = True
 
-                        if callback_self.trainer_instance.progress_callback:
+                        # Check 2: Convergence — loss below target for N consecutive checks
+                        cfg = ti.config
+                        if current_loss <= cfg.target_loss:
+                            callback_self._consecutive_below_target += 1
+                            if callback_self._consecutive_below_target >= cfg.convergence_patience:
+                                logger.info(
+                                    "Convergence reached: loss %.4f <= %.4f for %d consecutive checks at step %d",
+                                    current_loss, cfg.target_loss,
+                                    cfg.convergence_patience, state.global_step,
+                                )
+                                callback_self.stop_reason = "converged"
+                                control.should_training_stop = True
+                        else:
+                            callback_self._consecutive_below_target = 0
+
+                        if ti.progress_callback:
                             progress = TrainingProgress(
                                 current_step=state.global_step,
-                                total_steps=callback_self.trainer_instance.config.max_steps,
-                                current_loss=logs["loss"],
-                                avg_loss=sum(callback_self.trainer_instance._losses) / len(callback_self.trainer_instance._losses),
+                                total_steps=cfg.max_steps,
+                                current_loss=current_loss,
+                                avg_loss=sum(ti._losses) / len(ti._losses),
                                 elapsed_seconds=elapsed,
-                                estimated_remaining=(elapsed / max(state.global_step, 1)) * (callback_self.trainer_instance.config.max_steps - state.global_step)
+                                estimated_remaining=(elapsed / max(state.global_step, 1)) * (cfg.max_steps - state.global_step)
                             )
-                            callback_self.trainer_instance.progress_callback(progress)
+                            ti.progress_callback(progress)
 
             # Create trainer
+            progress_cb = ProgressCallback(self)
             self.trainer = transformers.Trainer(
                 model=self.model,
                 args=training_args,
                 train_dataset=train_dataset,
                 data_collator=data_collator,
-                callbacks=[ProgressCallback(self)],
+                callbacks=[progress_cb],
             )
 
-            logger.info("Starting training for %d steps", self.config.max_steps)
+            logger.info(
+                "Starting training: max_steps=%d, target_loss=%.4f, patience=%d, timeout=%ds",
+                self.config.max_steps, self.config.target_loss,
+                self.config.convergence_patience, timeout_seconds,
+            )
 
             # Train!
             train_result = self.trainer.train()
@@ -393,6 +502,7 @@ class QLoRATrainer:
                 "samples_seen": train_result.global_step * self.config.batch_size * self.config.gradient_accumulation_steps,
                 "duration_seconds": time.time() - self._start_time,
                 "loss_history": self._losses,
+                "stop_reason": progress_cb.stop_reason,
             }
 
             logger.info(

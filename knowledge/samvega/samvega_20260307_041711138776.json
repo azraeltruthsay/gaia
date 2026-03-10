@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-07T04:17:11.138748+00:00",
+  "session_id": "test-final-anchored-7eb6b612",
+  "packet_id": "8ad3d409-e616-4816-90bf-82170dbf3187",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "**Summary:**  \nThe assistant provided information about King Arthur's sword, Excalibur, and its significance in Arthurian legends. It noted that the sword was made by Avalon's smiths and symbolized kingship and divine favor. A thought seed was raised about Avalon's role, suggesting a potential knowledge gap that could be explored.\n\n**Action Items / Important Facts:**  \n- The assistant identified a potential knowledge gap regarding Avalon's role in Arthurian legends.  \n- Excalibur is a key symbol",
+  "what_went_wrong": "The response provided information about Excalibur but did not fully address the potential knowledge gap regarding Avalon's role, leading to a confidence mismatch.",
+  "root_cause": "The assistant identified a knowledge gap but did not sufficiently explore or clarify it, resulting in uncertainty and low confidence.",
+  "values_misaligned": [
+    "accuracy",
+    "epistemic_humility",
+    "safety"
+  ],
+  "corrected_understanding": "A better approach would involve elaborating on Avalon's role in Arthurian legends, connecting it to Excalibur's significance, and addressing the knowledge gap with more detailed explanation and examples to enhance clarity and confidence.",
+  "harmonic_context": {},
+  "auditory_notes": "No auditory environment was detected, so the lack of music or sound did not contribute to the error or affect clarity.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}

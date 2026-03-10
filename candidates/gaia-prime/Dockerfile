@@ -71,6 +71,10 @@ RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project
 # vLLM's dependencies pull numpy 2.x and override any earlier pin.
 RUN pip install --no-cache-dir "numpy<2"
 
+# LMCache: hierarchical KV cache persistence (GPU → CPU → disk)
+# Enables KV replay on wake instead of full re-prefill
+RUN pip install --no-cache-dir lmcache
+
 # Expose service port
 EXPOSE 7777
 

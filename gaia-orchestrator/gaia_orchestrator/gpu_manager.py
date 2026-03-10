@@ -240,19 +240,72 @@ class GPUManager:
             logger.error(f"Failed to start prime container: {e}")
             return False
 
-    async def request_release_from_core(self) -> bool:
+    async def sleep_audio(self) -> bool:
         """
-        Release GPU: stop the prime container, then tell gaia-core
-        to demote gpu_prime from its model pool.
+        Tell gaia-audio to unload GPU models (Whisper, XTTS) to free VRAM.
+
+        Calls POST /sleep which offloads models from GPU. This frees ~400MB
+        of VRAM without stopping the container.
         """
         import httpx
 
-        # Step 1: Stop the prime container (frees all VRAM)
+        url = f"{self.config.audio_url}/sleep"
+        logger.info("Requesting gaia-audio to sleep (unload GPU models): %s", url)
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+                if response.status_code == 200:
+                    logger.info("gaia-audio sleeping — GPU models unloaded")
+                    return True
+                else:
+                    logger.warning("gaia-audio sleep returned %s", response.status_code)
+                    return False
+        except Exception as e:
+            logger.warning("Failed to sleep gaia-audio (may not be running): %s", e)
+            # Not fatal — audio may not be running
+            return True
+
+    async def wake_audio(self) -> bool:
+        """
+        Tell gaia-audio to reload GPU models (Whisper, XTTS).
+
+        Calls POST /wake which reloads models onto GPU.
+        """
+        import httpx
+
+        url = f"{self.config.audio_url}/wake"
+        logger.info("Requesting gaia-audio to wake (reload GPU models): %s", url)
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+                if response.status_code == 200:
+                    logger.info("gaia-audio awake — GPU models reloaded")
+                    return True
+                else:
+                    logger.warning("gaia-audio wake returned %s", response.status_code)
+                    return False
+        except Exception as e:
+            logger.warning("Failed to wake gaia-audio: %s", e)
+            return False
+
+    async def request_release_from_core(self) -> bool:
+        """
+        Release GPU: sleep gaia-audio, stop the prime container, then tell
+        gaia-core to demote gpu_prime from its model pool.
+        """
+        import httpx
+
+        # Step 1: Sleep gaia-audio (unloads Whisper + XTTS from GPU)
+        await self.sleep_audio()
+
+        # Step 2: Stop the prime container (frees all VRAM)
         if not await self.stop_prime_container():
             logger.error("Failed to stop prime container — aborting release")
             return False
 
-        # Step 2: Tell core to update its model pool (demote gpu_prime)
+        # Step 3: Tell core to update its model pool (demote gpu_prime)
         url = f"{self.config.core_url}/gpu/release"
         logger.info(f"Requesting model pool update from Core: {url}")
 
@@ -274,7 +327,7 @@ class GPUManager:
     async def request_reclaim_by_core(self) -> bool:
         """
         Reclaim GPU: start the prime container, wait for healthy,
-        then tell gaia-core to restore gpu_prime in its model pool.
+        tell gaia-core to restore gpu_prime, then wake gaia-audio.
         """
         import httpx
 
@@ -293,7 +346,6 @@ class GPUManager:
 
                 if response.status_code == 200:
                     logger.info("Core acknowledged GPU reclaim — prime inference restored")
-                    return True
                 else:
                     logger.error(f"Core GPU reclaim failed: {response.status_code} {response.text}")
                     return False
@@ -301,6 +353,11 @@ class GPUManager:
         except Exception as e:
             logger.error(f"Failed to request GPU reclaim by Core: {e}")
             return False
+
+        # Step 3: Wake gaia-audio (reload Whisper + XTTS onto GPU)
+        await self.wake_audio()
+
+        return True
 
     async def signal_study_gpu_ready(self) -> bool:
         """

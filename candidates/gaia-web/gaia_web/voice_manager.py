@@ -595,26 +595,26 @@ class VoiceManager:
                 if self._sink:
                     self._sink.paused = True
 
-                # 2.5. Check core state — if not active, use Lite stalling response
+                # 2.5. Check core state — if not active, use Core stalling response
                 core_state = await self._get_core_state()
                 if core_state and core_state != "active":
-                    logger.info("Core state is '%s' — using Lite stalling response", core_state)
+                    logger.info("Core state is '%s' — using Core stalling response", core_state)
                     # Fire wake signal in background (idempotent if already waking)
                     asyncio.create_task(self._send_wake_signal())
                     self._state = "responding"
                     response_text = await self._get_lite_stalling_response(text)
                 else:
-                    # 3. Try Nano reflex fast-path for short utterances
+                    # 3. Try Reflex fast-path for short utterances
                     response_text = None
                     if len(text.strip()) < 150:
                         t0 = time.monotonic()
                         response_text = await self._get_reflex_response(text)
                         if response_text:
                             reflex_ms = (time.monotonic() - t0) * 1000
-                            logger.info("Voice: Nano reflex (%.0fms): %s", reflex_ms, response_text[:80])
+                            logger.info("Voice: Reflex (%.0fms): %s", reflex_ms, response_text[:80])
 
                     if not response_text:
-                        # Fall through to full Prime
+                        # Fall through to full Thinker
                         self._state = "responding"
                         response_text = await self._get_response(text)
                 if not response_text:
@@ -681,7 +681,7 @@ class VoiceManager:
         return response_text.strip() or None
 
     async def _get_reflex_response(self, text: str) -> str | None:
-        """Try Nano reflex fast-path with a fresh session for cold-start eligibility.
+        """Try Reflex fast-path with a fresh session for cold-start eligibility.
 
         Uses a unique session_id per utterance so is_eligible_for_reflex sees
         an empty history (cold start). Tight 5s timeout since reflex should
@@ -716,9 +716,9 @@ class VoiceManager:
         if not raw:
             return None
 
-        # Strip reflex formatting header: ⚡ **[(Reflex) Reflex]**\n...
+        # Strip reflex formatting header: ⚡ **[(Reflex) Nano]**\n...
         clean = raw.strip()
-        prefix = "⚡ **[(Reflex) Reflex]**"
+        prefix = "⚡ **[(Reflex) Nano]**"
         if clean.startswith(prefix):
             clean = clean[len(prefix):].lstrip("\n")
         # Strip trailing markdown separator
@@ -752,7 +752,7 @@ class VoiceManager:
         return None
 
     async def _get_lite_stalling_response(self, text: str) -> str | None:
-        """Get a quick Lite response while Prime boots.
+        """Get a quick Core response while Thinker boots.
 
         Builds a minimal CognitionPacket targeting TargetEngine.LITE with
         tight token/time budgets and a stalling system hint.
@@ -781,11 +781,11 @@ class VoiceManager:
                     headers={"Content-Type": "application/json"},
                 ) as resp:
                     if resp.status_code != 200:
-                        logger.error("Lite stalling response failed: %d", resp.status_code)
+                        logger.error("Core stalling response failed: %d", resp.status_code)
                         return None
                     return await self._parse_ndjson_response(resp)
         except Exception:
-            logger.error("Lite stalling request failed", exc_info=True)
+            logger.error("Core stalling request failed", exc_info=True)
         return None
 
     async def _speak(self, text: str) -> None:

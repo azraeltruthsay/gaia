@@ -8,14 +8,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
+# Install system dependencies (cmake needed for llama-cpp-python source build)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Create gaia user
+# Create non-root user for container execution (host UID mapping)
 RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
 ENV HOME=/home/gaia
 ENV USER=gaia
@@ -29,25 +30,30 @@ WORKDIR /app
 # Install dependencies from requirements.txt (better layer caching)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# 1. Copy common library first
-COPY candidates/gaia-common /gaia-common
-RUN pip install -e /gaia-common
-
-# 2. Copy requirements and install
+# Copy requirements first for better caching
 COPY candidates/gaia-core/requirements.txt .
+
+# Copy gaia-common source code so it's available to be installed by requirements.txt
+COPY candidates/gaia-common /gaia-common
+
+# Install Python dependencies
+# GPU inference is handled by gaia-prime — no GPU packages needed here
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. Install development dependencies
+# ═══════════════════════════════════════════════════════════════════════════
+# Install development dependencies for validation (pytest, ruff, mypy)
+# ═══════════════════════════════════════════════════════════════════════════
 COPY candidates/gaia-core/pyproject.toml .
 COPY candidates/gaia-core/README.md .
 RUN pip install -e ".[dev]"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Copy service code (This layer changes frequently)
+# Copy service code
 # ═══════════════════════════════════════════════════════════════════════════
 
 COPY candidates/gaia-core/gaia_core/ ./gaia_core/
 COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
+# Copy canonical constants file from gaia-common (single source of truth)
 COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 
 # Create writable directories and set ownership

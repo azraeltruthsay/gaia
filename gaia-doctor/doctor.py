@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import random
-import shutil
 import subprocess
 import threading
 import time
@@ -435,10 +434,10 @@ def audit_code():
 
 def run_service_tests(name: str) -> bool:
     """Run ruff and pytest inside the container to validate code changes."""
-    # 1. Fast Lint Check (Fatal errors only: F821 Undefined Name, E999 Syntax)
+    # 1. Fast Lint Check (Fatal errors only: F821 Undefined Name, F811 Redefined)
     log.info("Running fast lint audit for %s...", name)
     try:
-        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,E999"]
+        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,F811", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             log.error("FATAL LINT ERROR in %s:\n%s", name, lint_res.stdout)
@@ -933,8 +932,6 @@ def _validate_cognitive(endpoint: str, timeout: int = 30) -> dict:
 
         elapsed_ms = (time.monotonic() - start) * 1000
 
-        # Check if we got a meaningful response (should contain "56")
-        full_response = " ".join(response_lines)
         # Parse NDJSON lines for response content
         response_text = ""
         for line in response_lines:

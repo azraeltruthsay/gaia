@@ -3,7 +3,7 @@
 echo "$(date): flatten_soa.sh started. PATH: $PATH"
 
 # GAIA SOA Codebase Flattener
-# Updated: 2026-02-28 - Added gaia-audio to target dirs
+# Updated: 2026-03-07 - Major filter pass: removed low-signal files (~50 files, ~420K)
 # Purpose: Flattens the multi-container structure into a single directory for NotebookLM context.
 
 set -e
@@ -11,6 +11,7 @@ set -e
 # --- Configuration ---
 
 DEST_DIR="GAIA_Condensed_flat"
+WARN_FILES=250
 MAX_FILES=300
 DRY_RUN=false
 
@@ -32,6 +33,8 @@ EXCLUDE_SUBDIRS=(
     "knowledge/.obsidian"
     "knowledge/dnd_campaign"
     "knowledge/wiki_auto"
+    "knowledge/samvega"
+    "knowledge/seeds"
 )
 
 # Dev Notebook files to exclude (old proposals/plans superceded by implementation)
@@ -48,7 +51,9 @@ EXCLUDE_NOTEBOOK_PATTERNS=(
 )
 
 # Files to exclude by exact name or pattern (NotebookLM filler)
-EXCLUDE_FILLER_PATTERNS="code_analyzer|background/|MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$"
+# 2026-03-07: Added large low-signal files (rescue, loop detector, curriculum, study scripts)
+#             Added tiny persona stubs, stale system_reference files
+EXCLUDE_FILLER_PATTERNS="code_analyzer|background/|MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$|gaia_rescue\.py$|loop_detector\.py$|loop_patterns\.py$|generate_curriculum\.py$|study_mode_manager\.py$|blueprint_fidelity\.py$|test_memory\.md$|milestones_archive\.json$|cheat_sheet\.json$|codemind_instructions\.txt$|codemind\.json$|dnd_player_assistant\.json$|dev\.json$|lite\.json$|prime\.json$"
 
 
 
@@ -123,6 +128,10 @@ FILE_LIST=$(
         -path 'knowledge/curricula' -prune -o \
         -path 'knowledge/dnd_campaign' -prune -o \
         -path 'knowledge/wiki_auto' -prune -o \
+        -path 'knowledge/samvega' -prune -o \
+        -path 'knowledge/seeds' -prune -o \
+        -path 'knowledge/Dev_Notebook/Blueprint_System' -prune -o \
+        -path 'gaia-study/scripts' -prune -o \
         -path '*/session_vectors' -prune -o \
         -path '*/archive' -prune -o \
         -path '*/.mypy_cache' -prune -o \
@@ -137,7 +146,7 @@ FILE_LIST=$(
         \) -print | \
     grep -vE '__init__\.py$|_backup\.py$|\.py\.new$|\(backup\)|\.egg-info/|\.pyc$|\.lock$|\.map$|index_store\.json$|embeddings\.json$|final_prompt_for_review\.json$|last_activity\.timestamp$|sessions\.json$|/e2e_.*\.py$|/test_.*\.py$|/conftest\.py$|/README\.md$|/dev_matrix\.json$|/sketchpad\.json$|/response_fragments\.json$|\.claude/' | \
     grep -vE "$EXCLUDE_FILLER_PATTERNS" | \
-    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-|Dev_Notebook/2026-02-0[0-9]|Dev_Notebook/2026-02-1[0-5]|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.' | \
+    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-|Dev_Notebook/2026-03-0[12]_|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.|Dev_Notebook/Blueprint_System/' | \
     grep -vE 'blueprints/gaia-(core|web|mcp|study|prime|orchestrator)\.md$'
 )
 
@@ -223,10 +232,14 @@ fi
 # --- Verification ---
 
 if [ "$file_count" -gt "$MAX_FILES" ]; then
-    echo "Warning: File count ($file_count) exceeds limit of $MAX_FILES."
-    echo "   Consider adding more exclusions."
+    echo "ERROR: File count ($file_count) exceeds hard limit of $MAX_FILES. Aborting."
+    echo "   Add more exclusions before syncing to NotebookLM."
+    rm -rf "$DEST_DIR"
+    exit 1
+elif [ "$file_count" -gt "$WARN_FILES" ]; then
+    echo "Warning: File count ($file_count) exceeds soft limit of $WARN_FILES. Consider pruning."
 else
-    echo "File count ($file_count) is within limit."
+    echo "File count ($file_count) is within limits."
 fi
 
 # Wait for background tasks

@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-07T04:17:16.588139+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "8ad3d409-e616-4816-90bf-82170dbf3187",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Excalibur's historical and mythological context. Could be researched and added to knowledge base.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-07T04:37:53.172825+00:00"
+}

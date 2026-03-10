@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-10T14:14:09.204217+00:00",
+  "session_id": "sovereign_review_1773152021",
+  "packet_id": "9082e063-663f-463a-b44f-719852a31cbb",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "The diff is syntactically valid, shows intentional refactoring, and introduces no obvious regressions.  \n- **Key changes**: streamlined function calls and updated error\u2011handling paths.  \n- **Action item**: review the refactored error\u2011handling to ensure robustness.  \n- **Note**: all tests pass locally; ready for merge.",
+  "what_went_wrong": "GAIA\u2019s output failed to explicitly confirm that the refactored error\u2011handling path is robust, leaving the confidence score low.",
+  "root_cause": "The analysis omitted an explicit confidence affirmation and a clear action\u2011item statement, resulting in a vague conclusion.",
+  "values_misaligned": [
+    "accuracy",
+    "user_understanding",
+    "epistemic_humility"
+  ],
+  "corrected_understanding": "GAIA\u2019s output should explicitly state that the diff is syntactically valid, highlight the key changes in a single sentence, and conclude with a clear action item\u2014\u2019review the refactored error\u2011handling to ensure robustness\u2019\u2014while maintaining a confidence score of at least 0.8.",
+  "harmonic_context": {},
+  "auditory_notes": "The absence of detected auditory cues did not influence the clarity of the turn; the primary issue was the missing confidence affirmation rather than tempo, key, or mood.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}

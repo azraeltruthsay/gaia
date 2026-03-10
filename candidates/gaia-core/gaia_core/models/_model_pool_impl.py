@@ -64,7 +64,7 @@ try:
 except Exception:
     GroqAPIModel = None
 import os
-from typing import List
+from typing import List, Optional
 
 # --- resolver imports (added) ----------------------------------------------
 import subprocess
@@ -533,6 +533,33 @@ class ModelPool:
                     "enabled": True,
                 }
 
+            # Remote CPU inference via NANO_ENDPOINT (llama-server container)
+            nano_endpoint = os.getenv("NANO_ENDPOINT")
+            if nano_endpoint:
+                nano_model = os.getenv("NANO_MODEL", "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf")
+                self.config.MODEL_CONFIGS["reflex"] = {
+                    "type": "vllm_remote",
+                    "endpoint": nano_endpoint,
+                    "path": nano_model,
+                    "enabled": True,
+                    "max_model_len": 2048,
+                }
+                logger.info("NANO_ENDPOINT set: reflex -> llama-server @ %s", nano_endpoint)
+
+            # Remote CPU inference via CORE_CPU_ENDPOINT (llama-server container)
+            core_cpu_endpoint = os.getenv("CORE_CPU_ENDPOINT")
+            if core_cpu_endpoint:
+                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf")
+                self.config.MODEL_CONFIGS["core"] = {
+                    "type": "vllm_remote",
+                    "endpoint": core_cpu_endpoint,
+                    "path": core_cpu_model,
+                    "enabled": True,
+                    "max_model_len": 4096,
+                }
+                self.config.MODEL_CONFIGS["lite"] = {"alias": "core", "enabled": True}
+                logger.info("CORE_CPU_ENDPOINT set: core/lite -> llama-server @ %s", core_cpu_endpoint)
+
             # Remote vLLM inference via PRIME_ENDPOINT — switches gpu_prime to
             # a remote HTTP backend so gaia-core doesn't need local GPU access.
             prime_endpoint = os.getenv("PRIME_ENDPOINT")
@@ -541,7 +568,7 @@ class ModelPool:
                 self.config.MODEL_CONFIGS["gpu_prime"] = {
                     "type": "vllm_remote",
                     "endpoint": prime_endpoint,
-                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or "/models/Qwen3-8B-abliterated-AWQ",
+                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or "/models/Qwen3.5-4B-Abliterated",
                     "enabled": True,
                     "max_model_len": int(os.getenv("VLLM_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 8192)),
                     "lora_config": self.config.constants.get("LORA_CONFIG", {}),
@@ -1185,11 +1212,19 @@ class ModelPool:
 
         return _logged_stream()
 
-    def forward_to_model(self, role: str, messages: list, release: bool = True, **kwargs):
+    def forward_to_model(self, role: str, messages: list, release: bool = True,
+                         adapter_name: Optional[str] = None, **kwargs):
         """Utility used by AgentCore/tests to run a short chat completion via role lookup.
 
         If the primary model raises RuntimeError during inference (e.g. vLLM
         unreachable after retries), walks the fallback chain before giving up.
+
+        Parameters
+        ----------
+        adapter_name : str, optional
+            LoRA adapter name to use with vLLM. Only applied to models that
+            support ``create_chat_completion_with_adapter``. Cloud/CPU fallbacks
+            ignore this parameter.
         """
         name = self._resolve_model_name_for_role(role)
         if not name or name not in self.models:
@@ -1197,7 +1232,12 @@ class ModelPool:
         model = self.models[name]
         self.set_status(name, "busy")
         try:
-            if hasattr(model, "create_chat_completion"):
+            if adapter_name and hasattr(model, "create_chat_completion_with_adapter"):
+                logger.info("forward_to_model: using adapter '%s' with model '%s'", adapter_name, name)
+                result = model.create_chat_completion_with_adapter(
+                    adapter_name=adapter_name, messages=messages, **kwargs,
+                )
+            elif hasattr(model, "create_chat_completion"):
                 result = model.create_chat_completion(messages=messages, **kwargs)
             elif callable(model):
                 result = model(messages)
@@ -1223,6 +1263,7 @@ class ModelPool:
                 try:
                     logger.warning("Attempting inference fallback to '%s'...", fallback_name)
                     self.set_status(fallback_name, "busy")
+                    # Don't pass adapter_name to fallbacks (cloud/CPU models)
                     if hasattr(fallback_model, "create_chat_completion"):
                         result = fallback_model.create_chat_completion(messages=messages, **kwargs)
                     elif callable(fallback_model):
@@ -1243,6 +1284,39 @@ class ModelPool:
         finally:
             if release:
                 self.release_model(name)
+
+    def register_adapter_with_prime(self, adapter_name: str, adapter_path: str) -> bool:
+        """Register a LoRA adapter with the remote vLLM server (gaia-prime).
+
+        Uses the ``/v1/load_lora_adapter`` API to dynamically load an adapter
+        without restarting the server.  Returns True on success, False on failure.
+        """
+        prime_model = self.models.get("gpu_prime") or self.models.get("prime")
+        if prime_model is None:
+            logger.warning("register_adapter_with_prime: no Prime model in pool")
+            return False
+        endpoint = getattr(prime_model, "endpoint", None)
+        if not endpoint:
+            logger.warning("register_adapter_with_prime: Prime model has no endpoint")
+            return False
+        try:
+            import requests as _req
+            url = f"{endpoint}/v1/load_lora_adapter"
+            resp = _req.post(url, json={
+                "lora_name": adapter_name,
+                "lora_path": adapter_path,
+            }, timeout=30)
+            if resp.status_code == 200:
+                logger.info("Registered adapter '%s' with vLLM from %s", adapter_name, adapter_path)
+                return True
+            logger.warning(
+                "Failed to register adapter '%s': HTTP %s — %s",
+                adapter_name, resp.status_code, resp.text[:200],
+            )
+            return False
+        except Exception:
+            logger.warning("register_adapter_with_prime failed for '%s'", adapter_name, exc_info=True)
+            return False
 
     def get_active_persona(self) -> PersonaAdapter:
         """Returns the currently active PersonaAdapter object."""

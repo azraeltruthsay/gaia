@@ -34,8 +34,13 @@ services:
       - PRIME_ENDPOINT=http://gaia-prime:7777/v1
       - GAIA_AUTOLOAD_MODELS=1
     
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+
     command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core", "--reload-exclude", "knowledge/*"]
-    
+
     ports:
       - "6416:6415"
     
@@ -76,6 +81,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENABLE_DISCORD=0 # Disable discord in candidate to avoid duplicate bots
 
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
     ports:
       - "6417:6414"
 
@@ -115,6 +125,11 @@ services:
       - gaia-candidate-shared:/shared:rw
       - ./logs:/logs:rw
 
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
     ports:
       - "8767:8765"
 
@@ -125,6 +140,60 @@ services:
       retries: 3
 
     command: ["python", "-m", "uvicorn", "gaia_mcp.main:app", "--host", "0.0.0.0", "--port", "8765"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-prime-candidate: The Voice (pre-built vLLM image for Qwen3.5 testing)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-prime-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-prime/Dockerfile
+    image: localhost:5000/gaia-prime-candidate:local
+    container_name: gaia-prime-candidate
+    hostname: gaia-prime-candidate
+    restart: "no"
+
+    volumes:
+      - /mnt/gaia_warm_pool:/models:ro
+      - ./logs/kvcache/prime:/kvcache:rw
+      - ./candidates/gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
+
+    ports:
+      - "7778:7777"
+
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model /models/Qwen3.5-4B-Abliterated
+      --host 0.0.0.0
+      --port 7777
+      --gpu-memory-utilization 0.65
+      --max-model-len 24576
+      --max-num-seqs 1
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --quantization fp8
+      --enable-prefix-caching
+      --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   gaia-candidate-shared:

@@ -156,6 +156,8 @@ _PROMPT_TOOLS = {
     "list_dir", "list_tree",
     # Self-introspection
     "introspect_logs",
+    # Tool discovery (for tools not in this list)
+    "list_tools", "describe_tool",
 }
 
 # ── Timeout-protected Llama calls ────────────────────────────────────────
@@ -264,6 +266,8 @@ def select_tool(
 
 AVAILABLE TOOLS:
 {tool_catalog}
+
+IMPORTANT: These are your most common tools. If the user's request might need a capability you don't see above (e.g., audio, notebooks, study, promotion, world-building), use "list_tools" to discover all available tools, then use "describe_tool" to get the schema for the one you need.
 
 USER REQUEST: {user_input}
 

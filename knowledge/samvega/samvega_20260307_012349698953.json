@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-07T01:23:49.698926+00:00",
+  "session_id": "test-session-21d59c2d",
+  "packet_id": "4c45ab9f-6770-4506-8241-be2d1e460ea5",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "**Summary:**  \nThe system timestamp indicates the current time is 01:23:25 UTC on March 7, 2026. This is part of the system's operational state, reflecting its awareness of time and date.\n\n**Action Items / Important Facts:**  \n- The system maintains accurate time synchronization with UTC.  \n- The timestamp is part of the system's operational state, indicating its awareness of real-time data.  \n- The system is in development and may have ongoing updates or changes to its state.",
+  "what_went_wrong": "The system provided a timestamp-based summary without addressing the user's actual query, leading to a confidence mismatch.",
+  "root_cause": "The system's response was misaligned with the user's intent due to an overemphasis on operational state details without contextual relevance.",
+  "values_misaligned": [
+    "relevance",
+    "user_understanding",
+    "epistemic_humility"
+  ],
+  "corrected_understanding": "A better approach would involve acknowledging the timestamp information while explicitly connecting it to the user's query, ensuring clarity and relevance, and adjusting confidence levels based on the alignment with the user's needs.",
+  "harmonic_context": {},
+  "auditory_notes": "No auditory environment was detected, so the absence of music or sound did not contribute to the error or affect clarity.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}

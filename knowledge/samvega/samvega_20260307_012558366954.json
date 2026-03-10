@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-07T01:25:58.366923+00:00",
+  "session_id": "test-session-21d59c2d",
+  "packet_id": "eebd484e-16e8-465c-b067-6b6ffa2603c4",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "**Summary:**  \nThe assistant provides the current time and states that the name of King Arthur's sword is Excalibur.\n\n**Action Items / Important Facts:**  \n- The current time is 2026-03-07 01:25:34 UTC.  \n- The assistant correctly identifies Excalibur as the name of King Arthur's sword.  \n- The information is provided in a concise and factual manner.",
+  "what_went_wrong": "The assistant provided correct information but with low confidence, indicating uncertainty in the response.",
+  "root_cause": "The low confidence level suggests the assistant was unsure about the correctness of the information despite it being accurate.",
+  "values_misaligned": [
+    "epistemic_humility",
+    "accuracy",
+    "safety"
+  ],
+  "corrected_understanding": "A better approach would involve expressing the information with appropriate confidence, acknowledging the certainty of the answer while maintaining humility in the face of potential future knowledge.",
+  "harmonic_context": {},
+  "auditory_notes": "No auditory environment was detected, so the absence of music or sound did not contribute to the error or affect clarity.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}

@@ -1,7 +1,8 @@
 # GAIA Service-Oriented Architecture - Master Composition
 #
 # Services:
-#   - gaia-core:  The Brain   - Cognitive loop and reasoning (CPU, delegates to gaia-prime)
+#   - gaia-core:  The Brain   - Cognitive loop + embedded Core CPU inference (delegates to gaia-prime for GPU)
+#   - gaia-nano:  The Reflex  - Nano triage classifier (CPU, llama-server)
 #   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
@@ -87,10 +88,7 @@ services:
   # gaia-prime: The Voice - Standalone vLLM inference server (GPU)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime:
-    build:
-      context: ./gaia-prime
-      dockerfile: Dockerfile
-    image: localhost:5000/gaia-prime:local
+    image: vllm/vllm-openai:latest
     container_name: gaia-prime
     hostname: gaia-prime
     restart: unless-stopped
@@ -109,8 +107,7 @@ services:
       - "7777:7777"
 
     command: >
-      python -m vllm.entrypoints.openai.api_server
-      --model ${PRIME_MODEL_PATH:-/models/Qwen3-8B-abliterated-AWQ}
+      ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.65
@@ -119,14 +116,8 @@ services:
       --trust-remote-code
       --dtype auto
       --enforce-eager
-      --enable-lora
-      --max-loras 4
-      --max-lora-rank 64
-      --enable-sleep-mode
+      --quantization fp8
       --enable-prefix-caching
-      --kv-offloading-backend native
-      --kv-offloading-size 8
-      --disable-hybrid-kv-cache-manager
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
@@ -147,7 +138,51 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-core: The Brain - Cognitive loop and reasoning (CPU, delegates to gaia-prime)
+  # gaia-nano: The Reflex - Nano triage classifier (CPU, llama-server)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-nano:
+    build:
+      context: ./gaia-llama
+      dockerfile: Dockerfile
+    image: localhost:5000/gaia-nano:local
+    container_name: gaia-nano
+    hostname: gaia-nano
+    restart: unless-stopped
+
+    volumes:
+      - ./gaia-models:/models:ro
+
+    command: >
+      --host 0.0.0.0
+      --port 8080
+      --model /models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
+      --ctx-size 2048
+      --threads 4
+      --n-gpu-layers 0
+      --chat-template chatml
+
+    ports:
+      - "8090:8080"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - gaia-net
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core: The Brain - Cognitive loop + embedded Core CPU inference
+  # Runs llama-server internally for Core/Lite (Qwen3.5-4B) on port 8092
+  # GPU inference offloaded to gaia-prime via PRIME_ENDPOINT
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-core:
     build:
@@ -200,9 +235,18 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-abliterated-AWQ}
-      # Lite model (CPU, GGUF via llama_cpp)
-      - GAIA_LITE_GGUF=${GAIA_LITE_GGUF:-/models/Qwen3-8B-abliterated-Q4_K_M.gguf}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3.5-4B-Abliterated}
+      # Nano reflex endpoint (separate llama-server container)
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
+      - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-Abliterated-Q8_0.gguf}
+      # Core/Lite CPU endpoint (embedded llama-server inside gaia-core)
+      - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-Abliterated-Q4_K_M.gguf}
+      # Embedded llama-server config
+      - CORE_CPU_PORT=8092
+      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf
+      - CORE_CPU_CTX=4096
+      - CORE_CPU_THREADS=8
       # HA failover — candidate MCP as fallback
       - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       # Logging
@@ -366,6 +410,9 @@ services:
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       # Embedding model
       - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
+      # AWQ model is for inference only (GEMM kernels lack backward pass)
+      - BASE_MODEL_PATH=/models/Qwen3.5-9B-Abliterated
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
@@ -377,6 +424,8 @@ services:
 
     deploy:
       resources:
+        limits:
+          memory: 48G
         reservations:
           devices:
             - driver: nvidia
@@ -491,7 +540,7 @@ services:
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
       - ./gaia-models/voice:/models/voice:ro
-      - ./gaia-models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf:/models/nano_refiner.gguf:ro
+      - ./gaia-models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf:/models/nano_refiner.gguf:ro
 
     environment:
       - PYTHONPATH=/app:/gaia-common

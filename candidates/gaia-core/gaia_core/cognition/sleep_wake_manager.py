@@ -26,8 +26,10 @@ TaskQueue); gaia-core owns the orchestration.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
@@ -297,6 +299,9 @@ class SleepWakeManager:
                 consumed_note_paths = [n["path"] for n in pending]
                 logger.info("Loaded %d Council notes for Prime", len(pending))
 
+            # LMCache status: check if disk-persisted KV chunks exist
+            lmcache_status = self._check_lmcache_status()
+
             self.state = GaiaState.ACTIVE
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
@@ -304,13 +309,26 @@ class SleepWakeManager:
             self.last_state_change = datetime.now(timezone.utc)
             self._emit_state_change("asleep", "active", "wake signal processed")
 
-            logger.info("Wake complete, context restored")
+            # Log memory layer status
+            if lmcache_status["kv_warm"] and checkpoint:
+                logger.info("Wake complete — dual memory: LMCache KV warm (%d chunks) + prime.md checkpoint",
+                            lmcache_status["chunk_count"])
+            elif lmcache_status["kv_warm"]:
+                logger.info("Wake complete — LMCache KV warm (%d chunks), no prime.md checkpoint",
+                            lmcache_status["chunk_count"])
+                logger.warning("LMCache has KV state but prime.md is missing/stale — semantic backup gap")
+            elif checkpoint:
+                logger.info("Wake complete — prime.md checkpoint loaded, LMCache cold (first wake or cache evicted)")
+            else:
+                logger.info("Wake complete — cold start (no LMCache, no checkpoint)")
+
             return {
                 "checkpoint_loaded": bool(checkpoint),
                 "context": review_context,
                 "council_context": council_context,
                 "council_note_paths": consumed_note_paths,
                 "council_notes_count": len(consumed_note_paths),
+                "lmcache": lmcache_status,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception:
@@ -446,6 +464,22 @@ class SleepWakeManager:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_lmcache_status() -> Dict[str, Any]:
+        """Check whether LMCache has persisted KV chunks on disk."""
+        kvcache_dir = Path(os.environ.get("LMCACHE_DISK_PATH", "/kvcache"))
+        try:
+            if kvcache_dir.is_dir():
+                chunks = list(kvcache_dir.glob("*"))
+                return {
+                    "kv_warm": len(chunks) > 0,
+                    "chunk_count": len(chunks),
+                    "disk_path": str(kvcache_dir),
+                }
+        except Exception:
+            logger.debug("LMCache disk check failed", exc_info=True)
+        return {"kv_warm": False, "chunk_count": 0, "disk_path": str(kvcache_dir)}
 
     @staticmethod
     def _format_checkpoint_as_review(checkpoint: str) -> str:

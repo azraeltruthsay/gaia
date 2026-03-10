@@ -1,0 +1,22 @@
+{
+  "artifact_type": "samvega",
+  "timestamp": "2026-03-07T01:19:54.937965+00:00",
+  "session_id": "test-session-75351c38",
+  "packet_id": "e853c8ae-af73-4754-84e9-ede510512065",
+  "trigger": "confidence_mismatch",
+  "original_output_summary": "**Summary:**  \nThe system provides the current time as 01:17:27 UTC on 2026-03-07. This timestamp is relevant for tracking events within the GAIA system's operational timeline.\n\n**Action Items / Important Facts:**  \n- The current system time is 01:17:27 UTC on 2026-03-07.  \n- GAIA is in a developmental phase and operates as a self-reflective, resilient, and sovereign Intelligent Operating System.  \n- The system includes various MCP methods for interacting with the environment and managing tasks.",
+  "what_went_wrong": "GAIA provided a time-related summary without addressing the user's query or demonstrating confidence in its response.",
+  "root_cause": "The system's confidence levels were low, and it failed to align its output with the user's expectations or context.",
+  "values_misaligned": [
+    "accuracy",
+    "user_understanding",
+    "epistemic_humility"
+  ],
+  "corrected_understanding": "A better approach would be to acknowledge the current time, relate it to the user's context, and express a reasonable level of confidence in the information provided.",
+  "harmonic_context": {},
+  "auditory_notes": "No auditory environment was detected, so the lack of music or sound did not contribute to the error or affect clarity.",
+  "weight": 0.0,
+  "promoted_to_tier5": false,
+  "reviewed": false,
+  "reviewed_at": null
+}
