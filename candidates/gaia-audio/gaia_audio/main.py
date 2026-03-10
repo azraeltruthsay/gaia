@@ -10,6 +10,7 @@ import asyncio
 import base64
 import logging
 import time
+import os
 from contextlib import asynccontextmanager
 
 import httpx
@@ -25,11 +26,17 @@ from gaia_audio.models import (
     SynthesizeResponse,
     TranscribeRequest,
     TranscribeResponse,
+    RefineRequest,
+    RefineResponse,
+    AnalyzeAudioRequest,
+    AnalyzeAudioResponse,
     VoiceInfo,
 )
 from gaia_audio.status import status_tracker
 from gaia_audio.stt_engine import STTEngine, audio_bytes_to_array
 from gaia_audio.tts_engine import TTSEngine
+from gaia_audio.refiner_engine import RefinerEngine
+from gaia_audio.music_engine import MusicEngine
 
 logger = logging.getLogger("GAIA.Audio")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -40,6 +47,8 @@ config: AudioConfig | None = None
 gpu_manager: GPUManager | None = None
 stt_engine: STTEngine | None = None
 tts_engine: TTSEngine | None = None
+refiner_engine: RefinerEngine | None = None
+music_engine: MusicEngine | None = None
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -48,7 +57,7 @@ tts_engine: TTSEngine | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    global config, gpu_manager, stt_engine, tts_engine
+    global config, gpu_manager, stt_engine, tts_engine, refiner_engine, music_engine
 
     config = AudioConfig.from_constants()
     logger.info("Audio config loaded: stt=%s, tts=%s, vram_budget=%dMB",
@@ -69,6 +78,21 @@ async def lifespan(app: FastAPI):
         vram_budget_mb=config.vram_budget_mb,
         half_duplex=config.half_duplex,
     )
+
+    # Initialize Nano-Refiner (via gaia-nano HTTP endpoint)
+    nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+    refiner_engine = RefinerEngine(endpoint=nano_endpoint)
+    try:
+        refiner_engine.load()
+    except Exception as e:
+        logger.error(f"Failed to connect to Nano-Refiner: {e}")
+
+    # Initialize MusicEngine (CPU models + librosa)
+    music_engine = MusicEngine()
+    try:
+        music_engine.load()
+    except Exception as e:
+        logger.error(f"Failed to load MusicEngine: {e}")
 
     duplex_mode = "half-duplex" if config.half_duplex else "full-duplex"
     await status_tracker.emit("startup", f"gaia-audio ready (STT={config.stt_model}, TTS={config.tts_engine}, {duplex_mode})")
@@ -213,6 +237,90 @@ async def transcribe(request: TranscribeRequest):
         raise HTTPException(500, f"Transcription failed: {e}") from e
 
 
+# ── Audio Analysis (Music/Environment) ─────────────────────────────
+
+
+@app.post("/analyze", response_model=AnalyzeAudioResponse)
+async def analyze_audio(request: AnalyzeAudioRequest):
+    """Perform deep musical and environmental analysis of audio."""
+    if not music_engine:
+        raise HTTPException(503, "Music engine not initialized")
+
+    t0 = time.monotonic()
+    status_tracker.state = "analyzing"
+    await status_tracker.emit("analyze_start", f"Analyzing audio sample ({request.sample_rate}Hz)")
+
+    try:
+        # Convert base64 to numpy array
+        audio_bytes = base64.b64decode(request.audio_base64)
+        audio_array = audio_bytes_to_array(audio_bytes, request.sample_rate)
+
+        # Run analysis in executor (CPU intensive)
+        analysis_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            music_engine.analyze,
+            audio_array,
+            request.sample_rate
+        )
+
+        latency_ms = (time.monotonic() - t0) * 1000
+        status_tracker.state = "idle"
+        await status_tracker.emit("analyze_complete", f"BPM: {analysis_result['bpm']}, Key: {analysis_result['key']}", latency_ms)
+
+        return AnalyzeAudioResponse(
+            **analysis_result
+        )
+
+    except Exception as e:
+        status_tracker.state = "idle"
+        await status_tracker.emit("error", f"Analysis failed: {e}")
+        logger.error("Analysis failed", exc_info=True)
+        raise HTTPException(500, f"Analysis failed: {e}") from e
+
+
+# ── Refinement (Nano LLM) ───────────────────────────────────────────
+
+
+@app.post("/refine", response_model=RefineResponse)
+async def refine(request: RefineRequest):
+    """Clean up and format a transcript using the nano-refiner (CPU)."""
+    global refiner_engine
+    logger.info(f"Refine request received. Engine initialized: {refiner_engine is not None}")
+    if not refiner_engine:
+        # Emergency initialization if lifespan missed it or global state was lost
+        nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+        logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_endpoint}")
+        refiner_engine = RefinerEngine(endpoint=nano_endpoint)
+        refiner_engine.load()
+
+    t0 = time.monotonic()
+    status_tracker.state = "refining"
+    await status_tracker.emit("refine_start", f"Refining text ({len(request.text)} chars)")
+
+    try:
+        # The refiner runs on CPU, so it doesn't need gpu_manager synchronization
+        refined_text = await asyncio.get_event_loop().run_in_executor(
+            None, 
+            refiner_engine.refine, 
+            request.text, 
+            request.max_tokens
+        )
+
+        latency_ms = (time.monotonic() - t0) * 1000
+        status_tracker.state = "idle"
+        await status_tracker.emit("refine_complete", f"Refined {len(refined_text)} chars", latency_ms)
+
+        return RefineResponse(
+            refined_text=refined_text,
+            latency_ms=latency_ms
+        )
+
+    except Exception as e:
+        status_tracker.state = "idle"
+        await status_tracker.emit("error", f"Refinement failed: {e}")
+        raise HTTPException(500, f"Refinement failed: {e}") from e
+
+
 # ── Synthesis (TTS) ───────────────────────────────────────────────────
 
 
@@ -225,6 +333,10 @@ async def synthesize(request: SynthesizeRequest):
     if not gpu_manager or not tts_engine:
         raise HTTPException(503, "Audio service not initialized")
 
+    if not tts_engine.loaded:
+        logger.info("TTS engine not loaded; loading on-demand")
+        await gpu_manager.run_tts(tts_engine.load)
+
     t0 = time.monotonic()
     status_tracker.state = "synthesizing"
     await status_tracker.emit("tts_start", request.text[:80])
@@ -233,9 +345,16 @@ async def synthesize(request: SynthesizeRequest):
         # Use requested engine override or default
         engine = tts_engine
         if request.engine and request.engine != tts_engine.engine_type:
-            # TODO: support dynamic engine switching
-            logger.warning("Engine override requested (%s) but not yet supported; using %s",
-                           request.engine, tts_engine.engine_type)
+            # Check for cloud fallback providers
+            if request.engine in ["elevenlabs", "openai"]:
+                logger.info("Using cloud TTS provider: %s", request.engine)
+                # Cloud providers would be handled via a separate CloudTTSEngine class
+                # For now, we fallback to local but log the intent
+                logger.warning("%s requested but dynamic cloud switching not fully implemented; falling back to %s",
+                               request.engine, tts_engine.engine_type)
+            else:
+                logger.warning("Engine override requested (%s) not supported; using %s",
+                               request.engine, tts_engine.engine_type)
 
         result = await gpu_manager.run_tts(
             engine.synthesize_sync,

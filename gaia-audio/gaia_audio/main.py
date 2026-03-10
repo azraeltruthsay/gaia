@@ -57,7 +57,7 @@ music_engine: MusicEngine | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    global config, gpu_manager, stt_engine, tts_engine
+    global config, gpu_manager, stt_engine, tts_engine, refiner_engine, music_engine
 
     config = AudioConfig.from_constants()
     logger.info("Audio config loaded: stt=%s, tts=%s, vram_budget=%dMB",
@@ -79,13 +79,13 @@ async def lifespan(app: FastAPI):
         half_duplex=config.half_duplex,
     )
 
-    # Initialize Nano-Refiner (CPU model)
-    nano_model_path = os.getenv("NANO_MODEL_PATH", "/models/nano_refiner.gguf")
-    refiner_engine = RefinerEngine(model_path=nano_model_path)
+    # Initialize Nano-Refiner (via gaia-nano HTTP endpoint)
+    nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+    refiner_engine = RefinerEngine(endpoint=nano_endpoint)
     try:
         refiner_engine.load()
     except Exception as e:
-        logger.error(f"Failed to load RefinerEngine: {e}")
+        logger.error(f"Failed to connect to Nano-Refiner: {e}")
 
     # Initialize MusicEngine (CPU models + librosa)
     music_engine = MusicEngine()
@@ -288,9 +288,9 @@ async def refine(request: RefineRequest):
     logger.info(f"Refine request received. Engine initialized: {refiner_engine is not None}")
     if not refiner_engine:
         # Emergency initialization if lifespan missed it or global state was lost
-        nano_model_path = os.getenv("NANO_MODEL_PATH", "/models/nano_refiner.gguf")
-        logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_model_path}")
-        refiner_engine = RefinerEngine(model_path=nano_model_path)
+        nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+        logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_endpoint}")
+        refiner_engine = RefinerEngine(endpoint=nano_endpoint)
         refiner_engine.load()
 
     t0 = time.monotonic()
