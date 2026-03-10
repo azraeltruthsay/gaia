@@ -11,6 +11,7 @@ Orchestrates the process of:
 Part of Phase 1 implementation of the GAIA LoRA Adapter Architecture.
 """
 
+import gc
 import json
 import logging
 import hashlib
@@ -56,6 +57,11 @@ class TrainingConfig:
     learning_rate: float = 2e-4
     max_steps: int = 100
     warmup_steps: int = 10
+    target_loss: float = 0.05
+    convergence_patience: int = 3
+
+    # Incremental training
+    resume_from: Optional[str] = None
 
     # Governance
     requires_approval: bool = True
@@ -399,6 +405,100 @@ class StudyModeManager:
         finally:
             self.current_training = None
 
+    async def _acquire_gpu(self, min_free_gb: float = 12.0) -> bool:
+        """
+        Ensure GPU has enough free VRAM for training.
+
+        If free VRAM is below threshold, requests the orchestrator to release
+        GPU-holding services (gaia-prime, gaia-audio) via the handoff protocol.
+
+        Returns:
+            True if GPU is ready, False if acquisition failed (training can
+            still proceed but may OOM).
+        """
+        import torch
+
+        if not torch.cuda.is_available():
+            logger.warning("No CUDA device — skipping GPU acquisition")
+            return False
+
+        free_bytes, total_bytes = torch.cuda.mem_get_info(0)
+        free_gb = free_bytes / (1024 ** 3)
+        total_gb = total_bytes / (1024 ** 3)
+        logger.info("GPU VRAM: %.1fGiB free / %.1fGiB total", free_gb, total_gb)
+
+        if free_gb >= min_free_gb:
+            logger.info("Sufficient VRAM available — no handoff needed")
+            return True
+
+        # Request orchestrator to clear GPU
+        orchestrator_url = "http://gaia-orchestrator:6410"
+        logger.info(
+            "Insufficient VRAM (%.1fGiB < %.1fGiB) — requesting GPU handoff from orchestrator",
+            free_gb, min_free_gb
+        )
+
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                resp = await client.post(
+                    f"{orchestrator_url}/gpu/handoff",
+                    json={"target": "study", "reason": "qlora_training"},
+                )
+                if resp.status_code == 200:
+                    logger.info("GPU handoff to study completed successfully")
+                    return True
+                else:
+                    logger.warning(
+                        "GPU handoff request returned %s: %s",
+                        resp.status_code, resp.text[:200]
+                    )
+                    return False
+
+        except Exception as e:
+            logger.warning(
+                "Could not reach orchestrator for GPU handoff: %s "
+                "(manual intervention may be needed — stop gaia-prime/gaia-audio)",
+                e
+            )
+            return False
+
+    async def _release_gpu(self) -> None:
+        """
+        Release GPU resources after training and signal orchestrator to
+        restore normal services (gaia-prime, gaia-audio).
+        """
+        import torch
+
+        # Clear CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        logger.info("CUDA cache cleared after training")
+
+        # Signal orchestrator to reclaim GPU for inference
+        orchestrator_url = "http://gaia-orchestrator:6410"
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{orchestrator_url}/gpu/handoff",
+                    json={"target": "core", "reason": "training_complete"},
+                )
+                if resp.status_code == 200:
+                    logger.info("GPU reclaim by core/prime completed")
+                else:
+                    logger.warning("GPU reclaim request returned %s", resp.status_code)
+
+        except Exception as e:
+            logger.warning(
+                "Could not reach orchestrator for GPU reclaim: %s "
+                "(gaia-prime/gaia-audio may need manual restart)",
+                e
+            )
+
     async def _run_qlora_training(
         self,
         samples: List[Dict[str, str]],
@@ -429,12 +529,16 @@ class StudyModeManager:
         base_model_path = self.config.get("base_model_path")
 
         if use_real_training and base_model_path:
+            # Acquire GPU — clear other services' VRAM if needed
+            await self._acquire_gpu(min_free_gb=12.0)
             try:
                 return await self._run_real_qlora_training(
                     samples, config, adapter_dir, base_model_path
                 )
             except Exception as e:
                 logger.warning(f"Real training failed, falling back to simulation: {e}")
+            finally:
+                await self._release_gpu()
 
         # Fallback: Simulation mode for testing
         return await self._run_simulated_training(samples, config, adapter_dir)
@@ -450,7 +554,15 @@ class StudyModeManager:
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
 
-        from app.cognition.qlora_trainer import QLoRATrainer, QLoRAConfig
+        from gaia_study.qlora_trainer import QLoRATrainer, QLoRAConfig
+
+        # Archive existing adapter before overwriting (rollback safety)
+        is_incremental = config.resume_from is not None
+        if is_incremental and adapter_dir.exists() and (adapter_dir / "adapter_config.json").exists():
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+            archive_dir = adapter_dir.parent / f"{adapter_dir.name}_v_{ts}"
+            shutil.copytree(adapter_dir, archive_dir)
+            logger.info("Archived existing adapter to %s", archive_dir)
 
         # Build QLoRA config from training config
         qlora_config = QLoRAConfig(
@@ -467,6 +579,8 @@ class StudyModeManager:
             learning_rate=config.learning_rate,
             max_steps=config.max_steps,
             warmup_steps=config.warmup_steps,
+            target_loss=config.target_loss,
+            convergence_patience=config.convergence_patience,
         )
 
         # Progress callback to update our state
@@ -474,12 +588,13 @@ class StudyModeManager:
             self.progress = 0.3 + (0.5 * progress.current_step / max(progress.total_steps, 1))
             self.status_message = f"Training step {progress.current_step}/{progress.total_steps} (loss: {progress.current_loss:.4f})"
 
-        # Create trainer
+        # Create trainer with optional resume_from
         trainer = QLoRATrainer(
             base_model_path=base_model_path,
             config=qlora_config,
             output_dir=str(adapter_dir),
-            progress_callback=on_progress
+            progress_callback=on_progress,
+            resume_from=config.resume_from,
         )
 
         # Run training in thread pool to not block async loop
@@ -517,17 +632,21 @@ class StudyModeManager:
 
             # Save adapter
             self.status_message = "Saving adapter..."
+            stop_reason = metrics.get("stop_reason", "max_steps")
             await loop.run_in_executor(
                 executor,
                 trainer.save_adapter,
                 config.adapter_name,
-                None
+                {"stop_reason": stop_reason},
             )
 
             final_loss = metrics.get("final_loss", 0.0)
             steps = metrics.get("total_steps", 0)
 
-            logger.info(f"Real QLoRA training complete: {steps} steps, loss={final_loss:.4f}")
+            logger.info(
+                "Real QLoRA training complete: %d steps, loss=%.4f, stop_reason=%s",
+                steps, final_loss, stop_reason,
+            )
             return adapter_dir, final_loss, steps
 
         finally:
@@ -624,7 +743,9 @@ class StudyModeManager:
                 "batch_size": config.batch_size,
                 "final_loss": final_loss,
                 "duration_seconds": duration,
-                "source_documents": training_metadata.get("source_documents", [])
+                "source_documents": training_metadata.get("source_documents", []),
+                "incremental": config.resume_from is not None,
+                "resumed_from": config.resume_from,
             },
             "governance": {
                 "requires_approval": config.requires_approval,

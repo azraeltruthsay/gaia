@@ -729,7 +729,8 @@
         <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
         <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
         <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
-        <button class="gen-filter-btn" :class="roleFilter === 'lite' ? 'active' : ''" @click="setFilter('lite')">Lite</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'core' ? 'active' : ''" @click="setFilter('core')">Core</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'nano' ? 'active' : ''" @click="setFilter('nano')">Nano</button>
         <div style="flex:1"></div>
         <label class="gen-scroll-lock">
           <input type="checkbox" x-model="scrollLocked"> Auto-scroll

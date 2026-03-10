@@ -84,8 +84,10 @@ _MAX_PHRASES = _PROBE_CFG.get("max_phrases", 8)
 # Min phrase length (skip noise)
 _MIN_PHRASE_LEN = _PROBE_CFG.get("min_phrase_len", 3)
 
-# Similarity threshold — below this, a hit is noise
-SIMILARITY_THRESHOLD = _PROBE_CFG.get("similarity_threshold", 0.40)
+# Similarity threshold — below this, a hit is noise.
+# 0.55 filters out spurious matches (e.g. "GAIA" matching blueprints at 0.54)
+# while still catching genuine domain queries.
+SIMILARITY_THRESHOLD = _PROBE_CFG.get("similarity_threshold", 0.55)
 
 # Short-circuit: skip probe for these reflex commands
 _REFLEX_COMMANDS = frozenset({"exit", "quit", "bye", "help", "h", "status", "list_tools", ""})

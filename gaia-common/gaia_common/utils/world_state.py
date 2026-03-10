@@ -44,8 +44,13 @@ def _mem_summary() -> str:
                     meminfo[k.strip()] = v.strip()
         total = meminfo.get("MemTotal")
         free = meminfo.get("MemAvailable") or meminfo.get("MemFree")
+        swap_total = meminfo.get("SwapTotal")
+        swap_free = meminfo.get("SwapFree")
         if total and free:
-            return f"mem {free} free / {total} total"
+            parts = [f"mem {free} free / {total} total"]
+            if swap_total and swap_free:
+                parts.append(f"swap {swap_free} free / {swap_total} total")
+            return " | ".join(parts)
     except Exception:
         logger.exception("Failed to read meminfo")
         pass

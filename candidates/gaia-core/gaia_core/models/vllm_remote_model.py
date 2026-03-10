@@ -7,7 +7,7 @@ gaia-core to offload GPU inference to a separate container.
 
 Environment:
     PRIME_ENDPOINT: Base URL of the vLLM server (e.g. http://gaia-prime-candidate:7777)
-    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3-8B-abliterated-AWQ)
+    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3.5-4B-Abliterated)
 """
 
 import logging
@@ -43,7 +43,7 @@ class VLLMRemoteModel:
         self.model_name = (
             model_config.get("path")
             or model_config.get("model")
-            or os.getenv("PRIME_MODEL", "/models/Qwen3-8B-abliterated-AWQ")
+            or os.getenv("PRIME_MODEL", "/models/Qwen3.5-4B-Abliterated")
         )
 
         self.timeout = int(model_config.get("timeout", 120))
@@ -299,20 +299,37 @@ class VLLMRemoteModel:
                     f"Is gaia-prime running?"
                 ) from exc
             except requests.exceptions.HTTPError as exc:
-                # Smart retry for context window overflow: parse exact available tokens
-                if r.status_code == 400 and _allow_clamp_retry:
+                if r.status_code == 400:
                     error_text = (r.text or "")[:500]
-                    m = re.search(r"max_tokens\s+\d+\s*>\s*(\d+)\s*-\s*(\d+)", error_text)
-                    if m:
-                        available = int(m.group(1)) - int(m.group(2))
-                        if available > 0:
-                            clamped = max(1, available - 16)
-                            logger.warning(
-                                "vLLM context overflow — retrying with max_tokens=%d (was %d)",
-                                clamped, payload.get("max_tokens", 0),
-                            )
-                            payload["max_tokens"] = clamped
-                            return self._post(path, payload, _allow_clamp_retry=False)
+
+                    # ── LoRA adapter not loaded — graceful fallback to base model ──
+                    if self._active_adapter and (
+                        "lora" in error_text.lower()
+                        or "adapter" in error_text.lower()
+                        or self._active_adapter in error_text
+                    ):
+                        logger.warning(
+                            "vLLM rejected adapter '%s' (400: %s). "
+                            "Falling back to base model.",
+                            self._active_adapter, error_text[:200],
+                        )
+                        self._active_adapter = None
+                        payload["model"] = self.model_name
+                        return self._post(path, payload, _allow_clamp_retry=_allow_clamp_retry)
+
+                    # Smart retry for context window overflow: parse exact available tokens
+                    if _allow_clamp_retry:
+                        m = re.search(r"max_tokens\s+\d+\s*>\s*(\d+)\s*-\s*(\d+)", error_text)
+                        if m:
+                            available = int(m.group(1)) - int(m.group(2))
+                            if available > 0:
+                                clamped = max(1, available - 16)
+                                logger.warning(
+                                    "vLLM context overflow — retrying with max_tokens=%d (was %d)",
+                                    clamped, payload.get("max_tokens", 0),
+                                )
+                                payload["max_tokens"] = clamped
+                                return self._post(path, payload, _allow_clamp_retry=False)
                 logger.error("vLLM HTTP error %s: %s", r.status_code, r.text[:500])
                 raise RuntimeError(f"vLLM request failed ({r.status_code})") from exc
 
@@ -374,8 +391,17 @@ class VLLMRemoteModel:
 
     @staticmethod
     def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-        """Normalise messages for the OpenAI-compatible API."""
-        clean = []
+        """Normalise messages for the OpenAI-compatible API.
+
+        Qwen3.5 (and many other models) require that system messages
+        appear **only** at position 0.  The prompt builder may produce
+        multiple system blocks (persona, summary, sleep context, council,
+        session RAG).  We consolidate them into a single system message
+        at the front, preserving order.
+        """
+        system_parts: list[str] = []
+        non_system: list[dict[str, str]] = []
+
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
@@ -385,9 +411,21 @@ class VLLMRemoteModel:
                 content = ""
             elif not isinstance(content, str):
                 content = str(content)
-            if not content.strip() and role != "system":
+
+            if role == "system":
+                if content.strip():
+                    system_parts.append(content)
                 continue
-            clean.append({"role": role, "content": content})
+
+            if not content.strip():
+                continue
+            non_system.append({"role": role, "content": content})
+
+        clean: list[dict[str, str]] = []
+        if system_parts:
+            clean.append({"role": "system", "content": "\n\n".join(system_parts)})
+        clean.extend(non_system)
+
         if not any(m["role"] == "user" for m in clean):
             clean.append({"role": "user", "content": "(continue)"})
         return clean

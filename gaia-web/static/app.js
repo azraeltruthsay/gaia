@@ -1545,7 +1545,7 @@ function generationPanel() {
     maxEntries: 500,
     currentGenId: null,
     scrollLocked: true,   // auto-scroll to bottom
-    roleFilter: '',       // '' = all, 'prime', 'lite'
+    roleFilter: '',       // '' = all, 'prime', 'core', 'nano'
     connected: false,
     _es: null,            // EventSource
     _currentBuf: '',      // accumulator for in-progress generation

@@ -243,6 +243,12 @@ class ImmuneSystem:
             for name, mcfg in model_configs.items():
                 if not mcfg.get("enabled", True):
                     continue
+                # Remote models (vllm_remote) use a model identifier, not a local path
+                if mcfg.get("type") == "vllm_remote" or mcfg.get("endpoint"):
+                    continue
+                # Alias entries (e.g. "lite": {"alias": "core"}) have no path
+                if mcfg.get("alias"):
+                    continue
                 path_val = mcfg.get("path")
                 if path_val:
                     p = Path(path_val)
@@ -391,6 +397,22 @@ class ImmuneSystem:
                 return weight
         return 1.0
 
+    LOG_WINDOW_SECONDS = 1800  # Only count errors from last 30 minutes
+
+    def _is_recent_log_line(self, line: str) -> bool:
+        """Check if a log line's timestamp is within the scoring window."""
+        # Match ISO timestamps like 2026-03-07T21:28:56.330634+00:00
+        m = re.match(r'.*?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
+        if not m:
+            return True  # No timestamp = assume recent (conservative)
+        try:
+            from datetime import datetime, timezone
+            ts = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            return age <= self.LOG_WINDOW_SECONDS
+        except Exception:
+            return True
+
     def _scan_and_triage(self) -> Dict[str, Any]:
         stats = {}
         for service in self.SERVICES:
@@ -401,7 +423,7 @@ class ImmuneSystem:
                 continue
             try:
                 lines = log_path.read_text(errors="replace").splitlines()[-500:]
-                error_lines = [l for l in lines if "ERROR" in l or "CRITICAL" in l]
+                error_lines = [l for l in lines if ("ERROR" in l or "CRITICAL" in l) and self._is_recent_log_line(l)]
                 service_issues = Counter()
                 service_score = 0.0
                 for line in error_lines:
@@ -409,7 +431,7 @@ class ImmuneSystem:
                     normalized = self._normalize_message(msg)
                     service_issues[normalized] += 1
                 for issue, count in service_issues.items():
-                    service_score += self._get_priority(issue) * math.log10(count + 9) 
+                    service_score += self._get_priority(issue) * math.log10(count + 9)
                 stats[service] = {
                     "raw_count": len(error_lines),
                     "issues": dict(service_issues),

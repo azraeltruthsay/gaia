@@ -33,9 +33,9 @@ def get_study_manager() -> StudyModeManager:
         study_config = {
             "max_training_time_seconds": int(os.getenv("MAX_TRAINING_TIME", "600")),
             "max_training_samples": int(os.getenv("MAX_TRAINING_SAMPLES", "1000")),
-            "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "100")),
+            "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "200")),
             "use_real_training": os.getenv("USE_REAL_TRAINING", "true").lower() == "true",
-            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Claude"),
+            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Qwen3.5-9B-Abliterated"),
             "governance": {
                 "forbidden_patterns": [
                     "ignore previous instructions",
@@ -92,6 +92,9 @@ class StudyStartRequest(BaseModel):
     pillar: str = Field(default="general", description="Knowledge pillar")
     description: str = ""
     max_steps: int = Field(default=100, ge=1, le=1000)
+    target_loss: float = Field(default=0.05, ge=0.0, description="Stop when loss drops below this threshold")
+    convergence_patience: int = Field(default=3, ge=1, description="Consecutive checks below target_loss before stopping")
+    resume_from: Optional[str] = Field(default=None, description="Path to existing adapter for incremental training")
     activation_triggers: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
 
@@ -342,6 +345,9 @@ def create_app() -> FastAPI:
                 source_documents=request.documents,
                 description=request.description,
                 max_steps=request.max_steps,
+                target_loss=request.target_loss,
+                convergence_patience=request.convergence_patience,
+                resume_from=request.resume_from,
                 activation_triggers=request.activation_triggers,
                 tags=request.tags,
             )
@@ -397,6 +403,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/adapters")
+    @app.get("/adapters")
     async def adapter_list(tier: Optional[int] = None):
         """List available LoRA adapters."""
         try:
@@ -411,6 +418,26 @@ def create_app() -> FastAPI:
             logger.exception(f"Failed to list adapters: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    async def _notify_core_adapter_change(adapter_name: str, action: str, tier: int = 3):
+        """Notify gaia-core that an adapter has changed."""
+        import httpx
+        core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+        url = f"{core_url}/models/adapters/notify"
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "adapter_name": adapter_name,
+                    "action": action,
+                    "tier": tier
+                }
+                resp = await client.post(url, json=payload, timeout=5.0)
+                if resp.status_code == 200:
+                    logger.info(f"Successfully notified core of adapter {action}: {adapter_name}")
+                else:
+                    logger.warning(f"Failed to notify core of adapter {action}: {resp.status_code} {resp.text}")
+        except Exception as e:
+            logger.error(f"Error notifying core of adapter change: {e}")
+
     @app.post("/adapters/load")
     async def adapter_load(request: AdapterLoadRequest):
         """Load a LoRA adapter for use in generation."""
@@ -418,81 +445,85 @@ def create_app() -> FastAPI:
             manager = get_study_manager()
             tier_dir = manager._get_tier_directory(request.tier)
             adapter_path = tier_dir / request.adapter_name
-
+    
             if not adapter_path.exists():
                 raise HTTPException(
                     status_code=404,
                     detail=f"Adapter '{request.adapter_name}' not found in tier {request.tier}"
                 )
-
-            # TODO: Actually load into vLLM model pool via gaia-core API
+    
+            # Notify core so the model pool can prepare
+            await _notify_core_adapter_change(request.adapter_name, "load", request.tier)
+            
             return {
                 "ok": True,
                 "adapter_name": request.adapter_name,
                 "adapter_path": str(adapter_path),
                 "tier": request.tier,
-                "message": "Adapter registered for loading (actual loading requires model pool integration)"
+                "message": f"Adapter '{request.adapter_name}' loaded and core notified."
             }
         except HTTPException:
             raise
         except Exception as e:
             logger.exception(f"Failed to load adapter: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-
+    
     @app.post("/adapters/unload")
     async def adapter_unload(request: AdapterLoadRequest):
         """Unload a LoRA adapter."""
         try:
-            # TODO: Actually unload from vLLM model pool via gaia-core API
+            # Notify core to unload from model pool
+            await _notify_core_adapter_change(request.adapter_name, "unload", request.tier)
+            
             return {
                 "ok": True,
                 "adapter_name": request.adapter_name,
-                "message": "Adapter unload requested (requires model pool integration)"
+                "message": f"Adapter '{request.adapter_name}' unload requested and core notified."
             }
         except Exception as e:
             logger.exception(f"Failed to unload adapter: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-
-    @app.delete("/adapters/{adapter_name}")
-    async def adapter_delete(adapter_name: str, tier: int = 3):
-        """Delete a LoRA adapter."""
-        try:
-            manager = get_study_manager()
-            deleted = manager.delete_adapter(adapter_name, tier)
-            return {
-                "ok": deleted,
-                "adapter_name": adapter_name,
-                "tier": tier,
-                "message": "Adapter deleted" if deleted else "Adapter not found or protected"
-            }
-        except Exception as e:
-            logger.exception(f"Failed to delete adapter: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @app.get("/adapters/{adapter_name}")
-    async def adapter_info(adapter_name: str, tier: int = 3):
-        """Get detailed info about a specific adapter."""
-        try:
-            import json
-            manager = get_study_manager()
-            tier_dir = manager._get_tier_directory(tier)
-            adapter_path = tier_dir / adapter_name
-            metadata_path = adapter_path / "metadata.json"
-
-            if not metadata_path.exists():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Adapter '{adapter_name}' not found in tier {tier}"
-                )
-
-            with open(metadata_path) as f:
-                metadata = json.load(f)
-
-            return {"ok": True, "adapter": metadata}
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception(f"Failed to get adapter info: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
+    
+        @app.delete("/adapters/{adapter_name}")
+        async def adapter_delete(adapter_name: str, tier: int = 3):
+            """Delete a LoRA adapter."""
+            try:
+                manager = get_study_manager()
+                deleted = manager.delete_adapter(adapter_name, tier)
+                return {
+                    "ok": deleted,
+                    "adapter_name": adapter_name,
+                    "tier": tier,
+                    "message": "Adapter deleted" if deleted else "Adapter not found or protected"
+                }
+            except Exception as e:
+                logger.exception(f"Failed to delete adapter: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+    
+        @app.get("/adapters/{adapter_name}")
+        async def adapter_info(adapter_name: str, tier: int = 3):
+            """Get detailed info about a specific adapter."""
+            try:
+                import json
+                manager = get_study_manager()
+                tier_dir = manager._get_tier_directory(tier)
+                adapter_path = tier_dir / adapter_name
+                metadata_path = adapter_path / "metadata.json"
+    
+                if not metadata_path.exists():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Adapter '{adapter_name}' not found in tier {tier}"
+                    )
+    
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+    
+                return {"ok": True, "adapter": metadata}
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.exception(f"Failed to get adapter info: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+    
     return app

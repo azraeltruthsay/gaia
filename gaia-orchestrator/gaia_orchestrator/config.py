@@ -56,6 +56,10 @@ class OrchestratorConfig(BaseSettings):
         default="http://gaia-prime-candidate:7777",
         description="gaia-prime-candidate inference server endpoint"
     )
+    audio_url: str = Field(
+        default="http://gaia-audio:8080",
+        description="gaia-audio endpoint"
+    )
 
     # GPU VRAM quotas (v0.3 Sovereign Sensory Architecture)
     gpu_prime_vram_quota: float = Field(

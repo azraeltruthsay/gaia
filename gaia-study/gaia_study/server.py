@@ -33,9 +33,9 @@ def get_study_manager() -> StudyModeManager:
         study_config = {
             "max_training_time_seconds": int(os.getenv("MAX_TRAINING_TIME", "600")),
             "max_training_samples": int(os.getenv("MAX_TRAINING_SAMPLES", "1000")),
-            "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "100")),
+            "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "200")),
             "use_real_training": os.getenv("USE_REAL_TRAINING", "true").lower() == "true",
-            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Claude"),
+            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Qwen3.5-9B-Abliterated"),
             "governance": {
                 "forbidden_patterns": [
                     "ignore previous instructions",
@@ -92,6 +92,9 @@ class StudyStartRequest(BaseModel):
     pillar: str = Field(default="general", description="Knowledge pillar")
     description: str = ""
     max_steps: int = Field(default=100, ge=1, le=1000)
+    target_loss: float = Field(default=0.05, ge=0.0, description="Stop when loss drops below this threshold")
+    convergence_patience: int = Field(default=3, ge=1, description="Consecutive checks below target_loss before stopping")
+    resume_from: Optional[str] = Field(default=None, description="Path to existing adapter for incremental training")
     activation_triggers: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
 
@@ -342,6 +345,9 @@ def create_app() -> FastAPI:
                 source_documents=request.documents,
                 description=request.description,
                 max_steps=request.max_steps,
+                target_loss=request.target_loss,
+                convergence_patience=request.convergence_patience,
+                resume_from=request.resume_from,
                 activation_triggers=request.activation_triggers,
                 tags=request.tags,
             )

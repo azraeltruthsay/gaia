@@ -1,0 +1,12 @@
+# LMCache configuration for GAIA Prime
+# Hierarchical KV cache: GPU → CPU RAM → Disk
+# Persists KV tensors across sleep/wake cycles
+
+chunk_size: 256
+local_cpu: true
+max_local_cpu_size: 4.0          # GB CPU RAM for KV cache tier
+local_disk: "file:///kvcache/"   # Persistent disk tier (volume-mounted)
+max_local_disk_size: 10.0        # GB
+cache_policy: "LRU"
+save_decode_cache: true          # Cache decode-phase KV too (multi-turn)
+enable_async_loading: true

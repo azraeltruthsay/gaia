@@ -202,6 +202,15 @@ class SleepTaskScheduler:
             handler=self._run_initiative_cycle,
         ))
 
+        self.register_task(SleepTask(
+            task_id="curriculum_training",
+            task_type="CURRICULUM_SYNC",
+            priority=3,
+            interruptible=True,
+            estimated_duration_seconds=300,
+            handler=self._run_curriculum_sync,
+        ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -645,6 +654,66 @@ class SleepTaskScheduler:
         with open(bp_path, "a", encoding="utf-8") as f:
             f.write(note)
 
+    def _run_curriculum_sync(self) -> None:
+        """Sync blueprints → curriculum, then trigger incremental QLoRA training."""
+        try:
+            from gaia_core.cognition.curriculum_sync import sync_curriculum
+        except ImportError:
+            logger.debug("curriculum_sync module not available, skipping")
+            return
+
+        result = sync_curriculum()
+        logger.info(
+            "Curriculum sync: %d blueprints changed, %d new pairs",
+            result["changed_count"], result["new_pairs"],
+        )
+
+        if not result["trigger_training"]:
+            return
+
+        # Find existing adapter to resume from
+        adapter_base = Path("/models/lora_adapters/tier1_global")
+        existing_adapter = None
+        for candidate_name in ("gaia_persona_v1", "gaia_identity"):
+            candidate_path = adapter_base / candidate_name
+            if (candidate_path / "adapter_config.json").exists():
+                existing_adapter = str(candidate_path)
+                break
+
+        # Trigger incremental training via gaia-study
+        train_jsonl = result["train_jsonl"]
+        study_url = os.getenv("STUDY_ENDPOINT", "http://gaia-study:8766")
+        payload = {
+            "adapter_name": "gaia_persona_v1",
+            "documents": [train_jsonl],
+            "tier": 1,
+            "pillar": "identity",
+            "description": "Incremental blueprint→curriculum training",
+            "max_steps": 50,
+            "resume_from": existing_adapter,
+            "tags": ["curriculum_sync", "incremental"],
+        }
+
+        try:
+            import urllib.request
+            import urllib.error
+            req = urllib.request.Request(
+                f"{study_url}/study/start",
+                data=_json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp_data = _json.loads(resp.read().decode())
+                logger.info("Triggered incremental training: %s", resp_data)
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                logger.info("Training already in progress, skipping curriculum trigger")
+            else:
+                logger.warning("Failed to trigger curriculum training: %s %s", e.code, e.reason)
+        except Exception as e:
+            logger.warning("Could not reach gaia-study for curriculum training: %s", e)
+
     def _rebuild_blueprint_embeddings(self) -> None:
         """Rebuild the vector index for all blueprint documents."""
         try:
@@ -936,7 +1005,8 @@ class SleepTaskScheduler:
         """Call gaia-prime with the code-architect adapter. Returns response text."""
         # Try model pool first
         if self.model_pool is not None:
-            model = getattr(self.model_pool, "_primary_model", None)
+            model = (self.model_pool.models.get("gpu_prime")
+                     or self.model_pool.models.get("prime"))
             if model is not None and hasattr(model, "create_chat_completion_with_adapter"):
                 try:
                     result = model.create_chat_completion_with_adapter(

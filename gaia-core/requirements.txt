@@ -37,5 +37,7 @@ uvicorn==0.40.0
 yarl==1.22.0
 numpy>=1.24.0
 tiktoken>=0.5.0
+# llama-cpp-python for CPU model loading (fallback, temporal state manager)
+# Nano/Core now served via llama-server containers, but kept for compatibility
 llama-cpp-python>=0.3.16
 sentence-transformers>=2.2.0

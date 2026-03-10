@@ -154,6 +154,24 @@ def initialize_cognitive_system():
         # Create the AgentCore
         _agent_core = AgentCore(_ai_manager)
 
+        # ── Auto-register default LoRA adapter with vLLM if it exists on disk ──
+        try:
+            from pathlib import Path
+            adapter_name = "gaia_persona_v1"
+            adapter_path = Path("/models/lora_adapters/tier1_global") / adapter_name
+            if (adapter_path / "adapter_config.json").exists():
+                registered = model_pool.register_adapter_with_prime(
+                    adapter_name, str(adapter_path),
+                )
+                if registered:
+                    logger.info("Default persona adapter '%s' registered with vLLM", adapter_name)
+                else:
+                    logger.warning("Could not register default persona adapter '%s'", adapter_name)
+            else:
+                logger.info("No persona adapter at %s — running without LoRA", adapter_path)
+        except Exception:
+            logger.debug("Adapter auto-registration skipped", exc_info=True)
+
         logger.info("GAIA cognitive system initialized successfully")
         return True
 
@@ -441,7 +459,7 @@ async def doctor_review(request: Request):
         response_text = ""
         for chunk in _agent_core.run_turn(
             user_input=review_prompt,
-            session_id=f"sovereign_review_{int(time.time())}",
+            session_id=f"sovereign_review_{int(_time.time())}",
             source="gaia-doctor",
         ):
             if chunk.get("type") == "token":
@@ -619,11 +637,22 @@ async def process_packet(packet_data: Dict[str, Any]):
                 logger.info("Main: Triggering instant speculative Reflex...")
                 # The generate_instant_reflex method now returns the full formatted string
                 # with the ⚡ [(Reflex) Reflex] header included.
+                _reflex_t0 = _time.perf_counter()
                 reflex_text = await loop.run_in_executor(
                     None, _agent_core.generate_instant_reflex, packet
                 )
                 if reflex_text:
-                    formatted_reflex = f"⚡ **[(Reflex) Reflex]**\n{reflex_text}"
+                    # Log reflex generation to stream
+                    try:
+                        from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
+                        _gl = _get_gen_logger()
+                        _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
+                        _gid = _gl.start_generation("reflex-0.5B", "nano", "response")
+                        _gl.log_token(_gid, reflex_text)
+                        _gl.end_generation(_gid)
+                    except Exception:
+                        pass
+                    formatted_reflex = f"⚡ **[(Reflex) Nano]**\n{reflex_text}"
                     yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
                     yield json.dumps({"type": "flush"}) + "\n"
 

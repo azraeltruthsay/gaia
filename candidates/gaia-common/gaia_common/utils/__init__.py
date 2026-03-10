@@ -41,6 +41,12 @@ from .packet_utils import (
 from .packet_factory import build_packet, PacketSource
 from .heartbeat_logger import HeartbeatLogger, HeartbeatLoggerProxy
 from .tools_registry import TOOLS as tools_registry
+from .memory_guard import (
+    MemoryStatus,
+    MemoryGuardError,
+    get_memory_status,
+    require_memory,
+)
 
 __all__ = [
     # Logging
@@ -73,4 +79,9 @@ __all__ = [
     "HeartbeatLogger",
     "HeartbeatLoggerProxy",
     "tools_registry", # Export TOOLS as tools_registry
+    # Memory guard
+    "MemoryStatus",
+    "MemoryGuardError",
+    "get_memory_status",
+    "require_memory",
 ]

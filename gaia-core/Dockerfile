@@ -1,6 +1,28 @@
 # gaia-core: The Brain - Cognitive loop and reasoning engine
 # CPU-only container — GPU inference is offloaded to gaia-prime via PRIME_ENDPOINT
+# Includes embedded llama-server for Core/Lite CPU inference (Qwen3.5-4B)
 
+# ── Stage 1: Build llama-server from source ─────────────────────────────────
+FROM debian:bookworm-slim AS llama-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+ARG LLAMA_CPP_TAG=b8250
+RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_NATIVE=ON \
+        -DLLAMA_CURL=ON \
+        -DGGML_CPU_AARCH64=OFF \
+    && cmake --build build --target llama-server -j$(nproc)
+
+# ── Stage 2: Python runtime ─────────────────────────────────────────────────
 FROM python:3.11-slim AS base
 
 # Prevent interactive prompts during package installation
@@ -9,11 +31,19 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install system dependencies
+# libcurl4 + libgomp1 required by llama-server
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     build-essential \
+    cmake \
+    libcurl4 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy llama-server binary and shared libraries from builder
+COPY --from=llama-builder /build/llama.cpp/build/bin/ /usr/local/bin/
+RUN cp /usr/local/bin/lib*.so* /usr/local/lib/ 2>/dev/null; ldconfig
 
 # Create non-root user for container execution (host UID mapping)
 RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
@@ -69,5 +99,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Run as non-root user
 USER gaia
 
-# Run the service
-CMD ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415"]
+# Copy entrypoint script (starts llama-server + uvicorn)
+COPY gaia-core/entrypoint.sh /entrypoint.sh
+
+# Run the service (entrypoint starts llama-server in background, then uvicorn)
+CMD ["/bin/bash", "/entrypoint.sh"]

@@ -465,7 +465,7 @@ class DiscordInterface:
                                     if val.startswith("⚡ **[(Reflex)"):
                                         await self._send_response(message_obj, val, is_dm)
                                     else:
-                                        # Accumulate Core/Thinker tokens to send as a block
+                                        # Accumulate Operator/Thinker tokens to send as a block
                                         full_response += val
                             
                             elif event_type == "flush":
