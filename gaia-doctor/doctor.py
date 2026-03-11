@@ -1268,6 +1268,8 @@ class DoctorHandler(BaseHTTPRequestHandler):
         timeout = params.get("timeout", 30)
         wake_prime = params.get("wake_prime", False)
         full_pipeline = params.get("full_pipeline", False)
+        target = params.get("target", "core")
+        no_think = params.get("no_think", False)
 
         def _run():
             global _cognitive_running, _cognitive_last_result
@@ -1298,7 +1300,7 @@ class DoctorHandler(BaseHTTPRequestHandler):
                                 pass
                     except Exception as e:
                         log.warning("Wake signal failed: %s", e)
-                result = _run_cognitive_battery(section=section, ids=ids, timeout=timeout, full_pipeline=full_pipeline)
+                result = _run_cognitive_battery(section=section, ids=ids, timeout=timeout, full_pipeline=full_pipeline, target=target, no_think=no_think)
                 _cognitive_last_result = result
             except Exception:
                 log.error("Cognitive battery failed", exc_info=True)
@@ -1307,7 +1309,7 @@ class DoctorHandler(BaseHTTPRequestHandler):
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        self._json_response(202, {"status": "started", "section": section, "ids": ids, "full_pipeline": full_pipeline})
+        self._json_response(202, {"status": "started", "section": section, "ids": ids, "full_pipeline": full_pipeline, "target": target})
 
     def _json_response(self, code, data):
         body = json.dumps(data).encode()

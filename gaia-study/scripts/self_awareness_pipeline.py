@@ -124,6 +124,7 @@ class PipelineContext:
     skip_curriculum_build: bool = False
     skip_smoke: bool = False
     smoke_threshold: float = 0.85
+    from_base: bool = False  # If True, train from pristine base weights (not merged)
 
     # Populated during execution
     smoke_pass_rate: float | None = None
@@ -379,9 +380,13 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
     delta stays small because we only train on gaps the model hasn't
     learned yet.
     """
-    # Prefer merged (already-baked) weights for incremental training
-    base_4b = MERGED_4B if Path(MERGED_4B).exists() else BASE_4B
-    logger.info("═══ TRAIN_4B: QLoRA on %s ═══", base_4b)
+    # Incremental: train on merged weights (default). --from-base: train from pristine.
+    if ctx.from_base:
+        base_4b = BASE_4B
+        logger.info("═══ TRAIN_4B: QLoRA on BASE (--from-base) %s ═══", base_4b)
+    else:
+        base_4b = MERGED_4B if Path(MERGED_4B).exists() else BASE_4B
+        logger.info("═══ TRAIN_4B: QLoRA on %s ═══", base_4b)
 
     if not Path(ctx.filtered_path).exists():
         return StageResult(ok=False, message=f"Filtered data not found: {ctx.filtered_path}")
@@ -587,8 +592,12 @@ def stage_train_nano(ctx: PipelineContext) -> StageResult:
     for incremental identity baking.
     """
     merged_nano = f"{BASE_08B}-merged"
-    base_nano = merged_nano if Path(merged_nano).exists() else BASE_08B
-    logger.info("═══ TRAIN_NANO: QLoRA on %s ═══", base_nano)
+    if ctx.from_base:
+        base_nano = BASE_08B
+        logger.info("═══ TRAIN_NANO: QLoRA on BASE (--from-base) %s ═══", base_nano)
+    else:
+        base_nano = merged_nano if Path(merged_nano).exists() else BASE_08B
+        logger.info("═══ TRAIN_NANO: QLoRA on %s ═══", base_nano)
 
     if not Path(ctx.filtered_path).exists():
         return StageResult(ok=False, message=f"Filtered data not found: {ctx.filtered_path}")
@@ -886,6 +895,7 @@ def run_pipeline(args: argparse.Namespace):
         skip_curriculum_build=args.skip_curriculum_build,
         skip_smoke=args.skip_smoke,
         smoke_threshold=args.smoke_threshold,
+        from_base=args.from_base,
     )
 
     if not state:
@@ -1041,6 +1051,8 @@ def main():
                         help="Skip cognitive test battery gate")
     parser.add_argument("--smoke-threshold", type=float, default=0.85,
                         help="Minimum pass rate for cognitive smoke gate (default: 0.85)")
+    parser.add_argument("--from-base", action="store_true",
+                        help="Train from pristine base weights instead of merged (full retrain)")
 
     args = parser.parse_args()
     run_pipeline(args)
