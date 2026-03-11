@@ -734,7 +734,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # 12. Loop Recovery Context (if pending from a loop detection reset)
     try:
         from gaia_core.cognition.loop_recovery import get_recovery_manager
-        loop_manager = get_recovery_manager()
+        _sid = getattr(getattr(packet, 'header', None), 'session_id', '') or ''
+        loop_manager = get_recovery_manager(_sid)
         loop_recovery_context = loop_manager.get_recovery_context() if loop_manager else None
         if loop_recovery_context:
             # Insert loop recovery context near the top for high visibility

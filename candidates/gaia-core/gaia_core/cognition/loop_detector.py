@@ -1091,7 +1091,7 @@ class LoopDetector:
     Main interface for loop detection in GAIA cognitive pipeline.
 
     Usage:
-        detector = LoopDetector.get_instance()
+        detector = LoopDetector()
 
         # Record events
         detector.record_tool_call("Bash", {"command": "git status"}, result)
@@ -1108,24 +1108,10 @@ class LoopDetector:
                 detector.trigger_reset()
     """
 
-    _instance: Optional[LoopDetector] = None
-
     def __init__(self, config: Optional[LoopDetectorConfig] = None):
         self.config = config or LoopDetectorConfig()
         self.aggregator = LoopDetectionAggregator(self.config)
         self._enabled = self.config.enabled
-
-    @classmethod
-    def get_instance(cls, config: Optional[LoopDetectorConfig] = None) -> LoopDetector:
-        """Get or create the singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls(config)
-        return cls._instance
-
-    @classmethod
-    def reset_instance(cls) -> None:
-        """Reset the singleton (for testing)."""
-        cls._instance = None
 
     @property
     def enabled(self) -> bool:

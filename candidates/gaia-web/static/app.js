@@ -178,6 +178,8 @@ function systemPanel() {
     sleepState: '--',
     sleepStateClass: '',
     gpuOwner: '--',
+    alignment: '--',
+    alignmentClass: '',
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
@@ -211,7 +213,7 @@ function systemPanel() {
     },
 
     async poll() {
-      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator()]);
+      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment()]);
     },
 
     async pollServices() {
@@ -258,6 +260,18 @@ function systemPanel() {
           }
         }
       } catch { /* orchestrator unavailable */ }
+    },
+
+    async pollAlignment() {
+      try {
+        const resp = await fetch('/api/system/cognitive/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.alignment = data.alignment || 'UNKNOWN';
+          const cls = { 'SELF_ALIGNED': 'ok', 'ALIGNED': 'ok', 'PARTIAL': 'warn', 'UNTRAINED': 'error', 'UNKNOWN': '' };
+          this.alignmentClass = cls[this.alignment] || '';
+        }
+      } catch { this.alignment = '--'; }
     },
 
     // ── Graph ──────────────────────────────────────────────────────────
@@ -1086,6 +1100,202 @@ function hooksPanel() {
     },
   };
 }
+
+// ── Chaos Monkey Panel ────────────────────────────────────────────────────
+
+function chaosPanel() {
+  return {
+    config: { mode: 'triggered', drill_types: ['container', 'code'], schedule_interval_hours: 6 },
+    serenity: { serene: false, score: 0, threshold: 5.0 },
+    injecting: false,
+    lastResult: '',
+
+    async init() {
+      await this.loadConfig();
+      await this.loadSerenity();
+      // Refresh serenity every 30s
+      setInterval(() => this.loadSerenity(), 30000);
+    },
+
+    async loadConfig() {
+      try {
+        const r = await fetch('/api/chaos/config');
+        if (r.ok) this.config = await r.json();
+      } catch (e) {}
+    },
+
+    async saveConfig() {
+      try {
+        await fetch('/api/chaos/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.config),
+        });
+      } catch (e) {}
+    },
+
+    async loadSerenity() {
+      try {
+        const r = await fetch('/api/chaos/serenity');
+        if (r.ok) this.serenity = await r.json();
+      } catch (e) {}
+    },
+
+    async injectChaos() {
+      if (this.injecting) return;
+      this.injecting = true;
+      this.lastResult = '';
+      try {
+        const r = await fetch('/api/chaos/inject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drill_types: this.config.drill_types }),
+        });
+        const data = await r.json();
+        if (data.error) {
+          this.lastResult = 'Error: ' + data.error;
+        } else {
+          const results = data.drill_results || [];
+          const summary = results.map(r => `${r.service}: ${r.status}`).join(', ');
+          this.lastResult = summary || (data.drill_type ? `${data.drill_type} drill completed` : 'Done');
+          await this.loadSerenity();
+        }
+      } catch (e) {
+        this.lastResult = 'Request failed: ' + e.message;
+      } finally {
+        this.injecting = false;
+      }
+    },
+  };
+}
+
+// ── Cognitive Battery Panel ────────────────────────────────────────────────
+
+function cognitivePanel() {
+  return {
+    running: false,
+    alignment: 'UNKNOWN',
+    lastRun: {},
+    failures: [],
+    bySection: {},
+    selectedSection: '',
+    showResults: false,
+    _timer: null,
+
+    async init() {
+      await this.pollStatus();
+      this._timer = setInterval(() => this.pollStatus(), 15000);
+    },
+
+    destroy() {
+      if (this._timer) clearInterval(this._timer);
+    },
+
+    async pollStatus() {
+      try {
+        const r = await fetch('/api/system/cognitive/status');
+        if (r.ok) {
+          const data = await r.json();
+          this.running = data.running || false;
+          this.alignment = data.alignment || 'UNKNOWN';
+          if (data.last_run) this.lastRun = data.last_run;
+        }
+      } catch {}
+      // If we have results, fetch full details for failures/sections
+      if (this.lastRun.total && !this.bySection.architecture) {
+        await this.fetchResults();
+      }
+    },
+
+    async fetchResults() {
+      try {
+        const r = await fetch('/api/system/cognitive/results');
+        if (r.ok) {
+          const data = await r.json();
+          this.failures = data.failures || [];
+          this.bySection = data.by_section || {};
+          this.alignment = data.alignment || this.alignment;
+          if (data.summary) this.lastRun = data.summary;
+        }
+      } catch {}
+    },
+
+    async runBattery() {
+      if (this.running) return;
+      this.running = true;
+      this.showResults = false;
+      try {
+        const body = {};
+        if (this.selectedSection) body.section = this.selectedSection;
+        await fetch('/api/system/cognitive/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        // Poll more frequently while running
+        const pollUntilDone = setInterval(async () => {
+          await this.pollStatus();
+          if (!this.running) {
+            clearInterval(pollUntilDone);
+            await this.fetchResults();
+          }
+        }, 5000);
+      } catch (e) {
+        this.running = false;
+      }
+    },
+  };
+}
+
+
+// ── Training Pipeline Panel ───────────────────────────────────────────────
+
+function pipelinePanel() {
+  return {
+    pipelineStatus: '--',
+    currentStage: '',
+    alignmentStatus: '',
+    _timer: null,
+
+    async init() {
+      await this.poll();
+      this._timer = setInterval(() => this.poll(), 15000);
+    },
+
+    destroy() {
+      if (this._timer) clearInterval(this._timer);
+    },
+
+    async poll() {
+      try {
+        const r = await fetch('/api/system/pipeline/status');
+        if (r.ok) {
+          const data = await r.json();
+          this.alignmentStatus = data.alignment_status || '';
+          // Find current/latest stage
+          const stages = data.stages || {};
+          let running = Object.entries(stages).find(([_, s]) => s.status === 'running');
+          if (running) {
+            this.pipelineStatus = 'Running';
+            this.currentStage = running[0];
+          } else {
+            let completed = Object.entries(stages).filter(([_, s]) => s.status === 'completed');
+            if (completed.length > 0) {
+              this.pipelineStatus = 'Completed';
+              this.currentStage = completed[completed.length - 1][0];
+            } else {
+              this.pipelineStatus = data.status || 'Idle';
+              this.currentStage = '';
+            }
+          }
+        }
+      } catch {
+        this.pipelineStatus = '--';
+      }
+    },
+  };
+}
+
 
 // ── File Browser Component ─────────────────────────────────────────────────
 

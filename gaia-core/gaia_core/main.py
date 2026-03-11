@@ -233,6 +233,27 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to start sleep cycle loop", exc_info=True)
 
+    # Start KV cache manager (background restore + periodic checkpoint)
+    _kv_cache_mgr = None
+    try:
+        from gaia_core.cognition.kv_cache_manager import init_kv_cache_manager
+        _kv_cache_mgr = init_kv_cache_manager(pool)
+        app.state.kv_cache_manager = _kv_cache_mgr
+
+        # Restore caches in background thread to avoid blocking startup
+        import threading
+        threading.Thread(
+            target=_kv_cache_mgr.restore_all,
+            name="kv-cache-restore",
+            daemon=True,
+        ).start()
+
+        # Start periodic checkpoint thread
+        _kv_cache_mgr.start()
+        logger.info("KV cache manager started")
+    except Exception:
+        logger.warning("Failed to start KV cache manager", exc_info=True)
+
     # Start audio commentary daemon
     _audio_commentary = None
     try:
@@ -259,6 +280,15 @@ async def lifespan(app: FastAPI):
         _write_shutdown_checkpoints(app)
     except Exception:
         logger.warning("Shutdown checkpoint write failed", exc_info=True)
+
+    # Save KV caches before shutdown
+    if _kv_cache_mgr is not None:
+        try:
+            _kv_cache_mgr.stop()
+            _kv_cache_mgr.save_all()
+            logger.info("KV caches saved on shutdown")
+        except Exception:
+            logger.warning("KV cache shutdown save failed", exc_info=True)
 
     if _audio_commentary is not None:
         _audio_commentary.stop()
@@ -566,6 +596,34 @@ async def cognition_checkpoint():
     return JSONResponse(status_code=200, content=results)
 
 
+@app.post("/api/kv-cache/save")
+async def kv_cache_save():
+    """Trigger an immediate KV cache save for all roles."""
+    from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager
+    mgr = get_kv_cache_manager()
+    if mgr is None:
+        return JSONResponse(status_code=503, content={"error": "KV cache manager not initialized"})
+    results = mgr.save_all()
+    return {"status": "ok", "results": results}
+
+
+@app.post("/api/kv-cache/restore/{role}")
+async def kv_cache_restore(role: str):
+    """Restore KV cache for a specific role (e.g., 'reflex' or 'core')."""
+    from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager, _CHECKPOINT_FILENAMES
+    mgr = get_kv_cache_manager()
+    if mgr is None:
+        return JSONResponse(status_code=503, content={"error": "KV cache manager not initialized"})
+    if role not in _CHECKPOINT_FILENAMES:
+        return JSONResponse(status_code=400, content={"error": f"Unknown role: {role}. Valid: {list(_CHECKPOINT_FILENAMES.keys())}"})
+    model = mgr._get_model_for_role(role)
+    if model is None:
+        return JSONResponse(status_code=404, content={"error": f"No model found for role '{role}'"})
+    filename = _CHECKPOINT_FILENAMES[role]
+    ok = model.restore_kv_cache(filename)
+    return {"status": "ok" if ok else "failed", "role": role, "filename": filename}
+
+
 @app.post("/process_packet")
 async def process_packet(packet_data: Dict[str, Any]):
     """
@@ -801,6 +859,138 @@ async def audio_context():
         "count": len(_audio_context_buffer),
         "max": _audio_context_buffer.maxlen,
     }
+
+
+# ── Cognitive Similarity Endpoint ─────────────────────────────────────
+# Used by gaia-doctor's cognitive test battery for open-ended validation.
+
+class CognitiveQueryRequest(BaseModel):
+    prompt: str
+    system: str = "You are GAIA, a sovereign AI agent. Answer concisely and accurately."
+    max_tokens: int = 512
+    temperature: float = 0.3
+
+
+class SimilarityRequest(BaseModel):
+    text: str
+    reference: str
+
+
+@app.post("/api/cognitive/similarity")
+async def cognitive_similarity(req: SimilarityRequest):
+    """Rate semantic similarity between two texts using the Nano/Lite model.
+
+    Returns a score from 0.0 to 1.0.
+    """
+    prompt = (
+        "Rate the semantic similarity between these two texts on a scale of 0.0 to 1.0.\n"
+        "Reply with ONLY a JSON object: {\"score\": 0.XX}\n\n"
+        f"Text A: {req.text[:500]}\n\n"
+        f"Text B: {req.reference[:500]}"
+    )
+    try:
+        if _agent_core and hasattr(_agent_core, 'model_pool'):
+            pool = _agent_core.model_pool
+            result = await pool.generate(
+                prompt=prompt,
+                role="nano",
+                max_tokens=32,
+                temperature=0.1,
+            )
+            # Parse score from response
+            import re as _re
+            text = result if isinstance(result, str) else str(result)
+            match = _re.search(r'"score"\s*:\s*([\d.]+)', text)
+            if match:
+                score = min(max(float(match.group(1)), 0.0), 1.0)
+                return {"score": score}
+        # Fallback: basic token overlap
+        t_tokens = set(req.text.lower().split())
+        r_tokens = set(req.reference.lower().split())
+        if not r_tokens:
+            return {"score": 1.0}
+        overlap = len(t_tokens & r_tokens) / max(len(r_tokens), 1)
+        return {"score": round(min(overlap, 1.0), 4)}
+    except Exception as e:
+        logger.warning("Similarity endpoint error: %s", e)
+        # Fallback
+        t_tokens = set(req.text.lower().split())
+        r_tokens = set(req.reference.lower().split())
+        overlap = len(t_tokens & r_tokens) / max(len(r_tokens), 1)
+        return {"score": round(min(overlap, 1.0), 4)}
+
+
+@app.post("/api/cognitive/query")
+async def cognitive_query(req: CognitiveQueryRequest):
+    """Lightweight LLM query endpoint for cognitive testing.
+
+    Bypasses the full 20-stage cognitive pipeline — sends the prompt
+    directly to the embedded llama-server. Much faster (~5s vs ~90s).
+    """
+    import httpx
+    core_cpu = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092")
+    url = f"{core_cpu.rstrip('/')}/v1/chat/completions"
+    payload = {
+        "messages": [
+            {"role": "system", "content": req.system},
+            {"role": "user", "content": req.prompt},
+        ],
+        "max_tokens": req.max_tokens,
+        "temperature": req.temperature,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+            return {"content": text.strip()}
+    except Exception as e:
+        logger.warning("Cognitive query error: %s", e)
+        return {"content": "", "error": str(e)}
+
+
+# ── Embedded llama-server Management ─────────────────────────────────
+# Used by the self-awareness training pipeline to release/reload the
+# Core CPU model without restarting the gaia-core container.
+
+from gaia_core.model_server import get_model_server as _get_model_server
+
+
+class ModelReloadRequest(BaseModel):
+    model_path: str | None = None
+
+
+@app.post("/model/release")
+async def model_release():
+    """Stop the embedded llama-server and free RAM.
+
+    Called by the training pipeline before GGUF overwrite.
+    """
+    ms = _get_model_server()
+    result = ms.release()
+    status_code = 200 if result.get("ok") else 500
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@app.post("/model/reload")
+async def model_reload(req: ModelReloadRequest = None):
+    """Start the embedded llama-server (optionally with a new GGUF).
+
+    Called by the training pipeline after deploying a new Core model.
+    """
+    model_path = req.model_path if req else None
+    ms = _get_model_server()
+    result = ms.reload(model_path=model_path)
+    status_code = 200 if result.get("ok") else 500
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@app.get("/model/status")
+async def model_status():
+    """Return the current embedded llama-server status."""
+    ms = _get_model_server()
+    return ms.status()
 
 
 def get_audio_context_for_prompt(max_entries: int = 10, max_chars: int = 2000) -> str | None:

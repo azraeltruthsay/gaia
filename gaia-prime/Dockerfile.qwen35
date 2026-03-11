@@ -1,0 +1,6 @@
+# gaia-prime: vLLM with Qwen3.5 + LMCache support
+# Extends official vLLM image with transformers 5.x for qwen3_5_text model type
+# and LMCache for hierarchical KV cache persistence (GPU → CPU → disk)
+FROM vllm/vllm-openai:latest
+
+RUN pip install --no-cache-dir "transformers>=5.2.0" lmcache

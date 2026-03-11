@@ -138,7 +138,7 @@ class LoopRecoveryManager:
             on_escalate: Callback when escalating (after multiple resets)
         """
         self.config = config or LoopDetectorConfig()
-        self.detector = LoopDetector.get_instance(self.config)
+        self.detector = LoopDetector(self.config)
         self.renderer = PatternRenderer()
 
         # Callbacks
@@ -388,15 +388,27 @@ I need your guidance to proceed. What would you like me to do differently?"""
 # Integration Helpers
 # =============================================================================
 
-def get_recovery_manager() -> LoopRecoveryManager:
-    """Get or create the global recovery manager instance."""
-    global _recovery_manager
-    if '_recovery_manager' not in globals() or _recovery_manager is None:
-        _recovery_manager = LoopRecoveryManager()
-    return _recovery_manager
+def get_recovery_manager(session_id: str = "") -> LoopRecoveryManager:
+    """Get or create a per-session recovery manager instance.
+
+    Each session_id gets an isolated LoopRecoveryManager so that loop
+    resets in one session (e.g. doctor review) don't contaminate others.
+    """
+    key = session_id or "__global__"
+    if key not in _session_managers:
+        _session_managers[key] = LoopRecoveryManager()
+    return _session_managers[key]
 
 
-def inject_recovery_context_if_needed(prompt: str) -> str:
+def cleanup_session_manager(session_id: str) -> None:
+    """Evict a completed session's loop state to prevent memory leak."""
+    key = session_id or "__global__"
+    removed = _session_managers.pop(key, None)
+    if removed:
+        logger.debug("Cleaned up loop state for session %s", key)
+
+
+def inject_recovery_context_if_needed(prompt: str, session_id: str = "") -> str:
     """
     Inject recovery context into a prompt if there's a pending reset.
 
@@ -404,7 +416,7 @@ def inject_recovery_context_if_needed(prompt: str) -> str:
         prompt = build_prompt(...)
         prompt = inject_recovery_context_if_needed(prompt)
     """
-    manager = get_recovery_manager()
+    manager = get_recovery_manager(session_id)
     context = manager.get_recovery_context()
 
     if not context:
@@ -496,9 +508,10 @@ class LoopDetectorObserver:
     )
 
     def __init__(self, manager: Optional[LoopRecoveryManager] = None,
+                 session_id: str = "",
                  think_tag_char_threshold: int = 500,
                  think_tag_ratio_threshold: float = 0.90):
-        self.manager = manager or get_recovery_manager()
+        self.manager = manager or get_recovery_manager(session_id)
         self._token_buffer = ""
         self._last_check_len = 0
         self._check_interval = 100  # Check every N characters
@@ -642,5 +655,5 @@ class LoopDetectorObserver:
         self._phrase_warned = False
 
 
-# Global instance
-_recovery_manager: Optional[LoopRecoveryManager] = None
+# Per-session manager registry (replaces former global singleton)
+_session_managers: Dict[str, LoopRecoveryManager] = {}

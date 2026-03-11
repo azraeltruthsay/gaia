@@ -230,6 +230,45 @@ class VLLMRemoteModel:
         finally:
             self._active_adapter = prev
 
+    # ── KV Cache Slot API ──────────────────────────────────────────────────
+
+    def save_kv_cache(self, filename: str, slot_id: int = 0) -> bool:
+        """Save KV cache state via llama-server slot API. Non-fatal on failure."""
+        try:
+            url = f"{self.endpoint}/slots/{slot_id}?action=save"
+            r = self._session.post(url, json={"filename": filename}, timeout=30)
+            if r.status_code == 200:
+                logger.info("KV cache saved: slot=%d filename=%s", slot_id, filename)
+                return True
+            logger.warning("KV cache save failed (HTTP %d): %s", r.status_code, r.text[:200])
+            return False
+        except Exception as exc:
+            logger.warning("KV cache save error: %s", exc)
+            return False
+
+    def restore_kv_cache(self, filename: str, slot_id: int = 0) -> bool:
+        """Restore KV cache state via llama-server slot API. Non-fatal on failure."""
+        try:
+            url = f"{self.endpoint}/slots/{slot_id}?action=restore"
+            r = self._session.post(url, json={"filename": filename}, timeout=30)
+            if r.status_code == 200:
+                logger.info("KV cache restored: slot=%d filename=%s", slot_id, filename)
+                return True
+            logger.warning("KV cache restore failed (HTTP %d): %s", r.status_code, r.text[:200])
+            return False
+        except Exception as exc:
+            logger.warning("KV cache restore error: %s", exc)
+            return False
+
+    @property
+    def supports_kv_cache(self) -> bool:
+        """Check if the remote server supports the slot save/restore API."""
+        try:
+            r = self._session.get(f"{self.endpoint}/slots", timeout=10)
+            return r.status_code == 200
+        except Exception:
+            return False
+
     # ── Health / lifecycle ───────────────────────────────────────────────────
 
     def health_check(self) -> bool:

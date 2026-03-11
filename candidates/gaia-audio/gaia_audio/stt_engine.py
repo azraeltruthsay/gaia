@@ -17,6 +17,18 @@ from gaia_audio.status import status_tracker
 
 logger = logging.getLogger("GAIA.Audio.STT")
 
+# Qwen3-ASR uses full language names, not ISO codes
+_LANG_MAP = {
+    "en": "English", "zh": "Chinese", "yue": "Cantonese", "ar": "Arabic",
+    "de": "German", "fr": "French", "es": "Spanish", "pt": "Portuguese",
+    "id": "Indonesian", "it": "Italian", "ko": "Korean", "ru": "Russian",
+    "th": "Thai", "vi": "Vietnamese", "ja": "Japanese", "tr": "Turkish",
+    "hi": "Hindi", "ms": "Malay", "nl": "Dutch", "sv": "Swedish",
+    "da": "Danish", "fi": "Finnish", "pl": "Polish", "cs": "Czech",
+    "fil": "Filipino", "fa": "Persian", "el": "Greek", "ro": "Romanian",
+    "hu": "Hungarian", "mk": "Macedonian",
+}
+
 
 class STTEngine:
     """Qwen3-ASR speech-to-text with lazy loading."""
@@ -110,11 +122,14 @@ class STTEngine:
 
         duration_seconds = len(audio_array) / sample_rate
 
+        # Normalize ISO-639 codes to full names for Qwen3-ASR
+        lang_name = _LANG_MAP.get(language.lower(), language) if language else None
+
         # Qwen3-ASR accepts (np.ndarray, sample_rate) tuple or file path
-        results = self._model.transcribe(
-            audio=(audio_array, sample_rate),
-            language=language,
-        )
+        kwargs = {"audio": (audio_array, sample_rate)}
+        if lang_name:
+            kwargs["language"] = lang_name
+        results = self._model.transcribe(**kwargs)
 
         # Build response from Qwen3-ASR results
         texts = []

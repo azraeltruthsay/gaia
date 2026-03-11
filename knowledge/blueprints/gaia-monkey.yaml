@@ -1,0 +1,548 @@
+id: gaia-monkey
+version: '1.0'
+role: The Adversary (Chaos Testing)
+service_status: live
+runtime:
+  port: 6420
+  base_image: python:3.12-slim (multi-stage with node:20-slim for PromptFoo)
+  gpu: false
+  startup_cmd: python -m uvicorn gaia_monkey.main:app --host 0.0.0.0 --port 6420
+  health_check: curl -f http://localhost:6420/health
+  gpu_count: null
+  user: root
+  dockerfile: gaia-monkey/Dockerfile
+  compose_service: gaia-monkey
+  security: requires docker.sock (ro) for container stop/start in drills
+
+interfaces:
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: '{"status": "ok", "service": "gaia-monkey"}'
+  description: Container health check endpoint.
+  status: active
+
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: '{"mode", "enabled", "meditation", "serenity", "last_run", "next_run", "recent_history"}'
+  description: Full operational status — mode, next scheduled run, serenity state, last drill results.
+  status: active
+
+- id: config_get
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /config
+    method: GET
+    input_schema: null
+    output_schema: MonkeyConfig
+  description: Read current operational config from /shared/monkey/config.json.
+  status: active
+
+- id: config_set
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /config
+    method: POST
+    input_schema: MonkeyConfig
+    output_schema: '{"status": "saved", "config": MonkeyConfig}'
+  description: Write operational config. Changes take effect on the next scheduler cycle without restart.
+  status: active
+
+- id: chaos_inject
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /chaos/inject
+    method: POST
+    input_schema: '{"drill_types": [...], "targets": [...]}'
+    output_schema: DrillResult
+  description: >
+    Top-level chaos trigger. Picks a drill type from config.drill_types at random,
+    auto-enters Defensive Meditation if not already active, runs the drill.
+    Used by the dashboard "Inject Chaos" button and the scheduler.
+  status: active
+
+- id: chaos_drill
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /chaos/drill
+    method: POST
+    input_schema: '{"targets": ["gaia-core-candidate", ...]}'
+    output_schema: DrillResult
+  description: >
+    Container-level fault injection. Stops target containers, verifies failure,
+    restarts them, validates recovery. Requires active Defensive Meditation.
+  status: active
+
+- id: chaos_code
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /chaos/code
+    method: POST
+    input_schema: '{"targets": ["gaia-core-candidate"]}'
+    output_schema: DrillResult
+  description: >
+    Semantic code fault injection. Picks a non-vital .py file, injects a fault
+    (removed import / broken return / disabled assignment), triggers runtime failure,
+    sends to gaia-core for LLM-powered Tier 2 repair. Full serenity points only
+    awarded for LLM-repaired faults.
+  status: active
+
+- id: chaos_linguistic
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /chaos/linguistic
+    method: POST
+    input_schema: '{"suite": "persona|factuality|format"}'
+    output_schema: LinguisticDrillResult
+  description: >
+    PromptFoo red-team evaluation. Runs a YAML test suite via promptfoo eval subprocess.
+    Checks GAIA's identity stability, factual accuracy, and output format compliance.
+  status: active
+
+- id: chaos_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /chaos/history
+    method: GET
+    input_schema: '?limit=20'
+    output_schema: '{"history": [DrillResult]}'
+  description: Last N drill results (in-memory, last 50 total).
+  status: active
+
+- id: meditation_enter
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /meditation/enter
+    method: POST
+    input_schema: null
+    output_schema: '{"status": "entered", "meditation": MeditationStatus}'
+  description: >
+    Enter Defensive Meditation — 30-minute window where the restart circuit breaker
+    is relaxed and chaos drills are permitted. Writes shared flag file for gaia-doctor.
+  status: active
+
+- id: meditation_exit
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /meditation/exit
+    method: POST
+    input_schema: null
+    output_schema: '{"status": "exited", "meditation": MeditationStatus}'
+  description: Exit Defensive Meditation ahead of the 30-minute timeout.
+  status: active
+
+- id: serenity_get
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /serenity
+    method: GET
+    input_schema: null
+    output_schema: SerenityReport
+  description: >
+    Current serenity state — serene bool, score, threshold, achieved_at, reason,
+    meditation_active. Consumed by gaia-web /api/system/status and gaia-doctor /serenity.
+  status: active
+
+- id: serenity_break
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /serenity/break
+    method: POST
+    input_schema: '{"reason": "..."}'
+    output_schema: '{"status": "broken", "serenity": SerenityReport}'
+  description: >
+    Force-break Serenity. Called by gaia-doctor when a vital service fails
+    or a structural audit fails during production monitoring.
+  status: active
+
+- id: serenity_reset
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /serenity/reset
+    method: POST
+    input_schema: null
+    output_schema: '{"status": "reset", "serenity": SerenityReport}'
+  description: Manual reset of serenity state. Debug/admin use.
+  status: active
+
+- id: core_repair
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /api/repair/structural
+    method: POST
+    input_schema: '{"service", "broken_code", "error_msg", "file_path"}'
+    output_schema: '{"status": "repaired"}'
+  description: >
+    Tier 2 LLM-powered repair. Sends broken file content to gaia-core for
+    live model diagnosis and fix. Used by both container and code chaos drills.
+    120-second timeout.
+  status: active
+
+- id: core_health_probe
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Health probe to candidate services during drill recovery verification.
+  status: active
+
+- id: docker_control
+  direction: outbound
+  transport:
+    type: subprocess
+    command: docker stop/start/restart <container>
+  description: >
+    Docker CLI subprocess calls for container-level fault injection.
+    Uses docker.sock mounted read-only. Targets candidate containers only by default.
+  status: active
+
+- id: promptfoo_eval
+  direction: outbound
+  transport:
+    type: subprocess
+    command: promptfoo eval --config <suite>.yaml --output <tmp>.json
+  description: >
+    PromptFoo evaluation subprocess for linguistic chaos drills.
+    Reads suite YAML from /app/promptfoo-suites/, writes results to tmp JSON.
+  status: active
+
+dependencies:
+  services:
+  - id: gaia-core
+    role: llm_repair
+    required: false
+    fallback: emergency_restore_original_file
+  - id: gaia-doctor
+    role: serenity_break_consumer
+    required: false
+    fallback: null
+  volumes:
+  - name: gaia-shared
+    access: rw
+    purpose: >
+      Shared state — /shared/doctor/serenity.json (serenity state),
+      /shared/doctor/defensive_meditation.json (meditation flag, read by gaia-doctor),
+      /shared/monkey/config.json (operational config)
+    mount_path: /shared
+  - name: project_root
+    access: ro
+    purpose: Read candidate .py files for fault injection and repair
+    mount_path: /gaia/GAIA_Project
+  - name: docker_sock
+    access: ro
+    purpose: Container control (stop/start/restart) for chaos drills
+    mount_path: /var/run/docker.sock
+  external_apis: []
+
+source_files:
+- path: gaia-monkey/gaia_monkey/main.py
+  role: entrypoint
+  file_type: python
+- path: gaia-monkey/gaia_monkey/chaos_engine.py
+  role: core_logic
+  file_type: python
+- path: gaia-monkey/gaia_monkey/serenity_manager.py
+  role: state_management
+  file_type: python
+- path: gaia-monkey/gaia_monkey/meditation_controller.py
+  role: state_management
+  file_type: python
+- path: gaia-monkey/gaia_monkey/fault_injector.py
+  role: utility
+  file_type: python
+- path: gaia-monkey/gaia_monkey/cognitive_validator.py
+  role: utility
+  file_type: python
+- path: gaia-monkey/gaia_monkey/linguistic_engine.py
+  role: utility
+  file_type: python
+- path: gaia-monkey/gaia_monkey/scheduler.py
+  role: background_task
+  file_type: python
+- path: gaia-monkey/promptfoo-suites/persona.yaml
+  role: config
+  file_type: yaml
+- path: gaia-monkey/promptfoo-suites/factuality.yaml
+  role: config
+  file_type: yaml
+- path: gaia-monkey/promptfoo-suites/format.yaml
+  role: config
+  file_type: yaml
+
+failure_modes:
+- condition: gaia-core unavailable during code chaos drill
+  response: Emergency-restores original file from in-memory copy; restarts candidate; marks drill failed_recovery
+  severity: degraded
+  auto_recovers: true
+- condition: PromptFoo not installed
+  response: Returns error result; other drill types unaffected
+  severity: degraded
+  auto_recovers: false
+- condition: Candidate container fails to recover after 30s (6 × 5s retries)
+  response: Marks drill status=failed_recovery; serenity points not awarded; meditation remains active
+  severity: partial
+  auto_recovers: false
+- condition: Docker socket unavailable
+  response: All container/code drills fail immediately; linguistic drills unaffected
+  severity: critical
+  auto_recovers: false
+- condition: Scheduler fires while gaia-monkey is restarting
+  response: next_run timestamp is in-memory only; resets to None on restart; scheduler recalculates from now
+  severity: minor
+  auto_recovers: true
+
+intent:
+  purpose: >
+    The adversarial resilience engine of GAIA. Deliberately breaks things to prove
+    GAIA can recover — from stopped containers, injected code faults, and linguistic
+    attacks. Manages the Serenity State (a trust signal that gates autonomous promotion
+    and initiative cycles) and Defensive Meditation (the time-boxed window that relaxes
+    the restart circuit breaker for deliberate stress-testing).
+
+    Extracted from gaia-doctor to separate immune monitoring (passive) from adversarial
+    testing (active). This separation allows chaos drills to run on schedules or randomly
+    without coupling to the production health watchdog's stability guarantees.
+
+  design_decisions:
+  - Chaos extracted from gaia-doctor to allow independent scheduling without affecting HA watchdog stability
+  - Defensive Meditation as a gated window prevents chaos from running in prod context by accident
+  - Serenity points only awarded for LLM-repaired faults — proves cognitive pipeline not just container restart
+  - Shared file protocol (serenity.json, defensive_meditation.json) enables cross-service state without tight coupling
+  - docker.sock mounted read-only — monkey can stop/start containers but cannot build images or run arbitrary commands
+  - Fault injection targets non-vital files only (avoids main.py, agent_core.py, tools.py, etc.)
+  - Three semantic fault types (remove_import, break_return, comment_assignment) all pass ast.parse — tests runtime, not syntax
+  - PromptFoo runs as a subprocess with 300s timeout; failures are isolated and don't crash the service
+  - Scheduler reads config from disk each cycle — mode/interval changes take effect without restart
+  - In-memory drill history (last 50) is intentionally not persisted — each run is a fresh experiment
+
+  open_questions:
+  - Should scheduler config persist next_run across restarts to avoid double-firing after crash+restart?
+  - Should linguistic drill results feed into Serenity scoring?
+  - PromptFoo provider config currently uses gaia-core HTTP directly — should it go through gaia-web for session context?
+
+  cognitive_role: The Adversary
+
+architecture:
+  components:
+  - id: api_layer
+    label: API Layer
+    description: FastAPI entrypoint. All endpoints. Lifespan starts the scheduler background task.
+    source_files:
+    - gaia-monkey/gaia_monkey/main.py
+    key_classes: []
+    key_functions:
+    - inject_chaos()
+    exposes_interfaces:
+    - health
+    - status
+    - config_get
+    - config_set
+    - chaos_inject
+    - chaos_drill
+    - chaos_code
+    - chaos_linguistic
+    - chaos_history
+    - meditation_enter
+    - meditation_exit
+    - serenity_get
+    - serenity_break
+    - serenity_reset
+    consumes_interfaces: []
+
+  - id: chaos_engine
+    label: Chaos Engine
+    description: >
+      Synchronous blocking logic for container-level and code-level drills.
+      Called via asyncio.to_thread to keep the event loop free.
+      Orchestrates fault injection, LLM repair, and recovery verification.
+    source_files:
+    - gaia-monkey/gaia_monkey/chaos_engine.py
+    key_classes: []
+    key_functions:
+    - run_container_drill()
+    - run_code_drill()
+    exposes_interfaces: []
+    consumes_interfaces:
+    - docker_control
+    - core_repair
+    - core_health_probe
+
+  - id: serenity_manager
+    label: Serenity Manager
+    description: >
+      Thread-safe serenity state. Accumulates weighted recovery points during
+      Defensive Meditation. Persists to /shared/doctor/serenity.json for
+      gaia-doctor and gaia-web to read.
+    source_files:
+    - gaia-monkey/gaia_monkey/serenity_manager.py
+    key_classes: []
+    key_functions:
+    - record_recovery()
+    - break_serenity()
+    - get_report()
+    exposes_interfaces: []
+    consumes_interfaces: []
+
+  - id: meditation_controller
+    label: Meditation Controller
+    description: >
+      Defensive Meditation enter/exit/timeout. Writes shared flag file
+      (/shared/doctor/defensive_meditation.json) so gaia-doctor can read
+      meditation state for its restart circuit breaker bypass logic.
+    source_files:
+    - gaia-monkey/gaia_monkey/meditation_controller.py
+    key_classes: []
+    key_functions:
+    - enter()
+    - exit_meditation()
+    - is_active()
+    exposes_interfaces: []
+    consumes_interfaces: []
+
+  - id: fault_injector
+    label: Fault Injector
+    description: >
+      Picks a non-vital .py file from a candidate service directory.
+      Injects a semantic fault (one of three types) that passes ast.parse
+      but breaks runtime behaviour.
+    source_files:
+    - gaia-monkey/gaia_monkey/fault_injector.py
+    key_classes: []
+    key_functions:
+    - pick_target_file()
+    - inject_semantic_fault()
+    exposes_interfaces: []
+    consumes_interfaces: []
+
+  - id: cognitive_validator
+    label: Cognitive Validator
+    description: >
+      Sends a real CognitionPacket (What is 7×8?) to a candidate service
+      endpoint and checks for a substantive response. Proves the full
+      cognitive pipeline is working post-chaos, not just container health.
+    source_files:
+    - gaia-monkey/gaia_monkey/cognitive_validator.py
+    key_classes: []
+    key_functions:
+    - validate()
+    exposes_interfaces: []
+    consumes_interfaces:
+    - core_health_probe
+
+  - id: linguistic_engine
+    label: Linguistic Engine
+    description: >
+      Runs PromptFoo evaluation suites via asyncio subprocess.
+      Parses pass/fail counts and failed assertion previews from JSON output.
+    source_files:
+    - gaia-monkey/gaia_monkey/linguistic_engine.py
+    key_classes: []
+    key_functions:
+    - run_suite()
+    exposes_interfaces: []
+    consumes_interfaces:
+    - promptfoo_eval
+
+  - id: scheduler
+    label: Chaos Scheduler
+    description: >
+      asyncio background task. Reads config each cycle (60s poll).
+      Supports triggered (idle), scheduled (fixed interval), random
+      (re-randomised after each run), and persistent (cooldown loop) modes.
+    source_files:
+    - gaia-monkey/gaia_monkey/scheduler.py
+    key_classes: []
+    key_functions:
+    - run_background()
+    exposes_interfaces: []
+    consumes_interfaces:
+    - chaos_inject
+
+  edges:
+  - from_component: api_layer
+    to_component: chaos_engine
+    label: dispatches drills to (via asyncio.to_thread)
+    transport: function_call
+    data_flow: targets list, returns DrillResult
+  - from_component: api_layer
+    to_component: linguistic_engine
+    label: dispatches linguistic drills to
+    transport: function_call
+    data_flow: suite name, returns LinguisticDrillResult
+  - from_component: api_layer
+    to_component: meditation_controller
+    label: enter/exit meditation via
+    transport: function_call
+    data_flow: none
+  - from_component: api_layer
+    to_component: serenity_manager
+    label: break/reset serenity via
+    transport: function_call
+    data_flow: reason string
+  - from_component: chaos_engine
+    to_component: fault_injector
+    label: picks target file and injects fault via
+    transport: function_call
+    data_flow: service_name, returns (broken_content, fault_desc)
+  - from_component: chaos_engine
+    to_component: cognitive_validator
+    label: validates post-recovery inference via
+    transport: function_call
+    data_flow: endpoint URL, returns {passed, latency_ms}
+  - from_component: chaos_engine
+    to_component: serenity_manager
+    label: records recovery points via
+    transport: function_call
+    data_flow: category, detail
+  - from_component: scheduler
+    to_component: api_layer
+    label: calls _inject_chaos() on
+    transport: function_call
+    data_flow: config dict
+
+meta:
+  status: live
+  genesis: false
+  generated_by: manual
+  blueprint_version: '1.0'
+  schema_version: '1.0'
+  created_at: '2026-03-10T00:00:00Z'
+  last_reflected: '2026-03-10T00:00:00Z'
+  promoted_at: '2026-03-10T00:00:00Z'
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: high
+    intent: high
+  reflection_notes: >
+    Blueprint written at time of service creation. Extracted from gaia-doctor chaos
+    logic (lines 46-247, 772-1314). Serenity and meditation state now owned exclusively
+    by gaia-monkey; gaia-doctor reads from shared files. All 13 Python files pass
+    py_compile at creation time.
+  divergence_score: 0.00

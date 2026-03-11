@@ -113,6 +113,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="kv_cache_checkpoint",
+            task_type="maintenance",
+            priority=1,
+            interruptible=False,
+            estimated_duration_seconds=5,
+            handler=self._run_kv_cache_checkpoint,
+        ))
+
+        self.register_task(SleepTask(
             task_id="conversation_curation",
             task_type="conversation_curation",
             priority=1,
@@ -128,6 +137,15 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_samvega_introspection,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="tier5_training",
+            task_type="RETRAINABLE_MEMORY",
+            priority=2,
+            interruptible=False,
+            estimated_duration_seconds=30,
+            handler=self._run_tier5_training,
         ))
 
         self.register_task(SleepTask(
@@ -303,6 +321,19 @@ class SleepTaskScheduler:
             logger.debug("code_evolution module not available, skipping golden thread sync")
         except Exception as e:
             logger.error("Golden Thread sync failed: %s", e, exc_info=True)
+
+    def _run_kv_cache_checkpoint(self) -> None:
+        """Save KV cache checkpoints for all active llama-server instances."""
+        try:
+            from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager
+            mgr = get_kv_cache_manager()
+            if mgr is None:
+                logger.debug("KV cache manager not initialized, skipping checkpoint")
+                return
+            results = mgr.save_all()
+            logger.info("KV cache checkpoint: %s", results)
+        except Exception as e:
+            logger.error("KV cache checkpoint failed: %s", e, exc_info=True)
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {
@@ -1719,6 +1750,123 @@ class SleepTaskScheduler:
         logger.info(
             "Samvega introspection: reviewed %d artifacts, %d promoted to tier-5, %d clusters",
             reviewed, promoted, sum(1 for g in clusters.values() if len(g) >= 2),
+        )
+
+    # ------------------------------------------------------------------
+    # Tier 5 Retrainable Memory
+    # ------------------------------------------------------------------
+
+    def _run_tier5_training(self) -> None:
+        """Translate promoted Samvega artifacts → QLoRA training pairs, trigger micro-training."""
+        from gaia_core.cognition.samvega import list_tier5_artifacts, update_artifact
+        from gaia_core.cognition.tier5_translator import (
+            translate_artifact_to_pair,
+            filter_already_known,
+            write_delta_and_portable_soul,
+        )
+
+        artifacts = list_tier5_artifacts()
+        if not artifacts:
+            logger.info("Tier5 training: no untranslated tier-5 artifacts")
+            return
+
+        samvega_cfg = self.config.constants.get("SAMVEGA", {})
+        t5_cfg = samvega_cfg.get("tier5_training", {})
+        if not t5_cfg.get("enabled", True):
+            logger.info("Tier5 training: disabled in config")
+            return
+
+        # Step 1: Translate artifacts to training pairs
+        pairs = []
+        for path, data in artifacts:
+            pair = translate_artifact_to_pair(data)
+            if pair.get("output"):
+                pairs.append(pair)
+
+        if not pairs:
+            logger.info("Tier5 training: no valid pairs after translation")
+            return
+
+        logger.info("Tier5 training: translated %d artifacts into %d pairs", len(artifacts), len(pairs))
+
+        # Step 2: Pre-eval filter (discard what the model already knows)
+        similarity_threshold = t5_cfg.get("pre_eval_similarity_threshold", 0.85)
+        pairs = filter_already_known(pairs, self.model_pool, similarity_threshold)
+
+        if not pairs:
+            logger.info("Tier5 training: all pairs filtered (model already knows them)")
+            # Mark artifacts as translated even if filtered — they're not useful
+            for path, data in artifacts:
+                data["translated_to_training"] = True
+                update_artifact(path.name, data)
+            return
+
+        # Step 3: Write delta + Portable Soul
+        delta_path = t5_cfg.get("delta_path", "/knowledge/curricula/self-model/gaia_delta.jsonl")
+        soul_path = t5_cfg.get("portable_soul_path", "/knowledge/curricula/self-model/gaia_persona_training.jsonl")
+        delta, new_soul_count = write_delta_and_portable_soul(pairs, delta_path, soul_path)
+
+        # Step 4: Trigger micro-training via gaia-study
+        epoch_threshold = t5_cfg.get("epoch_threshold", 20)
+        default_epochs = t5_cfg.get("default_epochs", 3)
+        fallback_max_steps = t5_cfg.get("fallback_max_steps", 50)
+
+        # Find existing adapter to resume from
+        adapter_base = Path("/models/lora_adapters/tier1_global")
+        existing_adapter = None
+        for candidate_name in ("gaia_persona_v1", "gaia_identity"):
+            candidate_path = adapter_base / candidate_name
+            if (candidate_path / "adapter_config.json").exists():
+                existing_adapter = str(candidate_path)
+                break
+
+        payload = {
+            "adapter_name": "gaia_persona_v1",
+            "documents": [str(delta)],
+            "tier": 1,
+            "pillar": "identity",
+            "description": f"Tier5 micro-training: {len(pairs)} samvega corrections",
+            "resume_from": existing_adapter,
+            "tags": ["tier5_training", "samvega_correction"],
+        }
+
+        if len(pairs) <= epoch_threshold:
+            payload["num_train_epochs"] = default_epochs
+        else:
+            payload["max_steps"] = fallback_max_steps
+
+        study_url = os.getenv("STUDY_ENDPOINT", "http://gaia-study:8766")
+        try:
+            import urllib.request
+            import urllib.error
+            req = urllib.request.Request(
+                f"{study_url}/study/start",
+                data=_json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp_data = _json.loads(resp.read().decode())
+                logger.info("Tier5 training triggered: %s", resp_data)
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                logger.info("Tier5 training: gaia-study already training, will retry next cycle")
+                return  # Don't mark artifacts — retry next cycle
+            else:
+                logger.warning("Tier5 training: HTTP error %s %s", e.code, e.reason)
+                return
+        except Exception as e:
+            logger.warning("Tier5 training: could not reach gaia-study: %s", e)
+            return
+
+        # Step 5: Mark source artifacts as translated
+        for path, data in artifacts:
+            data["translated_to_training"] = True
+            update_artifact(path.name, data)
+
+        logger.info(
+            "Tier5 training complete: %d pairs sent, %d new soul entries",
+            len(pairs), new_soul_count,
         )
 
     # ------------------------------------------------------------------

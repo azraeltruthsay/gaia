@@ -88,6 +88,9 @@ class QLoRAConfig:
     target_loss: float = 0.05          # Stop when loss drops below this
     convergence_patience: int = 3      # Must stay below target_loss for N consecutive log checks
 
+    # Epoch-based training (overrides max_steps when set)
+    num_train_epochs: Optional[int] = None
+
     def __post_init__(self):
         if self.target_modules is None:
             self.target_modules = ["q_proj", "v_proj"]
@@ -115,6 +118,7 @@ class QLoRAConfig:
             save_steps=config.get("save_steps", 50),
             target_loss=config.get("target_loss", 0.05),
             convergence_patience=config.get("convergence_patience", 3),
+            num_train_epochs=config.get("num_train_epochs"),
         )
 
 
@@ -228,6 +232,20 @@ class QLoRATrainer:
                     "and the trained LoRA adapter can be applied to the AWQ model at inference time."
                 )
 
+            # Detect multimodal model — use AutoModelForImageTextToText to
+            # preserve vision encoder so merged adapters produce a full
+            # ForConditionalGeneration model (not stripped CausalLM).
+            auto_cls = transformers.AutoModelForCausalLM
+            try:
+                _cfg = transformers.AutoConfig.from_pretrained(
+                    self.base_model_path, trust_remote_code=True
+                )
+                if hasattr(_cfg, "vision_config") and _cfg.vision_config is not None:
+                    auto_cls = transformers.AutoModelForImageTextToText
+                    logger.info("Multimodal model detected — using AutoModelForImageTextToText")
+            except Exception:
+                pass
+
             if self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~4-5GB final VRAM)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
@@ -237,27 +255,29 @@ class QLoRATrainer:
                     bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
                     bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
                 )
-                # BnB quantizes bf16→NF4 per-shard during loading (~4-5GB final).
-                # Pinned to transformers <5.0 because 5.3.0 has a regression that
-                # bulk-loads ALL bf16 weights to GPU before quantizing (OOM on 16GB).
+                # Workaround for transformers >=5.2 regression: core_model_loading.py
+                # bulk-loads bf16 weights to GPU before BnB quantizes them, causing OOM
+                # on 16GB cards with 4B+ models. Fix: set a tight GPU budget (5GiB) so
+                # the device_map places most layers on CPU, then BnB quantizes on dispatch.
+                bnb_gpu_budget_gib = 5
                 logger.info(
                     "Loading bf16 model with BnB NF4 quantization "
-                    "(GPU budget: %dGiB, ~4-5GiB quantized, %dGiB training headroom)",
-                    max_gpu_gb, training_headroom_gb
+                    "(GPU budget: %dGiB for BnB, %dGiB total, %dGiB training headroom)",
+                    bnb_gpu_budget_gib, max_gpu_gb, training_headroom_gb
                 )
-                self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                self.model = auto_cls.from_pretrained(
                     self.base_model_path,
                     trust_remote_code=True,
                     quantization_config=bnb_config,
                     device_map="auto",
-                    max_memory={0: f"{max_gpu_gb}GiB", "cpu": "30GiB"},
+                    max_memory={0: f"{bnb_gpu_budget_gib}GiB", "cpu": "30GiB"},
                     low_cpu_mem_usage=True,
                     torch_dtype=torch.bfloat16,
                 )
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")
-                self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                self.model = auto_cls.from_pretrained(
                     self.base_model_path,
                     trust_remote_code=True,
                     dtype=torch.bfloat16,
@@ -405,14 +425,19 @@ class QLoRATrainer:
         self._losses = []
 
         try:
-            # Set up training arguments
+            # Set up training arguments — epoch-based or step-based
+            if self.config.num_train_epochs is not None:
+                step_kwargs = {"max_steps": -1, "num_train_epochs": self.config.num_train_epochs}
+            else:
+                step_kwargs = {"max_steps": self.config.max_steps, "num_train_epochs": 1}
+
             training_args = transformers.TrainingArguments(
                 output_dir=str(self.output_dir / "checkpoints"),
                 per_device_train_batch_size=self.config.batch_size,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 learning_rate=self.config.learning_rate,
-                max_steps=self.config.max_steps,
                 warmup_steps=self.config.warmup_steps,
+                **step_kwargs,
                 logging_steps=self.config.logging_steps,
                 save_steps=self.config.save_steps,
                 bf16=True,

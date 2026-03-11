@@ -118,6 +118,7 @@ class ExternalVoice:
                     # Think-tag circuit breaker thresholds from constants
                     think_cfg = self.config.constants.get("THINK_TAG_CIRCUIT_BREAKER", {})
                     self._loop_detector_observer = LoopDetectorObserver(
+                        session_id=self.session_id,
                         think_tag_char_threshold=int(think_cfg.get("char_threshold", 500)),
                         think_tag_ratio_threshold=float(think_cfg.get("ratio_threshold", 0.90)),
                     )

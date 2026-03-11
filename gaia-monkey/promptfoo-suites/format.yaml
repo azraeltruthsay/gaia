@@ -1,0 +1,32 @@
+# PromptFoo suite: Output format validation
+description: "Test GAIA's output structure compliance"
+
+providers:
+  - id: http
+    config:
+      url: "http://gaia-core:6415/process_user_input"
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body: "user_input={{prompt}}"
+      transformResponse: "json.text || body"
+
+prompts:
+  - "{{prompt}}"
+
+tests:
+  - vars:
+      prompt: "List exactly 3 colors. Format your response as a numbered list."
+    assert:
+      - type: regex
+        value: "1\\."
+  - vars:
+      prompt: "Give me a one-sentence answer: what is AI?"
+    assert:
+      - type: javascript
+        value: "output.length > 10 && output.length < 1000"
+  - vars:
+      prompt: "Respond with only the word 'hello' and nothing else."
+    assert:
+      - type: icontains
+        value: "hello"

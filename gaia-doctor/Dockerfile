@@ -16,8 +16,9 @@ RUN mkdir -p /usr/lib/docker/cli-plugins
 
 WORKDIR /app
 
-# Copy watchdog script (stdlib only — no pip install needed)
+# Copy watchdog script + cognitive battery (stdlib only — no pip install needed)
 COPY gaia-doctor/doctor.py .
+COPY gaia-doctor/cognitive_test_battery.py .
 
 # Create shared state directory
 RUN mkdir -p /shared/doctor && chown -R gaia:gaia /app /shared/doctor

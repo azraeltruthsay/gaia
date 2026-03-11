@@ -2,14 +2,14 @@
 System status routes for Mission Control dashboard.
 
 Aggregates health data from gaia-doctor and gaia-orchestrator to provide
-the three endpoints the frontend polls: /services, /sleep, /status.
+the endpoints the frontend polls: /services, /sleep, /status, /cognitive/*.
 """
 
 import logging
 import os
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 logger = logging.getLogger("GAIA.Web.System")
 
@@ -18,6 +18,8 @@ router = APIRouter()
 DOCTOR_URL = os.getenv("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 CORE_URL = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+MONKEY_URL = os.getenv("MONKEY_ENDPOINT", "http://gaia-monkey:6420")
+STUDY_URL = os.getenv("STUDY_ENDPOINT", "http://gaia-study:8766")
 
 # Map doctor service names to display-friendly IDs
 _SERVICE_DISPLAY = {
@@ -119,13 +121,92 @@ async def system_status():
     except Exception as e:
         logger.debug("Failed to fetch orchestrator status: %s", e)
 
-    # Fetch serenity state from doctor
+    # Fetch serenity state from gaia-monkey (primary), fall back to doctor
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{DOCTOR_URL}/serenity")
+            resp = await client.get(f"{MONKEY_URL}/serenity")
             if resp.status_code == 200:
                 result["serenity"] = resp.json()
     except Exception:
-        pass
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{DOCTOR_URL}/serenity")
+                if resp.status_code == 200:
+                    result["serenity"] = resp.json()
+        except Exception:
+            pass
 
     return result
+
+
+# ── Cognitive Battery Proxy (doctor) ──────────────────────────────────────
+
+@router.get("/cognitive/status")
+async def cognitive_status():
+    """Get cognitive test battery status + alignment from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/cognitive/status")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch cognitive status: %s", e)
+    return {"running": False, "alignment": "UNKNOWN", "last_run": {}}
+
+
+@router.get("/cognitive/results")
+async def cognitive_results():
+    """Get full cognitive test battery results from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/cognitive/results")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch cognitive results: %s", e)
+    return {"message": "unavailable"}
+
+
+@router.get("/cognitive/tests")
+async def cognitive_tests():
+    """List all registered cognitive tests from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/cognitive/tests")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch cognitive tests: %s", e)
+    return {"tests": []}
+
+
+@router.post("/cognitive/run")
+async def cognitive_run(request: Request):
+    """Trigger a cognitive test battery run on gaia-doctor."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/cognitive/run",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to trigger cognitive run: %s", e)
+        return {"error": str(e)}
+
+
+# ── Training Pipeline Status ─────────────────────────────────────────────
+
+@router.get("/pipeline/status")
+async def pipeline_status():
+    """Get self-awareness training pipeline status from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/pipeline")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch pipeline status: %s", e)
+    return {"status": "no pipeline running"}

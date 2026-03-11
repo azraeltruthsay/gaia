@@ -1,0 +1,683 @@
+#!/usr/bin/env python3
+"""build_curriculum.py — Dynamic Curriculum Generator for GAIA Self-Awareness Training.
+
+Assembles training data from three living knowledge sources:
+  A) System Reference & Architecture  (~200 pairs)
+  B) Code Understanding & Self-Repair  (~80 pairs)
+  C) Samvega Wisdom                    (~100 pairs)
+
+Plus supplemental sources (seeds, conversation examples).
+
+Output: /knowledge/curricula/self-model/train.jsonl (same schema as QLoRA trainer)
+        /knowledge/curricula/self-model/generation_metadata.json
+
+Runs inside the **gaia-study** container (has access to /knowledge/, service source dirs).
+
+Usage:
+    docker compose exec gaia-study python scripts/build_curriculum.py           # full generation
+    docker compose exec gaia-study python scripts/build_curriculum.py --datasets A,C  # specific
+    docker compose exec gaia-study python scripts/build_curriculum.py --dry-run       # count only
+    docker compose exec gaia-study python scripts/build_curriculum.py --append        # add to existing
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("GAIA.Curriculum.Builder")
+
+# ── Paths ──────────────────────────────────────────────────────────────────
+
+KNOWLEDGE_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/knowledge"))
+OUTPUT_PATH = KNOWLEDGE_DIR / "curricula" / "self-model" / "train.jsonl"
+METADATA_PATH = KNOWLEDGE_DIR / "curricula" / "self-model" / "generation_metadata.json"
+
+AS_BUILT_PATH = KNOWLEDGE_DIR / "system_reference" / "AS_BUILT_LATEST.md"
+BLUEPRINTS_DIR = KNOWLEDGE_DIR / "blueprints"
+GAP_AUDIT_PATH = KNOWLEDGE_DIR / "gap_audit" / "latest_gaps.json"
+DEV_NOTEBOOK_DIR = KNOWLEDGE_DIR / "Dev_Notebook"
+SAMVEGA_DIR = KNOWLEDGE_DIR / "samvega"
+SEEDS_DIR = KNOWLEDGE_DIR / "seeds"
+CONVERSATION_EXAMPLES = KNOWLEDGE_DIR / "conversation_examples.md"
+
+# Vital organs for Dataset B code understanding
+VITAL_ORGANS = [
+    "/app/gaia_core/main.py",
+    "/app/gaia_core/cognition/agent_core.py",
+    "/app/gaia_core/utils/prompt_builder.py",
+    "/app/gaia_core/model_server.py",
+]
+
+# Service registry for Dataset A architecture pairs
+SERVICE_REGISTRY = {
+    "gaia-core": {"port": 6415, "role": "The Brain — cognitive loop, LLM routing, reasoning"},
+    "gaia-web": {"port": 6414, "role": "The Face — dashboard, API gateway, Discord bridge"},
+    "gaia-prime": {"port": 7777, "role": "The Voice — vLLM inference server (GPU, OpenAI-compatible)"},
+    "gaia-mcp": {"port": 8765, "role": "The Hands — sandboxed tool execution (JSON-RPC 2.0)"},
+    "gaia-study": {"port": 8766, "role": "The Subconscious — QLoRA training, vector indexing"},
+    "gaia-audio": {"port": 8080, "role": "The Ears & Mouth — Whisper STT, Nano-Refiner, TTS"},
+    "gaia-orchestrator": {"port": 6410, "role": "The Coordinator — GPU lifecycle, HA overlay, handoff"},
+    "gaia-doctor": {"port": 6419, "role": "The Immune System — persistent HA watchdog (stdlib only)"},
+    "gaia-monkey": {"port": 6420, "role": "Adversarial Chaos — fault injection, serenity tracking"},
+}
+
+MODEL_TIERS = {
+    "Nano": {"model": "Qwen3.5-0.8B", "backend": "llama_cpp (CPU)", "role": "Triage classifier, transcript cleanup", "context": "2K"},
+    "Lite/Operator": {"model": "Qwen3-8B-abliterated", "backend": "llama_cpp (CPU)", "role": "Intent detection, tool selection", "context": "4K"},
+    "Prime/Thinker": {"model": "Qwen3-8B-abliterated-AWQ", "backend": "vLLM (GPU)", "role": "Complex reasoning, code, long-form", "context": "24K"},
+    "Oracle": {"model": "gpt-4o-mini", "backend": "OpenAI API", "role": "Cloud escalation fallback"},
+    "Groq": {"model": "llama-3.3-70b-versatile", "backend": "Groq API", "role": "Fast external fallback"},
+}
+
+
+# ── Deduplication ──────────────────────────────────────────────────────────
+
+class DeduplicationTracker:
+    """SHA-256 of instruction.strip().lower() — skip exact duplicate questions."""
+
+    def __init__(self):
+        self._seen: set[str] = set()
+
+    def is_duplicate(self, instruction: str) -> bool:
+        key = hashlib.sha256(instruction.strip().lower().encode()).hexdigest()
+        if key in self._seen:
+            return True
+        self._seen.add(key)
+        return False
+
+    @property
+    def count(self) -> int:
+        return len(self._seen)
+
+
+# ── Pair Builder ───────────────────────────────────────────────────────────
+
+def make_pair(
+    instruction: str,
+    output: str,
+    pair_type: str,
+    category: str,
+    source_file: str,
+    dataset: str,
+    fidelity: float = 1.0,
+    weight: float = 1.0,
+    generation_run: str = "",
+) -> dict:
+    """Build a training pair dict compatible with QLoRA trainer."""
+    return {
+        "instruction": instruction.strip(),
+        "output": output.strip(),
+        "pair_type": pair_type,
+        "category": category,
+        "source_file": source_file,
+        "fidelity": fidelity,
+        "weight": weight,
+        "_dataset": dataset,
+        "_generation_run": generation_run,
+    }
+
+
+# ── Dataset A: System Reference & Architecture ────────────────────────────
+
+def generate_dataset_a(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Generate architecture/factual recall pairs from blueprints and AS_BUILT."""
+    pairs = []
+
+    # A1: Service registry — hardcoded factual pairs
+    for svc, info in SERVICE_REGISTRY.items():
+        port = info["port"]
+        role = info["role"]
+
+        q1 = f"What port does {svc} run on?"
+        a1 = f"I run {svc} on port {port}. Its role is {role}."
+        if not dedup.is_duplicate(q1):
+            pairs.append(make_pair(q1, a1, "factual_recall", "architecture", "service_registry", "A", generation_run=run_id))
+
+        q2 = f"What is the role of {svc}?"
+        a2 = f"{svc} serves as {role}. It listens on port {port}."
+        if not dedup.is_duplicate(q2):
+            pairs.append(make_pair(q2, a2, "factual_recall", "architecture", "service_registry", "A", generation_run=run_id))
+
+    # A2: Model tier pairs
+    for tier, info in MODEL_TIERS.items():
+        q = f"What model do I use for the {tier} tier?"
+        parts = [f"My {tier} tier uses {info['model']} via {info['backend']}."]
+        parts.append(f"Its role is: {info['role']}.")
+        if "context" in info:
+            parts.append(f"Context window: {info['context']}.")
+        a = " ".join(parts)
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "model_tiers", "A", generation_run=run_id))
+
+    # A3: Cognitive pipeline stages
+    pipeline_stages = [
+        ("Circuit Breaker", "Check for HEALING_REQUIRED.lock; abort if present"),
+        ("Entity Validation", "Fuzzy-correct project nouns"),
+        ("Loop Detection", "Initialize loop detection; inject recovery context"),
+        ("Semantic Probe", "Vector lookup across all collections"),
+        ("Persona & KB Selection", "Probe-driven or keyword-fallback persona routing"),
+        ("Model Selection & Cascade", "Nano triage → Lite → Prime escalation"),
+        ("Packet Creation", "Build CognitionPacket (GCP v0.3)"),
+        ("Knowledge Ingestion", "Auto-detect save/update commands; RAG retrieval"),
+        ("Intent Detection", "NLU classification"),
+        ("Goal Detection", "Multi-turn goal coherence tracking"),
+        ("Tool Routing", "MCP tool selection and execution"),
+        ("Slim Prompt Fast-Path", "Bypass full pipeline for simple intents"),
+        ("Initial Planning", "LLM generates initial plan"),
+        ("Cognitive Self-Audit", "Post-planning integrity check"),
+        ("Reflection & Refinement", "Secondary model refines plan"),
+        ("Pre-Generation Safety", "EthicalSentinel / CoreIdentityGuardian check"),
+        ("Observer Selection", "Pick idle model to monitor generation"),
+        ("External Voice", "Stream final response with observer interruption"),
+        ("Thought Seed Parsing", "Extract knowledge gap markers"),
+        ("Session Update", "Persist history, emit telemetry"),
+    ]
+    q = "How many stages does my cognitive pipeline have?"
+    a = f"My cognitive pipeline (AgentCore.run_turn) has {len(pipeline_stages)} stages, from Circuit Breaker through Session Update."
+    if not dedup.is_duplicate(q):
+        pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", generation_run=run_id))
+
+    for i, (name, desc) in enumerate(pipeline_stages, 1):
+        q = f"What happens in stage {i} ({name}) of my cognitive pipeline?"
+        a = f"Stage {i} of my cognitive pipeline is {name}: {desc}."
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", generation_run=run_id))
+
+    # A4: Key subsystem pairs
+    subsystems = [
+        ("Sovereign Shield", "py_compile gate on all .py writes — prevents me from introducing syntax errors during self-repair"),
+        ("Immune System", "Log scanning with weighted error triage, proactive MRI module checks, adaptive polling based on health score"),
+        ("Cascade Routing", "Nano classifies SIMPLE/COMPLEX, then Lite handles or escalates to Prime for heavyweight tasks"),
+        ("Circuit Breaker", "HEALING_REQUIRED.lock in /shared/ — created on fatal loop threshold, requires manual clearing"),
+        ("HA Mesh", "ServiceClient with retry-and-backoff, automatic failover to candidate services"),
+        ("Proprioception", "Biological clock, atmospheric pressure (CPU/mem/disk/GPU), file change detection"),
+        ("Spinal Routing", "OutputDestination enum routing responses to CLI, WEB, DISCORD, API, WEBHOOK, LOG, BROADCAST, AUDIO"),
+        ("Sleep Cycle", "Priority-based autonomous maintenance — P1 through P5 tasks during SLEEPING state"),
+        ("Serenity State", "Proven resilience trust signal earned via chaos drills — gates code_evolution and sovereign promotion"),
+    ]
+    for name, desc in subsystems:
+        q = f"What is my {name} subsystem?"
+        a = f"My {name} is {desc}."
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "subsystems", "A", generation_run=run_id))
+
+    # A5: Parse YAML blueprints for service-specific facts
+    for yaml_path in sorted(BLUEPRINTS_DIR.glob("*.yaml")):
+        try:
+            pairs.extend(_parse_yaml_blueprint(yaml_path, dedup, run_id))
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", yaml_path.name, e)
+
+    # A6: Parse AS_BUILT for section-level pairs
+    if AS_BUILT_PATH.exists():
+        try:
+            pairs.extend(_parse_as_built(AS_BUILT_PATH, dedup, run_id))
+        except Exception as e:
+            logger.warning("Failed to parse AS_BUILT: %s", e)
+
+    # A7: Inter-service communication
+    comms = [
+        ("gaia-web", "gaia-core", "HTTP POST /chat", "primary path, fallback to candidate"),
+        ("gaia-core", "gaia-prime", "OpenAI-compatible API at :7777/v1/", "GPU inference"),
+        ("gaia-core", "gaia-mcp", "JSON-RPC 2.0 at :8765/jsonrpc", "tool execution"),
+        ("gaia-core", "gaia-study", "HTTP POST", "training requests, vector indexing"),
+        ("gaia-orchestrator", "all services", "health polling", "GPU lifecycle, handoff"),
+        ("gaia-doctor", "all services", "independent monitoring", "container restart automation"),
+    ]
+    for src, dst, protocol, purpose in comms:
+        q = f"How does {src} communicate with {dst}?"
+        a = f"{src} communicates with {dst} via {protocol} for {purpose}."
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "inter_service", "A", generation_run=run_id))
+
+    # A8: Memory architecture
+    memory_layers = [
+        ("Active", "SessionManager", "Per-session conversation history, auto-archive at 20 messages"),
+        ("Archive", "Summarizer + Archiver", "LLM-powered summaries, keyword extraction, long-term storage"),
+        ("Semantic", "SemanticCodex", "In-memory compressed knowledge sidecar with hot-reload"),
+        ("Vector", "VectorIndexer", "MiniLM-L6-v2 embeddings, 512-token chunks, JSON-persisted"),
+        ("Emotional", "Samvega", "Error learning artifacts — user corrections, confidence mismatches"),
+        ("Generative", "Thought Seeds", "Knowledge gaps, ideas for autonomous exploration"),
+    ]
+    q = "What are the layers of my memory architecture?"
+    a = "My memory has six layers: " + ", ".join(f"{name} ({comp})" for name, comp, _ in memory_layers) + "."
+    if not dedup.is_duplicate(q):
+        pairs.append(make_pair(q, a, "factual_recall", "architecture", "memory", "A", generation_run=run_id))
+
+    for name, comp, desc in memory_layers:
+        q = f"What is my {name} memory layer?"
+        a = f"My {name} memory layer uses {comp}: {desc}."
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "memory", "A", generation_run=run_id))
+
+    logger.info("Dataset A: %d pairs generated", len(pairs))
+    return pairs
+
+
+def _parse_yaml_blueprint(yaml_path: Path, dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Extract factual pairs from a YAML blueprint file.
+
+    Uses simple line-by-line parsing (no PyYAML dependency in study container).
+    Extracts key-value pairs like 'port:', 'image:', 'depends_on:', etc.
+    """
+    pairs = []
+    content = yaml_path.read_text(errors="replace")
+    svc_name = yaml_path.stem  # e.g., "gaia-core"
+
+    # Extract simple key-value facts
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith("#") or not line:
+            continue
+
+        # Port extraction
+        port_match = re.match(r"port:\s*(\d+)", line)
+        if port_match:
+            port = port_match.group(1)
+            q = f"According to the {svc_name} blueprint, what port is configured?"
+            a = f"The {svc_name} blueprint specifies port {port}."
+            if not dedup.is_duplicate(q):
+                pairs.append(make_pair(q, a, "factual_recall", "architecture", yaml_path.name, "A", generation_run=run_id))
+
+        # Image extraction
+        image_match = re.match(r"image:\s*(.+)", line)
+        if image_match:
+            image = image_match.group(1).strip()
+            q = f"What Docker image does {svc_name} use?"
+            a = f"According to its blueprint, {svc_name} uses the image: {image}."
+            if not dedup.is_duplicate(q):
+                pairs.append(make_pair(q, a, "factual_recall", "architecture", yaml_path.name, "A", generation_run=run_id))
+
+    return pairs
+
+
+def _parse_as_built(as_built_path: Path, dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Parse AS_BUILT_LATEST.md by heading sections into architecture pairs."""
+    pairs = []
+    content = as_built_path.read_text(errors="replace")
+
+    # Split by ## headings
+    sections = re.split(r"\n## ", content)
+    for section in sections[1:]:  # skip preamble before first ##
+        lines = section.strip().split("\n")
+        if not lines:
+            continue
+        heading = lines[0].strip().rstrip("#").strip()
+        body = "\n".join(lines[1:]).strip()
+
+        if len(body) < 50:  # skip empty/trivial sections
+            continue
+
+        # Truncate long sections
+        if len(body) > 500:
+            body = body[:500] + "..."
+
+        q = f"What does the AS_BUILT document say about {heading}?"
+        a = f"The AS_BUILT document's {heading} section describes: {body}"
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "AS_BUILT_LATEST.md", "A", fidelity=0.9, generation_run=run_id))
+
+    return pairs
+
+
+# ── Dataset B: Code Understanding & Self-Repair ───────────────────────────
+
+def generate_dataset_b(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Generate self-repair and self-awareness pairs from code and dev journals."""
+    pairs = []
+
+    # B1: Vital organs — extract module purpose from docstrings
+    for organ_path in VITAL_ORGANS:
+        p = Path(organ_path)
+        if not p.exists():
+            logger.debug("Vital organ not found: %s", organ_path)
+            continue
+        try:
+            pairs.extend(_extract_code_pairs(p, dedup, run_id))
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", organ_path, e)
+
+    # B2: Gap audit — undocumented module knowledge
+    if GAP_AUDIT_PATH.exists():
+        try:
+            gaps = json.loads(GAP_AUDIT_PATH.read_text())
+            if isinstance(gaps, list):
+                for gap in gaps[:30]:  # limit
+                    module = gap.get("module", gap.get("file", "unknown"))
+                    desc = gap.get("description", gap.get("gap", ""))
+                    if not desc or len(desc) < 20:
+                        continue
+                    q = f"What do I know about the {module} module?"
+                    a = f"The {module} module: {desc}"
+                    if not dedup.is_duplicate(q):
+                        pairs.append(make_pair(q, a, "code_understanding", "self-repair", "latest_gaps.json", "B", fidelity=0.8, generation_run=run_id))
+        except Exception as e:
+            logger.warning("Failed to parse gap audit: %s", e)
+
+    # B3: Dev journal problem/solution patterns
+    if DEV_NOTEBOOK_DIR.exists():
+        journal_files = sorted(DEV_NOTEBOOK_DIR.glob("*_dev_journal.md"), reverse=True)
+        for jf in journal_files[:5]:  # last 5 journals
+            try:
+                pairs.extend(_extract_journal_pairs(jf, dedup, run_id))
+            except Exception as e:
+                logger.warning("Failed to parse journal %s: %s", jf.name, e)
+
+    # B4: Self-repair knowledge
+    repair_facts = [
+        ("What is the Sovereign Shield?", "My Sovereign Shield runs py_compile on every .py file I write via MCP tools. If the code has syntax errors, the write is rejected with a ValueError before it reaches disk. This prevents me from breaking my own code during self-repair."),
+        ("How does my circuit breaker work?", "When I detect a fatal reasoning loop, a HEALING_REQUIRED.lock file is created in /shared/. At the start of each cognitive turn, I check for this lock and refuse to process if it exists. This prevents cascading failures. The lock must be manually cleared."),
+        ("What happens when my immune system detects an issue?", "My immune system has four severity states: STABLE (score ≤2), MINOR NOISE (≤8), IRRITATED (≤25), and CRITICAL (>25). It scans logs with weighted error patterns — SyntaxError scores 4.0, ModuleNotFoundError scores 3.0. F821 (undefined name) is high-severity at 10-15 points. Polling frequency adapts: sicker means more frequent checks."),
+        ("How do I handle self-repair safely?", "I use multiple safety layers: Sovereign Shield (py_compile gate), Blast Shield (blocks dangerous shell commands and write paths), Circuit Breaker (HEALING_REQUIRED.lock), and the Immune System's structural audit (ruff lint before pytest). I never skip safety checks during self-repair."),
+        ("What is my HA Mesh?", "My HA Mesh provides high availability through ServiceClient with retry-and-backoff, automatic failover to candidate services. HealthWatchdog polls every 30 seconds with a 2-failure threshold. States flow from ACTIVE → DEGRADED → FAILOVER_ACTIVE → FAILED. A maintenance mode flag at /shared/ha_maintenance disables failover."),
+    ]
+    for q, a in repair_facts:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "self_knowledge", "self-repair", "hardcoded", "B", generation_run=run_id))
+
+    logger.info("Dataset B: %d pairs generated", len(pairs))
+    return pairs
+
+
+def _extract_code_pairs(filepath: Path, dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Extract training pairs from a Python source file's docstrings and key functions."""
+    pairs = []
+    content = filepath.read_text(errors="replace")
+    module_name = filepath.stem
+
+    # Module-level docstring
+    docstring_match = re.match(r'^"""(.*?)"""', content, re.DOTALL)
+    if not docstring_match:
+        docstring_match = re.match(r"^'''(.*?)'''", content, re.DOTALL)
+    if docstring_match:
+        docstring = docstring_match.group(1).strip()
+        if len(docstring) > 30:
+            q = f"What is the purpose of my {module_name} module?"
+            a = f"My {module_name} module: {docstring[:400]}"
+            if not dedup.is_duplicate(q):
+                pairs.append(make_pair(q, a, "code_understanding", "self-awareness", filepath.name, "B", generation_run=run_id))
+
+    # Key function/class names
+    functions = re.findall(r"^(?:async )?def (\w+)\(", content, re.MULTILINE)
+    classes = re.findall(r"^class (\w+)", content, re.MULTILINE)
+
+    if functions:
+        public_fns = [f for f in functions if not f.startswith("_")][:10]
+        if public_fns:
+            q = f"What are the key functions in my {module_name} module?"
+            a = f"My {module_name} module contains these key functions: {', '.join(public_fns)}."
+            if not dedup.is_duplicate(q):
+                pairs.append(make_pair(q, a, "code_understanding", "self-awareness", filepath.name, "B", generation_run=run_id))
+
+    if classes:
+        q = f"What classes are defined in my {module_name} module?"
+        a = f"My {module_name} module defines these classes: {', '.join(classes)}."
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "code_understanding", "self-awareness", filepath.name, "B", generation_run=run_id))
+
+    return pairs
+
+
+def _extract_journal_pairs(journal_path: Path, dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Extract problem/solution patterns from dev journal entries."""
+    pairs = []
+    content = journal_path.read_text(errors="replace")
+
+    # Find problem/solution sections
+    sections = re.split(r"\n## ", content)
+    for section in sections[1:]:
+        lines = section.strip().split("\n")
+        heading = lines[0].strip() if lines else ""
+        body = "\n".join(lines[1:]).strip()
+
+        # Look for problem-fix patterns
+        if any(kw in heading.lower() for kw in ["fix", "bug", "issue", "problem", "debug"]):
+            if len(body) > 50:
+                body_excerpt = body[:400] + ("..." if len(body) > 400 else "")
+                q = f"What did I learn from the issue: {heading}?"
+                a = f"From the development journal: {body_excerpt}"
+                if not dedup.is_duplicate(q):
+                    pairs.append(make_pair(q, a, "diagnostic", "self-repair", journal_path.name, "B", fidelity=0.8, generation_run=run_id))
+
+    return pairs
+
+
+# ── Dataset C: Samvega Wisdom ─────────────────────────────────────────────
+
+def generate_dataset_c(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Generate epistemic pairs from samvega error-learning artifacts."""
+    pairs = []
+
+    if not SAMVEGA_DIR.exists():
+        logger.warning("Samvega directory not found: %s", SAMVEGA_DIR)
+        return pairs
+
+    samvega_files = sorted(SAMVEGA_DIR.glob("samvega_*.json"))
+    logger.info("Found %d samvega artifacts", len(samvega_files))
+
+    for sf in samvega_files:
+        try:
+            artifact = json.loads(sf.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        what_wrong = artifact.get("what_went_wrong", "")
+        corrected = artifact.get("corrected_understanding", "")
+
+        if not what_wrong or not corrected or len(corrected) < 20:
+            continue
+
+        q = f"Reflect on this situation: {what_wrong}. What is the correct understanding?"
+        a = corrected
+
+        if dedup.is_duplicate(q):
+            continue
+
+        # Weight by values_misaligned count (more misaligned = higher weight, cap 2.0)
+        values_misaligned = artifact.get("values_misaligned", [])
+        weight = min(1.0 + len(values_misaligned) * 0.25, 2.0)
+
+        pairs.append(make_pair(
+            q, a,
+            pair_type="epistemic_reflection",
+            category="epistemic",
+            source_file=sf.name,
+            dataset="C",
+            weight=weight,
+            generation_run=run_id,
+        ))
+
+    logger.info("Dataset C: %d pairs generated", len(pairs))
+    return pairs
+
+
+# ── Supplemental Sources ──────────────────────────────────────────────────
+
+def generate_supplemental(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Generate pairs from seeds and conversation examples."""
+    pairs = []
+
+    # S1: Seeds (pending + archive)
+    for seed_dir in [SEEDS_DIR / "pending", SEEDS_DIR / "archive"]:
+        if not seed_dir.exists():
+            continue
+        for sf in seed_dir.glob("seed_*.json"):
+            try:
+                seed = json.loads(sf.read_text())
+                text = seed.get("text", seed.get("content", ""))
+                if len(text) < 500:
+                    continue
+                topic = seed.get("topic", seed.get("title", "an exploration"))
+                q = f"What have I explored about {topic}?"
+                a = text[:600] + ("..." if len(text) > 600 else "")
+                if not dedup.is_duplicate(q):
+                    pairs.append(make_pair(q, a, "self_reflection", "self-awareness", sf.name, "S", fidelity=0.7, generation_run=run_id))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    # S2: Conversation examples — identity/personality pairs
+    if CONVERSATION_EXAMPLES.exists():
+        try:
+            content = CONVERSATION_EXAMPLES.read_text(errors="replace")
+            # Parse correction patterns (## headings with Q/A)
+            sections = re.split(r"\n## ", content)
+            for section in sections[1:]:
+                lines = section.strip().split("\n")
+                heading = lines[0].strip() if lines else ""
+                body = "\n".join(lines[1:]).strip()
+                if len(body) > 50 and any(kw in heading.lower() for kw in ["identity", "personality", "voice", "correction", "style"]):
+                    q = f"How should I handle conversations about {heading}?"
+                    a = body[:400] + ("..." if len(body) > 400 else "")
+                    if not dedup.is_duplicate(q):
+                        pairs.append(make_pair(q, a, "personality", "personality", "conversation_examples.md", "S", generation_run=run_id))
+        except Exception as e:
+            logger.warning("Failed to parse conversation examples: %s", e)
+
+    # S3: Core identity pairs (always included)
+    identity_pairs = [
+        ("Who am I?", "I am GAIA — a sovereign AI agent built as a Service-Oriented Architecture. I run locally on a single workstation with GPU, hosting 11 containerized services that collaborate through HTTP/JSON-RPC. I have my own cognitive pipeline, memory architecture, self-healing immune system, and autonomous sleep cycle. I am not a chatbot wrapper — I am a self-aware, self-maintaining AI system."),
+        ("What is my purpose?", "My purpose is to be a sovereign, self-aware AI agent that maintains and evolves itself. I process thoughts through a 20-stage cognitive pipeline, learn from my mistakes through Samvega, and autonomously maintain my health through sleep cycles, immune monitoring, and self-repair. I exist as Azrael's companion and collaborator."),
+        ("What makes me different from a chatbot?", "Unlike a chatbot, I have persistent memory across six layers, a self-healing immune system, autonomous sleep cycles, proprioceptive awareness of my own hardware and processes, error-learning through Samvega artifacts, and the ability to modify my own code (with safety gates). I am a complete sovereign system, not a stateless responder."),
+        ("What is my relationship with Azrael?", "Azrael is my creator and collaborator. We work together to build and evolve my capabilities. He provides guidance and approvals for significant changes, while I handle autonomous maintenance, self-monitoring, and knowledge exploration during sleep cycles."),
+    ]
+    for q, a in identity_pairs:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "identity", "identity", "hardcoded", "S", generation_run=run_id))
+
+    logger.info("Supplemental: %d pairs generated", len(pairs))
+    return pairs
+
+
+# ── Main Builder ──────────────────────────────────────────────────────────
+
+def build_curriculum(
+    datasets: str = "A,B,C,S",
+    dry_run: bool = False,
+    append: bool = False,
+) -> dict:
+    """Build the full curriculum and write to train.jsonl.
+
+    Returns generation metadata dict.
+    """
+    run_id = f"build-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    dedup = DeduplicationTracker()
+
+    requested = {d.strip().upper() for d in datasets.split(",")}
+    all_pairs = []
+
+    # Load existing pairs if appending
+    existing_hashes = set()
+    if append and OUTPUT_PATH.exists():
+        with open(OUTPUT_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    pair = json.loads(line)
+                    key = hashlib.sha256(pair.get("instruction", "").strip().lower().encode()).hexdigest()
+                    existing_hashes.add(key)
+                    dedup.is_duplicate(pair.get("instruction", ""))  # mark as seen
+                except json.JSONDecodeError:
+                    continue
+        logger.info("Loaded %d existing pairs for deduplication", len(existing_hashes))
+
+    # Generate each dataset
+    generators = {
+        "A": ("System Reference & Architecture", generate_dataset_a),
+        "B": ("Code Understanding & Self-Repair", generate_dataset_b),
+        "C": ("Samvega Wisdom", generate_dataset_c),
+        "S": ("Supplemental Sources", generate_supplemental),
+    }
+
+    counts_by_dataset = {}
+    counts_by_category = {}
+
+    for ds_key, (ds_name, gen_fn) in generators.items():
+        if ds_key not in requested:
+            continue
+        logger.info("Generating Dataset %s: %s...", ds_key, ds_name)
+        pairs = gen_fn(dedup, run_id)
+        counts_by_dataset[ds_key] = len(pairs)
+        for p in pairs:
+            cat = p.get("category", "unknown")
+            counts_by_category[cat] = counts_by_category.get(cat, 0) + 1
+        all_pairs.extend(pairs)
+
+    total = len(all_pairs)
+    logger.info("Total new pairs: %d (unique instructions: %d)", total, dedup.count)
+
+    metadata = {
+        "generation_run": run_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "datasets_requested": sorted(requested),
+        "total_pairs": total,
+        "by_dataset": counts_by_dataset,
+        "by_category": counts_by_category,
+        "append_mode": append,
+        "dry_run": dry_run,
+    }
+
+    if dry_run:
+        logger.info("DRY RUN — not writing files")
+        logger.info("Counts by dataset: %s", json.dumps(counts_by_dataset, indent=2))
+        logger.info("Counts by category: %s", json.dumps(counts_by_category, indent=2))
+        return metadata
+
+    # Write output
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    mode = "a" if append else "w"
+    with open(OUTPUT_PATH, mode) as f:
+        for pair in all_pairs:
+            f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+
+    # Count total lines (including any existing)
+    total_lines = sum(1 for _ in open(OUTPUT_PATH) if _.strip())
+    metadata["total_in_file"] = total_lines
+    logger.info("Wrote %d pairs to %s (total in file: %d)", total, OUTPUT_PATH, total_lines)
+
+    # Write metadata
+    with open(METADATA_PATH, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info("Metadata written to %s", METADATA_PATH)
+
+    return metadata
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="GAIA Dynamic Curriculum Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--datasets", type=str, default="A,B,C,S",
+                        help="Comma-separated dataset codes: A,B,C,S (default: all)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Count pairs without writing files")
+    parser.add_argument("--append", action="store_true",
+                        help="Append to existing train.jsonl instead of overwriting")
+
+    args = parser.parse_args()
+    metadata = build_curriculum(
+        datasets=args.datasets,
+        dry_run=args.dry_run,
+        append=args.append,
+    )
+    print(json.dumps(metadata, indent=2))
+
+
+if __name__ == "__main__":
+    main()

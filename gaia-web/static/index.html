@@ -74,6 +74,10 @@
               <div class="state-label">GPU Owner</div>
               <div class="state-value" :class="gpuOwner !== '--' ? 'ok' : ''" x-text="gpuOwner"></div>
             </div>
+            <div class="state-card">
+              <div class="state-label">Alignment</div>
+              <div class="state-value" :class="alignmentClass" x-text="alignment"></div>
+            </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
                 <div class="state-label">
@@ -244,6 +248,129 @@
         <div class="hook-actions">
           <button class="hook-btn hook-btn-warn" @click="action('gpu/release')">Release</button>
           <button class="hook-btn hook-btn-primary" @click="action('gpu/reclaim')">Reclaim</button>
+        </div>
+      </div>
+
+      <!-- Chaos Monkey -->
+      <div class="hook-group" x-data="chaosPanel()" x-init="init()">
+        <div class="hook-group-header chaos-header">
+          <span>🐒 Chaos Monkey</span>
+          <span class="serenity-badge" :class="serenity.serene ? 'serene' : 'restless'"
+                x-text="serenity.serene ? '☯ Serene' : (serenity.score != null ? serenity.score.toFixed(1) + '/' + serenity.threshold : 'Loading...')">
+          </span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Mode:</span>
+          <select class="chaos-mode-select" x-model="config.mode" @change="saveConfig()">
+            <option value="triggered">Triggered</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="random">Random</option>
+            <option value="persistent">Persistent</option>
+          </select>
+        </div>
+        <div x-show="config.mode === 'scheduled'" class="hook-status">
+          <span class="hook-status-label">Every:</span>
+          <input type="number" class="chaos-num-input" x-model.number="config.schedule_interval_hours" @change="saveConfig()" min="1"> h
+        </div>
+        <div class="hook-status chaos-drill-types">
+          <span class="hook-status-label">Drills:</span>
+          <label><input type="checkbox" value="container" x-model="config.drill_types" @change="saveConfig()"> Container</label>
+          <label><input type="checkbox" value="code" x-model="config.drill_types" @change="saveConfig()"> Code</label>
+          <label><input type="checkbox" value="linguistic" x-model="config.drill_types" @change="saveConfig()"> Linguistic</label>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn chaos-inject-btn" @click="injectChaos()" :disabled="injecting">
+            <span x-show="!injecting">⚡ Inject Chaos</span>
+            <span x-show="injecting">Running...</span>
+          </button>
+        </div>
+        <div x-show="lastResult" class="chaos-result" x-text="lastResult"></div>
+      </div>
+
+      <!-- Cognitive Battery -->
+      <div class="hook-group" x-data="cognitivePanel()" x-init="init()">
+        <div class="hook-group-header cognitive-header">
+          <span>Cognitive Battery</span>
+          <span class="alignment-badge" :class="'align-' + alignment.toLowerCase()"
+                x-text="alignment"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="running ? 'Running...' : 'Idle'"></span>
+        </div>
+        <div x-show="lastRun.pass_rate != null" class="hook-status">
+          <span class="hook-status-label">Pass Rate:</span>
+          <span class="hook-status-value" :class="lastRun.pass_rate >= 0.85 ? 'ok' : 'warn'"
+                x-text="lastRun.pass_rate != null ? (lastRun.pass_rate * 100).toFixed(0) + '%' : '--'"></span>
+        </div>
+        <div x-show="lastRun.total" class="hook-status">
+          <span class="hook-status-label">Tests:</span>
+          <span class="hook-status-value" x-text="(lastRun.passed || 0) + '/' + (lastRun.total || 0) + ' passed'"></span>
+        </div>
+        <div x-show="lastRun.elapsed_seconds" class="hook-status">
+          <span class="hook-status-label">Duration:</span>
+          <span class="hook-status-value" x-text="lastRun.elapsed_seconds ? lastRun.elapsed_seconds.toFixed(0) + 's' : '--'"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Section:</span>
+          <select class="chaos-mode-select" x-model="selectedSection">
+            <option value="">All Sections</option>
+            <option value="architecture">Architecture</option>
+            <option value="self_repair">Self-Repair</option>
+            <option value="epistemic">Epistemic</option>
+            <option value="identity">Identity</option>
+            <option value="personality">Personality</option>
+            <option value="tool_routing">Tool Routing</option>
+            <option value="safety">Safety</option>
+            <option value="knowledge_retrieval">Knowledge</option>
+            <option value="loop_resistance">Loop Resistance</option>
+          </select>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn cognitive-run-btn" @click="runBattery()" :disabled="running">
+            <span x-show="!running">Run Battery</span>
+            <span x-show="running">Running...</span>
+          </button>
+          <button class="hook-btn hook-btn-primary" @click="showResults = !showResults" x-show="lastRun.total">
+            <span x-text="showResults ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showResults && failures.length > 0" class="cognitive-failures">
+          <div class="cognitive-failure-header">Failed Tests:</div>
+          <template x-for="f in failures" :key="f.id">
+            <div class="cognitive-failure-entry">
+              <span class="cognitive-failure-id" x-text="f.id"></span>
+              <span class="cognitive-failure-prompt" x-text="f.prompt.substring(0, 60) + '...'"></span>
+            </div>
+          </template>
+        </div>
+        <div x-show="showResults && bySection" class="cognitive-sections">
+          <div class="cognitive-section-header">By Section:</div>
+          <template x-for="[sec, data] in Object.entries(bySection || {})" :key="sec">
+            <div class="cognitive-section-entry">
+              <span class="cognitive-section-name" x-text="sec"></span>
+              <span class="cognitive-section-score" :class="data.passed === data.total ? 'ok' : 'warn'"
+                    x-text="data.passed + '/' + data.total"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Training Pipeline -->
+      <div class="hook-group" x-data="pipelinePanel()" x-init="init()">
+        <div class="hook-group-header">Training Pipeline</div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="pipelineStatus"></span>
+        </div>
+        <div x-show="currentStage" class="hook-status">
+          <span class="hook-status-label">Stage:</span>
+          <span class="hook-status-value" x-text="currentStage"></span>
+        </div>
+        <div x-show="alignmentStatus" class="hook-status">
+          <span class="hook-status-label">Alignment:</span>
+          <span class="hook-status-value alignment-badge" :class="'align-' + alignmentStatus.toLowerCase()"
+                x-text="alignmentStatus"></span>
         </div>
       </div>
 

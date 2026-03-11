@@ -1,4 +1,4 @@
-# gaia-prime-candidate: Custom vLLM inference server for GAIA
+# gaia-prime: Custom vLLM inference server for GAIA
 # RTX 5080 Blackwell (sm_120 / compute capability 12.0) compatible build
 #
 # Uses NGC PyTorch base image which includes CUDA 12.8+ and PyTorch
@@ -70,6 +70,13 @@ RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project
 # tensors which crashes at runtime. Must be done AFTER vLLM install since
 # vLLM's dependencies pull numpy 2.x and override any earlier pin.
 RUN pip install --no-cache-dir "numpy<2"
+
+# Qwen3.5 requires transformers 5.2+ for qwen3_5_text model type
+RUN pip install --no-cache-dir "transformers>=5.2.0"
+
+# LMCache: hierarchical KV cache persistence (GPU → CPU → disk)
+# Enables KV replay on wake instead of full re-prefill
+RUN pip install --no-cache-dir lmcache
 
 # Expose service port
 EXPOSE 7777

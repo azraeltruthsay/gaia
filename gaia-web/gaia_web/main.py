@@ -30,6 +30,7 @@ from gaia_web.routes.logs import router as logs_router
 from gaia_web.routes.audio import router as audio_router
 from gaia_web.routes.discord import router as discord_router
 from gaia_web.routes.system import router as system_router
+from gaia_web.routes.chaos import router as chaos_router
 
 # Setup logging
 try:
@@ -99,6 +100,7 @@ app.include_router(audio_router, tags=["audio"])
 app.include_router(discord_router, tags=["discord"])
 # system_router uses relative paths, so it needs the prefix
 app.include_router(system_router, prefix="/api/system", tags=["system"])
+app.include_router(chaos_router, prefix="/api/chaos", tags=["chaos"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):
