@@ -92,6 +92,7 @@ class StudyStartRequest(BaseModel):
     pillar: str = Field(default="general", description="Knowledge pillar")
     description: str = ""
     max_steps: int = Field(default=100, ge=1, le=1000)
+    num_train_epochs: Optional[int] = Field(default=None, ge=1, le=20, description="Epoch-based training (overrides max_steps)")
     target_loss: float = Field(default=0.05, ge=0.0, description="Stop when loss drops below this threshold")
     convergence_patience: int = Field(default=3, ge=1, description="Consecutive checks below target_loss before stopping")
     resume_from: Optional[str] = Field(default=None, description="Path to existing adapter for incremental training")
@@ -345,6 +346,7 @@ def create_app() -> FastAPI:
                 source_documents=request.documents,
                 description=request.description,
                 max_steps=request.max_steps,
+                num_train_epochs=request.num_train_epochs,
                 target_loss=request.target_loss,
                 convergence_patience=request.convergence_patience,
                 resume_from=request.resume_from,

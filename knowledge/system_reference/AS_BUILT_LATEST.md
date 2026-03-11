@@ -1,13 +1,16 @@
 # Code Evolution Snapshot
-Generated: 2026-03-10T13:33:29.411330+00:00
+Generated: 2026-03-11T13:15:50.140194+00:00
 
 ## Pending Candidate Changes
-- **gaia-common**: 2 changed (blueprint.py, blueprint_generator.py)
-- **gaia-core**: 4 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json, web_ui_session.json +1), 9 added, 672 removed
+- **gaia-common**: 1 changed (gaia_constants.json)
+- **gaia-core**: 4 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json, web_ui_session.json +1), 58 added, 1093 removed
 - **gaia-web**: 1 changed (voice_whitelist.json), 1 removed
-- **gaia-orchestrator**: 2 changed (config.py, gpu_manager.py), 4 removed
+- **gaia-orchestrator**: 2 removed
 
 ## Recent Commits
+- `c32bfc8` (2026-03-10): feat: three-tier Qwen3 audio architecture for gaia-audio
+- `b0484c8` (2026-03-10): feat: migrate gaia-audio Nano-Refiner from llama-cpp to gaia-nano HTTP
+- `a1549e1` (2026-03-10): feat: Qwen3.5 full-stack migration, llama-server arch, doctor hardening
 - `7bcfa3f` (2026-03-07): feat: Serenity State, Chaos Monkey L2, identity continuity, grit mode, atomic hashing
 - `b248e37` (2026-03-06): feat: anchored Nano reflex and epistemic validation logic
 - `4052a87` (2026-03-06): docs: define Penpal Protocol for NotebookLM interaction
@@ -15,9 +18,6 @@ Generated: 2026-03-10T13:33:29.411330+00:00
 - `e071f62` (2026-03-06): feat: add orderly startup script with health gating
 - `89052c1` (2026-03-06): fix: resolve all remaining fixable lint errors in production and candidates
 - `bb9696c` (2026-03-06): fix: prime endpoint URL and samvega LLM call compatibility
-- `aa104da` (2026-03-06): chore: Immune System 3.0 hardening and Chaos Monkey 5/6 surgical repair
-- `ebdff9d` (2026-03-06): fix: Harden HA Surgeon — context windowing, rw write authority, py_compile gate
-- `c23e33d` (2026-03-06): feat: Implement Bicameral Mind Support & Immune System 3.0 Hardening
 
 ## Backup History
 - 122 .bak files (oldest: 2026-01-07, newest: 2026-01-27)

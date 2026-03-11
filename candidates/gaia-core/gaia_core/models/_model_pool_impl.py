@@ -574,6 +574,12 @@ class ModelPool:
                     "lora_config": self.config.constants.get("LORA_CONFIG", {}),
                 }
                 self.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True}
+                # Also update thinker config to match (gpu_prime resolves to thinker via role map)
+                if "thinker" in self.config.MODEL_CONFIGS:
+                    prime_model = os.getenv("PRIME_MODEL") or existing_cfg.get("path")
+                    if prime_model:
+                        self.config.MODEL_CONFIGS["thinker"]["path"] = prime_model
+                        self.config.MODEL_CONFIGS["thinker"]["endpoint"] = prime_endpoint
                 if "cpu_prime" in self.config.MODEL_CONFIGS:
                     self.config.MODEL_CONFIGS["cpu_prime"]["enabled"] = False
                 logger.info("PRIME_ENDPOINT set: gpu_prime -> vllm_remote @ %s", prime_endpoint)
@@ -1090,9 +1096,9 @@ class ModelPool:
 
         # 2. Check MODEL_CONFIGS for alias or direct entry
         cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
-        
-        # If it's a remote model, return the role itself as the name (we'll handle lazy load next)
-        if cfg.get("type") == "vllm_remote":
+
+        # If it's a remote model and enabled, return the role itself as the name (we'll handle lazy load next)
+        if cfg.get("type") == "vllm_remote" and cfg.get("enabled", True):
             return target_role
 
         alias = cfg.get('alias')

@@ -4,7 +4,7 @@ The GAIA project is a service-oriented architecture designed for advanced AI ope
 
 ## Core Services
 
-The system is built around eight primary services plus a shared library:
+The system is built around ten primary services plus a shared library:
 
 | Service | Role | Port | GPU | Base Image |
 |---------|------|------|-----|------------|
@@ -15,6 +15,8 @@ The system is built around eight primary services plus a shared library:
 | **`gaia-mcp`** | The Hands (Tools) | 8765 | - | python:3.11-slim |
 | **`gaia-study`** | The Subconscious (Learning) | 8766 | All GPUs | nvidia/cuda:12.4 |
 | **`gaia-audio`** | The Ears & Mouth (STT/TTS) | 8080 | 1x NVIDIA | python:3.11-slim |
+| **`gaia-doctor`** | The Immune System (HA Watchdog) | 6419 | - | python:3.12-slim |
+| **`gaia-monkey`** | The Adversary (Chaos Testing) | 6420 | - | python:3.12-slim + node:20-slim |
 | **`gaia-wiki`** | The Library (Documentation) | 8080 (internal) | - | python:3.11-slim |
 
 **`gaia-common`** is a shared Python library (not a running service) consumed by all services.
@@ -28,7 +30,9 @@ The system is built around eight primary services plus a shared library:
 5.  **`gaia-mcp`**: Sandboxed tool execution environment with approval workflows. Provides file operations, shell execution, vector queries, and knowledge management tools. Security-hardened with dropped capabilities.
 6.  **`gaia-study`**: Background processing for vector indexing, embedding generation, and QLoRA model fine-tuning. Sole writer to the vector store. Uses GPU for embeddings and training.
 7.  **`gaia-audio`**: Sensory microservice providing STT (faster-whisper, GPU-accelerated) and TTS (Coqui XTTS v2, espeak-ng fallback, ElevenLabs cloud fallback). Half-duplex GPU management swaps between STT and TTS models to fit VRAM budget. Called by gaia-web's VoiceManager during Discord voice sessions.
-8.  **`gaia-wiki`**: Internal MkDocs Material documentation server. Accessible on the Docker network at `gaia-wiki:8080`, optionally proxied by gaia-web at `/wiki`.
+8.  **`gaia-doctor`**: Persistent HA watchdog. Polls all service health endpoints, auto-restarts crashed containers (circuit-breaker gated), runs structural audits, monitors log irritations, and detects live/candidate code drift (Dissonance Probe). stdlib only — zero external dependencies.
+9.  **`gaia-monkey`**: Adversarial resilience engine. Manages Defensive Meditation (time-boxed chaos window), Serenity State (trust signal for autonomous promotion), and three drill types: container fault injection, semantic code fault injection (with LLM-powered Tier 2 repair), and PromptFoo linguistic red-teaming.
+10. **`gaia-wiki`**: Internal MkDocs Material documentation server. Accessible on the Docker network at `gaia-wiki:8080`, optionally proxied by gaia-web at `/wiki`.
 
 ## Architecture & Data Flow
 
@@ -87,7 +91,10 @@ In v0.3, GPU inference is fully decoupled from cognition:
 *   **GPU Offload**: Inference is fully decoupled from cognition. gaia-core is CPU-only; all GPU work goes through gaia-prime via HTTP.
 *   **Read/Write Segregation**: `gaia-study` is the exclusive writer for the vector store. Other services have read-only access via `VectorClient`.
 *   **Hybrid AI Model System**: Dynamic backend selection from local GPU inference (vLLM), local CPU inference (GGUF), cloud APIs (Groq, OpenAI, Gemini).
-*   **Continuous Learning Loop**: `gaia-study` processes new information and fine-tunes LoRA adapters using QLoRA.
+*   **Continuous Learning Loop**: `gaia-study` processes new information and fine-tunes LoRA adapters using QLoRA. The self-awareness pipeline (15 stages) orchestrates curriculum generation, gap-filtered training, merge+requantize, deployment, and cognitive verification.
+*   **Dynamic Curriculum**: `build_curriculum.py` assembles training data from three living knowledge sources: System Reference (architecture), Code Understanding (self-repair), and Samvega Wisdom (epistemic), plus supplemental seeds and conversation examples. Deduplicates by SHA-256 of instruction text.
+*   **Cognitive Test Battery**: `cognitive_test_battery.py` in gaia-doctor validates learned knowledge across 9 sections (~50 tests): architecture, self-repair, epistemic, identity, personality, tool routing, safety, knowledge retrieval, and loop resistance. Stdlib-only.
+*   **Alignment Status**: Four-tier progression — UNTRAINED (no pipeline run), TRAINING (pipeline running), ALIGNED (cognitive smoke passed), SELF_ALIGNED (zero training gaps + perfect cognitive smoke). Surfaced in pipeline state, cognitive battery results, and Mission Control dashboard.
 *   **Secure Sandboxed Tooling**: `gaia-mcp` executes tools with dropped Linux capabilities, approval workflows for sensitive operations, and isolated sandbox volumes.
 *   **Candidate/Live SDLC**: Parallel candidate stack for testing. Validated promotion via `promote_candidate.sh` with containerized ruff/mypy/pytest checks.
 *   **High Availability**: HA overlay (`docker-compose.ha.yml`) enables hot-standby failover. Candidate services run as warm standbys; gaia-web and gaia-core auto-route to candidates on primary failure.

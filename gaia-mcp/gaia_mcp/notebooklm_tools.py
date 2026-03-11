@@ -359,7 +359,15 @@ async def notebooklm_download_audio(params: dict) -> dict:
             result["transcribed"] = False
             result["transcribe_error"] = "httpx not available for transcription relay"
 
-        # Clean up temp file
+        # Persist to save_path if requested, otherwise clean up temp file
+        save_path = (params.get("save_path") or "").strip()
+        if save_path:
+            try:
+                import shutil
+                shutil.copy2(str(download_path), save_path)
+                result["saved_path"] = save_path
+            except Exception as e:
+                result["save_error"] = str(e)
         try:
             Path(download_path).unlink(missing_ok=True)
         except Exception:

@@ -6,16 +6,17 @@ pydantic>=2.0
 dataclasses-json
 
 # STT - Qwen3-ASR
-qwen-asr>=0.1.0
-transformers>=4.57.0
+qwen-asr>=0.0.6
+transformers>=4.45.0
 
-# TTS - Qwen3-TTS (NanoSpeaker + PrimeSpeaker)
-qwen-tts>=0.1.0
+# TTS - Qwen3-TTS (not yet on PyPI — falls back to espeak-ng)
+# qwen-tts>=0.1.0
 
 # Audio processing
 numpy
 soundfile
 scipy
+librosa
 
 # GPU management
 torch>=2.0.0

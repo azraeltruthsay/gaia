@@ -51,6 +51,8 @@ services:
       - gaia-candidate-shared:/candidate-shared:rw
       # Project root for compose file access (read-only)
       - .:/gaia/GAIA_Project:ro
+      # Warm pool for model sync (self-awareness pipeline)
+      - /mnt/gaia_warm_pool:/warm_pool:rw
 
     # Grant access to the host Docker socket (GID 962 = docker group on host)
     group_add:
@@ -88,30 +90,32 @@ services:
   # gaia-prime: The Voice - Standalone vLLM inference server (GPU)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime:
-    image: vllm/vllm-openai:latest
+    build:
+      context: ./gaia-prime
+      dockerfile: Dockerfile.qwen35
+    image: gaia-prime:qwen35-lmcache
     container_name: gaia-prime
     hostname: gaia-prime
     restart: unless-stopped
 
     volumes:
       - /mnt/gaia_warm_pool:/models:ro
+      - ./logs/kvcache/prime:/kvcache:rw
+      - ./gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
 
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
-      - VLLM_FLASH_ATTN_VERSION=2
-      - TORCH_CUDA_ARCH_LIST=12.0+PTX
-      # Required for vLLM sleep mode (/sleep and /wake_up endpoints)
-      - VLLM_SERVER_DEV_MODE=1
+      - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
 
     ports:
       - "7777:7777"
 
     command: >
-      ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated}
+      ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-merged}
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.65
-      --max-model-len 16384
+      --gpu-memory-utilization 0.60
+      --max-model-len 24576
       --max-num-seqs 1
       --trust-remote-code
       --dtype auto
@@ -151,6 +155,7 @@ services:
 
     volumes:
       - ./gaia-models:/models:ro
+      - ./logs/kvcache/nano:/kvcache:rw
 
     command: >
       --host 0.0.0.0
@@ -160,6 +165,7 @@ services:
       --threads 4
       --n-gpu-layers 0
       --chat-template chatml
+      --slot-save-path /kvcache
 
     ports:
       - "8090:8080"
@@ -230,6 +236,7 @@ services:
       # CPU-only mode — GPU inference offloaded to gaia-prime
       - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
       - GAIA_FORCE_CPU=0
+      - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
       - N_GPU_LAYERS=16
       - GAIA_AUTOLOAD_MODELS=1
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
@@ -247,6 +254,8 @@ services:
       - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf
       - CORE_CPU_CTX=4096
       - CORE_CPU_THREADS=8
+      # KV cache persistence for embedded llama-server
+      - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       # HA failover — candidate MCP as fallback
       - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
       # Logging
@@ -337,6 +346,8 @@ services:
       - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Chaos Monkey integration
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
 
     ports:
       - "6414:6414"
@@ -652,6 +663,8 @@ services:
       - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
       - COMPOSE_PROJECT_NAME=gaia_project
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - SHARED_DIR=/shared
 
     volumes:
       # Docker socket (read-write — doctor needs to restart containers)
@@ -682,6 +695,48 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-monkey: Adversarial Chaos Service
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-monkey:
+    build:
+      context: ./gaia-monkey
+      dockerfile: Dockerfile
+    image: localhost:5000/gaia-monkey:local
+    container_name: gaia-monkey
+    hostname: gaia-monkey
+    restart: unless-stopped
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - gaia-shared:/shared:rw
+      - .:/gaia/GAIA_Project:ro
+
+    environment:
+      - CORE_ENDPOINT=http://gaia-core:6415
+      - DOCTOR_ENDPOINT=http://gaia-doctor:6419
+      - SHARED_DIR=/shared
+      - PROJECT_ROOT=/gaia/GAIA_Project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PROMPTFOO_HOME=/tmp/.promptfoo
+
+    ports:
+      - "6420:6420"
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      - gaia-core
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6420/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 
 # ═══════════════════════════════════════════════════════════════════════════

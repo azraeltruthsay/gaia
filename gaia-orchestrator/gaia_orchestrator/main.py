@@ -560,6 +560,88 @@ async def gpu_wake():
 
 
 # =============================================================================
+# Single Container Restart (used by self-awareness training pipeline)
+# =============================================================================
+
+_RESTART_ALLOWED = {
+    "gaia-prime", "gaia-nano", "gaia-core", "gaia-web",
+    "gaia-study", "gaia-mcp",
+}
+
+
+@app.post("/containers/{container_name}/restart")
+async def restart_single_container(container_name: str):
+    """Restart a single container by name.
+
+    Used by the self-awareness pipeline to restart gaia-prime and gaia-nano
+    after deploying new model weights. Whitelist prevents arbitrary restarts.
+    """
+    if _docker_manager is None:
+        raise HTTPException(status_code=501, detail="Docker manager not available")
+
+    if container_name not in _RESTART_ALLOWED:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Container '{container_name}' not in restart whitelist",
+        )
+
+    try:
+        ok = await _docker_manager.restart_container(container_name)
+        if ok:
+            logger.info("Restarted container %s", container_name)
+            return {"ok": True, "container": container_name}
+        else:
+            raise HTTPException(status_code=500, detail=f"Restart of {container_name} returned False")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error restarting container %s", container_name)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Warm Pool Sync (copy merged model to warm pool for vLLM)
+# =============================================================================
+
+class WarmPoolSyncRequest(BaseModel):
+    model: str  # e.g. "Qwen3.5-4B-Abliterated-merged"
+
+
+@app.post("/warm-pool/sync")
+async def warm_pool_sync(request: WarmPoolSyncRequest):
+    """Copy a model from gaia-models/ to /warm_pool/.
+
+    Used after merge+requantize to make the new merged model available
+    to gaia-prime (which mounts /mnt/gaia_warm_pool as /models).
+    """
+    import shutil
+
+    src = Path(f"/gaia/GAIA_Project/gaia-models/{request.model}")
+    dst = Path(f"/warm_pool/{request.model}")
+
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Source model not found: {src}")
+
+    if not Path("/warm_pool").exists():
+        raise HTTPException(
+            status_code=501,
+            detail="Warm pool not mounted — add /mnt/gaia_warm_pool:/warm_pool:rw to orchestrator volumes",
+        )
+
+    try:
+        logger.info("Syncing model %s → %s", src, dst)
+        shutil.copytree(str(src), str(dst), dirs_exist_ok=True)
+        # Calculate synced size
+        total_bytes = sum(f.stat().st_size for f in dst.rglob("*") if f.is_file())
+        size_gb = total_bytes / (1024 ** 3)
+        logger.info("Warm pool sync complete: %s (%.2f GB)", request.model, size_gb)
+        return {"ok": True, "model": request.model, "size_gb": round(size_gb, 2)}
+    except Exception as e:
+        logger.exception("Warm pool sync failed for %s", request.model)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Candidate Rollback Endpoints
 # =============================================================================
 

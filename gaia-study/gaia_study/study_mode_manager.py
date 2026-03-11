@@ -60,6 +60,9 @@ class TrainingConfig:
     target_loss: float = 0.05
     convergence_patience: int = 3
 
+    # Epoch-based training (overrides max_steps when set)
+    num_train_epochs: Optional[int] = None
+
     # Incremental training
     resume_from: Optional[str] = None
 
@@ -581,6 +584,7 @@ class StudyModeManager:
             warmup_steps=config.warmup_steps,
             target_loss=config.target_loss,
             convergence_patience=config.convergence_patience,
+            num_train_epochs=config.num_train_epochs,
         )
 
         # Progress callback to update our state

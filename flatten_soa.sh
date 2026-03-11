@@ -132,6 +132,7 @@ FILE_LIST=$(
         -path 'knowledge/seeds' -prune -o \
         -path 'knowledge/Dev_Notebook/Blueprint_System' -prune -o \
         -path 'gaia-study/scripts' -prune -o \
+        -path 'gaia-study/gptqmodel_offload' -prune -o \
         -path '*/session_vectors' -prune -o \
         -path '*/archive' -prune -o \
         -path '*/.mypy_cache' -prune -o \

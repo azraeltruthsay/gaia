@@ -252,14 +252,41 @@ def ensure_awake(endpoint: str, timeout: int = 30) -> bool:
 
 
 def send_packet(packet: dict, endpoint: str, timeout: int = 300) -> dict:
-    """POST a CognitionPacket dict to /process_packet and return the response."""
+    """POST a CognitionPacket dict to /process_packet and return the response.
+
+    Handles both legacy JSON responses and NDJSON streaming responses.
+    For NDJSON, concatenates all token values into a synthetic response dict.
+    """
     url = f"{endpoint.rstrip('/')}/process_packet"
     data = json.dumps(packet).encode("utf-8")
 
     req = Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            body = resp.read().decode("utf-8")
+            # Try parsing as single JSON first (legacy format)
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError:
+                pass
+            # Parse as NDJSON streaming — collect token values
+            tokens = []
+            for line in body.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if obj.get("type") == "token":
+                        tokens.append(obj.get("value", ""))
+                    elif obj.get("type") == "response":
+                        # Full response object — return it directly
+                        return obj
+                except json.JSONDecodeError:
+                    continue
+            # Build synthetic response from collected tokens
+            full_text = "".join(tokens)
+            return {"response": {"candidate": full_text}}
     except HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {e.code}: {body}") from e

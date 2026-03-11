@@ -101,19 +101,32 @@ def merge_adapter(base_path: str, adapter_path: str, output_path: str) -> str:
     logger.info("  Output:  %s", output_path)
 
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
     t0 = time.time()
 
     # Load base model in bf16 on CPU (uses ~16GB system RAM for 9B)
+    # Use AutoModelForImageTextToText for multimodal models to preserve the
+    # vision encoder through the merge. AutoModelForCausalLM strips it.
     logger.info("Loading base model (bf16, CPU)...")
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_path,
+    load_kwargs = dict(
         torch_dtype="auto",
         device_map="cpu",
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
+    try:
+        cfg = AutoConfig.from_pretrained(base_path, trust_remote_code=True)
+        has_vision = hasattr(cfg, "vision_config") and cfg.vision_config is not None
+    except Exception:
+        has_vision = False
+
+    if has_vision:
+        logger.info("Detected multimodal model — loading with AutoModelForImageTextToText to preserve vision encoder")
+        base_model = AutoModelForImageTextToText.from_pretrained(base_path, **load_kwargs)
+    else:
+        logger.info("Text-only model — loading with AutoModelForCausalLM")
+        base_model = AutoModelForCausalLM.from_pretrained(base_path, **load_kwargs)
 
     # Load and merge adapter
     logger.info("Loading and merging adapter...")
@@ -256,13 +269,13 @@ def quantize_prime(model_path: str, output_path: str) -> bool:
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-        # Configure GPTQ quantization (lm_head=True to quantize lm_head
-        # so the model fits in 16GB VRAM — unquantized lm_head is 1.89GB
-        # with 248K vocab)
+        # Configure GPTQ quantization
+        # Note: lm_head=False because Qwen3.5 uses tied weights
+        # (embed_tokens == lm_head) which GPTQ cannot quantize separately
         quant_config = QuantizeConfig(
             bits=GPTQ_BITS,
             group_size=GPTQ_GROUP_SIZE,
-            lm_head=True,
+            lm_head=False,
         )
 
         # Load model for quantization (device_map="auto" to split across GPU/CPU

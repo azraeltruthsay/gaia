@@ -110,6 +110,44 @@ Background processing service for GAIA's self-study during sleep cycles. Handles
 - 🟡 **Vector index corruption**
   → Returns empty index; rebuild via /index/build
 
+## Self-Awareness Training Pipeline
+
+The 15-stage `self_awareness_pipeline.py` orchestrates identity baking:
+
+| Stage | Purpose |
+|-------|---------|
+| BUILD_CURRICULUM | Dynamic curriculum generation from 3 datasets (architecture, self-repair, samvega) |
+| PRE_EVAL_4B | Score curriculum against Core CPU model |
+| FILTER_DELTA_4B | Filter to gap-only samples |
+| GPU_ACQUIRE | Request GPU handoff from orchestrator |
+| TRAIN_4B | QLoRA training on 4B model |
+| MERGE_4B | Merge LoRA adapter into base |
+| GGUF_CORE | Convert to GGUF Q4_K_M |
+| DEPLOY_PRIME | Sync to warm pool, restart gaia-prime |
+| RELOAD_CORE | Hot-reload Core CPU model |
+| TRAIN_NANO | QLoRA on 0.8B Nano |
+| MERGE_NANO | Merge Nano adapter |
+| GGUF_NANO | Convert to GGUF Q8_0 |
+| DEPLOY_NANO | Restart gaia-nano |
+| POST_EVAL | Re-score curriculum, measure F1 improvement |
+| COGNITIVE_SMOKE | Run gaia-doctor's cognitive test battery as gate |
+
+### Dynamic Curriculum (`build_curriculum.py`)
+
+Assembles training data from living knowledge sources:
+- **Dataset A** (architecture): Service registry, model tiers, pipeline stages, subsystems, YAML blueprints, AS_BUILT
+- **Dataset B** (self-repair): Vital organ code analysis, gap audit, dev journal problem/solution patterns
+- **Dataset C** (samvega): Epistemic reflection from error-learning artifacts, weighted by values_misaligned
+- **Supplemental**: Seeds, conversation examples, core identity pairs
+
+### Alignment Status
+
+Four-tier progression tracked in pipeline state:
+- **UNTRAINED** — No pipeline run yet
+- **TRAINING** — Pipeline in progress
+- **ALIGNED** — Cognitive smoke passed (≥85%)
+- **SELF_ALIGNED** — Zero training gaps + perfect cognitive smoke (100%)
+
 ## Source Files
 
 - `candidates/gaia-study/gaia_study/main.py` _entrypoint_ [python]
@@ -118,6 +156,9 @@ Background processing service for GAIA's self-study during sleep cycles. Handles
 - `candidates/gaia-study/gaia_study/study_mode_manager.py` _training_orchestration_ [python]
 - `candidates/gaia-study/gaia_study/qlora_trainer.py` _qlora_training_ [python]
 - `candidates/gaia-study/gaia_study/training_utils.py` _training_utilities_ [python]
+- `candidates/gaia-study/gaia_study/merge_and_requantize.py` _merge_requantize_ [python]
+- `candidates/gaia-study/scripts/build_curriculum.py` _curriculum_generator_ [python]
+- `candidates/gaia-study/scripts/self_awareness_pipeline.py` _training_pipeline_ [python]
 - `candidates/gaia-study/Dockerfile` _build_config_ [dockerfile]
 
 ## Blueprint Confidence

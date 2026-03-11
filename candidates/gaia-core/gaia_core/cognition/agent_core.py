@@ -56,6 +56,7 @@ import gaia_core.utils.gaia_rescue_helper as rescue_helper
 # Loop Detection System
 from gaia_core.cognition.loop_recovery import (
     get_recovery_manager,
+    cleanup_session_manager,
     build_loop_detection_config_from_constants
 )
 
@@ -780,7 +781,7 @@ class AgentCore:
             # --- Loop Detection: Initialize and check for active recovery ---
             try:
                 loop_config = build_loop_detection_config_from_constants(constants)
-                loop_manager = get_recovery_manager()
+                loop_manager = get_recovery_manager(session_id)
                 loop_manager.config = loop_config
                 loop_manager.enabled = constants.get("LOOP_DETECTION_ENABLED", True)
             except Exception:
@@ -2080,6 +2081,18 @@ class AgentCore:
                 yield {"type": "token", "value": concluding_response}
                 self.session_manager.add_message(session_id, "assistant", concluding_response)
 
+            # Notify KV cache manager that inference occurred for this role
+            try:
+                from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager
+                _kv_mgr = get_kv_cache_manager()
+                if _kv_mgr is not None and selected_model_name:
+                    _kv_role_map = {"reflex": "reflex", "nano": "reflex", "core": "core", "lite": "core"}
+                    _kv_role = _kv_role_map.get(selected_model_name)
+                    if _kv_role:
+                        _kv_mgr.notify_inference(_kv_role)
+            except Exception:
+                pass
+
             log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
             log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
             turn_end_event = {"type": "turn_end", "user": user_input, "assistant": user_facing_response}
@@ -2151,7 +2164,9 @@ class AgentCore:
                     # Clear recovery context if we successfully completed without looping
                     if not loop_result or not loop_result.is_loop:
                         loop_manager.clear_recovery_context()
-    
+                        # Evict session loop state to prevent memory leak
+                        cleanup_session_manager(session_id)
+
                 except Exception:
                     logger.debug("Loop detection: post-turn check failed", exc_info=True)
     
@@ -5230,7 +5245,7 @@ Start your response with the first line of the file."""
 
             # --- Loop Detection: Record tool call ---
             try:
-                loop_mgr = get_recovery_manager()
+                loop_mgr = get_recovery_manager(session_id)
                 if loop_mgr and loop_mgr.enabled:
                     result_str = str(result.output)[:500] if result.output else ""
                     loop_mgr.record_tool_call(
@@ -5258,7 +5273,7 @@ Start your response with the first line of the file."""
 
             # --- Loop Detection: Record error ---
             try:
-                loop_mgr = get_recovery_manager()
+                loop_mgr = get_recovery_manager(session_id)
                 if loop_mgr and loop_mgr.enabled:
                     loop_mgr.record_error(
                         error_type=f"tool_{primary_tool.tool_name}",

@@ -109,6 +109,27 @@ def list_unreviewed_artifacts() -> List[Tuple[Path, dict]]:
     return results
 
 
+def list_tier5_artifacts() -> List[Tuple[Path, dict]]:
+    """Return artifacts promoted to tier5 that haven't been translated to training yet.
+
+    Checks both active and archive directories. Sorted by weight descending.
+    """
+    results: List[Tuple[Path, dict]] = []
+    dirs = [SAMVEGA_DIR, SAMVEGA_ARCHIVE_DIR]
+    for d in dirs:
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("samvega_*.json")):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if data.get("promoted_to_tier5") and not data.get("translated_to_training"):
+                    results.append((p, data))
+            except Exception:
+                logger.warning("Could not read artifact %s", p)
+    results.sort(key=lambda x: x[1].get("weight", 0), reverse=True)
+    return results
+
+
 def list_artifacts_by_weight(min_weight: float = 0.0) -> List[Tuple[Path, dict]]:
     """Return artifacts at or above a weight threshold."""
     results: List[Tuple[Path, dict]] = []

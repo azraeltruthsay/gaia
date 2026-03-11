@@ -8,10 +8,10 @@
   "priority": "high",
 
   "training_config": {
-    "lora_r": 4,
-    "lora_alpha": 8,
+    "lora_r": 16,
+    "lora_alpha": 32,
     "lora_dropout": 0.05,
-    "target_modules": ["q_proj", "v_proj"],
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     "learning_rate": 2e-4,
     "batch_size": 1,
     "gradient_accumulation_steps": 4,
@@ -43,7 +43,7 @@
     },
     "identity": {
       "description": "Core identity, SOP — who GAIA is and her operating principles",
-      "target_samples": 25
+      "target_samples": 70
     },
     "personality": {
       "description": "Conversation examples — communication style and personality",

@@ -1903,3 +1903,214 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Chaos Monkey Panel ────────────────────────────────────────── */
+
+.chaos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.serenity-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.03em;
+}
+
+.serenity-badge.serene {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.serenity-badge.restless {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.chaos-inject-btn {
+  background: linear-gradient(135deg, #dc2626, #ea580c);
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.chaos-inject-btn:hover:not(:disabled) { opacity: 0.85; }
+.chaos-inject-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.chaos-mode-select {
+  background: var(--bg-input, #1e1e2e);
+  color: var(--text-primary, #cdd6f4);
+  border: 1px solid var(--border, #313244);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.82rem;
+}
+
+.chaos-num-input {
+  background: var(--bg-input, #1e1e2e);
+  color: var(--text-primary, #cdd6f4);
+  border: 1px solid var(--border, #313244);
+  border-radius: 4px;
+  padding: 2px 6px;
+  width: 52px;
+  font-size: 0.82rem;
+}
+
+.chaos-drill-types {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chaos-drill-types label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #a6adc8);
+  cursor: pointer;
+}
+
+.chaos-result {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--bg-input, #1e1e2e);
+  border-radius: 4px;
+  font-size: 0.76rem;
+  font-family: monospace;
+  color: var(--text-muted, #a6adc8);
+  word-break: break-all;
+}
+
+/* ── Cognitive Battery Panel ─────────────────────────────────────────── */
+
+.cognitive-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.alignment-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.align-self_aligned {
+  background: linear-gradient(135deg, #22c55e, #059669);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+.align-aligned {
+  background: var(--success, #4caf50);
+  color: #fff;
+}
+
+.align-partial {
+  background: var(--warn, #ffa726);
+  color: #1a1a2e;
+}
+
+.align-untrained {
+  background: var(--text-muted, #8899aa);
+  color: #1a1a2e;
+}
+
+.align-unknown {
+  background: var(--border, #253658);
+  color: var(--text-muted, #8899aa);
+}
+
+.cognitive-run-btn {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.cognitive-run-btn:hover:not(:disabled) { opacity: 0.85; }
+.cognitive-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cognitive-failures {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--bg-input, #1e1e2e);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.cognitive-failure-header,
+.cognitive-section-header {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted, #a6adc8);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cognitive-failure-entry {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border, #253658);
+  font-size: 0.76rem;
+}
+
+.cognitive-failure-id {
+  color: var(--error, #e94560);
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.cognitive-failure-prompt {
+  color: var(--text-muted, #a6adc8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cognitive-sections {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--bg-input, #1e1e2e);
+  border-radius: 4px;
+}
+
+.cognitive-section-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: 0.76rem;
+}
+
+.cognitive-section-name {
+  color: var(--text, #e0e0e0);
+}
+
+.cognitive-section-score {
+  font-weight: 600;
+}
+
+.cognitive-section-score.ok { color: var(--success, #4caf50); }
+.cognitive-section-score.warn { color: var(--warn, #ffa726); }

@@ -11,9 +11,11 @@ CORE_CPU_PORT="${CORE_CPU_PORT:-8092}"
 CORE_CPU_MODEL_PATH="${CORE_CPU_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf}"
 CORE_CPU_CTX="${CORE_CPU_CTX:-4096}"
 CORE_CPU_THREADS="${CORE_CPU_THREADS:-8}"
+CORE_CPU_SLOT_SAVE_PATH="${CORE_CPU_SLOT_SAVE_PATH:-/shared/kvcache/core}"
 
 # Only start llama-server if the model file exists
 if [ -f "$CORE_CPU_MODEL_PATH" ]; then
+    mkdir -p "$CORE_CPU_SLOT_SAVE_PATH" 2>/dev/null || true
     echo "[entrypoint] Starting llama-server for Core/Lite on port $CORE_CPU_PORT..."
     llama-server \
         --host 0.0.0.0 \
@@ -23,9 +25,11 @@ if [ -f "$CORE_CPU_MODEL_PATH" ]; then
         --threads "$CORE_CPU_THREADS" \
         --n-gpu-layers 0 \
         --chat-template chatml \
+        --slot-save-path "$CORE_CPU_SLOT_SAVE_PATH" \
         2>&1 | sed 's/^/[llama-server] /' &
 
     LLAMA_PID=$!
+    echo "$LLAMA_PID" > /tmp/llama_server.pid
     echo "[entrypoint] llama-server started (PID $LLAMA_PID)"
 
     # Wait for llama-server to be ready (up to 120s for model load)

@@ -556,6 +556,15 @@
       "observer_block": 1.5,
       "observer_caution": 1.2,
       "repeated_domain": 1.3
+    },
+    "tier5_training": {
+      "enabled": true,
+      "pre_eval_similarity_threshold": 0.85,
+      "epoch_threshold": 20,
+      "default_epochs": 3,
+      "fallback_max_steps": 50,
+      "delta_path": "/knowledge/curricula/self-model/gaia_delta.jsonl",
+      "portable_soul_path": "/knowledge/curricula/self-model/gaia_persona_training.jsonl"
     }
   },
   "SYSTEM": {
