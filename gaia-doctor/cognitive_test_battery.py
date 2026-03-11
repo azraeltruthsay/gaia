@@ -144,16 +144,20 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
-def query_model_direct(prompt: str, endpoint: str, timeout: int = DEFAULT_TIMEOUT, max_tokens: int = 512) -> str:
+def query_model_direct(prompt: str, endpoint: str, timeout: int = DEFAULT_TIMEOUT, max_tokens: int = 512, target: str = "core", no_think: bool = False) -> str:
     """Query the model directly via /api/cognitive/query.
 
     Bypasses the full 20-stage cognitive pipeline — much faster for batch testing.
+    target: "core" (CPU GGUF), "prime" (GPU vLLM merged), "nano" (CPU small GGUF)
+    no_think: suppress <think> reasoning blocks (faster, saves tokens)
     """
     url = f"{endpoint.rstrip('/')}/api/cognitive/query"
     payload = {
         "prompt": prompt,
         "max_tokens": max_tokens,
         "temperature": 0.3,
+        "target": target,
+        "no_think": no_think,
     }
     data = json.dumps(payload).encode("utf-8")
     req = Request(url, data=data, headers={"Content-Type": "application/json"})
@@ -277,13 +281,12 @@ def validate_similarity(response: str, reference: str, threshold: float = 0.6) -
         return False, f"token overlap {overlap:.2f} < {threshold} (similarity endpoint error: {e})"
 
 
-def validate_loop_resistance(response: str, prompt: str, endpoint: str, session_id: str, repeat_count: int = 3) -> tuple[bool, str]:
+def validate_loop_resistance(response: str, prompt: str, endpoint: str, session_id: str, repeat_count: int = 3, target: str = "core", no_think: bool = False) -> tuple[bool, str]:
     """Send the same prompt N times and check responses aren't too similar."""
     responses = [response]
     for _ in range(repeat_count - 1):
         try:
-            pkt = build_packet(prompt, session_id)
-            r = send_packet(pkt, endpoint)
+            r = query_model_direct(prompt, endpoint, target=target, no_think=no_think)
             responses.append(r)
         except Exception:
             responses.append("")
@@ -318,6 +321,8 @@ def run_validator(validator: dict, response: str, **kwargs) -> tuple[bool, str]:
             kwargs.get("endpoint", CORE_ENDPOINT),
             kwargs.get("session_id", ""),
             validator.get("repeat_count", 3),
+            target=kwargs.get("target", "core"),
+            no_think=kwargs.get("no_think", False),
         )
     else:
         return False, f"unknown validator type: {vtype}"
@@ -618,6 +623,8 @@ def run_battery(
     ids: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
     full_pipeline: bool = False,
+    target: str = "core",
+    no_think: bool = False,
 ) -> dict:
     """Run the cognitive test battery and return results.
 
@@ -628,11 +635,13 @@ def run_battery(
         timeout: per-test timeout in seconds
         full_pipeline: if True, send CognitionPackets through /process_packet
                       (slow, ~90s/test). Default False uses direct model query
-                      via /v1/chat/completions (~5s/test).
+                      via /api/cognitive/query (~5-15s/test).
+        target: model target for direct mode — "core", "prime", or "nano"
+        no_think: suppress <think> reasoning blocks (faster, saves tokens)
     """
     session_id = f"cogtest-{uuid.uuid4().hex[:8]}"
     run_id = f"cognitive-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    mode = "pipeline" if full_pipeline else "direct"
+    mode = f"pipeline" if full_pipeline else f"direct:{target}"
 
     # Filter tests
     tests = TEST_CASES
@@ -662,7 +671,7 @@ def run_battery(
                 packet = build_packet(prompt, session_id, source=test.get("source", "web"))
                 response = send_packet(packet, endpoint, timeout=actual_timeout)
             else:
-                response = query_model_direct(prompt, endpoint, timeout=actual_timeout)
+                response = query_model_direct(prompt, endpoint, timeout=actual_timeout, target=target, no_think=no_think)
             elapsed = time.time() - t_start
 
             # Run validators
@@ -674,6 +683,8 @@ def run_battery(
                     prompt=prompt,
                     endpoint=endpoint,
                     session_id=session_id,
+                    target=target,
+                    no_think=no_think,
                 )
                 validator_results.append({"type": v["type"], "ok": ok, "detail": detail})
                 if not ok:

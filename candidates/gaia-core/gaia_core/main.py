@@ -869,6 +869,8 @@ class CognitiveQueryRequest(BaseModel):
     system: str = "You are GAIA, a sovereign AI agent. Answer concisely and accurately."
     max_tokens: int = 512
     temperature: float = 0.3
+    target: str = "core"  # "core" (CPU llama-server), "prime" (GPU vLLM), "nano"
+    no_think: bool = False  # Suppress <think> reasoning blocks (Qwen3+)
 
 
 class SimilarityRequest(BaseModel):
@@ -925,29 +927,49 @@ async def cognitive_query(req: CognitiveQueryRequest):
     """Lightweight LLM query endpoint for cognitive testing.
 
     Bypasses the full 20-stage cognitive pipeline — sends the prompt
-    directly to the embedded llama-server. Much faster (~5s vs ~90s).
+    directly to a model backend. Much faster (~5s vs ~90s).
+
+    target options:
+      - "core" (default): embedded llama-server (CPU, GGUF)
+      - "prime": gaia-prime vLLM (GPU, merged model)
+      - "nano": embedded nano llama-server (CPU, small GGUF)
     """
     import httpx
-    core_cpu = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092")
-    url = f"{core_cpu.rstrip('/')}/v1/chat/completions"
+
+    target_endpoints = {
+        "core": os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092"),
+        "prime": os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"),
+        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8093"),
+    }
+    base = target_endpoints.get(req.target, target_endpoints["core"])
+    url = f"{base.rstrip('/')}/v1/chat/completions"
+    timeout = 60.0 if req.target == "prime" else 30.0
+
+    system_content = req.system
+    if req.no_think:
+        system_content += " /no_think"
+
     payload = {
         "messages": [
-            {"role": "system", "content": req.system},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": req.prompt},
         ],
         "max_tokens": req.max_tokens,
         "temperature": req.temperature,
     }
+    # Qwen3 chat_template: enable_thinking=false suppresses <think> blocks
+    if req.no_think:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             text = data["choices"][0]["message"]["content"]
-            return {"content": text.strip()}
+            return {"content": text.strip(), "target": req.target}
     except Exception as e:
-        logger.warning("Cognitive query error: %s", e)
-        return {"content": "", "error": str(e)}
+        logger.warning("Cognitive query error (target=%s): %s", req.target, e)
+        return {"content": "", "error": str(e), "target": req.target}
 
 
 # ── Embedded llama-server Management ─────────────────────────────────
