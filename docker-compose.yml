@@ -100,11 +100,13 @@ services:
 
     volumes:
       - /mnt/gaia_warm_pool:/models:ro
+      - ./gaia-models/lora_adapters:/lora_adapters:ro
       - ./logs/kvcache/prime:/kvcache:rw
       - ./gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
 
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_ALLOW_RUNTIME_LORA_UPDATING=true
       - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
 
     ports:
@@ -122,6 +124,9 @@ services:
       --enforce-eager
       --quantization fp8
       --enable-prefix-caching
+      --enable-lora
+      --max-loras 2
+      --max-lora-rank 16
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
@@ -423,7 +428,7 @@ services:
       - EMBEDDING_MODEL=all-MiniLM-L6-v2
       # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
       # AWQ model is for inference only (GEMM kernels lack backward pass)
-      - BASE_MODEL_PATH=/models/Qwen3.5-9B-Abliterated
+      - BASE_MODEL_PATH=/models/Qwen3.5-4B-Abliterated
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

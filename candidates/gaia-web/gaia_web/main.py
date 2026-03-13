@@ -62,9 +62,12 @@ async def lifespan(app: FastAPI):
         if not bot_token:
             logger.error("Discord bot enabled but DISCORD_BOT_TOKEN not set")
         else:
+            from gaia_web.queue.message_queue import MessageQueue
+            mq = MessageQueue(core_url=core_url)
             discord_bot = DiscordInterface(
                 bot_token=bot_token,
                 core_endpoint=core_url,
+                message_queue=mq,
                 core_fallback_endpoint=core_fallback
             )
             asyncio.create_task(discord_bot.start())

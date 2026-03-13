@@ -1,47 +1,19 @@
 {
-  "adapter_name": "self-model",
-  "generated_at": "2026-03-07T23:43:13Z",
-  "seed": 42,
-  "total_pairs": 316,
-  "train_pairs": 268,
-  "validation_pairs": 48,
-  "duplicates_removed": 67,
-  "categories": {
-    "architecture": 172,
-    "personality": 6,
-    "self-awareness": 90,
-    "identity": 15,
-    "self-repair": 31,
-    "epistemic": 2
+  "generation_run": "build-20260313-151435",
+  "generated_at": "2026-03-13T15:14:35.494861+00:00",
+  "datasets_requested": [
+    "A",
+    "D"
+  ],
+  "total_pairs": 126,
+  "by_dataset": {
+    "A": 79,
+    "D": 47
   },
-  "pair_types": {
-    "factual_recall": 157,
-    "conversation": 6,
-    "self_reflection": 88,
-    "identity": 14,
-    "meta_learning": 3,
-    "reasoning": 8,
-    "narrative": 16,
-    "diagnostic": 21,
-    "procedural": 2,
-    "epistemic_correction": 1
+  "by_category": {
+    "architecture": 126
   },
-  "top_sources": {
-    "CLAUDE.md": 30,
-    "hardcoded": 15,
-    "gaia-mcp.yaml": 9,
-    "core_identity.json": 9,
-    "gaia-orchestrator.yaml": 9,
-    "gaia-core.yaml": 9,
-    "GAIA_PRIME.md": 9,
-    "gaia-web.yaml": 9,
-    "gaia-audio.yaml": 8,
-    "gaia-wiki.yaml": 8,
-    "GAIA_BOOTSTRAP_INSTALL.md": 7,
-    "gaia-prime.yaml": 7,
-    "gaia-study.yaml": 7,
-    "conversation_examples.md": 6,
-    "GAIA_LINUX_DISTRO.md": 6
-  },
-  "data_hash": "b451693b75dabea2"
+  "append_mode": false,
+  "dry_run": false,
+  "total_in_file": 126
 }

@@ -35,7 +35,7 @@ def get_study_manager() -> StudyModeManager:
             "max_training_samples": int(os.getenv("MAX_TRAINING_SAMPLES", "1000")),
             "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "200")),
             "use_real_training": os.getenv("USE_REAL_TRAINING", "true").lower() == "true",
-            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Qwen3.5-9B-Abliterated"),
+            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Qwen3.5-4B-Abliterated"),
             "governance": {
                 "forbidden_patterns": [
                     "ignore previous instructions",
@@ -91,6 +91,9 @@ class StudyStartRequest(BaseModel):
     tier: int = Field(default=3, ge=1, le=3, description="Adapter tier: 1=global, 2=user, 3=session")
     pillar: str = Field(default="general", description="Knowledge pillar")
     description: str = ""
+    rank: int = Field(default=8, ge=1, le=64, description="LoRA rank")
+    alpha: int = Field(default=16, ge=1, le=128, description="LoRA alpha")
+    target_modules: Optional[List[str]] = Field(default=None, description="LoRA target modules (default: q_proj, v_proj)")
     max_steps: int = Field(default=100, ge=1, le=1000)
     num_train_epochs: Optional[int] = Field(default=None, ge=1, le=20, description="Epoch-based training (overrides max_steps)")
     target_loss: float = Field(default=0.05, ge=0.0, description="Stop when loss drops below this threshold")
@@ -275,34 +278,23 @@ def create_app() -> FastAPI:
         """
         Request from orchestrator to release the GPU.
 
-        Cancels any in-progress training, cleans up CUDA resources,
-        and acknowledges the release.
+        Kills any training subprocess (which releases all VRAM on exit).
+        The parent process never imports torch, so no CUDA cleanup needed.
         """
-        import gc
         import time
 
         logger.info("GPU release request received from orchestrator")
 
-        # Cancel any in-progress training
         manager = get_study_manager()
         status = manager.get_status()
 
         if status["state"] not in ("idle", "complete", "failed"):
-            logger.info(f"Cancelling in-progress training (state: {status['state']})")
+            logger.info(f"Killing training subprocess (state: {status['state']})")
+            manager.kill_training_subprocess()
             manager.cancel_training()
-
-        # Clean up CUDA resources
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gc.collect()
-                allocated = torch.cuda.memory_allocated() / 1e9
-                logger.info(f"CUDA cache cleared. VRAM allocated: {allocated:.2f} GB")
-        except ImportError:
-            logger.debug("torch not available for CUDA cleanup")
-        except Exception as e:
-            logger.warning(f"CUDA cleanup error: {e}")
+        elif status.get("subprocess_alive"):
+            logger.info("Killing lingering training subprocess")
+            manager.kill_training_subprocess()
 
         _gpu_available["available"] = False
         _gpu_available["released_at"] = time.strftime(
@@ -311,8 +303,62 @@ def create_app() -> FastAPI:
 
         return {
             "ok": True,
-            "message": "GPU released, CUDA resources cleaned up",
+            "message": "GPU released, training subprocess killed",
             "gpu_available": False,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Training Subprocess Monitoring (for orchestrator)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @app.get("/study/training/status")
+    async def training_subprocess_status():
+        """
+        Detailed training status including subprocess info and progress file.
+
+        Used by the orchestrator to monitor training progress.
+        """
+        import json as _json
+        from gaia_study.training_subprocess import PROGRESS_FILE
+
+        manager = get_study_manager()
+        manager_status = manager.get_status()
+
+        # Read progress file directly
+        progress_data = None
+        try:
+            if PROGRESS_FILE.exists():
+                with open(PROGRESS_FILE) as f:
+                    progress_data = _json.load(f)
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "manager": manager_status,
+            "progress_file": progress_data,
+        }
+
+    @app.post("/study/training/kill")
+    async def training_subprocess_kill():
+        """
+        Force-kill the training subprocess.
+
+        Last resort for the orchestrator when training is stuck.
+        """
+        manager = get_study_manager()
+        killed = manager.kill_training_subprocess()
+
+        if killed:
+            manager.state = manager.state.__class__("failed")
+            manager.status_message = "Training subprocess force-killed"
+            manager.current_training = None
+            logger.warning("Training subprocess force-killed via API")
+
+        return {
+            "ok": True,
+            "killed": killed,
+            "message": "Subprocess killed" if killed else "No subprocess running",
         }
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -345,6 +391,9 @@ def create_app() -> FastAPI:
                 pillar=request.pillar,
                 source_documents=request.documents,
                 description=request.description,
+                rank=request.rank,
+                alpha=request.alpha,
+                target_modules=request.target_modules or ["q_proj", "v_proj"],
                 max_steps=request.max_steps,
                 num_train_epochs=request.num_train_epochs,
                 target_loss=request.target_loss,

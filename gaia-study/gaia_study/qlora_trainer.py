@@ -181,7 +181,7 @@ class QLoRATrainer:
         _lazy_import()
 
         try:
-            # Pre-flight: verify enough system RAM for BnB NF4 loading (~8GB for 9B model)
+            # Pre-flight: verify enough system RAM for BnB NF4 loading (~5GB for 4B model)
             if _require_memory is not None:
                 _require_memory(needed_mb=8000, label="QLoRA training setup")
 
@@ -247,7 +247,7 @@ class QLoRATrainer:
                 pass
 
             if self.config.load_in_4bit and bitsandbytes is not None:
-                # QLoRA: BnB NF4 quantization on bf16 base model (~4-5GB final VRAM)
+                # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
                 bnb_config = transformers.BitsAndBytesConfig(
                     load_in_4bit=True,
@@ -255,25 +255,49 @@ class QLoRATrainer:
                     bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
                     bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
                 )
-                # Workaround for transformers >=5.2 regression: core_model_loading.py
-                # bulk-loads bf16 weights to GPU before BnB quantizes them, causing OOM
-                # on 16GB cards with 4B+ models. Fix: set a tight GPU budget (5GiB) so
-                # the device_map places most layers on CPU, then BnB quantizes on dispatch.
-                bnb_gpu_budget_gib = 5
-                logger.info(
-                    "Loading bf16 model with BnB NF4 quantization "
-                    "(GPU budget: %dGiB for BnB, %dGiB total, %dGiB training headroom)",
-                    bnb_gpu_budget_gib, max_gpu_gb, training_headroom_gb
-                )
-                self.model = auto_cls.from_pretrained(
-                    self.base_model_path,
-                    trust_remote_code=True,
-                    quantization_config=bnb_config,
-                    device_map="auto",
-                    max_memory={0: f"{bnb_gpu_budget_gib}GiB", "cpu": "30GiB"},
-                    low_cpu_mem_usage=True,
-                    torch_dtype=torch.bfloat16,
-                )
+                # Estimate bf16 model size to decide loading strategy.
+                # transformers >=5.2 temporarily loads bf16 weights before BnB quantizes,
+                # so we need the bf16 size to fit in VRAM during loading.
+                base_p = Path(self.base_model_path)
+                bf16_size_gb = sum(
+                    f.stat().st_size for f in base_p.glob("*.safetensors")
+                ) / (1024**3)
+                if bf16_size_gb == 0:
+                    bf16_size_gb = sum(
+                        f.stat().st_size for f in base_p.glob("*.bin")
+                    ) / (1024**3)
+
+                if bf16_size_gb < max_gpu_gb * 0.8:
+                    # Model fits on GPU — load directly for full GPU training
+                    logger.info(
+                        "Loading model to GPU (bf16 size: %.1fGiB fits in %.1fGiB VRAM)",
+                        bf16_size_gb, max_gpu_gb
+                    )
+                    self.model = auto_cls.from_pretrained(
+                        self.base_model_path,
+                        trust_remote_code=True,
+                        quantization_config=bnb_config,
+                        device_map={"": 0},
+                        low_cpu_mem_usage=True,
+                        torch_dtype=torch.bfloat16,
+                    )
+                else:
+                    # Model too large — split across GPU/CPU (slower training)
+                    bnb_gpu_budget_gib = max(int(max_gpu_gb * 0.7), 5)
+                    logger.info(
+                        "Model too large for full GPU (bf16: %.1fGiB > %.1fGiB budget) — "
+                        "splitting across GPU (%dGiB) + CPU",
+                        bf16_size_gb, max_gpu_gb * 0.8, bnb_gpu_budget_gib
+                    )
+                    self.model = auto_cls.from_pretrained(
+                        self.base_model_path,
+                        trust_remote_code=True,
+                        quantization_config=bnb_config,
+                        device_map="auto",
+                        max_memory={0: f"{bnb_gpu_budget_gib}GiB", "cpu": "30GiB"},
+                        low_cpu_mem_usage=True,
+                        torch_dtype=torch.bfloat16,
+                    )
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")

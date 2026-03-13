@@ -176,6 +176,11 @@ async def root():
                 "study_to_prime": "POST /handoff/study-to-prime",
                 "status": "GET /handoff/{handoff_id}/status",
             },
+            "training": {
+                "status": "GET /training/status",
+                "validate": "POST /training/validate",
+                "kill": "POST /training/kill",
+            },
             "notifications": {
                 "oracle_fallback": "POST /notify/oracle-fallback",
                 "websocket": "WS /ws/notifications",
@@ -779,6 +784,37 @@ async def candidate_rollback(request: RollbackRequest):
         )
 
     return response
+
+
+# =============================================================================
+# Training Subprocess Monitoring
+# =============================================================================
+
+@app.get("/training/status")
+async def get_training_status():
+    """Get training subprocess status from gaia-study."""
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    return await _gpu_manager.get_training_status()
+
+
+@app.post("/training/validate")
+async def validate_training():
+    """Validate a completed training run (adapter files, loss, state)."""
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    return await _gpu_manager.validate_training_result()
+
+
+@app.post("/training/kill")
+async def kill_training():
+    """Force-kill the training subprocess (last resort)."""
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    return await _gpu_manager.kill_training_subprocess()
 
 
 # =============================================================================

@@ -4,13 +4,21 @@
 Scores each sample via token-level F1, classifying as LEARNED or GAP.
 Writes a filtered JSONL containing only GAP samples for focused retraining.
 
+Modes:
+  --use-packet    Send CognitionPackets through gaia-core's cognitive pipeline
+                  (persona, system prompt, cascade routing — no RAG/observer)
+  (default)       Raw llama-server /v1/chat/completions (fastest, no pipeline)
+
 Usage:
     docker compose exec gaia-core python /gaia/GAIA_Project/gaia-study/scripts/pre_eval_curriculum.py
     docker compose exec gaia-core python /gaia/GAIA_Project/gaia-study/scripts/pre_eval_curriculum.py \
         --endpoint http://localhost:8092 --threshold 0.5 --output /knowledge/curricula/self-model/train_filtered.jsonl
+    docker compose exec gaia-core python /gaia/GAIA_Project/gaia-study/scripts/pre_eval_curriculum.py \
+        --use-packet --endpoint http://gaia-core:6415
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -18,7 +26,13 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import uuid
 from collections import defaultdict
+
+
+def strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks (Qwen3+ models)."""
+    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
 def tokenize(text: str) -> list[str]:
@@ -54,15 +68,19 @@ def token_f1(predicted: str, expected: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def query_model(endpoint: str, instruction: str, max_tokens: int = 256, timeout: int = 30) -> str:
-    """Send a chat completion request to the llama-server."""
+def query_model(endpoint: str, instruction: str, max_tokens: int = 256, timeout: int = 30, model_name: str = "core") -> str:
+    """Send a chat completion request to a llama-server or vLLM endpoint."""
     url = f"{endpoint}/v1/chat/completions"
     payload = json.dumps({
-        "model": "core",
-        "messages": [{"role": "user", "content": instruction}],
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": "You are GAIA, a sovereign AI agent. Answer concisely and accurately. /no_think"},
+            {"role": "user", "content": instruction},
+        ],
         "max_tokens": max_tokens,
         "temperature": 0.1,
         "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -73,7 +91,151 @@ def query_model(endpoint: str, instruction: str, max_tokens: int = 256, timeout:
     )
     resp = urllib.request.urlopen(req, timeout=timeout)
     data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"].strip()
+    content = data["choices"][0]["message"]["content"].strip()
+    return strip_think_tags(content)
+
+
+def build_packet(prompt: str, session_id: str, target: str = "Prime") -> dict:
+    """Build a minimal CognitionPacket for /process_packet."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    packet_id = "pkt-preeval-" + uuid.uuid4().hex[:12]
+
+    header = {
+        "datetime": now,
+        "session_id": session_id,
+        "packet_id": packet_id,
+        "sub_id": "sub-0",
+        "persona": {
+            "identity_id": "gaia-pre-eval",
+            "persona_id": "Default",
+            "role": "Default",
+            "tone_hint": "neutral",
+            "traits": {},
+        },
+        "origin": "user",
+        "routing": {
+            "target_engine": target.capitalize(),
+            "allow_parallel": False,
+            "priority": 5,
+        },
+        "model": {
+            "name": "/models/Claude",
+            "provider": "vllm_remote",
+            "context_window_tokens": 8192,
+            "max_output_tokens": 512,
+            "response_buffer_tokens": 256,
+            "temperature": 0.3,
+            "top_p": 0.95,
+            "stop": [],
+            "tool_permissions": [],
+            "allow_tools": False,
+        },
+        "output_routing": {
+            "primary": {"destination": "api", "metadata": {}},
+            "secondary": [],
+            "suppress_echo": True,
+            "addressed_to_gaia": True,
+            "source_destination": "api",
+        },
+        "lineage": [],
+    }
+
+    header_hash = hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()
+    content = {"original_prompt": prompt, "data_fields": [], "attachments": []}
+    content_hash = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+    return {
+        "version": "0.3.0-preeval",
+        "schema_id": "gaia-cogpacket-v0.3",
+        "header": header,
+        "intent": {
+            "user_intent": prompt,
+            "system_task": "Stream",
+            "confidence": 1.0,
+            "tags": ["pre-eval"],
+        },
+        "context": {
+            "session_history_ref": {"type": "session_id", "value": session_id},
+            "cheatsheets": [],
+            "constraints": {
+                "max_tokens": 512,
+                "time_budget_ms": 120000,
+                "safety_mode": "permissive",
+                "policies": [],
+            },
+            "relevant_history_snippet": [],
+        },
+        "content": content,
+        "reasoning": {"reflection_log": [], "sketchpad": [], "evaluations": []},
+        "response": {
+            "candidate": "",
+            "confidence": 0.0,
+            "stream_proposal": False,
+            "tool_calls": [],
+            "sidecar_actions": [],
+        },
+        "governance": {
+            "safety": {"execution_allowed": True, "dry_run": False},
+            "signatures": {"header_hash": header_hash, "content_hash": content_hash},
+            "audit": {"reviewers": []},
+            "privacy": {},
+        },
+        "metrics": {
+            "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "latency_ms": 0,
+            "errors": [],
+        },
+        "status": {
+            "finalized": False,
+            "state": "initialized",
+            "next_steps": ["process"],
+            "observer_trace": [],
+        },
+    }
+
+
+def query_via_packet(endpoint: str, instruction: str, session_id: str, timeout: int = 120, target: str = "Prime") -> str:
+    """Send a CognitionPacket through gaia-core's cognitive pipeline."""
+    packet = build_packet(instruction, session_id, target=target)
+    url = f"{endpoint}/process_packet"
+    data = json.dumps(packet).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    resp = urllib.request.urlopen(req, timeout=timeout)
+    body = resp.read().decode("utf-8")
+
+    # Try JSON first (non-streaming response)
+    try:
+        obj = json.loads(body)
+        candidate = obj.get("response", {}).get("candidate", "")
+        if candidate:
+            return strip_think_tags(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # NDJSON streaming response
+    tokens = []
+    for line in body.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if obj.get("type") == "token":
+                tokens.append(obj.get("value", ""))
+            elif obj.get("type") == "response":
+                candidate = obj.get("response", {}).get("candidate", "".join(tokens))
+                return strip_think_tags(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    return strip_think_tags("".join(tokens))
 
 
 def load_curriculum(path: str) -> list[dict]:
@@ -131,6 +293,22 @@ def main():
         action="store_true",
         help="Print per-sample details",
     )
+    parser.add_argument(
+        "--use-packet",
+        action="store_true",
+        help="Send CognitionPackets through gaia-core pipeline instead of raw llama-server",
+    )
+    parser.add_argument(
+        "--target",
+        default="prime",
+        choices=["prime", "core", "nano", "lite"],
+        help="Target engine for packet routing (default: prime). Only used with --use-packet",
+    )
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Model name for /v1/chat/completions (default: 'core' for llama-server, auto-detected for vLLM)",
+    )
     args = parser.parse_args()
 
     # Resolve output path
@@ -138,15 +316,43 @@ def main():
         input_dir = os.path.dirname(args.input)
         args.output = os.path.join(input_dir, "train_filtered.jsonl")
 
+    # Adjust defaults for packet mode
+    if args.use_packet:
+        # Default endpoint switches to gaia-core when using packets
+        if args.endpoint == os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092"):
+            args.endpoint = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
+        if args.timeout == 30:
+            args.timeout = 120  # pipeline is slower
+
+    # Auto-detect model name for vLLM endpoints if not specified
+    if args.model_name is None:
+        # Try to query /v1/models to detect vLLM
+        try:
+            models_url = f"{args.endpoint}/v1/models"
+            resp = urllib.request.urlopen(models_url, timeout=5)
+            models_data = json.loads(resp.read().decode("utf-8"))
+            model_list = models_data.get("data", [])
+            if model_list:
+                args.model_name = model_list[0]["id"]
+                print(f"Auto-detected model: {args.model_name}")
+        except Exception:
+            pass
+        if args.model_name is None:
+            args.model_name = "core"
+
     # Load curriculum
     samples = load_curriculum(args.input)
     if not samples:
         print(f"ERROR: No samples loaded from {args.input}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Pre-evaluating {len(samples)} samples against {args.endpoint} ...")
+    mode_label = f"CogPacket→{args.target.upper()}" if args.use_packet else f"raw ({args.model_name})"
+    print(f"Pre-evaluating {len(samples)} samples against {args.endpoint} ({mode_label}) ...")
     print(f"  Threshold: {args.threshold}  |  Max tokens: {args.max_tokens}")
     print()
+
+    # Create a session ID for packet mode
+    session_id = f"preeval-{uuid.uuid4().hex[:8]}" if args.use_packet else None
 
     # Evaluate each sample
     learned = []
@@ -161,7 +367,10 @@ def main():
         category = sample.get("category", "unknown")
 
         try:
-            predicted = query_model(args.endpoint, instruction, args.max_tokens, args.timeout)
+            if args.use_packet:
+                predicted = query_via_packet(args.endpoint, instruction, session_id, args.timeout, target=args.target)
+            else:
+                predicted = query_model(args.endpoint, instruction, args.max_tokens, args.timeout, model_name=args.model_name)
             f1 = token_f1(predicted, expected)
             is_learned = f1 > args.threshold
 

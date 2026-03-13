@@ -58,6 +58,11 @@ ignore = [
     "F811",  # Redefinition of unused name
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::PendingDeprecationWarning"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_unused_configs = true
