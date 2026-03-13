@@ -15,7 +15,11 @@ import gc
 import json
 import logging
 import hashlib
+import multiprocessing
+import os
+import signal
 import shutil
+import time as _time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +63,9 @@ class TrainingConfig:
     warmup_steps: int = 10
     target_loss: float = 0.05
     convergence_patience: int = 3
+
+    # Epoch-based training (overrides max_steps when set)
+    num_train_epochs: Optional[int] = None
 
     # Incremental training
     resume_from: Optional[str] = None
@@ -105,6 +112,8 @@ class StudyModeManager:
         self.current_training: Optional[TrainingConfig] = None
         self.progress: float = 0.0
         self.status_message: str = ""
+        self._training_process: Optional[multiprocessing.Process] = None
+        self._training_start_time: Optional[float] = None
 
         # Load governance rules
         self.governance = config.get("governance", {})
@@ -193,8 +202,20 @@ class StudyModeManager:
                     "size_bytes": len(content.encode('utf-8'))
                 })
 
+                # JSONL files contain pre-curated instruction/output pairs
+                if path.suffix == ".jsonl":
+                    for line in content.strip().split("\n"):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            if "instruction" in entry and "output" in entry:
+                                samples.append(entry)
+                        except json.JSONDecodeError:
+                            continue
                 # Generate training samples based on format
-                if output_format == "instruction":
+                elif output_format == "instruction":
                     samples.extend(self._create_instruction_samples(content, path.name))
                 else:
                     samples.extend(self._create_completion_samples(content))
@@ -407,36 +428,42 @@ class StudyModeManager:
 
     async def _acquire_gpu(self, min_free_gb: float = 12.0) -> bool:
         """
-        Ensure GPU has enough free VRAM for training.
+        Ensure GPU is available for training by requesting orchestrator handoff.
 
-        If free VRAM is below threshold, requests the orchestrator to release
-        GPU-holding services (gaia-prime, gaia-audio) via the handoff protocol.
+        The parent process does NOT import torch (subprocess isolation).
+        We check VRAM via nvidia-smi subprocess call instead.
 
         Returns:
-            True if GPU is ready, False if acquisition failed (training can
-            still proceed but may OOM).
+            True if GPU is ready, False if acquisition failed.
         """
-        import torch
+        import subprocess
 
-        if not torch.cuda.is_available():
-            logger.warning("No CUDA device — skipping GPU acquisition")
-            return False
+        # Check free VRAM without importing torch in the parent
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.free,memory.total",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                free_str, total_str = result.stdout.strip().split(", ")
+                free_gb = float(free_str) / 1024
+                total_gb = float(total_str) / 1024
+                logger.info("GPU VRAM: %.1fGiB free / %.1fGiB total", free_gb, total_gb)
 
-        free_bytes, total_bytes = torch.cuda.mem_get_info(0)
-        free_gb = free_bytes / (1024 ** 3)
-        total_gb = total_bytes / (1024 ** 3)
-        logger.info("GPU VRAM: %.1fGiB free / %.1fGiB total", free_gb, total_gb)
-
-        if free_gb >= min_free_gb:
-            logger.info("Sufficient VRAM available — no handoff needed")
-            return True
+                if free_gb >= min_free_gb:
+                    logger.info("Sufficient VRAM available — no handoff needed")
+                    return True
+            else:
+                logger.warning("nvidia-smi failed: %s", result.stderr.strip())
+        except FileNotFoundError:
+            logger.warning("nvidia-smi not found — requesting handoff anyway")
+        except Exception as e:
+            logger.warning("VRAM check failed: %s — requesting handoff anyway", e)
 
         # Request orchestrator to clear GPU
         orchestrator_url = "http://gaia-orchestrator:6410"
-        logger.info(
-            "Insufficient VRAM (%.1fGiB < %.1fGiB) — requesting GPU handoff from orchestrator",
-            free_gb, min_free_gb
-        )
+        logger.info("Requesting GPU handoff from orchestrator")
 
         try:
             import httpx
@@ -468,14 +495,15 @@ class StudyModeManager:
         """
         Release GPU resources after training and signal orchestrator to
         restore normal services (gaia-prime, gaia-audio).
-        """
-        import torch
 
-        # Clear CUDA cache
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        With subprocess isolation, the parent process never has a CUDA
+        context. When the training subprocess exits, the OS reclaims ALL
+        GPU memory automatically. We just need to signal the orchestrator.
+        """
+        # Kill any lingering training subprocess
+        self.kill_training_subprocess()
         gc.collect()
-        logger.info("CUDA cache cleared after training")
+        logger.info("GPU release: subprocess dead, VRAM reclaimed by OS")
 
         # Signal orchestrator to reclaim GPU for inference
         orchestrator_url = "http://gaia-orchestrator:6410"
@@ -550,11 +578,16 @@ class StudyModeManager:
         adapter_dir: Path,
         base_model_path: str
     ) -> Tuple[Path, float, int]:
-        """Run actual QLoRA training using PEFT/transformers."""
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
+        """
+        Run QLoRA training in an isolated subprocess.
 
-        from gaia_study.qlora_trainer import QLoRATrainer, QLoRAConfig
+        The subprocess gets its own CUDA context. When it exits, the OS
+        reclaims ALL GPU memory — no empty_cache() needed.
+        """
+        import asyncio
+        from gaia_study.training_subprocess import (
+            SubprocessConfig, PROGRESS_FILE, run_training,
+        )
 
         # Archive existing adapter before overwriting (rollback safety)
         is_incremental = config.resume_from is not None
@@ -564,8 +597,12 @@ class StudyModeManager:
             shutil.copytree(adapter_dir, archive_dir)
             logger.info("Archived existing adapter to %s", archive_dir)
 
-        # Build QLoRA config from training config
-        qlora_config = QLoRAConfig(
+        # Build subprocess config (fully serializable)
+        sub_config = SubprocessConfig(
+            base_model_path=base_model_path,
+            adapter_dir=str(adapter_dir),
+            adapter_name=config.adapter_name,
+            samples=samples,
             load_in_4bit=self.qlora_config.get("load_in_4bit", True),
             bnb_4bit_compute_dtype=self.qlora_config.get("bnb_4bit_compute_dtype", "bfloat16"),
             bnb_4bit_quant_type=self.qlora_config.get("bnb_4bit_quant_type", "nf4"),
@@ -581,78 +618,117 @@ class StudyModeManager:
             warmup_steps=config.warmup_steps,
             target_loss=config.target_loss,
             convergence_patience=config.convergence_patience,
-        )
-
-        # Progress callback to update our state
-        def on_progress(progress):
-            self.progress = 0.3 + (0.5 * progress.current_step / max(progress.total_steps, 1))
-            self.status_message = f"Training step {progress.current_step}/{progress.total_steps} (loss: {progress.current_loss:.4f})"
-
-        # Create trainer with optional resume_from
-        trainer = QLoRATrainer(
-            base_model_path=base_model_path,
-            config=qlora_config,
-            output_dir=str(adapter_dir),
-            progress_callback=on_progress,
+            num_train_epochs=config.num_train_epochs,
+            max_training_time=self.max_training_time,
             resume_from=config.resume_from,
         )
 
-        # Run training in thread pool to not block async loop
-        loop = asyncio.get_event_loop()
-        executor = ThreadPoolExecutor(max_workers=1)
+        # Spawn subprocess (fresh interpreter, fresh CUDA context)
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(
+            target=run_training,
+            args=(sub_config.to_dict(),),
+            name=f"qlora-{config.adapter_name}",
+        )
+        self._training_process = proc
+        self._training_start_time = _time.time()
+        self.status_message = "Spawning training subprocess..."
 
-        try:
-            # Setup
-            self.status_message = "Loading model for training..."
-            setup_success = await loop.run_in_executor(executor, trainer.setup)
-            if not setup_success:
-                raise RuntimeError("Failed to setup QLoRA trainer")
+        proc.start()
+        logger.info(
+            "Training subprocess spawned: PID %d for adapter '%s'",
+            proc.pid, config.adapter_name,
+        )
 
-            # Prepare dataset
-            self.status_message = "Preparing training dataset..."
-            train_dataset = await loop.run_in_executor(
-                executor,
-                trainer.prepare_dataset,
-                samples,
-                "instruction"
-            )
+        # Poll progress file until subprocess exits
+        poll_interval = 2.0
+        while proc.is_alive():
+            await asyncio.sleep(poll_interval)
+            progress = self._read_progress()
+            if progress:
+                state = progress.get("state", "")
+                step = progress.get("step", 0)
+                total = progress.get("total_steps", config.max_steps)
+                loss = progress.get("loss", 0.0)
+                if state == "training" and total > 0:
+                    self.progress = 0.3 + (0.5 * step / max(total, 1))
+                    self.status_message = (
+                        f"Training step {step}/{total} (loss: {loss:.4f})"
+                    )
+                elif state == "setup":
+                    self.status_message = "Loading model in subprocess..."
+                elif state == "saving":
+                    self.status_message = "Saving adapter..."
+                    self.progress = 0.8
 
-            # Train
-            self.status_message = "Training in progress..."
-            success, metrics = await loop.run_in_executor(
-                executor,
-                trainer.train,
-                train_dataset,
-                config.adapter_name,
-                self.max_training_time
-            )
+        # Subprocess has exited — join to get exit code
+        proc.join(timeout=10)
+        self._training_process = None
+        exit_code = proc.exitcode
 
-            if not success:
-                raise RuntimeError(metrics.get("error", "Training failed"))
+        logger.info("Training subprocess exited with code %s", exit_code)
 
-            # Save adapter
-            self.status_message = "Saving adapter..."
-            stop_reason = metrics.get("stop_reason", "max_steps")
-            await loop.run_in_executor(
-                executor,
-                trainer.save_adapter,
-                config.adapter_name,
-                {"stop_reason": stop_reason},
-            )
+        # Read final progress
+        progress = self._read_progress()
 
-            final_loss = metrics.get("final_loss", 0.0)
-            steps = metrics.get("total_steps", 0)
-
+        if exit_code == 0 and progress and progress.get("state") == "completed":
+            final_loss = progress.get("loss", 0.0)
+            steps = progress.get("step", 0)
+            stop_reason = progress.get("stop_reason", "max_steps")
             logger.info(
-                "Real QLoRA training complete: %d steps, loss=%.4f, stop_reason=%s",
+                "Subprocess training complete: %d steps, loss=%.4f, stop_reason=%s",
                 steps, final_loss, stop_reason,
             )
             return adapter_dir, final_loss, steps
+        else:
+            error = "Unknown error"
+            if progress:
+                error = progress.get("error", f"Subprocess exited with code {exit_code}")
+            raise RuntimeError(f"Training subprocess failed: {error}")
 
-        finally:
-            # Cleanup
-            await loop.run_in_executor(executor, trainer.cleanup)
-            executor.shutdown(wait=False)
+    def _read_progress(self) -> Optional[Dict[str, Any]]:
+        """Read the training progress file (written by subprocess)."""
+        from gaia_study.training_subprocess import PROGRESS_FILE
+        try:
+            if PROGRESS_FILE.exists():
+                with open(PROGRESS_FILE) as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
+    def kill_training_subprocess(self) -> bool:
+        """
+        Kill the training subprocess: SIGTERM → wait 10s → SIGKILL.
+
+        Returns True if a process was killed, False if none was running.
+        """
+        proc = self._training_process
+        if proc is None or not proc.is_alive():
+            self._training_process = None
+            return False
+
+        pid = proc.pid
+        logger.warning("Killing training subprocess PID %d (SIGTERM)...", pid)
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+        proc.join(timeout=10)
+
+        if proc.is_alive():
+            logger.warning("Subprocess PID %d still alive, sending SIGKILL", pid)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+            proc.join(timeout=5)
+
+        self._training_process = None
+        logger.info("Training subprocess PID %d terminated", pid)
+        return True
 
     async def _run_simulated_training(
         self,
@@ -773,16 +849,27 @@ class StudyModeManager:
 
     def get_status(self) -> Dict[str, Any]:
         """Get current study mode status."""
-        return {
+        proc = self._training_process
+        result = {
             "state": self.state.value,
             "progress": self.progress,
             "message": self.status_message,
-            "current_adapter": self.current_training.adapter_name if self.current_training else None
+            "current_adapter": self.current_training.adapter_name if self.current_training else None,
+            "subprocess_pid": proc.pid if proc and proc.is_alive() else None,
+            "subprocess_alive": proc.is_alive() if proc else False,
         }
+        # Include progress file data if available
+        progress = self._read_progress()
+        if progress:
+            result["subprocess_state"] = progress.get("state")
+            result["subprocess_step"] = progress.get("step", 0)
+            result["subprocess_loss"] = progress.get("loss", 0.0)
+        return result
 
     def cancel_training(self) -> bool:
         """Cancel an in-progress training session."""
         if self.state in [StudyModeState.TRAINING, StudyModeState.PREPARING]:
+            self.kill_training_subprocess()
             self.state = StudyModeState.IDLE
             self.status_message = "Training cancelled"
             self.current_training = None

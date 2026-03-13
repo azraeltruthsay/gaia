@@ -13,10 +13,9 @@ sentence-transformers>=2.7.0
 chromadb>=0.4.24
 
 # QLoRA training dependencies
-# Pin transformers <5.0: transformers 5.3.0 has a regression in core_model_loading.py
-# that materializes ALL bf16 weights to GPU before BnB quantization, causing OOM
-# on 16GB cards with 8B models. transformers 4.57.x loads per-shard correctly.
-transformers>=4.46.0,<5.0
+# Qwen3.5 model_type requires transformers >=5.3.0
+# Prior <5.0 pin was for 8B OOM; 4B fits fine with eager loading
+transformers>=5.3.0
 peft>=0.13.0
 bitsandbytes>=0.44.0
 datasets>=3.0.0
@@ -24,7 +23,7 @@ trl>=0.12.0
 accelerate>=1.0.0
 
 # Quantization toolchain (merge+requantize pipeline)
-# AutoAWQ: bf16 → AWQ quantization (GPU, ~10min for 9B)
+# AutoAWQ: bf16 → AWQ quantization (GPU, ~5min for 4B)
 autoawq>=0.2.0
 # gguf: HuggingFace → GGUF conversion (used by llama.cpp convert script)
 gguf>=0.6.0

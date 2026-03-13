@@ -212,8 +212,8 @@ class AgentCore:
         "oracle": "Oracle",
     }
 
-    # ── Always-on LoRA adapter for identity/persona ────────────────────────
-    _DEFAULT_ADAPTER = "gaia_persona_v1"
+    # ── Always-on LoRA adapter for identity/architecture ────────────────────
+    _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "gaia_architecture")
     _ADAPTER_BASE_PATH = Path("/models/lora_adapters/tier1_global")
     # Models that support LoRA adapters (vLLM-backed)
     _ADAPTER_ELIGIBLE_MODELS = frozenset({"gpu_prime", "prime", "cpu_prime", "thinker"})
@@ -1981,7 +1981,23 @@ class AgentCore:
                                 logger.info("AgentCore: Scrubbed %d confabulated file reference(s) from response", len(fake_names))
                 except Exception:
                     logger.warning("Post-stream observer review failed; continuing without interruption.", exc_info=True)
-    
+
+            # ── Observer Scoring (async, non-blocking) ──
+            try:
+                from gaia_core.cognition.observer_scorer import get_observer_scorer
+                _scorer = get_observer_scorer(self.config)
+                if _scorer:
+                    import threading
+                    _obs_review = review if 'review' in dir() else None
+                    threading.Thread(
+                        target=_scorer.score_turn,
+                        args=(user_input, full_response, packet),
+                        kwargs={"observer_review": _obs_review},
+                        daemon=True,
+                    ).start()
+            except Exception:
+                logger.debug("Observer scorer hook failed", exc_info=True)
+
             # --- Output Routing & Persistence (Always Run) ---
             # This function now needs to handle the v0.3 packet
             routed_output = route_output(full_response, packet, self.ai_manager, session_id, destination)

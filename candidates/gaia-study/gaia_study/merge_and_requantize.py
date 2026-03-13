@@ -11,14 +11,14 @@ Pipeline stages:
 Usage (inside gaia-study container):
   # Quantize all three tiers from base bf16 weights (no adapter merge)
   python -m gaia_study.merge_and_requantize \
-      --prime-base /models/Qwen3.5-9B-Abliterated \
+      --prime-base /models/Qwen3.5-4B-Abliterated \
       --core-base  /models/Qwen3.5-4B-Abliterated \
       --nano-base  /models/Qwen3.5-0.8B-Abliterated \
       --output-dir /models
 
   # Merge adapter first, then quantize (identity baking)
   python -m gaia_study.merge_and_requantize \
-      --prime-base /models/Qwen3.5-9B-Abliterated \
+      --prime-base /models/Qwen3.5-4B-Abliterated \
       --adapter /models/lora_adapters/tier1_global/gaia_persona_v1 \
       --output-dir /models
 
@@ -88,12 +88,30 @@ def merge_adapter(base_path: str, adapter_path: str, output_path: str) -> str:
 
     adapter_config = Path(adapter_path) / "adapter_config.json"
     if not adapter_config.exists():
-        logger.warning("Adapter config not found at %s — skipping merge", adapter_config)
-        return base_path
+        # Fallback: search checkpoints for the latest adapter_config.json
+        checkpoint_configs = sorted(
+            Path(adapter_path).glob("checkpoints/*/adapter_config.json")
+        )
+        if checkpoint_configs:
+            adapter_path = str(checkpoint_configs[-1].parent)
+            adapter_config = checkpoint_configs[-1]
+            logger.info("Adapter config not at top level — using checkpoint: %s", adapter_path)
+        else:
+            logger.warning("Adapter config not found at %s or checkpoints — skipping merge", adapter_config)
+            return base_path
 
-    # Pre-flight memory check: loading a 9B bf16 model needs ~18GB
+    # Pre-flight memory check: estimate from model file sizes
+    # bf16 merge loads model to CPU RAM. Safetensors are already bf16, so
+    # memory needed ≈ file size + ~30% overhead for tokenizer/merge ops.
     if require_memory is not None:
-        require_memory(needed_mb=18000, label="LoRA merge (bf16 model load)")
+        base_p = Path(base_path)
+        total_bytes = sum(f.stat().st_size for f in base_p.glob("*.safetensors"))
+        if total_bytes == 0:
+            total_bytes = sum(f.stat().st_size for f in base_p.glob("*.bin"))
+        estimated_mb = max(int(total_bytes / (1024 * 1024) * 1.4), 4000)
+        logger.info("Estimated memory for merge: %d MB (model files: %.1f GB)",
+                     estimated_mb, total_bytes / (1024**3))
+        require_memory(needed_mb=estimated_mb, label="LoRA merge (bf16 model load)")
 
     logger.info("═══ Merging LoRA adapter into base weights ═══")
     logger.info("  Base:    %s", base_path)
@@ -101,19 +119,32 @@ def merge_adapter(base_path: str, adapter_path: str, output_path: str) -> str:
     logger.info("  Output:  %s", output_path)
 
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
     t0 = time.time()
 
-    # Load base model in bf16 on CPU (uses ~16GB system RAM for 9B)
+    # Load base model in bf16 on CPU (uses ~8GB system RAM for 4B)
+    # Use AutoModelForImageTextToText for multimodal models to preserve the
+    # vision encoder through the merge. AutoModelForCausalLM strips it.
     logger.info("Loading base model (bf16, CPU)...")
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_path,
+    load_kwargs = dict(
         torch_dtype="auto",
         device_map="cpu",
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
+    try:
+        cfg = AutoConfig.from_pretrained(base_path, trust_remote_code=True)
+        has_vision = hasattr(cfg, "vision_config") and cfg.vision_config is not None
+    except Exception:
+        has_vision = False
+
+    if has_vision:
+        logger.info("Detected multimodal model — loading with AutoModelForImageTextToText to preserve vision encoder")
+        base_model = AutoModelForImageTextToText.from_pretrained(base_path, **load_kwargs)
+    else:
+        logger.info("Text-only model — loading with AutoModelForCausalLM")
+        base_model = AutoModelForCausalLM.from_pretrained(base_path, **load_kwargs)
 
     # Load and merge adapter
     logger.info("Loading and merging adapter...")
@@ -222,7 +253,7 @@ def quantize_prime(model_path: str, output_path: str) -> bool:
 
     Uses gptqmodel with a custom qwen3_5_text definition for Qwen3.5's
     hybrid architecture (linear_attn + self_attn + dense MLP).
-    Requires GPU. For 9B models, uses ~10-14GB VRAM.
+    Requires GPU. For 4B models, uses ~6-8GB VRAM.
     """
     # Pre-flight memory check: GPTQ needs ~14GB system RAM + GPU VRAM
     if require_memory is not None:
@@ -256,13 +287,13 @@ def quantize_prime(model_path: str, output_path: str) -> bool:
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-        # Configure GPTQ quantization (lm_head=True to quantize lm_head
-        # so the model fits in 16GB VRAM — unquantized lm_head is 1.89GB
-        # with 248K vocab)
+        # Configure GPTQ quantization
+        # Note: lm_head=False because Qwen3.5 uses tied weights
+        # (embed_tokens == lm_head) which GPTQ cannot quantize separately
         quant_config = QuantizeConfig(
             bits=GPTQ_BITS,
             group_size=GPTQ_GROUP_SIZE,
-            lm_head=True,
+            lm_head=False,
         )
 
         # Load model for quantization (device_map="auto" to split across GPU/CPU
@@ -289,7 +320,7 @@ def quantize_prime(model_path: str, output_path: str) -> bool:
             ] * GPTQ_CALIB_SAMPLES
 
         # Quantize with calibration data
-        logger.info("Quantizing (this takes ~10-20 min for 9B)...")
+        logger.info("Quantizing (this takes ~5-10 min for 4B)...")
         model.quantize(
             calibration=calib_texts,
             calibration_concat_size=GPTQ_CALIB_SEQ_LEN,
@@ -529,7 +560,7 @@ def main():
 
     # Model bases (bf16 HuggingFace format)
     parser.add_argument("--prime-base", type=str,
-                        help="Path to Prime bf16 model (e.g., /models/Qwen3.5-9B-Abliterated)")
+                        help="Path to Prime bf16 model (e.g., /models/Qwen3.5-4B-Abliterated)")
     parser.add_argument("--core-base", type=str,
                         help="Path to Core bf16 model (e.g., /models/Qwen3.5-4B-Abliterated)")
     parser.add_argument("--nano-base", type=str,

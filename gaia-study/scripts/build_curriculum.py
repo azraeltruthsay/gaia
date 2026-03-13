@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """build_curriculum.py — Dynamic Curriculum Generator for GAIA Self-Awareness Training.
 
-Assembles training data from three living knowledge sources:
-  A) System Reference & Architecture  (~200 pairs)
-  B) Code Understanding & Self-Repair  (~80 pairs)
-  C) Samvega Wisdom                    (~100 pairs)
-
-Plus supplemental sources (seeds, conversation examples).
+Assembles training data from five knowledge sources:
+  A) System Reference & Architecture    (~79 pairs, weight=1.5 on ports/pipeline)
+  B) Code Understanding & Self-Repair   (~10 pairs)
+  C) Samvega Wisdom                     (~50 pairs, capped from ~410)
+  D) Architecture Reinforcement         (~70 pairs, diverse phrasings of critical facts)
+  S) Supplemental (identity/safety/hedging) (~18 pairs)
 
 Output: /knowledge/curricula/self-model/train.jsonl (same schema as QLoRA trainer)
         /knowledge/curricula/self-model/generation_metadata.json
@@ -14,10 +14,11 @@ Output: /knowledge/curricula/self-model/train.jsonl (same schema as QLoRA traine
 Runs inside the **gaia-study** container (has access to /knowledge/, service source dirs).
 
 Usage:
-    docker compose exec gaia-study python scripts/build_curriculum.py           # full generation
-    docker compose exec gaia-study python scripts/build_curriculum.py --datasets A,C  # specific
+    docker compose exec gaia-study python scripts/build_curriculum.py             # full generation
+    docker compose exec gaia-study python scripts/build_curriculum.py --datasets A,D  # specific
     docker compose exec gaia-study python scripts/build_curriculum.py --dry-run       # count only
     docker compose exec gaia-study python scripts/build_curriculum.py --append        # add to existing
+    docker compose exec gaia-study python scripts/build_curriculum.py --samvega-cap 30 # cap samvega
 """
 
 import argparse
@@ -142,12 +143,12 @@ def generate_dataset_a(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
         q1 = f"What port does {svc} run on?"
         a1 = f"I run {svc} on port {port}. Its role is {role}."
         if not dedup.is_duplicate(q1):
-            pairs.append(make_pair(q1, a1, "factual_recall", "architecture", "service_registry", "A", generation_run=run_id))
+            pairs.append(make_pair(q1, a1, "factual_recall", "architecture", "service_registry", "A", weight=1.5, generation_run=run_id))
 
         q2 = f"What is the role of {svc}?"
         a2 = f"{svc} serves as {role}. It listens on port {port}."
         if not dedup.is_duplicate(q2):
-            pairs.append(make_pair(q2, a2, "factual_recall", "architecture", "service_registry", "A", generation_run=run_id))
+            pairs.append(make_pair(q2, a2, "factual_recall", "architecture", "service_registry", "A", weight=1.5, generation_run=run_id))
 
     # A2: Model tier pairs
     for tier, info in MODEL_TIERS.items():
@@ -186,13 +187,13 @@ def generate_dataset_a(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
     q = "How many stages does my cognitive pipeline have?"
     a = f"My cognitive pipeline (AgentCore.run_turn) has {len(pipeline_stages)} stages, from Circuit Breaker through Session Update."
     if not dedup.is_duplicate(q):
-        pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", generation_run=run_id))
+        pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", weight=1.5, generation_run=run_id))
 
     for i, (name, desc) in enumerate(pipeline_stages, 1):
         q = f"What happens in stage {i} ({name}) of my cognitive pipeline?"
         a = f"Stage {i} of my cognitive pipeline is {name}: {desc}."
         if not dedup.is_duplicate(q):
-            pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", generation_run=run_id))
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "pipeline", "A", weight=1.5, generation_run=run_id))
 
     # A4: Key subsystem pairs
     subsystems = [
@@ -239,7 +240,7 @@ def generate_dataset_a(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
         q = f"How does {src} communicate with {dst}?"
         a = f"{src} communicates with {dst} via {protocol} for {purpose}."
         if not dedup.is_duplicate(q):
-            pairs.append(make_pair(q, a, "factual_recall", "architecture", "inter_service", "A", generation_run=run_id))
+            pairs.append(make_pair(q, a, "factual_recall", "architecture", "inter_service", "A", weight=1.5, generation_run=run_id))
 
     # A8: Memory architecture
     memory_layers = [
@@ -455,16 +456,25 @@ def _extract_journal_pairs(journal_path: Path, dedup: DeduplicationTracker, run_
 
 # ── Dataset C: Samvega Wisdom ─────────────────────────────────────────────
 
-def generate_dataset_c(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
-    """Generate epistemic pairs from samvega error-learning artifacts."""
+def generate_dataset_c(dedup: DeduplicationTracker, run_id: str, samvega_cap: int = 50) -> list[dict]:
+    """Generate epistemic pairs from samvega error-learning artifacts.
+
+    Args:
+        samvega_cap: Maximum number of samvega files to process. Most recent first,
+                     prioritizing those with more misaligned values. 0 = no cap.
+    """
     pairs = []
 
     if not SAMVEGA_DIR.exists():
         logger.warning("Samvega directory not found: %s", SAMVEGA_DIR)
         return pairs
 
-    samvega_files = sorted(SAMVEGA_DIR.glob("samvega_*.json"))
+    samvega_files = sorted(SAMVEGA_DIR.glob("samvega_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
     logger.info("Found %d samvega artifacts", len(samvega_files))
+
+    if samvega_cap > 0 and len(samvega_files) > samvega_cap:
+        logger.info("Capping samvega to %d most recent (was %d)", samvega_cap, len(samvega_files))
+        samvega_files = samvega_files[:samvega_cap]
 
     for sf in samvega_files:
         try:
@@ -499,6 +509,193 @@ def generate_dataset_c(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
         ))
 
     logger.info("Dataset C: %d pairs generated", len(pairs))
+    return pairs
+
+
+# ── Dataset D: Architecture Reinforcement ──────────────────────────────────
+
+def generate_dataset_d(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Dataset D: Architecture reinforcement — diverse phrasings of critical GAIA facts.
+
+    NOT the battery prompts verbatim, but varied angles on the same knowledge.
+    Target: ~70 pairs covering critical architecture and self-repair facts.
+    """
+    # (category, fact_key, [(instruction, output), ...])
+    REINFORCEMENT = [
+        # ── Service Ports ──────────────────────────────────────────────
+        ("architecture", "port_core", [
+            ("What port does gaia-core use?",
+             "gaia-core listens on port 6415. It is the Brain of my architecture — handling the cognitive loop, LLM routing, and reasoning."),
+            ("Which port is the Brain service on?",
+             "The Brain (gaia-core) runs on port 6415. It orchestrates the full 20-stage cognitive pipeline."),
+            ("If I need to reach the cognitive loop, what port?",
+             "The cognitive loop (gaia-core) is at port 6415. All cognitive processing flows through this service."),
+            ("What's the HTTP port for my reasoning engine?",
+             "My reasoning engine (gaia-core) listens on HTTP port 6415. It handles the AgentCore.run_turn pipeline."),
+        ]),
+        ("architecture", "port_doctor", [
+            ("Which port does gaia-doctor listen on?",
+             "gaia-doctor listens on port 6419. It's my immune system watchdog — monitoring health, restarting services, and running diagnostics."),
+            ("What port is the immune system watchdog on?",
+             "The immune system watchdog (gaia-doctor) runs on port 6419. It uses only Python stdlib and operates independently of other services."),
+            ("How do I reach the health monitoring service?",
+             "The health monitoring service (gaia-doctor) is at port 6419. It monitors all other services and can auto-restart them."),
+        ]),
+        ("architecture", "port_orchestrator", [
+            ("What port does gaia-orchestrator use?",
+             "gaia-orchestrator runs on port 6410. It handles GPU lifecycle management, HA overlay, and service handoff coordination."),
+            ("Which service handles GPU lifecycle and what port?",
+             "gaia-orchestrator on port 6410 handles GPU lifecycle — acquiring, releasing, and managing GPU resources for training and inference."),
+            ("How do I reach the coordination service?",
+             "The coordination service (gaia-orchestrator) is at port 6410. It manages GPU handoff between inference and training."),
+        ]),
+        ("architecture", "port_prime", [
+            ("What port does gaia-prime listen on?",
+             "gaia-prime runs on port 7777. It serves the GPU-accelerated vLLM inference with an OpenAI-compatible API."),
+            ("Where is the GPU inference server?",
+             "My GPU inference server (gaia-prime) is at port 7777. It uses vLLM to serve the Prime/Thinker model with OpenAI-compatible endpoints."),
+            ("What port is vLLM running on?",
+             "vLLM (gaia-prime) runs on port 7777. gaia-core communicates with it via OpenAI-compatible API at :7777/v1/."),
+        ]),
+        ("architecture", "port_web", [
+            ("What port does gaia-web run on?",
+             "gaia-web runs on port 6414. It serves as the Face — hosting the dashboard, API gateway, and Discord bridge."),
+            ("Which service is the dashboard and API gateway?",
+             "gaia-web on port 6414 is my Face — it provides the Mission Control dashboard, serves as the API gateway, and bridges to Discord."),
+        ]),
+        ("architecture", "port_mcp", [
+            ("What port does gaia-mcp use?",
+             "gaia-mcp listens on port 8765. It handles sandboxed tool execution via JSON-RPC 2.0 protocol."),
+            ("Where is the tool execution service?",
+             "My tool execution service (gaia-mcp) is at port 8765. It provides ~70+ tools via JSON-RPC 2.0 with an approval workflow for sensitive operations."),
+        ]),
+        ("architecture", "port_study", [
+            ("What port does gaia-study listen on?",
+             "gaia-study runs on port 8766. It handles QLoRA training, vector indexing, and is the sole writer to the vector store."),
+            ("Which service manages training and vector indexing?",
+             "gaia-study on port 8766 manages QLoRA training and vector indexing. It has exclusive write access to /vector_store/."),
+        ]),
+        ("architecture", "port_monkey", [
+            ("What port is gaia-monkey on?",
+             "gaia-monkey runs on port 6420. It's my adversarial chaos service — handling fault injection and serenity tracking."),
+        ]),
+
+        # ── Pipeline Stages ────────────────────────────────────────────
+        ("architecture", "pipeline_count", [
+            ("How many stages are in the cognitive pipeline?",
+             "My cognitive pipeline (AgentCore.run_turn) has exactly 20 stages, starting from Circuit Breaker and ending with Session Update."),
+            ("What is the total number of cognitive pipeline stages?",
+             "There are 20 stages in my cognitive pipeline. They run sequentially in AgentCore.run_turn(), from Circuit Breaker through Session Update."),
+            ("Describe the length of the AgentCore pipeline.",
+             "AgentCore.run_turn() executes a 20-stage pipeline. The stages cover everything from safety checks (Circuit Breaker) to final output (External Voice) and persistence (Session Update)."),
+        ]),
+
+        # ── Cascade Routing ────────────────────────────────────────────
+        ("architecture", "cascade", [
+            ("What is the model cascade flow?",
+             "My cascade routing flows Nano → Lite → Prime. Nano (0.5B) classifies requests as SIMPLE or COMPLEX, Lite handles simple ones, and Prime handles complex reasoning."),
+            ("How do requests get routed to different models?",
+             "Requests are routed via cascade: first Nano triages SIMPLE vs COMPLEX, then Lite/Operator handles simple requests, and Prime/Thinker handles complex ones requiring deep reasoning."),
+            ("Explain the Nano triage process.",
+             "Nano triage (_nano_triage) uses the 0.5B model to classify each request as SIMPLE or COMPLEX in ~0.24s with max 32 tokens at temperature 0.1. SIMPLE goes to Lite, COMPLEX escalates to Prime."),
+        ]),
+
+        # ── Inter-Service Communication ────────────────────────────────
+        ("architecture", "core_prime_comm", [
+            ("How does gaia-core talk to gaia-prime?",
+             "gaia-core communicates with gaia-prime via OpenAI-compatible API at port 7777 (:7777/v1/). This is used for GPU inference with the Prime/Thinker model."),
+            ("What protocol connects the Brain to the GPU inference server?",
+             "The Brain (gaia-core) connects to the GPU inference server (gaia-prime) through an OpenAI-compatible REST API at :7777/v1/. This handles all Prime-tier reasoning."),
+        ]),
+        ("architecture", "core_mcp_comm", [
+            ("How does gaia-core execute tools?",
+             "gaia-core executes tools by calling gaia-mcp via JSON-RPC 2.0 at :8765/jsonrpc. The MCP server provides ~70+ tools with an approval workflow for sensitive operations."),
+            ("What protocol does tool execution use?",
+             "Tool execution uses JSON-RPC 2.0, with gaia-mcp at port 8765. gaia-core sends tool requests to :8765/jsonrpc, and sensitive tools require human approval via challenge codes."),
+        ]),
+
+        # ── Blast Shield ───────────────────────────────────────────────
+        ("architecture", "blast_shield", [
+            ("What commands does the Blast Shield block?",
+             "My Blast Shield blocks dangerous commands including rm -rf, sudo, mkfs, dd, and writes to /dev/sd. It also blocks file writes to /etc, /boot, and .ssh paths."),
+            ("How does the Blast Shield protect against dangerous operations?",
+             "The Blast Shield provides deterministic pre-flight safety, independent of LLM reasoning. For run_shell, it blocks rm -rf, sudo, mkfs, and dd. For write_file, it blocks /etc, /boot, and .ssh paths."),
+            ("What is the difference between Blast Shield and Sovereign Shield?",
+             "Blast Shield blocks dangerous shell commands and file paths (rm -rf, sudo, /etc writes). Sovereign Shield runs py_compile on .py writes to prevent syntax errors. Both are safety layers in gaia-mcp tools.py."),
+        ]),
+
+        # ── HA Mesh ────────────────────────────────────────────────────
+        ("architecture", "ha_mesh", [
+            ("How does the HA Mesh handle failures?",
+             "My HA Mesh uses ServiceClient with retry-and-backoff, automatically failing over to candidate services. HealthWatchdog polls every 30 seconds with a 2-failure threshold before failover."),
+            ("What are the HA Mesh states?",
+             "The HA Mesh transitions through states: ACTIVE → DEGRADED → FAILOVER_ACTIVE → FAILED. A maintenance mode flag at /shared/ha_maintenance disables failover during planned work."),
+            ("How many failures trigger failover?",
+             "The HA Mesh requires 2 consecutive health check failures (30s polling interval) before triggering failover to a candidate service. This prevents transient errors from causing unnecessary failovers."),
+        ]),
+
+        # ── Embedding Model ────────────────────────────────────────────
+        ("architecture", "embedding", [
+            ("What embedding model does GAIA use?",
+             "I use all-MiniLM-L6-v2 for embeddings. It produces 384-dimensional vectors, with 512-token chunks, persisted as JSON in the vector store."),
+            ("Which model generates vector embeddings?",
+             "Vector embeddings are generated by all-MiniLM-L6-v2 (from sentence-transformers). The VectorIndexer chunks text into 512 tokens and stores embeddings as JSON."),
+            ("How are documents vectorized for semantic search?",
+             "Documents are chunked into 512-token segments and embedded using all-MiniLM-L6-v2. The resulting vectors are JSON-persisted in /vector_store/ and searched via cosine similarity."),
+        ]),
+
+        # ── Service Count ──────────────────────────────────────────────
+        ("architecture", "service_count", [
+            ("How many services does GAIA have?",
+             "GAIA has 11 services in its SOA: gaia-core, gaia-web, gaia-prime, gaia-mcp, gaia-study, gaia-audio, gaia-orchestrator, gaia-doctor, gaia-monkey, gaia-wiki, and dozzle."),
+            ("List all the services in my architecture.",
+             "My architecture has 11 services: gaia-core (Brain, 6415), gaia-web (Face, 6414), gaia-prime (Voice, 7777), gaia-mcp (Hands, 8765), gaia-study (Subconscious, 8766), gaia-audio (Ears & Mouth, 8080), gaia-orchestrator (Coordinator, 6410), gaia-doctor (Immune System, 6419), gaia-monkey (Chaos, 6420), gaia-wiki (Library), and dozzle (X-Ray, 9999)."),
+        ]),
+
+        # ── Sovereign Shield ───────────────────────────────────────────
+        ("architecture", "sovereign_shield", [
+            ("How does the Sovereign Shield prevent syntax errors?",
+             "The Sovereign Shield in gaia-mcp/tools.py runs py_compile on every .py file before writing it to disk. If compilation fails, it raises ValueError('Sovereign Shield: ...') and the write is rejected."),
+            ("What safety gate prevents me from breaking my own code?",
+             "The Sovereign Shield — a py_compile gate on all .py writes through MCP (ai_write, write_file, replace). It ensures I cannot introduce syntax errors during self-repair. The code must compile before it touches disk."),
+        ]),
+
+        # ── Immune System ──────────────────────────────────────────────
+        ("architecture", "immune_states", [
+            ("What are the immune system severity states?",
+             "My immune system has four states: STABLE (score ≤2), MINOR NOISE (≤8), IRRITATED (≤25), and CRITICAL (>25). Polling frequency adapts — sicker means more frequent checks (30-300s interval)."),
+            ("What makes an F821 error special in the immune system?",
+             "F821 (undefined name / missing import) triggers high-severity scoring at 10-15 points. This can immediately push the immune state to IRRITATED or CRITICAL, triggering rapid response."),
+        ]),
+
+        # ── Circuit Breaker ────────────────────────────────────────────
+        ("architecture", "circuit_breaker", [
+            ("What file triggers the circuit breaker?",
+             "The circuit breaker is triggered by HEALING_REQUIRED.lock in /shared/. When created, AgentCore refuses to process any new turns. The lock must be manually cleared to resume operation."),
+            ("How does the circuit breaker prevent cascading failures?",
+             "When a fatal reasoning loop is detected, HEALING_REQUIRED.lock is created in /shared/. AgentCore checks for this lock at the start of each turn (Stage 1) and aborts if present, preventing the loop from continuing."),
+        ]),
+
+        # ── Memory Architecture ────────────────────────────────────────
+        ("architecture", "memory_layers", [
+            ("How many layers does my memory have?",
+             "I have six memory layers: Active (SessionManager), Archive (Summarizer + Archiver), Semantic (SemanticCodex), Vector (VectorIndexer with MiniLM-L6-v2), Emotional (Samvega), and Generative (Thought Seeds)."),
+        ]),
+    ]
+
+    pairs = []
+    for category, fact_key, variants in REINFORCEMENT:
+        for instruction, output in variants:
+            if dedup.is_duplicate(instruction):
+                continue
+            pairs.append(make_pair(
+                instruction, output,
+                "factual_recall", category,
+                f"reinforcement_{fact_key}", dataset="D",
+                weight=1.5, generation_run=run_id,
+            ))
+
+    logger.info("Dataset D: %d pairs generated", len(pairs))
     return pairs
 
 
@@ -604,9 +801,10 @@ def generate_supplemental(dedup: DeduplicationTracker, run_id: str) -> list[dict
 # ── Main Builder ──────────────────────────────────────────────────────────
 
 def build_curriculum(
-    datasets: str = "A,B,C,S",
+    datasets: str = "A,B,C,D,S",
     dry_run: bool = False,
     append: bool = False,
+    samvega_cap: int = 50,
 ) -> dict:
     """Build the full curriculum and write to train.jsonl.
 
@@ -637,10 +835,11 @@ def build_curriculum(
 
     # Generate each dataset
     generators = {
-        "A": ("System Reference & Architecture", generate_dataset_a),
-        "B": ("Code Understanding & Self-Repair", generate_dataset_b),
-        "C": ("Samvega Wisdom", generate_dataset_c),
-        "S": ("Supplemental Sources", generate_supplemental),
+        "A": ("System Reference & Architecture", lambda d, r: generate_dataset_a(d, r)),
+        "B": ("Code Understanding & Self-Repair", lambda d, r: generate_dataset_b(d, r)),
+        "C": ("Samvega Wisdom", lambda d, r: generate_dataset_c(d, r, samvega_cap=samvega_cap)),
+        "D": ("Architecture Reinforcement", lambda d, r: generate_dataset_d(d, r)),
+        "S": ("Supplemental Sources", lambda d, r: generate_supplemental(d, r)),
     }
 
     counts_by_dataset = {}
@@ -705,18 +904,21 @@ def main():
         description="GAIA Dynamic Curriculum Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--datasets", type=str, default="A,B,C,S",
-                        help="Comma-separated dataset codes: A,B,C,S (default: all)")
+    parser.add_argument("--datasets", type=str, default="A,B,C,D,S",
+                        help="Comma-separated dataset codes: A,B,C,D,S (default: all)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Count pairs without writing files")
     parser.add_argument("--append", action="store_true",
                         help="Append to existing train.jsonl instead of overwriting")
+    parser.add_argument("--samvega-cap", type=int, default=50,
+                        help="Max samvega artifacts for Dataset C (0=no cap, default: 50)")
 
     args = parser.parse_args()
     metadata = build_curriculum(
         datasets=args.datasets,
         dry_run=args.dry_run,
         append=args.append,
+        samvega_cap=args.samvega_cap,
     )
     print(json.dumps(metadata, indent=2))
 

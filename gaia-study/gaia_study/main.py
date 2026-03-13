@@ -12,8 +12,17 @@ Usage:
 """
 
 import logging
+import multiprocessing
 import os
 
+# CRITICAL: Set spawn start method before any other imports that might
+# touch multiprocessing. "spawn" creates a fresh interpreter for child
+# processes, giving them their own CUDA context. When the child exits,
+# the OS reclaims ALL GPU memory — guaranteed.
+try:
+    multiprocessing.set_start_method("spawn", force=True)
+except RuntimeError:
+    pass  # Already set (e.g., in tests)
 
 from gaia_common.utils import setup_logging, get_logger, install_health_check_filter
 

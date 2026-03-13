@@ -26,7 +26,7 @@ from urllib.request import urlopen, Request
 
 # Cognitive test battery (stdlib only — lives alongside doctor.py)
 try:
-    from cognitive_test_battery import run_battery as _run_cognitive_battery, get_test_metadata as _get_test_metadata
+    from cognitive_test_battery import run_battery as _run_cognitive_battery, get_test_metadata as _get_test_metadata, generate_rubric as _generate_rubric
     _BATTERY_AVAILABLE = True
 except ImportError:
     _BATTERY_AVAILABLE = False
@@ -199,6 +199,14 @@ def _init_state():
         _restart_history[name] = []
         _last_log_offsets[name] = 0
         _code_mtimes[name] = _get_service_mtime(name)
+
+    # Generate cognitive rubric for observer scoring
+    if _BATTERY_AVAILABLE:
+        try:
+            _generate_rubric()
+            log.info("Cognitive rubric generated on startup")
+        except Exception:
+            log.warning("Failed to generate cognitive rubric on startup", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +506,56 @@ def inspect_container(name: str) -> dict | None:
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
         pass
     return None
+
+
+def check_container_naming(name: str) -> bool:
+    """Check if a container's actual name matches the expected service name.
+
+    Docker compose can produce mangled names (e.g. 'e682e64949a5_gaia-core')
+    when a previous recreate failed or the container was orphaned.  If detected,
+    force-recreate via compose to fix the naming.
+
+    Returns True if naming is correct (or service not found), False if a
+    fix was attempted.
+    """
+    try:
+        # Find containers matching the service name (partial match)
+        result = subprocess.run(
+            ["docker", "ps", "--filter", f"name={name}",
+             "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return True  # container not found — nothing to fix
+
+        for container_name in result.stdout.strip().split("\n"):
+            container_name = container_name.strip()
+            if not container_name:
+                continue
+            # Skip candidate containers when checking production service
+            if "candidate" in container_name and "candidate" not in name:
+                continue
+            # The expected name should match exactly
+            if container_name != name:
+                log.warning(
+                    "NAMING ANOMALY: container '%s' should be '%s' — force-recreating",
+                    container_name, name,
+                )
+                # Stop and remove the misnamed container first
+                subprocess.run(
+                    ["docker", "stop", container_name],
+                    capture_output=True, text=True, timeout=30,
+                )
+                subprocess.run(
+                    ["docker", "rm", container_name],
+                    capture_output=True, text=True, timeout=10,
+                )
+                # Recreate with correct naming via compose
+                docker_restart(name)
+                return False
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        log.debug("Container naming check failed for %s", name, exc_info=True)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -986,6 +1044,11 @@ def poll_cycle():
     # Audit code for disk/memory mismatches
     audit_code()
 
+    # Check for container naming anomalies (mangled names from failed recreates)
+    for name, (_url, remediation) in SERVICES.items():
+        if remediation == "restart" and "candidate" not in name:
+            check_container_naming(name)
+
     # Then check HTTP health
     for name, (url, remediation) in SERVICES.items():
         healthy = check_health(name, url)
@@ -1302,6 +1365,11 @@ class DoctorHandler(BaseHTTPRequestHandler):
                         log.warning("Wake signal failed: %s", e)
                 result = _run_cognitive_battery(section=section, ids=ids, timeout=timeout, full_pipeline=full_pipeline, target=target, no_think=no_think)
                 _cognitive_last_result = result
+                # Regenerate rubric after battery (tests may have been updated)
+                try:
+                    _generate_rubric()
+                except Exception:
+                    log.debug("Rubric regeneration after battery failed", exc_info=True)
             except Exception:
                 log.error("Cognitive battery failed", exc_info=True)
             finally:

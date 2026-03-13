@@ -185,20 +185,17 @@
     "audio": {
       "enabled": true,
       "endpoint": "http://gaia-audio:8080",
-      "listener_model_path": "/models/Qwen3-ASR-0.6B",
-      "listener_device": "auto",
-      "nano_speaker_model_path": "/models/Qwen3-TTS-12Hz-0.6B-Base",
-      "prime_speaker_model_path": "/models/Qwen3-TTS-12Hz-1.7B-Base",
-      "voice_ref_audio": "/models/voice/gaia_identity.wav",
-      "voice_ref_text": null,
-      "tts_auto_threshold": 200,
-      "prime_speaker_timeout": 30,
-      "sample_rate": 24000,
-      "vram_budget_mb": 16000,
+      "stt_model": "base.en",
+      "tts_engine": "coqui",
+      "tts_voice": "/models/voice/gaia_identity.wav",
+      "sample_rate": 16000,
+      "vram_budget_mb": 5600,
+      "half_duplex": false,
       "mute_on_sleep": true,
       "cloud_fallback": {
         "provider": "elevenlabs",
-        "enabled": false
+        "enabled": false,
+        "api_key_env": "ELEVENLABS_API_KEY"
       }
     }
   },
@@ -277,7 +274,7 @@
   },
   "STUDY_MODE": {
     "enabled": true,
-    "base_model_path": "/models/Qwen3.5-9B-Abliterated",
+    "base_model_path": "/models/Qwen3.5-4B-Abliterated",
     "max_training_time_seconds": 600,
     "max_training_samples": 1000,
     "max_training_content_kb": 200,
@@ -556,15 +553,6 @@
       "observer_block": 1.5,
       "observer_caution": 1.2,
       "repeated_domain": 1.3
-    },
-    "tier5_training": {
-      "enabled": true,
-      "pre_eval_similarity_threshold": 0.85,
-      "epoch_threshold": 20,
-      "default_epochs": 3,
-      "fallback_max_steps": 50,
-      "delta_path": "/knowledge/curricula/self-model/gaia_delta.jsonl",
-      "portable_soul_path": "/knowledge/curricula/self-model/gaia_persona_training.jsonl"
     }
   },
   "SYSTEM": {

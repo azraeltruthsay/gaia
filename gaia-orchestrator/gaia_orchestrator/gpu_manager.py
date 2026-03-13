@@ -15,6 +15,7 @@ offloaded to an 8GB CPU RAM buffer (--kv-offloading-backend native).
 import asyncio
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
 from .config import get_config
@@ -410,6 +411,115 @@ class GPUManager:
         except Exception as e:
             logger.error(f"Failed to request GPU release from Study: {e}")
             return False
+
+    # =========================================================================
+    # Training Subprocess Monitoring
+    # =========================================================================
+
+    async def get_training_status(self) -> dict:
+        """
+        Poll gaia-study for training subprocess status.
+
+        Returns the combined manager state + progress file data.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/training/status"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    return resp.json()
+                else:
+                    return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def validate_training_result(self) -> dict:
+        """
+        Validate a completed training run by checking the progress file.
+
+        Checks:
+        - state == "completed"
+        - adapter directory exists with expected files
+        - loss is finite (not NaN/Inf)
+        """
+        import json
+        import math
+
+        progress_file = Path("/shared/study/training_progress.json")
+        result = {"valid": False, "checks": {}}
+
+        # Check progress file exists
+        if not progress_file.exists():
+            result["error"] = "Progress file not found"
+            return result
+
+        try:
+            with open(progress_file) as f:
+                progress = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            result["error"] = f"Cannot read progress file: {e}"
+            return result
+
+        # Check state
+        state = progress.get("state", "")
+        result["checks"]["state_completed"] = state == "completed"
+
+        # Check loss is finite
+        loss = progress.get("loss", float("nan"))
+        result["checks"]["loss_finite"] = isinstance(loss, (int, float)) and math.isfinite(loss)
+        result["checks"]["loss_value"] = loss
+
+        # Check adapter directory and files
+        adapter_dir = progress.get("adapter_dir", "")
+        if adapter_dir:
+            adapter_path = Path(adapter_dir)
+            result["checks"]["adapter_dir_exists"] = adapter_path.exists()
+
+            adapter_config = adapter_path / "adapter_config.json"
+            result["checks"]["adapter_config_exists"] = adapter_config.exists()
+
+            # Check for model weights (safetensors or bin)
+            has_weights = (
+                (adapter_path / "adapter_model.safetensors").exists()
+                or (adapter_path / "adapter_model.bin").exists()
+            )
+            result["checks"]["adapter_weights_exist"] = has_weights
+        else:
+            result["checks"]["adapter_dir_exists"] = False
+
+        # Overall validity
+        result["valid"] = all(result["checks"].values())
+        result["progress"] = progress
+
+        logger.info(
+            "Training validation: valid=%s checks=%s",
+            result["valid"], result["checks"],
+        )
+        return result
+
+    async def kill_training_subprocess(self) -> dict:
+        """
+        Force-kill the training subprocess via gaia-study API.
+
+        Last resort when training is stuck and VRAM needs to be reclaimed.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/training/kill"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    logger.info("Training subprocess kill: %s", data)
+                    return data
+                else:
+                    return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            logger.error("Failed to kill training subprocess: %s", e)
+            return {"ok": False, "error": str(e)}
 
     def shutdown(self):
         """Shutdown NVML."""
