@@ -60,6 +60,7 @@ nvidia_post_debug.txt
 # --- Tools / config not tracked ---
 tools/
 .claude/
+.gemini/
 
 # --- Standalone root files (not part of SOA services) ---
 Geppitti Persona & Interaction Overview
