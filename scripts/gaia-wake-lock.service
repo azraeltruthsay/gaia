@@ -1,0 +1,12 @@
+[Unit]
+Description=GAIA Wake Lock — prevent sleep while GAIA containers are active
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=/gaia/GAIA_Project/scripts/gaia-wake-lock.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

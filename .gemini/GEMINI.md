@@ -1,6 +1,6 @@
 # GAIA Project — Gemini CLI Instructions
 
-> **Last updated**: 2026-03-04 | **Era**: Sovereign Autonomy | **Services**: 11
+> **Last updated**: 2026-03-06 | **Era**: Sovereign Autonomy | **Services**: 11
 
 ## Project Overview
 
@@ -94,11 +94,21 @@ Candidate (HA) services mirror production with +1 ports. Defined in `docker-comp
 - **Epistemic Gate**: Confidence-gated check that triggers "honest ignorance" if RAG fails for domain-specific queries.
 - **Identity Guardian**: Hard-coded constraints in `AgentCore` that block generation if persona traits are violated.
 
+### Immune System 3.0 (Chaos Monkey Validated, 2026-03-06)
+Four layers, empirically verified across 6+ Chaos Monkey rounds:
+1. **Production Lock**: Sovereign Shield + candidate-first enforcement
+2. **Watchdog (gaia-doctor)**: 15s polling, 2-failure threshold, structural audit (ast.parse) before restart, circuit breaker (max 2/30min), post-remediation `_verify_recovery()` confirms health in 5s
+3. **HA Surgeon**: Tier 1 ruff --fix → Tier 2 sends to gaia-core `/api/repair/structural` (Prime model fixes within ±40-line window)
+4. **Dissonance Probe**: SHA-256 hash parity between live/candidate Vital Organs
+
+**Doctor deployment note**: code is COPYed in Dockerfile — requires `docker compose build gaia-doctor` for changes.
+
 ### Cognition & Memory
 - **Semantic Probe**: Uses embeddings to find the "domain center" of a query before the LLM even sees it.
 - **Oracle Persistence**: Responses from `oracle` models (GPT-4o) are automatically saved as local facts to reduce cloud dependency over time.
 - **Fragmentation/Rehydration**: MCP tools for chunking responses that exceed context windows, with seamless reassembly.
 - **Samvega**: Captures "irritants" (errors/corrections) to drive future self-correction.
+- **Epistemic Validation**: Detects when Nano gives fundamentally wrong answers (similarity < 0.4) — labels as "Correction" and emits Samvega THOUGHT_SEED for hallucination learning.
 
 ---
 

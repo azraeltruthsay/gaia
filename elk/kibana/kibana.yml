@@ -1,0 +1,14 @@
+# Kibana configuration for GAIA
+# Connects to local Elasticsearch, no external auth
+
+server.host: "0.0.0.0"
+server.name: "gaia-kibana"
+
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# Disable telemetry
+telemetry.enabled: false
+telemetry.optIn: false
+
+# Reduce Kibana memory usage
+monitoring.ui.enabled: false

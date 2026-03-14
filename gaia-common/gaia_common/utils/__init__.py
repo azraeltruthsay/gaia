@@ -47,6 +47,7 @@ from .memory_guard import (
     get_memory_status,
     require_memory,
 )
+from .error_logging import log_gaia_error
 
 __all__ = [
     # Logging
@@ -84,4 +85,6 @@ __all__ = [
     "MemoryGuardError",
     "get_memory_status",
     "require_memory",
+    # Structured error logging
+    "log_gaia_error",
 ]

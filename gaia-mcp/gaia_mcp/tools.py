@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from gaia_common.utils import get_logger
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
 from gaia_common.config import Config
 from gaia_common.utils.safe_execution import run_shell_safe
 from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
@@ -80,7 +85,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         try:
             approval_store.validate_against_blast_shield(method, params)
         except ValueError as e:
-            logger.critical(f"🛡️ BLAST SHIELD blocked execution of '{method}': {e}")
+            log_gaia_error(logger, "GAIA-MCP-010", f"Blocked '{method}': {e}")
             raise PermissionError(f"Blast Shield block: {e}")
 
     # 3. Handle built-in discoveries
@@ -181,6 +186,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
     }
 
     if method not in tool_map and method not in async_tool_map:
+        log_gaia_error(logger, "GAIA-MCP-001", f"Tool '{method}' not found")
         raise ValueError(f"Tool '{method}' is not a valid, implemented tool.")
 
     # Execute the tool
@@ -209,7 +215,7 @@ def _validate_python_content(path: str, content: str):
                 tmp.flush()
                 py_compile.compile(tmp.name, doraise=True)
         except Exception as e:
-            logger.error("Sovereign Shield: Compilation failed for %s: %s", path, e)
+            log_gaia_error(logger, "GAIA-MCP-025", f"Compilation failed for {path}: {e}")
             raise ValueError(f"Sovereign Shield: Cannot save {path} because it contains syntax errors: {e}")
 
 
@@ -280,7 +286,7 @@ def _write_file_impl(params: dict) -> dict:
     
     if is_live_code and not is_candidate:
         if os.getenv("BREAKGLASS_EMERGENCY") != "1":
-            logger.critical(f"🛡️ PRODUCTION LOCK: Attempted write to live code path: {p}")
+            log_gaia_error(logger, "GAIA-MCP-030", f"Attempted write to live code path: {p}")
             raise PermissionError(
                 "PRODUCTION LOCK ACTIVE: Direct writes to live services are forbidden. "
                 "Modify code in /candidates/ and use the promotion pipeline instead."

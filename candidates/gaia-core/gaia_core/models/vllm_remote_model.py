@@ -338,23 +338,27 @@ class VLLMRemoteModel:
                     f"Is gaia-prime running?"
                 ) from exc
             except requests.exceptions.HTTPError as exc:
-                if r.status_code == 400:
-                    error_text = (r.text or "")[:500]
+                error_text = (r.text or "")[:500]
 
-                    # ── LoRA adapter not loaded — graceful fallback to base model ──
-                    if self._active_adapter and (
-                        "lora" in error_text.lower()
-                        or "adapter" in error_text.lower()
-                        or self._active_adapter in error_text
-                    ):
-                        logger.warning(
-                            "vLLM rejected adapter '%s' (400: %s). "
-                            "Falling back to base model.",
-                            self._active_adapter, error_text[:200],
-                        )
-                        self._active_adapter = None
-                        payload["model"] = self.model_name
-                        return self._post(path, payload, _allow_clamp_retry=_allow_clamp_retry)
+                # ── LoRA adapter not loaded — graceful fallback to base model ──
+                # vLLM returns 400 when the adapter is rejected, or 404 when
+                # the adapter model name doesn't exist at all.
+                if r.status_code in (400, 404) and self._active_adapter and (
+                    "lora" in error_text.lower()
+                    or "adapter" in error_text.lower()
+                    or self._active_adapter in error_text
+                    or "does not exist" in error_text.lower()
+                ):
+                    logger.warning(
+                        "vLLM rejected adapter '%s' (%d: %s). "
+                        "Falling back to base model.",
+                        self._active_adapter, r.status_code, error_text[:200],
+                    )
+                    self._active_adapter = None
+                    payload["model"] = self.model_name
+                    return self._post(path, payload, _allow_clamp_retry=_allow_clamp_retry)
+
+                if r.status_code == 400:
 
                     # Smart retry for context window overflow: parse exact available tokens
                     if _allow_clamp_retry:

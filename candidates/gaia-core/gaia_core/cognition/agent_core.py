@@ -27,6 +27,7 @@ from gaia_core.utils.stream_observer import StreamObserver
 import gaia_core.utils.mcp_client as mcp_client
 from gaia_core.config import get_config
 from gaia_common.utils.entity_validator import EntityValidator
+from gaia_common.utils.error_logging import log_gaia_error
 
 # Get constants from config for backwards compatibility
 _config = get_config()
@@ -250,15 +251,22 @@ class AgentCore:
 
         Only Prime/Thinker (vLLM-backed) models can use adapters.  Returns
         None if the model is ineligible or the adapter hasn't been trained yet
-        (no adapter_model.safetensors on disk).
+        (no adapter weights on disk).
         """
         # Only vLLM-backed models support LoRA
         resolved = model_name.lower()
         if not any(tag in resolved for tag in ("prime", "thinker", "gpu")):
             return None
-        # Check that the adapter actually exists on disk (real weights, not just config)
+        # Check that the adapter has both config AND actual weight files
         adapter_dir = self._ADAPTER_BASE_PATH / self._DEFAULT_ADAPTER
         if not (adapter_dir / "adapter_config.json").exists():
+            return None
+        # Require actual weight files — config-only means training hasn't completed
+        has_weights = (
+            (adapter_dir / "adapter_model.safetensors").exists()
+            or (adapter_dir / "adapter_model.bin").exists()
+        )
+        if not has_weights:
             return None
         return self._DEFAULT_ADAPTER
 
@@ -485,7 +493,7 @@ class AgentCore:
             if tool_info and tool_info.get("ok"):
                 available_tools = tool_info.get("methods", [])
         except Exception as e:
-            self.logger.error(f"Failed to discover MCP tools: {e}")
+            log_gaia_error(self.logger, "GAIA-CORE-150", str(e), exc_info=True)
 
         context = Context(
             session_history_ref=SessionHistoryRef(type="hash", value=""), # Placeholder
@@ -741,7 +749,7 @@ class AgentCore:
 
         # 1. CIRCUIT BREAKER: Check if manual healing is required
         if os.path.exists("/shared/HEALING_REQUIRED.lock"):
-            self.logger.critical("⛔ COGNITIVE LOOP LOCKED: Manual healing required. See /shared/HEALING_REQUIRED.lock")
+            log_gaia_error(self.logger, "GAIA-CORE-001", "See /shared/HEALING_REQUIRED.lock")
             yield {
                 "type": "error",
                 "value": "My cognitive loop is currently locked for safety following a diagnostic spiral. Manual triage by the Architect (Azrael) is required to restore my integrity."
@@ -905,9 +913,12 @@ class AgentCore:
             # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
             # Trivial/factual queries go to Nano first; cascade triage will
             # escalate later if the question turns out to be complex.
-            if (wants_nano or is_trivial) and "nano" in self.config.MODEL_CONFIGS and not force_thinker:
-                selected_model_name = "nano"
-                logger.info(f"[MODEL_SELECT] Routing to Reflex Nano (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+            # The nano model may be registered as "nano" or "reflex" in MODEL_CONFIGS.
+            has_nano = any(k in self.config.MODEL_CONFIGS for k in ("nano", "reflex"))
+            nano_key = "nano" if "nano" in self.config.MODEL_CONFIGS else "reflex"
+            if (wants_nano or is_trivial) and has_nano and not force_thinker:
+                selected_model_name = nano_key
+                logger.info(f"[MODEL_SELECT] Routing to Reflex Nano '{nano_key}' (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
 
             # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
             # Only escalate if the query is non-trivial — a spurious KB match
@@ -965,8 +976,8 @@ class AgentCore:
                 try:
                     self.model_pool.ensure_model_loaded(selected_model_name)
                 except Exception as e:
-                    logger.warning(f"Lazy load failed for '{selected_model_name}': {e}")
-    
+                    log_gaia_error(logger, "GAIA-CORE-050", f"Lazy load failed for '{selected_model_name}': {e}")
+
             if selected_model_name not in self.model_pool.models:
                 logger.info(f"Model '{selected_model_name}' still not available after lazy load; attempting fallback selection")
                 logger.warning(f"[MODEL_SELECT DEBUG] pool keys before fallback: {list(self.model_pool.models.keys())}")
@@ -1010,14 +1021,14 @@ class AgentCore:
                 is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
                                     any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
                 
-                if selected_model_name in ("lite", "nano") and not force_operator and not is_forced_thinker:
+                if selected_model_name in ("lite", "nano", "reflex") and not force_operator and not is_forced_thinker:
                     # Perform Nano triage
                     triage_result = self._nano_triage(user_input)
                     if triage_result == "COMPLEX":
                         # Emit status message to user
                         yield {"type": "token", "value": "[(i) Reflex Nano: Complexity detected. Routing to Operator Core...]\n\n"}
                         selected_model_name = "lite"
-                        
+
                         # Secondary escalation: check if Lite thinks it's even MORE complex
                         if self._should_escalate_to_thinker(user_input):
                             for cand in ["gpu_prime", "prime", "cpu_prime"]:
@@ -1034,8 +1045,8 @@ class AgentCore:
                                     selected_model_name = cand
                                     break
                     else:
-                        # Nano can handle it
-                        selected_model_name = "nano"
+                        # Nano can handle it — use the actual key from MODEL_CONFIGS
+                        selected_model_name = nano_key
                         logger.info("[CASCADE] Reflex Nano confirmed SIMPLE request.")
             except Exception:
                 logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
@@ -1191,7 +1202,7 @@ class AgentCore:
                     self.logger.info("No knowledge_base_name specified in the packet; skipping RAG query.")
     
             except Exception as e:
-                self.logger.error(f"Failed to retrieve documents from vector store: {e}")
+                log_gaia_error(self.logger, "GAIA-CORE-045", str(e), exc_info=True)
     
             # If RAG query returns no results, attempt to find and embed the knowledge
             if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
@@ -1536,6 +1547,7 @@ class AgentCore:
             except Exception as exc:
                 logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
                 yield {"type": "token", "value": f"[plan-error] {type(exc).__name__}: {exc}"}
+                yield {"type": "flush"}
                 return
             logger.warning("AgentCore: planning call returned type=%s", type(plan_res))
             ts_write({"type": "planning_raw_response", "response": str(plan_res)}, session_id, source=source, destination_context=_metadata)
@@ -1691,7 +1703,7 @@ class AgentCore:
                     else:
                         user_msg = "I can't process that request due to an internal safety check failure."
     
-                    logger.error(f"[CoreIdentityGuardian] Blocking generation: {reason}")
+                    log_gaia_error(logger, "GAIA-CORE-010", f"Blocked by guardian: {reason}")
                     yield {"type": "token", "value": user_msg}
                     return
     
@@ -1748,9 +1760,9 @@ class AgentCore:
                 )
 
                 # BICAMERAL UPGRADE: If escalate to Thinker, have Operator yield a status update
-                if _is_prime and debate_turn == 1:
+                # Only show escalation notice if we actually swapped models (debate_turn > 1)
+                if _is_prime and debate_turn > 1:
                     yield {"type": "token", "value": "🤖 **[(Operator) Core]** *Deep reasoning required. Escalating to Thinker...*\n"}
-                    yield {"type": "flush"}
 
                 phase_header = f"\n\n{header_icon} **[({role_label}) {identity_label}]**\n"
 
@@ -1791,8 +1803,6 @@ class AgentCore:
                     obs_note = f"\n\n🔍 **[Observation]** {rev.level.upper()}: {rev.reason}"
                     yield {"type": "token", "value": obs_note}
 
-                yield {"type": "flush"}
-                
                 # Parse current output for council tags
                 routing_result = route_output(current_response, packet, self, session_id, destination)
                 council_msgs = routing_result.get("council_messages", [])
@@ -1845,6 +1855,9 @@ class AgentCore:
             
             # Release the final model used
             self.model_pool.release_model_for_role(selected_model_name)
+
+            # Single consolidated flush after all debate turns complete
+            yield {"type": "flush"}
 
             # --- Finalize response processing ---
             full_response = self._suppress_repetition(full_response)
@@ -2162,12 +2175,12 @@ class AgentCore:
                             # Warning only - add note to output
                             warn_msg = f"\n\n---\n⚠️ **Loop Warning**: {notification.get('toast', {}).get('body', 'Repetitive pattern detected.')}\n---"
                             yield {"type": "token", "value": warn_msg}
-                            logger.warning(f"Loop warning issued: {notification.get('status_line', '')}")
+                            log_gaia_error(logger, "GAIA-CORE-025", notification.get('status_line', ''))
                         else:
                             # Reset triggered - will inject recovery context next turn
                             reset_msg = f"\n\n---\n🔄 **Loop Detected**: {notification.get('toast', {}).get('body', 'Resetting to try a different approach.')}\n---"
                             yield {"type": "token", "value": reset_msg}
-                            logger.warning(f"Loop reset triggered: {notification.get('status_line', '')}")
+                            log_gaia_error(logger, "GAIA-CORE-026", notification.get('status_line', ''))
     
                         ts_write({
                             "type": "loop_detection",
@@ -2487,13 +2500,15 @@ class AgentCore:
         Use the Nano model (0.5B) to perform a quick triage of the request.
         Returns "SIMPLE" or "COMPLEX".
         """
-        if "nano" not in self.config.MODEL_CONFIGS:
-            return "COMPLEX" # Fallback to more capable models
-        
+        # The nano model may be registered as "nano" or "reflex" in MODEL_CONFIGS.
+        _nano_key = "nano" if "nano" in self.config.MODEL_CONFIGS else "reflex"
+        if _nano_key not in self.config.MODEL_CONFIGS:
+            return "COMPLEX"  # Fallback to more capable models
+
         try:
             # Ensure nano is loaded
-            self.model_pool.ensure_model_loaded("nano")
-            nano = self.model_pool.get("nano")
+            self.model_pool.ensure_model_loaded(_nano_key)
+            nano = self.model_pool.get(_nano_key)
             if not nano:
                 return "COMPLEX"
 
@@ -2524,7 +2539,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 return "SIMPLE"
             return "COMPLEX"
         except Exception:
-            logger.warning("Nano triage failed, falling back to COMPLEX", exc_info=True)
+            log_gaia_error(logger, "GAIA-CORE-060", "Nano triage failed, falling back to COMPLEX", exc_info=True)
             return "COMPLEX"
 
     def _should_escalate_to_thinker(self, text: str) -> bool:
@@ -2961,6 +2976,11 @@ RESULT: COMPLEX (reason: <brief reason>)
                     # Fall through to standard generation
 
         # Otherwise, use the canonical GCP prompt builder (world state + identity).
+        # Nano (0.5B) gets slim_mode=True — the few-shot prompt with explicit
+        # clock/identity examples.  The full multi-thousand-token system prompt
+        # overwhelms small models and causes them to miss dynamic context like
+        # the current time.
+        use_slim = selected_model_name in ("nano", "reflex")
         try:
             # Use provided packet if available (preserves RAG context), otherwise create new
             if packet is None:
@@ -2974,8 +2994,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                 packet.intent.user_intent = intent or "other"
             except Exception:
                 pass
-            messages = build_from_packet(packet)
-            self.logger.info("AgentCore: slim prompt routed through GCP builder")
+            messages = build_from_packet(packet, slim_mode=use_slim)
+            self.logger.info("AgentCore: slim prompt routed through GCP builder (slim_mode=%s)", use_slim)
             # Use configured MAX_ALLOWED_RESPONSE_TOKENS (default 1000) instead of hardcoded 256
             max_resp_tokens = (
                 getattr(self.config, 'MAX_ALLOWED_RESPONSE_TOKENS', None) or

@@ -131,6 +131,7 @@ class ErrorRecord:
     context: str = ""
     attempted_fix: str = ""
     timestamp: float = field(default_factory=time.time)
+    error_code: str = ""  # Optional GAIA-{SERVICE}-{NNN} structured error code
 
 
 # =============================================================================

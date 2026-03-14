@@ -99,7 +99,7 @@ services:
     restart: unless-stopped
 
     volumes:
-      - /mnt/gaia_warm_pool:/models:ro
+      - ./gaia-models:/models:ro
       - ./gaia-models/lora_adapters:/lora_adapters:ro
       - ./logs/kvcache/prime:/kvcache:rw
       - ./gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
@@ -669,6 +669,7 @@ services:
       - COMPOSE_PROJECT_NAME=gaia_project
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
       - SHARED_DIR=/shared
 
     volumes:
@@ -744,6 +745,136 @@ services:
       start_period: 60s
 
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ELK Stack: Centralized Log Aggregation
+  # ═══════════════════════════════════════════════════════════════════════════
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    hostname: elasticsearch
+    restart: unless-stopped
+
+    volumes:
+      - gaia-elastic-data:/usr/share/elasticsearch/data
+      - ./elk/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+
+    environment:
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - ELASTIC_PASSWORD=
+
+    ports:
+      - "9200:9200"
+
+    networks:
+      - gaia-net
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.17.0
+    container_name: logstash
+    hostname: logstash
+    restart: unless-stopped
+
+    volumes:
+      - ./elk/logstash/pipeline/:/usr/share/logstash/pipeline/:ro
+
+    environment:
+      - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
+      - XPACK_MONITORING_ENABLED=false
+
+    ports:
+      - "5044:5044"
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600/_node/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: kibana
+    hostname: kibana
+    restart: unless-stopped
+
+    volumes:
+      - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+
+    ports:
+      - "5601:5601"
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.17.0
+    container_name: filebeat
+    hostname: filebeat
+    restart: unless-stopped
+    user: root
+    command: ["--strict.perms=false"]
+
+    volumes:
+      - ./elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /mnt/dockerdata/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - gaia-filebeat-data:/usr/share/filebeat/data
+
+    networks:
+      - gaia-net
+
+    depends_on:
+      logstash:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Networks
 # ═══════════════════════════════════════════════════════════════════════════
@@ -770,6 +901,14 @@ volumes:
   # Isolated sandbox for MCP tool execution
   gaia-sandbox:
     name: gaia-sandbox
+
+  # Elasticsearch data persistence
+  gaia-elastic-data:
+    name: gaia-elastic-data
+
+  # Filebeat registry persistence
+  gaia-filebeat-data:
+    name: gaia-filebeat-data
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Secrets (VouchCore ADC Pattern)

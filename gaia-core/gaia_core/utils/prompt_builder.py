@@ -93,7 +93,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     persona_id = getattr(persona, "persona_id", "GAIA") if persona else "GAIA"
     role_val = getattr(getattr(persona, "role", None), "value", "assistant") if persona else "assistant"
     tone_hint = getattr(persona, "tone_hint", "concise") if persona else "concise"
-    persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}{council_scaffolding}\n\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
+    # Inject the current time at the top of the persona anchor so models
+    # always see it early — prevents "I don't know the time" responses.
+    import time as _time
+    _current_time = _time.strftime('%Y-%m-%d %H:%M:%S UTC', _time.gmtime())
+    persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}{council_scaffolding}\n\nCurrent time: {_current_time}\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}"
 
     # Compact mode trims optional identity/context to reduce repetition and token usage during planning/reflect phases.
     compact_mode = task_instruction_key in {

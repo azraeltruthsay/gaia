@@ -1,0 +1,15 @@
+{
+  "created": "2026-03-10T23:27:18.457054+00:00",
+  "seed_type": "knowledge_gap",
+  "context": {
+    "prompt": "",
+    "packet_id": "31c55654-db08-437a-aa5d-b8afa695b949",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "Knowledge gap \u2014 Recursion in Python. Could be researched and added to knowledge base.`\n\n**Response**  \nRecursion is a self\u2011calling function that solves a problem by breaking it into smaller, identical sub\u2011problems. The base case stops the recursion, the recursive step calls the function again, and the stack unwinds on return. It\u2019s elegant for hierarchical data and divide\u2011and\u2011conquer algorithms, but watch out for stack depth limits.",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "archived": true,
+  "archived_at": "2026-03-10T23:28:53.872792+00:00"
+}

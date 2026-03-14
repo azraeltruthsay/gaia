@@ -1,10 +1,13 @@
 # Code Evolution Snapshot
-Generated: 2026-03-13T18:57:20.873063+00:00
+Generated: 2026-03-14T22:16:30.440507+00:00
 
 ## Pending Candidate Changes
-- **gaia-core**: 2 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json), 72 added, 382 removed
+- **gaia-common**: 4 removed
+- **gaia-core**: 2 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json), 104 added, 634 removed
 
 ## Recent Commits
+- `af8946f` (2026-03-14): feat: SOA maintenance mode + cognitive battery tuning (96% on Prime, 2.5min)
+- `3fd6d9e` (2026-03-13): feat: GPU subprocess isolation, vLLM LoRA dynamic loading, adapter routing
 - `4f8fd61` (2026-03-11): feat: safety/hedging curriculum pairs, --from-base, no_think + target routing
 - `d6a4f10` (2026-03-11): feat: no_think mode, target routing, --from-base flag for cognitive battery
 - `d0ce29b` (2026-03-11): feat: cognitive test battery, dynamic curriculum, gaia-monkey, alignment status
@@ -13,8 +16,6 @@ Generated: 2026-03-13T18:57:20.873063+00:00
 - `a1549e1` (2026-03-10): feat: Qwen3.5 full-stack migration, llama-server arch, doctor hardening
 - `7bcfa3f` (2026-03-07): feat: Serenity State, Chaos Monkey L2, identity continuity, grit mode, atomic hashing
 - `b248e37` (2026-03-06): feat: anchored Nano reflex and epistemic validation logic
-- `4052a87` (2026-03-06): docs: define Penpal Protocol for NotebookLM interaction
-- `a34c511` (2026-03-06): fix: manual lint fixes and noqa annotations for 100% MRI cleanliness
 
 ## Backup History
 - 122 .bak files (oldest: 2026-01-07, newest: 2026-01-27)

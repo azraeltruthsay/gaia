@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-12T00:59:03Z",
-  "gap_count": 36,
+  "timestamp": "2026-03-14T15:21:05Z",
+  "gap_count": 37,
   "gaps": [
     {
       "type": "undocumented_module",
@@ -100,6 +100,11 @@
     {
       "type": "undocumented_module",
       "module": "loop_recovery",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "observer_scorer",
       "search_dir": "knowledge/system_reference/core_documents/"
     },
     {

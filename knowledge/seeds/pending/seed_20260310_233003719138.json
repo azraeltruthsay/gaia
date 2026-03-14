@@ -1,0 +1,16 @@
+{
+  "created": "2026-03-10T23:30:03.719147+00:00",
+  "seed_type": "general",
+  "context": {
+    "prompt": "",
+    "packet_id": "f93676cd-107b-4f5a-9563-1d387f189885",
+    "persona": "PersonaRole.DEFAULT"
+  },
+  "seed": "** *Recursion vs. iteration trade\u2011offs in Python.*  \n*Potential research: benchmarking recursive vs. iterative implementations on large datasets.*",
+  "reviewed": false,
+  "action_taken": false,
+  "result": null,
+  "pending": true,
+  "deferred_at": "2026-03-10T23:50:59.654207+00:00",
+  "revisit_after": "2026-03-17T23:50:59.654116+00:00"
+}

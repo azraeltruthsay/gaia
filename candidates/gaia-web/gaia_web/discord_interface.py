@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
+from gaia_web.security.middleware import SecurityScanMiddleware
 # Import all necessary dataclasses for CognitionPacket
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
@@ -27,6 +28,15 @@ from gaia_common.protocols.cognition_packet import (
 )
 
 logger = logging.getLogger("GAIA.Web.Discord")
+
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
+
+# Module-level security middleware singleton
+_security_middleware = SecurityScanMiddleware()
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
@@ -427,6 +437,13 @@ class DiscordInterface:
         )
         packet.compute_hashes() # Compute hashes for integrity
 
+        # Inbound security scan — runs before dispatch to gaia-core
+        packet, should_block = _security_middleware.scan_packet(packet)
+        if should_block:
+            log_gaia_error(logger, "GAIA-WEB-020", f"Blocked packet {packet.header.packet_id} for session {packet.header.session_id}")
+            await self._send_response(message_obj, "⚠️ Your message was blocked by GAIA's security scanner. Please rephrase and try again.", is_dm)
+            return
+
         try:
             # Persistent client handles retries and HA failover
             core_client = await get_core_client()
@@ -447,7 +464,7 @@ class DiscordInterface:
                     # Check for errors immediately
                     if response.status_code != 200:
                         await response.aread() # Must read body before accessing .text
-                        logger.error(f"Discord: Core error {response.status_code}: {response.text}")
+                        log_gaia_error(logger, "GAIA-WEB-001", f"Core error {response.status_code}: {response.text}")
                         raise httpx.HTTPStatusError(f"Core error {response.status_code}", request=response.request, response=response)
 
                     # Iterate over the NDJSON stream
@@ -486,7 +503,8 @@ class DiscordInterface:
                             logger.debug(f"Discord: failed to decode stream line: {line}")
 
             if not completed_packet:
-                raise RuntimeError("Core stream finished without yielding a final packet")
+                logger.warning("Discord: Core stream finished without a final packet — sending accumulated response")
+                # Don't crash — send whatever we accumulated (may include error text)
 
             # Finalize the accumulated response
             if full_response.strip():
@@ -500,21 +518,21 @@ class DiscordInterface:
                     pass
 
         except httpx.TimeoutException:
-            logger.error("Discord: Request to gaia-core timed out")
+            log_gaia_error(logger, "GAIA-WEB-001", "Request to gaia-core timed out")
             await self._send_response(
                 message_obj,
                 "I'm sorry, GAIA Core took too long to respond. Please try again.",
                 is_dm
             )
         except httpx.HTTPStatusError as e:
-            logger.error(f"Discord: GAIA Core returned error: {e.response.status_code} - {e.response.text}")
+            log_gaia_error(logger, "GAIA-WEB-001", f"Core HTTP error: {e.response.status_code}")
             await self._send_response(
                 message_obj,
                 "I encountered an error communicating with my core systems. Please try again in a moment.",
                 is_dm
             )
         except Exception as e:
-            logger.exception(f"Discord: An unexpected error occurred during packet processing: {e}")
+            log_gaia_error(logger, "GAIA-WEB-010", f"Unexpected error during packet processing: {e}", exc_info=True)
             await self._send_response(
                 message_obj,
                 "An unexpected error occurred. Please try again.",
@@ -861,7 +879,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
     _core_endpoint = core_endpoint
 
     if not bot_token:
-        logger.error("Cannot start Discord bot: no token provided")
+        log_gaia_error(logger, "GAIA-WEB-015", "Cannot start Discord bot: no token provided")
         return False
 
     interface = DiscordInterface(bot_token, core_endpoint, message_queue=message_queue, core_fallback_endpoint=core_fallback_endpoint)
@@ -878,7 +896,7 @@ def start_discord_bot(bot_token: str, core_endpoint: str, message_queue=None, vo
                 # Clean exit via stop_discord_bot()
                 break
             except Exception as e:
-                logger.error(f"Discord bot error: {e} — reconnecting in {backoff}s")
+                log_gaia_error(logger, "GAIA-WEB-015", f"Bot error: {e} — reconnecting in {backoff}s")
             # Reset backoff if bot ran for >60s (stable session, not a crash loop)
             if time.time() - started_at > 60:
                 backoff = 5
