@@ -27,6 +27,12 @@ except ImportError:
 
 logger = logging.getLogger("GAIA.Core.API")
 
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
+
 # Global references for the cognitive system
 _agent_core = None
 _ai_manager = None
@@ -176,7 +182,7 @@ def initialize_cognitive_system():
         return True
 
     except Exception as e:
-        logger.exception(f"Failed to initialize cognitive system: {e}")
+        log_gaia_error(logger, "GAIA-CORE-003", str(e), exc_info=True)
         return False
 
 
@@ -186,7 +192,7 @@ async def lifespan(app: FastAPI):
     # Startup
     success = initialize_cognitive_system()
     if not success:
-        logger.error("Cognitive system failed to initialize - endpoints will return errors")
+        log_gaia_error(logger, "GAIA-CORE-003", "Endpoints will return errors")
 
     # Fetch critical instances for app.state
     from gaia_core.config import get_config
@@ -424,7 +430,7 @@ async def doctor_diagnose(request: Request):
     if not service or not logs:
         return JSONResponse(status_code=400, content={"error": "Missing service or logs"})
         
-    logger.critical("🚨 DOCTOR-INITIATED DIAGNOSIS: %s is in a restart loop.", service)
+    log_gaia_error(logger, "GAIA-CORE-002", f"Doctor-initiated diagnosis: {service} is in a restart loop")
     
     # Create a specialized internal packet for self-healing
     
@@ -640,7 +646,7 @@ async def process_packet(packet_data: Dict[str, Any]):
     if _agent_core is None or _ai_manager is None:
         raise HTTPException(
             status_code=503,
-            detail="Cognitive system not initialized. Check logs for startup errors."
+            detail="[GAIA-CORE-003] Cognitive system not initialized. Check logs for startup errors."
         )
 
     async def _run_loop():
@@ -657,7 +663,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                 from gaia_common.protocols.cognition_packet import CognitionPacket
                 packet = CognitionPacket.from_dict(packet_data)
             except Exception as e:
-                logger.error(f"Failed to deserialize packet: {e}")
+                log_gaia_error(logger, "GAIA-CORE-015", f"Failed to deserialize packet: {e}")
                 yield json.dumps({"type": "error", "value": f"Invalid packet structure: {str(e)}"}) + "\n"
                 return
 
@@ -760,6 +766,10 @@ async def process_packet(packet_data: Dict[str, Any]):
                     elif event.get("type") == "packet":
                         # Store the final packet to yield at the very end
                         final_packet_dict = event.get("value")
+
+            # Ensure a flush is always emitted so front-ends send accumulated text
+            if response_pieces:
+                yield json.dumps({"type": "flush"}) + "\n"
 
             # Finalize response processing
             full_response = "".join(response_pieces)
@@ -943,7 +953,7 @@ async def cognitive_query(req: CognitiveQueryRequest):
     }
     base = target_endpoints.get(req.target, target_endpoints["core"])
     url = f"{base.rstrip('/')}/v1/chat/completions"
-    timeout = 60.0 if req.target == "prime" else 30.0
+    timeout = 60.0 if req.target == "prime" else 45.0
 
     system_content = req.system
     if req.no_think:

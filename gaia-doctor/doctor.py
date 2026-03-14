@@ -31,6 +31,21 @@ try:
 except ImportError:
     _BATTERY_AVAILABLE = False
 
+# Error registry (lazy import — stdlib-safe, lives in gaia-common)
+_error_registry = None
+
+def _get_error_registry():
+    """Lazy-import the GAIA error registry to enrich log entries with hints."""
+    global _error_registry
+    if _error_registry is not None:
+        return _error_registry
+    try:
+        from gaia_common.errors import lookup, all_errors
+        _error_registry = {"lookup": lookup, "all_errors": all_errors}
+    except ImportError:
+        _error_registry = {"lookup": lambda _: None, "all_errors": lambda: {}}
+    return _error_registry
+
 # ---------------------------------------------------------------------------
 # Configuration (from environment)
 # ---------------------------------------------------------------------------
@@ -41,6 +56,70 @@ RESTART_COOLDOWN = int(os.environ.get("RESTART_COOLDOWN", "300"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "6419"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 MAINTENANCE_FLAG = Path(os.environ.get("SHARED_DIR", "/shared")) / "ha_maintenance"
+
+# Structured maintenance mode (new — backward compat with MAINTENANCE_FLAG)
+try:
+    from gaia_common.utils.maintenance import (
+        is_maintenance_active,
+        get_maintenance_info,
+        enter_maintenance,
+        exit_maintenance,
+    )
+except ImportError:
+    # Inline stdlib-only implementation (doctor can't import gaia-common)
+    _MAINT_FLAG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "maintenance_mode.json"
+
+    def is_maintenance_active():
+        try:
+            if _MAINT_FLAG_FILE.exists():
+                data = json.loads(_MAINT_FLAG_FILE.read_text())
+                return data.get("active", False)
+        except (json.JSONDecodeError, OSError):
+            pass
+        return MAINTENANCE_FLAG.exists()
+
+    def get_maintenance_info():
+        if not is_maintenance_active():
+            return None
+        try:
+            if _MAINT_FLAG_FILE.exists():
+                return json.loads(_MAINT_FLAG_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+        if MAINTENANCE_FLAG.exists():
+            return {"active": True, "entered_at": "unknown", "entered_by": "legacy", "reason": "ha_maintenance flag"}
+        return None
+
+    def enter_maintenance(reason="manual", entered_by="unknown"):
+        _MAINT_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "active": True,
+            "entered_at": datetime.now(timezone.utc).isoformat(),
+            "entered_by": entered_by,
+            "reason": reason,
+        }
+        _MAINT_FLAG_FILE.write_text(json.dumps(data, indent=2))
+        MAINTENANCE_FLAG.touch()
+        return data
+
+    def exit_maintenance():
+        info = get_maintenance_info()
+        duration = None
+        if info and info.get("entered_at", "unknown") != "unknown":
+            try:
+                entered = datetime.fromisoformat(info["entered_at"])
+                duration = (datetime.now(timezone.utc) - entered).total_seconds()
+            except (ValueError, TypeError):
+                pass
+        try:
+            _MAINT_FLAG_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            MAINTENANCE_FLAG.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return {"active": False, "exited_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": duration, "previous": info}
 STATUS_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "status.json"
 ALARMS_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "alarms.json"
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "/compose")
@@ -70,6 +149,7 @@ HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-stu
 HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "file_hashes.json"
 
 MONKEY_ENDPOINT = os.environ.get("MONKEY_ENDPOINT", "http://gaia-monkey:6420")
+ES_ENDPOINT = os.environ.get("ES_ENDPOINT", "http://elasticsearch:9200")
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -571,7 +651,7 @@ def restart_candidate(name: str) -> bool:
         log.info("Cooldown active for %s (%ds remaining), skipping restart", name, remaining)
         return False
 
-    if MAINTENANCE_FLAG.exists():
+    if is_maintenance_active():
         log.info("Maintenance mode active, skipping restart of %s", name)
         return False
 
@@ -612,10 +692,10 @@ def restart_candidate(name: str) -> bool:
             _verify_recovery(name, url)
             return True
         else:
-            log.error("Failed to restart %s: %s", name, result.stderr.strip()[:200])
+            log.error("[GAIA-DOCTOR-001] Failed to restart %s: %s", name, result.stderr.strip()[:200])
             return False
     except subprocess.TimeoutExpired:
-        log.error("Restart of %s timed out (>120s)", name)
+        log.error("[GAIA-DOCTOR-010] Restart of %s timed out (>120s)", name)
         _last_restart[name] = time.monotonic()
         return False
 
@@ -761,7 +841,7 @@ def _verify_recovery(name: str, url: str, delay: int = 5):
 
 def docker_restart(name: str) -> bool:
     """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker."""
-    if MAINTENANCE_FLAG.exists():
+    if is_maintenance_active():
         log.info("Maintenance mode active, skipping restart of %s", name)
         return False
 
@@ -1038,11 +1118,13 @@ def poll_cycle():
     _model_server_cache = _fetch_model_server_status()
     _pipeline_status_cache = _fetch_pipeline_status()
 
-    # First scan logs for irritations
-    scan_logs()
+    # First scan logs for irritations (skip scoring in maintenance mode)
+    if not is_maintenance_active():
+        scan_logs()
 
-    # Audit code for disk/memory mismatches
-    audit_code()
+    # Audit code for disk/memory mismatches (skip in maintenance mode)
+    if not is_maintenance_active():
+        audit_code()
 
     # Check for container naming anomalies (mangled names from failed recreates)
     for name, (_url, remediation) in SERVICES.items():
@@ -1113,8 +1195,9 @@ def poll_cycle():
                  _dissonance_report["parity_percent"])
 
     # Sovereign promotion: if candidate is healthy and files have diverged, trigger review
+    # Skip entirely in maintenance mode — promotion during dev sessions causes contention
     all_divergent = _dissonance_report.get("vital_divergent", []) + _dissonance_report.get("standard_divergent", [])
-    if all_divergent:
+    if all_divergent and not is_maintenance_active():
         try:
             candidate_healthy = all(
                 check_health(name, url)
@@ -1195,7 +1278,7 @@ def _build_status() -> dict:
         "service": "gaia-doctor",
         "uptime_seconds": uptime,
         "poll_interval": POLL_INTERVAL,
-        "maintenance_mode": MAINTENANCE_FLAG.exists(),
+        "maintenance_mode": is_maintenance_active(),
         "active_alarms": list(_alarmed_services),
         "irritation_count": len(_irritations),
         "dissonance": _dissonance_report,
@@ -1231,6 +1314,102 @@ def _build_status() -> dict:
 # HTTP server
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Elasticsearch log query (stdlib only)
+# ---------------------------------------------------------------------------
+
+def _es_query(query_body: dict, index: str = "gaia-logs-*", size: int = 50) -> dict:
+    """Query Elasticsearch using stdlib urllib. Returns parsed JSON or error dict."""
+    url = f"{ES_ENDPOINT}/{index}/_search"
+    payload = json.dumps(query_body).encode()
+    req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        resp = urlopen(req, timeout=10)
+        return json.loads(resp.read().decode())
+    except URLError as e:
+        return {"error": f"[GAIA-DOCTOR-020] ES unreachable: {e}"}
+    except Exception as e:
+        return {"error": f"[GAIA-DOCTOR-020] ES query failed: {e}"}
+
+
+def _es_recent_errors(minutes: int = 60, service: str | None = None, size: int = 50) -> list[dict]:
+    """Fetch recent ERROR-level logs from Elasticsearch."""
+    must_clauses = [
+        {"range": {"@timestamp": {"gte": f"now-{minutes}m"}}},
+    ]
+    # Match ERROR in parsed JSON field or raw message
+    should_clauses = [
+        {"match": {"log_level": "ERROR"}},
+        {"match": {"gaia.level": "ERROR"}},
+        {"match_phrase": {"message": "ERROR"}},
+    ]
+    must_clauses.append({"bool": {"should": should_clauses, "minimum_should_match": 1}})
+
+    if service:
+        must_clauses.append({
+            "bool": {
+                "should": [
+                    {"match": {"gaia_service": service}},
+                    {"match": {"service_name": service}},
+                    {"wildcard": {"container.name": f"*{service}*"}},
+                ],
+                "minimum_should_match": 1,
+            }
+        })
+
+    query = {
+        "size": size,
+        "sort": [{"@timestamp": {"order": "desc"}}],
+        "query": {"bool": {"must": must_clauses}},
+        "_source": ["@timestamp", "message", "log_level", "gaia", "gaia_service", "service_name", "container"],
+    }
+    result = _es_query(query, size=size)
+    if "error" in result:
+        return [result]
+    hits = result.get("hits", {}).get("hits", [])
+    return [h.get("_source", {}) for h in hits]
+
+
+def _es_service_error_counts(minutes: int = 60) -> dict:
+    """Get error counts per service from the last N minutes."""
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"range": {"@timestamp": {"gte": f"now-{minutes}m"}}},
+                    {"bool": {
+                        "should": [
+                            {"match": {"log_level": "ERROR"}},
+                            {"match": {"gaia.level": "ERROR"}},
+                        ],
+                        "minimum_should_match": 1,
+                    }},
+                ],
+            }
+        },
+        "aggs": {
+            "by_service": {
+                "terms": {"field": "service_name.keyword", "size": 20}
+            }
+        },
+    }
+    result = _es_query(query)
+    if "error" in result:
+        return result
+    buckets = result.get("aggregations", {}).get("by_service", {}).get("buckets", [])
+    return {b["key"]: b["doc_count"] for b in buckets}
+
+
+def _es_health() -> dict:
+    """Check if Elasticsearch is reachable."""
+    try:
+        resp = urlopen(f"{ES_ENDPOINT}/_cluster/health", timeout=5)
+        return json.loads(resp.read().decode())
+    except Exception as e:
+        return {"status": "unreachable", "error": str(e)}
+
+
 class DoctorHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
@@ -1263,12 +1442,38 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._cognitive_results()
         elif self.path == "/cognitive/tests":
             self._cognitive_tests()
+        elif self.path == "/maintenance/status":
+            info = get_maintenance_info()
+            self._json_response(200, info or {"active": False})
+        elif self.path == "/logs/health":
+            self._json_response(200, _es_health())
+        elif self.path.startswith("/logs"):
+            self._handle_logs()
+        elif self.path == "/errors":
+            self._handle_errors()
         else:
             self._json_response(404, {"error": "not found"})
 
     def do_POST(self):
         if self.path == "/cognitive/run":
             self._cognitive_run()
+        elif self.path == "/maintenance/enter":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                params = json.loads(body)
+            except json.JSONDecodeError:
+                params = {}
+            reason = params.get("reason", "manual")
+            entered_by = params.get("entered_by", "api")
+            result = enter_maintenance(reason=reason, entered_by=entered_by)
+            log.warning("🔧 MAINTENANCE MODE ENTERED: %s (by %s)", reason, entered_by)
+            self._json_response(200, result)
+        elif self.path == "/maintenance/exit":
+            result = exit_maintenance()
+            log.warning("🔧 MAINTENANCE MODE EXITED (duration: %s sec)",
+                        result.get("duration_seconds", "unknown"))
+            self._json_response(200, result)
         else:
             # Chaos, meditation, and serenity management moved to gaia-monkey:6420
             self._json_response(404, {"error": "not found — chaos endpoints moved to gaia-monkey:6420"})
@@ -1331,7 +1536,7 @@ class DoctorHandler(BaseHTTPRequestHandler):
         timeout = params.get("timeout", 30)
         wake_prime = params.get("wake_prime", False)
         full_pipeline = params.get("full_pipeline", False)
-        target = params.get("target", "core")
+        target = params.get("target", "prime")
         no_think = params.get("no_think", False)
 
         def _run():
@@ -1371,13 +1576,65 @@ class DoctorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     log.debug("Rubric regeneration after battery failed", exc_info=True)
             except Exception:
-                log.error("Cognitive battery failed", exc_info=True)
+                log.error("[GAIA-DOCTOR-025] Cognitive battery failed", exc_info=True)
             finally:
                 _cognitive_running = False
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
         self._json_response(202, {"status": "started", "section": section, "ids": ids, "full_pipeline": full_pipeline, "target": target})
+
+    def _handle_logs(self):
+        """Query Elasticsearch for recent logs.
+
+        GET /logs?minutes=60&service=gaia-core&size=50  → recent errors
+        GET /logs/counts?minutes=60                     → error counts by service
+        """
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        minutes = int(params.get("minutes", ["60"])[0])
+        service = params.get("service", [None])[0]
+        size = int(params.get("size", ["50"])[0])
+
+        if parsed.path == "/logs/counts":
+            result = _es_service_error_counts(minutes=minutes)
+            self._json_response(200, result)
+        else:
+            errors = _es_recent_errors(minutes=minutes, service=service, size=size)
+            # Enrich log entries with hints from the error registry
+            import re as _re
+            _gaia_code_re = _re.compile(r'GAIA-[A-Z]+-\d{3}')
+            registry = _get_error_registry()
+            for entry in errors:
+                msg = entry.get("message", "")
+                # Check for error_code already in structured JSON fields
+                code = entry.get("error_code") or entry.get("gaia", {}).get("error_code", "")
+                if not code:
+                    # Try to extract from message text
+                    m = _gaia_code_re.search(msg)
+                    if m:
+                        code = m.group(0)
+                if code:
+                    defn = registry["lookup"](code)
+                    if defn:
+                        entry["error_code"] = code
+                        entry["error_hint"] = defn.hint
+                        entry["error_category"] = defn.category.value
+            self._json_response(200, {"count": len(errors), "errors": errors})
+
+    def _handle_errors(self):
+        """List all registered GAIA error codes with hints."""
+        registry = _get_error_registry()
+        errors = {}
+        for code, defn in registry["all_errors"]().items():
+            errors[code] = {
+                "message": defn.message,
+                "hint": defn.hint,
+                "level": logging.getLevelName(defn.level),
+                "category": defn.category.value,
+            }
+        self._json_response(200, {"count": len(errors), "errors": errors})
 
     def _json_response(self, code, data):
         body = json.dumps(data).encode()
