@@ -101,6 +101,9 @@ app/shared/
 # --- Samvega emotional state logs (runtime data) ---
 knowledge/samvega/
 
+# --- Generated curricula (regenerate via build_curriculum.py) ---
+knowledge/curricula/
+
 # --- Python ---
 __pycache__/
 *.pyc
