@@ -161,6 +161,15 @@ class ThoughtSeedHeartbeat:
 
     def _tick(self) -> None:
         """One heartbeat cycle: promote overdue, triage unreviewed seeds."""
+        # Skip heartbeat during maintenance mode to avoid resource contention
+        try:
+            from gaia_common.utils.maintenance import is_maintenance_active
+            if is_maintenance_active():
+                logger.debug("Maintenance mode active — skipping heartbeat tick")
+                return
+        except ImportError:
+            pass
+
         from gaia_core.cognition.thought_seed import (
             list_pending_seeds_due,
             list_unreviewed_seeds,

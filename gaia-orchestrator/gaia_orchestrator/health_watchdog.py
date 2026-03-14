@@ -55,8 +55,13 @@ POLL_INTERVAL = 30
 # Consecutive failures before declaring a service unhealthy
 FAILURE_THRESHOLD = 2
 
-# Maintenance flag — when set, candidate monitoring is informational only
-_MAINTENANCE_FLAG = Path(os.environ.get("SHARED_DIR", "/shared")) / "ha_maintenance"
+# Maintenance mode — structured flag with legacy fallback
+try:
+    from gaia_common.utils.maintenance import is_maintenance_active as _is_maint_active
+except ImportError:
+    _LEGACY_MAINTENANCE_FLAG = Path(os.environ.get("SHARED_DIR", "/shared")) / "ha_maintenance"
+    def _is_maint_active():
+        return _LEGACY_MAINTENANCE_FLAG.exists()
 
 # Session sync script path (inside container, project root is /gaia/GAIA_Project)
 _SYNC_SCRIPT = Path("/gaia/GAIA_Project/scripts/ha_sync.sh")
@@ -290,8 +295,8 @@ class HealthWatchdog:
 
     @staticmethod
     def _is_maintenance_mode() -> bool:
-        """Check if HA maintenance mode is active."""
-        return _MAINTENANCE_FLAG.exists()
+        """Check if maintenance mode is active."""
+        return _is_maint_active()
 
     def get_status(self) -> Dict:
         """Return current known health + HA status."""

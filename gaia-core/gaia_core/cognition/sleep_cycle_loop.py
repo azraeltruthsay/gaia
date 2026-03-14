@@ -160,6 +160,14 @@ class SleepCycleLoop:
     # ------------------------------------------------------------------
 
     def _handle_active(self, idle_minutes: float) -> None:
+        # Skip auto-sleep transition during maintenance mode — stay ACTIVE
+        try:
+            from gaia_common.utils.maintenance import is_maintenance_active
+            if is_maintenance_active():
+                return
+        except ImportError:
+            pass
+
         if self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes):
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
             self._update_presence("drifting off...")

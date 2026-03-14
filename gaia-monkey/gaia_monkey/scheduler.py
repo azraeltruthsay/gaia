@@ -8,6 +8,14 @@ import time
 from pathlib import Path
 from typing import Callable
 
+# Maintenance mode check — skip auto-firing during dev sessions
+try:
+    from gaia_common.utils.maintenance import is_maintenance_active
+except ImportError:
+    _LEGACY_FLAG = Path(os.environ.get("SHARED_DIR", "/shared")) / "ha_maintenance"
+    def is_maintenance_active():
+        return _LEGACY_FLAG.exists()
+
 log = logging.getLogger("gaia-monkey.scheduler")
 
 CONFIG_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "monkey" / "config.json"
@@ -76,6 +84,10 @@ async def run_background():
 
         if not enabled or mode == "triggered" or _inject_chaos_fn is None:
             _next_run = None
+            continue
+
+        # Skip auto-firing during maintenance mode
+        if is_maintenance_active():
             continue
 
         now = time.time()

@@ -139,6 +139,50 @@ async def system_status():
     return result
 
 
+# ── Maintenance Mode Proxy (doctor) ───────────────────────────────────────
+
+@router.get("/maintenance/status")
+async def maintenance_status():
+    """Get maintenance mode status from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/maintenance/status")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch maintenance status: %s", e)
+    return {"active": False}
+
+
+@router.post("/maintenance/enter")
+async def maintenance_enter(request: Request):
+    """Enter maintenance mode via gaia-doctor."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/maintenance/enter",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to enter maintenance mode: %s", e)
+        return {"error": str(e)}
+
+
+@router.post("/maintenance/exit")
+async def maintenance_exit():
+    """Exit maintenance mode via gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(f"{DOCTOR_URL}/maintenance/exit")
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to exit maintenance mode: %s", e)
+        return {"error": str(e)}
+
+
 # ── Cognitive Battery Proxy (doctor) ──────────────────────────────────────
 
 @router.get("/cognitive/status")
