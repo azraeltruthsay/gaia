@@ -1,18 +1,34 @@
 """
 NotebookLM MCP Tools — structured access to Google NotebookLM notebooks.
 
-Provides 8 tools:
+Provides 9 tools:
   - notebooklm_list_notebooks   (read)
   - notebooklm_get_notebook     (read)
   - notebooklm_list_sources     (read)
   - notebooklm_list_notes       (read)
   - notebooklm_list_artifacts   (read)
   - notebooklm_chat             (read)
-  - notebooklm_download_audio   (read)
-  - notebooklm_create_note      (write, sensitive)
+  - notebooklm_download_audio   (read + transcription relay)
+  - notebooklm_generate_audio   (write)
+  - notebooklm_create_note      (write, sensitive — requires MCP approval)
 
 All calls go through the async NotebookLMClient (httpx-based).
 Auth via Playwright storage state at NOTEBOOKLM_HOME/storage_state.json.
+
+PenPal Protocol workflow (Episodes):
+  1. Upload context docs as sources / create notes with penpal responses
+  2. notebooklm_generate_audio(notebook_id, instructions=...) → async task
+  3. Poll notebooklm_list_artifacts until is_completed=True (status=3)
+  4. notebooklm_download_audio(notebook_id, artifact_id, save_path=...)
+     → auto-transcribes via gaia-audio relay if available
+  5. For large audio (>10MB), transcribe chunks externally:
+     ffmpeg -i file.mp4 -ar 16000 -ac 1 -f wav file.wav
+     Split into 2-min chunks, POST each to gaia-audio /transcribe
+
+Approval bypass for operator-initiated writes:
+  - Set GAIA_MCP_BYPASS=1 env var on gaia-mcp container, OR
+  - Call notebooklm_create_note directly inside the container via:
+    docker exec gaia-mcp python3 -c "from gaia_mcp.notebooklm_tools import ..."
 """
 
 import base64
@@ -334,7 +350,12 @@ async def notebooklm_download_audio(params: dict) -> dict:
             "download_path": str(download_path),
         }
 
-        # Try to transcribe via gaia-audio
+        # Transcribe via gaia-audio STT relay.
+        # Contract: POST /transcribe expects TranscribeRequest schema:
+        #   {"audio_base64": str, "sample_rate": int (default 16000), "language": str|None}
+        # Returns: {"text": str, ...} on 200, 400 if audio_base64 missing, 423 if muted.
+        # NOTE: For large files (>~10MB), the base64 payload may exceed server limits.
+        #       In that case, split audio into chunks externally and transcribe each.
         if httpx is not None:
             try:
                 audio_bytes = Path(download_path).read_bytes()
@@ -343,7 +364,7 @@ async def notebooklm_download_audio(params: dict) -> dict:
                 async with httpx.AsyncClient(timeout=120) as http:
                     resp = await http.post(
                         f"{_GAIA_AUDIO_URL}/transcribe",
-                        json={"audio": audio_b64, "format": "mp4"},
+                        json={"audio_base64": audio_b64, "sample_rate": 16000},
                     )
                     if resp.status_code == 200:
                         data = resp.json()

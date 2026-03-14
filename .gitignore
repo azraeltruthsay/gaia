@@ -38,6 +38,12 @@ latest_test.txt
 tmp/
 tmp_*.py
 
+# --- Video / large media files ---
+*.mp4
+*.mkv
+*.avi
+*.mov
+
 # --- Binaries / large standalone files ---
 llama_cpp
 inspect
@@ -88,6 +94,12 @@ app/shared/
 .idea/
 *.swp
 *.swo
+
+# --- Test artifacts (MagicMock from pytest) ---
+**/MagicMock/
+
+# --- Samvega emotional state logs (runtime data) ---
+knowledge/samvega/
 
 # --- Python ---
 __pycache__/

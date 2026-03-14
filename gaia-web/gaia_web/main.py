@@ -42,6 +42,16 @@ except ImportError:
 
 logger = logging.getLogger("GAIA.Web.API")
 
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
+
+# Module-level security middleware singleton
+from gaia_web.security.middleware import SecurityScanMiddleware
+_security_middleware = SecurityScanMiddleware()
+
 # Global singleton for the Discord interface (if enabled)
 discord_bot = None
 
@@ -60,7 +70,7 @@ async def lifespan(app: FastAPI):
         core_fallback = os.getenv("CORE_FALLBACK_ENDPOINT", "")
         
         if not bot_token:
-            logger.error("Discord bot enabled but DISCORD_BOT_TOKEN not set")
+            log_gaia_error(logger, "GAIA-WEB-015", "Discord bot enabled but DISCORD_BOT_TOKEN not set")
         else:
             from gaia_web.queue.message_queue import MessageQueue
             mq = MessageQueue(core_url=core_url)
@@ -113,9 +123,17 @@ async def process_user_input(user_input: str, request: Request):
     """
     session_id = request.headers.get("X-Session-ID", f"web_{uuid.uuid4().hex[:8]}")
     core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
-    
+    packet_id = f"web_{uuid.uuid4().hex[:8]}"
+
     logger.info("Processing user input for session %s", session_id)
-    
+
+    # Inbound security scan before forwarding to gaia-core
+    redacted_input, scan, should_block = _security_middleware.scan_text(user_input, packet_id, session_id)
+    if should_block:
+        async def _blocked():
+            yield json.dumps({"type": "error", "value": "Request blocked by security scan.", "error_code": "GAIA-WEB-020", "hint": "The security scanner blocked this request. Rephrase and try again."}) + "\n"
+        return StreamingResponse(_blocked(), media_type="application/x-ndjson")
+
     async def _stream_response():
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -124,15 +142,22 @@ async def process_user_input(user_input: str, request: Request):
                     "version": "v0.3",
                     "header": {
                         "session_id": session_id,
-                        "packet_id": f"web_{uuid.uuid4().hex[:8]}",
+                        "packet_id": packet_id,
                         "persona": {"persona_id": "gaia", "role": "assistant"}
                     },
-                    "content": {"original_prompt": user_input}
+                    "content": {"original_prompt": redacted_input},
+                    "governance": {
+                        "security_scan": {
+                            "ran": scan.ran,
+                            "passed": scan.passed,
+                            "injection_score": scan.injection_score,
+                        }
+                    },
                 }
                 
                 async with client.stream("POST", f"{core_url}/process_packet", json=payload) as resp:
                     if resp.status_code != 200:
-                        yield json.dumps({"type": "error", "value": f"Core returned {resp.status_code}"}) + "\n"
+                        yield json.dumps({"type": "error", "value": f"Core returned {resp.status_code}", "error_code": "GAIA-WEB-001", "hint": "gaia-core is not responding correctly. Check that gaia-core is running."}) + "\n"
                         return
                         
                     async for line in resp.aiter_lines():
@@ -140,9 +165,8 @@ async def process_user_input(user_input: str, request: Request):
                             yield line + "\n"
                             
         except Exception as e:
-            logger.exception("Error in web streaming loop")
-            # This is the line that was failing due to missing json
-            yield json.dumps({"type": "error", "value": str(e)}) + "\n"
+            log_gaia_error(logger, "GAIA-WEB-030", str(e), exc_info=True)
+            yield json.dumps({"type": "error", "value": str(e), "error_code": "GAIA-WEB-030"}) + "\n"
 
     return StreamingResponse(_stream_response(), media_type="application/x-ndjson")
 

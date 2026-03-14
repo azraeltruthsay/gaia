@@ -42,6 +42,8 @@ class MemoryStatus:
 class MemoryGuardError(RuntimeError):
     """Raised when insufficient memory is available for an operation."""
 
+    error_code = "GAIA-COMMON-001"
+
     def __init__(self, message: str, needed_mb: int, available_mb: int, reserve_mb: int):
         super().__init__(message)
         self.needed_mb = needed_mb

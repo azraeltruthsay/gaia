@@ -406,6 +406,24 @@ class Audit:
 class Privacy:
     pii_detected: Optional[bool] = None
     pii_notes: Optional[str] = None
+    pii_redactions: List[dict] = field(default_factory=list)
+
+@dataclass_json
+@dataclass
+class SecurityScanResult:
+    scanner: str = ""
+    rule_id: str = ""
+    severity: str = "INFO"          # "INFO" | "WARN" | "BLOCK"
+    redacted_excerpt: str = ""
+    timestamp: str = ""
+
+@dataclass_json
+@dataclass
+class SecurityScan:
+    ran: bool = False
+    passed: bool = True
+    scan_results: List[SecurityScanResult] = field(default_factory=list)
+    injection_score: float = 0.0
 
 @dataclass_json
 @dataclass
@@ -414,6 +432,7 @@ class Governance:
     signatures: Signatures = field(default_factory=Signatures)
     audit: Audit = field(default_factory=Audit)
     privacy: Privacy = field(default_factory=Privacy)
+    security_scan: SecurityScan = field(default_factory=SecurityScan)
 
 # --- Loop Detection State ---
 @dataclass_json

@@ -8,6 +8,11 @@ except Exception:
 
 from gaia_core.config import get_config, Config
 import logging
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
 from gaia_core.behavior.persona_manager import PersonaManager # New import
 from gaia_core.behavior.persona_adapter import PersonaAdapter # New import
 from gaia_core.utils.resource_monitor import ResourceMonitor # New import
@@ -682,7 +687,7 @@ class ModelPool:
                         last_exc = e
                         logger.warning("Model load attempt failed for %s with n_gpu_layers=%s: %s", model_name, n_try, e)
                         if n_try == attempt_layers[-1]:
-                            logger.error(f"❌ Failed to load {model_name} model: {e}")
+                            log_gaia_error(logger, "GAIA-CORE-050", f"Failed to load {model_name}: {e}")
                 if last_exc and model_name not in self.models:
                     return False
                 try:
@@ -759,7 +764,7 @@ class ModelPool:
                     logger.warning("Unknown model type '%s' for %s; skipping", model_type, model_name)
                 return False
         except Exception as e:
-            logger.error(f"❌ Failed to load {model_name} model: {e}")
+            log_gaia_error(logger, "GAIA-CORE-050", f"Failed to load {model_name}: {e}")
             return False
 
         self.model_status[model_name] = 'idle'
@@ -960,8 +965,7 @@ class ModelPool:
             if self.ensure_model_loaded(name):
                 model = self.models.get(name)
         if model is None:
-            logger.error(f"❌ Requested model '{name}' not found in pool! Pool keys: {list(self.models.keys())}")
-            logger.error(f"DEBUG: Model for '{name}' is None. Type of model: {type(model)}, Value of model: {model}")
+            log_gaia_error(logger, "GAIA-CORE-065", f"Model '{name}' not found in pool. Keys: {list(self.models.keys())}")
         return model
 
     def get_model_for_role(self, role: str, lazy_load: bool = True):
@@ -1132,7 +1136,7 @@ class ModelPool:
             if self.ensure_model_loaded(name or role):
                 name = name or role
             else:
-                logger.error(f"ModelPool: Failed to lazy-load remote model for role '{role}'")
+                log_gaia_error(logger, "GAIA-CORE-055", f"Failed to lazy-load remote model for role '{role}'")
                 return None
 
         # 2. If no model resolved and it's a local role, try lazy loading
@@ -1155,11 +1159,11 @@ class ModelPool:
                             logger.warning(f"🔄 Loaded {fallback} as fallback for {role}")
                             self.set_status(fallback, "busy")
                             return self.models[fallback]
-                logger.error(f"No fallback available for {role}")
+                log_gaia_error(logger, "GAIA-CORE-065", f"No fallback available for {role}")
                 return None
 
         if not name:
-            logger.error("ModelPool.acquire_model_for_role: no model resolved for role '%s'", role)
+            log_gaia_error(logger, "GAIA-CORE-065", f"No model resolved for role '{role}'")
             return None
 
         model = self.models.get(name)
@@ -1170,7 +1174,7 @@ class ModelPool:
                 model = self.models.get(name)
 
         if not model:
-            logger.error("ModelPool.acquire_model_for_role: resolved model '%s' missing from pool", name)
+            log_gaia_error(logger, "GAIA-CORE-065", f"Resolved model '{name}' missing from pool")
             return None
         self.set_status(name, "busy")
         return model
@@ -1285,7 +1289,7 @@ class ModelPool:
                     self.release_model(fallback_name)
 
             # All fallbacks exhausted — re-raise original
-            logger.error("All inference fallbacks exhausted for role '%s'", role)
+            log_gaia_error(logger, "GAIA-CORE-065", f"All inference fallbacks exhausted for role '{role}'")
             raise
         finally:
             if release:

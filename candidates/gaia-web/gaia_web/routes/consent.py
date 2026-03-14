@@ -20,6 +20,10 @@ from pydantic import BaseModel
 
 logger = logging.getLogger("GAIA.Web.Consent")
 
+# Module-level security middleware singleton
+from gaia_web.security.middleware import SecurityScanMiddleware
+_security_middleware = SecurityScanMiddleware()
+
 router = APIRouter(prefix="/api/consent", tags=["consent"])
 
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core-candidate:6415")
@@ -232,6 +236,12 @@ async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
         tool_routing=ToolRoutingState(),
     )
     packet.compute_hashes()
+
+    # Inbound security scan — runs before dispatch to gaia-core
+    packet, should_block = _security_middleware.scan_packet(packet)
+    if should_block:
+        logger.warning("Consent: Security scan BLOCKED packet %s", packet_id)
+        return {"error": "Request blocked by security scan."}
 
     try:
         from gaia_web.utils.retry import post_with_retry

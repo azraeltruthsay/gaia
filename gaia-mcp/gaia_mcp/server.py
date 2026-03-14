@@ -23,6 +23,15 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GAIA.MCPServer")
 
+try:
+    from gaia_common.utils.error_logging import log_gaia_error
+    from gaia_common.errors import lookup as _lookup_error
+except ImportError:
+    def log_gaia_error(lgr, code, detail="", **kw):
+        lgr.error("[%s] %s", code, detail)
+    def _lookup_error(code):
+        return None
+
 config = Config()
 gaia_helper = GAIARescueHelper(config)
 approval_store = ApprovalStore()
@@ -105,16 +114,32 @@ async def jsonrpc_endpoint(request: Request):
             "id": request_id
         })
     except PermissionError as e:
+        gaia_code = "GAIA-MCP-010" if "blast shield" in str(e).lower() else "GAIA-MCP-015"
+        defn = _lookup_error(gaia_code)
+        log_gaia_error(logger, gaia_code, str(e))
         return JSONResponse(content={
             "jsonrpc": "2.0",
-            "error": {"code": -32002, "message": str(e)},
+            "error": {
+                "code": -32002,
+                "message": str(e),
+                "data": {"gaia_code": gaia_code, "hint": defn.hint if defn else ""},
+            },
             "id": request_id
         }, status_code=403)
     except Exception as e:
-        logger.error(f"Error executing tool '{method}': {e}", exc_info=True)
+        log_gaia_error(logger, "GAIA-MCP-020", f"Tool '{method}': {e}", exc_info=True)
+        defn = _lookup_error("GAIA-MCP-020")
         return JSONResponse(content={
             "jsonrpc": "2.0",
-            "error": {"code": -32603, "message": f"Internal error: {e}", "data": traceback.format_exc()},
+            "error": {
+                "code": -32603,
+                "message": f"Internal error: {e}",
+                "data": {
+                    "gaia_code": "GAIA-MCP-020",
+                    "hint": defn.hint if defn else "",
+                    "traceback": traceback.format_exc(),
+                },
+            },
             "id": request_id
         }, status_code=500)
 
