@@ -630,6 +630,38 @@ async def kv_cache_restore(role: str):
     return {"status": "ok" if ok else "failed", "role": role, "filename": filename}
 
 
+@app.get("/api/kv-cache/pressure")
+async def kv_cache_pressure():
+    """Return KV cache pressure for all roles and recent compaction log."""
+    from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager
+    mgr = get_kv_cache_manager()
+    if mgr is None:
+        return JSONResponse(status_code=503, content={"error": "KV cache manager not initialized"})
+    return {
+        "pressures": mgr.get_all_pressures(),
+        "compaction_log": mgr.get_compaction_log(),
+    }
+
+
+@app.post("/api/kv-cache/compact/{role}")
+async def kv_cache_compact(role: str):
+    """Manually trigger KV cache compaction for a specific role."""
+    from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager, _CHECKPOINT_FILENAMES
+    mgr = get_kv_cache_manager()
+    if mgr is None:
+        return JSONResponse(status_code=503, content={"error": "KV cache manager not initialized"})
+    if role not in _CHECKPOINT_FILENAMES:
+        return JSONResponse(status_code=400, content={
+            "error": f"Unknown role: {role}. Valid: {list(_CHECKPOINT_FILENAMES.keys())}"
+        })
+    ok = mgr.compact(role, reason="manual API call")
+    return {
+        "status": "compacted" if ok else "failed",
+        "role": role,
+        "pressure_after": mgr.get_cache_pressure(role),
+    }
+
+
 @app.post("/process_packet")
 async def process_packet(packet_data: Dict[str, Any]):
     """
@@ -729,8 +761,6 @@ async def process_packet(packet_data: Dict[str, Any]):
             # Run the cognitive loop
             response_pieces = []
             final_packet_dict = None
-
-            from gaia_core.utils.output_router import _strip_think_tags_robust
 
             import re as _re
             _think_tag_re = _re.compile(r'</?(?:think|thinking)[^>]*>')
