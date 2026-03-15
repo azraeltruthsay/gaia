@@ -900,7 +900,12 @@ class AgentCore:
             wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
             
             # Simple patterns NANO can handle reliably
-            factual_patterns = ["who is", "what is", "where is", "when did", "how many", "name of", "tell me what time", "what time"]
+            factual_patterns = [
+                "who is", "what is", "where is", "when did", "how many",
+                "name of", "tell me what time", "what time", "what date",
+                "current date", "current time", "date and time", "time and date",
+                "what day", "today's date", "right now",
+            ]
             is_factual = any(p in text_lower for p in factual_patterns)
             is_trivial = len(user_input) < 100 and (
                 any(w in text_lower for w in [
@@ -1024,8 +1029,13 @@ class AgentCore:
                                     any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
                 
                 if selected_model_name in ("lite", "nano", "reflex") and not force_operator and not is_forced_thinker:
-                    # Perform Nano triage
-                    triage_result = self._nano_triage(user_input)
+                    # Skip LLM triage for queries already classified as factual/trivial
+                    # by deterministic pattern matching — no need to ask the 0.5B model.
+                    if is_factual or is_trivial:
+                        triage_result = "SIMPLE"
+                        logger.info("[CASCADE] Skipping Nano triage — deterministic match (is_factual=%s, is_trivial=%s)", is_factual, is_trivial)
+                    else:
+                        triage_result = self._nano_triage(user_input)
                     if triage_result == "COMPLEX":
                         # Emit status message to user
                         yield {"type": "token", "value": "[(i) Reflex Nano: Complexity detected. Routing to Operator Core...]\n\n"}

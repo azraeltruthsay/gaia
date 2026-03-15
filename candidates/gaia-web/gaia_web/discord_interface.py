@@ -64,6 +64,7 @@ _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
 _dm_blocklist = None   # DMBlocklist instance (set by start_discord_bot)
 _core_endpoint = ""    # Core endpoint URL (set by start_discord_bot)
 _typing_wake_sent: Dict[str, float] = {}  # user_id -> last wake signal timestamp
+_wake_config_cache: Dict[str, Any] = {}   # {"config": {...}, "fetched_at": float}
 
 # Pending approval waiters: (channel_id, user_id) -> waiter context dict
 _pending_approvals: Dict[Tuple[str, str], dict] = {}
@@ -224,6 +225,26 @@ class DiscordInterface:
                 except Exception:
                     logger.error("Voice state update handler error", exc_info=True)
 
+        async def _is_typing_wake_enabled() -> bool:
+            """Check if discord_typing wake trigger is enabled (cached 30s, fail-open)."""
+            now = time.time()
+            cached = _wake_config_cache.get("fetched_at", 0)
+            if now - cached < 30 and "config" in _wake_config_cache:
+                return _wake_config_cache["config"].get("discord_typing", True)
+            # Fetch from gaia-core
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(f"{_core_endpoint}/sleep/wake-config")
+                    if resp.status_code == 200:
+                        cfg = resp.json()
+                        _wake_config_cache["config"] = cfg
+                        _wake_config_cache["fetched_at"] = now
+                        return cfg.get("discord_typing", True)
+            except Exception:
+                logger.debug("Failed to fetch wake-config, defaulting to enabled", exc_info=True)
+            # Fail-open: allow wake if config unavailable
+            return True
+
         @bot.event
         async def on_typing(channel, user, when):
             """Speculative prime wake: typing in a recent DM triggers preload."""
@@ -238,6 +259,9 @@ class DiscordInterface:
                 return
             # Only wake if GAIA replied to this user within 48h
             if not (_dm_blocklist and _dm_blocklist.has_recent_gaia_reply(uid)):
+                return
+            # Check if discord typing wake trigger is enabled
+            if not await _is_typing_wake_enabled():
                 return
             # Debounce: one wake signal per 30s per user
             now = time.time()

@@ -577,4 +577,80 @@ def create_app() -> FastAPI:
                 logger.exception(f"Failed to get adapter info: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
     
+    # ── Self-Awareness Pipeline ───────────────────────────────────────────────
+
+    _pipeline_proc = None  # Track running pipeline subprocess
+
+    @app.post("/pipeline/run")
+    async def pipeline_run(background_tasks: BackgroundTasks, options: Dict = {}):
+        """Launch the self-awareness pipeline as a background subprocess.
+
+        Options:
+          dry_run (bool): Run in dry-run mode (no actual training)
+          skip_nano (bool): Skip nano model stages
+          skip_smoke (bool): Skip cognitive smoke test
+          stage (str): Run only a specific stage (e.g. "COGNITIVE_SMOKE")
+          resume (bool): Resume from last checkpoint
+        """
+        nonlocal _pipeline_proc
+        import subprocess
+        import sys
+
+        if _pipeline_proc is not None and _pipeline_proc.poll() is None:
+            return {"ok": False, "error": "Pipeline already running", "pid": _pipeline_proc.pid}
+
+        cmd = [sys.executable, "scripts/self_awareness_pipeline.py"]
+
+        if options.get("dry_run"):
+            cmd.append("--dry-run")
+        if options.get("skip_nano"):
+            cmd.append("--skip-nano")
+        if options.get("skip_smoke"):
+            cmd.append("--skip-smoke")
+        if options.get("resume"):
+            cmd.append("--resume")
+        if options.get("stage"):
+            cmd.extend(["--stage", str(options["stage"])])
+
+        logger.info("Launching pipeline: %s", " ".join(cmd))
+
+        try:
+            _pipeline_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd="/app",
+            )
+            return {
+                "ok": True,
+                "status": "started",
+                "pid": _pipeline_proc.pid,
+                "command": " ".join(cmd),
+            }
+        except Exception as e:
+            logger.exception("Failed to start pipeline")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/pipeline/status")
+    async def pipeline_status():
+        """Check if a pipeline subprocess is currently running."""
+        nonlocal _pipeline_proc
+        import json as _json
+        from pathlib import Path
+
+        running = _pipeline_proc is not None and _pipeline_proc.poll() is None
+        state_file = Path("/shared/pipeline/self_awareness_state.json")
+        state = {}
+        if state_file.exists():
+            try:
+                state = _json.loads(state_file.read_text())
+            except Exception:
+                pass
+
+        return {
+            "running": running,
+            "pid": _pipeline_proc.pid if running else None,
+            "state": state,
+        }
+
     return app
