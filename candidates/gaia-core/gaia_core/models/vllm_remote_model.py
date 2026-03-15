@@ -82,6 +82,41 @@ class VLLMRemoteModel:
         total_chars = sum(len(m.get("content", "")) for m in text_or_messages)
         return total_chars // 3 + len(text_or_messages) * 4  # +4/msg for role overhead
 
+    def _truncate_messages_to_fit(self, messages: list, reserved_output: int = 256) -> list:
+        """Truncate message content to fit within the model's context window.
+
+        Strategy: preserve the system message and last user message intact.
+        Trim middle messages (oldest first), then truncate the system message
+        content as a last resort. This prevents 400 errors from context overflow.
+        """
+        budget = self.max_model_len - reserved_output
+        est = self._estimate_prompt_tokens(messages)
+        if est <= budget:
+            return messages
+
+        logger.warning(
+            "Prompt (%d est. tokens) exceeds context budget (%d) — truncating messages",
+            est, budget,
+        )
+        # Work on copies
+        messages = [dict(m) for m in messages]
+
+        # Phase 1: Drop middle messages (keep system[0] and last user message)
+        while len(messages) > 2 and self._estimate_prompt_tokens(messages) > budget:
+            # Remove the second message (oldest non-system)
+            messages.pop(1)
+
+        # Phase 2: Truncate system message content if still over budget
+        if self._estimate_prompt_tokens(messages) > budget and messages and messages[0].get("role") == "system":
+            content = messages[0].get("content", "")
+            # Estimate how many chars to keep (3 chars ≈ 1 token)
+            target_chars = max(200, (budget - reserved_output) * 3)
+            if len(content) > target_chars:
+                messages[0]["content"] = content[:target_chars] + "\n[...truncated to fit context window]"
+                logger.warning("Truncated system message from %d to %d chars", len(content), target_chars)
+
+        return messages
+
     def _clamp_max_tokens(self, max_tokens: int, estimated_prompt: int) -> int:
         """Clamp max_tokens to fit within context window. Returns clamped value."""
         available = self.max_model_len - estimated_prompt
@@ -167,6 +202,7 @@ class VLLMRemoteModel:
         """
         self._request_count += 1
         clean_messages = self._sanitize_messages(messages)
+        clean_messages = self._truncate_messages_to_fit(clean_messages, max_tokens)
         max_tokens = self._clamp_max_tokens(max_tokens, self._estimate_prompt_tokens(clean_messages))
 
         payload = {
@@ -268,6 +304,57 @@ class VLLMRemoteModel:
             return r.status_code == 200
         except Exception:
             return False
+
+    # ── KV Cache Pressure API ─────────────────────────────────────────────
+
+    def get_slot_info(self, slot_id: int = 0) -> Optional[Dict[str, Any]]:
+        """Query llama-server /slots endpoint for a specific slot's state.
+
+        Returns the slot dict with keys like n_ctx, n_past, or None on failure.
+        """
+        try:
+            r = self._session.get(f"{self.endpoint}/slots", timeout=10)
+            if r.status_code != 200:
+                return None
+            slots = r.json()
+            if isinstance(slots, list):
+                for slot in slots:
+                    if slot.get("id") == slot_id:
+                        return slot
+                # If slot_id not found but slots exist, return first
+                return slots[0] if slots else None
+            return slots if isinstance(slots, dict) else None
+        except Exception as exc:
+            logger.debug("get_slot_info failed: %s", exc)
+            return None
+
+    def erase_slot(self, slot_id: int = 0) -> bool:
+        """Erase (clear) a KV cache slot via POST /slots/{id}?action=erase."""
+        try:
+            url = f"{self.endpoint}/slots/{slot_id}?action=erase"
+            r = self._session.post(url, json={}, timeout=30)
+            if r.status_code == 200:
+                logger.info("KV cache slot %d erased", slot_id)
+                return True
+            logger.warning("KV cache erase failed (HTTP %d): %s", r.status_code, r.text[:200])
+            return False
+        except Exception as exc:
+            logger.warning("KV cache erase error: %s", exc)
+            return False
+
+    def get_cache_pressure(self, slot_id: int = 0) -> float:
+        """Return KV cache pressure as n_past / n_ctx ratio (0.0-1.0).
+
+        Returns -1.0 if slot info is unavailable.
+        """
+        slot = self.get_slot_info(slot_id)
+        if slot is None:
+            return -1.0
+        n_ctx = slot.get("n_ctx", 0)
+        n_past = slot.get("n_past", 0)
+        if n_ctx <= 0:
+            return -1.0
+        return min(n_past / n_ctx, 1.0)
 
     # ── Health / lifecycle ───────────────────────────────────────────────────
 

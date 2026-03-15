@@ -572,6 +572,14 @@
     "IDENTITY_FILE": "/knowledge/system_reference/core_identity.json",
     "CHEAT_SHEET_FILE": "/knowledge/system_reference/cheat_sheet.json"
   },
+  "KV_CACHE": {
+    "enabled": true,
+    "compact_threshold": 0.80,
+    "critical_threshold": 0.95,
+    "compact_interval_seconds": 30,
+    "checkpoint_interval_seconds": 300,
+    "doctor_critical_threshold": 0.90
+  },
   "SLEEP_CYCLE": {
     "enabled": true,
     "idle_threshold_minutes": 30,

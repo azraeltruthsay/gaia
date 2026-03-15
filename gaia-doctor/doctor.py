@@ -147,6 +147,13 @@ VITAL_ORGANS = [
 HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-study", "gaia-orchestrator"]
 HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "file_hashes.json"
 
+# KV cache pressure monitoring — independent of gaia-core
+KV_CACHE_ENDPOINTS = {
+    "reflex": "http://gaia-nano:8080/slots",
+    "core": "http://localhost:8092/slots",
+}
+KV_CACHE_DOCTOR_THRESHOLD = float(os.environ.get("KV_CACHE_DOCTOR_THRESHOLD", "0.90"))
+
 MONKEY_ENDPOINT = os.environ.get("MONKEY_ENDPOINT", "http://gaia-monkey:6420")
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
 ES_ENDPOINT = os.environ.get("ES_ENDPOINT", "http://elasticsearch:9200")
@@ -169,7 +176,7 @@ SERVICES = {
     "gaia-web": ("http://gaia-web:6414/health", "restart"),
     "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
-    "gaia-nano": ("http://gaia-nano:8080/health", None),
+    "gaia-nano": ("http://gaia-nano:8080/health", "restart"),
     "gaia-audio": ("http://gaia-audio:8080/health", None),
     "gaia-study": ("http://gaia-study:8766/health", None),
     "gaia-orchestrator": ("http://gaia-orchestrator:6410/health", None),
@@ -282,6 +289,84 @@ def _get_serenity_report() -> dict:
     except Exception:
         pass
     return {"serene": False, "score": 0.0, "threshold": 5.0}
+
+
+# ---------------------------------------------------------------------------
+# KV Cache Pressure Monitoring
+# ---------------------------------------------------------------------------
+
+_kv_cache_pressure: dict = {}  # role -> {pressure, n_past, n_ctx, checked_at}
+
+
+def poll_kv_cache_pressure():
+    """Poll llama-server /slots endpoints for KV cache fill ratio.
+
+    If pressure >= doctor threshold (90%), request compaction via gaia-core.
+    If compaction fails AND the service supports restart, restart as last resort.
+    """
+    global _kv_cache_pressure
+
+    for role, slots_url in KV_CACHE_ENDPOINTS.items():
+        try:
+            resp = urlopen(slots_url, timeout=5)
+            data = json.loads(resp.read().decode())
+            # /slots returns a list of slot dicts
+            slot = data[0] if isinstance(data, list) and data else data
+            n_ctx = slot.get("n_ctx", 0)
+            n_past = slot.get("n_past", 0)
+            pressure = n_past / n_ctx if n_ctx > 0 else 0.0
+
+            _kv_cache_pressure[role] = {
+                "pressure": round(pressure, 4),
+                "n_past": n_past,
+                "n_ctx": n_ctx,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            if pressure >= KV_CACHE_DOCTOR_THRESHOLD:
+                log.warning(
+                    "KV cache pressure HIGH for '%s': %.1f%% (%d/%d) — requesting compaction",
+                    role, pressure * 100, n_past, n_ctx,
+                )
+                compacted = _request_compact(role)
+                if not compacted:
+                    # Last resort: restart the service if it supports restart
+                    svc_name = "gaia-nano" if role == "reflex" else "gaia-core"
+                    svc_entry = SERVICES.get(svc_name)
+                    if svc_entry and svc_entry[1] == "restart":
+                        log.warning(
+                            "Compaction failed for '%s' — restarting %s as last resort",
+                            role, svc_name,
+                        )
+                        docker_restart(svc_name)
+            elif pressure >= 0.7:
+                log.info("KV cache pressure ELEVATED for '%s': %.1f%%", role, pressure * 100)
+
+        except Exception:
+            _kv_cache_pressure[role] = {
+                "pressure": -1,
+                "error": "unreachable",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+            log.debug("KV cache poll failed for '%s'", role, exc_info=True)
+
+
+def _request_compact(role: str) -> bool:
+    """Request KV cache compaction from gaia-core's API. Returns True on success."""
+    try:
+        url = f"{CORE_ENDPOINT}/api/kv-cache/compact/{role}"
+        req = Request(url, data=b"", method="POST",
+                      headers={"Content-Type": "application/json"})
+        resp = urlopen(req, timeout=15)
+        result = json.loads(resp.read().decode())
+        if result.get("status") == "compacted":
+            log.info("KV cache compaction succeeded for '%s' via gaia-core", role)
+            return True
+        log.warning("KV cache compaction response for '%s': %s", role, result)
+        return False
+    except Exception as e:
+        log.warning("KV cache compaction request failed for '%s': %s", role, e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1913,6 +1998,12 @@ def poll_cycle():
     _model_server_cache = _fetch_model_server_status()
     _pipeline_status_cache = _fetch_pipeline_status()
 
+    # Poll KV cache pressure (independent of gaia-core)
+    try:
+        poll_kv_cache_pressure()
+    except Exception:
+        log.debug("KV cache pressure poll failed", exc_info=True)
+
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():
         scan_logs()
@@ -2111,6 +2202,7 @@ def _build_status() -> dict:
         "model_server": _model_server_cache,
         "training_pipeline": _pipeline_status_cache,
         "cognitive_monitor": _cognitive_monitor_last_result,
+        "kv_cache_pressure": _kv_cache_pressure or None,
     }
     return status
 
@@ -2241,6 +2333,8 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._json_response(200, _model_server_cache or {"error": "no data yet"})
         elif self.path == "/pipeline":
             self._json_response(200, _pipeline_status_cache or {"status": "no pipeline running"})
+        elif self.path == "/kv-cache":
+            self._json_response(200, _kv_cache_pressure or {"status": "no data yet"})
         elif self.path == "/cognitive/status":
             self._cognitive_status()
         elif self.path == "/cognitive/results":
