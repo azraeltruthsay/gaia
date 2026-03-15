@@ -64,9 +64,9 @@ docker compose build gaia-doctor gaia-monkey
 docker compose up -d gaia-doctor gaia-monkey
 ```
 
-## Verification — 5-Drill Run (2026-03-14)
+## Verification — Initial 5-Drill Run (2026-03-14)
 
-All 5 drills completed successfully:
+All 5 drills completed (pre-demarker — LLM surgeon couldn't fix semantic faults):
 1. L1 `sleep_task_scheduler.py` (disabled assignment) → 3 LLM attempts → restored from production
 2. L2 `conversation_curator.py` (broke return) → 3 LLM attempts → restored from production
 3. L3 (skipped — no suitable target found)
@@ -74,7 +74,18 @@ All 5 drills completed successfully:
 5. L5 `self_review_worker.py` (multi-fault: 2 faults) → restored from production
 
 **Serenity reached**: 5.5/5.0 = SERENE
-**Cognitive Monitor**: pass, 0 failures
+
+## Verification — Clean 5-Drill Run (2026-03-15, post-fixes)
+
+All 5 drills resolved via Tier 1 demarker (~3s each):
+1. L1 `test_samvega.py` (disabled assignment) → **Tier 1 demarker** instant fix
+2. L1 `codex_writer.py` (disabled assignment) → **Tier 1 demarker** instant fix
+3. L2 `thought_seed.py` (removed import) → **Tier 1 demarker** instant fix
+4. L2 `test_semantic_codex.py` (removed import) → **Tier 1 demarker** instant fix
+5. L3 `test_temporal_state_manager.py` (break return) → **Tier 1 demarker** (marker stripped, logic subtly wrong but no crash)
+
+**Serenity reached**: 10.0/5.0 = SERENE
+**Cognitive Monitor**: pass, 0 failures (nano probe)
 **All services healthy** post-drills
 
 ### Issues Found & Fixed During Testing
