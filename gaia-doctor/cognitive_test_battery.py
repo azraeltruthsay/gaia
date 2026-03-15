@@ -21,7 +21,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 log = logging.getLogger("gaia-doctor.cognitive-battery")
@@ -760,7 +760,7 @@ def run_battery(
     """
     session_id = f"cogtest-{uuid.uuid4().hex[:8]}"
     run_id = f"cognitive-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    mode = f"pipeline" if full_pipeline else f"direct:{target}"
+    mode = "pipeline" if full_pipeline else f"direct:{target}"
 
     # Filter tests
     tests = TEST_CASES

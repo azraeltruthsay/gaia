@@ -14,7 +14,6 @@ import hashlib
 import json
 import logging
 import os
-import random
 import subprocess
 import threading
 import time
@@ -488,15 +487,24 @@ def audit_code():
 
 def run_service_tests(name: str) -> bool:
     """Run ruff and pytest inside the container to validate code changes."""
-    # 1. Fast Lint Check (Fatal errors only: F821 Undefined Name, F811 Redefined)
-    log.info("Running fast lint audit for %s...", name)
+    # 1. Lint Check (all F-rules: F401 unused import, F811 redef, F821 undef, etc.)
+    log.info("Running lint audit for %s...", name)
     try:
-        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F821,F811", "--no-cache"]
+        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
-            log.error("FATAL LINT ERROR in %s:\n%s", name, lint_res.stdout)
-            _record_irritation(name, f"Fatal lint error: {lint_res.stdout[:100]}", "CodeAudit: Lint Fatal")
-            return False
+            log.error("LINT ERROR in %s:\n%s", name, lint_res.stdout)
+            # Attempt auto-fix for safe rules before recording irritation
+            if _attempt_lint_autofix(name):
+                lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
+                if lint_res.returncode == 0:
+                    log.info("Lint autofix resolved all errors in %s", name)
+                else:
+                    _record_irritation(name, f"Lint error (post-autofix): {lint_res.stdout[:100]}", "CodeAudit: Lint Fatal")
+                    return False
+            else:
+                _record_irritation(name, f"Lint error: {lint_res.stdout[:100]}", "CodeAudit: Lint Fatal")
+                return False
     except Exception as e:
         log.warning("Fast lint audit failed for %s: %s", name, e)
 
@@ -519,6 +527,103 @@ def run_service_tests(name: str) -> bool:
     except Exception as e:
         log.error("Failed to run tests for %s: %s", name, e)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Lint Auto-Fix (safe subset of F-rules)
+# ---------------------------------------------------------------------------
+
+# Rules safe for unattended auto-fix (ruff --fix handles these deterministically):
+_LINT_AUTOFIX_RULES = "F401,F541,F811,F841"
+
+
+def _attempt_lint_autofix(name: str) -> bool:
+    """Try to auto-fix trivial lint errors (unused imports, etc.) in a container.
+
+    Returns True if fixes were applied successfully.
+    If surgeon approval is required, queues a proposal and returns False.
+    """
+    # 1. Preview fixable issues
+    try:
+        preview_cmd = [
+            "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
+            "--select", _LINT_AUTOFIX_RULES, "--no-cache",
+        ]
+        preview = subprocess.run(preview_cmd, capture_output=True, text=True, timeout=30)
+        if preview.returncode == 0:
+            return False  # Nothing to fix in the safe subset
+    except Exception as e:
+        log.warning("Lint autofix preview failed for %s: %s", name, e)
+        return False
+
+    fixable_summary = preview.stdout.strip()[:500]
+    log.info("Fixable lint issues in %s:\n%s", name, fixable_summary)
+
+    # 2. Surgeon approval gate
+    if _surgeon_approval_required:
+        repair_id = f"lint_{hashlib.md5(f'{name}:{time.time()}'.encode()).hexdigest()[:12]}"
+        proposal = {
+            "repair_id": repair_id,
+            "service": name,
+            "file": "(multiple — ruff --fix)",
+            "container_path": "/app",
+            "broken_code": fixable_summary,
+            "fixed_code": "(ruff auto-fix)",
+            "error_msg": fixable_summary,
+            "method": "lint_autofix",
+            "rules": _LINT_AUTOFIX_RULES,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "status": "pending",
+        }
+        _surgeon_queue.append(proposal)
+        log.info("Surgeon approval required — queued lint autofix %s for %s", repair_id, name)
+        return False
+
+    # 3. Apply fixes
+    try:
+        fix_cmd = [
+            "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
+            "--select", _LINT_AUTOFIX_RULES, "--fix", "--no-cache",
+        ]
+        fix_res = subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        log.warning("Lint autofix apply failed for %s: %s", name, e)
+        return False
+
+    # 4. Validate — full F-rule check
+    try:
+        verify_cmd = [
+            "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
+            "--select", "F", "--no-cache",
+        ]
+        verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        log.warning("Lint autofix verify failed for %s: %s", name, e)
+        return False
+
+    if verify.returncode == 0:
+        log.info("LINT AUTOFIX succeeded for %s — all F-rules clean", name)
+        _record_lint_autofix(name, fixable_summary)
+        return True
+    else:
+        log.warning("LINT AUTOFIX partial for %s — safe rules fixed but unfixable errors remain:\n%s",
+                     name, verify.stdout.strip()[:300])
+        _record_lint_autofix(name, f"partial: {fixable_summary}")
+        return True  # Safe fixes were applied; caller re-checks full lint
+
+
+def _record_lint_autofix(name: str, summary: str):
+    """Record a successful lint autofix in the remediation log."""
+    entry = {
+        "service": name,
+        "time": datetime.now(timezone.utc).isoformat(),
+        "action": "lint_autofix",
+        "detail": summary[:300],
+    }
+    _remediation_log.append(entry)
+    if len(_remediation_log) > 50:
+        _remediation_log.pop(0)
+    log.info("Recorded lint autofix remediation for %s", name)
 
 
 # ---------------------------------------------------------------------------
@@ -2427,6 +2532,49 @@ class DoctorHandler(BaseHTTPRequestHandler):
         container_path = proposal["container_path"]
         fixed_code = proposal["fixed_code"]
         file_path = proposal["file"]
+
+        # ── Lint autofix branch — run ruff --fix instead of writing fixed_code ──
+        if proposal.get("method") == "lint_autofix":
+            rules = proposal.get("rules", _LINT_AUTOFIX_RULES)
+            try:
+                fix_cmd = [
+                    "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
+                    "--select", rules, "--fix", "--no-cache",
+                ]
+                subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
+                verify_cmd = [
+                    "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
+                    "--select", "F", "--no-cache",
+                ]
+                verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
+            except Exception as e:
+                proposal["status"] = "apply_failed"
+                proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+                _surgeon_history.append(proposal)
+                if len(_surgeon_history) > 50:
+                    _surgeon_history[:] = _surgeon_history[-50:]
+                self._json_response(500, {"error": f"lint autofix failed: {e}", "repair_id": repair_id})
+                return
+
+            proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            if verify.returncode == 0:
+                proposal["status"] = "approved"
+                _surgeon_history.append(proposal)
+                if len(_surgeon_history) > 50:
+                    _surgeon_history[:] = _surgeon_history[-50:]
+                _record_lint_autofix(service, f"surgeon-approved: {proposal.get('error_msg', '')[:200]}")
+                log.info("Surgeon lint autofix APPROVED for %s: %s", repair_id, service)
+                self._json_response(200, {"status": "approved", "repair_id": repair_id, "validation": "passed"})
+            else:
+                proposal["status"] = "partial"
+                proposal["remaining_errors"] = verify.stdout.strip()[:300]
+                _surgeon_history.append(proposal)
+                if len(_surgeon_history) > 50:
+                    _surgeon_history[:] = _surgeon_history[-50:]
+                _record_lint_autofix(service, f"surgeon-approved (partial): {proposal.get('error_msg', '')[:200]}")
+                log.info("Surgeon lint autofix PARTIAL for %s — safe rules fixed, unfixable remain", repair_id)
+                self._json_response(200, {"status": "partial", "repair_id": repair_id, "remaining": verify.stdout.strip()[:300]})
+            return
 
         if not _write_container_file(service, container_path, fixed_code):
             proposal["status"] = "apply_failed"
