@@ -730,6 +730,8 @@ async def process_packet(packet_data: Dict[str, Any]):
             response_pieces = []
             final_packet_dict = None
 
+            from gaia_core.utils.output_router import _strip_think_tags_robust
+
             # AgentCore.run_turn is a synchronous generator. Each next()
             # call may block for seconds during llama_cpp inference.
             # Running in a thread executor prevents blocking the uvicorn
@@ -757,9 +759,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                 if isinstance(event, dict):
                     if event.get("type") == "token":
                         val = event.get("value", "")
+                        val = _strip_think_tags_robust(val)
+                        if not val:
+                            continue
                         response_pieces.append(val)
                         # Yield token immediately for real-time UI updates
-                        yield json.dumps(event) + "\n"
+                        yield json.dumps({"type": "token", "value": val}) + "\n"
                     elif event.get("type") == "flush":
                         # Signal to front-ends to flush their buffers
                         yield json.dumps(event) + "\n"
