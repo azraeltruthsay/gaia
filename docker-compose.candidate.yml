@@ -165,6 +165,13 @@ services:
     ports:
       - "7778:7777"
 
+    # LMCache KV persistence: blocked by vLLM 0.17 + Qwen3.5 hybrid arch.
+    # LMCacheConnectorV1 doesn't implement SupportsHMA, so:
+    #   - With HMA disabled: "failed to convert hybrid KV cache specs to one unified type"
+    #   - With HMA enabled:  "Connector LMCacheConnectorV1 does not support HMA"
+    # When LMCache ships HMA support, add to command block:
+    #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+    # Config, volume, and env var are already wired — just needs this flag.
     command: >
       python -m vllm.entrypoints.openai.api_server
       --model /models/Qwen3.5-4B-Abliterated
@@ -178,7 +185,6 @@ services:
       --enforce-eager
       --quantization fp8
       --enable-prefix-caching
-      --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]

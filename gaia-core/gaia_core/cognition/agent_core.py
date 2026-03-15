@@ -775,7 +775,7 @@ class AgentCore:
             # Initialize turn variables to prevent NameErrors in finally block or loop
             observer_model_name = None
             observer_instance = None
-            active_stream_observer = None
+            active_stream_observer = None  # NOTE: currently unused — kept for future streaming observer support
             post_run_observer = None
             disable_observer = True # Default to safe
             reflex_text = "" # Default to empty
@@ -2074,13 +2074,15 @@ class AgentCore:
                         final_yield_text = "\n\n---\n🔄 **[Refinement — here's the fuller answer]**\n" + user_facing_response
 
             # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
-            # Only yield if it's a 'Refinement' (reflex_text was present) or if streaming was disabled.
+            # Only yield if it's a 'Refinement' (reflex_text was present and response differs).
             if final_yield_text:
-                if reflex_text or not active_stream_observer:
+                if reflex_text:
+                    # Reflex was sent early — yield the full response as a refinement
                     yield {"type": "token", "value": _header + final_yield_text + epistemic_warning}
-                    logger.debug(f"Yielded to user: {final_yield_text}")
+                    logger.debug("Yielded refinement after reflex")
                 else:
-                    logger.debug("Suppressing final yield: already streamed.")
+                    # Response was already streamed during debate loop — don't duplicate
+                    logger.debug("Suppressing final yield: already streamed in debate loop.")
 
             # If the response came from the Oracle path, persist it as a learned fact
             # so future turns can answer locally without another external call.

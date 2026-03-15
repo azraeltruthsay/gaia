@@ -402,8 +402,30 @@ class VLLMRemoteModel:
         payload["stream"] = True
         url = f"{self.endpoint}/v1/chat/completions"
         content_buffer: list[str] = []
-        with self._session.post(url, json=payload, timeout=self.timeout, stream=True) as r:
-            r.raise_for_status()
+        try:
+            r = self._session.post(url, json=payload, timeout=self.timeout, stream=True)
+        except Exception:
+            raise
+        # Adapter fallback: if 404 and adapter is active, retry with base model
+        if r.status_code in (400, 404) and self._active_adapter:
+            error_text = ""
+            try:
+                error_text = r.text[:500]
+            except Exception:
+                pass
+            if ("lora" in error_text.lower()
+                    or "adapter" in error_text.lower()
+                    or self._active_adapter in error_text
+                    or "does not exist" in error_text.lower()):
+                logger.warning(
+                    "vLLM rejected adapter '%s' (%s: %s). Falling back to base model.",
+                    self._active_adapter, r.status_code, error_text[:200],
+                )
+                self._active_adapter = None
+                payload["model"] = self.model_name
+                r = self._session.post(url, json=payload, timeout=self.timeout, stream=True)
+        r.raise_for_status()
+        with r:
             for line in r.iter_lines(decode_unicode=True):
                 if not line or not line.startswith("data: "):
                     continue
