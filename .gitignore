@@ -9,7 +9,8 @@ google-cloud-sdk/
 artifacts/
 GAIA_Condensed_flat/
 
-# --- Backup directories (from promote_candidate.sh) ---
+# --- Backup files/directories (from promote_candidate.sh) ---
+*.bak
 *.bak/
 
 # --- Virtual environments ---

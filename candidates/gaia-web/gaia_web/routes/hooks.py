@@ -103,6 +103,48 @@ async def sleep_shutdown():
         return JSONResponse(status_code=502, content={"error": str(e)})
 
 
+# ── Prime Wake Triggers ─────────────────────────────────────────────────────
+
+@router.get("/sleep/wake-config")
+async def wake_config():
+    """Proxy GET gaia-core /sleep/wake-config."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{CORE_ENDPOINT}/sleep/wake-config")
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@router.post("/sleep/wake-toggle")
+async def wake_toggle(request: Request):
+    """Proxy POST gaia-core /sleep/wake-toggle."""
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{CORE_ENDPOINT}/sleep/wake-toggle", json=body)
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@router.post("/sleep/wake-activity")
+async def wake_activity():
+    """Proxy POST gaia-core /sleep/wake-activity."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(f"{CORE_ENDPOINT}/sleep/wake-activity")
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
 # ── GPU Management ───────────────────────────────────────────────────────────
 
 @router.get("/gpu/status")

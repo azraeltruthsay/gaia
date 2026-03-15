@@ -26,7 +26,7 @@ class PersonaAdapter:
         elif not isinstance(self.instructions, list):
             self.instructions = []
 
-        logger.debug(f"Initialized PersonaAdapter for '{self.name}'")
+        logger.debug(f"Initialized PersonaAdapter for ’{self.name}’")
 
     def get_full_instructions(self) -> str:
         """Combines template and instructions into a single string."""
@@ -42,4 +42,3 @@ class PersonaAdapter:
 
     def __str__(self):
         return self.name
-

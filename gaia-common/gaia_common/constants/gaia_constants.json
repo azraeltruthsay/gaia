@@ -578,6 +578,10 @@
     "enable_qlora": false,
     "enable_dream": false
   },
+  "PRIME_WAKE": {
+    "discord_typing": true,
+    "workstation_activity": false
+  },
   "TIMEOUTS": {
     "HTTP_DEFAULT": 30,
     "HTTP_QUICK": 5,
