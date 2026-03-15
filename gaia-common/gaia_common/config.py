@@ -24,7 +24,7 @@ class Config:
     temperature: float = 0.7
     top_p: float = 0.95
     max_tokens: int = 8192
-    max_tokens_lite: int = 32000
+    max_tokens_lite: int = 8192
     RESPONSE_BUFFER: int = 768
 
     # ── System Paths ────────────────────────────────────────────────
