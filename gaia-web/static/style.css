@@ -944,6 +944,7 @@ html, body {
 
 .hook-status-label { color: var(--text-muted); }
 .hook-status-value { color: var(--text-bright); font-weight: 600; }
+.hook-status-hint { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
 .hook-actions {
   display: flex;
@@ -2122,3 +2123,214 @@ html, body {
 
 .cognitive-section-score.ok { color: var(--success, #4caf50); }
 .cognitive-section-score.warn { color: var(--warn, #ffa726); }
+
+/* ── Doctor & Immunity Panel ─────────── */
+
+.doctor-section-divider {
+  margin: 10px 0 6px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.doctor-detail-section {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  background: var(--bg-input, #1e1e2e);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.irritation-entry,
+.remediation-entry {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.76rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.irritation-entry:last-child,
+.remediation-entry:last-child { border-bottom: none; }
+
+.doctor-entry-service {
+  color: var(--highlight);
+  font-weight: 600;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.doctor-entry-msg {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.doctor-entry-time {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.alarm-entry {
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  color: var(--error);
+  font-weight: 600;
+}
+
+.alarm-badge {
+  background: rgba(233, 69, 96, 0.2);
+  color: var(--error) !important;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.serenity-meter {
+  display: inline-block;
+  width: 80px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin: 0 6px;
+}
+
+.serenity-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.serenity-low { background: var(--error); }
+.serenity-mid { background: var(--warn); }
+.serenity-high { background: var(--success); }
+
+/* Surgeon proposal cards */
+
+.surgeon-proposal {
+  margin: 6px 0;
+  border-left: 3px solid var(--warn);
+  background: var(--bg-input, #1e1e2e);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.surgeon-proposal-header {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: background 0.15s;
+}
+
+.surgeon-proposal-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.surgeon-proposal-id {
+  color: var(--warn);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.surgeon-proposal-detail {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.surgeon-error-msg {
+  font-size: 0.74rem;
+  color: var(--error);
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.surgeon-diff-preview {
+  margin: 6px 0;
+}
+
+.surgeon-diff-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.surgeon-diff-preview pre {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.surgeon-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.surgeon-approve-btn {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--success);
+  transition: background 0.15s;
+}
+
+.surgeon-approve-btn:hover { background: rgba(76, 175, 80, 0.35); }
+
+.surgeon-reject-btn {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  background: rgba(233, 69, 96, 0.2);
+  color: var(--error);
+  transition: background 0.15s;
+}
+
+.surgeon-reject-btn:hover { background: rgba(233, 69, 96, 0.35); }
+
+.hook-btn-sm {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.hook-btn-sm:hover { background: var(--accent); color: var(--text); }
+
+.hook-btn-warn {
+  background: rgba(255, 167, 38, 0.2);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+}
