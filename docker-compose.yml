@@ -726,6 +726,8 @@ services:
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
       - gaia-shared:/shared:rw
       - .:/gaia/GAIA_Project:ro
 

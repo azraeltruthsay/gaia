@@ -219,17 +219,31 @@ def run_code_drill(targets: list[str] | None = None, difficulty: int | None = No
             fault_desc = "injected NameError (fallback)"
             entry["fault_description"] = fault_desc
 
-        # Write broken content to the host file (volume-mounted into container)
+        # Write broken content into the container via docker exec
+        # (project root is mounted :ro, so we write inside the container)
+        relative_to_service = target_file.relative_to(fault_injector.SERVICE_CODE_DIRS[name])
+        container_path = f"/app/{relative_to_service}"
+
         try:
-            target_file.write_text(broken_content)
-        except Exception as e:
+            inject_cmd = subprocess.run(
+                ["docker", "exec", name, "python3", "-c",
+                 f"open({container_path!r}, 'w').write({broken_content!r})"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if inject_cmd.returncode != 0:
+                entry["status"] = "failed"
+                entry["reason"] = f"injection failed: {inject_cmd.stderr.strip()[:200]}"
+                results.append(entry)
+                continue
+        except subprocess.TimeoutExpired:
             entry["status"] = "failed"
-            entry["reason"] = f"failed to write fault: {e}"
+            entry["reason"] = "injection timed out"
             results.append(entry)
             continue
 
         log.info("🐒 Code chaos: semantic fault injected into %s", target_file.name)
         entry["fault_injected"] = True
+        entry["container_path"] = container_path
 
         # Restart container to pick up the broken code
         try:

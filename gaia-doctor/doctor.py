@@ -504,6 +504,34 @@ def _get_test_errors(name: str) -> str:
         return f"failed to run pytest: {e}"
 
 
+def _read_container_file(container: str, container_path: str) -> str | None:
+    """Read a file from inside a running container via docker exec."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "cat", container_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except Exception as e:
+        log.warning("Failed to read %s from %s: %s", container_path, container, e)
+    return None
+
+
+def _write_container_file(container: str, container_path: str, content: str) -> bool:
+    """Write content to a file inside a running container via docker exec."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "python3", "-c",
+             f"open({container_path!r}, 'w').write({content!r})"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0
+    except Exception as e:
+        log.warning("Failed to write %s in %s: %s", container_path, container, e)
+        return False
+
+
 def _notify_monkey_repair_success(service: str, file_path: str):
     """Notify monkey of successful LLM repair — full serenity points."""
     try:
@@ -604,11 +632,32 @@ def restore_from_production(candidate_path: str) -> dict:
         else:
             return {"status": "error", "reason": f"production file unusable and git HEAD unavailable: {e}"}
 
-    # Write restored content via structural repair endpoint (doctor has ro mount)
+    # Derive the container name and container path for writing
+    # candidate_path like: candidates/gaia-core/gaia_core/x.py
+    # service name: gaia-core-candidate
+    # container path: /app/gaia_core/x.py
+    service_name = str(prod_rel).split("/")[0]  # e.g., "gaia-core"
+    container_name = f"{service_name}-candidate"
+    code_dir = SERVICE_CODE_DIRS.get(container_name)
+    if code_dir:
+        try:
+            relative = cand.relative_to(code_dir)
+            container_path = f"/app/{relative}"
+        except ValueError:
+            container_path = f"/app/{cand.name}"
+    else:
+        container_path = f"/app/{cand.name}"
+
+    # Write via docker exec into the candidate container
+    if _write_container_file(container_name, container_path, content):
+        log.info("Restored %s from %s via docker exec", candidate_path, source)
+        return {"status": "restored", "source": source, "file": git_rel}
+
+    # Fallback: try structural repair endpoint
     try:
         repair_data = json.dumps({
             "service": "restore",
-            "broken_code": content,  # "broken" is actually the good code
+            "broken_code": content,
             "error_msg": "RESTORE_FROM_PRODUCTION — write this content as-is",
             "file_path": str(cand),
             "restore_mode": True,
@@ -621,18 +670,12 @@ def restore_from_production(candidate_path: str) -> dict:
         )
         with urlopen(req, timeout=30) as resp:
             if resp.status == 200:
-                log.info("Restored %s from %s", candidate_path, source)
+                log.info("Restored %s from %s via structural endpoint", candidate_path, source)
                 return {"status": "restored", "source": source, "file": git_rel}
     except Exception as e:
-        log.error("Restore via structural endpoint failed: %s — writing directly", e)
+        log.error("All restore methods failed: %s", e)
 
-    # Direct write fallback (if we have rw mount)
-    try:
-        cand.write_text(content)
-        log.info("Restored %s from %s (direct write)", candidate_path, source)
-        return {"status": "restored", "source": source, "file": git_rel}
-    except Exception as e:
-        return {"status": "error", "reason": f"all restore methods failed: {e}"}
+    return {"status": "error", "reason": "all restore methods failed"}
 
 
 def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) -> dict:
@@ -652,6 +695,18 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
         "FINAL ATTEMPT: Be very conservative. Only fix the exact lines causing failures. Do not refactor.",
     ]
 
+    # Derive container path: candidates/gaia-core/gaia_core/x.py -> /app/gaia_core/x.py
+    code_dir = SERVICE_CODE_DIRS.get(service)
+    full_path = GAIA_PROJECT_ROOT / file_path
+    if code_dir:
+        try:
+            relative = full_path.relative_to(code_dir)
+            container_path = f"/app/{relative}"
+        except ValueError:
+            container_path = f"/app/{full_path.name}"
+    else:
+        container_path = f"/app/{full_path.name}"
+
     for attempt in range(1, max_retries + 1):
         log.info("Self-repair attempt %d/%d for %s in %s", attempt, max_retries, file_path, service)
 
@@ -659,13 +714,15 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
         test_errors = _get_test_errors(service)
         prompt = escalation_prompts[min(attempt - 1, len(escalation_prompts) - 1)]
 
-        # Read current broken content
-        try:
-            full_path = GAIA_PROJECT_ROOT / file_path
-            broken_code = full_path.read_text()
-        except Exception as e:
-            attempts.append({"attempt": attempt, "status": "error", "reason": f"cannot read file: {e}"})
-            continue
+        # Read current broken content from inside the container
+        broken_code = _read_container_file(service, container_path)
+        if broken_code is None:
+            # Fall back to host path
+            try:
+                broken_code = full_path.read_text()
+            except Exception as e:
+                attempts.append({"attempt": attempt, "status": "error", "reason": f"cannot read file: {e}"})
+                continue
 
         # POST to structural repair endpoint
         try:
@@ -673,7 +730,7 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
                 "service": service,
                 "broken_code": broken_code,
                 "error_msg": f"{prompt}\n\nTest errors:\n{test_errors}",
-                "file_path": str(full_path),
+                "file_path": container_path,
             }).encode("utf-8")
             req = Request(
                 f"{CORE_ENDPOINT}/api/repair/structural",
@@ -688,8 +745,17 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
             continue
 
         if result.get("status") != "repaired":
-            attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
-            continue
+            # If structural endpoint can't write, try writing the repaired code ourselves
+            repaired_code = result.get("repaired_code")
+            if repaired_code:
+                if _write_container_file(service, container_path, repaired_code):
+                    log.info("Wrote repaired code via docker exec (attempt %d)", attempt)
+                else:
+                    attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
+                    continue
+            else:
+                attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
+                continue
 
         # Re-run tests
         if run_service_tests(service):
@@ -754,29 +820,35 @@ def _handle_chaos_notification(data: dict):
 def _repair_divergent_candidate(name: str):
     """Called from audit_code() when a candidate file fails tests during meditation.
 
-    Finds the changed file(s) and runs the repair loop.
+    Only runs repair if we find a file with a CHAOS_MONKEY marker, confirming
+    this is an injected fault rather than a pre-existing test failure.
     """
     code_dir = SERVICE_CODE_DIRS.get(name)
     if not code_dir or not code_dir.exists():
         return
 
-    # Find recently modified .py files (within last 60s) that might be the fault target
+    # Find recently modified .py files (within last 60s) that have chaos markers
     now = time.time()
-    changed_files = []
+    chaos_files = []
     for p in code_dir.rglob("*.py"):
         if "__pycache__" in str(p):
             continue
         try:
             if now - p.stat().st_mtime < 60:
-                changed_files.append(p)
-        except OSError:
+                # Check inside the container for chaos markers
+                rel = p.relative_to(code_dir)
+                container_path = f"/app/{rel}"
+                content = _read_container_file(name, container_path)
+                if content and "CHAOS_MONKEY" in content:
+                    chaos_files.append(p)
+        except (OSError, ValueError):
             continue
 
-    if not changed_files:
-        log.info("No recently changed files found for %s — skipping repair", name)
+    if not chaos_files:
+        log.debug("No chaos-marked files found for %s — skipping repair (pre-existing test failures)", name)
         return
 
-    for changed in changed_files:
+    for changed in chaos_files:
         try:
             rel_path = str(changed.relative_to(GAIA_PROJECT_ROOT))
         except ValueError:
