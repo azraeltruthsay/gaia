@@ -960,10 +960,12 @@ class AgentCore:
                             selected_model_name = cand
                             break
                 
-                # Default path: Operator (lite) handles most turns.
+                # Default path: Operator (lite/core) handles most turns.
                 if not selected_model_name:
                     if "lite" in self.model_pool.models:
                         selected_model_name = "lite"
+                    elif "core" in self.model_pool.models:
+                        selected_model_name = "core"
                     elif "prime" in self.model_pool.models:
                         selected_model_name = "prime"
                     else:
@@ -986,8 +988,8 @@ class AgentCore:
                 candidates = []
                 if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
                     candidates.append(backend_env)
-                # Prefer Operator (lite) first, then Thinker tiers, then oracle/azrael
-                candidates.extend(["lite", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
+                # Prefer Operator (lite/core) first, then Thinker tiers, then oracle/azrael
+                candidates.extend(["lite", "core", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
                 found = None
                 for cand in candidates:
                     if cand == "gpu_prime" and _gpu_sleeping:
@@ -1027,10 +1029,12 @@ class AgentCore:
                     if triage_result == "COMPLEX":
                         # Emit status message to user
                         yield {"type": "token", "value": "[(i) Reflex Nano: Complexity detected. Routing to Operator Core...]\n\n"}
-                        selected_model_name = "lite"
+                        # Prefer lite, fall back to core (embedded llama-server)
+                        selected_model_name = "lite" if "lite" in self.model_pool.models else "core"
 
                         # Secondary escalation: check if Lite thinks it's even MORE complex
                         if self._should_escalate_to_thinker(user_input):
+                            _escalated = False
                             for cand in ["gpu_prime", "prime", "cpu_prime"]:
                                 if cand == "gpu_prime" and _gpu_sleeping:
                                     continue
@@ -1041,9 +1045,24 @@ class AgentCore:
                                     except Exception:
                                         pass
                                 if cand in self.model_pool.models:
+                                    # Verify the model endpoint is actually reachable before escalating
+                                    _model_obj = self.model_pool.models.get(cand)
+                                    if hasattr(_model_obj, 'endpoint'):
+                                        try:
+                                            import requests as _req
+                                            _health = _req.get(f"{_model_obj.endpoint}/health", timeout=2)
+                                            if _health.status_code != 200:
+                                                logger.warning(f"[CASCADE] {cand} endpoint unhealthy ({_health.status_code}); skipping escalation")
+                                                continue
+                                        except Exception:
+                                            logger.warning(f"[CASCADE] {cand} endpoint unreachable; skipping escalation")
+                                            continue
                                     yield {"type": "token", "value": "[(i) Operator Core: Deep reasoning required. Escalating to Thinker Prime...]\n\n"}
                                     selected_model_name = cand
+                                    _escalated = True
                                     break
+                            if not _escalated:
+                                logger.info("[CASCADE] No thinker-tier model reachable; staying on %s", selected_model_name)
                     else:
                         # Nano can handle it — use the actual key from MODEL_CONFIGS
                         selected_model_name = nano_key
