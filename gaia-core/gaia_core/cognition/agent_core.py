@@ -210,7 +210,9 @@ class AgentCore:
         "cpu_prime": "Prime",
         "prime": "Prime",
         "lite": "Core",
+        "core": "Core",
         "oracle": "Oracle",
+        "groq_fallback": "Groq",
     }
 
     # ── Always-on LoRA adapter for identity/architecture ────────────────────
@@ -1502,7 +1504,7 @@ class AgentCore:
                 packet.tool_routing
                 and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
             )
-            if not tool_already_executed and self._should_use_slim_prompt(plan, user_input):
+            if not tool_already_executed and self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name):
                 text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
                 if text is not None:
                     _header = self._build_response_header(selected_model_name, packet, None, None, None)
@@ -2394,6 +2396,13 @@ class AgentCore:
         # regenerates the entire answer without any separator.
         text = self._dedup_block(text)
 
+        # --- Pass 0.5: Line-block dedup ---
+        # Catch repeated multi-line blocks (e.g. Nano outputting the same
+        # 10-15 line status block over and over).
+        lines = text.split('\n')
+        if len(lines) > 10:
+            text = self._dedup_line_blocks(text)
+
         try:
             import regex as _re
             sentences = _re.split(r'(?<=[.!?])\s+', text)
@@ -2464,6 +2473,108 @@ class AgentCore:
 
         return text
 
+    @staticmethod
+    def _dedup_line_blocks(text: str, block_sizes=(3, 4, 5), max_repeats: int = 2) -> str:
+        """Remove repeated multi-line blocks.
+
+        Slides an N-line window through the text for each block size.
+        If any window hash appears more than *max_repeats* times,
+        the text is truncated after the second occurrence.
+        """
+        lines = text.split('\n')
+        for n in block_sizes:
+            if len(lines) < n * (max_repeats + 1):
+                continue
+            seen: Dict[int, list] = {}  # hash -> list of start indices
+            for i in range(len(lines) - n + 1):
+                block = '\n'.join(lines[i:i + n]).strip()
+                if not block:
+                    continue
+                h = hash(block)
+                positions = seen.setdefault(h, [])
+                positions.append(i)
+                if len(positions) > max_repeats:
+                    # Truncate after the end of the max_repeats-th occurrence
+                    cutoff = positions[max_repeats - 1] + n
+                    lines = lines[:cutoff]
+                    text = '\n'.join(lines)
+                    break  # re-check with truncated text
+            else:
+                continue
+            break  # already truncated, stop checking larger block sizes
+        return '\n'.join(lines) if isinstance(lines, list) else text
+
+    def _is_degenerate_output(self, content: str, user_input: str) -> bool:
+        """Detect degenerate model output that should trigger tier escalation."""
+        if not content or not content.strip():
+            return True
+        stripped = content.strip()
+        if len(stripped) < 5:
+            return True
+        # Repetition ratio: >60% of lines are duplicates
+        lines = [l.strip() for l in content.split('\n') if l.strip()]
+        if len(lines) > 5:
+            unique = set(lines)
+            if len(unique) / len(lines) < 0.4:
+                return True
+        # Starts with known error pattern
+        if stripped.startswith("I encountered an error"):
+            return True
+        # Disproportionately long for short input (>800 chars for <=30 char input)
+        if len(user_input) <= 30 and len(stripped) > 800:
+            return True
+        # Low unique-word ratio — sign of phrase-level repetition
+        words = stripped.lower().split()
+        if len(words) > 15:
+            unique_words = set(words)
+            if len(unique_words) / len(words) < 0.45:
+                return True
+        # Trailing truncation — output cut off mid-sentence (hit token limit)
+        if len(stripped) > 20 and stripped[-1] not in '.!?"\')…':
+            # Ends without terminal punctuation — likely truncated
+            # Only flag if there WAS punctuation earlier (so it's not just a short phrase)
+            if any(c in stripped[:-10] for c in '.!?'):
+                return True
+        return False
+
+    # Escalation chain for slim path failures
+    _SLIM_ESCALATION_CHAIN = ["core", "lite", "groq_fallback", "oracle"]
+
+    def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int) -> str:
+        """Try higher-tier models when the slim path model produces garbage.
+
+        On success, sets ``self._last_responding_model`` so callers can
+        attribute the response to the correct model in headers/tags.
+        """
+        for candidate in self._SLIM_ESCALATION_CHAIN:
+            if candidate == failed_model:
+                continue
+            if candidate not in self.model_pool.models:
+                continue
+            try:
+                self.logger.info("Slim escalation: trying '%s' after '%s' failed", candidate, failed_model)
+                res = self.model_pool.forward_to_model(
+                    candidate,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=self.config.temperature,
+                    top_p=self.config.top_p,
+                    adapter_name=self._resolve_adapter(candidate),
+                )
+                content = res["choices"][0]["message"]["content"]
+                content = strip_think_tags(content).strip()
+                content = self._suppress_repetition(content)
+                if not self._is_degenerate_output(content, messages[-1].get("content", "")):
+                    self.logger.info("Slim escalation succeeded with '%s'", candidate)
+                    self._last_responding_model = candidate
+                    return content
+                self.logger.warning("Slim escalation: '%s' also produced degenerate output", candidate)
+            except Exception:
+                log_gaia_error(self.logger, "GAIA-CORE-070", f"Slim escalation to '{candidate}' failed", exc_info=True)
+        # All escalations failed
+        self.logger.error("All slim escalation tiers exhausted — returning dignified error")
+        return "I'm having trouble responding right now. Please try again."
+
     def _build_response_header(
         self,
         model_name: str,
@@ -2476,7 +2587,10 @@ class AgentCore:
         Build a concise status header prepended to user-facing responses.
         Shows the 'mind' (model) that generated the response.
         """
-        mind_name = self._MIND_ALIASES.get(model_name or "unknown", model_name or "unknown")
+        # If an escalation occurred, use the model that actually responded
+        actual_model = getattr(self, '_last_responding_model', None) or model_name
+        self._last_responding_model = None  # reset after use
+        mind_name = self._MIND_ALIASES.get(actual_model or "unknown", actual_model or "unknown")
         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)
         return f"{tag}\n\n"
 
@@ -2510,29 +2624,37 @@ class AgentCore:
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """
         Executes a fast, non-streaming Reflex response with a minimal packet.
-        Returns the generated text.
+        Returns the generated text, or "" to defer to run_turn().
         """
         if "reflex" not in self.model_pool.models and "nano" not in self.model_pool.models:
             return ""
-            
+
         try:
             # Create a "Thin" version of the packet for speed
             from gaia_core.utils.prompt_builder import build_from_packet
             reflex_messages = build_from_packet(packet, slim_mode=True)
-            
-            # Direct non-streaming call to Reflex (Nano)
+            user_input = packet.content.original_prompt or ""
+
+            # Direct non-streaming call to Reflex (Nano), capped at 256 tokens
             res = self.model_pool.forward_to_model(
                 "reflex",
                 messages=reflex_messages,
                 max_tokens=256,
                 temperature=0.0,
             )
-            
+
             if isinstance(res, dict):
                 reflex_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 # Capability gate: Nano signals it can't answer confidently
                 if reflex_text.upper().startswith("ESCALATE"):
                     self.logger.info("Reflex: Nano self-escalated — deferring to run_turn()")
+                    return ""
+                # Strip think tags and suppress repetition
+                reflex_text = strip_think_tags(reflex_text).strip()
+                reflex_text = self._suppress_repetition(reflex_text)
+                # Degenerate output → defer to full run_turn() pipeline
+                if self._is_degenerate_output(reflex_text, user_input):
+                    self.logger.warning("Speculative reflex produced degenerate output — deferring to run_turn()")
                     return ""
                 # Identity and Sanity check
                 if self.identity_guardian.validate_reflex(reflex_text):
@@ -2619,7 +2741,7 @@ RESULT: COMPLEX (reason: <brief reason>)
         ]
         return any(m in t for m in markers)
 
-    def _should_use_slim_prompt(self, plan: Plan, user_input: str) -> bool:
+    def _should_use_slim_prompt(self, plan: Plan, user_input: str, selected_model_name: str = "") -> bool:
         """
         Decide whether to bypass the full plan/reflect pipeline and use a light prompt.
         Heuristics:
@@ -2634,6 +2756,12 @@ RESULT: COMPLEX (reason: <brief reason>)
             return False
         force_slim = os.getenv("GAIA_FORCE_SLIM_PROMPT", "").lower() in ("1", "true", "yes")
         if force_slim:
+            return True
+
+        # Nano/reflex MUST always use slim prompt — their context window (2048)
+        # cannot fit the full planning pipeline. Sending the full prompt causes
+        # context overflow errors (400) and exhausts the fallback chain.
+        if selected_model_name in ("nano", "reflex"):
             return True
 
         # Disable slim-prompt shortcuts only when truly CRITICAL (score >= 25).
@@ -3054,6 +3182,10 @@ RESULT: COMPLEX (reason: <brief reason>)
                 getattr(self.config, 'MAX_ALLOWED_RESPONSE_TOKENS', None) or
                 self.config.constants.get("MAX_ALLOWED_RESPONSE_TOKENS", 1000)
             )
+            # Nano (0.8B) should never generate more than 512 tokens —
+            # its 2K context window is too small for uncapped generation.
+            if selected_model_name in ("reflex", "nano"):
+                max_resp_tokens = min(max_resp_tokens, 512)
             res = self.model_pool.forward_to_model(
                 selected_model_name,
                 messages=messages,
@@ -3063,6 +3195,15 @@ RESULT: COMPLEX (reason: <brief reason>)
                 adapter_name=self._resolve_adapter(selected_model_name),
             )
             content = res["choices"][0]["message"]["content"]
+            # Strip think tags and suppress repetition (same guards as streaming path)
+            content = strip_think_tags(content).strip()
+            content = self._suppress_repetition(content)
+            # Detect degenerate output and escalate to a higher tier
+            if self._is_degenerate_output(content, user_input):
+                self.logger.warning("Degenerate output from '%s' — escalating to next tier", selected_model_name)
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                if escalated:
+                    return escalated
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
             # send a short polish request and return the Thinker output as final.
             try:
@@ -3094,7 +3235,10 @@ RESULT: COMPLEX (reason: <brief reason>)
                 self.logger.debug("Thinker polish step failed; returning Operator output", exc_info=True)
             return content
         except Exception as exc:
-            self.logger.exception("slim prompt call failed")
+            self.logger.exception("slim prompt call failed for '%s'", selected_model_name)
+            escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+            if escalated:
+                return escalated
             return f"I encountered an error while answering: {exc}"
 
     # ------------------------------------------------------------------

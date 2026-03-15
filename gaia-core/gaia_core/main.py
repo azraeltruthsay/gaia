@@ -753,7 +753,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                     yield json.dumps({"type": "flush"}) + "\n"
 
                     # FINALIZATION: Skip run_turn if reflex already provided the answer
-                    packet.status.state = "finalized"
+                    from gaia_common.protocols.cognition_packet import PacketState
+                    packet.status.state = PacketState.COMPLETED
                     packet.response.candidate = reflex_text
                     yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
                     return
