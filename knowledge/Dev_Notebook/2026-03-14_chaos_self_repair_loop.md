@@ -81,6 +81,8 @@ All 5 drills completed successfully:
 1. **Read-only mount**: Monkey container had `.:/gaia/GAIA_Project:ro` — can't write files directly. Fixed by restoring `docker exec` write path (matches original code). Also added docker CLI bind-mount (`/usr/bin/docker:ro`) to monkey's docker-compose volumes.
 2. **Container-aware I/O**: Doctor reads/writes files via `docker exec` into candidate containers, not host filesystem. Added `_read_container_file()` and `_write_container_file()` helpers.
 3. **Repair loop on pre-existing failures**: After restore, file has new mtime → `audit_code()` triggers → tests fail (pre-existing, not chaos) → repair loop re-enters. Fixed by checking for `CHAOS_MONKEY` marker in the file content before entering organic repair.
+4. **Structural surgeon can't fix semantic faults**: LLM surgeon prompt targets syntax errors only — kept CHAOS_MONKEY markers. Fixed with two-tier repair: Tier 1 = deterministic `_demarker()` (regex strips markers, uncomments disabled lines), Tier 2 = LLM for residue. L1 faults now fixed instantly.
+5. **Cognitive monitor timeouts**: Monitor used `/process_packet` (full 20-stage pipeline) which hung when `prime_available=false`. Fixed by switching to `/api/cognitive/query` with nano→core→prime fallback chain. Simple "What is the datetime?" probe works with any model tier.
 
 ## Design Notes
 - All doctor code is **stdlib-only** (urllib, subprocess, ast, difflib, json, threading)

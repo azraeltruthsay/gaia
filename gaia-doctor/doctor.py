@@ -678,24 +678,74 @@ def restore_from_production(candidate_path: str) -> dict:
     return {"status": "error", "reason": "all restore methods failed"}
 
 
-def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) -> dict:
-    """Attempt LLM-powered repair of a broken candidate file.
+def _demarker(code: str) -> str:
+    """Deterministic removal of all CHAOS_MONKEY markers.
 
-    For each attempt (1-3):
-      - Gets test error output for context
-      - POSTs to /api/repair/structural with escalating prompts
-      - Re-runs tests after each write
-      - If tests pass -> return repaired
-    After 3 failures -> restore from production.
+    Handles:
+      - '# CHAOS_MONKEY_DISABLED: <original line>'  -> restore original line
+      - '# CHAOS_MONKEY_REMOVED: <import line>'     -> restore import line
+      - 'return None  # CHAOS_MONKEY_BREAK'         -> cannot restore (original unknown)
+      - '<line>  # CHAOS_MONKEY_SWAP'                -> cannot restore (original unknown)
+      - '_chaos_undefined_var = ... # CHAOS_MONKEY_INJECT' -> remove entire line
+
+    Returns demarked code. Lines it can't deterministically fix are left
+    for the LLM tier.
+    """
+    import re as _re
+    out = []
+    for line in code.split("\n"):
+        # DISABLED / REMOVED: uncomment and strip marker
+        m = _re.match(r'^(\s*)#\s*CHAOS_MONKEY_(?:DISABLED|REMOVED):\s?(.*)', line)
+        if m:
+            out.append(m.group(1) + m.group(2))
+            continue
+        # INJECT: remove the entire line
+        if "CHAOS_MONKEY_INJECT" in line and "_chaos_" in line:
+            continue
+        # BREAK / SWAP: strip the trailing comment but leave the (broken) code
+        # — these need LLM help to restore the original logic
+        out.append(line)
+    return "\n".join(out)
+
+
+def _validate_repair(service: str, container_path: str) -> dict:
+    """Check if a repaired file is clean: no marker, lint passes, AST valid."""
+    content = _read_container_file(service, container_path)
+    if not content:
+        return {"valid": False, "reason": "cannot read file"}
+    has_marker = "CHAOS_MONKEY" in content
+    if has_marker:
+        return {"valid": False, "reason": "marker still present"}
+    # AST check
+    try:
+        ast.parse(content)
+    except SyntaxError as e:
+        return {"valid": False, "reason": f"syntax error: {e}"}
+    # Lint check — just this file
+    try:
+        lint_cmd = ["docker", "exec", service, "python", "-m", "ruff", "check",
+                    container_path, "--select", "F821,F811", "--no-cache"]
+        lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
+        if lint_res.returncode != 0:
+            return {"valid": False, "reason": f"lint errors: {lint_res.stdout[:200]}"}
+    except Exception as e:
+        return {"valid": False, "reason": f"lint check failed: {e}"}
+    return {"valid": True}
+
+
+def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) -> dict:
+    """Two-tier repair of a broken candidate file.
+
+    Tier 1 (deterministic): Regex demarker strips CHAOS_MONKEY comments.
+      Handles DISABLED, REMOVED, INJECT markers instantly.
+    Tier 2 (LLM): For faults the demarker can't fix (BREAK, SWAP, multi-fault
+      residue), escalates to the structural surgeon with error context.
+
+    After all retries -> restore from production.
     """
     attempts = []
-    escalation_prompts = [
-        "Fix the broken code so tests pass. Focus on the error messages below.",
-        "Previous fix attempt failed. Focus specifically on the failing assertions and imports. Be more careful.",
-        "FINAL ATTEMPT: Be very conservative. Only fix the exact lines causing failures. Do not refactor.",
-    ]
 
-    # Derive container path: candidates/gaia-core/gaia_core/x.py -> /app/gaia_core/x.py
+    # Derive container path
     code_dir = SERVICE_CODE_DIRS.get(service)
     full_path = GAIA_PROJECT_ROOT / file_path
     if code_dir:
@@ -707,30 +757,63 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
     else:
         container_path = f"/app/{full_path.name}"
 
-    for attempt in range(1, max_retries + 1):
-        log.info("Self-repair attempt %d/%d for %s in %s", attempt, max_retries, file_path, service)
+    # ── Tier 1: Deterministic demarker ──────────────────────────────────
+    broken_code = _read_container_file(service, container_path)
+    if broken_code is None:
+        try:
+            broken_code = full_path.read_text()
+        except Exception as e:
+            return {"status": "error", "reason": f"cannot read broken file: {e}"}
 
-        # Get current test errors
+    if "CHAOS_MONKEY" in broken_code:
+        demarked = _demarker(broken_code)
+        if _write_container_file(service, container_path, demarked):
+            log.info("Tier 1 demarker applied to %s:%s", service, container_path)
+            check = _validate_repair(service, container_path)
+            if check["valid"]:
+                log.info("TIER 1 SUCCESS (demarker) for %s — clean on first pass", file_path)
+                _notify_monkey_repair_success(service, file_path)
+                return {
+                    "status": "repaired",
+                    "method": "demarker",
+                    "attempts": [{"attempt": 0, "status": "demarker_success"}],
+                    "file": file_path,
+                    "service": service,
+                }
+            else:
+                log.info("Demarker applied but validation failed (%s) — escalating to Tier 2",
+                         check["reason"])
+                attempts.append({"attempt": 0, "status": "demarker_partial", "reason": check["reason"]})
+        else:
+            log.warning("Demarker write failed — escalating to Tier 2")
+
+    # ── Tier 2: LLM structural surgeon ──────────────────────────────────
+    escalation_prompts = [
+        "Fix the broken code. Lines containing 'CHAOS_MONKEY' markers are injected faults — "
+        "restore the original logic. For 'return None  # CHAOS_MONKEY_BREAK', reconstruct "
+        "the correct return value. For '# CHAOS_MONKEY_SWAP', swap the arguments back.",
+        "Previous fix attempt failed. The code still has issues. Focus on the specific "
+        "error lines. Be precise — only change what's broken.",
+        "FINAL ATTEMPT: Be extremely conservative. Fix only the lines causing errors. "
+        "Do not add new code, imports, or refactor anything.",
+    ]
+
+    for attempt in range(1, max_retries + 1):
+        log.info("Tier 2 LLM repair attempt %d/%d for %s in %s", attempt, max_retries, file_path, service)
+
         test_errors = _get_test_errors(service)
         prompt = escalation_prompts[min(attempt - 1, len(escalation_prompts) - 1)]
 
-        # Read current broken content from inside the container
-        broken_code = _read_container_file(service, container_path)
-        if broken_code is None:
-            # Fall back to host path
-            try:
-                broken_code = full_path.read_text()
-            except Exception as e:
-                attempts.append({"attempt": attempt, "status": "error", "reason": f"cannot read file: {e}"})
-                continue
+        current_code = _read_container_file(service, container_path)
+        if current_code is None:
+            attempts.append({"attempt": attempt, "status": "error", "reason": "cannot read file"})
+            continue
 
-        # POST to structural repair endpoint
         try:
             repair_data = json.dumps({
                 "service": service,
-                "broken_code": broken_code,
-                "error_msg": f"{prompt}\n\nTest errors:\n{test_errors}",
-                "file_path": container_path,
+                "broken_code": current_code,
+                "error_msg": f"{prompt}\n\nTest/lint errors:\n{test_errors}",
             }).encode("utf-8")
             req = Request(
                 f"{CORE_ENDPOINT}/api/repair/structural",
@@ -744,31 +827,30 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
             attempts.append({"attempt": attempt, "status": "error", "reason": f"repair endpoint failed: {e}"})
             continue
 
-        if result.get("status") != "repaired":
-            # If structural endpoint can't write, try writing the repaired code ourselves
-            repaired_code = result.get("repaired_code")
-            if repaired_code:
-                if _write_container_file(service, container_path, repaired_code):
-                    log.info("Wrote repaired code via docker exec (attempt %d)", attempt)
-                else:
-                    attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
-                    continue
-            else:
-                attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
-                continue
+        fixed_code = result.get("fixed_code")
+        if not fixed_code:
+            attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
+            continue
 
-        # Re-run tests
-        if run_service_tests(service):
-            log.info("Self-repair SUCCESS on attempt %d for %s", attempt, file_path)
+        if not _write_container_file(service, container_path, fixed_code):
+            attempts.append({"attempt": attempt, "status": "write_failed"})
+            continue
+        log.info("Wrote LLM fix to %s:%s (attempt %d)", service, container_path, attempt)
+
+        check = _validate_repair(service, container_path)
+        if check["valid"]:
+            log.info("TIER 2 SUCCESS (LLM) on attempt %d for %s", attempt, file_path)
             _notify_monkey_repair_success(service, file_path)
             return {
                 "status": "repaired",
+                "method": "llm_surgeon",
                 "attempts": attempts + [{"attempt": attempt, "status": "success"}],
                 "file": file_path,
                 "service": service,
             }
         else:
-            attempts.append({"attempt": attempt, "status": "tests_still_failing"})
+            log.info("LLM fix validation failed (attempt %d): %s", attempt, check["reason"])
+            attempts.append({"attempt": attempt, "status": "fix_incomplete", "reason": check["reason"]})
 
     # All retries exhausted — restore from production
     log.warning("All %d repair attempts failed for %s — restoring from production", max_retries, file_path)
@@ -1500,9 +1582,8 @@ _MIN_RESPONSE_LENGTH = 30
 
 
 def _run_cognitive_monitor():
-    """Send a heartbeat prompt through /process_packet and validate the response."""
+    """Send a lightweight cognitive probe and validate the response."""
     global _cognitive_monitor_failures, _cognitive_monitor_last_result
-    import uuid
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1535,66 +1616,53 @@ def _run_cognitive_monitor():
             _persist_monitor_result(result)
             return
 
-        # 3. Build CognitionPacket (unique session per probe to avoid history contamination)
-        probe_id = str(uuid.uuid4())[:8]
-        packet = {
-            "session_id": f"cognitive_monitor_{probe_id}",
-            "message_id": str(uuid.uuid4()),
-            "user_input": "Hello GAIA, this is a routine cognitive heartbeat check from gaia-doctor. Please respond briefly.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "source": "doctor",
-            "destination": "internal",
-            "dry_run": True,
-        }
-
-        # 4. POST to /process_packet, read streaming NDJSON response
-        req = Request(
-            "http://gaia-core:6415/process_packet",
-            data=json.dumps(packet).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        resp = urlopen(req, timeout=60)
-        raw = resp.read().decode("utf-8")
-
-        # 5. Accumulate response text from NDJSON token events
+        # 3. Use /api/cognitive/query — lightweight, bypasses full 20-stage pipeline.
+        #    Tries nano first (fastest), falls back to core, then prime.
+        probe_prompt = "What is the current date and time? Respond briefly."
         response_text = ""
-        for line in raw.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
+        probe_target = None
+
+        for target in ("nano", "core", "prime"):
             try:
-                event = json.loads(line)
-                etype = event.get("type", "")
-                if etype == "token":
-                    response_text += event.get("value", event.get("content", ""))
-                elif etype == "final":
-                    response_text = event.get("text", response_text)
-                elif etype == "packet":
-                    # Full packet — extract response candidate
-                    pkt = event.get("value", {})
-                    candidate = pkt.get("response", {}).get("candidate", "")
-                    if candidate and not response_text.strip():
-                        response_text = candidate
-                elif etype == "error":
-                    result["status"] = "fail"
-                    result["error"] = event.get("message", event.get("value", "stream error"))
-                    _handle_monitor_failure(result)
-                    return
-            except json.JSONDecodeError:
-                # Could be raw text response
-                response_text += line
+                payload = json.dumps({
+                    "prompt": probe_prompt,
+                    "system": "You are GAIA. Answer concisely.",
+                    "target": target,
+                    "max_tokens": 100,
+                    "temperature": 0.1,
+                    "no_think": True,
+                }).encode()
+                req = Request(
+                    f"{CORE_ENDPOINT}/api/cognitive/query",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                resp = urlopen(req, timeout=30)
+                data = json.loads(resp.read().decode("utf-8"))
+                text = data.get("content", "")
+                if data.get("error"):
+                    log.debug("Cognitive probe target=%s error: %s", target, data["error"])
+                    continue
+                if text and len(text.strip()) >= _MIN_RESPONSE_LENGTH:
+                    response_text = text.strip()
+                    probe_target = target
+                    break
+                log.debug("Cognitive probe target=%s too short (%d chars)", target, len(text.strip()))
+            except Exception as e:
+                log.debug("Cognitive probe target=%s failed: %s", target, e)
+                continue
 
-        # Strip markdown formatting headers for length check
+        result["probe_target"] = probe_target
+        result["response_text"] = response_text[:500]
+
+        # 4. Validate: non-empty response without error markers
         clean_text = _re.sub(r"[*\[\]()#_`]", "", response_text).strip()
-        result["response_text"] = response_text[:500]  # truncate for storage
-
-        # 6. Validate: non-empty response without error markers
         has_error = bool(_ERROR_PATTERN.search(response_text))
 
         if not clean_text or len(clean_text) < _MIN_RESPONSE_LENGTH:
             result["status"] = "fail"
-            result["error"] = f"empty_response (len={len(clean_text)})"
+            result["error"] = f"empty_response (len={len(clean_text)}, targets_tried=nano,core,prime)"
             _handle_monitor_failure(result)
         elif has_error:
             result["status"] = "fail"
