@@ -241,6 +241,21 @@ async def cognitive_run(request: Request):
         return {"error": str(e)}
 
 
+# ── Cognitive Monitor Proxy (doctor) ──────────────────────────────────────
+
+@router.get("/cognitive/monitor")
+async def cognitive_monitor():
+    """Get cognitive heartbeat monitor status from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/cognitive/monitor")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch cognitive monitor: %s", e)
+    return {"last_result": None, "consecutive_failures": 0, "alarmed": False}
+
+
 # ── Training Pipeline Status ─────────────────────────────────────────────
 
 @router.get("/pipeline/status")

@@ -66,6 +66,9 @@ class SleepCycleLoop:
             timeline_store=self.timeline_store,
         )
 
+        # Wire scheduler↔manager so wake signals can interrupt tasks
+        self.sleep_wake_manager.set_task_scheduler(self.sleep_task_scheduler)
+
         # Phase 3: Thought seed heartbeat (independent of sleep)
         self.heartbeat = None
         heartbeat_enabled = getattr(config, "HEARTBEAT_ENABLED", True)

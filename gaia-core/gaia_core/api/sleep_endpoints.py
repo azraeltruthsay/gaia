@@ -139,6 +139,81 @@ async def distracted_check(request: Request):
     }
 
 
+@router.post("/toggle")
+async def toggle_auto_sleep(request: Request):
+    """Enable or disable automatic sleep transitions.
+
+    Body: {"enabled": true/false}
+    """
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    body = await request.json()
+    enabled = body.get("enabled", True)
+    manager.set_auto_sleep(enabled)
+
+    return {
+        "accepted": True,
+        "auto_sleep_enabled": manager.auto_sleep_enabled,
+        "state": manager.get_state().value,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/force")
+async def force_sleep(request: Request):
+    """Immediately trigger sleep transition (ACTIVE → DROWSY → ASLEEP)."""
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    if manager.get_state().value != "active":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": f"Cannot force sleep from state: {manager.get_state().value}",
+                "state": manager.get_state().value,
+            },
+        )
+
+    entered_sleep = manager.initiate_drowsy()
+
+    return {
+        "accepted": True,
+        "entered_sleep": entered_sleep,
+        "state": manager.get_state().value,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/config")
+async def get_sleep_config(request: Request):
+    """Return current sleep configuration for the dashboard."""
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    sleep_cfg = getattr(manager.config, "SLEEP_CYCLE", None) or {}
+    threshold = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
+
+    return {
+        "auto_sleep_enabled": manager.auto_sleep_enabled,
+        "idle_threshold_minutes": threshold,
+        "state": manager.get_state().value,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.post("/shutdown")
 async def shutdown(request: Request):
     """Initiate graceful shutdown — transitions to OFFLINE and stops the loop."""
