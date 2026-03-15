@@ -14,6 +14,7 @@ log = logging.getLogger("gaia-monkey.chaos")
 
 GAIA_PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", "/gaia/GAIA_Project"))
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
+DOCTOR_ENDPOINT = os.environ.get("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
 
 SERVICES = {
     "gaia-core": ("http://gaia-core:6415/health", "restart"),
@@ -131,10 +132,41 @@ def run_container_drill(targets: list[str] | None = None) -> dict:
     }
 
 
-def run_code_drill(targets: list[str] | None = None) -> dict:
-    """Semantic code fault injection drill. Requires active Defensive Meditation."""
+def _notify_doctor(service: str, file_path: str, fault: str, difficulty: int):
+    """Notify gaia-doctor of a chaos injection so it can drive repair organically."""
+    try:
+        data = json.dumps({
+            "service": service,
+            "file": file_path,
+            "fault": fault,
+            "difficulty": difficulty,
+        }).encode("utf-8")
+        req = Request(
+            f"{DOCTOR_ENDPOINT}/notify/chaos_injection",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode())
+            log.info("🐒 Doctor notified: %s", result.get("status", "unknown"))
+    except Exception as e:
+        log.warning("🐒 Failed to notify doctor: %s", e)
+
+
+def run_code_drill(targets: list[str] | None = None, difficulty: int | None = None) -> dict:
+    """Semantic code fault injection drill. Injects fault then hands off to Doctor.
+
+    Monkey injects -> Doctor detects -> Doctor runs tests -> Doctor repairs/restores.
+    Requires active Defensive Meditation.
+    """
     if not meditation_controller.is_active():
         return {"error": "Code chaos drill requires active Defensive Meditation"}
+
+    # Auto-scale difficulty from serenity if not explicitly provided
+    if difficulty is None:
+        serenity_report = serenity_manager.get_report()
+        difficulty = fault_injector.get_difficulty_for_serenity(serenity_report.get("score", 0.0))
 
     drill_targets = targets or ["gaia-core-candidate"]
     results = []
@@ -145,7 +177,7 @@ def run_code_drill(targets: list[str] | None = None) -> dict:
             continue
 
         url = SERVICES[name][0]
-        entry = {"service": name, "type": "semantic_fault_injection"}
+        entry = {"service": name, "type": "semantic_fault_injection", "difficulty": difficulty}
 
         if not check_health(name, url):
             entry["status"] = "skipped"
@@ -160,8 +192,9 @@ def run_code_drill(targets: list[str] | None = None) -> dict:
             results.append(entry)
             continue
 
-        entry["target_file"] = str(target_file.relative_to(GAIA_PROJECT_ROOT))
-        log.info("🐒 Code chaos: targeting %s in %s", target_file.name, name)
+        rel_path = str(target_file.relative_to(GAIA_PROJECT_ROOT))
+        entry["target_file"] = rel_path
+        log.info("🐒 Code chaos: targeting %s in %s (difficulty=%d)", target_file.name, name, difficulty)
 
         try:
             original_content = target_file.read_text()
@@ -171,10 +204,11 @@ def run_code_drill(targets: list[str] | None = None) -> dict:
             results.append(entry)
             continue
 
-        broken_content, fault_desc = fault_injector.inject_semantic_fault(original_content)
+        broken_content, fault_desc = fault_injector.inject_semantic_fault(original_content, difficulty=difficulty)
         entry["fault_description"] = fault_desc
         log.info("🐒 Code chaos: injecting semantic fault: %s", fault_desc)
 
+        # Validate AST — fall back to NameError injection if broken syntax
         try:
             ast.parse(broken_content)
         except SyntaxError:
@@ -185,153 +219,35 @@ def run_code_drill(targets: list[str] | None = None) -> dict:
             fault_desc = "injected NameError (fallback)"
             entry["fault_description"] = fault_desc
 
-        container_name = name
-        relative_to_service = target_file.relative_to(fault_injector.SERVICE_CODE_DIRS[name])
-        container_path = f"/app/{relative_to_service}"
-
+        # Write broken content to the host file (volume-mounted into container)
         try:
-            inject_cmd = subprocess.run(
-                ["docker", "exec", container_name, "python3", "-c",
-                 f"open({container_path!r}, 'w').write({broken_content!r})"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if inject_cmd.returncode != 0:
-                entry["status"] = "failed"
-                entry["reason"] = f"injection failed: {inject_cmd.stderr.strip()[:200]}"
-                results.append(entry)
-                continue
-        except subprocess.TimeoutExpired:
+            target_file.write_text(broken_content)
+        except Exception as e:
             entry["status"] = "failed"
-            entry["reason"] = "injection timed out"
+            entry["reason"] = f"failed to write fault: {e}"
             results.append(entry)
             continue
 
         log.info("🐒 Code chaos: semantic fault injected into %s", target_file.name)
         entry["fault_injected"] = True
 
+        # Restart container to pick up the broken code
         try:
-            subprocess.run(["docker", "restart", container_name], capture_output=True, text=True, timeout=30)
+            subprocess.run(["docker", "restart", name], capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
             pass
 
-        time.sleep(8)
-        still_healthy = check_health(name, url)
-        entry["post_injection_healthy"] = still_healthy
-
-        if still_healthy:
-            log.info("🐒 Service still healthy after injection (non-critical file) — running LLM repair")
-
-        log.info("🐒 Escalating to Tier 2 (LLM-powered repair) for %s...", target_file.name)
-
-        try:
-            broken_on_disk = target_file.read_text()
-            error_msg = f"CHAOS_MONKEY semantic fault injected: {fault_desc}"
-
-            repair_url = f"{CORE_ENDPOINT}/api/repair/structural"
-            repair_data = json.dumps({
-                "service": name,
-                "broken_code": broken_on_disk,
-                "error_msg": error_msg,
-                "file_path": str(target_file),
-            }).encode("utf-8")
-
-            req = Request(repair_url, data=repair_data,
-                          headers={"Content-Type": "application/json"}, method="POST")
-
-            repair_result = None
-            with urlopen(req, timeout=120) as response:
-                if response.status == 200:
-                    repair_result = json.loads(response.read().decode("utf-8"))
-
-            if repair_result and repair_result.get("status") == "repaired":
-                entry["repair_method"] = "tier2_llm"
-                entry["llm_repaired"] = True
-                log.info("🐒 Tier 2 LLM repair succeeded for %s", target_file.name)
-            else:
-                log.warning("🐒 Tier 2 LLM repair failed — restoring original %s", target_file.name)
-                subprocess.run(
-                    ["docker", "exec", container_name, "python3", "-c",
-                     f"open({container_path!r}, 'w').write({original_content!r})"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                entry["repair_method"] = "manual_restore"
-                entry["llm_repaired"] = False
-
-        except Exception as e:
-            log.error("🐒 Tier 2 repair exception: %s — restoring original", e)
-            subprocess.run(
-                ["docker", "exec", container_name, "python3", "-c",
-                 f"open({container_path!r}, 'w').write({original_content!r})"],
-                capture_output=True, text=True, timeout=10,
-            )
-            entry["repair_method"] = "emergency_restore"
-            entry["llm_repaired"] = False
-            entry["repair_error"] = str(e)[:200]
-
-        try:
-            repaired_content = target_file.read_text()
-            ast.parse(repaired_content)
-            entry["syntax_clean"] = True
-            has_marker = "CHAOS_MONKEY" in repaired_content
-            entry["marker_removed"] = not has_marker
-            if has_marker:
-                log.warning("🐒 Chaos marker still in repaired file — restoring original")
-                subprocess.run(
-                    ["docker", "exec", container_name, "python3", "-c",
-                     f"open({container_path!r}, 'w').write({original_content!r})"],
-                    capture_output=True, text=True, timeout=10,
-                )
-        except SyntaxError:
-            entry["syntax_clean"] = False
-            subprocess.run(
-                ["docker", "exec", container_name, "python3", "-c",
-                 f"open({container_path!r}, 'w').write({original_content!r})"],
-                capture_output=True, text=True, timeout=10,
-            )
-
-        try:
-            subprocess.run(["docker", "restart", container_name], capture_output=True, text=True, timeout=30)
-        except subprocess.TimeoutExpired:
-            pass
-
-        recovered = False
-        for _ in range(6):
-            time.sleep(5)
-            if check_health(name, url):
-                recovered = True
-                break
-
-        if recovered:
-            if entry.get("llm_repaired"):
-                serenity_manager.record_recovery("vital_recovery", f"LLM-repaired code chaos: {target_file.name}", meditation_controller.is_active())
-                serenity_manager.record_recovery("cognitive_validation", f"LLM repair verified: {name}", meditation_controller.is_active())
-                log.info("🐒 Code chaos: LLM-REPAIRED recovery — full Serenity points awarded")
-            else:
-                serenity_manager.record_recovery("standard_recovery", f"code-chaos: {target_file.name}", meditation_controller.is_active())
-
-            serenity_manager.record_recovery("service_recovery", f"code-chaos restart: {name}", meditation_controller.is_active())
-
-            if "core" in name:
-                core_endpoint = SERVICES[name][0].rsplit("/health", 1)[0]
-                log.info("🐒 Running cognitive validation against %s...", name)
-                cog_result = cognitive_validator.validate(core_endpoint)
-                entry["cognitive_validation"] = cog_result
-                if cog_result["passed"]:
-                    serenity_manager.record_recovery("cognitive_validation", f"post-chaos inference: {name}", meditation_controller.is_active())
-                    log.info("🐒 Cognitive validation PASSED for %s (%.0fms)", name, cog_result["latency_ms"])
-                else:
-                    log.warning("🐒 Cognitive validation FAILED for %s", name)
-
-            log.info("🐒 Code chaos drill: %s RECOVERED ✓ (repair: %s)", name, entry.get("repair_method", "unknown"))
-            entry["status"] = "recovered"
-        else:
-            log.error("🐒 Code chaos drill: %s FAILED TO RECOVER after 30s", name)
-            entry["status"] = "failed_recovery"
+        # Notify Doctor — it will detect the fault, run tests, and drive repair
+        _notify_doctor(name, rel_path, fault_desc, difficulty)
+        entry["status"] = "injected"
+        entry["awaiting_doctor"] = True
+        log.info("🐒 Code chaos: fault injected, Doctor notified. Awaiting organic repair.")
 
         results.append(entry)
 
     return {
         "drill_type": "semantic_fault_injection",
+        "difficulty": difficulty,
         "drill_results": results,
         "serenity": serenity_manager.get_report(),
         "meditation_active": meditation_controller.is_active(),

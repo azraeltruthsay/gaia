@@ -149,6 +149,7 @@ HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-stu
 HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "file_hashes.json"
 
 MONKEY_ENDPOINT = os.environ.get("MONKEY_ENDPOINT", "http://gaia-monkey:6420")
+CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
 ES_ENDPOINT = os.environ.get("ES_ENDPOINT", "http://elasticsearch:9200")
 
 logging.basicConfig(
@@ -204,6 +205,14 @@ _dissonance_report: dict = {}            # module-level divergence detection
 _hash_registry: dict = {}               # file -> {hash, mtime} for atomic hashing
 _cognitive_running: bool = False         # True while cognitive battery is executing
 _cognitive_last_result: dict | None = None  # cached last battery run result
+
+# Cognitive monitor (heartbeat probe) state
+_cognitive_monitor_interval = int(os.environ.get("COGNITIVE_MONITOR_INTERVAL", "300"))
+_cognitive_monitor_last_run: float = 0.0
+_cognitive_monitor_failures: int = 0
+_cognitive_monitor_last_result: dict | None = None
+COGNITIVE_MONITOR_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "cognitive_monitor.json"
+
 # ---------------------------------------------------------------------------
 # gaia-monkey integration — delegate chaos/serenity/meditation to monkey service
 # ---------------------------------------------------------------------------
@@ -436,6 +445,10 @@ def audit_code():
             else:
                 log.warning("Tests FAILED for %s code changes. Auto-restart ABORTED.", name)
                 _record_irritation(name, "Code changes detected but tests failed", "CodeAudit: Tests Failed")
+                # If candidate + meditation active -> enter doctor self-repair loop
+                if "candidate" in name and _is_meditation_active():
+                    log.info("Meditation active — entering self-repair for divergent candidate %s", name)
+                    _repair_divergent_candidate(name)
 
 
 def run_service_tests(name: str) -> bool:
@@ -471,6 +484,306 @@ def run_service_tests(name: str) -> bool:
     except Exception as e:
         log.error("Failed to run tests for %s: %s", name, e)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Self-Repair Loop (Chaos Monkey integration)
+# ---------------------------------------------------------------------------
+
+def _get_test_errors(name: str) -> str:
+    """Run pytest and return the error output (last 3K chars) for LLM context."""
+    try:
+        cmd = ["docker", "exec", name, "python", "-m", "pytest", "/app",
+               "-v", "--tb=short", "-m", "not integration"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        output = (result.stdout + "\n" + result.stderr).strip()
+        return output[-3000:]  # Last 3K chars
+    except subprocess.TimeoutExpired:
+        return "pytest timed out (>180s)"
+    except Exception as e:
+        return f"failed to run pytest: {e}"
+
+
+def _notify_monkey_repair_success(service: str, file_path: str):
+    """Notify monkey of successful LLM repair — full serenity points."""
+    try:
+        data = json.dumps({
+            "category": "vital_recovery",
+            "detail": f"Doctor LLM-repaired: {file_path} in {service}",
+        }).encode()
+        req = Request(
+            f"{MONKEY_ENDPOINT}/serenity/record_recovery",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
+def _notify_monkey_repair_restored(service: str, file_path: str):
+    """Notify monkey of restore-only recovery — partial serenity credit."""
+    try:
+        data = json.dumps({
+            "category": "standard_recovery",
+            "detail": f"Doctor restored from production: {file_path} in {service}",
+        }).encode()
+        req = Request(
+            f"{MONKEY_ENDPOINT}/serenity/record_recovery",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
+def restore_from_production(candidate_path: str) -> dict:
+    """Restore a candidate file from its production counterpart.
+
+    Checks for divergence between production and git HEAD before restoring.
+    Falls back to git HEAD if production file is corrupt.
+    """
+    # Derive production path: candidates/gaia-core/x.py -> gaia-core/x.py
+    cand = Path(candidate_path)
+    try:
+        # Find the "candidates/" prefix and strip it
+        parts = cand.parts
+        candidates_idx = parts.index("candidates")
+        prod_rel = Path(*parts[candidates_idx + 1:])
+        prod_path = GAIA_PROJECT_ROOT / prod_rel
+    except (ValueError, IndexError):
+        return {"status": "error", "reason": f"cannot derive production path from {candidate_path}"}
+
+    git_rel = str(prod_rel)
+
+    # Divergence check: compare production file vs git HEAD
+    try:
+        git_content = subprocess.run(
+            ["git", "-C", str(GAIA_PROJECT_ROOT), "show", f"HEAD:{git_rel}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if git_content.returncode == 0:
+            git_text = git_content.stdout
+            if prod_path.exists():
+                prod_text = prod_path.read_text()
+                similarity = difflib.SequenceMatcher(None, prod_text, git_text).ratio()
+                if similarity < 0.50:
+                    log.error("DIVERGENCE ABORT: production vs git HEAD similarity=%.2f for %s", similarity, git_rel)
+                    return {
+                        "status": "divergence_abort",
+                        "reason": f"production vs git HEAD similarity {similarity:.2f} < 0.50 — needs human review",
+                        "file": git_rel,
+                    }
+        else:
+            git_text = None
+            log.warning("git show failed for %s — proceeding without divergence check", git_rel)
+    except Exception as e:
+        git_text = None
+        log.warning("Git divergence check failed: %s — proceeding", e)
+
+    # Try production file first
+    source = "production"
+    try:
+        if prod_path.exists():
+            content = prod_path.read_text()
+            ast.parse(content)
+        else:
+            raise FileNotFoundError(f"production file not found: {prod_path}")
+    except (SyntaxError, FileNotFoundError) as e:
+        log.warning("Production file unusable (%s) — falling back to git HEAD", e)
+        if git_text:
+            try:
+                ast.parse(git_text)
+                content = git_text
+                source = "git_head"
+            except SyntaxError:
+                return {"status": "error", "reason": "both production and git HEAD have syntax errors"}
+        else:
+            return {"status": "error", "reason": f"production file unusable and git HEAD unavailable: {e}"}
+
+    # Write restored content via structural repair endpoint (doctor has ro mount)
+    try:
+        repair_data = json.dumps({
+            "service": "restore",
+            "broken_code": content,  # "broken" is actually the good code
+            "error_msg": "RESTORE_FROM_PRODUCTION — write this content as-is",
+            "file_path": str(cand),
+            "restore_mode": True,
+        }).encode("utf-8")
+        req = Request(
+            f"{CORE_ENDPOINT}/api/repair/structural",
+            data=repair_data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=30) as resp:
+            if resp.status == 200:
+                log.info("Restored %s from %s", candidate_path, source)
+                return {"status": "restored", "source": source, "file": git_rel}
+    except Exception as e:
+        log.error("Restore via structural endpoint failed: %s — writing directly", e)
+
+    # Direct write fallback (if we have rw mount)
+    try:
+        cand.write_text(content)
+        log.info("Restored %s from %s (direct write)", candidate_path, source)
+        return {"status": "restored", "source": source, "file": git_rel}
+    except Exception as e:
+        return {"status": "error", "reason": f"all restore methods failed: {e}"}
+
+
+def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) -> dict:
+    """Attempt LLM-powered repair of a broken candidate file.
+
+    For each attempt (1-3):
+      - Gets test error output for context
+      - POSTs to /api/repair/structural with escalating prompts
+      - Re-runs tests after each write
+      - If tests pass -> return repaired
+    After 3 failures -> restore from production.
+    """
+    attempts = []
+    escalation_prompts = [
+        "Fix the broken code so tests pass. Focus on the error messages below.",
+        "Previous fix attempt failed. Focus specifically on the failing assertions and imports. Be more careful.",
+        "FINAL ATTEMPT: Be very conservative. Only fix the exact lines causing failures. Do not refactor.",
+    ]
+
+    for attempt in range(1, max_retries + 1):
+        log.info("Self-repair attempt %d/%d for %s in %s", attempt, max_retries, file_path, service)
+
+        # Get current test errors
+        test_errors = _get_test_errors(service)
+        prompt = escalation_prompts[min(attempt - 1, len(escalation_prompts) - 1)]
+
+        # Read current broken content
+        try:
+            full_path = GAIA_PROJECT_ROOT / file_path
+            broken_code = full_path.read_text()
+        except Exception as e:
+            attempts.append({"attempt": attempt, "status": "error", "reason": f"cannot read file: {e}"})
+            continue
+
+        # POST to structural repair endpoint
+        try:
+            repair_data = json.dumps({
+                "service": service,
+                "broken_code": broken_code,
+                "error_msg": f"{prompt}\n\nTest errors:\n{test_errors}",
+                "file_path": str(full_path),
+            }).encode("utf-8")
+            req = Request(
+                f"{CORE_ENDPOINT}/api/repair/structural",
+                data=repair_data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode())
+        except Exception as e:
+            attempts.append({"attempt": attempt, "status": "error", "reason": f"repair endpoint failed: {e}"})
+            continue
+
+        if result.get("status") != "repaired":
+            attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
+            continue
+
+        # Re-run tests
+        if run_service_tests(service):
+            log.info("Self-repair SUCCESS on attempt %d for %s", attempt, file_path)
+            _notify_monkey_repair_success(service, file_path)
+            return {
+                "status": "repaired",
+                "attempts": attempts + [{"attempt": attempt, "status": "success"}],
+                "file": file_path,
+                "service": service,
+            }
+        else:
+            attempts.append({"attempt": attempt, "status": "tests_still_failing"})
+
+    # All retries exhausted — restore from production
+    log.warning("All %d repair attempts failed for %s — restoring from production", max_retries, file_path)
+    restore_result = restore_from_production(str(GAIA_PROJECT_ROOT / file_path))
+
+    if restore_result.get("status") == "restored":
+        _notify_monkey_repair_restored(service, file_path)
+        # Restart container after restore
+        try:
+            subprocess.run(["docker", "restart", service], capture_output=True, text=True, timeout=30)
+        except Exception:
+            pass
+
+    return {
+        "status": "restored" if restore_result.get("status") == "restored" else "failed",
+        "attempts": attempts,
+        "restore": restore_result,
+        "file": file_path,
+        "service": service,
+    }
+
+
+def _handle_chaos_notification(data: dict):
+    """Handle notification from monkey about injected chaos fault.
+
+    Sleeps briefly for file write to settle, runs tests, then enters repair loop if needed.
+    """
+    service = data.get("service", "")
+    file_path = data.get("file", "")
+    fault = data.get("fault", "unknown")
+    difficulty = data.get("difficulty", 1)
+
+    log.info("Chaos notification received: %s in %s (difficulty=%d, fault=%s)",
+             file_path, service, difficulty, fault)
+
+    # Brief sleep for file write to settle on disk
+    time.sleep(3)
+
+    # Run tests to confirm the fault breaks something
+    if run_service_tests(service):
+        log.info("Tests still PASS for %s after chaos injection — non-critical fault", service)
+        return
+
+    log.warning("Tests FAILED for %s after chaos injection — entering self-repair loop", service)
+    result = repair_candidate_file(service, file_path)
+    log.info("Self-repair result for %s: %s", file_path, result.get("status", "unknown"))
+
+
+def _repair_divergent_candidate(name: str):
+    """Called from audit_code() when a candidate file fails tests during meditation.
+
+    Finds the changed file(s) and runs the repair loop.
+    """
+    code_dir = SERVICE_CODE_DIRS.get(name)
+    if not code_dir or not code_dir.exists():
+        return
+
+    # Find recently modified .py files (within last 60s) that might be the fault target
+    now = time.time()
+    changed_files = []
+    for p in code_dir.rglob("*.py"):
+        if "__pycache__" in str(p):
+            continue
+        try:
+            if now - p.stat().st_mtime < 60:
+                changed_files.append(p)
+        except OSError:
+            continue
+
+    if not changed_files:
+        log.info("No recently changed files found for %s — skipping repair", name)
+        return
+
+    for changed in changed_files:
+        try:
+            rel_path = str(changed.relative_to(GAIA_PROJECT_ROOT))
+        except ValueError:
+            continue
+        log.info("Attempting organic repair for %s in %s", rel_path, name)
+        result = repair_candidate_file(name, rel_path)
+        log.info("Organic repair result: %s", result.get("status", "unknown"))
 
 
 # ---------------------------------------------------------------------------
@@ -1100,6 +1413,175 @@ def sovereign_promote(divergent_files: list) -> bool:
     return all_healthy
 
 
+# ---------------------------------------------------------------------------
+# Cognitive Monitor — heartbeat probe through full cognitive pipeline
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_ERROR_PATTERN = _re.compile(
+    r"---\s*Error:.*interrupted\s*---|Stream.*interrupted|traceback.*most recent call",
+    _re.IGNORECASE,
+)
+# Minimum response length (chars) to consider the probe a pass
+_MIN_RESPONSE_LENGTH = 30
+
+
+def _run_cognitive_monitor():
+    """Send a heartbeat prompt through /process_packet and validate the response."""
+    global _cognitive_monitor_failures, _cognitive_monitor_last_result
+    import uuid
+
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": "unknown",
+        "response_text": "",
+        "consecutive_failures": _cognitive_monitor_failures,
+        "interval_seconds": _cognitive_monitor_interval,
+    }
+
+    try:
+        # 1. Check sleep status — skip if not ACTIVE
+        try:
+            resp = urlopen("http://gaia-core:6415/sleep/status", timeout=5)
+            sleep_data = json.loads(resp.read().decode("utf-8"))
+            sleep_state = sleep_data.get("state", "active")
+            if sleep_state in ("asleep", "drowsy", "dreaming"):
+                result["status"] = "skipped"
+                result["reason"] = f"sleep_state={sleep_state}"
+                _cognitive_monitor_last_result = result
+                _persist_monitor_result(result)
+                return
+        except Exception:
+            pass  # If we can't reach sleep endpoint, continue with the probe
+
+        # 2. Check maintenance — skip if active
+        if is_maintenance_active():
+            result["status"] = "skipped"
+            result["reason"] = "maintenance_mode"
+            _cognitive_monitor_last_result = result
+            _persist_monitor_result(result)
+            return
+
+        # 3. Build CognitionPacket (unique session per probe to avoid history contamination)
+        probe_id = str(uuid.uuid4())[:8]
+        packet = {
+            "session_id": f"cognitive_monitor_{probe_id}",
+            "message_id": str(uuid.uuid4()),
+            "user_input": "Hello GAIA, this is a routine cognitive heartbeat check from gaia-doctor. Please respond briefly.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "doctor",
+            "destination": "internal",
+            "dry_run": True,
+        }
+
+        # 4. POST to /process_packet, read streaming NDJSON response
+        req = Request(
+            "http://gaia-core:6415/process_packet",
+            data=json.dumps(packet).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urlopen(req, timeout=60)
+        raw = resp.read().decode("utf-8")
+
+        # 5. Accumulate response text from NDJSON token events
+        response_text = ""
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                etype = event.get("type", "")
+                if etype == "token":
+                    response_text += event.get("value", event.get("content", ""))
+                elif etype == "final":
+                    response_text = event.get("text", response_text)
+                elif etype == "packet":
+                    # Full packet — extract response candidate
+                    pkt = event.get("value", {})
+                    candidate = pkt.get("response", {}).get("candidate", "")
+                    if candidate and not response_text.strip():
+                        response_text = candidate
+                elif etype == "error":
+                    result["status"] = "fail"
+                    result["error"] = event.get("message", event.get("value", "stream error"))
+                    _handle_monitor_failure(result)
+                    return
+            except json.JSONDecodeError:
+                # Could be raw text response
+                response_text += line
+
+        # Strip markdown formatting headers for length check
+        clean_text = _re.sub(r"[*\[\]()#_`]", "", response_text).strip()
+        result["response_text"] = response_text[:500]  # truncate for storage
+
+        # 6. Validate: non-empty response without error markers
+        has_error = bool(_ERROR_PATTERN.search(response_text))
+
+        if not clean_text or len(clean_text) < _MIN_RESPONSE_LENGTH:
+            result["status"] = "fail"
+            result["error"] = f"empty_response (len={len(clean_text)})"
+            _handle_monitor_failure(result)
+        elif has_error:
+            result["status"] = "fail"
+            result["error"] = "response_contains_error"
+            _handle_monitor_failure(result)
+        else:
+            result["status"] = "pass"
+            _handle_monitor_success(result)
+
+    except Exception as e:
+        result["status"] = "fail"
+        result["error"] = str(e)[:200]
+        _handle_monitor_failure(result)
+
+
+def _handle_monitor_failure(result: dict):
+    """Increment failures, alarm after threshold."""
+    global _cognitive_monitor_failures, _cognitive_monitor_last_result
+    _cognitive_monitor_failures += 1
+    result["consecutive_failures"] = _cognitive_monitor_failures
+    _cognitive_monitor_last_result = result
+    _persist_monitor_result(result)
+
+    if _cognitive_monitor_failures >= FAILURE_THRESHOLD:
+        if "cognitive_monitor" not in _alarmed_services:
+            log.warning("COGNITIVE MONITOR ALARM: %d consecutive failures — %s",
+                        _cognitive_monitor_failures, result.get("error", "unknown"))
+            _alarmed_services.add("cognitive_monitor")
+            _active_alarms.append({
+                "service": "cognitive_monitor",
+                "time": datetime.now(timezone.utc).isoformat(),
+                "reason": f"cognitive probe failed {_cognitive_monitor_failures}x: {result.get('error', 'unknown')}",
+            })
+    else:
+        log.info("Cognitive monitor probe failed (%d/%d): %s",
+                 _cognitive_monitor_failures, FAILURE_THRESHOLD, result.get("error", "unknown"))
+
+
+def _handle_monitor_success(result: dict):
+    """Clear failures and alarm on success."""
+    global _cognitive_monitor_failures, _cognitive_monitor_last_result
+    if _cognitive_monitor_failures > 0:
+        log.info("Cognitive monitor recovered after %d failures", _cognitive_monitor_failures)
+    _cognitive_monitor_failures = 0
+    result["consecutive_failures"] = 0
+    _cognitive_monitor_last_result = result
+    _alarmed_services.discard("cognitive_monitor")
+    _persist_monitor_result(result)
+
+
+def _persist_monitor_result(result: dict):
+    """Write monitor result to shared JSON file."""
+    try:
+        COGNITIVE_MONITOR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        COGNITIVE_MONITOR_FILE.write_text(json.dumps(result, indent=2))
+    except Exception:
+        log.debug("Failed to persist cognitive monitor result", exc_info=True)
+
+
 def poll_cycle():
     """Run one health check cycle across all services."""
     global _gpu_status_cache, _model_server_cache, _pipeline_status_cache
@@ -1209,6 +1691,13 @@ def poll_cycle():
         except Exception:
             log.debug("Sovereign promotion check failed", exc_info=True)
 
+    # Cognitive monitor heartbeat probe (runs in background thread)
+    global _cognitive_monitor_last_run
+    now_cm = time.time()
+    if now_cm - _cognitive_monitor_last_run >= _cognitive_monitor_interval:
+        _cognitive_monitor_last_run = now_cm
+        threading.Thread(target=_run_cognitive_monitor, daemon=True).start()
+
     _write_status()
 
 
@@ -1306,6 +1795,7 @@ def _build_status() -> dict:
         "gpu": _gpu_status_cache,
         "model_server": _model_server_cache,
         "training_pipeline": _pipeline_status_cache,
+        "cognitive_monitor": _cognitive_monitor_last_result,
     }
     return status
 
@@ -1442,6 +1932,13 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._cognitive_results()
         elif self.path == "/cognitive/tests":
             self._cognitive_tests()
+        elif self.path == "/cognitive/monitor":
+            self._json_response(200, {
+                "last_result": _cognitive_monitor_last_result,
+                "consecutive_failures": _cognitive_monitor_failures,
+                "interval_seconds": _cognitive_monitor_interval,
+                "alarmed": "cognitive_monitor" in _alarmed_services,
+            })
         elif self.path == "/maintenance/status":
             info = get_maintenance_info()
             self._json_response(200, info or {"active": False})
@@ -1474,6 +1971,17 @@ class DoctorHandler(BaseHTTPRequestHandler):
             log.warning("🔧 MAINTENANCE MODE EXITED (duration: %s sec)",
                         result.get("duration_seconds", "unknown"))
             self._json_response(200, result)
+        elif self.path == "/notify/chaos_injection":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                data = {}
+            # Spawn background thread to handle repair — return immediately
+            thread = threading.Thread(target=_handle_chaos_notification, args=(data,), daemon=True)
+            thread.start()
+            self._json_response(200, {"status": "acknowledged", "service": data.get("service", ""), "file": data.get("file", "")})
         else:
             # Chaos, meditation, and serenity management moved to gaia-monkey:6420
             self._json_response(404, {"error": "not found — chaos endpoints moved to gaia-monkey:6420"})

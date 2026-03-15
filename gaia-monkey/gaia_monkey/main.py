@@ -135,7 +135,8 @@ async def chaos_drill(body: dict = {}):
 async def chaos_code(body: dict = {}):
     """Semantic code fault injection."""
     targets = body.get("targets")
-    result = await asyncio.to_thread(chaos_engine.run_code_drill, targets)
+    difficulty = body.get("difficulty")
+    result = await asyncio.to_thread(chaos_engine.run_code_drill, targets, difficulty)
     result["timestamp"] = time.time()
     _drill_history.append(result)
     if len(_drill_history) > 50:
@@ -183,6 +184,16 @@ async def serenity_break(body: dict = {}):
     reason = body.get("reason", "external break request")
     serenity_manager.break_serenity(reason)
     return {"status": "broken", "serenity": serenity_manager.get_report()}
+
+
+@app.post("/serenity/record_recovery")
+async def serenity_record(body: dict = {}):
+    """Record a recovery event from gaia-doctor for serenity scoring."""
+    category = body.get("category", "standard_recovery")
+    detail = body.get("detail", "")
+    serenity_manager.record_recovery(category, detail, meditation_controller.is_active())
+    log.info("🪷 Recovery recorded: %s — %s", category, detail)
+    return {"status": "recorded", "serenity": serenity_manager.get_report()}
 
 
 @app.post("/serenity/reset")
