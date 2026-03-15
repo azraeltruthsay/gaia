@@ -2,9 +2,32 @@
 import logging
 import os
 import random
+import re
 from pathlib import Path
 
 log = logging.getLogger("gaia-monkey.fault")
+
+# ---------------------------------------------------------------------------
+# Difficulty levels — auto-scaled by serenity score
+# ---------------------------------------------------------------------------
+
+DIFFICULTY_LEVELS = {
+    1: ["comment_assignment"],                            # Easy
+    2: ["remove_import", "break_return"],                 # Medium
+    3: ["remove_import", "break_return", "swap_args"],    # Hard
+    4: ["multi_fault"],                                   # Expert (2-3 faults)
+}
+
+
+def get_difficulty_for_serenity(score: float) -> int:
+    """Map serenity score to difficulty level."""
+    if score >= 10.0:
+        return 4
+    if score >= 7.0:
+        return 3
+    if score >= 3.0:
+        return 2
+    return 1
 
 GAIA_PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", "/gaia/GAIA_Project"))
 
@@ -42,13 +65,32 @@ def pick_target_file(service_name: str) -> Path | None:
     return random.choice(candidates) if candidates else None
 
 
-def inject_semantic_fault(content: str) -> tuple[str, str]:
+def inject_semantic_fault(content: str, difficulty: int = 1) -> tuple[str, str]:
     """Inject a semantic fault that passes ast.parse but breaks runtime behavior.
+
+    Args:
+        content: Source code to inject fault into.
+        difficulty: 1-4, controls which fault types are available.
 
     Returns (broken_content, fault_description).
     """
+    difficulty = max(1, min(4, difficulty))
+    available = DIFFICULTY_LEVELS.get(difficulty, DIFFICULTY_LEVELS[1])
+    fault_type = random.choice(available)
+
+    # Multi-fault applies 2-3 single faults sequentially
+    if fault_type == "multi_fault":
+        return _inject_multi_fault(content)
+
+    # Swap args fault
+    if fault_type == "swap_args":
+        result = _inject_swap_args(content)
+        if result:
+            return result
+        # Fall through to other types if no suitable call found
+        fault_type = random.choice(["remove_import", "break_return", "comment_assignment"])
+
     lines = content.split("\n")
-    fault_type = random.choice(["remove_import", "break_return", "comment_assignment"])
 
     if fault_type == "remove_import":
         import_lines = [(i, l) for i, l in enumerate(lines)
@@ -88,3 +130,61 @@ def inject_semantic_fault(content: str) -> tuple[str, str]:
     # Fallback
     lines.insert(0, "_chaos_undefined_var = _this_does_not_exist  # CHAOS_MONKEY_INJECT")
     return "\n".join(lines), "injected NameError via undefined variable reference"
+
+
+def _inject_swap_args(content: str) -> tuple[str, str] | None:
+    """Swap two arguments in a function call. Returns None if no suitable call found."""
+    # Match function calls with 2+ arguments: func(a, b, ...)
+    pattern = re.compile(r'(\w+)\(([^)]+,\s*[^)]+)\)')
+    lines = content.split("\n")
+    candidates = []
+    for i, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        for m in pattern.finditer(line):
+            args = [a.strip() for a in m.group(2).split(",")]
+            if len(args) >= 2 and all(a and "=" not in a for a in args[:2]):
+                candidates.append((i, m, args))
+
+    if not candidates:
+        return None
+
+    idx, match, args = random.choice(candidates)
+    # Swap first two args
+    args[0], args[1] = args[1], args[0]
+    new_call = f"{match.group(1)}({', '.join(args)})"
+    original_line = lines[idx]
+    lines[idx] = lines[idx][:match.start()] + new_call + lines[idx][match.end():]
+    lines[idx] += "  # CHAOS_MONKEY_SWAP"
+    return "\n".join(lines), f"swapped args at line {idx + 1}: {original_line.strip()}"
+
+
+def _inject_multi_fault(content: str) -> tuple[str, str]:
+    """Apply 2-3 single faults sequentially (expert difficulty)."""
+    num_faults = random.randint(2, 3)
+    descriptions = []
+    result = content
+    single_types = ["remove_import", "break_return", "comment_assignment", "swap_args"]
+
+    for _ in range(num_faults):
+        fault_type = random.choice(single_types)
+        if fault_type == "swap_args":
+            swap_result = _inject_swap_args(result)
+            if swap_result:
+                result, desc = swap_result
+                descriptions.append(desc)
+                continue
+            fault_type = "comment_assignment"
+
+        # Use difficulty=1 to get single-fault behavior (picks from comment_assignment)
+        # but override with specific type
+        broken, desc = inject_semantic_fault(result, difficulty=2 if fault_type != "comment_assignment" else 1)
+        if broken != result:
+            result = broken
+            descriptions.append(desc)
+
+    if not descriptions:
+        # Fallback — at least inject one fault
+        return inject_semantic_fault(content, difficulty=2)
+
+    return result, f"multi_fault ({len(descriptions)}): " + " | ".join(descriptions)

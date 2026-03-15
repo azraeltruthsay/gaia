@@ -112,6 +112,13 @@ services:
     ports:
       - "7777:7777"
 
+    # LMCache KV persistence: blocked by vLLM 0.17 + Qwen3.5 hybrid arch.
+    # LMCacheConnectorV1 doesn't implement SupportsHMA, so:
+    #   - With HMA disabled: "failed to convert hybrid KV cache specs to one unified type"
+    #   - With HMA enabled:  "Connector LMCacheConnectorV1 does not support HMA"
+    # When LMCache ships HMA support, add to command block:
+    #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+    # Config, volume, and env var are already wired — just needs this flag.
     command: >
       ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-merged}
       --host 0.0.0.0
@@ -669,8 +676,10 @@ services:
       - COMPOSE_PROJECT_NAME=gaia_project
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
       - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
       - SHARED_DIR=/shared
+      - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
 
     volumes:
       # Docker socket (read-write — doctor needs to restart containers)
