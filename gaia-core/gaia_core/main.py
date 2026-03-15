@@ -732,6 +732,20 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             from gaia_core.utils.output_router import _strip_think_tags_robust
 
+            import re as _re
+            _think_tag_re = _re.compile(r'</?(?:think|thinking)[^>]*>')
+            _think_block_re = _re.compile(r'<(?:think|thinking)>.*?</(?:think|thinking)>\s*', _re.DOTALL)
+            _think_unclosed_re = _re.compile(r'<(?:think|thinking)>.*$', _re.DOTALL)
+
+            def _strip_think_token(text: str) -> str:
+                """Strip think tags from a streaming token WITHOUT stripping whitespace."""
+                if not text or "<" not in text:
+                    return text
+                result = _think_block_re.sub('', text)
+                result = _think_unclosed_re.sub('', result)
+                result = _think_tag_re.sub('', result)
+                return result
+
             # AgentCore.run_turn is a synchronous generator. Each next()
             # call may block for seconds during llama_cpp inference.
             # Running in a thread executor prevents blocking the uvicorn
@@ -759,7 +773,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                 if isinstance(event, dict):
                     if event.get("type") == "token":
                         val = event.get("value", "")
-                        val = _strip_think_tags_robust(val)
+                        val = _strip_think_token(val)
                         if not val:
                             continue
                         response_pieces.append(val)

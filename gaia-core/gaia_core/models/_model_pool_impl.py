@@ -560,7 +560,7 @@ class ModelPool:
                     "endpoint": core_cpu_endpoint,
                     "path": core_cpu_model,
                     "enabled": True,
-                    "max_model_len": 4096,
+                    "max_model_len": int(os.getenv("CORE_CPU_CTX", "8192")),
                 }
                 self.config.MODEL_CONFIGS["lite"] = {"alias": "core", "enabled": True}
                 logger.info("CORE_CPU_ENDPOINT set: core/lite -> llama-server @ %s", core_cpu_endpoint)

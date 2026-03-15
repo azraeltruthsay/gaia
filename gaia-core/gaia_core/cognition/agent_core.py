@@ -1773,6 +1773,7 @@ class AgentCore:
                 yield {"type": "token", "value": phase_header}
 
                 current_turn_pieces = []
+                _stream_buf = ""  # Rolling buffer for live repetition detection
                 try:
                     stream_generator = voice.stream_response()
                     for item in stream_generator:
@@ -1784,9 +1785,30 @@ class AgentCore:
                                 logger.warning(f"AgentCore: Observer interruption during debate turn {debate_turn}: {reason_data}")
                                 break
                         else:
-                            current_turn_pieces.append(str(item))
+                            token_str = str(item)
+                            _stream_buf += token_str
+                            # Live repetition detection: if the buffer's second half
+                            # repeats the first half, stop streaming.
+                            _sb_len = len(_stream_buf)
+                            if _sb_len >= 80:
+                                _half = _sb_len // 2
+                                if _stream_buf[_half:].strip() and _stream_buf[:_half].rstrip().endswith(_stream_buf[_half:].strip()):
+                                    logger.warning("AgentCore: Stream repetition detected at %d chars; truncating.", _sb_len)
+                                    break
+                                # Also check if a sentence-level block is repeated
+                                _stripped = _stream_buf.strip()
+                                _mid = len(_stripped) // 2
+                                if _mid >= 30:
+                                    _first = _stripped[:_mid].strip()
+                                    _second = _stripped[_mid:].strip()
+                                    if _first and _second and _first == _second:
+                                        logger.warning("AgentCore: Block duplication detected in stream; truncating.")
+                                        # Remove the duplicate from pieces
+                                        current_turn_pieces = current_turn_pieces[:len(current_turn_pieces)//2] if current_turn_pieces else current_turn_pieces
+                                        break
+                            current_turn_pieces.append(token_str)
                             # Yield token for real-time streaming
-                            yield {"type": "token", "value": str(item)}
+                            yield {"type": "token", "value": token_str}
                 except Exception:
                     logger.exception(f"AgentCore: Stream from {selected_model_name} failed")
                     yield {"type": "token", "value": f"--- Error: Stream from {role_label} {identity_label} interrupted ---"}
@@ -2363,7 +2385,7 @@ class AgentCore:
         return " ".join(result)
 
     @staticmethod
-    def _dedup_block(text: str, min_block: int = 120, similarity_threshold: float = 0.85) -> str:
+    def _dedup_block(text: str, min_block: int = 40, similarity_threshold: float = 0.85) -> str:
         """
         Detect and remove whole-block duplication where the model outputs the
         same response twice back-to-back.

@@ -264,7 +264,7 @@ services:
       # Embedded llama-server config
       - CORE_CPU_PORT=8092
       - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf
-      - CORE_CPU_CTX=4096
+      - CORE_CPU_CTX=8192
       - CORE_CPU_THREADS=8
       # KV cache persistence for embedded llama-server
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
