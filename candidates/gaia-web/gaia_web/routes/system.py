@@ -269,3 +269,153 @@ async def pipeline_status():
     except Exception as e:
         logger.debug("Failed to fetch pipeline status: %s", e)
     return {"status": "no pipeline running"}
+
+
+@router.post("/pipeline/run")
+async def pipeline_run(request: Request):
+    """Trigger self-awareness pipeline run via gaia-doctor → gaia-study."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/pipeline/run",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to trigger pipeline run: %s", e)
+        return {"error": str(e)}
+
+
+# ── Doctor Detail Proxies ────────────────────────────────────────────────
+
+@router.get("/doctor/status")
+async def doctor_status():
+    """Get raw doctor status (alarms, irritations summary, remediations, serenity)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/status")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch doctor status: %s", e)
+    return {}
+
+
+@router.get("/irritations")
+async def doctor_irritations():
+    """Get full irritation list from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/irritations")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch irritations: %s", e)
+    return {"irritations": []}
+
+
+@router.get("/dissonance")
+async def doctor_dissonance():
+    """Get prod vs candidate dissonance report from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/dissonance")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch dissonance: %s", e)
+    return {}
+
+
+# ── Surgeon Approval Queue Proxies ───────────────────────────────────────
+
+@router.get("/surgeon/config")
+async def surgeon_config_get():
+    """Get surgeon approval config from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/surgeon/config")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch surgeon config: %s", e)
+    return {"approval_required": False}
+
+
+@router.post("/surgeon/config")
+async def surgeon_config_set(request: Request):
+    """Toggle surgeon approval mode on gaia-doctor."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/surgeon/config",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to set surgeon config: %s", e)
+        return {"error": str(e)}
+
+
+@router.get("/surgeon/queue")
+async def surgeon_queue():
+    """Get pending surgeon repair proposals from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/surgeon/queue")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch surgeon queue: %s", e)
+    return {"queue": []}
+
+
+@router.post("/surgeon/approve")
+async def surgeon_approve(request: Request):
+    """Approve a queued surgeon repair proposal."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/surgeon/approve",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to approve surgeon repair: %s", e)
+        return {"error": str(e)}
+
+
+@router.post("/surgeon/reject")
+async def surgeon_reject(request: Request):
+    """Reject a queued surgeon repair proposal."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{DOCTOR_URL}/surgeon/reject",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        logger.debug("Failed to reject surgeon repair: %s", e)
+        return {"error": str(e)}
+
+
+@router.get("/surgeon/history")
+async def surgeon_history():
+    """Get surgeon repair history from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/surgeon/history")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch surgeon history: %s", e)
+    return {"history": []}

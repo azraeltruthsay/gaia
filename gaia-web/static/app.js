@@ -1006,6 +1006,8 @@ function hooksPanel() {
     sleepUptime: '--',
     autoSleepEnabled: true,
     sleepThreshold: 30,
+    wakeDiscordTyping: true,
+    wakeWorkstationActivity: false,
     gpuOwner: '--',
     gpuVram: '--',
     codexQuery: '',
@@ -1121,8 +1123,40 @@ function hooksPanel() {
       }
     },
 
+    async refreshWakeConfig() {
+      try {
+        const resp = await fetch('/api/hooks/sleep/wake-config');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.discord_typing != null) this.wakeDiscordTyping = data.discord_typing;
+          if (data.workstation_activity != null) this.wakeWorkstationActivity = data.workstation_activity;
+        }
+      } catch { /* ignore */ }
+    },
+
+    async toggleWakeTrigger(trigger, enabled) {
+      this.logEntry('sleep/wake-toggle', `${trigger} → ${enabled}`, false);
+      try {
+        const resp = await fetch('/api/hooks/sleep/wake-toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger, enabled }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.wake_config) {
+          this.wakeDiscordTyping = data.wake_config.discord_typing ?? this.wakeDiscordTyping;
+          this.wakeWorkstationActivity = data.wake_config.workstation_activity ?? this.wakeWorkstationActivity;
+          this.logEntry('sleep/wake-toggle', JSON.stringify(data).substring(0, 120), false);
+        } else {
+          this.logEntry('sleep/wake-toggle', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (e) {
+        this.logEntry('sleep/wake-toggle', `Failed: ${e.message}`, true);
+      }
+    },
+
     async refreshAll() {
-      await Promise.all([this.refreshSleep(), this.refreshGpu()]);
+      await Promise.all([this.refreshSleep(), this.refreshGpu(), this.refreshWakeConfig()]);
     },
 
     async action(endpoint) {
@@ -1328,6 +1362,9 @@ function pipelinePanel() {
     pipelineStatus: '--',
     currentStage: '',
     alignmentStatus: '',
+    pipelineRunning: false,
+    dryRun: false,
+    skipNano: false,
     _timer: null,
 
     async init() {
@@ -1350,8 +1387,10 @@ function pipelinePanel() {
           let running = Object.entries(stages).find(([_, s]) => s.status === 'running');
           if (running) {
             this.pipelineStatus = 'Running';
+            this.pipelineRunning = true;
             this.currentStage = running[0];
           } else {
+            this.pipelineRunning = false;
             let completed = Object.entries(stages).filter(([_, s]) => s.status === 'completed');
             if (completed.length > 0) {
               this.pipelineStatus = 'Completed';
@@ -1365,6 +1404,286 @@ function pipelinePanel() {
       } catch {
         this.pipelineStatus = '--';
       }
+    },
+
+    async runPipeline() {
+      if (this.pipelineRunning) return;
+      this.pipelineRunning = true;
+      this.pipelineStatus = 'Starting...';
+      try {
+        const opts = {};
+        if (this.dryRun) opts.dry_run = true;
+        if (this.skipNano) opts.skip_nano = true;
+        const r = await fetch('/api/system/pipeline/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(opts),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          this.pipelineStatus = 'Running';
+          // Poll more frequently while running
+          if (this._timer) clearInterval(this._timer);
+          this._timer = setInterval(() => this.poll(), 5000);
+        } else {
+          this.pipelineStatus = data.error || 'Failed';
+          this.pipelineRunning = false;
+        }
+      } catch (e) {
+        this.pipelineStatus = 'Error: ' + e.message;
+        this.pipelineRunning = false;
+      }
+    },
+
+    async runSmoke() {
+      if (this.pipelineRunning) return;
+      this.pipelineRunning = true;
+      this.pipelineStatus = 'Starting smoke...';
+      try {
+        const r = await fetch('/api/system/pipeline/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: 'COGNITIVE_SMOKE' }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          this.pipelineStatus = 'Running (smoke)';
+          if (this._timer) clearInterval(this._timer);
+          this._timer = setInterval(() => this.poll(), 5000);
+        } else {
+          this.pipelineStatus = data.error || 'Failed';
+          this.pipelineRunning = false;
+        }
+      } catch (e) {
+        this.pipelineStatus = 'Error: ' + e.message;
+        this.pipelineRunning = false;
+      }
+    },
+  };
+}
+
+
+// ── Doctor & Immunity Panel ─────────────────────────────────────────────────
+
+function doctorPanel() {
+  return {
+    // Status from /status polling
+    irritations: [],
+    irritationCount: 0,
+    alarms: [],
+    alarmCount: 0,
+    maintenanceActive: false,
+    remediations: [],
+    serenityScore: 0,
+    serenityThreshold: 5.0,
+    dissonanceCount: 0,
+    dissonanceFiles: [],
+
+    // Surgeon state
+    surgeonApprovalRequired: false,
+    surgeonQueue: [],
+    surgeonHistory: [],
+
+    // UI toggles
+    showIrritations: false,
+    showRemediations: false,
+    showDissonance: false,
+    showSurgeonHistory: false,
+    expandedRepair: null,
+
+    _timer: null,
+
+    async init() {
+      await this.pollDoctor();
+      this._timer = setInterval(() => this.pollDoctor(), 10000);
+    },
+
+    destroy() {
+      if (this._timer) clearInterval(this._timer);
+    },
+
+    async pollDoctor() {
+      // Parallel fetch: doctor status + maintenance + surgeon config + surgeon queue + irritations + dissonance
+      const fetches = await Promise.allSettled([
+        fetch('/api/system/doctor/status'),     // 0: full doctor status (alarms, remediations, serenity, maintenance)
+        fetch('/api/system/maintenance/status'), // 1: maintenance
+        fetch('/api/system/surgeon/config'),     // 2: surgeon config
+        fetch('/api/system/surgeon/queue'),      // 3: surgeon queue
+        fetch('/api/system/irritations'),        // 4: irritations
+        fetch('/api/system/dissonance'),         // 5: dissonance
+      ]);
+
+      // [0] Doctor status — alarms, remediations, serenity, maintenance
+      if (fetches[0].status === 'fulfilled' && fetches[0].value.ok) {
+        try {
+          const data = await fetches[0].value.json();
+          // Serenity
+          if (data.serenity) {
+            this.serenityScore = data.serenity.score ?? data.serenity.total ?? 0;
+            this.serenityThreshold = data.serenity.threshold ?? 5.0;
+          }
+          // Alarms
+          this.alarms = data.active_alarms || [];
+          this.alarmCount = this.alarms.length;
+          // Remediations
+          this.remediations = data.recent_remediations || [];
+          // Maintenance
+          this.maintenanceActive = data.maintenance_mode || false;
+        } catch {}
+      }
+
+      // [1] Maintenance (fallback / authoritative)
+      if (fetches[1].status === 'fulfilled' && fetches[1].value.ok) {
+        try {
+          const data = await fetches[1].value.json();
+          this.maintenanceActive = data.active || false;
+        } catch {}
+      }
+
+      // [2] Surgeon config
+      if (fetches[2].status === 'fulfilled' && fetches[2].value.ok) {
+        try {
+          const data = await fetches[2].value.json();
+          this.surgeonApprovalRequired = data.approval_required || false;
+        } catch {}
+      }
+
+      // [3] Surgeon queue
+      if (fetches[3].status === 'fulfilled' && fetches[3].value.ok) {
+        try {
+          const data = await fetches[3].value.json();
+          this.surgeonQueue = data.queue || [];
+        } catch {}
+      }
+
+      // [4] Irritations
+      if (fetches[4].status === 'fulfilled' && fetches[4].value.ok) {
+        try {
+          const data = await fetches[4].value.json();
+          const list = data.irritations || [];
+          this.irritationCount = list.length;
+          if (this.showIrritations) {
+            this.irritations = list.slice(-20);
+          }
+        } catch {}
+      }
+
+      // [5] Dissonance
+      if (fetches[5].status === 'fulfilled' && fetches[5].value.ok) {
+        try {
+          const data = await fetches[5].value.json();
+          const diverged = data.diverged || [];
+          this.dissonanceCount = diverged.length;
+          if (this.showDissonance) {
+            this.dissonanceFiles = diverged.slice(0, 20);
+          }
+        } catch {}
+      }
+    },
+
+    async toggleIrritations() {
+      this.showIrritations = !this.showIrritations;
+      if (this.showIrritations && this.irritations.length === 0) {
+        try {
+          const r = await fetch('/api/system/irritations');
+          if (r.ok) {
+            const data = await r.json();
+            this.irritations = (data.irritations || []).slice(-20);
+          }
+        } catch {}
+      }
+    },
+
+    async toggleDissonance() {
+      this.showDissonance = !this.showDissonance;
+      if (this.showDissonance && this.dissonanceFiles.length === 0) {
+        try {
+          const r = await fetch('/api/system/dissonance');
+          if (r.ok) {
+            const data = await r.json();
+            this.dissonanceFiles = (data.diverged || []).slice(0, 20);
+          }
+        } catch {}
+      }
+    },
+
+    async toggleMaintenance() {
+      const endpoint = this.maintenanceActive
+        ? '/api/system/maintenance/exit'
+        : '/api/system/maintenance/enter';
+      try {
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard', entered_by: 'dashboard' }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          this.maintenanceActive = !this.maintenanceActive;
+        }
+      } catch {}
+    },
+
+    async toggleSurgeonApproval() {
+      try {
+        const r = await fetch('/api/system/surgeon/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approval_required: !this.surgeonApprovalRequired }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          this.surgeonApprovalRequired = data.approval_required;
+        }
+      } catch {}
+    },
+
+    async approveRepair(repairId) {
+      try {
+        const r = await fetch('/api/system/surgeon/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repair_id: repairId }),
+        });
+        if (r.ok) {
+          // Remove from queue, refresh
+          this.surgeonQueue = this.surgeonQueue.filter(p => p.repair_id !== repairId);
+          this.expandedRepair = null;
+          await this.fetchSurgeonHistory();
+        }
+      } catch {}
+    },
+
+    async rejectRepair(repairId) {
+      try {
+        const r = await fetch('/api/system/surgeon/reject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repair_id: repairId }),
+        });
+        if (r.ok) {
+          this.surgeonQueue = this.surgeonQueue.filter(p => p.repair_id !== repairId);
+          this.expandedRepair = null;
+          await this.fetchSurgeonHistory();
+        }
+      } catch {}
+    },
+
+    async toggleSurgeonHistory() {
+      this.showSurgeonHistory = !this.showSurgeonHistory;
+      if (this.showSurgeonHistory) {
+        await this.fetchSurgeonHistory();
+      }
+    },
+
+    async fetchSurgeonHistory() {
+      try {
+        const r = await fetch('/api/system/surgeon/history');
+        if (r.ok) {
+          const data = await r.json();
+          this.surgeonHistory = (data.history || []).slice(-20);
+        }
+      } catch {}
     },
   };
 }

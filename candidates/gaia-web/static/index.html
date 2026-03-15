@@ -250,6 +250,31 @@
         </div>
       </div>
 
+      <!-- Prime Wake Triggers -->
+      <div class="hook-group">
+        <div class="hook-group-header">Prime Wake Triggers</div>
+        <div class="hook-status">
+          <div>
+            <span class="hook-status-label">Discord Typing:</span>
+            <div class="hook-status-hint">Wake Prime when a DM user starts typing</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="wakeDiscordTyping" @change="toggleWakeTrigger('discord_typing', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="hook-status">
+          <div>
+            <span class="hook-status-label">Workstation Activity:</span>
+            <div class="hook-status-hint">Wake Prime on keyboard/mouse after idle</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="wakeWorkstationActivity" @change="toggleWakeTrigger('workstation_activity', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
       <!-- GPU Management -->
       <div class="hook-group">
         <div class="hook-group-header">GPU Management</div>
@@ -387,6 +412,169 @@
           <span class="hook-status-label">Alignment:</span>
           <span class="hook-status-value alignment-badge" :class="'align-' + alignmentStatus.toLowerCase()"
                 x-text="alignmentStatus"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Options:</span>
+          <div style="display:flex;gap:10px;font-size:12px;">
+            <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
+            <label><input type="checkbox" x-model="skipNano"> Skip Nano</label>
+          </div>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" @click="runPipeline()" :disabled="pipelineRunning">
+            <span x-show="!pipelineRunning">Run Pipeline</span>
+            <span x-show="pipelineRunning">Running...</span>
+          </button>
+          <button class="hook-btn cognitive-run-btn" @click="runSmoke()" :disabled="pipelineRunning">
+            Smoke Only
+          </button>
+        </div>
+      </div>
+
+      <!-- Doctor & Immunity -->
+      <div class="hook-group hook-group-wide" x-data="doctorPanel()" x-init="init()">
+        <div class="hook-group-header">Doctor & Immunity</div>
+
+        <!-- Irritations -->
+        <div class="hook-status">
+          <span class="hook-status-label">Irritations:</span>
+          <span class="hook-status-value" x-text="irritationCount"></span>
+          <button class="hook-btn hook-btn-sm" x-show="irritationCount > 0" @click="toggleIrritations()">
+            <span x-text="showIrritations ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showIrritations" x-collapse class="doctor-detail-section">
+          <template x-for="irr in irritations" :key="irr.timestamp + irr.service">
+            <div class="irritation-entry">
+              <span class="doctor-entry-service" x-text="irr.service"></span>
+              <span class="doctor-entry-msg" x-text="irr.pattern || irr.line?.substring(0, 120)"></span>
+              <span class="doctor-entry-time" x-text="irr.timestamp?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Alarms -->
+        <div class="hook-status">
+          <span class="hook-status-label">Active Alarms:</span>
+          <span :class="alarmCount > 0 ? 'hook-status-value alarm-badge' : 'hook-status-value'" x-text="alarmCount"></span>
+        </div>
+        <template x-for="alarm in alarms" :key="alarm">
+          <div class="alarm-entry" x-text="alarm"></div>
+        </template>
+
+        <!-- Maintenance -->
+        <div class="hook-status">
+          <span class="hook-status-label">Maintenance:</span>
+          <button class="hook-btn" :class="maintenanceActive ? 'hook-btn-warn' : 'hook-btn-sm'" @click="toggleMaintenance()">
+            <span x-text="maintenanceActive ? 'Exit Maintenance' : 'Enter Maintenance'"></span>
+          </button>
+        </div>
+
+        <!-- Serenity -->
+        <div class="hook-status">
+          <span class="hook-status-label">Serenity:</span>
+          <div class="serenity-meter">
+            <div class="serenity-bar" :style="'width:' + Math.min(serenityScore / serenityThreshold * 100, 100) + '%'"
+                 :class="serenityScore < 3 ? 'serenity-low' : serenityScore < 5 ? 'serenity-mid' : 'serenity-high'"></div>
+          </div>
+          <span class="hook-status-value" x-text="serenityScore.toFixed(1) + ' / ' + serenityThreshold.toFixed(1)"></span>
+        </div>
+
+        <!-- Dissonance -->
+        <div class="hook-status">
+          <span class="hook-status-label">Dissonance:</span>
+          <span class="hook-status-value" x-text="dissonanceCount + ' files drifted'"></span>
+          <button class="hook-btn hook-btn-sm" x-show="dissonanceCount > 0" @click="toggleDissonance()">
+            <span x-text="showDissonance ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showDissonance" x-collapse class="doctor-detail-section">
+          <template x-for="d in dissonanceFiles" :key="d.file || d">
+            <div class="irritation-entry">
+              <span class="doctor-entry-msg" x-text="d.file || d"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Remediations -->
+        <div class="hook-status">
+          <span class="hook-status-label">Remediations:</span>
+          <span class="hook-status-value" x-text="remediations.length"></span>
+          <button class="hook-btn hook-btn-sm" x-show="remediations.length > 0" @click="showRemediations = !showRemediations">
+            <span x-text="showRemediations ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showRemediations" x-collapse class="doctor-detail-section">
+          <template x-for="rem in remediations" :key="rem.timestamp + rem.service">
+            <div class="remediation-entry">
+              <span class="doctor-entry-service" x-text="rem.service"></span>
+              <span class="doctor-entry-msg" x-text="rem.action || rem.type || 'remediation'"></span>
+              <span class="doctor-entry-time" x-text="rem.timestamp?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Surgeon Section Divider -->
+        <div class="doctor-section-divider">Surgeon</div>
+
+        <!-- Human Approval Toggle -->
+        <div class="hook-status">
+          <span class="hook-status-label">Human Approval:</span>
+          <button class="hook-btn" :class="surgeonApprovalRequired ? 'hook-btn-warn' : 'hook-btn-sm'" @click="toggleSurgeonApproval()">
+            <span x-text="surgeonApprovalRequired ? 'ON (click to disable)' : 'OFF (click to enable)'"></span>
+          </button>
+        </div>
+
+        <!-- Pending Repairs -->
+        <div class="hook-status">
+          <span class="hook-status-label">Pending Repairs:</span>
+          <span class="hook-status-value" x-text="surgeonQueue.length"></span>
+        </div>
+        <template x-for="proposal in surgeonQueue" :key="proposal.repair_id">
+          <div class="surgeon-proposal">
+            <div class="surgeon-proposal-header" @click="expandedRepair = expandedRepair === proposal.repair_id ? null : proposal.repair_id">
+              <span class="surgeon-proposal-id" x-text="proposal.repair_id"></span>
+              <span class="doctor-entry-service" x-text="proposal.service"></span>
+              <span class="doctor-entry-msg" x-text="proposal.file?.split('/').pop()"></span>
+            </div>
+            <div x-show="expandedRepair === proposal.repair_id" x-collapse>
+              <div class="surgeon-proposal-detail">
+                <div class="surgeon-error-msg" x-show="proposal.error_msg">
+                  <strong>Error:</strong> <span x-text="proposal.error_msg?.substring(0, 300)"></span>
+                </div>
+                <div class="surgeon-diff-preview">
+                  <div class="surgeon-diff-label">Broken Code (excerpt):</div>
+                  <pre x-text="proposal.broken_code?.substring(0, 500) + (proposal.broken_code?.length > 500 ? '\n...' : '')"></pre>
+                </div>
+                <div class="surgeon-diff-preview">
+                  <div class="surgeon-diff-label">Fixed Code (excerpt):</div>
+                  <pre x-text="proposal.fixed_code?.substring(0, 500) + (proposal.fixed_code?.length > 500 ? '\n...' : '')"></pre>
+                </div>
+                <div class="surgeon-actions">
+                  <button class="surgeon-approve-btn" @click="approveRepair(proposal.repair_id)">Approve</button>
+                  <button class="surgeon-reject-btn" @click="rejectRepair(proposal.repair_id)">Reject</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Surgeon History -->
+        <div class="hook-status">
+          <span class="hook-status-label">Recent Repairs:</span>
+          <span class="hook-status-value" x-text="surgeonHistory.length"></span>
+          <button class="hook-btn hook-btn-sm" x-show="surgeonHistory.length > 0" @click="toggleSurgeonHistory()">
+            <span x-text="showSurgeonHistory ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showSurgeonHistory" x-collapse class="doctor-detail-section">
+          <template x-for="h in surgeonHistory" :key="h.repair_id">
+            <div class="remediation-entry">
+              <span class="doctor-entry-service" x-text="h.service"></span>
+              <span class="doctor-entry-msg" x-text="h.file?.split('/').pop() + ' — ' + h.status"></span>
+              <span class="doctor-entry-time" x-text="h.resolved_at?.substring(11, 19) || h.queued_at?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
         </div>
       </div>
 

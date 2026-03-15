@@ -214,6 +214,37 @@ _cognitive_monitor_last_result: dict | None = None
 COGNITIVE_MONITOR_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "cognitive_monitor.json"
 
 # ---------------------------------------------------------------------------
+# Surgeon Approval Queue
+# ---------------------------------------------------------------------------
+
+SURGEON_CONFIG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "surgeon_config.json"
+_surgeon_approval_required: bool = False
+_surgeon_queue: list[dict] = []       # pending repair proposals
+_surgeon_history: list[dict] = []     # completed/rejected (last 50)
+
+
+def _load_surgeon_config():
+    """Load surgeon config from shared file on startup."""
+    global _surgeon_approval_required
+    try:
+        if SURGEON_CONFIG_FILE.exists():
+            data = json.loads(SURGEON_CONFIG_FILE.read_text())
+            _surgeon_approval_required = data.get("approval_required", False)
+    except (json.JSONDecodeError, OSError):
+        pass
+
+
+def _save_surgeon_config():
+    """Persist surgeon config to shared file."""
+    try:
+        SURGEON_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SURGEON_CONFIG_FILE.write_text(json.dumps({
+            "approval_required": _surgeon_approval_required,
+        }, indent=2))
+    except OSError as e:
+        log.warning("Failed to save surgeon config: %s", e)
+
+# ---------------------------------------------------------------------------
 # gaia-monkey integration — delegate chaos/serenity/meditation to monkey service
 # ---------------------------------------------------------------------------
 
@@ -288,6 +319,10 @@ def _init_state():
         _restart_history[name] = []
         _last_log_offsets[name] = 0
         _code_mtimes[name] = _get_service_mtime(name)
+
+    # Load surgeon approval config from persistent file
+    _load_surgeon_config()
+    log.info("Surgeon approval mode: %s", "ON" if _surgeon_approval_required else "OFF")
 
     # Generate cognitive rubric for observer scoring
     if _BATTERY_AVAILABLE:
@@ -841,6 +876,33 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
         if not fixed_code:
             attempts.append({"attempt": attempt, "status": "repair_rejected", "detail": str(result)[:200]})
             continue
+
+        # ── Surgeon approval gate ────────────────────────────────
+        if _surgeon_approval_required:
+            repair_id = f"repair_{hashlib.md5(f'{service}:{file_path}:{time.time()}'.encode()).hexdigest()[:12]}"
+            test_errors = _get_test_errors(service)
+            proposal = {
+                "repair_id": repair_id,
+                "service": service,
+                "file": file_path,
+                "container_path": container_path,
+                "broken_code": current_code,
+                "fixed_code": fixed_code,
+                "error_msg": test_errors[:2000] if test_errors else "",
+                "method": "llm_surgeon",
+                "attempt": attempt,
+                "queued_at": datetime.now(timezone.utc).isoformat(),
+                "status": "pending",
+            }
+            _surgeon_queue.append(proposal)
+            log.info("Surgeon approval required — queued repair %s for %s:%s", repair_id, service, file_path)
+            return {
+                "status": "pending_approval",
+                "repair_id": repair_id,
+                "attempts": attempts + [{"attempt": attempt, "status": "queued_for_approval"}],
+                "file": file_path,
+                "service": service,
+            }
 
         if not _write_container_file(service, container_path, fixed_code):
             attempts.append({"attempt": attempt, "status": "write_failed"})
@@ -1893,6 +1955,8 @@ def _fetch_pipeline_status() -> dict | None:
                 "stages_total": len(stages),
                 "current_stage": running[0] if running else None,
                 "failed_stages": failed,
+                "alignment_status": data.get("alignment_status", "UNTRAINED"),
+                "stages": stages,
                 "pre_eval_f1": data.get("pre_eval", {}).get("core_avg_f1"),
                 "post_eval_f1": data.get("post_eval", {}).get("core_avg_f1"),
             }
@@ -2088,6 +2152,12 @@ class DoctorHandler(BaseHTTPRequestHandler):
         elif self.path == "/maintenance/status":
             info = get_maintenance_info()
             self._json_response(200, info or {"active": False})
+        elif self.path == "/surgeon/config":
+            self._json_response(200, {"approval_required": _surgeon_approval_required})
+        elif self.path == "/surgeon/queue":
+            self._json_response(200, {"queue": _surgeon_queue})
+        elif self.path == "/surgeon/history":
+            self._json_response(200, {"history": _surgeon_history[-50:]})
         elif self.path == "/logs/health":
             self._json_response(200, _es_health())
         elif self.path.startswith("/logs"):
@@ -2100,6 +2170,8 @@ class DoctorHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/cognitive/run":
             self._cognitive_run()
+        elif self.path == "/pipeline/run":
+            self._pipeline_run()
         elif self.path == "/maintenance/enter":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length) if content_length > 0 else b"{}"
@@ -2117,6 +2189,12 @@ class DoctorHandler(BaseHTTPRequestHandler):
             log.warning("🔧 MAINTENANCE MODE EXITED (duration: %s sec)",
                         result.get("duration_seconds", "unknown"))
             self._json_response(200, result)
+        elif self.path == "/surgeon/config":
+            self._handle_surgeon_config()
+        elif self.path == "/surgeon/approve":
+            self._handle_surgeon_approve()
+        elif self.path == "/surgeon/reject":
+            self._handle_surgeon_reject()
         elif self.path == "/notify/chaos_injection":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length) if content_length > 0 else b"{}"
@@ -2169,6 +2247,25 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._json_response(501, {"error": "cognitive_test_battery not available"})
             return
         self._json_response(200, {"tests": _get_test_metadata()})
+
+    def _pipeline_run(self):
+        """Proxy POST /pipeline/run to gaia-study."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            study_url = "http://gaia-study:8766/pipeline/run"
+            req = Request(
+                study_url,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            resp = urlopen(req, timeout=15)
+            result = json.loads(resp.read().decode())
+            self._json_response(resp.status, result)
+        except Exception as e:
+            log.error("Pipeline run proxy failed: %s", e)
+            self._json_response(502, {"error": f"gaia-study unreachable: {e}"})
 
     def _cognitive_run(self):
         global _cognitive_running, _cognitive_last_result
@@ -2289,6 +2386,110 @@ class DoctorHandler(BaseHTTPRequestHandler):
                 "category": defn.category.value,
             }
         self._json_response(200, {"count": len(errors), "errors": errors})
+
+    def _handle_surgeon_config(self):
+        global _surgeon_approval_required
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            params = json.loads(body)
+        except json.JSONDecodeError:
+            params = {}
+        if "approval_required" in params:
+            _surgeon_approval_required = bool(params["approval_required"])
+            _save_surgeon_config()
+            log.info("Surgeon approval mode: %s", "ON" if _surgeon_approval_required else "OFF")
+        self._json_response(200, {"approval_required": _surgeon_approval_required})
+
+    def _handle_surgeon_approve(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            params = json.loads(body)
+        except json.JSONDecodeError:
+            self._json_response(400, {"error": "invalid JSON"})
+            return
+        repair_id = params.get("repair_id")
+        if not repair_id:
+            self._json_response(400, {"error": "repair_id required"})
+            return
+        # Find in queue
+        proposal = None
+        for i, p in enumerate(_surgeon_queue):
+            if p["repair_id"] == repair_id:
+                proposal = _surgeon_queue.pop(i)
+                break
+        if not proposal:
+            self._json_response(404, {"error": f"repair {repair_id} not found in queue"})
+            return
+        # Apply the fix
+        service = proposal["service"]
+        container_path = proposal["container_path"]
+        fixed_code = proposal["fixed_code"]
+        file_path = proposal["file"]
+
+        if not _write_container_file(service, container_path, fixed_code):
+            proposal["status"] = "apply_failed"
+            proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            _surgeon_history.append(proposal)
+            if len(_surgeon_history) > 50:
+                _surgeon_history[:] = _surgeon_history[-50:]
+            self._json_response(500, {"error": "failed to write fixed code", "repair_id": repair_id})
+            return
+
+        check = _validate_repair(service, container_path)
+        if check["valid"]:
+            # Restart container
+            try:
+                subprocess.run(["docker", "restart", service], capture_output=True, text=True, timeout=30)
+            except Exception:
+                pass
+            proposal["status"] = "approved"
+            proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            _surgeon_history.append(proposal)
+            if len(_surgeon_history) > 50:
+                _surgeon_history[:] = _surgeon_history[-50:]
+            _notify_monkey_repair_success(service, file_path)
+            log.info("Surgeon repair APPROVED and applied: %s for %s", repair_id, file_path)
+            self._json_response(200, {"status": "approved", "repair_id": repair_id, "validation": "passed"})
+        else:
+            # Validation failed — revert and report
+            proposal["status"] = "apply_failed"
+            proposal["validation_error"] = check["reason"]
+            proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            _surgeon_history.append(proposal)
+            if len(_surgeon_history) > 50:
+                _surgeon_history[:] = _surgeon_history[-50:]
+            log.warning("Surgeon repair approved but validation FAILED for %s: %s", repair_id, check["reason"])
+            self._json_response(200, {"status": "validation_failed", "repair_id": repair_id, "reason": check["reason"]})
+
+    def _handle_surgeon_reject(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            params = json.loads(body)
+        except json.JSONDecodeError:
+            self._json_response(400, {"error": "invalid JSON"})
+            return
+        repair_id = params.get("repair_id")
+        if not repair_id:
+            self._json_response(400, {"error": "repair_id required"})
+            return
+        proposal = None
+        for i, p in enumerate(_surgeon_queue):
+            if p["repair_id"] == repair_id:
+                proposal = _surgeon_queue.pop(i)
+                break
+        if not proposal:
+            self._json_response(404, {"error": f"repair {repair_id} not found in queue"})
+            return
+        proposal["status"] = "rejected"
+        proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+        _surgeon_history.append(proposal)
+        if len(_surgeon_history) > 50:
+            _surgeon_history[:] = _surgeon_history[-50:]
+        log.info("Surgeon repair REJECTED: %s for %s", repair_id, proposal["file"])
+        self._json_response(200, {"status": "rejected", "repair_id": repair_id})
 
     def _json_response(self, code, data):
         body = json.dumps(data).encode()
