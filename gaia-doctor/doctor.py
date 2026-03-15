@@ -699,12 +699,15 @@ def _demarker(code: str) -> str:
         if m:
             out.append(m.group(1) + m.group(2))
             continue
-        # INJECT: remove the entire line
-        if "CHAOS_MONKEY_INJECT" in line and "_chaos_" in line:
+        # INJECT: remove marker line and the injected variable line
+        if "CHAOS_MONKEY_INJECT" in line:
             continue
-        # BREAK / SWAP: strip the trailing comment but leave the (broken) code
+        if _re.match(r'^\s*_chaos_\w+\s*=', line):
+            continue
+        # BREAK / SWAP: strip the trailing marker comment but leave the (broken) code
         # — these need LLM help to restore the original logic
-        out.append(line)
+        stripped = _re.sub(r'\s*#\s*CHAOS_MONKEY_(?:BREAK|SWAP)\b.*$', '', line)
+        out.append(stripped)
     return "\n".join(out)
 
 
@@ -757,7 +760,7 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
     else:
         container_path = f"/app/{full_path.name}"
 
-    # ── Tier 1: Deterministic demarker ──────────────────────────────────
+    # ── Tier 0: Check if already clean (race guard) ─────────────────────
     broken_code = _read_container_file(service, container_path)
     if broken_code is None:
         try:
@@ -765,6 +768,13 @@ def repair_candidate_file(service: str, file_path: str, max_retries: int = 3) ->
         except Exception as e:
             return {"status": "error", "reason": f"cannot read broken file: {e}"}
 
+    if "CHAOS_MONKEY" not in broken_code:
+        check = _validate_repair(service, container_path)
+        if check["valid"]:
+            log.info("File already clean (no markers, lint OK) — likely fixed by parallel path: %s", file_path)
+            return {"status": "already_clean", "file": file_path, "service": service}
+
+    # ── Tier 1: Deterministic demarker ──────────────────────────────────
     if "CHAOS_MONKEY" in broken_code:
         demarked = _demarker(broken_code)
         if _write_container_file(service, container_path, demarked):
@@ -889,12 +899,8 @@ def _handle_chaos_notification(data: dict):
     # Brief sleep for file write to settle on disk
     time.sleep(3)
 
-    # Run tests to confirm the fault breaks something
-    if run_service_tests(service):
-        log.info("Tests still PASS for %s after chaos injection — non-critical fault", service)
-        return
-
-    log.warning("Tests FAILED for %s after chaos injection — entering self-repair loop", service)
+    # Skip full test suite — we know a fault was injected, go straight to repair
+    log.info("Entering self-repair loop for %s (fault=%s, difficulty=%d)", service, fault, difficulty)
     result = repair_candidate_file(service, file_path)
     log.info("Self-repair result for %s: %s", file_path, result.get("status", "unknown"))
 
