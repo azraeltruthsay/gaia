@@ -25,7 +25,7 @@
       "max_num_prompt_tokens": 16384,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Qwen3.5-4B-Abliterated",
+      "path": "/models/Qwen3.5-4B-Abliterated-merged",
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm_remote",
@@ -571,6 +571,12 @@
     "HISTORY_DIR": "/shared/history",
     "IDENTITY_FILE": "/knowledge/system_reference/core_identity.json",
     "CHEAT_SHEET_FILE": "/knowledge/system_reference/cheat_sheet.json"
+  },
+  "SLEEP_CYCLE": {
+    "enabled": true,
+    "idle_threshold_minutes": 30,
+    "enable_qlora": false,
+    "enable_dream": false
   },
   "TIMEOUTS": {
     "HTTP_DEFAULT": 30,

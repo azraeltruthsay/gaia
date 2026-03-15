@@ -78,6 +78,10 @@
               <div class="state-label">Alignment</div>
               <div class="state-value" :class="alignmentClass" x-text="alignment"></div>
             </div>
+            <div class="state-card">
+              <div class="state-label">Cognitive Monitor</div>
+              <div class="state-value" :class="cogMonitorClass" x-text="cogMonitorText"></div>
+            </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
                 <div class="state-label">
@@ -228,8 +232,20 @@
           <span class="hook-status-label">Uptime:</span>
           <span class="hook-status-value" x-text="sleepUptime"></span>
         </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Auto-Sleep:</span>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="autoSleepEnabled" @change="toggleAutoSleep($event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Threshold:</span>
+          <span class="hook-status-value" x-text="sleepThreshold + 'm'"></span>
+        </div>
         <div class="hook-actions">
           <button class="hook-btn hook-btn-primary" @click="action('sleep/wake')">Wake</button>
+          <button class="hook-btn hook-btn-warn" @click="forceSleep()">Sleep Now</button>
           <button class="hook-btn hook-btn-danger" @click="action('sleep/shutdown')">Shutdown</button>
         </div>
       </div>

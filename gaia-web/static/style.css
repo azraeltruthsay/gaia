@@ -974,6 +974,14 @@ html, body {
 .hook-btn-danger { background: rgba(233, 69, 96, 0.15); border-color: rgba(233, 69, 96, 0.4); color: var(--error); }
 .hook-btn-danger:hover { background: rgba(233, 69, 96, 0.25); }
 
+/* Toggle switch for auto-sleep */
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; vertical-align: middle; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.1); border-radius: 10px; transition: 0.3s; }
+.toggle-slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: var(--text-dim); border-radius: 50%; transition: 0.3s; }
+.toggle-switch input:checked + .toggle-slider { background: rgba(0, 200, 83, 0.3); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--ok); }
+
 .hook-search-row {
   display: flex;
   gap: 8px;

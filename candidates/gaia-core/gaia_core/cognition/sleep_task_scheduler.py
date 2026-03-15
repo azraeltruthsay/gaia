@@ -14,6 +14,7 @@ import json as _json
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.SleepTaskScheduler")
+
+
+class TaskInterruptedError(Exception):
+    """Raised when a sleep task is interrupted by a wake signal."""
 
 
 @dataclass
@@ -53,6 +58,7 @@ class SleepTaskScheduler:
         self.agent_core = agent_core
         self._timeline = timeline_store
         self._tasks: List[SleepTask] = []
+        self._wake_event = threading.Event()
 
         self._register_default_tasks()
 
@@ -63,6 +69,24 @@ class SleepTaskScheduler:
     def register_task(self, task: SleepTask) -> None:
         self._tasks.append(task)
         logger.info("Registered sleep task: %s (P%d)", task.task_id, task.priority)
+
+    # ------------------------------------------------------------------
+    # Wake signal / cooperative cancellation
+    # ------------------------------------------------------------------
+
+    def signal_wake(self) -> None:
+        """Set the wake event so interruptible tasks can bail out quickly."""
+        self._wake_event.set()
+        logger.info("Wake event signalled — interruptible tasks will be interrupted")
+
+    def check_interrupted(self) -> None:
+        """Raise TaskInterruptedError if a wake signal is pending.
+
+        Interruptible task handlers should call this at natural phase
+        boundaries to cooperatively yield within ~2 seconds of a wake signal.
+        """
+        if self._wake_event.is_set():
+            raise TaskInterruptedError("Task interrupted by wake signal")
 
     def _is_serene(self) -> bool:
         """Check if GAIA is in Serenity state by reading the shared flag file."""
@@ -77,7 +101,7 @@ class SleepTaskScheduler:
             pass
         return False
 
-    def _run_initiative_cycle(self) -> None:
+    def _run_initiative_cycle(self, **kwargs) -> None:
         """Run the autonomous initiative/goal generation cycle.
 
         Gated on Serenity: only runs when GAIA has proven resilience, ensuring
@@ -89,6 +113,8 @@ class SleepTaskScheduler:
         if self.agent_core is None:
             logger.warning("Initiative cycle skipped: agent_core not available")
             return
+
+        self.check_interrupted()
 
         try:
             # AgentCore owns the initiative engine logic
@@ -249,6 +275,9 @@ class SleepTaskScheduler:
     def execute_task(self, task: SleepTask) -> bool:
         """Execute a task handler. Returns True on success."""
         logger.info("Starting sleep task: %s", task.task_id)
+        # Clear wake event before each task so stale signals don't
+        # immediately abort the next task.
+        self._wake_event.clear()
         start = time.monotonic()
         try:
             task.handler()
@@ -258,6 +287,17 @@ class SleepTaskScheduler:
             task.last_error = None
             logger.info("Completed %s in %.1fs (run #%d)", task.task_id, elapsed, task.run_count)
             self._emit_task_exec(task.task_id, task.task_type, elapsed, True)
+            return True
+        except TaskInterruptedError:
+            elapsed = time.monotonic() - start
+            task.last_run = datetime.now(timezone.utc)
+            task.run_count += 1
+            task.last_error = None  # Not a failure
+            logger.info(
+                "Task %s interrupted by wake signal after %.1fs (run #%d)",
+                task.task_id, elapsed, task.run_count,
+            )
+            self._emit_task_exec(task.task_id, task.task_type, elapsed, True, "interrupted_by_wake")
             return True
         except Exception as exc:
             elapsed = time.monotonic() - start
@@ -289,7 +329,7 @@ class SleepTaskScheduler:
     # Built-in task handlers
     # ------------------------------------------------------------------
 
-    def _run_conversation_curation(self) -> None:
+    def _run_conversation_curation(self, **kwargs) -> None:
         """Curate recent session conversations for the knowledge base."""
         from gaia_core.cognition.conversation_curator import ConversationCurator
         from gaia_core.memory.session_manager import SessionManager
@@ -300,6 +340,7 @@ class SleepTaskScheduler:
         # Curate all active sessions that have enough messages
         curated = 0
         for sid, session in session_manager.sessions.items():
+            self.check_interrupted()
             if session.history:
                 if curator.curate(sid, session.history):
                     curated += 1
@@ -370,7 +411,7 @@ class SleepTaskScheduler:
         "gaia-audio": "/gaia/GAIA_Project/candidates/gaia-audio/gaia_audio",
     }
 
-    def _run_promotion_readiness(self) -> None:
+    def _run_promotion_readiness(self, **kwargs) -> None:
         """Assess promotion readiness for candidate services.
 
         For each service in _YAML_BLUEPRINT_SERVICES:
@@ -396,6 +437,8 @@ class SleepTaskScheduler:
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         for service_id in self._YAML_BLUEPRINT_SERVICES:
+            self.check_interrupted()
+
             candidate_dir = Path(project_root) / "candidates" / service_id
             live_dir = Path(project_root) / service_id
 
@@ -472,7 +515,7 @@ class SleepTaskScheduler:
                     except Exception:
                         logger.warning("Could not create promotion request for %s", service_id, exc_info=True)
 
-    def _run_blueprint_validation(self) -> None:
+    def _run_blueprint_validation(self, **kwargs) -> None:
         """Scan blueprints against source files and flag stale content.
 
         Uses two paths:
@@ -485,8 +528,12 @@ class SleepTaskScheduler:
         # ── Path 1: YAML blueprint pre-check (structured) ────────────────
         total_mismatches += self._validate_yaml_blueprints()
 
+        self.check_interrupted()
+
         # ── Path 2: Legacy .md blueprint validation (fallback) ────────────
         total_mismatches += self._validate_legacy_blueprints()
+
+        self.check_interrupted()
 
         # ── Path 3: Code-architect corpus readiness ──────────────────────
         self._check_code_architect_corpus()
@@ -685,7 +732,7 @@ class SleepTaskScheduler:
         with open(bp_path, "a", encoding="utf-8") as f:
             f.write(note)
 
-    def _run_curriculum_sync(self) -> None:
+    def _run_curriculum_sync(self, **kwargs) -> None:
         """Sync blueprints → curriculum, then trigger incremental QLoRA training."""
         try:
             from gaia_core.cognition.curriculum_sync import sync_curriculum
@@ -701,6 +748,8 @@ class SleepTaskScheduler:
 
         if not result["trigger_training"]:
             return
+
+        self.check_interrupted()
 
         # Find existing adapter to resume from
         adapter_base = Path("/models/lora_adapters/tier1_global")
@@ -855,7 +904,7 @@ class SleepTaskScheduler:
     def _REVIEW_QUEUE_PATH(self) -> str:
         return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect" / "review_queue.json")
 
-    def _run_code_review(self) -> None:
+    def _run_code_review(self, **kwargs) -> None:
         """
         Autonomous code review using the code-architect adapter.
 
@@ -885,6 +934,8 @@ class SleepTaskScheduler:
         review_queue_items: list[dict] = []
 
         for service_id in self._YAML_BLUEPRINT_SERVICES:
+            self.check_interrupted()
+
             bp = load_blueprint(service_id)
             if bp is None:
                 continue
@@ -1146,7 +1197,7 @@ class SleepTaskScheduler:
     def _REGEN_MANIFEST(self) -> str:
         return str(Path(self.config.KNOWLEDGE_DIR) / "wiki_auto" / "_last_regen_manifest.json")
 
-    def _run_wiki_doc_regen(self) -> None:
+    def _run_wiki_doc_regen(self, **kwargs) -> None:
         """Generate wiki markdown pages from blueprint YAML files.
 
         Pure YAML → Markdown transformation. No LLM inference required.
@@ -1437,7 +1488,7 @@ class SleepTaskScheduler:
 
     _MCP_ENDPOINT = "http://gaia-mcp:8765/jsonrpc"
 
-    def _run_knowledge_research(self) -> None:
+    def _run_knowledge_research(self, **kwargs) -> None:
         """Research knowledge gaps identified by thought seeds.
 
         Reads unreviewed seeds with seed_type == "knowledge_gap", uses MCP
@@ -1479,6 +1530,8 @@ class SleepTaskScheduler:
         research_dir.mkdir(parents=True, exist_ok=True)
 
         for seed_path, seed_data in gap_seeds[:max_per_cycle]:
+            self.check_interrupted()
+
             seed_text = seed_data.get("seed", "")
             # Extract the topic from "Knowledge gap — <topic>" pattern
             topic = seed_text
@@ -1657,7 +1710,7 @@ class SleepTaskScheduler:
             logger.warning("Failed to index research document: %s",
                            filepath, exc_info=True)
 
-    def _run_code_evolution(self) -> None:
+    def _run_code_evolution(self, **kwargs) -> None:
         """Generate code evolution snapshot for temporal self-awareness.
 
         Gated on Serenity: only runs when GAIA has proven resilience through
@@ -1702,7 +1755,7 @@ class SleepTaskScheduler:
     # Samvega Introspection
     # ------------------------------------------------------------------
 
-    def _run_samvega_introspection(self) -> None:
+    def _run_samvega_introspection(self, **kwargs) -> None:
         """Review unreviewed samvega artifacts, boost repeated patterns, flag tier-5."""
         from gaia_core.cognition.samvega import (
             list_unreviewed_artifacts,
@@ -1725,6 +1778,8 @@ class SleepTaskScheduler:
         for path, data in artifacts:
             rc = data.get("root_cause", "").strip().lower()
             clusters[rc].append((path, data))
+
+        self.check_interrupted()
 
         reviewed = 0
         promoted = 0
@@ -1873,7 +1928,7 @@ class SleepTaskScheduler:
     # adversarial_resilience_drill (RESILIENCE_DRILL)
     # ------------------------------------------------------------------
 
-    def _run_adversarial_resilience_drill(self) -> None:
+    def _run_adversarial_resilience_drill(self, **kwargs) -> None:
         """
         The Chaos Monkey / Adversarial Sandbox Loop.
 
@@ -1886,6 +1941,8 @@ class SleepTaskScheduler:
         snapshot SHA and restarts the affected containers.  This guarantee must hold
         regardless of what the forward-looking fix logic does.
         """
+        self.check_interrupted()
+
         from gaia_core.cognition.candidate_checkpoint import CandidateCheckpointManager
 
         logger.info("Starting adversarial resilience drill (Chaos Monkey)...")

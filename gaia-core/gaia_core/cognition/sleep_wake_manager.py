@@ -84,8 +84,14 @@ class SleepWakeManager:
         self.dreaming_handoff_id: Optional[str] = None
         self._preemption_initiated: bool = False
         self.voice_active: bool = False
+        self._task_scheduler = None  # Set via set_task_scheduler()
+        self.auto_sleep_enabled: bool = True
 
         logger.info("SleepWakeManager initialized")
+
+    def set_task_scheduler(self, scheduler) -> None:
+        """Store a reference to the SleepTaskScheduler for wake signal forwarding."""
+        self._task_scheduler = scheduler
 
     # ------------------------------------------------------------------
     # State queries
@@ -98,8 +104,17 @@ class SleepWakeManager:
         """Check whether we should begin the sleep transition."""
         if self.state != GaiaState.ACTIVE:
             return False
-        threshold = getattr(self.config, "SLEEP_IDLE_THRESHOLD_MINUTES", 5)
+        if not self.auto_sleep_enabled:
+            return False
+        # Read from SLEEP_CYCLE config section, fall back to 30 minutes
+        sleep_cfg = getattr(self.config, "SLEEP_CYCLE", None) or {}
+        threshold = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
         return idle_minutes >= threshold
+
+    def set_auto_sleep(self, enabled: bool) -> None:
+        """Enable or disable automatic sleep transitions."""
+        self.auto_sleep_enabled = enabled
+        logger.info("Auto-sleep %s", "enabled" if enabled else "disabled")
 
     # ------------------------------------------------------------------
     # Timeline event helper
@@ -209,6 +224,14 @@ class SleepWakeManager:
     def receive_wake_signal(self) -> None:
         """Called by gaia-web (via POST /sleep/wake) when a message is queued."""
         self.wake_signal_pending = True
+
+        # Immediately signal the task scheduler so interruptible tasks can
+        # bail out without waiting for the current handler to complete.
+        if self._task_scheduler is not None:
+            try:
+                self._task_scheduler.signal_wake()
+            except Exception:
+                logger.debug("Failed to signal task scheduler wake", exc_info=True)
 
         # Only reset idle timer when waking from a sleep state (DROWSY/ASLEEP).
         # When already ACTIVE, /process_packet handles mark_active() itself —
@@ -447,6 +470,9 @@ class SleepWakeManager:
             "last_state_change": self.last_state_change.isoformat(),
             "seconds_in_state": (now - self.last_state_change).total_seconds(),
         }
+        status["auto_sleep_enabled"] = self.auto_sleep_enabled
+        sleep_cfg = getattr(self.config, "SLEEP_CYCLE", None) or {}
+        status["idle_threshold_minutes"] = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
         status["voice_active"] = self.voice_active
         status["preemption_initiated"] = self._preemption_initiated
         if self.dreaming_handoff_id:

@@ -180,6 +180,8 @@ function systemPanel() {
     gpuOwner: '--',
     alignment: '--',
     alignmentClass: '',
+    cogMonitorText: '--',
+    cogMonitorClass: '',
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
@@ -213,7 +215,7 @@ function systemPanel() {
     },
 
     async poll() {
-      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment()]);
+      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment(), this.pollCognitiveMonitor()]);
     },
 
     async pollServices() {
@@ -272,6 +274,29 @@ function systemPanel() {
           this.alignmentClass = cls[this.alignment] || '';
         }
       } catch { this.alignment = '--'; }
+    },
+
+    async pollCognitiveMonitor() {
+      try {
+        const resp = await fetch('/api/system/cognitive/monitor');
+        if (resp.ok) {
+          const data = await resp.json();
+          const lr = data.last_result;
+          if (!lr) {
+            this.cogMonitorText = 'pending';
+            this.cogMonitorClass = '';
+          } else if (lr.status === 'pass') {
+            this.cogMonitorText = 'pass';
+            this.cogMonitorClass = 'ok';
+          } else if (lr.status === 'skipped') {
+            this.cogMonitorText = 'skipped';
+            this.cogMonitorClass = 'warn';
+          } else {
+            this.cogMonitorText = `fail (${data.consecutive_failures})`;
+            this.cogMonitorClass = 'error';
+          }
+        }
+      } catch { this.cogMonitorText = '--'; this.cogMonitorClass = ''; }
     },
 
     // ── Graph ──────────────────────────────────────────────────────────
@@ -979,6 +1004,8 @@ function hooksPanel() {
     sleepState: '--',
     sleepCycle: '--',
     sleepUptime: '--',
+    autoSleepEnabled: true,
+    sleepThreshold: 30,
     gpuOwner: '--',
     gpuVram: '--',
     codexQuery: '',
@@ -1020,16 +1047,62 @@ function hooksPanel() {
 
     async refreshSleep() {
       try {
-        const resp = await fetch('/api/hooks/sleep/status');
-        if (resp.ok) {
-          const data = await resp.json();
+        const [statusResp, configResp] = await Promise.all([
+          fetch('/api/hooks/sleep/status'),
+          fetch('/api/hooks/sleep/config'),
+        ]);
+        if (statusResp.ok) {
+          const data = await statusResp.json();
           this.sleepState = data.state || data.sleep_state || 'unknown';
           this.sleepCycle = data.cycle_count != null ? `#${data.cycle_count}` : '--';
           const up = data.uptime_seconds || data.uptime;
           this.sleepUptime = up != null ? formatDuration(up) : '--';
+          if (data.auto_sleep_enabled != null) this.autoSleepEnabled = data.auto_sleep_enabled;
+          if (data.idle_threshold_minutes != null) this.sleepThreshold = data.idle_threshold_minutes;
+        }
+        if (configResp.ok) {
+          const cfg = await configResp.json();
+          if (cfg.auto_sleep_enabled != null) this.autoSleepEnabled = cfg.auto_sleep_enabled;
+          if (cfg.idle_threshold_minutes != null) this.sleepThreshold = cfg.idle_threshold_minutes;
         }
       } catch {
         this.sleepState = 'unreachable';
+      }
+    },
+
+    async toggleAutoSleep(enabled) {
+      this.logEntry('sleep/toggle', `auto-sleep → ${enabled}`, false);
+      try {
+        const resp = await fetch('/api/hooks/sleep/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.autoSleepEnabled = data.auto_sleep_enabled;
+          this.logEntry('sleep/toggle', JSON.stringify(data).substring(0, 120), false);
+        } else {
+          this.logEntry('sleep/toggle', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (e) {
+        this.logEntry('sleep/toggle', `Failed: ${e.message}`, true);
+      }
+    },
+
+    async forceSleep() {
+      this.logEntry('sleep/force', 'sending...', false);
+      try {
+        const resp = await fetch('/api/hooks/sleep/force', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.logEntry('sleep/force', JSON.stringify(data).substring(0, 120), false);
+          this.sleepState = data.state || 'drowsy';
+        } else {
+          this.logEntry('sleep/force', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+        }
+      } catch (e) {
+        this.logEntry('sleep/force', `Failed: ${e.message}`, true);
       }
     },
 
