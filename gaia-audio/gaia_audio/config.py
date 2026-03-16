@@ -34,7 +34,7 @@ class AudioConfig(CommonConfig):
 
     @property
     def listener_model_path(self) -> str:
-        return self.audio_cfg.get("listener_model_path", "/models/Qwen3-ASR-0.6B")
+        return self.audio_cfg.get("listener_model_path") or self.model_path("audio", "stt") or "/models/Qwen3-ASR-0.6B"
 
     @property
     def listener_device(self) -> str:
@@ -42,11 +42,11 @@ class AudioConfig(CommonConfig):
 
     @property
     def nano_speaker_model_path(self) -> str:
-        return self.audio_cfg.get("nano_speaker_model_path", "/models/Qwen3-TTS-12Hz-0.6B-Base")
+        return self.audio_cfg.get("nano_speaker_model_path") or self.model_path("audio", "tts_nano") or "/models/Qwen3-TTS-12Hz-0.6B-Base"
 
     @property
     def prime_speaker_model_path(self) -> str:
-        return self.audio_cfg.get("prime_speaker_model_path", "/models/Qwen3-TTS-12Hz-1.7B-Base")
+        return self.audio_cfg.get("prime_speaker_model_path") or self.model_path("audio", "tts_prime") or "/models/Qwen3-TTS-12Hz-1.7B-Base"
 
     @property
     def voice_ref_audio(self) -> str | None:

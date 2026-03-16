@@ -17,8 +17,6 @@ import time
 
 import numpy as np
 
-from gaia_audio.status import status_tracker
-
 logger = logging.getLogger("GAIA.Audio.TTS")
 
 
@@ -64,10 +62,16 @@ class NanoSpeaker:
 
     def __init__(
         self,
-        model_path: str = "/models/Qwen3-TTS-12Hz-0.6B-Base",
+        model_path: str | None = None,
         voice_ref_audio: str | None = None,
         voice_ref_text: str | None = None,
     ) -> None:
+        if model_path is None:
+            try:
+                from gaia_audio.config import get_config
+                model_path = get_config().nano_speaker_model_path
+            except Exception:
+                model_path = "/models/Qwen3-TTS-12Hz-0.6B-Base"
         self.model_path = model_path
         self.voice_ref_audio = voice_ref_audio
         self.voice_ref_text = voice_ref_text
@@ -172,10 +176,16 @@ class PrimeSpeaker:
 
     def __init__(
         self,
-        model_path: str = "/models/Qwen3-TTS-12Hz-1.7B-Base",
+        model_path: str | None = None,
         voice_ref_audio: str | None = None,
         voice_ref_text: str | None = None,
     ) -> None:
+        if model_path is None:
+            try:
+                from gaia_audio.config import get_config
+                model_path = get_config().prime_speaker_model_path
+            except Exception:
+                model_path = "/models/Qwen3-TTS-12Hz-1.7B-Base"
         self.model_path = model_path
         self.voice_ref_audio = voice_ref_audio
         self.voice_ref_text = voice_ref_text

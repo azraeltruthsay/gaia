@@ -9,8 +9,6 @@ from __future__ import annotations
 import io
 import logging
 import time
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from gaia_audio.status import status_tracker
@@ -35,9 +33,15 @@ class STTEngine:
 
     def __init__(
         self,
-        model_path: str = "/models/Qwen3-ASR-0.6B",
+        model_path: str | None = None,
         device: str = "auto",
     ) -> None:
+        if model_path is None:
+            try:
+                from gaia_audio.config import get_config
+                model_path = get_config().listener_model_path
+            except Exception:
+                model_path = "/models/Qwen3-ASR-0.6B"
         self.model_path = model_path
         self.device = device
         self._model = None

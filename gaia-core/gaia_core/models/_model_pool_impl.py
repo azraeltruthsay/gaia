@@ -573,7 +573,7 @@ class ModelPool:
                 self.config.MODEL_CONFIGS["gpu_prime"] = {
                     "type": "vllm_remote",
                     "endpoint": prime_endpoint,
-                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or "/models/Qwen3.5-4B-Abliterated",
+                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or self.config.model_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged",
                     "enabled": True,
                     "max_model_len": int(os.getenv("VLLM_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 8192)),
                     "lora_config": self.config.constants.get("LORA_CONFIG", {}),

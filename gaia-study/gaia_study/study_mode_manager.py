@@ -98,7 +98,7 @@ class StudyModeManager:
     and integrating them into the model pool.
     """
 
-    def __init__(self, config: Dict[str, Any], adapter_base_dir: str = "/models/lora_adapters"):
+    def __init__(self, config: Dict[str, Any], adapter_base_dir: str | None = None):
         """
         Initialize the StudyModeManager.
 
@@ -107,6 +107,12 @@ class StudyModeManager:
             adapter_base_dir: Base directory for storing adapters
         """
         self.config = config
+        if adapter_base_dir is None:
+            try:
+                from gaia_common.config import Config
+                adapter_base_dir = Config.get_instance().model_path("lora_adapters") or "/models/lora_adapters"
+            except Exception:
+                adapter_base_dir = "/models/lora_adapters"
         self.adapter_base_dir = Path(adapter_base_dir)
         self.state = StudyModeState.IDLE
         self.current_training: Optional[TrainingConfig] = None
@@ -586,7 +592,7 @@ class StudyModeManager:
         """
         import asyncio
         from gaia_study.training_subprocess import (
-            SubprocessConfig, PROGRESS_FILE, run_training,
+            SubprocessConfig, run_training,
         )
 
         # Archive existing adapter before overwriting (rollback safety)

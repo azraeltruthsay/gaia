@@ -7,7 +7,7 @@ gaia-core to offload GPU inference to a separate container.
 
 Environment:
     PRIME_ENDPOINT: Base URL of the vLLM server (e.g. http://gaia-prime-candidate:7777)
-    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3.5-4B-Abliterated)
+    PRIME_MODEL:    Model name registered in the vLLM server (default: /models/Qwen3.5-4B-Abliterated-merged)
 """
 
 import logging
@@ -43,7 +43,8 @@ class VLLMRemoteModel:
         self.model_name = (
             model_config.get("path")
             or model_config.get("model")
-            or os.getenv("PRIME_MODEL", "/models/Qwen3.5-4B-Abliterated")
+            or os.getenv("PRIME_MODEL")
+            or self._registry_prime_path()
         )
 
         self.timeout = int(model_config.get("timeout", 120))
@@ -71,6 +72,15 @@ class VLLMRemoteModel:
             self.endpoint,
             self.model_name,
         )
+
+    @staticmethod
+    def _registry_prime_path() -> str:
+        """Resolve prime model path from Config singleton MODEL_REGISTRY."""
+        try:
+            from gaia_common.config import Config
+            return Config.get_instance().model_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged"
+        except Exception:
+            return "/models/Qwen3.5-4B-Abliterated-merged"
 
     # ── Token clamping ────────────────────────────────────────────────────────
 
@@ -394,6 +404,7 @@ class VLLMRemoteModel:
 
     def _post(self, path: str, payload: dict, _allow_clamp_retry: bool = True) -> dict:
         url = f"{self.endpoint}{path}"
+        logger.debug("vLLM POST %s (model=%s)", url, payload.get("model", "?"))
         last_exc: Optional[Exception] = None
 
         for attempt in range(1, self._MAX_RETRIES + 1):
@@ -471,6 +482,7 @@ class VLLMRemoteModel:
     def _stream_completions(self, payload: dict) -> Generator[Dict[str, Any], None, None]:
         payload["stream"] = True
         url = f"{self.endpoint}/v1/completions"
+        logger.debug("vLLM stream-completions %s", url)
         with self._session.post(url, json=payload, timeout=self.timeout, stream=True) as r:
             r.raise_for_status()
             for line in r.iter_lines(decode_unicode=True):
@@ -488,6 +500,7 @@ class VLLMRemoteModel:
     def _stream_chat(self, payload: dict) -> Generator[Dict[str, Any], None, None]:
         payload["stream"] = True
         url = f"{self.endpoint}/v1/chat/completions"
+        logger.debug("vLLM stream-chat %s (model=%s)", url, payload.get("model", "?"))
         content_buffer: list[str] = []
         try:
             r = self._session.post(url, json=payload, timeout=self.timeout, stream=True)
