@@ -67,6 +67,7 @@ class GaiaErrorDef:
     hint: str               # human-readable remediation
     level: int              # logging level constant (logging.ERROR etc.)
     category: ErrorCategory
+    is_retryable: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -82,11 +83,12 @@ def register(
     hint: str,
     level: int = logging.ERROR,
     category: ErrorCategory = ErrorCategory.INTERNAL,
+    is_retryable: bool = False,
 ) -> GaiaErrorDef:
     """Register a new error definition.  Raises ValueError on duplicate codes."""
     if code in _REGISTRY:
         raise ValueError(f"Duplicate error code: {code}")
-    defn = GaiaErrorDef(code=code, message=message, hint=hint, level=level, category=category)
+    defn = GaiaErrorDef(code=code, message=message, hint=hint, level=level, category=category, is_retryable=is_retryable)
     _REGISTRY[code] = defn
     return defn
 
@@ -150,7 +152,7 @@ register("GAIA-CORE-012", "Ethical sentinel block",
 register("GAIA-CORE-015", "Forward-to-model failed",
          "Failed to get a response from the selected model. "
          "Check model health and endpoint connectivity.",
-         logging.ERROR, ErrorCategory.MODEL)
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
 
 register("GAIA-CORE-016", "Model response empty",
          "The model returned an empty or whitespace-only response. "
@@ -195,7 +197,7 @@ register("GAIA-CORE-050", "Model load failed",
 register("GAIA-CORE-055", "Prime model unreachable",
          "Cannot connect to the vLLM Prime inference server (port 7777). "
          "Check that gaia-prime is running.",
-         logging.ERROR, ErrorCategory.NETWORK)
+         logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
 
 register("GAIA-CORE-060", "Nano model unreachable",
          "The Nano (triage) model failed to load or respond. Triage will be skipped.",
@@ -228,11 +230,11 @@ register("GAIA-CORE-110", "Session save failed",
 
 register("GAIA-CORE-150", "MCP connection failed",
          "Cannot reach the MCP tool server. Check that gaia-mcp is running on port 8765.",
-         logging.ERROR, ErrorCategory.NETWORK)
+         logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
 
 register("GAIA-CORE-155", "Tool execution timeout",
          "A tool call exceeded the timeout. Consider increasing the timeout or simplifying the operation.",
-         logging.WARNING, ErrorCategory.TOOL)
+         logging.WARNING, ErrorCategory.TOOL, is_retryable=True)
 
 register("GAIA-CORE-160", "Tool result parse error",
          "Failed to parse the JSON-RPC result from a tool call.",
@@ -294,7 +296,7 @@ register("GAIA-MCP-015", "Approval denied",
 
 register("GAIA-MCP-020", "Tool execution crashed",
          "The tool raised an unhandled exception during execution.",
-         logging.ERROR, ErrorCategory.TOOL)
+         logging.ERROR, ErrorCategory.TOOL, is_retryable=True)
 
 register("GAIA-MCP-025", "py_compile gate failed",
          "Sovereign Shield: the written Python file has syntax errors. Write was blocked.",
