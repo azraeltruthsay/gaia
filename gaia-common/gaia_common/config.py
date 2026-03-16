@@ -113,6 +113,7 @@ class Config:
             return
 
         self.constants = data
+        self._model_registry = data.get("MODEL_REGISTRY", {})
         logger.info(f"Loaded GAIA constants from {found_path}")
 
         # Map top-level keys
@@ -131,6 +132,11 @@ class Config:
         self.endpoints.update(data.get("SERVICE_ENDPOINTS", {}))
         self.timeouts.update(data.get("TIMEOUTS", {}))
 
+        # Derive EMBEDDING_MODEL_PATH from registry if available
+        emb = self._model_registry.get("embedding")
+        if emb and isinstance(emb, str):
+            self.EMBEDDING_MODEL_PATH = emb
+
         # Map System Paths (Defensively skip read-only properties)
         sys_cfg = data.get("SYSTEM", {})
         for key, value in sys_cfg.items():
@@ -141,6 +147,22 @@ class Config:
                 continue
             if hasattr(self, key):
                 setattr(self, key, value)
+
+    def model_path(self, role: str, variant: str = "merged") -> str:
+        """Lookup a model path from MODEL_REGISTRY.
+
+        Examples::
+
+            model_path("prime", "merged")  -> "/models/Qwen3.5-4B-Abliterated-merged"
+            model_path("nano", "gguf")     -> "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"
+            model_path("embedding")        -> "/models/all-MiniLM-L6-v2"
+            model_path("lora_adapters")    -> "/models/lora_adapters"
+            model_path("audio", "stt")     -> "/models/Qwen3-ASR-0.6B"
+        """
+        entry = self._model_registry.get(role, {})
+        if isinstance(entry, str):
+            return entry
+        return entry.get(variant, "")
 
     def _apply_env_overrides(self):
         """Apply high-priority environment variable overrides."""

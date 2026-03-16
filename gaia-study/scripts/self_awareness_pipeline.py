@@ -43,7 +43,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,14 +61,21 @@ CURRICULUM_PATH = "/knowledge/curricula/self-model/train.jsonl"
 FILTERED_PATH = "/knowledge/curricula/self-model/train_filtered.jsonl"
 WEIGHTED_PATH = "/knowledge/curricula/self-model/train_weighted.jsonl"
 
-# Model paths
-BASE_4B = "/models/Qwen3.5-4B-Abliterated"
-BASE_08B = "/models/Qwen3.5-0.8B-Abliterated"
-MERGED_4B = "/models/Qwen3.5-4B-Abliterated-merged"
-GGUF_CORE = "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf"
-GGUF_NANO = "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"
+# Model paths — sourced from MODEL_REGISTRY in gaia_constants.json
+def _registry_path(role: str, variant: str = "merged") -> str:
+    try:
+        from gaia_common.config import Config
+        return Config.get_instance().model_path(role, variant)
+    except Exception:
+        return ""
+
+BASE_4B = _registry_path("prime", "base") or "/models/Qwen3.5-4B-Abliterated"
+BASE_08B = _registry_path("nano", "base") or "/models/Qwen3.5-0.8B-Abliterated"
+MERGED_4B = _registry_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged"
+GGUF_CORE = _registry_path("prime", "gguf") or "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf"
+GGUF_NANO = _registry_path("nano", "gguf") or "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"
 BAKED_DIR = "/models/baked"
-ADAPTER_DIR = "/models/lora_adapters/tier1_global"
+ADAPTER_DIR = (_registry_path("lora_adapters") or "/models/lora_adapters") + "/tier1_global"
 
 # Endpoints (inside Docker network)
 CORE_CPU_ENDPOINT = os.environ.get("CORE_CPU_ENDPOINT", "http://gaia-core:6415")

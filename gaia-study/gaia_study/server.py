@@ -18,6 +18,25 @@ from .study_mode_manager import StudyModeManager, TrainingConfig
 
 logger = get_logger(__name__)
 
+
+def _registry_base_model_path() -> str:
+    """Resolve prime base model path from Config MODEL_REGISTRY."""
+    try:
+        from gaia_common.config import Config
+        return Config.get_instance().model_path("prime", "base") or "/models/Qwen3.5-4B-Abliterated"
+    except Exception:
+        return "/models/Qwen3.5-4B-Abliterated"
+
+
+def _registry_lora_dir() -> str:
+    """Resolve lora_adapters path from Config MODEL_REGISTRY."""
+    try:
+        from gaia_common.config import Config
+        return Config.get_instance().model_path("lora_adapters") or "/models/lora_adapters"
+    except Exception:
+        return "/models/lora_adapters"
+
+
 # Singleton study mode manager (initialized on first use)
 _study_manager: Optional[StudyModeManager] = None
 
@@ -27,7 +46,7 @@ def get_study_manager() -> StudyModeManager:
     global _study_manager
     if _study_manager is None:
         # Load config from environment or defaults
-        adapter_dir = os.getenv("LORA_ADAPTER_DIR", "/models/lora_adapters")
+        adapter_dir = os.getenv("LORA_ADAPTER_DIR") or _registry_lora_dir()
 
         # Build study config from environment
         study_config = {
@@ -35,7 +54,7 @@ def get_study_manager() -> StudyModeManager:
             "max_training_samples": int(os.getenv("MAX_TRAINING_SAMPLES", "1000")),
             "max_training_content_kb": int(os.getenv("MAX_TRAINING_CONTENT_KB", "200")),
             "use_real_training": os.getenv("USE_REAL_TRAINING", "true").lower() == "true",
-            "base_model_path": os.getenv("BASE_MODEL_PATH", "/models/Qwen3.5-4B-Abliterated"),
+            "base_model_path": os.getenv("BASE_MODEL_PATH") or _registry_base_model_path(),
             "governance": {
                 "forbidden_patterns": [
                     "ignore previous instructions",
