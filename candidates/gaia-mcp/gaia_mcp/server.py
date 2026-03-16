@@ -122,7 +122,12 @@ async def jsonrpc_endpoint(request: Request):
             "error": {
                 "code": -32002,
                 "message": str(e),
-                "data": {"gaia_code": gaia_code, "hint": defn.hint if defn else ""},
+                "data": {
+                    "gaia_code": gaia_code,
+                    "hint": defn.hint if defn else "",
+                    "errorCategory": defn.category.value if defn else "safety",
+                    "isRetryable": defn.is_retryable if defn else False,
+                },
             },
             "id": request_id
         }, status_code=403)
@@ -137,6 +142,8 @@ async def jsonrpc_endpoint(request: Request):
                 "data": {
                     "gaia_code": "GAIA-MCP-020",
                     "hint": defn.hint if defn else "",
+                    "errorCategory": defn.category.value if defn else "internal",
+                    "isRetryable": defn.is_retryable if defn else False,
                     "traceback": traceback.format_exc(),
                 },
             },

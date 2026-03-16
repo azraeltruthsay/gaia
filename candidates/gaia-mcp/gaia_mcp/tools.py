@@ -709,7 +709,7 @@ async def _study_start_impl(params: dict) -> dict:
         })
     except Exception as e:
         logger.error(f"Failed to start study via gateway: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 async def _study_status_impl(params: dict) -> dict:
@@ -741,7 +741,7 @@ async def _adapter_list_impl(params: dict) -> dict:
         return await client.get("/adapters", params=query_params)
     except Exception as e:
         logger.error(f"Failed to list adapters via gateway: {e}")
-        return {"ok": False, "adapters": [], "error": str(e)}
+        return {"ok": False, "adapters": [], "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 async def _adapter_load_impl(params: dict) -> dict:
@@ -760,7 +760,7 @@ async def _adapter_load_impl(params: dict) -> dict:
         })
     except Exception as e:
         logger.error(f"Failed to load adapter via gateway: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 async def _adapter_unload_impl(params: dict) -> dict:
@@ -778,7 +778,7 @@ async def _adapter_unload_impl(params: dict) -> dict:
         })
     except Exception as e:
         logger.error(f"Failed to unload adapter via gateway: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 async def _adapter_delete_impl(params: dict) -> dict:
@@ -794,7 +794,7 @@ async def _adapter_delete_impl(params: dict) -> dict:
         return await client.delete(f"/adapters/{adapter_name}", params={"tier": tier})
     except Exception as e:
         logger.error(f"Failed to delete adapter via gateway: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 async def _adapter_info_impl(params: dict) -> dict:
@@ -810,7 +810,7 @@ async def _adapter_info_impl(params: dict) -> dict:
         return await client.get(f"/adapters/{adapter_name}", params={"tier": tier})
     except Exception as e:
         logger.error(f"Failed to get adapter info via gateway: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "errorCategory": "network", "isRetryable": True}
 
 
 # ── Self-Introspection Tools ────────────────────────────────────────────────
@@ -861,7 +861,7 @@ def _introspect_logs_impl(params: dict) -> dict:
             with open(p, "r", encoding="utf-8", errors="replace") as f:
                 all_lines = f.read().split("\n")
     except Exception as e:
-        return {"ok": False, "error": f"Failed to read log file: {e}"}
+        return {"ok": False, "error": f"Failed to read log file: {e}", "errorCategory": "resource", "isRetryable": True}
 
     # Remove trailing empty line from split
     if all_lines and all_lines[-1] == "":
