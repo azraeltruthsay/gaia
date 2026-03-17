@@ -30,7 +30,6 @@ Usage (inside gaia-study container):
 
 import argparse
 import gc
-import json
 import logging
 import os
 import shutil

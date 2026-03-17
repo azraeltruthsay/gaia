@@ -16,7 +16,6 @@ from gaia_web.security.scanner import (
     PromptInjectionScanner,
     PIIRedactionScanner,
     SecretsScanner,
-    VulnerabilityScanner,
 )
 from gaia_web.security.middleware import SecurityScanMiddleware
 

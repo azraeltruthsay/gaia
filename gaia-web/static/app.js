@@ -1208,6 +1208,39 @@ function hooksPanel() {
   };
 }
 
+// ── Changelog Panel ──────────────────────────────────────────────────────
+
+function changelogPanel() {
+  return {
+    entries: [],
+    serviceFilter: '',
+    typeFilter: '',
+
+    async init() {
+      await this.load();
+    },
+
+    async load() {
+      try {
+        const params = new URLSearchParams();
+        if (this.serviceFilter) params.set('service', this.serviceFilter);
+        if (this.typeFilter) params.set('type', this.typeFilter);
+        params.set('limit', '100');
+        const r = await fetch('/api/changelog?' + params.toString());
+        if (r.ok) {
+          const data = await r.json();
+          this.entries = data.entries || [];
+        }
+      } catch (e) {}
+    },
+
+    typeIcon(type) {
+      const icons = { feat: '+', fix: '!', refactor: '~', promote: '^', docs: '#', config: '%', manual: '*' };
+      return icons[type] || '?';
+    },
+  };
+}
+
 // ── Chaos Monkey Panel ────────────────────────────────────────────────────
 
 function chaosPanel() {
@@ -1684,6 +1717,229 @@ function doctorPanel() {
           this.surgeonHistory = (data.history || []).slice(-20);
         }
       } catch {}
+    },
+  };
+}
+
+
+// ── Training Monitor Panel ──────────────────────────────────────────────────
+
+function trainingMonitor() {
+  return {
+    state: 'idle',
+    step: 0,
+    totalSteps: 0,
+    loss: null,
+    avgLoss: null,
+    elapsed: 0,
+    eta: 0,
+    speed: 0,
+    adapter: '',
+    lossHistory: [],
+    subprocessAlive: false,
+    stopReason: '',
+    error: '',
+    progress: 0,
+    lastState: '',
+
+    // UI
+    showLog: false,
+    logLines: [],
+    _timer: null,
+    _logSource: null,
+
+    async init() {
+      await this.pollTraining();
+      this._adaptInterval();
+    },
+
+    destroy() {
+      if (this._timer) clearInterval(this._timer);
+      if (this._logSource) this._logSource.close();
+    },
+
+    _adaptInterval() {
+      if (this._timer) clearInterval(this._timer);
+      const interval = (this.state === 'training' || this.state === 'setup' || this.state === 'saving') ? 3000 : 15000;
+      this._timer = setInterval(() => this.pollTraining(), interval);
+    },
+
+    async pollTraining() {
+      const prevState = this.state;
+      try {
+        const r = await fetch('/api/system/training/progress');
+        if (r.ok) {
+          const raw = await r.json();
+          // Merge manager + progress_file into flat data object
+          const mgr = raw.manager || {};
+          const pf = raw.progress_file || {};
+          const data = { ...pf, ...mgr, ...raw };
+
+          // Determine state: prefer manager state, then progress_file state
+          const mgrState = mgr.state || '';
+          const pfState = pf.state || '';
+          // Manager "complete" + subprocess "failed" = show failed
+          if (mgrState === 'complete' && pfState === 'failed') {
+            this.state = 'failed';
+          } else if (mgrState === 'training' || pfState === 'training') {
+            this.state = 'training';
+          } else if (mgrState === 'complete' || pfState === 'completed') {
+            this.state = 'completed';
+          } else if (mgrState === 'idle' && !pfState) {
+            this.state = 'idle';
+          } else {
+            this.state = pfState || mgrState || 'idle';
+          }
+
+          this.step = pf.step || mgr.subprocess_step || 0;
+          this.totalSteps = pf.total_steps || 0;
+          this.loss = (pf.loss ?? mgr.subprocess_loss) || null;
+          if (this.loss === 0.0 && this.state !== 'training') this.loss = null;
+          this.elapsed = pf.elapsed_seconds || 0;
+          this.eta = pf.estimated_remaining || 0;
+          this.adapter = mgr.current_adapter || pf.adapter_dir?.split('/').pop() || '';
+          this.subprocessAlive = mgr.subprocess_alive || false;
+          this.stopReason = pf.stop_reason || '';
+          this.error = pf.error || '';
+          this.progress = mgr.progress ?? (this.totalSteps > 0 ? this.step / this.totalSteps : 0);
+
+          // Loss history
+          if (pf.loss_history && pf.loss_history.length > 0) {
+            this.lossHistory = pf.loss_history;
+          } else if (this.loss != null && this.loss > 0 && this.state === 'training') {
+            // Accumulate from polling
+            if (this.lossHistory.length === 0 || this.lossHistory[this.lossHistory.length - 1] !== this.loss) {
+              this.lossHistory.push(this.loss);
+              if (this.lossHistory.length > 200) this.lossHistory = this.lossHistory.slice(-200);
+            }
+          }
+
+          // Compute average loss
+          if (this.lossHistory.length > 0) {
+            this.avgLoss = this.lossHistory.reduce((a, b) => a + b, 0) / this.lossHistory.length;
+          }
+
+          // Compute speed (seconds per step)
+          if (this.step > 0 && this.elapsed > 0) {
+            this.speed = this.elapsed / this.step;
+          }
+
+          // Draw sparkline after data update
+          this.$nextTick(() => {
+            if (this.$refs.lossCanvas && this.lossHistory.length >= 2) {
+              this.drawLossSparkline(this.$refs.lossCanvas);
+            }
+          });
+        }
+      } catch {
+        // Silently handle — endpoint may not be reachable
+      }
+
+      // Track last active state for idle display
+      if (this.state !== 'idle' && this.state !== 'unknown') {
+        this.lastState = this.state;
+      }
+
+      // Adapt polling interval when state changes
+      if (prevState !== this.state) {
+        this._adaptInterval();
+        // Clear loss history on new training session
+        if (this.state === 'training' && prevState === 'idle') {
+          this.lossHistory = [];
+          this.avgLoss = null;
+        }
+      }
+    },
+
+    toggleLog() {
+      this.showLog = !this.showLog;
+      if (this.showLog) {
+        this._connectLog();
+      } else {
+        this._disconnectLog();
+      }
+    },
+
+    _connectLog() {
+      if (this._logSource) this._logSource.close();
+      this.logLines = [];
+      try {
+        this._logSource = new EventSource('/api/logs/stream?service=study');
+        this._logSource.onmessage = (e) => {
+          const line = e.data;
+          if (line) {
+            this.logLines.push(line);
+            if (this.logLines.length > 200) this.logLines = this.logLines.slice(-150);
+            // Auto-scroll
+            this.$nextTick(() => {
+              const container = this.$refs.logContainer;
+              if (container) container.scrollTop = container.scrollHeight;
+            });
+          }
+        };
+        this._logSource.onerror = () => {
+          // Reconnect silently handled by EventSource
+        };
+      } catch {
+        this.logLines = ['Failed to connect to log stream'];
+      }
+    },
+
+    _disconnectLog() {
+      if (this._logSource) {
+        this._logSource.close();
+        this._logSource = null;
+      }
+    },
+
+    drawLossSparkline(canvas) {
+      if (!canvas || this.lossHistory.length < 2) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const values = this.lossHistory;
+      const max = Math.max(...values);
+      const min = Math.min(...values);
+      const range = max - min || 1;
+      const step = w / (values.length - 1);
+
+      // Fill area
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
+      values.forEach((v, i) => {
+        const x = i * step;
+        const y = h - ((v - min) / range) * (h - 8) - 4;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.lineTo(w, h);
+      ctx.lineTo(0, h);
+      ctx.closePath();
+      ctx.fill();
+
+      // Line
+      ctx.beginPath();
+      ctx.strokeStyle = '#42a5f5';
+      ctx.lineWidth = 1.5;
+      values.forEach((v, i) => {
+        const x = i * step;
+        const y = h - ((v - min) / range) * (h - 8) - 4;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Current value label
+      const last = values[values.length - 1];
+      ctx.fillStyle = '#42a5f5';
+      ctx.font = '9px monospace';
+      ctx.fillText(last.toFixed(4), w - 48, 10);
+    },
+
+    formatDur(seconds) {
+      return formatDuration(seconds);
     },
   };
 }

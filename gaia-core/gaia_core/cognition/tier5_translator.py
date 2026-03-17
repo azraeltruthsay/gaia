@@ -14,7 +14,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 logger = logging.getLogger("GAIA.Tier5Translator")
 

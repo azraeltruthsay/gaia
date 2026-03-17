@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     build-essential \
     python3-dev \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for container execution (host UID mapping)

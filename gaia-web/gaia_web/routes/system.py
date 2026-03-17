@@ -408,6 +408,19 @@ async def surgeon_reject(request: Request):
         return {"error": str(e)}
 
 
+@router.get("/training/progress")
+async def training_progress():
+    """Get training progress from gaia-study."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{STUDY_URL}/study/training/status")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch training progress: %s", e)
+    return {"state": "idle"}
+
+
 @router.get("/surgeon/history")
 async def surgeon_history():
     """Get surgeon repair history from gaia-doctor."""

@@ -1,20 +1,20 @@
 # Code Evolution Snapshot
-Generated: 2026-03-15T14:58:09.791560+00:00
+Generated: 2026-03-17T22:07:38.047086+00:00
 
 ## Pending Candidate Changes
-- **gaia-core**: 1 changed (gaia_heartbeat_session.json), 460 added, 1074 removed
+- **gaia-core**: 2 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json), 516 added, 3804 removed
 
 ## Recent Commits
+- `3051ad8` (2026-03-17): feat: CFR system, Qwen3-8B identity baking, penpal pipeline, sleep hold
+- `fb2a789` (2026-03-16): feat: centralized MODEL_REGISTRY — single source of truth for all model paths
+- `2410ac7` (2026-03-16): feat: structured MCP errors (isRetryable/errorCategory) + workflow commands
+- `bce255f` (2026-03-15): fix: Nano repetition loop + degenerate output escalation + mind tag accuracy
+- `88c8fb6` (2026-03-15): feat: KV cache auto-compaction & pressure monitoring
+- `6e54871` (2026-03-15): feat: doctor auto-fix for trivial lint errors (F401/F541/F811/F841)
+- `9f50f63` (2026-03-15): feat: prime wake triggers, cascade triage skip, error tests, gitignore fix
+- `0d48d57` (2026-03-15): feat: Doctor & Immunity dashboard panel + Surgeon approval queue
 - `ad1c6be` (2026-03-15): fix: model fallback chain — add core to all selection paths, health-check escalation
 - `b9a598d` (2026-03-15): fix: Discord pipeline errors — context window, token spacing, stream dedup
-- `218f440` (2026-03-14): docs: update dev journal with clean 5-drill run results
-- `b438415` (2026-03-14): fix: demarker race guard + INJECT/BREAK/SWAP pattern fixes
-- `fc86981` (2026-03-14): fix: two-tier repair demarker + cognitive monitor model-agnostic probe
-- `9338862` (2026-03-14): fix: chaos self-repair I/O and repair-loop guard
-- `840937c` (2026-03-14): fix: vLLM adapter fallback, think-tag stripping, conversation examples cleanup
-- `0e13468` (2026-03-14): feat: sleep cycle dashboard controls + cooperative wake interrupts
-- `b8afd84` (2026-03-14): feat: chaos monkey self-repair loop — doctor-driven organic repair
-- `d3ec3f4` (2026-03-14): chore: remove .gemini/ from git tracking
 
 ## Backup History
 - 124 .bak files (oldest: 2026-01-07, newest: 2026-01-27)

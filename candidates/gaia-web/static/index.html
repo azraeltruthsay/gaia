@@ -578,6 +578,101 @@
         </div>
       </div>
 
+      <!-- Training Monitor -->
+      <div class="hook-group hook-group-wide" x-data="trainingMonitor()" x-init="init()">
+        <div class="hook-group-header training-header">
+          Training Monitor
+          <span x-show="state === 'training'" class="training-active-badge">ACTIVE</span>
+        </div>
+
+        <!-- Idle state -->
+        <template x-if="state === 'idle' || state === 'unknown'">
+          <div class="training-idle">
+            <span class="training-idle-text">No training active</span>
+            <template x-if="lastState && lastState !== 'idle'">
+              <span class="training-idle-last">Last run: <span x-text="lastState"></span></span>
+            </template>
+          </div>
+        </template>
+
+        <!-- Active / completed / failed state -->
+        <template x-if="state && state !== 'idle' && state !== 'unknown'">
+          <div class="training-content">
+            <!-- Status row -->
+            <div class="training-metrics">
+              <div class="training-metric">
+                <span class="training-metric-label">Status</span>
+                <span class="training-metric-value" :class="'training-state-' + state" x-text="state"></span>
+              </div>
+              <div class="training-metric" x-show="adapter">
+                <span class="training-metric-label">Adapter</span>
+                <span class="training-metric-value" x-text="adapter"></span>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="training-progress-bar">
+              <div class="training-progress-fill"
+                   :class="{ 'training-fill-complete': state === 'completed', 'training-fill-failed': state === 'failed' }"
+                   :style="'width: ' + Math.round(progress * 100) + '%'">
+              </div>
+              <span class="training-progress-text" x-text="Math.round(progress * 100) + '%'"></span>
+            </div>
+
+            <!-- Metrics grid -->
+            <div class="training-metrics">
+              <div class="training-metric">
+                <span class="training-metric-label">Step</span>
+                <span class="training-metric-value" x-text="step + ' / ' + totalSteps"></span>
+              </div>
+              <div class="training-metric">
+                <span class="training-metric-label">Loss</span>
+                <span class="training-metric-value" x-text="loss != null ? loss.toFixed(4) : '--'"></span>
+              </div>
+              <div class="training-metric" x-show="avgLoss != null">
+                <span class="training-metric-label">Avg Loss</span>
+                <span class="training-metric-value" x-text="avgLoss != null ? avgLoss.toFixed(4) : '--'"></span>
+              </div>
+              <div class="training-metric">
+                <span class="training-metric-label">Elapsed</span>
+                <span class="training-metric-value" x-text="formatDur(elapsed)"></span>
+              </div>
+              <div class="training-metric" x-show="eta > 0">
+                <span class="training-metric-label">ETA</span>
+                <span class="training-metric-value" x-text="'~' + formatDur(eta)"></span>
+              </div>
+              <div class="training-metric" x-show="speed > 0">
+                <span class="training-metric-label">Speed</span>
+                <span class="training-metric-value" x-text="'~' + speed.toFixed(1) + 's/step'"></span>
+              </div>
+            </div>
+
+            <!-- Loss sparkline -->
+            <template x-if="lossHistory.length >= 2">
+              <div class="training-loss-sparkline">
+                <span class="training-metric-label">Loss Curve</span>
+                <canvas x-ref="lossCanvas" width="400" height="60"></canvas>
+              </div>
+            </template>
+
+            <!-- Stop reason / error -->
+            <div x-show="stopReason" class="training-stop-reason" x-text="'Stop: ' + stopReason"></div>
+            <div x-show="error" class="training-error" x-text="error"></div>
+
+            <!-- Training log toggle -->
+            <button class="hook-btn hook-btn-sm" @click="toggleLog()" x-text="showLog ? 'Hide Training Log' : 'Show Training Log'" style="margin-top: 8px;"></button>
+            <div x-show="showLog" x-collapse class="training-log-section">
+              <div class="training-log-lines" x-ref="logContainer">
+                <template x-for="(line, i) in logLines" :key="i">
+                  <div class="training-log-line" x-text="line"></div>
+                </template>
+                <div x-show="logLines.length === 0" class="training-log-empty">Connecting to study log stream...</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- Semantic Codex -->
       <div class="hook-group hook-group-wide">
         <div class="hook-group-header">Semantic Codex Lookup</div>
@@ -601,6 +696,46 @@
               <span x-show="r.score != null" class="hook-codex-result-score" x-text="r.score?.toFixed(3)"></span>
               <div class="hook-codex-result-title" x-text="r.title || r.key || r.id || 'untitled'"></div>
               <div class="hook-codex-result-snippet" x-text="(r.snippet || r.text || r.content || '').substring(0, 200)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Change Log -->
+      <div class="hook-group hook-group-wide" x-data="changelogPanel()" x-init="init()">
+        <div class="hook-group-header">Change Log</div>
+        <div class="changelog-filters">
+          <select class="chaos-mode-select" x-model="serviceFilter" @change="load()">
+            <option value="">All Services</option>
+            <option value="gaia-core">gaia-core</option>
+            <option value="gaia-web">gaia-web</option>
+            <option value="gaia-common">gaia-common</option>
+            <option value="gaia-study">gaia-study</option>
+            <option value="gaia-mcp">gaia-mcp</option>
+            <option value="gaia-audio">gaia-audio</option>
+            <option value="multi">multi</option>
+          </select>
+          <select class="chaos-mode-select" x-model="typeFilter" @change="load()">
+            <option value="">All Types</option>
+            <option value="feat">feat</option>
+            <option value="fix">fix</option>
+            <option value="refactor">refactor</option>
+            <option value="promote">promote</option>
+            <option value="docs">docs</option>
+            <option value="config">config</option>
+            <option value="manual">manual</option>
+          </select>
+        </div>
+        <div class="changelog-timeline">
+          <template x-if="entries.length === 0">
+            <div class="hook-codex-placeholder">No changelog entries yet.</div>
+          </template>
+          <template x-for="e in entries" :key="e.id">
+            <div class="changelog-entry">
+              <span class="changelog-icon" x-text="typeIcon(e.type)"></span>
+              <span class="changelog-service" x-text="e.service"></span>
+              <span class="changelog-summary" x-text="e.summary"></span>
+              <span class="changelog-meta" x-text="e.timestamp?.substring(0, 16).replace('T', ' ')"></span>
             </div>
           </template>
         </div>
@@ -1052,6 +1187,8 @@
       <button class="logs-subtab" :class="logsTab === 'mcp' ? 'active' : ''" @click="logsTab = 'mcp'">MCP</button>
       <button class="logs-subtab" :class="logsTab === 'study' ? 'active' : ''" @click="logsTab = 'study'">Study</button>
       <button class="logs-subtab" :class="logsTab === 'discord' ? 'active' : ''" @click="logsTab = 'discord'">Discord</button>
+      <div style="flex:1"></div>
+      <a href="http://localhost:5601" target="_blank" rel="noopener" class="logs-subtab logs-kibana-link" title="Open Kibana (ELK log explorer)">Kibana ↗</a>
     </div>
 
     <!-- Generation sub-tab (existing component, unchanged) -->
