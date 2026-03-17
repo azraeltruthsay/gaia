@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -106,6 +106,9 @@ class SleepWakeManager:
             return False
         if not self.auto_sleep_enabled:
             return False
+        # Respect time-boxed sleep hold (e.g., during CFR ingest / penpal pipeline)
+        if self._is_hold_active():
+            return False
         # Read from SLEEP_CYCLE config section, fall back to 30 minutes
         sleep_cfg = getattr(self.config, "SLEEP_CYCLE", None) or {}
         threshold = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
@@ -114,7 +117,51 @@ class SleepWakeManager:
     def set_auto_sleep(self, enabled: bool) -> None:
         """Enable or disable automatic sleep transitions."""
         self.auto_sleep_enabled = enabled
+        self._sleep_hold_until = None  # Clear any hold when manually toggling
         logger.info("Auto-sleep %s", "enabled" if enabled else "disabled")
+
+    def hold_wake(self, minutes: int = 30, reason: str = "") -> dict:
+        """Temporarily suppress auto-sleep for the given duration.
+
+        Auto-expires after `minutes` (max 120). The hold is checked in
+        should_transition_to_drowsy() and automatically cleared when expired.
+        Unlike set_auto_sleep(False), this is time-boxed and self-healing.
+        """
+        minutes = max(1, min(minutes, 120))  # Clamp 1-120
+        self._sleep_hold_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        self._sleep_hold_reason = reason or "long-form operation"
+        # Also ensure we're ACTIVE
+        if self.state != GaiaState.ACTIVE:
+            self.receive_wake_signal(reason=f"hold_wake: {reason}")
+        logger.info("Sleep hold active for %d minutes (reason: %s)", minutes, self._sleep_hold_reason)
+        return {
+            "hold_active": True,
+            "expires_at": self._sleep_hold_until.isoformat(),
+            "minutes": minutes,
+            "reason": self._sleep_hold_reason,
+        }
+
+    def release_hold(self) -> dict:
+        """Release a sleep hold early."""
+        was_held = getattr(self, "_sleep_hold_until", None) is not None
+        self._sleep_hold_until = None
+        self._sleep_hold_reason = ""
+        if was_held:
+            logger.info("Sleep hold released")
+        return {"hold_active": False, "was_held": was_held}
+
+    def _is_hold_active(self) -> bool:
+        """Check if a sleep hold is currently active (not expired)."""
+        hold_until = getattr(self, "_sleep_hold_until", None)
+        if hold_until is None:
+            return False
+        if datetime.now(timezone.utc) >= hold_until:
+            # Auto-expire
+            logger.info("Sleep hold expired (was: %s)", getattr(self, "_sleep_hold_reason", ""))
+            self._sleep_hold_until = None
+            self._sleep_hold_reason = ""
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Timeline event helper
@@ -473,6 +520,14 @@ class SleepWakeManager:
         status["auto_sleep_enabled"] = self.auto_sleep_enabled
         sleep_cfg = getattr(self.config, "SLEEP_CYCLE", None) or {}
         status["idle_threshold_minutes"] = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
+        # Sleep hold info
+        hold_until = getattr(self, "_sleep_hold_until", None)
+        if hold_until and datetime.now(timezone.utc) < hold_until:
+            status["sleep_hold"] = {
+                "active": True,
+                "expires_at": hold_until.isoformat(),
+                "reason": getattr(self, "_sleep_hold_reason", ""),
+            }
         status["voice_active"] = self.voice_active
         status["preemption_initiated"] = self._preemption_initiated
         if self.dreaming_handoff_id:

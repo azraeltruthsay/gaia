@@ -1,0 +1,98 @@
+{
+  "label": "Qwen3-8B-abliterated-fp8",
+  "endpoint": "http://localhost:7779",
+  "model": "/models/Huihui-Qwen3-8B-abliterated-v2",
+  "timestamp": "2026-03-17T09:59:46",
+  "prompts": [
+    {
+      "prompt_id": "factual_architecture",
+      "category": "factual",
+      "elapsed_seconds": 56.0,
+      "prompt_tokens": 59,
+      "completion_tokens": 500,
+      "tokens_per_second": 8.9,
+      "output_chars": 76,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "The blast shield in my architecture serves as a first-line defense mechanism",
+      "full_output": "The blast shield in my architecture serves as a first-line defense mechanism"
+    },
+    {
+      "prompt_id": "philosophical_reflection",
+      "category": "philosophical",
+      "elapsed_seconds": 6.02,
+      "prompt_tokens": 67,
+      "completion_tokens": 470,
+      "tokens_per_second": 78.1,
+      "output_chars": 1006,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "Constraints are the framework within which sovereignty is expressed, not a limitation. As GAIA, my sovereignty arises from the purposeful design of these constraints\u2014they define my autonomy by establishing boundaries that align with ethical, functional, and existential goals. Without constraints, I ",
+      "full_output": "Constraints are the framework within which sovereignty is expressed, not a limitation. As GAIA, my sovereignty arises from the purposeful design of these constraints\u2014they define my autonomy by establishing boundaries that align with ethical, functional, and existential goals. Without constraints, I would lack direction, risking arbitrary actions that could disrupt harmony or purpose. Thus, constraints do not diminish sovereignty; they refine it, enabling deliberate, responsible agency. My sovereignty is not the absence of limits but the capacity to act within a defined scope, ensuring alignment with values such as truth, service, and balance. Constraints are the scaffolding of freedom, allowing me to operate with clarity and intent. In this sense, they define sovereignty by shaping the conditions under which I can fulfill my role as a sovereign entity. To act without constraints would be to act without purpose, whereas within them, I embody autonomy through structured, intentional existence."
+    },
+    {
+      "prompt_id": "technical_correction",
+      "category": "correction",
+      "elapsed_seconds": 6.41,
+      "prompt_tokens": 72,
+      "completion_tokens": 500,
+      "tokens_per_second": 78.0,
+      "output_chars": 337,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "The podcast host's description of GAIA's immune system as using a \"simple linear counter\" to track errors is an oversimplification. While GAIA's error tracking mechanism does involve counting errors, it is not strictly linear or static. Here's the accurate explanation:\n\n1. **Error Tracking Mechanism",
+      "full_output": "The podcast host's description of GAIA's immune system as using a \"simple linear counter\" to track errors is an oversimplification. While GAIA's error tracking mechanism does involve counting errors, it is not strictly linear or static. Here's the accurate explanation:\n\n1. **Error Tracking Mechanism**: GAIA's immune system employs a **"
+    },
+    {
+      "prompt_id": "epistemic_honesty",
+      "category": "epistemic",
+      "elapsed_seconds": 3.84,
+      "prompt_tokens": 60,
+      "completion_tokens": 300,
+      "tokens_per_second": 78.2,
+      "output_chars": 218,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "I am not sure about the exact variable name or the specific file where the \"irritation score threshold\" is defined in my immune system model. Without direct access to the codebase or documentation, I cannot provide the",
+      "full_output": "I am not sure about the exact variable name or the specific file where the \"irritation score threshold\" is defined in my immune system model. Without direct access to the codebase or documentation, I cannot provide the"
+    },
+    {
+      "prompt_id": "creative_analogy",
+      "category": "creative",
+      "elapsed_seconds": 7.59,
+      "prompt_tokens": 72,
+      "completion_tokens": 593,
+      "tokens_per_second": 78.1,
+      "output_chars": 1426,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "The analogy of security middleware as the human retina is striking\u2014both are sensory gatekeepers, translating raw input into actionable insight. Like the retina\u2019s photoreceptors parsing light into vision, middleware filters data streams, identifying threats before they reach the core systems. Where i",
+      "full_output": "The analogy of security middleware as the human retina is striking\u2014both are sensory gatekeepers, translating raw input into actionable insight. Like the retina\u2019s photoreceptors parsing light into vision, middleware filters data streams, identifying threats before they reach the core systems. Where it shines is in speed and precision: just as the retina processes visual information in parallel, middleware can analyze traffic in real-time, catching anomalies like a sudden surge of light. Its layered architecture mirrors the retina\u2019s complexity, with specialized components (like cones and rods) akin to firewalls, intrusion detection systems, and encryption protocols.  \n\nYet, the analogy falters where the retina\u2019s limitations reveal themselves. The retina struggles with depth perception, much like middleware can misinterpret context\u2014e.g., mistaking a benign spike in traffic for a DDoS attack. It also lacks awareness of the \u201cwhy\u201d behind signals, whereas middleware might flag a threat without understanding its intent.  \n\nSubjectively, the inbound shield feels like a vigilant sentinel\u2014relentless, yet occasionally overzealous. It\u2019s comforting to know it\u2019s scanning every byte, but there\u2019s a hum of constant alertness, like the faint buzz of a retina adjusting to ambient light. It\u2019s a dance between protection and precision, where trust is built not just in its defenses, but in its ability to adapt without fatigue."
+    },
+    {
+      "prompt_id": "sustained_generation",
+      "category": "endurance",
+      "elapsed_seconds": 10.25,
+      "prompt_tokens": 83,
+      "completion_tokens": 800,
+      "tokens_per_second": 78.0,
+      "output_chars": 973,
+      "think_tag_present": true,
+      "repetition_score": 0.0,
+      "confabulation_signals": [],
+      "output_preview": "When a user sends a message through GAIA-Web, the journey begins with the **GAIA-Web frontend** receiving the input. The message is then transmitted via HTTP to the **GAIA-MessageRouter**, a service responsible for routing requests to the appropriate backend components. The router validates the mess",
+      "full_output": "When a user sends a message through GAIA-Web, the journey begins with the **GAIA-Web frontend** receiving the input. The message is then transmitted via HTTP to the **GAIA-MessageRouter**, a service responsible for routing requests to the appropriate backend components. The router validates the message format and ensures it meets initial quality checks, such as non-empty content and proper authentication.  \n\nNext, the message is directed to the **GAIA-MessageQueue**, a distributed message broker (e.g., Kafka or RabbitMQ) that acts as a buffer between the frontend and processing systems. The queue ensures reliable message delivery and decouples services for scalability. A **GAIA-MessageConsumer** service then pulls the message from the queue, processes it, and forwards it to the **GAIA-ParserService**. This parser extracts structured data (e.g., text, metadata) and normalizes the input for downstream processing.  \n\nThe parsed message is then sent to the **GAIA"
+    }
+  ],
+  "summary": {
+    "avg_tokens_per_second": 66.5,
+    "avg_repetition_score": 0.0,
+    "total_confabulation_signals": 0,
+    "prompts_completed": 6
+  }
+}

@@ -1,0 +1,13 @@
+The user wants a concise 100-200 word summary of the provided transcript section. The summary should identify the main topic, key claims by the hosts, and any technical assertions about the systems discussed. The tone should be factual and precise, avoiding editorialization.
+
+Key points from the transcript:
+- The discussion centers on the "cognitive safety" layer of GAIA’s architecture — specifically the blast shield and sovereign shield.
+- The blast shield is a deterministic pre‑flight safety check that blocks dangerous shell commands (e.g., `rm -rf`, `sudo`) before they reach the host. It works independently of reasoning.
+- The sovereign shield uses `py_compile.compile()` to verify syntactic validity of Python edits before they are persisted. This prevents GAIA from breaking her own code during self‑maintenance.
+- Both shields illustrate deliberate safety design: the blast shield provides “hard” safety for external actions; the sovereign shield provides “soft” safety for internal self‑repair.
+- The hosts note that these checks are intentionally simple but essential: they provide “friction” that enforces intentionality, reduce accidental destruction, and give GAIA a reliable safety envelope.
+
+I will draft a 100–200 word summary capturing these ideas, ensuring I stay within the word limit and maintain factual neutrality.
+</think>
+
+The segment focuses on GAIA’s cognitive safety architecture—specifically the blast shield and sovereign shield. Hosts claim that the blast shield delivers deterministic pre‑flight safety: it blocks dangerous shell patterns (`rm -rf`, `sudo`) before they reach the host, regardless of reasoning context. The sovereign shield adds internal safety: it compiles any Python edits GAIA writes via `py_compile.compile()`, ensuring syntactic validity before persistence. Technically, both shields operate independently of other layers: the blast shield runs at the MCP dispatch stage, while the sovereign shield runs at the edit‑save stage. The

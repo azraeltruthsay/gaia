@@ -210,6 +210,83 @@ TOOLS = {
             "required": []
         }
     },
+    # --- Cognitive Focus and Resolution (CFR) Tools ---
+    "cfr_ingest": {
+        "description": "Ingest a document into the CFR system. Chunks it into sections, generates summaries at multiple resolution levels, and stores the resolution tree. Use for any document too large for the context window, or when you want variable-resolution access to content.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the document to ingest."},
+                "doc_id": {"type": "string", "description": "Optional custom document ID. Auto-generated from content hash if omitted."},
+                "chunk_target": {"type": "integer", "description": "Target chunk size in characters (default 3500)."}
+            },
+            "required": ["file_path"]
+        }
+    },
+    "cfr_focus": {
+        "description": "Load a specific document section at full resolution into context, with compressed summaries of all other sections. Returns the working-memory payload for reasoning about that section.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID from cfr_ingest."},
+                "section_index": {"type": "integer", "description": "Section index to focus on (0-based)."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_compress": {
+        "description": "Summarize a section and store the summary, releasing the full text from working memory. Returns the cached summary if one already exists.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "section_index": {"type": "integer", "description": "Section index to compress."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_expand": {
+        "description": "Re-expand a previously compressed section to full resolution. No LLM call needed — retrieves the stored full text.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "section_index": {"type": "integer", "description": "Section index to expand."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_synthesize": {
+        "description": "Generate a rolling synthesis of understanding across all sections of a document. Uses all section summaries to produce a coherent overview.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."}
+            },
+            "required": ["doc_id"]
+        }
+    },
+    "cfr_status": {
+        "description": "Show current resolution state of a CFR document — which sections are expanded, compressed, or focused, with token budgets. If doc_id omitted, lists all ingested documents.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID. Omit to list all documents."}
+            },
+            "required": []
+        }
+    },
+    "cfr_rolling_context": {
+        "description": "Generate a relevance-weighted rolling summary of all sections before a target section, emphasizing details relevant to the target's topic. Use this to build coherent prior context before reasoning about a specific section.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "target_section": {"type": "integer", "description": "Section index to build context for (0-based)."}
+            },
+            "required": ["doc_id", "target_section"]
+        }
+    },
     # --- Study Mode / LoRA Adapter Tools ---
     # These tools allow GAIA to learn new knowledge through QLoRA fine-tuning
     "study_start": {

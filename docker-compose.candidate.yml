@@ -31,7 +31,9 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CORE_ENDPOINT=http://gaia-core-candidate:6415
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
-      - PRIME_ENDPOINT=http://gaia-prime:7777/v1
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3.5-4B-Abliterated-merged}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-Abliterated-Q4_K_M.gguf}
       - GAIA_AUTOLOAD_MODELS=1
     
     deploy:
@@ -174,7 +176,7 @@ services:
     # Config, volume, and env var are already wired — just needs this flag.
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model /models/Qwen3.5-4B-Abliterated
+      --model ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-merged}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.65
@@ -200,6 +202,44 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-study-candidate: The Subconscious (upgraded PyTorch for RTX 5080)
+  # Used for QLoRA training on 8B+ models with native sm_120 CUDA support.
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-study-candidate:
+    build:
+      context: .
+      dockerfile: ./gaia-study/Dockerfile
+    image: gaia-study-candidate:pytorch210
+    container_name: gaia-study-candidate
+    hostname: gaia-study-candidate
+    restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      - ./gaia-study:/app:rw
+      - ./gaia-common:/gaia-common:ro
+      - ./knowledge:/knowledge:rw
+      - ./gaia-models:/models:rw
+      - gaia-candidate-shared:/shared:rw
+      - ./logs:/logs:rw
+
+    environment:
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_ENV=development
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    profiles:
+      - study-candidate
 
 volumes:
   gaia-candidate-shared:
