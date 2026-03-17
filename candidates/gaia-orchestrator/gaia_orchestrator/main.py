@@ -30,6 +30,7 @@ from .models.schemas import (
     HandoffRequest,
     HandoffStatus,
     HandoffType,
+    NanoGPUStatus,
     OracleNotification,
     Notification,
     NotificationType,
@@ -57,6 +58,7 @@ _handoff_manager = None
 _notification_manager = None
 _health_watchdog = None
 _gpu_lock = asyncio.Lock()
+_nano_pressure_task: Optional[asyncio.Task] = None
 
 
 @asynccontextmanager
@@ -109,11 +111,19 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning("Health watchdog not available yet")
 
+    # Start Nano VRAM pressure monitor
+    global _nano_pressure_task
+    if _gpu_manager:
+        _nano_pressure_task = asyncio.create_task(_nano_vram_pressure_loop())
+        logger.info("Nano VRAM pressure monitor started")
+
     logger.info("GAIA Orchestrator ready")
     yield
 
     # Shutdown
     logger.info("GAIA Orchestrator shutting down...")
+    if _nano_pressure_task and not _nano_pressure_task.done():
+        _nano_pressure_task.cancel()
     if _health_watchdog:
         await _health_watchdog.stop()
     if _state_manager:
@@ -181,6 +191,11 @@ async def root():
                 "validate": "POST /training/validate",
                 "kill": "POST /training/kill",
             },
+            "nano": {
+                "status": "GET /nano/status",
+                "backoff": "POST /nano/backoff",
+                "restore": "POST /nano/restore",
+            },
             "notifications": {
                 "oracle_fallback": "POST /notify/oracle-fallback",
                 "websocket": "WS /ws/notifications",
@@ -200,6 +215,7 @@ async def get_status():
         "service": "gaia-orchestrator",
         "status": "operational",
         "gpu": state.gpu.model_dump(),
+        "nano": state.nano.model_dump(),
         "containers": state.containers.model_dump(),
         "active_handoff": state.active_handoff.model_dump() if state.active_handoff else None,
         "last_updated": state.last_updated.isoformat(),
@@ -857,6 +873,74 @@ async def websocket_notifications(websocket: WebSocket):
             await _notification_manager.disconnect(websocket)
     else:
         await websocket.close(code=1011, reason="Notification manager not available")
+
+
+# =============================================================================
+# Nano GPU Backoff
+# =============================================================================
+
+async def _nano_vram_pressure_loop():
+    """Background loop that monitors VRAM and auto-manages Nano GPU placement."""
+    config = get_config()
+    interval = config.nano_vram_check_interval
+
+    # Wait for services to stabilize on startup
+    await asyncio.sleep(30)
+
+    while True:
+        try:
+            if _gpu_manager:
+                action = await _gpu_manager.check_nano_vram_pressure()
+                if action and _notification_manager:
+                    await _notification_manager.broadcast(
+                        Notification(
+                            notification_type=NotificationType.GPU_RELEASED
+                            if action == "evicted"
+                            else NotificationType.GPU_ACQUIRED,
+                            title=f"Nano {action}",
+                            message=f"Nano {'moved to CPU' if action == 'evicted' else 'restored to GPU'} "
+                                    f"(VRAM pressure {'detected' if action == 'evicted' else 'relieved'})",
+                            data={"nano_action": action},
+                        )
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Nano VRAM pressure check failed: %s", e)
+
+        await asyncio.sleep(interval)
+
+
+@app.get("/nano/status")
+async def get_nano_status() -> NanoGPUStatus:
+    """Get Nano GPU/CPU placement status."""
+    if _state_manager is None:
+        raise HTTPException(status_code=503, detail="State manager not initialized")
+    return _state_manager.state.nano
+
+
+@app.post("/nano/backoff")
+async def nano_backoff(reason: str = "manual"):
+    """Evict Nano from GPU to CPU to free VRAM."""
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    success = await _gpu_manager.evict_nano_to_cpu(reason)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to evict Nano to CPU")
+    return {"ok": True, "mode": "cpu", "reason": reason}
+
+
+@app.post("/nano/restore")
+async def nano_restore(reason: str = "manual"):
+    """Restore Nano to GPU for faster inference."""
+    if _gpu_manager is None:
+        raise HTTPException(status_code=501, detail="GPU manager not available")
+
+    success = await _gpu_manager.restore_nano_to_gpu(reason)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to restore Nano to GPU (VRAM may be insufficient)")
+    return {"ok": True, "mode": "gpu", "reason": reason}
 
 
 # =============================================================================

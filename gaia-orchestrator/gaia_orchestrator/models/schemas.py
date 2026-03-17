@@ -26,6 +26,20 @@ class GPUOwner(str, Enum):
     AUDIO = "gaia-audio"
 
 
+class NanoGPUMode(str, Enum):
+    """Nano model GPU placement mode."""
+    GPU = "gpu"       # All layers on GPU (--n-gpu-layers 999)
+    CPU = "cpu"       # All layers on CPU (--n-gpu-layers 0)
+
+
+class NanoGPUStatus(BaseModel):
+    """Current Nano GPU/CPU placement status."""
+    mode: NanoGPUMode = NanoGPUMode.GPU
+    last_transition: Optional[datetime] = None
+    reason: Optional[str] = None
+    transitions: int = 0
+
+
 class GPUAcquireRequest(BaseModel):
     """Request to acquire GPU ownership."""
     requester: GPUOwner = Field(..., description="Service requesting GPU")
@@ -186,6 +200,7 @@ class Notification(BaseModel):
 class OrchestratorState(BaseModel):
     """Complete orchestrator state for persistence."""
     gpu: GPUStatus = Field(default_factory=GPUStatus)
+    nano: NanoGPUStatus = Field(default_factory=NanoGPUStatus)
     containers: ContainerStatus = Field(default_factory=ContainerStatus)
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)

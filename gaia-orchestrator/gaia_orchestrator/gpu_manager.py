@@ -20,7 +20,7 @@ from typing import Optional
 
 from .config import get_config
 from .state import StateManager
-from .models.schemas import GPUMemoryInfo
+from .models.schemas import GPUMemoryInfo, NanoGPUMode
 
 logger = logging.getLogger("GAIA.Orchestrator.GPU")
 
@@ -45,6 +45,7 @@ class GPUManager:
     """Manages GPU resources and monitors VRAM usage."""
 
     PRIME_CONTAINER_NAME = os.environ.get("PRIME_CONTAINER_NAME", "gaia-prime")
+    NANO_CONTAINER_NAME = os.environ.get("NANO_CONTAINER_NAME", "gaia-nano")
 
     def __init__(self, state_manager: StateManager):
         self.state_manager = state_manager
@@ -293,10 +294,13 @@ class GPUManager:
 
     async def request_release_from_core(self) -> bool:
         """
-        Release GPU: sleep gaia-audio, stop the prime container, then tell
-        gaia-core to demote gpu_prime from its model pool.
+        Release GPU: evict Nano, sleep gaia-audio, stop the prime container,
+        then tell gaia-core to demote gpu_prime from its model pool.
         """
         import httpx
+
+        # Step 0: Evict Nano to CPU (frees ~800MB VRAM)
+        await self.evict_nano_to_cpu("gpu_release")
 
         # Step 1: Sleep gaia-audio (unloads Whisper + XTTS from GPU)
         await self.sleep_audio()
@@ -357,6 +361,9 @@ class GPUManager:
 
         # Step 3: Wake gaia-audio (reload Whisper + XTTS onto GPU)
         await self.wake_audio()
+
+        # Step 4: Restore Nano to GPU (if VRAM allows)
+        await self.restore_nano_to_gpu("gpu_reclaim")
 
         return True
 
@@ -520,6 +527,134 @@ class GPUManager:
         except Exception as e:
             logger.error("Failed to kill training subprocess: %s", e)
             return {"ok": False, "error": str(e)}
+
+    # =========================================================================
+    # Nano GPU Backoff — dynamic GPU/CPU placement
+    # =========================================================================
+
+    async def _restart_nano_with_layers(self, n_gpu_layers: int, reason: str) -> bool:
+        """Restart gaia-nano via docker compose with different GPU layer count.
+
+        Uses `docker compose up -d gaia-nano` with NANO_GPU_LAYERS env override.
+        Compose recreates the container with the new --n-gpu-layers value.
+        """
+        import subprocess
+
+        compose_file = self.config.compose_file_live
+        env = {**dict(os.environ), "NANO_GPU_LAYERS": str(n_gpu_layers)}
+        cmd = [
+            "docker", "compose", "-f", str(compose_file),
+            "up", "-d", "gaia-nano",
+        ]
+
+        logger.info(
+            "Restarting gaia-nano with --n-gpu-layers %d (reason: %s)",
+            n_gpu_layers, reason,
+        )
+
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, cmd,
+                capture_output=True, text=True, env=env,
+                cwd=str(compose_file.parent), timeout=60,
+            )
+            if result.returncode != 0:
+                logger.error("Nano restart failed: %s", result.stderr.strip())
+                return False
+
+            logger.info("gaia-nano restarted with %d GPU layers", n_gpu_layers)
+            return True
+        except Exception as e:
+            logger.error("Failed to restart gaia-nano: %s", e)
+            return False
+
+    async def evict_nano_to_cpu(self, reason: str = "vram_pressure") -> bool:
+        """Evict Nano from GPU to CPU to free ~800MB VRAM.
+
+        Restarts gaia-nano with --n-gpu-layers 0. The model reloads in <2s.
+        """
+        from datetime import datetime, timezone
+
+        current_mode = self.state_manager.state.nano.mode
+        if current_mode == NanoGPUMode.CPU:
+            logger.info("Nano already on CPU — skipping eviction")
+            return True
+
+        success = await self._restart_nano_with_layers(0, reason)
+        if success:
+            async with self.state_manager.modify() as state:
+                state.nano.mode = NanoGPUMode.CPU
+                state.nano.last_transition = datetime.now(timezone.utc)
+                state.nano.reason = reason
+                state.nano.transitions += 1
+            logger.info("Nano evicted to CPU (reason: %s)", reason)
+        return success
+
+    async def restore_nano_to_gpu(self, reason: str = "vram_available") -> bool:
+        """Restore Nano to GPU for faster triage inference.
+
+        Restarts gaia-nano with --n-gpu-layers 999. Checks VRAM headroom first.
+        """
+        from datetime import datetime, timezone
+
+        current_mode = self.state_manager.state.nano.mode
+        if current_mode == NanoGPUMode.GPU:
+            logger.info("Nano already on GPU — skipping restore")
+            return True
+
+        # Check if there's enough VRAM to restore
+        mem_info = await self.get_memory_info()
+        if mem_info:
+            threshold = self.config.nano_vram_restore_threshold_mb
+            if mem_info.free_mb < threshold:
+                logger.info(
+                    "Not enough VRAM to restore Nano (free: %dMB, need: %dMB)",
+                    mem_info.free_mb, threshold,
+                )
+                return False
+
+        success = await self._restart_nano_with_layers(999, reason)
+        if success:
+            async with self.state_manager.modify() as state:
+                state.nano.mode = NanoGPUMode.GPU
+                state.nano.last_transition = datetime.now(timezone.utc)
+                state.nano.reason = reason
+                state.nano.transitions += 1
+            logger.info("Nano restored to GPU (reason: %s)", reason)
+        return success
+
+    async def check_nano_vram_pressure(self) -> Optional[str]:
+        """Check if VRAM pressure requires Nano eviction or allows restoration.
+
+        Returns action taken: "evicted", "restored", or None.
+        """
+        mem_info = await self.get_memory_info()
+        if mem_info is None:
+            return None
+
+        current_mode = self.state_manager.state.nano.mode
+
+        # If on GPU and VRAM is tight, evict
+        if (current_mode == NanoGPUMode.GPU
+                and mem_info.free_mb < self.config.nano_vram_pressure_threshold_mb):
+            logger.warning(
+                "VRAM pressure detected (free: %dMB < %dMB) — evicting Nano to CPU",
+                mem_info.free_mb, self.config.nano_vram_pressure_threshold_mb,
+            )
+            if await self.evict_nano_to_cpu("vram_pressure_auto"):
+                return "evicted"
+
+        # If on CPU and VRAM is comfortable, restore
+        if (current_mode == NanoGPUMode.CPU
+                and mem_info.free_mb > self.config.nano_vram_restore_threshold_mb):
+            logger.info(
+                "VRAM available (free: %dMB > %dMB) — restoring Nano to GPU",
+                mem_info.free_mb, self.config.nano_vram_restore_threshold_mb,
+            )
+            if await self.restore_nano_to_gpu("vram_available_auto"):
+                return "restored"
+
+        return None
 
     def shutdown(self):
         """Shutdown NVML."""
