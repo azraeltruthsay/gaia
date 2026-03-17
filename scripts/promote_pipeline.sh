@@ -705,6 +705,11 @@ else
     done
 
     if [ "$promote_ok" = true ]; then
+        # Append changelog entry for promotion
+        CHANGELOG_JSONL="$GAIA_ROOT/logs/changelog.jsonl"
+        CHG_TS=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
+        CHG_ID="chg_$(date -u +%Y%m%dT%H%M%S)_$(head -c 4 /dev/urandom | xxd -p | head -c 4)"
+        echo "{\"id\":\"$CHG_ID\",\"timestamp\":\"$CHG_TS\",\"type\":\"promote\",\"service\":\"multi\",\"summary\":\"Promoted services: $SERVICES\",\"author\":\"promote_pipeline\",\"source\":\"promotion\"}" >> "$CHANGELOG_JSONL" 2>/dev/null || true
         stage_pass "Promote Services"
     else
         stage_fail "Promote Services" "Service promotion failed — manual rollback may be needed"

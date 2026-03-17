@@ -53,6 +53,7 @@ RUN pip install -e ".[dev]"
 
 COPY candidates/gaia-core/gaia_core/ ./gaia_core/
 COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
+COPY candidates/gaia-core/entrypoint.sh /entrypoint.sh
 # Copy canonical constants file from gaia-common (single source of truth)
 COPY candidates/gaia-common/gaia_common/constants/gaia_constants.json ./gaia_common/constants/gaia_constants.json
 

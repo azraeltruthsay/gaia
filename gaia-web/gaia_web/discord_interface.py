@@ -19,10 +19,11 @@ from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
 from gaia_web.security.middleware import SecurityScanMiddleware
+from gaia_web.attachment_handler import process_attachments
 # Import all necessary dataclasses for CognitionPacket
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
-    OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
+    Attachment, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
     SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
     PacketState, TargetEngine
 )
@@ -201,6 +202,19 @@ class DiscordInterface:
                     content = content.replace(f"<@{mention.id}>", "").replace(f"<@!{mention.id}>", "")
                 content = content.strip()
 
+                # Process file attachments (PDF, txt, md, images, etc.)
+                attachments = []
+                if message.attachments:
+                    try:
+                        attachments = await process_attachments(message)
+                    except Exception:
+                        logger.error("Attachment processing failed", exc_info=True)
+
+                # If user sent only file(s) with no text, synthesize a content string
+                if not content and attachments:
+                    names = ", ".join(a["filename"] for a in attachments)
+                    content = f"[Attached: {names}]"
+
                 if content:
                     logger.info(f"Discord processing message from {message.author.display_name}: {content[:50]}")
                     await self._handle_message(
@@ -211,7 +225,8 @@ class DiscordInterface:
                         author_name=message.author.display_name,
                         message_id=str(message.id),
                         is_dm=is_dm,
-                        message_obj=message
+                        message_obj=message,
+                        attachments=attachments,
                     )
 
             if not is_dm:
@@ -337,7 +352,8 @@ class DiscordInterface:
         author_name: str,
         message_id: str,
         is_dm: bool,
-        message_obj: Any
+        message_obj: Any,
+        attachments: Optional[list] = None,
     ):
         """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket."""
         logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {author_name}")
@@ -459,6 +475,24 @@ class DiscordInterface:
             status=Status(finalized=False, state=PacketState.INITIALIZED, next_steps=[]),
             tool_routing=ToolRoutingState() # Empty for initial packet
         )
+        # Attach file metadata and extracted text to the packet
+        if attachments:
+            for att in attachments:
+                packet.content.attachments.append(Attachment(
+                    name=att["filename"],
+                    mime=att["mime"],
+                    content_hash=att["content_hash"],
+                    bytes=att["size_bytes"],
+                    location=att["path"],
+                ))
+                # Add extracted text as a DataField for downstream processing
+                if att.get("text_content"):
+                    packet.content.data_fields.append(DataField(
+                        key="attachment_text",
+                        value={"filename": att["filename"], "text_preview": att["text_content"][:2000]},
+                        type="json",
+                    ))
+
         packet.compute_hashes() # Compute hashes for integrity
 
         # Inbound security scan — runs before dispatch to gaia-core

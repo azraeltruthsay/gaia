@@ -392,6 +392,138 @@ def run_auto_detect(
 
 
 # ---------------------------------------------------------------------------
+# LLM-Driven Domain Classification (Nano model)
+# ---------------------------------------------------------------------------
+
+def classify_domain_llm(text_snippet: str, available_kbs: list) -> str:
+    """
+    Use the Nano model to classify which knowledge domain a text snippet belongs to.
+
+    Falls back to 'general' on any failure.
+    """
+    if not available_kbs:
+        available_kbs = ["dnd_campaign", "system", "blueprints", "general"]
+
+    # Ensure 'general' is always an option
+    if "general" not in available_kbs:
+        available_kbs = available_kbs + ["general"]
+
+    kb_list = ", ".join(available_kbs)
+    prompt_text = (
+        f"Given this text excerpt, which knowledge domain does it belong to?\n"
+        f"Available domains: {kb_list}\n"
+        f"Text: {text_snippet[:1000]}\n"
+        f"Reply with ONLY the domain name, nothing else."
+    )
+
+    try:
+        from gaia_core.models._model_pool_impl import ModelPool
+        from gaia_core.config import get_config
+        config = get_config()
+
+        nano_key = "nano" if "nano" in config.MODEL_CONFIGS else "reflex"
+        if nano_key not in config.MODEL_CONFIGS:
+            logger.warning("No Nano model configured — falling back to keyword classification")
+            return "general"
+
+        pool = ModelPool(config)
+        pool.ensure_model_loaded(nano_key)
+        nano = pool.get(nano_key)
+        if not nano:
+            return "general"
+
+        messages = [
+            {"role": "system", "content": "You are a document classifier. Respond with exactly one domain name."},
+            {"role": "user", "content": prompt_text},
+        ]
+        res = nano.create_chat_completion(messages=messages, max_tokens=16, temperature=0.1)
+        response = res["choices"][0]["message"]["content"].strip().lower()
+
+        # Validate response against available KBs
+        for kb in available_kbs:
+            if kb in response:
+                logger.info("Nano domain classification: '%s' → %s", text_snippet[:50], kb)
+                return kb
+
+        logger.info("Nano response '%s' didn't match any KB — using 'general'", response)
+        return "general"
+
+    except Exception as e:
+        logger.warning("Nano domain classification failed: %s — using 'general'", e)
+        return "general"
+
+
+def run_attachment_ingestion(
+    filename: str,
+    text_content: str,
+    user_hint: str = "",
+) -> Dict:
+    """
+    Full ingestion pipeline for a file attachment.
+
+    1. Classify domain via Nano LLM
+    2. Override with user hint if present
+    3. Classify content category (keyword-based)
+    4. Dedup check
+    5. Format and write + embed
+
+    Returns dict with {action, kb_name, category, path, embed_ok, error}.
+    """
+    from gaia_core.behavior.persona_switcher import get_available_knowledge_bases
+
+    available_kbs = get_available_knowledge_bases()
+
+    # Step 1: LLM domain classification
+    kb_name = classify_domain_llm(text_content, available_kbs)
+
+    # Step 2: User hint override (e.g., "save this D&D stuff")
+    if user_hint:
+        hint_lower = user_hint.lower()
+        for kb in available_kbs:
+            # Check if user explicitly mentioned a domain
+            kb_keywords = {
+                "dnd_campaign": ["d&d", "dnd", "campaign", "dungeon"],
+                "system": ["system", "architecture", "config"],
+                "blueprints": ["blueprint", "design", "plan"],
+            }
+            for kw in kb_keywords.get(kb, []):
+                if kw in hint_lower:
+                    logger.info("User hint override: '%s' → kb=%s", kw, kb)
+                    kb_name = kb
+                    break
+
+    # Step 3: Keyword-based content classification within the domain
+    classification = classify_content(text_content)
+
+    # Step 4: Dedup check
+    dedup = check_dedup(text_content, kb_name)
+    if dedup:
+        logger.info("Attachment dedup blocked: %s already exists (sim=%.3f)", filename, dedup["similarity"])
+        return {
+            "action": "dedup_blocked",
+            "kb_name": kb_name,
+            "category": classification["category"],
+            "existing_doc": dedup,
+            "path": None,
+            "embed_ok": False,
+            "error": None,
+        }
+
+    # Step 5: Format document and write + embed
+    doc_filename, document = format_document(text_content, classification, subject=filename)
+    result = write_and_embed(doc_filename, document, kb_name)
+
+    return {
+        "action": "saved",
+        "kb_name": kb_name,
+        "category": classification["category"],
+        "path": result.get("path"),
+        "embed_ok": result.get("embed_ok", False),
+        "error": result.get("error"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Knowledge Update Detection (casual updates to existing entities)
 # ---------------------------------------------------------------------------
 

@@ -19,7 +19,6 @@ Audit log: /logs/security_audit.jsonl (JSONL, append mode)
 import logging
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Tuple
 
 from gaia_common.protocols.cognition_packet import (
@@ -146,8 +145,6 @@ class SecurityScanMiddleware:
         if self._redact_pii:
             redacted, redaction_records, pii_hits = self._pii_scanner.scan(redacted)
             all_hits.extend(pii_hits)
-        else:
-            redaction_records = []
 
         # --- Secrets scan ---
         if self._scan_secrets:

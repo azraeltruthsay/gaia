@@ -21,8 +21,6 @@ import asyncio
 import functools
 import logging
 import time
-from typing import Literal
-
 import httpx
 
 from gaia_audio.status import status_tracker

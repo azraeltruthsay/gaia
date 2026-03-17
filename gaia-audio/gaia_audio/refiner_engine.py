@@ -6,7 +6,6 @@ by calling the gaia-nano llama-server over its OpenAI-compatible API.
 """
 
 import logging
-from typing import Optional
 
 import httpx
 

@@ -39,7 +39,7 @@ from gaia_core.behavior.persona_switcher import get_persona_for_request, get_per
 from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_probe_stats
 from gaia_core.cognition.cognitive_dispatcher import process_execution_results
 from gaia_core.cognition.knowledge_enhancer import enhance_packet
-from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect
+from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect, run_attachment_ingestion
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
@@ -1373,7 +1373,59 @@ class AgentCore:
                             f"Knowledge update tagged + hint injected: entity={entity}"
                         )
             # ── End Knowledge Ingestion Pipeline ──────────────────────────
-    
+
+            # ── Attachment Ingestion Pipeline ─────────────────────────────
+            # Process file attachments (PDFs, text files, etc.) sent via Discord
+            if packet.content.attachments:
+                for att in packet.content.attachments:
+                    # Find the matching attachment_text DataField
+                    att_text = None
+                    for df in packet.content.data_fields:
+                        if df.key == "attachment_text" and isinstance(df.value, dict):
+                            if df.value.get("filename") == att.name:
+                                att_text = df.value.get("text_preview", "")
+                                break
+
+                    if not att_text:
+                        self.logger.info("Attachment '%s' has no extracted text — skipping ingestion", att.name)
+                        continue
+
+                    try:
+                        result = run_attachment_ingestion(
+                            filename=att.name,
+                            text_content=att_text,
+                            user_hint=user_input,
+                        )
+                        if result.get("action") == "saved" and result.get("path"):
+                            msg = (
+                                f"I've saved **{att.name}** to your **{result['kb_name']}** "
+                                f"knowledge base ({result['category']})."
+                            )
+                            if result.get("embed_ok"):
+                                msg += " It's now indexed for retrieval."
+                            yield {"type": "token", "value": msg}
+                        elif result.get("action") == "dedup_blocked":
+                            existing = result.get("existing_doc", {})
+                            yield {"type": "token", "value": (
+                                f"**{att.name}** appears to already exist in the "
+                                f"**{result['kb_name']}** knowledge base "
+                                f"(similarity: {existing.get('similarity', 0):.0%}). "
+                                f"No duplicate was created."
+                            )}
+                        elif result.get("error"):
+                            yield {"type": "token", "value": (
+                                f"I tried to save **{att.name}** but encountered an issue: "
+                                f"{result['error']}"
+                            )}
+                    except Exception as e:
+                        self.logger.error("Attachment ingestion failed for '%s': %s", att.name, e, exc_info=True)
+                        yield {"type": "token", "value": f"Failed to process attachment **{att.name}**: {e}"}
+
+                # If the message was ONLY attachments (no real user text), we're done
+                if user_input.startswith("[Attached:"):
+                    return
+            # ── End Attachment Ingestion Pipeline ─────────────────────────
+
             # Compatibility shims removed: callers should use the v0.3 packet
             # contract (header.persona, context.cheatsheets, content.original_prompt,
             # and reasoning.reflection_log). The StreamObserver and other helpers
@@ -2125,6 +2177,38 @@ class AgentCore:
                     else:
                         self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
                         final_yield_text = "\n\n---\n🔄 **[Refinement — here's the fuller answer]**\n" + user_facing_response
+
+            # ── Epistemic Confabulation Gate ─────────────────────────────
+            # Detect when GAIA claims to have reviewed/evaluated something
+            # that wasn't grounded in retrieved documents or tool output.
+            _confab_signals = [
+                "solid upgrade", "great addition", "looks good", "well designed",
+                "i've reviewed", "i've seen", "i can confirm", "glad you",
+                "happy with", "the implementation is", "nice work on",
+            ]
+            _response_lower = (final_yield_text or "").lower()
+            _has_confab_signal = any(s in _response_lower for s in _confab_signals)
+            if _has_confab_signal:
+                # Check if there's grounding: retrieved docs or tool execution results
+                _has_grounding = bool(execution_results)
+                if not _has_grounding:
+                    for _df in packet.content.data_fields:
+                        if _df.key == "retrieved_documents" and _df.value:
+                            _has_grounding = True
+                            break
+                if not _has_grounding:
+                    self.logger.warning(
+                        "AgentCore: Epistemic confabulation detected — "
+                        "response claims evaluation without grounding"
+                    )
+                    seed_msg = (
+                        f"THOUGHT_SEED: Confabulation detected — claimed to have "
+                        f"reviewed/evaluated something without grounding documents. "
+                        f"Prompt: '{user_input[:50]}...'"
+                    )
+                    self.logger.info(seed_msg)
+                    ts_write(seed_msg)
+            # ── End Epistemic Confabulation Gate ──────────────────────────
 
             # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
             # Only yield if it's a 'Refinement' (reflex_text was present and response differs).

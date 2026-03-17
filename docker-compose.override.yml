@@ -23,6 +23,8 @@ services:
     volumes:
       # Mount source code for hot-reload
       - ./gaia-core/gaia_core:/app/gaia_core:ro
+      # Entrypoint script (starts llama-server + uvicorn)
+      - ./gaia-core/entrypoint.sh:/entrypoint.sh:ro
       # Shared library (already mounted in base)
       - ./gaia-common:/gaia-common:ro
     environment:

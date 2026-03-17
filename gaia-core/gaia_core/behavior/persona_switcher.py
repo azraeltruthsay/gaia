@@ -109,6 +109,18 @@ def get_persona_for_knowledge_base(kb_name: str) -> Optional[str]:
     return None
 
 
+def get_available_knowledge_bases() -> list:
+    """Return list of configured knowledge base names from gaia_constants.json."""
+    try:
+        from gaia_core.config import get_config
+        config = get_config()
+        kbs = config.constants.get("KNOWLEDGE_BASES", {})
+        return list(kbs.keys())
+    except Exception as e:
+        logger.warning("Failed to read KNOWLEDGE_BASES from config: %s", e)
+        return ["dnd_campaign", "system", "blueprints", "general"]
+
+
 def get_persona_for_request(user_input: str) -> Tuple[str, Optional[str]]:
     """
     Determines the appropriate persona and knowledge base for a given user request.

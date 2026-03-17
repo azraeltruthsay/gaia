@@ -6,7 +6,6 @@ import os
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("GAIA.Web.Chaos")
 

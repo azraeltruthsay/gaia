@@ -14,7 +14,6 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 log = logging.getLogger("gaia-core.observer-scorer")

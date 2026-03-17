@@ -5,7 +5,6 @@ import pytest
 
 from gaia_common.errors import (
     ErrorCategory,
-    GaiaErrorDef,
     register,
     lookup,
     all_errors,
