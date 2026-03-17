@@ -2,7 +2,7 @@
 #
 # Services:
 #   - gaia-core:  The Brain   - Cognitive loop + embedded Core CPU inference (delegates to gaia-prime for GPU)
-#   - gaia-nano:  The Reflex  - Nano triage classifier (CPU, llama-server)
+#   - gaia-nano:  The Reflex  - Nano triage classifier (GPU, llama-server)
 #   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
@@ -154,13 +154,13 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-nano: The Reflex - Nano triage classifier (CPU, llama-server)
+  # gaia-nano: The Reflex - Nano triage classifier (GPU, llama-server)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-nano:
     build:
       context: ./gaia-llama
       dockerfile: Dockerfile
-    image: localhost:5000/gaia-nano:local
+    image: localhost:5000/gaia-nano:cuda
     container_name: gaia-nano
     hostname: gaia-nano
     restart: unless-stopped
@@ -175,7 +175,7 @@ services:
       --model /models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
       --ctx-size 2048
       --threads 4
-      --n-gpu-layers 0
+      --n-gpu-layers ${NANO_GPU_LAYERS:-999}
       --chat-template chatml
       --slot-save-path /kvcache
 
@@ -196,6 +196,11 @@ services:
       resources:
         limits:
           memory: 2G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-core: The Brain - Cognitive loop + embedded Core CPU inference

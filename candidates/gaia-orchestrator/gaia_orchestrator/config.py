@@ -101,6 +101,21 @@ class OrchestratorConfig(BaseSettings):
         description="Seconds between VRAM checks during cleanup"
     )
 
+    # Nano GPU backoff settings
+    nano_vram_pressure_threshold_mb: int = Field(
+        default=1500,
+        description="Free VRAM (MB) below which Nano is evicted to CPU. "
+                    "Should leave headroom for Prime KV cache growth."
+    )
+    nano_vram_restore_threshold_mb: int = Field(
+        default=2500,
+        description="Free VRAM (MB) above which Nano can be restored to GPU."
+    )
+    nano_vram_check_interval: float = Field(
+        default=10.0,
+        description="Seconds between VRAM pressure checks for Nano backoff."
+    )
+
     # Handoff settings
     handoff_timeout_seconds: int = Field(
         default=120,

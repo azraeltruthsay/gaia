@@ -7,10 +7,18 @@ ENV USER=gaia
 
 WORKDIR /app
 
-# Install system dependencies for Docker SDK and health checks
+# Install system dependencies for Docker SDK, health checks, and Docker CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
+    ca-certificates \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
