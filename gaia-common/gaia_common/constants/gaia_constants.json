@@ -212,6 +212,19 @@
     "verification_enabled": true,
     "seam_overlap_tokens": 20
   },
+  "CFR": {
+    "enabled": true,
+    "state_dir": "/shared/gaia_state/cfr",
+    "chunk_target_chars": 3500,
+    "chunk_min_chars": 1500,
+    "chunk_max_chars": 5000,
+    "summary_max_output_tokens": 400,
+    "synthesis_max_output_tokens": 800,
+    "vllm_endpoint": "http://gaia-prime:7777",
+    "model": "/models/Qwen3.5-4B-Abliterated-merged",
+    "summary_temperature": 0.3,
+    "max_documents": 50
+  },
   "TOOL_ROUTING": {
     "ENABLED": true,
     "SELECTION_TEMPERATURE": 0.15,
@@ -568,6 +581,14 @@
       "base": "/models/Qwen3.5-4B-Abliterated",
       "merged": "/models/Qwen3.5-4B-Abliterated-merged",
       "gguf": "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf"
+    },
+    "prime_8b": {
+      "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
+      "merged": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+      "family": "qwen3",
+      "params": "8B",
+      "quantization": "fp8",
+      "notes": "Qwen3ForCausalLM — standard transformer, not hybrid. Use vLLM fp8 on-the-fly."
     },
     "nano": {
       "base": "/models/Qwen3.5-0.8B-Abliterated",

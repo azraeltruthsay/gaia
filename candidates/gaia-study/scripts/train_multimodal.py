@@ -16,7 +16,6 @@ import json
 import logging
 import sys
 import time
-from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +35,12 @@ MODELS = {
     "nano": {
         "base_path": "/models/Qwen3.5-0.8B-Abliterated",
         "output_dir": "/models/lora_adapters/tier1_global/self-model-nano-mm",
+        "max_steps": 300,
+        "max_seq_length": 512,
+    },
+    "prime_8b": {
+        "base_path": "/models/Huihui-Qwen3-8B-abliterated-v2",
+        "output_dir": "/models/lora_adapters/tier1_global/self-model-prime-8b",
         "max_steps": 300,
         "max_seq_length": 512,
     },

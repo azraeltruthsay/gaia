@@ -17,6 +17,7 @@ from gaia_common.config import Config
 from gaia_common.utils.safe_execution import run_shell_safe
 from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
 from gaia_common.utils.vector_indexer import VectorIndexer
+from gaia_common.utils.cfr_manager import CFRManager
 from gaia_common.utils.world_state import world_state_detail
 from gaia_common.utils.service_client import get_study_client
 
@@ -47,6 +48,7 @@ logger = get_logger(__name__)
 # For now, create a global instance. A better pattern would be dependency injection.
 _config_instance = Config()
 _gaia_helper = GAIARescueHelper(_config_instance)
+_cfr_manager = CFRManager()
 
 # Placeholder for TOOLS registry (will be populated from gaia-common.utils.tools_registry)
 from gaia_common.utils.tools_registry import TOOLS
@@ -125,6 +127,14 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "fragment_assemble": lambda p: _gaia_helper.fragment_assemble(p.get("parent_request_id"), seam_overlap_check=bool(p.get("seam_overlap_check", True))),
         "fragment_list_pending": lambda p: _gaia_helper.fragment_list_pending(),
         "fragment_clear": lambda p: _gaia_helper.fragment_clear(p.get("parent_request_id")),
+        # Cognitive Focus and Resolution (CFR) tools
+        "cfr_ingest": lambda p: _cfr_manager.ingest(file_path=p.get("file_path"), doc_id=p.get("doc_id"), chunk_target=int(p.get("chunk_target", 3500))),
+        "cfr_focus": lambda p: _cfr_manager.focus(doc_id=p["doc_id"], section_index=int(p["section_index"])),
+        "cfr_compress": lambda p: _cfr_manager.compress(doc_id=p["doc_id"], section_index=int(p["section_index"])),
+        "cfr_expand": lambda p: _cfr_manager.expand(doc_id=p["doc_id"], section_index=int(p["section_index"])),
+        "cfr_synthesize": lambda p: _cfr_manager.synthesize(doc_id=p["doc_id"]),
+        "cfr_status": lambda p: _cfr_manager.status(doc_id=p.get("doc_id", "")),
+        "cfr_rolling_context": lambda p: _cfr_manager.rolling_context(doc_id=p["doc_id"], target_section=int(p["target_section"])),
         # Knowledge base tools (VectorIndexer from gaia_common)
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),

@@ -282,19 +282,24 @@ class QLoRATrainer:
                         torch_dtype=torch.bfloat16,
                     )
                 else:
-                    # Model too large — split across GPU/CPU (slower training)
-                    bnb_gpu_budget_gib = max(int(max_gpu_gb * 0.7), 5)
+                    # Model too large for conservative budget but may fit
+                    # during peak bf16→NF4 conversion. NF4 quantization
+                    # requires all layers on GPU (no CPU split). Load
+                    # everything to GPU and let bitsandbytes handle the
+                    # conversion — the final 4-bit model is much smaller
+                    # than the peak conversion footprint.
+                    gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     logger.info(
-                        "Model too large for full GPU (bf16: %.1fGiB > %.1fGiB budget) — "
-                        "splitting across GPU (%dGiB) + CPU",
-                        bf16_size_gb, max_gpu_gb * 0.8, bnb_gpu_budget_gib
+                        "Model bf16 size (%.1fGiB) exceeds conservative budget (%.1fGiB) "
+                        "but GPU has %.1fGiB free — loading to GPU for NF4 quantization "
+                        "(peak memory will be high during conversion)",
+                        bf16_size_gb, max_gpu_gb * 0.8, gpu_free_gb
                     )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map="auto",
-                        max_memory={0: f"{bnb_gpu_budget_gib}GiB", "cpu": "30GiB"},
+                        device_map={"": 0},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
                     )

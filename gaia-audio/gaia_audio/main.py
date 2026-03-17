@@ -523,6 +523,76 @@ async def _background_wake():
         await status_tracker.emit("wake_error", "Listener reload failed — will lazy-load on demand")
 
 
+# ── GPU release/reclaim (for external GPU handoff) ───────────────────
+
+@app.post("/gpu/release")
+async def gpu_release():
+    """Release GPU VRAM by unloading all GPU models.
+
+    Unlike /sleep, this does NOT mute the service — STT will lazy-reload
+    on the next /transcribe request when GPU is available again.
+    Use this when another service needs the GPU temporarily.
+
+    Pair with /gpu/reclaim to reload models afterward.
+    """
+    if not gpu_manager:
+        return {"status": "no_gpu_manager", "vram_freed_mb": 0}
+
+    vram_before = status_tracker.vram_used_mb
+    await gpu_manager.release()
+    vram_freed = vram_before - status_tracker.vram_used_mb
+    logger.info("GPU released: freed %.0f MB VRAM", vram_freed)
+    return {
+        "status": "released",
+        "vram_freed_mb": round(vram_freed),
+        "models_unloaded": True,
+        "muted": status_tracker.muted,  # mute state unchanged
+    }
+
+
+@app.post("/gpu/reclaim")
+async def gpu_reclaim():
+    """Reclaim GPU by reloading STT model in background.
+
+    Returns immediately — model reload runs as a background task.
+    Use after /gpu/release when the GPU is available again.
+    """
+    if not gpu_manager:
+        return {"status": "no_gpu_manager"}
+
+    asyncio.create_task(_background_gpu_reclaim())
+    return {"status": "reclaiming", "reload_started": True}
+
+
+async def _background_gpu_reclaim():
+    """Reload STT model on GPU in background after release."""
+    try:
+        t0 = time.monotonic()
+        if gpu_manager:
+            await gpu_manager.wake()  # Reuses wake logic: loads Listener on GPU
+        elapsed = (time.monotonic() - t0) * 1000
+        await status_tracker.emit(
+            "gpu_reclaim", f"STT model reloaded on GPU ({elapsed:.0f}ms)", elapsed
+        )
+        logger.info("GPU reclaimed: STT model reloaded in %.0fms", elapsed)
+    except Exception:
+        logger.error("GPU reclaim failed — STT will lazy-load on demand", exc_info=True)
+        await status_tracker.emit("gpu_reclaim_error", "STT reload failed — will lazy-load")
+
+
+@app.get("/gpu/status")
+async def gpu_status():
+    """Current GPU usage by the audio service."""
+    return {
+        "vram_used_mb": round(status_tracker.vram_used_mb),
+        "stt_loaded": gpu_manager.stt.loaded if gpu_manager else False,
+        "tts_nano_loaded": gpu_manager.nano.loaded if gpu_manager else False,
+        "tts_prime_loaded": gpu_manager.prime.loaded if gpu_manager else False,
+        "gpu_mode": status_tracker.gpu_mode,
+        "muted": status_tracker.muted,
+    }
+
+
 # ── Internal helpers ──────────────────────────────────────────────────
 
 

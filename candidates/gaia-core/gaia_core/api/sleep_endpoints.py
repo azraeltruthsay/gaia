@@ -165,6 +165,42 @@ async def toggle_auto_sleep(request: Request):
     }
 
 
+@router.post("/hold")
+async def hold_wake(request: Request):
+    """Temporarily suppress auto-sleep for long-form operations.
+
+    Body: {"minutes": 30, "reason": "CFR ingest"}
+    Max 120 minutes. Auto-expires. Self-healing — no risk of permanent insomnia.
+    """
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    body = await request.json()
+    minutes = int(body.get("minutes", 30))
+    reason = body.get("reason", "")
+    result = manager.hold_wake(minutes=minutes, reason=reason)
+    result["state"] = manager.get_state().value
+    return result
+
+
+@router.post("/hold-release")
+async def release_hold(request: Request):
+    """Release a sleep hold early."""
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+    result = manager.release_hold()
+    result["state"] = manager.get_state().value
+    return result
+
+
 @router.post("/force")
 async def force_sleep(request: Request):
     """Immediately trigger sleep transition (ACTIVE → DROWSY → ASLEEP)."""
@@ -185,6 +221,14 @@ async def force_sleep(request: Request):
         )
 
     entered_sleep = manager.initiate_drowsy()
+
+    # Release GPU via the sleep cycle loop (same path as idle-triggered sleep)
+    sleep_loop = getattr(request.app.state, "sleep_cycle_loop", None)
+    if sleep_loop and entered_sleep:
+        try:
+            sleep_loop._release_gpu_for_sleep()
+        except Exception:
+            logger.warning("GPU release on force-sleep failed", exc_info=True)
 
     return {
         "accepted": True,
