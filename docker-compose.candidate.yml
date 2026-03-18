@@ -5,23 +5,23 @@
 
 services:
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-core-candidate: The Brain
+  # gaia-core-candidate: The Brain (GPU-capable for testing & training)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-core-candidate:
     build:
       context: .
-      dockerfile: ./candidates/gaia-core/Dockerfile
-    image: localhost:5000/gaia-core-candidate:local
+      dockerfile: ./candidates/gaia-core/Dockerfile.candidate
+    image: localhost:5000/gaia-core-candidate:cuda
     container_name: gaia-core-candidate
     hostname: gaia-core-candidate
     restart: "no"
     user: "${UID:-1000}:${GID:-1000}"
-    
+
     volumes:
       - ./candidates/gaia-core:/app:rw
       - ./candidates/gaia-common:/gaia-common:ro
       - ./knowledge:/knowledge:ro
-      - ./gaia-models:/models:ro
+      - ./gaia-models:/models:rw
       - gaia-candidate-shared:/shared:rw
       - ./logs:/logs:rw
 
@@ -33,24 +33,35 @@ services:
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf}
+      # Candidate Core: Qwen3.5-2B-Base (clean geometry for identity baking)
+      - CORE_CPU_MODEL=${CANDIDATE_CORE_MODEL:-Qwen3.5-2B-Base-BF16.gguf}
+      - CORE_CPU_MODEL_PATH=${CANDIDATE_CORE_MODEL_PATH:-/models/Qwen3.5-2B-Base/Qwen3.5-2B-Base-BF16.gguf}
+      - CORE_CPU_CTX=8192
+      - CORE_CPU_THREADS=8
+      - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
+      - SHARED_DIR=/shared
+      - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-999}
       - GAIA_AUTOLOAD_MODELS=1
-    
+
     deploy:
       resources:
         limits:
           memory: 8G
-
-    command: ["python", "-m", "uvicorn", "gaia_core.main:app", "--host", "0.0.0.0", "--port", "6415", "--reload", "--reload-dir", "/app/gaia_core", "--reload-exclude", "knowledge/*"]
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
     ports:
       - "6416:6415"
-    
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6415/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-web-candidate: The Face
