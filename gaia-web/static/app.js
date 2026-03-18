@@ -91,6 +91,9 @@ document.addEventListener('alpine:init', () => {
 // ── Chat Panel Component ──────────────────────────────────────────────────────
 
 function chatPanel() {
+  const CHAT_STORAGE_KEY = 'gaia_chat_history';
+  const CHAT_MAX_STORED = 200;
+
   return {
     messages: [],
     input: '',
@@ -98,8 +101,38 @@ function chatPanel() {
     _nextId: 0,
 
     init() {
-      this.addMessage('Mission Control online. Type a message to talk to GAIA.', 'system');
+      this._loadHistory();
+      if (this.messages.length === 0) {
+        this.addMessage('Mission Control online. Type a message to talk to GAIA.', 'system');
+      }
       this._connectAutoStream();
+    },
+
+    _loadHistory() {
+      try {
+        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved) && saved.length > 0) {
+            this.messages = saved;
+            this._nextId = Math.max(...saved.map(m => m.id ?? 0)) + 1;
+          }
+        }
+      } catch { /* ignore corrupt storage */ }
+    },
+
+    _saveHistory() {
+      try {
+        const toSave = this.messages.slice(-CHAT_MAX_STORED);
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave));
+      } catch { /* storage full or unavailable */ }
+    },
+
+    clearHistory() {
+      this.messages = [];
+      this._nextId = 0;
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+      this.addMessage('Chat history cleared.', 'system');
     },
 
     _connectAutoStream() {
@@ -119,11 +152,23 @@ function chatPanel() {
     },
 
     addMessage(text, type) {
-      this.messages.push({ text, type, id: this._nextId++ });
+      this.messages.push({
+        text,
+        type,
+        id: this._nextId++,
+        ts: new Date().toISOString(),
+      });
+      this._saveHistory();
       this.$nextTick(() => {
         const el = this.$refs.messages;
         if (el) el.scrollTop = el.scrollHeight;
       });
+    },
+
+    formatTimestamp(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 
     renderMessage(msg) {
@@ -144,11 +189,51 @@ function chatPanel() {
           method: 'POST',
           signal: AbortSignal.timeout(CHAT_TIMEOUT),
         });
-        const data = await resp.json();
-        if (resp.ok) {
-          this.addMessage(data.response || '(no response)', 'gaia');
+        if (!resp.ok) {
+          // Try to parse error as JSON
+          try {
+            const errData = await resp.json();
+            this.addMessage(`Error ${resp.status}: ${errData.detail || errData.response || 'unknown'}`, 'system');
+          } catch {
+            this.addMessage(`Error ${resp.status}`, 'system');
+          }
+          return;
+        }
+        // Read NDJSON stream line by line
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let responseText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const chunk = JSON.parse(line);
+              if (chunk.type === 'token') {
+                responseText += chunk.value || '';
+              } else if (chunk.type === 'final') {
+                responseText = chunk.value || responseText;
+              } else if (chunk.type === 'error') {
+                this.addMessage(`Error: ${chunk.value || 'unknown'}`, 'system');
+                return;
+              }
+              // Ignore other chunk types (metadata, routing, etc.)
+            } catch { /* skip unparseable lines */ }
+          }
+        }
+
+        if (responseText.trim()) {
+          this.addMessage(responseText.trim(), 'gaia');
         } else {
-          this.addMessage(`Error ${resp.status}: ${data.detail || data.response || 'unknown'}`, 'system');
+          this.addMessage('(no response)', 'system');
         }
       } catch (err) {
         this.addMessage(`Connection error: ${err.message}`, 'system');

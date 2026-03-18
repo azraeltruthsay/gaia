@@ -229,6 +229,34 @@ html, body {
   font-style: italic;
 }
 
+.chat-ts {
+  display: block;
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.chat-text {
+  display: block;
+}
+
+.panel-header .btn-icon {
+  float: right;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  opacity: 0.5;
+}
+.panel-header .btn-icon:hover {
+  opacity: 1;
+  color: var(--red, #e57373);
+}
+
 .chat-input-row {
   display: flex;
   gap: 8px;
