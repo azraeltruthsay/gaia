@@ -270,7 +270,11 @@ def migrate_to(target_device: str) -> dict:
         if target_device == "cpu":
             _model = _model.to("cpu")
             if _kv_cache:
-                _kv_cache.migrate_device("cpu")
+                _kv_cache.invalidate()  # free cached KV tensors on GPU
+            # Aggressive VRAM cleanup — release as much as possible
+            import gc
+            gc.collect()
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
             _device = "cpu"
         elif target_device == "cuda":
