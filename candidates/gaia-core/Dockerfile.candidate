@@ -62,6 +62,12 @@ ENV USER=gaia
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# Install PyTorch with CUDA 12.8 (for safetensors inference server)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+
+# Install transformers for safetensors model loading
+RUN pip install --no-cache-dir transformers accelerate
+
 WORKDIR /app
 
 # Install Python dependencies
