@@ -241,8 +241,10 @@ def load_model(model_path: str, device: str = "cuda", dtype=torch.bfloat16):
 
     _model = AutoModelForCausalLM.from_pretrained(
         model_path, trust_remote_code=True, dtype=dtype,
-        device_map=device if device == "cuda" else "cpu",
     )
+    # Move explicitly to device (avoids FLA mixed-device issues with device_map)
+    if device == "cuda" and torch.cuda.is_available():
+        _model = _model.to("cuda")
     _model.eval()
 
     _device = device
