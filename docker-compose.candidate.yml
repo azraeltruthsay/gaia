@@ -34,7 +34,7 @@ services:
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
       # Candidate Core: safetensors primary (GPU), GGUF fallback (CPU)
-      - CORE_SAFETENSORS_PATH=/models/Qwen3.5-2B-GAIA-Core
+      - CORE_SAFETENSORS_PATH=/models/Qwen3.5-2B-GAIA-Core-v2
       - CORE_CPU_MODEL_PATH=/models/Qwen3.5-2B/Qwen3.5-2B-BF16.gguf
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       - CORE_CPU_CTX=8192
