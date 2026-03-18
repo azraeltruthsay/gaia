@@ -1096,6 +1096,21 @@ class AgentCore:
             logger.warning(f"[MODEL_SELECT DEBUG] acquired selected_model_name={selected_model_name} -> {selected_model}")
             logger.info(f"[RESPONDER] Selected responder model: '{selected_model_name}'")
             logger.info("AgentCore: selected model %s", selected_model_name)
+
+            # ── Pipeline Depth: tier-based gating ────────────────────────
+            # REFLEX:   minimal pipeline — just generate (reflex already handled above)
+            # OPERATOR: intent → slim prompt → generation → 1 reflection → observer
+            # THINKER:  full pipeline with all stages
+            _REFLEX_MODELS = {"nano", "reflex"}
+            _OPERATOR_MODELS = {"core", "lite", "cpu_prime"}
+            # Everything else (gpu_prime, thinker, prime, oracle, azrael) = THINKER depth
+            if selected_model_name in _REFLEX_MODELS:
+                pipeline_depth = "REFLEX"
+            elif selected_model_name in _OPERATOR_MODELS:
+                pipeline_depth = "OPERATOR"
+            else:
+                pipeline_depth = "THINKER"
+            logger.info("[PIPELINE_DEPTH] %s (model: %s)", pipeline_depth, selected_model_name)
             logger.debug("[DEBUG] AgentCore selected_model=%s", selected_model_name)
             # Extra runtime guard: if a raw llama_cpp.Llama escaped into the pool
             # (some scripts/tests assign directly to model_pool.models), wrap it
@@ -1506,8 +1521,8 @@ class AgentCore:
             ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
     
             # 3a-bis. Goal Detection — identify overarching user goal
-            # Skip for trivial/factual queries — adds 2-5s latency for zero value
-            if not (is_factual or is_trivial):
+            # Only run for THINKER depth — REFLEX and OPERATOR skip this
+            if pipeline_depth == "THINKER":
                 try:
                     from gaia_core.cognition.goal_detector import GoalDetector
                     goal_detector = GoalDetector(config=self.config)
@@ -1717,12 +1732,14 @@ class AgentCore:
                 if reflection_model is None:
                     reflection_model = selected_model
             try:
-                # Skip reflection for trivial/factual queries — saves 6-24s latency
-                if is_factual or is_trivial:
-                    logger.info("[FAST_PATH] Skipping reflection for trivial/factual query")
+                # REFLEX: skip reflection entirely
+                # OPERATOR: run reflection (TODO: cap to 1 iteration)
+                # THINKER: full reflection (up to 3 iterations)
+                if pipeline_depth == "REFLEX":
+                    logger.info("[PIPELINE_DEPTH] REFLEX — skipping reflection")
                     refined_plan_text = initial_plan_text
                 else:
-                    refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
+                    refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
                 # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
                 try:
                     packet.reasoning.reflection_log.append(ReflectionLog(step="refined_plan", summary=refined_plan_text, confidence=0.88))

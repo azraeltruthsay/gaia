@@ -288,7 +288,7 @@ def migrate_to(target_device: str) -> dict:
 
 
 def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
-             top_p: float = 0.9, use_prefix_cache: bool = True) -> dict:
+             top_p: float = 0.9, use_prefix_cache: bool = False) -> dict:
     global _request_count, _total_tokens
 
     with _lock:
