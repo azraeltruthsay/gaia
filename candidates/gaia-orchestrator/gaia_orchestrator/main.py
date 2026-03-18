@@ -59,6 +59,7 @@ _notification_manager = None
 _health_watchdog = None
 _gpu_lock = asyncio.Lock()
 _nano_pressure_task: Optional[asyncio.Task] = None
+_watch_manager = None
 
 
 @asynccontextmanager
@@ -94,6 +95,14 @@ async def lifespan(app: FastAPI):
         logger.info("Handoff manager initialized")
     except ImportError:
         logger.warning("Handoff manager not available yet")
+
+    try:
+        global _watch_manager
+        from .watch_manager import WatchManager
+        _watch_manager = WatchManager(_state_manager, _gpu_manager)
+        logger.info("Watch rotation manager initialized")
+    except ImportError:
+        logger.warning("Watch rotation manager not available yet")
 
     try:
         from .notification_manager import NotificationManager
@@ -195,6 +204,11 @@ async def root():
                 "status": "GET /nano/status",
                 "backoff": "POST /nano/backoff",
                 "restore": "POST /nano/restore",
+            },
+            "watch": {
+                "state": "GET /watch/state",
+                "focus": "POST /watch/focus",
+                "idle": "POST /watch/idle",
             },
             "notifications": {
                 "oracle_fallback": "POST /notify/oracle-fallback",
@@ -941,6 +955,44 @@ async def nano_restore(reason: str = "manual"):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to restore Nano to GPU (VRAM may be insufficient)")
     return {"ok": True, "mode": "gpu", "reason": reason}
+
+
+# =============================================================================
+# GPU Watch Rotation
+# =============================================================================
+
+@app.get("/watch/state")
+async def get_watch_state():
+    """Get current GPU watch rotation state."""
+    if _watch_manager is None:
+        raise HTTPException(status_code=501, detail="Watch manager not available")
+    return await _watch_manager.get_state()
+
+
+@app.post("/watch/focus")
+async def watch_focus(reason: str = "user_request", priority: str = "NORMAL"):
+    """Transition to FOCUSING — wake Prime, yield Core+Nano to CPU.
+
+    Priority: URGENT (immediate yield), NORMAL (finish current batch),
+    SCHEDULED (pre-emptive coordination).
+    """
+    if _watch_manager is None:
+        raise HTTPException(status_code=501, detail="Watch manager not available")
+    result = await _watch_manager.focus(reason=reason, priority=priority)
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=result.get("error", "focus failed"))
+    return result
+
+
+@app.post("/watch/idle")
+async def watch_idle(reason: str = "inactivity"):
+    """Transition to IDLE — sleep Prime, wake Core+Nano on GPU with KV pre-warm."""
+    if _watch_manager is None:
+        raise HTTPException(status_code=501, detail="Watch manager not available")
+    result = await _watch_manager.idle(reason=reason)
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=result.get("error", "idle failed"))
+    return result
 
 
 # =============================================================================
