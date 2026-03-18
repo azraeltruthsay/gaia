@@ -287,8 +287,57 @@ def migrate_to(target_device: str) -> dict:
         return {"ok": True, "device": _device, "elapsed_s": round(elapsed, 2), "vram_mb": mem_mb}
 
 
+def _autoregressive_generate(input_ids: torch.Tensor, past_kv, max_tokens: int,
+                              temperature: float, top_p: float) -> tuple:
+    """Custom generation loop using model.forward() instead of model.generate().
+
+    model.generate() can't handle Qwen3.5's hybrid attention cache format
+    (Qwen3_5DynamicCache with mixed recurrent + KV states). But model.forward()
+    handles it correctly. This loop replicates generate()'s behavior using
+    forward() directly.
+
+    Returns: (generated_token_ids: list[int], final_past_key_values)
+    """
+    generated = []
+    current_kv = past_kv
+
+    # First forward: process all input tokens (or continuation tokens if cache hit)
+    with torch.no_grad():
+        out = _model(input_ids, past_key_values=current_kv, use_cache=True)
+    current_kv = out.past_key_values
+    logits = out.logits[:, -1, :]
+
+    for _ in range(max_tokens):
+        # Sample or greedy
+        if temperature > 0:
+            logits = logits / temperature
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                mask = cumulative_probs - torch.softmax(sorted_logits, dim=-1) >= top_p
+                sorted_logits[mask] = float("-inf")
+                logits = sorted_logits.scatter(1, sorted_indices, sorted_logits)
+            probs = torch.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+        else:
+            next_id = logits.argmax(dim=-1, keepdim=True)
+
+        token = next_id.item()
+        if token == _tokenizer.eos_token_id:
+            break
+        generated.append(token)
+
+        # Forward single token with cache
+        with torch.no_grad():
+            out = _model(next_id, past_key_values=current_kv, use_cache=True)
+        current_kv = out.past_key_values
+        logits = out.logits[:, -1, :]
+
+    return generated, current_kv
+
+
 def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
-             top_p: float = 0.9, use_prefix_cache: bool = False) -> dict:
+             top_p: float = 0.9, use_prefix_cache: bool = True) -> dict:
     global _request_count, _total_tokens
 
     with _lock:
@@ -309,9 +358,6 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
         prefix_len = 0
 
         if use_prefix_cache and _kv_cache and system_content:
-            # Update identity segment with the system prompt
-            # (In production, this would be pre-split into identity/tools/world_state
-            # by the prompt builder. For now, treat the whole system prompt as identity.)
             _kv_cache.update_segment("identity", system_content)
             past_kv, _, prefix_len = _kv_cache.get_prefix_kv()
 
@@ -326,9 +372,8 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
 
         if past_kv is not None:
             # KV cache hit — only tokenize the conversation part
-            conv_ids = _tokenizer.encode(conv_text, return_tensors="pt", add_special_tokens=False).to(_model.device)
-            input_ids = conv_ids
-            input_len = prefix_len + conv_ids.shape[1]
+            input_ids = _tokenizer.encode(conv_text, return_tensors="pt", add_special_tokens=False).to(_model.device)
+            input_len = prefix_len + input_ids.shape[1]
         else:
             # No cache — build full prompt
             if system_content:
@@ -338,30 +383,20 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
             input_ids = _tokenizer.encode(full_text, return_tensors="pt").to(_model.device)
             input_len = input_ids.shape[1]
 
-        gen_kwargs = {
-            "max_new_tokens": max_tokens,
-            "do_sample": temperature > 0,
-            "pad_token_id": _tokenizer.pad_token_id,
-        }
-        if temperature > 0:
-            gen_kwargs["temperature"] = temperature
-            gen_kwargs["top_p"] = top_p
-        if past_kv is not None:
-            gen_kwargs["past_key_values"] = past_kv
+        # Use custom autoregressive loop (model.forward) instead of model.generate()
+        # This correctly handles Qwen3.5's hybrid attention cache format
+        generated_ids, _ = _autoregressive_generate(
+            input_ids, past_kv, max_tokens, temperature, top_p,
+        )
 
-        with torch.no_grad():
-            output = _model.generate(input_ids=input_ids, **gen_kwargs)
-
-        # Extract only the new tokens
-        new_tokens = output[0][input_ids.shape[1]:]
-        response_text = _tokenizer.decode(new_tokens, skip_special_tokens=True)
+        response_text = _tokenizer.decode(generated_ids, skip_special_tokens=True)
 
         # Strip think tags if present
         if "<think>" in response_text:
             response_text = re.sub(r"<think>.*?</think>\s*", "", response_text, flags=re.DOTALL)
 
         _request_count += 1
-        _total_tokens += len(new_tokens)
+        _total_tokens += len(generated_ids)
 
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -371,12 +406,12 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
             "choices": [{
                 "index": 0,
                 "message": {"role": "assistant", "content": response_text.strip()},
-                "finish_reason": "stop",
+                "finish_reason": "stop" if len(generated_ids) < max_tokens else "length",
             }],
             "usage": {
                 "prompt_tokens": input_len,
-                "completion_tokens": len(new_tokens),
-                "total_tokens": input_len + len(new_tokens),
+                "completion_tokens": len(generated_ids),
+                "total_tokens": input_len + len(generated_ids),
                 "cached_prefix_tokens": prefix_len if past_kv is not None else 0,
             },
         }
