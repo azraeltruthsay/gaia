@@ -33,13 +33,15 @@ mkdir -p "${SHARED_DIR:-/shared}/doctor" 2>/dev/null || true
 
 # ── Mode 1: Safetensors inference server (GPU-native) ────────────────────────
 if [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ]; then
-    echo "[entrypoint] Starting safetensors inference server (device=$CORE_DEVICE)..."
+    echo "[entrypoint] Starting GAIA Inference Engine (device=$CORE_DEVICE)..."
     echo "[entrypoint] Model: $CORE_SAFETENSORS_PATH"
-    python -m gaia_core.inference_server \
+    COMPILE_MODE="${GAIA_COMPILE_MODE:-reduce-overhead}"
+    python -m gaia_core.gaia_engine \
         --model "$CORE_SAFETENSORS_PATH" \
         --port "$CORE_CPU_PORT" \
         --device "$CORE_DEVICE" \
-        2>&1 | sed 's/^/[inference-server] /' &
+        --compile "$COMPILE_MODE" \
+        2>&1 | sed 's/^/[gaia-engine] /' &
 
     SERVER_PID=$!
     echo "$SERVER_PID" > /tmp/inference_server.pid
