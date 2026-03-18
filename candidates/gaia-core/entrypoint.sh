@@ -9,24 +9,28 @@ set -euo pipefail
 
 CORE_CPU_PORT="${CORE_CPU_PORT:-8092}"
 CORE_CPU_MODEL_PATH="${CORE_CPU_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf}"
-CORE_CPU_CTX="${CORE_CPU_CTX:-4096}"
+CORE_CPU_CTX="${CORE_CPU_CTX:-8192}"
 CORE_CPU_THREADS="${CORE_CPU_THREADS:-8}"
 CORE_CPU_SLOT_SAVE_PATH="${CORE_CPU_SLOT_SAVE_PATH:-/shared/kvcache/core}"
+# GPU layers: 0 = CPU only, 999 = all layers on GPU (default: 0 for production)
+N_GPU_LAYERS="${N_GPU_LAYERS:-0}"
+
+# Ensure shared directories exist
+mkdir -p "$CORE_CPU_SLOT_SAVE_PATH" 2>/dev/null || true
+mkdir -p "${SHARED_DIR:-/shared}/doctor" 2>/dev/null || true
 
 # Only start llama-server if the model file exists
 if [ -f "$CORE_CPU_MODEL_PATH" ]; then
-    mkdir -p "$CORE_CPU_SLOT_SAVE_PATH" 2>/dev/null || true
-    echo "[entrypoint] Starting llama-server for Core/Lite on port $CORE_CPU_PORT..."
-    llama-server \
-        --host 0.0.0.0 \
-        --port "$CORE_CPU_PORT" \
-        --model "$CORE_CPU_MODEL_PATH" \
-        --ctx-size "$CORE_CPU_CTX" \
-        --threads "$CORE_CPU_THREADS" \
-        --n-gpu-layers 0 \
-        --chat-template chatml \
-        --slot-save-path "$CORE_CPU_SLOT_SAVE_PATH" \
-        2>&1 | sed 's/^/[llama-server] /' &
+    echo "[entrypoint] Starting llama-server for Core/Operator on port $CORE_CPU_PORT (gpu_layers=$N_GPU_LAYERS)..."
+    # Build llama-server args
+    LLAMA_ARGS="--host 0.0.0.0 --port $CORE_CPU_PORT --model $CORE_CPU_MODEL_PATH"
+    LLAMA_ARGS="$LLAMA_ARGS --ctx-size $CORE_CPU_CTX --threads $CORE_CPU_THREADS"
+    LLAMA_ARGS="$LLAMA_ARGS --n-gpu-layers $N_GPU_LAYERS --chat-template chatml"
+    # Only add slot-save-path if directory exists
+    if [ -d "$CORE_CPU_SLOT_SAVE_PATH" ]; then
+        LLAMA_ARGS="$LLAMA_ARGS --slot-save-path $CORE_CPU_SLOT_SAVE_PATH"
+    fi
+    llama-server $LLAMA_ARGS 2>&1 | sed 's/^/[llama-server] /' &
 
     LLAMA_PID=$!
     echo "$LLAMA_PID" > /tmp/llama_server.pid
