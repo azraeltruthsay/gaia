@@ -51,7 +51,9 @@ RUN ldconfig
 
 # PyTorch + transformers for safetensors mode
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
-RUN pip install --no-cache-dir transformers accelerate flash-linear-attention
+RUN pip install --no-cache-dir transformers accelerate
+# Note: flash-linear-attention omitted — Qwen3.5 falls back to torch implementation
+# which works correctly. FLA's custom_device_ctx has a torch.cpu.device bug.
 
 WORKDIR /app
 
