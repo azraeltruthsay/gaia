@@ -247,6 +247,25 @@ def load_model(model_path: str, device: str = "cuda", dtype=torch.bfloat16):
         _model = _model.to("cuda")
     _model.eval()
 
+    # ── Performance optimizations ────────────────────────────────────────
+    # torch.compile: JIT-compiles the forward pass for 2-4x speedup.
+    # Uses reduce-overhead mode for inference (no training).
+    compile_mode = _os.environ.get("GAIA_COMPILE_MODE", "reduce-overhead")
+    if compile_mode != "none" and device == "cuda":
+        try:
+            _model = torch.compile(_model, mode=compile_mode, fullgraph=False)
+            logger.info("Model compiled with torch.compile (mode=%s)", compile_mode)
+        except Exception as e:
+            logger.warning("torch.compile failed (continuing uncompiled): %s", e)
+
+    # Enable optimized attention kernels (FlashAttention via SDPA)
+    try:
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        logger.info("Flash/memory-efficient SDPA enabled")
+    except Exception:
+        pass  # older PyTorch versions may not support this
+
     _device = device
     _model_path = model_path
     _started_at = time.time()
