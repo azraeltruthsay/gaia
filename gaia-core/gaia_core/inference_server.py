@@ -230,7 +230,7 @@ _started_at = 0.0
 
 
 def load_model(model_path: str, device: str = "cuda", dtype=torch.bfloat16):
-    global _model, _tokenizer, _device, _model_path, _started_at, _kv_cache
+    global _model, _tokenizer, _device, _model_path, _started_at, _kv_cache, _activation_monitor
 
     logger.info("Loading model %s on %s...", model_path, device)
     start = time.time()
@@ -251,6 +251,16 @@ def load_model(model_path: str, device: str = "cuda", dtype=torch.bfloat16):
 
     # Initialize KV prefix cache
     _kv_cache = KVPrefixCache(_model, _tokenizer, device)
+
+    # Initialize activation monitor (the polygraph)
+    _activation_monitor = ActivationMonitor(num_layers=24, hidden_size=2048)
+
+    # Try to load SAE atlas if available
+    atlas_path = _os.environ.get("SAE_ATLAS_PATH", "/shared/atlas/core")
+    if _Path(atlas_path).exists():
+        _activation_monitor.load_atlas(atlas_path)
+    else:
+        logger.info("No SAE atlas at %s — polygraph will show raw activations only", atlas_path)
 
     elapsed = time.time() - start
     mem_mb = torch.cuda.memory_allocated() // (1024 * 1024) if device == "cuda" else 0
@@ -291,6 +301,137 @@ def migrate_to(target_device: str) -> dict:
         return {"ok": True, "device": _device, "elapsed_s": round(elapsed, 2), "vram_mb": mem_mb}
 
 
+# ── Activation Monitor ("The Polygraph") ─────────────────────────────────────
+
+class ActivationMonitor:
+    """Real-time activation monitoring during inference.
+
+    Hooks into model.forward() to capture hidden states at configurable
+    layer depths. When a SAE feature atlas is loaded, maps activations
+    to interpretable features in real time.
+
+    This is GAIA's polygraph — always available, never modifies inference.
+    """
+
+    def __init__(self, num_layers: int = 24, hidden_size: int = 2048):
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+        self.enabled = True
+
+        # Latest activation snapshot (last forward pass)
+        self._last_activations: Optional[dict] = None
+        self._last_timestamp: float = 0.0
+
+        # SAE feature atlas (loaded from disk when available)
+        self._feature_atlas: Optional[dict] = None  # layer_idx → SAE decoder matrix
+        self._atlas_path: Optional[str] = None
+
+        # Monitoring stats
+        self._total_captures = 0
+
+    def capture(self, hidden_states: tuple) -> dict:
+        """Capture activation snapshot from a forward pass.
+
+        Args:
+            hidden_states: tuple of (num_layers+1) tensors, each [batch, seq, hidden]
+
+        Returns:
+            Activation summary dict
+        """
+        if not self.enabled or hidden_states is None:
+            return {}
+
+        self._total_captures += 1
+        self._last_timestamp = time.time()
+
+        # Sample specific layers (every 4th + first + last)
+        sample_layers = [0, 6, 12, 18, 23, len(hidden_states) - 1]
+        sample_layers = [i for i in sample_layers if i < len(hidden_states)]
+
+        snapshot = {}
+        for layer_idx in sample_layers:
+            hs = hidden_states[layer_idx]
+            # Take the last token's activations (most recent cognitive state)
+            last_token = hs[0, -1, :]  # [hidden_size]
+
+            # Basic activation stats
+            snapshot[f"layer_{layer_idx}"] = {
+                "mean": float(last_token.mean()),
+                "std": float(last_token.std()),
+                "max": float(last_token.max()),
+                "min": float(last_token.min()),
+                "l2_norm": float(last_token.norm()),
+                "top_5_indices": last_token.abs().topk(5).indices.tolist(),
+                "top_5_values": [round(float(v), 4) for v in last_token.abs().topk(5).values],
+            }
+
+            # If SAE atlas is loaded, map to interpretable features
+            if self._feature_atlas and layer_idx in self._feature_atlas:
+                feature_activations = self._project_to_features(last_token, layer_idx)
+                snapshot[f"layer_{layer_idx}"]["features"] = feature_activations
+
+        self._last_activations = snapshot
+        return snapshot
+
+    def _project_to_features(self, activations: torch.Tensor, layer_idx: int) -> dict:
+        """Project activations through SAE decoder to get feature strengths."""
+        atlas = self._feature_atlas.get(layer_idx)
+        if atlas is None:
+            return {}
+
+        # atlas["decoder"] is [num_features, hidden_size]
+        decoder = atlas["decoder"].to(activations.device)
+        feature_strengths = torch.matmul(decoder, activations)  # [num_features]
+
+        # Top active features
+        top_k = min(10, feature_strengths.shape[0])
+        top_vals, top_idx = feature_strengths.abs().topk(top_k)
+
+        features = {}
+        for i in range(top_k):
+            fidx = top_idx[i].item()
+            label = atlas.get("labels", {}).get(str(fidx), f"feature_{fidx}")
+            features[label] = round(float(top_vals[i]), 4)
+
+        return features
+
+    def load_atlas(self, path: str) -> bool:
+        """Load a SAE feature atlas from disk."""
+        try:
+            import os
+            atlas_dir = _Path(path)
+            if not atlas_dir.exists():
+                logger.warning("Atlas path not found: %s", path)
+                return False
+
+            self._feature_atlas = {}
+            for atlas_file in atlas_dir.glob("layer_*.pt"):
+                layer_idx = int(atlas_file.stem.split("_")[1])
+                self._feature_atlas[layer_idx] = torch.load(atlas_file, map_location="cpu")
+                logger.info("Loaded SAE atlas for layer %d (%d features)",
+                            layer_idx, self._feature_atlas[layer_idx]["decoder"].shape[0])
+
+            self._atlas_path = path
+            return True
+        except Exception as e:
+            logger.warning("Failed to load atlas: %s", e)
+            return False
+
+    def get_status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "total_captures": self._total_captures,
+            "last_timestamp": self._last_timestamp,
+            "atlas_loaded": self._feature_atlas is not None,
+            "atlas_path": self._atlas_path,
+            "atlas_layers": list(self._feature_atlas.keys()) if self._feature_atlas else [],
+            "last_activations": self._last_activations,
+        }
+
+
+_activation_monitor: Optional[ActivationMonitor] = None
+
+
 def _autoregressive_generate(input_ids: torch.Tensor, past_kv, max_tokens: int,
                               temperature: float, top_p: float) -> tuple:
     """Custom generation loop using model.forward() instead of model.generate().
@@ -306,10 +447,17 @@ def _autoregressive_generate(input_ids: torch.Tensor, past_kv, max_tokens: int,
     current_kv = past_kv
 
     # First forward: process all input tokens (or continuation tokens if cache hit)
+    # Capture hidden states for the activation monitor (polygraph)
+    capture_activations = _activation_monitor is not None and _activation_monitor.enabled
     with torch.no_grad():
-        out = _model(input_ids, past_key_values=current_kv, use_cache=True)
+        out = _model(input_ids, past_key_values=current_kv, use_cache=True,
+                     output_hidden_states=capture_activations)
     current_kv = out.past_key_values
     logits = out.logits[:, -1, :]
+
+    # Feed activations to the polygraph
+    if capture_activations and hasattr(out, "hidden_states") and out.hidden_states:
+        _activation_monitor.capture(out.hidden_states)
 
     for _ in range(max_tokens):
         # Sample or greedy
@@ -608,6 +756,22 @@ class InferenceHandler(BaseHTTPRequestHandler):
         elif self.path == "/thought/list":
             self._send_json(list_thoughts())
 
+        elif self.path == "/polygraph/status":
+            if _activation_monitor:
+                self._send_json(_activation_monitor.get_status())
+            else:
+                self._send_json({"enabled": False, "error": "monitor not initialized"})
+
+        elif self.path == "/polygraph/activations":
+            if _activation_monitor and _activation_monitor._last_activations:
+                self._send_json({
+                    "timestamp": _activation_monitor._last_timestamp,
+                    "activations": _activation_monitor._last_activations,
+                    "atlas_loaded": _activation_monitor._feature_atlas is not None,
+                })
+            else:
+                self._send_json({"activations": None, "message": "no activations captured yet"})
+
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -668,6 +832,29 @@ class InferenceHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             label = body.get("label", "")
             self._send_json(drop_thought(label))
+
+        elif self.path == "/polygraph/enable":
+            if _activation_monitor:
+                _activation_monitor.enabled = True
+                self._send_json({"ok": True, "enabled": True})
+            else:
+                self._send_json({"ok": False, "error": "not initialized"})
+
+        elif self.path == "/polygraph/disable":
+            if _activation_monitor:
+                _activation_monitor.enabled = False
+                self._send_json({"ok": True, "enabled": False})
+            else:
+                self._send_json({"ok": False, "error": "not initialized"})
+
+        elif self.path == "/polygraph/load-atlas":
+            body = self._read_body()
+            path = body.get("path", "/shared/atlas/core")
+            if _activation_monitor:
+                ok = _activation_monitor.load_atlas(path)
+                self._send_json({"ok": ok, "path": path})
+            else:
+                self._send_json({"ok": False, "error": "not initialized"})
 
         else:
             self._send_json({"error": "not found"}, 404)
