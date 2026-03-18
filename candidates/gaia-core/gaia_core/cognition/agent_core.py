@@ -1506,24 +1506,26 @@ class AgentCore:
             ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
     
             # 3a-bis. Goal Detection — identify overarching user goal
-            try:
-                from gaia_core.cognition.goal_detector import GoalDetector
-                goal_detector = GoalDetector(config=self.config)
-                packet.goal_state = goal_detector.detect(
-                    packet=packet,
-                    session_manager=self.session_manager,
-                    session_id=session_id,
-                    model_pool=self.model_pool,
-                )
-                if packet.goal_state and packet.goal_state.current_goal:
-                    ts_write({
-                        "type": "goal_detect",
-                        "goal": packet.goal_state.current_goal.goal_id,
-                        "confidence": packet.goal_state.current_goal.confidence.value,
-                        "source": packet.goal_state.current_goal.source,
-                    }, session_id, source=source, destination_context=_metadata)
-            except Exception:
-                logger.debug("Goal detection failed (non-fatal)", exc_info=True)
+            # Skip for trivial/factual queries — adds 2-5s latency for zero value
+            if not (is_factual or is_trivial):
+                try:
+                    from gaia_core.cognition.goal_detector import GoalDetector
+                    goal_detector = GoalDetector(config=self.config)
+                    packet.goal_state = goal_detector.detect(
+                        packet=packet,
+                        session_manager=self.session_manager,
+                        session_id=session_id,
+                        model_pool=self.model_pool,
+                    )
+                    if packet.goal_state and packet.goal_state.current_goal:
+                        ts_write({
+                            "type": "goal_detect",
+                            "goal": packet.goal_state.current_goal.goal_id,
+                            "confidence": packet.goal_state.current_goal.confidence.value,
+                            "source": packet.goal_state.current_goal.source,
+                        }, session_id, source=source, destination_context=_metadata)
+                except Exception:
+                    logger.debug("Goal detection failed (non-fatal)", exc_info=True)
     
             # 3b. GCP Tool Routing System: Check if request needs MCP tools
             # This runs before the slim prompt path to properly route tool-related requests
@@ -1681,7 +1683,6 @@ class AgentCore:
                 except Exception:
                     logger.warning("AgentCore: cognitive self-audit failed, continuing", exc_info=True)
     
-            # pick a reflection model that's idle and not the selected model; prefer role resolution
             # Pick a reflection model that's idle and not the selected model.
             # Rely on `get_idle_model` being present on ModelPool; fall back to a
             # simple pool-key scan only if the call fails at runtime.
@@ -1716,7 +1717,12 @@ class AgentCore:
                 if reflection_model is None:
                     reflection_model = selected_model
             try:
-                refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
+                # Skip reflection for trivial/factual queries — saves 6-24s latency
+                if is_factual or is_trivial:
+                    logger.info("[FAST_PATH] Skipping reflection for trivial/factual query")
+                    refined_plan_text = initial_plan_text
+                else:
+                    refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel) # Instructions are now in the packet
                 # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
                 try:
                     packet.reasoning.reflection_log.append(ReflectionLog(step="refined_plan", summary=refined_plan_text, confidence=0.88))
@@ -2696,14 +2702,17 @@ class AgentCore:
         return None
 
     def is_eligible_for_reflex(self, packet: CognitionPacket, history: list) -> bool:
-        """Determines if a packet should trigger an instant Nano reflex."""
+        """Determines if a packet should trigger an instant Nano reflex.
+
+        Fires for ANY short, simple request regardless of session history.
+        The reflex model handles greetings, time/date, identity, and basic
+        math — escalating to the full pipeline via ESCALATE when unsure.
+        """
         user_input = packet.content.original_prompt
-        user_history = [m for m in history if m.get("role") == "user"]
-        is_cold = len(user_history) <= 1
         is_short = len(user_input) < 150
-        
+
         from gaia_common.utils.immune_system import is_system_irritated
-        return is_cold and is_short and not is_system_irritated() and "reflex" in self.model_pool.models
+        return is_short and not is_system_irritated() and "reflex" in self.model_pool.models
 
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """

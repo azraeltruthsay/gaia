@@ -212,6 +212,9 @@ _hash_registry: dict = {}               # file -> {hash, mtime} for atomic hashi
 _cognitive_running: bool = False         # True while cognitive battery is executing
 _cognitive_last_result: dict | None = None  # cached last battery run result
 
+# Sovereign promotion rate limiter
+_last_sovereign_attempt: float = 0.0
+
 # Cognitive monitor (heartbeat probe) state
 _cognitive_monitor_interval = int(os.environ.get("COGNITIVE_MONITOR_INTERVAL", "300"))
 _cognitive_monitor_last_run: float = 0.0
@@ -2081,9 +2084,13 @@ def poll_cycle():
                  _dissonance_report["parity_percent"])
 
     # Sovereign promotion: if candidate is healthy and files have diverged, trigger review
-    # Skip entirely in maintenance mode — promotion during dev sessions causes contention
+    # Rate-limited to prevent flooding the cognitive pipeline with 16K-token review packets.
+    # Skip entirely in maintenance mode — promotion during dev sessions causes contention.
+    global _last_sovereign_attempt
     all_divergent = _dissonance_report.get("vital_divergent", []) + _dissonance_report.get("standard_divergent", [])
-    if all_divergent and not is_maintenance_active():
+    _sovereign_cooldown = int(os.environ.get("SOVEREIGN_COOLDOWN", "600"))  # 10 min default
+    if all_divergent and not is_maintenance_active() and (time.time() - _last_sovereign_attempt > _sovereign_cooldown):
+        _last_sovereign_attempt = time.time()
         try:
             candidate_healthy = all(
                 check_health(name, url)
