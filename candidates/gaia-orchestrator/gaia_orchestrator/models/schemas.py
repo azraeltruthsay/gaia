@@ -26,10 +26,53 @@ class GPUOwner(str, Enum):
     AUDIO = "gaia-audio"
 
 
+class GPUState(str, Enum):
+    """GPU ownership state for the watch rotation protocol."""
+    IDLE = "idle"                   # Core+Nano own GPU. Prime sleeping. SAE/ROME work possible.
+    FOCUSING = "focusing"           # Prime owns GPU. Core+Nano on CPU fallback.
+    TRANSITIONING = "transitioning" # Handoff in progress. No inference requests accepted.
+
+
+class TierDevice(str, Enum):
+    """Current device for a cognitive tier."""
+    GPU_SAFETENSORS = "gpu_safetensors"   # Safetensors loaded on GPU (full capability)
+    GPU_GGUF = "gpu_gguf"                 # GGUF on GPU via llama-server
+    CPU_GGUF = "cpu_gguf"                 # GGUF on CPU via llama-server (fallback)
+    GPU_VLLM = "gpu_vllm"                 # Safetensors via vLLM (Prime only)
+    UNLOADED = "unloaded"                 # Not loaded anywhere
+    ON_DEMAND = "on_demand"               # Loaded when needed, unloaded after (audio)
+
+
+class TierStatus(BaseModel):
+    """Status of a single cognitive tier."""
+    name: str                                       # nano, core, prime
+    role: str                                       # reflex, operator, thinker
+    device: TierDevice = TierDevice.UNLOADED
+    model_path: str = ""
+    vram_mb: int = 0
+    kv_cache_warm: bool = False                     # True if identity prefix is cached
+    last_transition: Optional[datetime] = None
+    inference_endpoint: str = ""                    # URL where this tier is serving
+
+
+class GPUWatchState(BaseModel):
+    """Complete GPU watch rotation state."""
+    gpu_state: GPUState = GPUState.IDLE
+    tiers: Dict[str, TierStatus] = Field(default_factory=lambda: {
+        "nano": TierStatus(name="nano", role="reflex"),
+        "core": TierStatus(name="core", role="operator"),
+        "prime": TierStatus(name="prime", role="thinker"),
+    })
+    last_transition: Optional[datetime] = None
+    transition_reason: str = ""
+    transitions_total: int = 0
+
+
+# Legacy — NanoGPUMode still used by existing backoff system
 class NanoGPUMode(str, Enum):
     """Nano model GPU placement mode."""
-    GPU = "gpu"       # All layers on GPU (--n-gpu-layers 999)
-    CPU = "cpu"       # All layers on CPU (--n-gpu-layers 0)
+    GPU = "gpu"
+    CPU = "cpu"
 
 
 class NanoGPUStatus(BaseModel):
@@ -201,6 +244,7 @@ class OrchestratorState(BaseModel):
     """Complete orchestrator state for persistence."""
     gpu: GPUStatus = Field(default_factory=GPUStatus)
     nano: NanoGPUStatus = Field(default_factory=NanoGPUStatus)
+    watch: GPUWatchState = Field(default_factory=GPUWatchState)
     containers: ContainerStatus = Field(default_factory=ContainerStatus)
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)
