@@ -57,8 +57,10 @@ RUN pip install --no-cache-dir transformers accelerate
 
 WORKDIR /app
 
-# Copy the inference server (shared with gaia-core — same code, different model)
-COPY gaia-core/gaia_core/inference_server.py /app/inference_server.py
+# Install gaia-common (shared engine library)
+COPY candidates/gaia-common /gaia-common
+RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
+ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"
 
 # Copy entrypoint
 COPY gaia-llama/entrypoint.sh /entrypoint.sh

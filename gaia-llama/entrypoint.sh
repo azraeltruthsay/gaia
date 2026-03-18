@@ -18,12 +18,9 @@ mkdir -p /shared/thoughts 2>/dev/null || true
 
 # ── Mode 1: Safetensors inference server ────────────────────────────────────
 if [ -n "$SAFETENSORS_PATH" ] && [ -d "$SAFETENSORS_PATH" ]; then
-    echo "[nano-entrypoint] Starting safetensors server (device=$DEVICE, port=$PORT)..."
+    echo "[nano-entrypoint] Starting GAIA Engine (device=$DEVICE, port=$PORT)..."
     echo "[nano-entrypoint] Model: $SAFETENSORS_PATH"
-    exec python /app/inference_server.py \
-        --model "$SAFETENSORS_PATH" \
-        --port "$PORT" \
-        --device "$DEVICE"
+    exec python -c "from gaia_common.engine import serve; serve('$SAFETENSORS_PATH', $PORT, '$DEVICE')"
 
 # ── Mode 2: GGUF via llama-server ──────────────────────────────────────────
 elif [ -f "$GGUF_MODEL_PATH" ]; then
