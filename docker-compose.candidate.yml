@@ -33,9 +33,9 @@ services:
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
-      # Candidate Core: Qwen3.5-2B-Base (clean geometry for identity baking)
-      - CORE_CPU_MODEL=${CANDIDATE_CORE_MODEL:-Qwen3.5-2B-Base-BF16.gguf}
-      - CORE_CPU_MODEL_PATH=${CANDIDATE_CORE_MODEL_PATH:-/models/Qwen3.5-2B-Base/Qwen3.5-2B-Base-BF16.gguf}
+      # Candidate Core: Qwen3.5-2B post-trained (instruction-ready, clean geometry)
+      - CORE_CPU_MODEL=${CANDIDATE_CORE_MODEL:-Qwen3.5-2B-BF16.gguf}
+      - CORE_CPU_MODEL_PATH=${CANDIDATE_CORE_MODEL_PATH:-/models/Qwen3.5-2B/Qwen3.5-2B-BF16.gguf}
       - CORE_CPU_CTX=8192
       - CORE_CPU_THREADS=8
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
@@ -239,6 +239,7 @@ services:
     environment:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_ENV=development
+      - GAIA_LOG_DIR=/logs
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
     deploy:
