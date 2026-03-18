@@ -241,6 +241,56 @@ services:
     profiles:
       - study-candidate
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-doctor-candidate: The Immune System (candidate)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-doctor-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-doctor/Dockerfile
+    image: localhost:5000/gaia-doctor-candidate:local
+    container_name: gaia-doctor-candidate
+    hostname: gaia-doctor-candidate
+    restart: "no"
+
+    environment:
+      - POLL_INTERVAL=30
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      - COMPOSE_PROJECT_NAME=gaia_project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
+      - SHARED_DIR=/candidate-shared
+      - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
+      # Disable restarts and sovereign promotion — candidate observes only
+      - DOCTOR_DRY_RUN=1
+
+    volumes:
+      # Docker socket (read-only — candidate should NOT restart containers)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker CLI + compose plugin
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      # Project root for code monitoring (read-only)
+      - .:/gaia/GAIA_Project:ro
+      # Candidate shared state (separate from production)
+      - gaia-candidate-shared:/candidate-shared:rw
+
+    group_add:
+      - "${DOCKER_GID:-962}"
+
+    ports:
+      - "6421:6419"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6419/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   gaia-candidate-shared:
   gaia-candidate-sandbox:
