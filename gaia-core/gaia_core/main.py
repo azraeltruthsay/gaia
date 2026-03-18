@@ -239,6 +239,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to start sleep cycle loop", exc_info=True)
 
+    # Start idle heartbeat — the "sound of silence"
+    _idle_heartbeat = None
+    try:
+        from gaia_core.cognition.idle_heartbeat import IdleHeartbeat
+        _idle_heartbeat = IdleHeartbeat(
+            config=_config,
+            model_pool=_model_pool,
+            timeline_store=getattr(app.state, "timeline_store", None),
+            session_manager=getattr(_agent_core, "session_manager", None) if _agent_core else None,
+        )
+        _idle_heartbeat.start()
+        app.state.idle_heartbeat = _idle_heartbeat
+        logger.info("Idle heartbeat started")
+    except Exception:
+        logger.warning("Failed to start idle heartbeat", exc_info=True)
+
     # Start KV cache manager (background restore + periodic checkpoint)
     _kv_cache_mgr = None
     try:
