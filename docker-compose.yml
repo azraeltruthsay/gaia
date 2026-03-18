@@ -154,13 +154,13 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-nano: The Reflex - Nano triage classifier (GPU, llama-server)
+  # gaia-nano: The Reflex — dual-mode (safetensors + GGUF fallback)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-nano:
     build:
-      context: ./gaia-llama
-      dockerfile: Dockerfile
-    image: localhost:5000/gaia-nano:cuda
+      context: .
+      dockerfile: gaia-llama/Dockerfile
+    image: localhost:5000/gaia-nano:dual
     container_name: gaia-nano
     hostname: gaia-nano
     restart: unless-stopped
@@ -168,16 +168,20 @@ services:
     volumes:
       - ./gaia-models:/models:ro
       - ./logs/kvcache/nano:/kvcache:rw
+      - gaia-shared:/shared:rw
 
-    command: >
-      --host 0.0.0.0
-      --port 8080
-      --model /models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
-      --ctx-size 2048
-      --threads 4
-      --n-gpu-layers ${NANO_GPU_LAYERS:-999}
-      --chat-template chatml
-      --slot-save-path /kvcache
+    environment:
+      # Safetensors mode (GPU-native, enables polygraph + SAE)
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-Abliterated-merged}
+      - NANO_DEVICE=${NANO_DEVICE:-cuda}
+      # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty)
+      - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
+      - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
+      - NANO_PORT=8080
+      - NANO_CTX_SIZE=2048
+      - NANO_THREADS=4
+      - SAE_ATLAS_PATH=/shared/atlas/nano
+      - SHARED_DIR=/shared
 
     ports:
       - "8090:8080"
@@ -195,7 +199,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
           devices:
             - driver: nvidia
