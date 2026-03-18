@@ -172,7 +172,7 @@ services:
 
     environment:
       # Safetensors mode (GPU-native, enables polygraph + SAE)
-      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-Abliterated-merged}
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-GAIA-Nano-v1}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
       # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty)
       - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
