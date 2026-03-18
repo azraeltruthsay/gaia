@@ -304,6 +304,15 @@ class GAIAEngine:
         self.monitor = ActivationMonitor()
         self.thoughts = ThoughtManager()
 
+        # Initialize dynamic awareness
+        try:
+            from gaia_common.engine.awareness import AwarenessManager
+            self.awareness = AwarenessManager()
+            logger.info("Dynamic awareness initialized (%d packages)", len(self.awareness.packages))
+        except Exception as e:
+            logger.warning("Awareness system not available: %s", e)
+            self.awareness = None
+
         elapsed = time.time() - start
         mem_mb = torch.cuda.memory_allocated() // (1024 * 1024) if device == "cuda" else 0
         logger.info("GAIA Engine ready in %.1fs (VRAM: %dMB)", elapsed, mem_mb)
@@ -321,11 +330,19 @@ class GAIAEngine:
                 else:
                     conversation.append(msg)
 
-            # KV prefix cache
+            # KV prefix cache — identity + situational awareness
             past_kv = None
             prefix_len = 0
             if system:
                 self.prefix_cache.update_segment("identity", system)
+
+                # Inject situational awareness if available
+                if self.awareness:
+                    user_text = " ".join(m.get("content", "") for m in conversation)
+                    awareness_text = self.awareness.compose_awareness_text(context=user_text)
+                    if awareness_text:
+                        self.prefix_cache.update_segment("world_state", awareness_text)
+
                 past_kv, prefix_len = self.prefix_cache.get_kv()
 
             # Build conversation tokens
@@ -482,6 +499,16 @@ class EngineHandler(BaseHTTPRequestHandler):
             self._json({"activations": _engine.monitor._last_snapshot, "timestamp": _engine.monitor._last_timestamp})
         elif self.path == "/thought/list":
             self._json(_engine.thoughts.list_all())
+        elif self.path == "/awareness/status":
+            if _engine.awareness:
+                self._json(_engine.awareness.status())
+            else:
+                self._json({"error": "awareness not available"})
+        elif self.path == "/awareness/curiosity":
+            if _engine.awareness:
+                self._json({"signals": _engine.awareness.get_curiosity_signals()})
+            else:
+                self._json({"signals": []})
         else:
             self._json({"error": "not found"}, 404)
 
