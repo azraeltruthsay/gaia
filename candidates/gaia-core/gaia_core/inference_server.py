@@ -421,6 +421,141 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
         }
 
 
+# ── Thought Management — "Hold that thought" ────────────────────────────────
+
+import os as _os
+from pathlib import Path as _Path
+
+THOUGHT_DIR = _Path(_os.environ.get("SHARED_DIR", "/shared")) / "thoughts"
+THOUGHT_DIR.mkdir(parents=True, exist_ok=True)
+
+# In-memory thought cache (label → (past_key_values, metadata))
+_held_thoughts: dict = {}
+
+
+def hold_thought(label: str, context_summary: str = "") -> dict:
+    """Freeze current KV cache state as a named thought.
+
+    Saves the complete cognitive state — every attention pattern,
+    every recurrent state — so GAIA can resume this exact train
+    of thought later. Like putting a finger in a book, except the
+    finger remembers what you were thinking about the page.
+    """
+    with _lock:
+        if _kv_cache is None or _kv_cache._cached_kv is None:
+            return {"ok": False, "error": "no active KV cache to save"}
+
+        # Deep copy the KV state (tensors stay on current device)
+        import copy
+        kv_snapshot = copy.deepcopy(_kv_cache._cached_kv)
+        prefix_len = _kv_cache._cached_prefix_len
+        segment_hashes = list(_kv_cache._cached_segment_hashes)
+
+        metadata = {
+            "label": label,
+            "context_summary": context_summary,
+            "prefix_tokens": prefix_len,
+            "segment_hashes": segment_hashes,
+            "device": _device,
+            "timestamp": time.time(),
+            "model": _model_path,
+        }
+
+        _held_thoughts[label] = {
+            "kv": kv_snapshot,
+            "metadata": metadata,
+        }
+
+        # Also persist metadata to disk (KV tensors stay in memory for speed)
+        meta_path = THOUGHT_DIR / f"{label}.json"
+        meta_path.write_text(json.dumps(metadata, indent=2))
+
+        logger.info("THOUGHT HELD: '%s' (%d prefix tokens, device=%s)", label, prefix_len, _device)
+        return {"ok": True, "label": label, **metadata}
+
+
+def resume_thought(label: str) -> dict:
+    """Resume a previously held thought — restore the exact cognitive state.
+
+    GAIA picks up exactly where she left off. No re-reading, no context
+    loss, no "where was I?" moment. The attention patterns, the recurrent
+    states, everything is restored.
+    """
+    with _lock:
+        if label not in _held_thoughts:
+            return {"ok": False, "error": f"no thought named '{label}'"}
+
+        thought = _held_thoughts[label]
+        kv_snapshot = thought["kv"]
+        metadata = thought["metadata"]
+
+        # Restore KV cache state
+        if _kv_cache is not None:
+            # Move KV to current device if needed
+            target = _model.device if _model is not None else _device
+            try:
+                restored_kv = tuple(
+                    tuple(t.to(target) for t in layer) if isinstance(layer, tuple)
+                    else layer.to(target) if hasattr(layer, 'to') else layer
+                    for layer in kv_snapshot
+                ) if isinstance(kv_snapshot, tuple) else kv_snapshot
+            except Exception:
+                restored_kv = kv_snapshot
+
+            _kv_cache._cached_kv = restored_kv
+            _kv_cache._cached_prefix_len = metadata["prefix_tokens"]
+            _kv_cache._cached_segment_hashes = metadata["segment_hashes"]
+            _kv_cache._cache_hits += 1
+
+        logger.info("THOUGHT RESUMED: '%s' (%d prefix tokens)", label, metadata["prefix_tokens"])
+        return {"ok": True, "label": label, "resumed": metadata}
+
+
+def list_thoughts() -> dict:
+    """List all held thoughts with their metadata."""
+    result = {}
+    for label, thought in _held_thoughts.items():
+        meta = thought["metadata"]
+        result[label] = {
+            "context_summary": meta.get("context_summary", ""),
+            "prefix_tokens": meta["prefix_tokens"],
+            "timestamp": meta["timestamp"],
+            "device": meta["device"],
+            "age_seconds": round(time.time() - meta["timestamp"], 1),
+        }
+
+    # Also check disk for thoughts from previous sessions
+    for meta_file in THOUGHT_DIR.glob("*.json"):
+        label = meta_file.stem
+        if label not in result:
+            try:
+                meta = json.loads(meta_file.read_text())
+                result[label] = {
+                    "context_summary": meta.get("context_summary", ""),
+                    "prefix_tokens": meta.get("prefix_tokens", 0),
+                    "timestamp": meta.get("timestamp", 0),
+                    "device": meta.get("device", "unknown"),
+                    "age_seconds": round(time.time() - meta.get("timestamp", 0), 1),
+                    "in_memory": False,  # on disk only, needs reload
+                }
+            except Exception:
+                pass
+
+    return {"thoughts": result, "count": len(result)}
+
+
+def drop_thought(label: str) -> dict:
+    """Release a held thought, freeing memory."""
+    if label in _held_thoughts:
+        del _held_thoughts[label]
+        meta_path = THOUGHT_DIR / f"{label}.json"
+        if meta_path.exists():
+            meta_path.unlink()
+        logger.info("THOUGHT DROPPED: '%s'", label)
+        return {"ok": True, "label": label}
+    return {"ok": False, "error": f"no thought named '{label}'"}
+
+
 # ── HTTP Server ──────────────────────────────────────────────────────────────
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -470,6 +605,9 @@ class InferenceHandler(BaseHTTPRequestHandler):
                 result["kv_cache"] = _kv_cache.stats()
             self._send_json(result)
 
+        elif self.path == "/thought/list":
+            self._send_json(list_thoughts())
+
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -502,7 +640,6 @@ class InferenceHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "no cache"})
 
         elif self.path == "/cache/update":
-            # Update individual segments: {"identity": "...", "tools": "...", "world_state": "..."}
             body = self._read_body()
             changed = []
             if _kv_cache:
@@ -512,6 +649,25 @@ class InferenceHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "changed": changed})
             else:
                 self._send_json({"ok": False, "error": "no cache"})
+
+        elif self.path == "/thought/hold":
+            body = self._read_body()
+            label = body.get("label", f"thought_{int(time.time())}")
+            context = body.get("context", "")
+            self._send_json(hold_thought(label, context))
+
+        elif self.path == "/thought/resume":
+            body = self._read_body()
+            label = body.get("label", "")
+            if not label:
+                self._send_json({"ok": False, "error": "label required"}, 400)
+            else:
+                self._send_json(resume_thought(label))
+
+        elif self.path == "/thought/drop":
+            body = self._read_body()
+            label = body.get("label", "")
+            self._send_json(drop_thought(label))
 
         else:
             self._send_json({"error": "not found"}, 404)
