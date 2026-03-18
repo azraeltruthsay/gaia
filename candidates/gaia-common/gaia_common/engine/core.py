@@ -522,6 +522,36 @@ class EngineHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "not found"}, 404)
         elif self.path == "/thought/drop":
             self._json({"ok": _engine.thoughts.drop(self._body().get("label", ""))})
+        elif self.path == "/thought/compose":
+            # Compose two held thoughts into a unified cognitive state
+            # {"primary": "label_a", "secondary": "label_b", "shared_prefix": 14}
+            b = self._body()
+            primary = _engine.thoughts.resume(b.get("primary", ""))
+            secondary = _engine.thoughts.resume(b.get("secondary", ""))
+            if not primary or not secondary:
+                self._json({"ok": False, "error": "one or both thoughts not found"}, 404)
+            else:
+                from gaia_common.engine.thought_composer import compose_thoughts, estimate_composed_size
+                shared = b.get("shared_prefix", 0)
+                pw = b.get("primary_weight", 0.6)
+                sw = b.get("secondary_weight", 0.4)
+                est = estimate_composed_size(primary["kv"], secondary["kv"], shared)
+                composed_kv = compose_thoughts(primary["kv"], secondary["kv"], shared, pw, sw)
+                # Install composed state as active KV cache
+                _engine.prefix_cache._cached_kv = composed_kv
+                _engine.prefix_cache._cached_len = est["composed_tokens"]
+                self._json({"ok": True, "estimate": est,
+                            "primary": b.get("primary"), "secondary": b.get("secondary")})
+        elif self.path == "/thought/estimate-compose":
+            b = self._body()
+            primary = _engine.thoughts.resume(b.get("primary", ""))
+            secondary = _engine.thoughts.resume(b.get("secondary", ""))
+            if not primary or not secondary:
+                self._json({"ok": False, "error": "not found"}, 404)
+            else:
+                from gaia_common.engine.thought_composer import estimate_composed_size
+                est = estimate_composed_size(primary["kv"], secondary["kv"], b.get("shared_prefix", 0))
+                self._json({"ok": True, "estimate": est})
         elif self.path == "/polygraph/enable":
             _engine.monitor.enabled = True
             self._json({"ok": True})
