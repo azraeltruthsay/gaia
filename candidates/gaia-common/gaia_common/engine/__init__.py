@@ -14,5 +14,6 @@ Each container imports this library and serves one model through it.
 """
 
 from gaia_common.engine.core import GAIAEngine, serve
+from gaia_common.engine.thought_composer import compose_thoughts, estimate_composed_size
 
-__all__ = ["GAIAEngine", "serve"]
+__all__ = ["GAIAEngine", "serve", "compose_thoughts", "estimate_composed_size"]
