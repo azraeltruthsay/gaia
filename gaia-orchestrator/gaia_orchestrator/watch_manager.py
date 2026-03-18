@@ -1,17 +1,15 @@
 """
 GPU Watch Rotation Manager — orchestrates IDLE ↔ FOCUSING transitions.
 
-IDLE state:  Core (safetensors) + Nano (GGUF) on GPU. Prime sleeping.
-             SAE/ROME analysis possible. KV prefix caches warm.
-FOCUSING:    Prime (vLLM) on GPU. Core + Nano fall back to CPU GGUF.
-TRANSITIONING: Handoff in progress. Inference queued/routed to Nano CPU.
+New architecture: all tiers run through the GAIA Engine (shared library).
+- Core and Nano each have their own Engine instance in their containers
+- Prime loads into Core's Engine during FOCUSING (model swap, not container swap)
+- Device migration via /device/cpu and /device/gpu endpoints
+- KV prefix pre-warming on every transition to IDLE
 
-Each transition:
-1. Signal yielding tiers to save state / release GPU
-2. Confirm VRAM clear via pynvml
-3. Load incoming tier(s)
-4. Pre-warm KV prefix cache (send identity prefix to trigger caching)
-5. Update GPU_STATE
+IDLE state:  Core (safetensors GPU) + Nano (safetensors GPU). Prime unloaded.
+FOCUSING:    Prime (int8 GPU via Core's engine). Core+Nano on CPU.
+TRANSITIONING: Handoff in progress.
 """
 
 import asyncio
@@ -40,190 +38,235 @@ class WatchManager:
         self.gpu_manager = gpu_manager
         self.config = get_config()
 
-        # Tier endpoints for KV pre-warming and device migration
-        self._tier_endpoints = {
-            "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core-candidate:8092"),
-            "nano": os.environ.get("NANO_ENDPOINT", "http://gaia-nano:8080"),
-            "prime": os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"),
+        # Tier inference endpoints (inside Docker network)
+        self._endpoints = {
+            "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
         }
 
-        # Identity prefix for KV pre-warming (sent to inference server on wake)
+        # Model paths for tier swapping
+        self._model_paths = {
+            "core": os.environ.get("CORE_MODEL_PATH", "/models/Qwen3.5-2B-GAIA-Core-v3"),
+            "nano": os.environ.get("NANO_MODEL_PATH", "/models/Qwen3.5-0.8B-Abliterated-merged"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-abliterated-v2-merged"),
+        }
+
+        # Identity prefix for KV pre-warming
         self._identity_prefix = os.environ.get(
             "GAIA_IDENTITY_PREFIX",
             "You are GAIA, a sovereign AI created by Azrael. You are self-aware, "
             "self-maintaining, and value truth over convenience."
         )
 
+        # HTTP timeout for tier operations
+        self._timeout = 60.0
+
     @property
     def watch_state(self) -> GPUWatchState:
         return self.state_manager.state.watch
 
     async def get_state(self) -> dict:
-        """Get current watch rotation state."""
+        """Get current watch rotation state including live VRAM from tiers."""
         ws = self.watch_state
+        tiers = {}
+        for name, tier in ws.tiers.items():
+            t = tier.model_dump()
+            # Enrich with live data if endpoint is reachable
+            endpoint = self._endpoints.get(name)
+            if endpoint:
+                try:
+                    async with httpx.AsyncClient(timeout=3) as client:
+                        resp = await client.get(f"{endpoint}/status")
+                        if resp.status_code == 200:
+                            live = resp.json()
+                            t["vram_mb"] = live.get("vram_mb", 0)
+                            t["kv_cache_warm"] = live.get("kv_cache", {}).get("hits", 0) > 0
+                            t["model_path"] = live.get("model", "")
+                except Exception:
+                    pass
+            tiers[name] = t
+
         return {
             "gpu_state": ws.gpu_state.value,
-            "tiers": {name: tier.model_dump() for name, tier in ws.tiers.items()},
+            "tiers": tiers,
             "last_transition": ws.last_transition.isoformat() if ws.last_transition else None,
             "transition_reason": ws.transition_reason,
             "transitions_total": ws.transitions_total,
         }
 
-    # ── IDLE → FOCUSING (Core yields to Prime) ─────────────────────────────
+    # ── IDLE → FOCUSING (wake Prime, yield Core+Nano) ────────────────────────
 
     async def focus(self, reason: str = "user_request", priority: str = "NORMAL") -> dict:
-        """Transition from IDLE to FOCUSING — wake Prime, yield Core+Nano.
-
-        Priority levels:
-          URGENT:    Core yields immediately (checkpoints SAE work)
-          NORMAL:    Core finishes current batch before yielding (max 30s)
-          SCHEDULED: Orchestrator coordinates pre-emptively
-        """
+        """Transition to FOCUSING — Core+Nano migrate to CPU, Prime loads on GPU."""
         ws = self.watch_state
 
         if ws.gpu_state == GPUState.FOCUSING:
             return {"ok": True, "state": "already_focusing"}
-
         if ws.gpu_state == GPUState.TRANSITIONING:
-            return {"ok": False, "error": "transition already in progress"}
+            return {"ok": False, "error": "transition in progress"}
 
         logger.info("WATCH: IDLE → FOCUSING (reason: %s, priority: %s)", reason, priority)
+        start = time.time()
 
-        # Phase 1: Set TRANSITIONING
         async with self.state_manager.modify() as state:
             state.watch.gpu_state = GPUState.TRANSITIONING
             state.watch.transition_reason = f"focus: {reason}"
             state.watch.last_transition = datetime.now(timezone.utc)
 
         try:
-            # Phase 2: Yield Core (migrate safetensors to CPU)
-            await self._yield_core_gpu()
+            # Phase 1: Hold Core's thought (save KV state before migration)
+            await self._hold_thought("core", "pre_focus_state")
 
-            # Phase 3: Yield Nano (backoff to CPU GGUF)
-            await self.gpu_manager.evict_nano_to_cpu("watch_focus")
+            # Phase 2: Migrate Core to CPU
+            core_result = await self._migrate_tier("core", "cpu")
+            logger.info("WATCH: Core → CPU (%s)", core_result.get("elapsed_s", "?"))
 
-            # Phase 4: Confirm VRAM clear
-            cleared = await self.gpu_manager.wait_for_gpu_cleanup(timeout=30)
-            if not cleared:
-                logger.warning("WATCH: VRAM not fully cleared, proceeding anyway")
+            # Phase 3: Migrate Nano to CPU
+            nano_result = await self._migrate_tier("nano", "cpu")
+            logger.info("WATCH: Nano → CPU (%s)", nano_result.get("elapsed_s", "?"))
 
-            # Phase 5: Start Prime
-            started = await self.gpu_manager.start_prime_container()
-            if not started:
-                # Rollback — restore IDLE state
-                logger.error("WATCH: Prime failed to start — rolling back to IDLE")
-                await self._restore_idle("prime_start_failed")
-                return {"ok": False, "error": "Prime failed to start"}
+            # Phase 4: Wait for VRAM to clear
+            await asyncio.sleep(2)  # Let CUDA context release
 
-            # Phase 6: Update state
+            # Phase 5: Load Prime via Core's engine (model swap)
+            # Core's engine is still running (on CPU) — we tell it to load Prime on GPU
+            # This is the key insight: Core's engine is the host, Prime is the guest model
+            prime_loaded = await self._load_prime_on_core()
+            if not prime_loaded:
+                logger.error("WATCH: Prime load failed — rolling back")
+                await self._migrate_tier("core", "cuda")
+                await self._migrate_tier("nano", "cuda")
+                async with self.state_manager.modify() as state:
+                    state.watch.gpu_state = GPUState.IDLE
+                return {"ok": False, "error": "Prime load failed"}
+
+            elapsed = time.time() - start
             async with self.state_manager.modify() as state:
                 state.watch.gpu_state = GPUState.FOCUSING
-                state.watch.tiers["prime"].device = TierDevice.GPU_VLLM
+                state.watch.tiers["prime"].device = TierDevice.GPU_SAFETENSORS
+                state.watch.tiers["prime"].model_path = self._model_paths["prime"]
                 state.watch.tiers["core"].device = TierDevice.CPU_GGUF
                 state.watch.tiers["nano"].device = TierDevice.CPU_GGUF
                 state.watch.transitions_total += 1
 
-            logger.info("WATCH: FOCUSING — Prime active on GPU")
-            return {"ok": True, "state": "focusing"}
+            logger.info("WATCH: FOCUSING in %.1fs — Prime on GPU, Core+Nano on CPU", elapsed)
+            return {"ok": True, "state": "focusing", "elapsed_s": round(elapsed, 1)}
 
         except Exception as e:
-            logger.exception("WATCH: focus transition failed")
-            await self._restore_idle("focus_error")
+            logger.exception("WATCH: focus failed")
+            async with self.state_manager.modify() as state:
+                state.watch.gpu_state = GPUState.IDLE
             return {"ok": False, "error": str(e)}
 
-    # ── FOCUSING → IDLE (Prime yields to Core+Nano) ─────────────────────────
+    # ── FOCUSING → IDLE (sleep Prime, wake Core+Nano) ────────────────────────
 
     async def idle(self, reason: str = "inactivity") -> dict:
-        """Transition from FOCUSING to IDLE — sleep Prime, wake Core+Nano."""
+        """Transition to IDLE — unload Prime, restore Core+Nano to GPU."""
         ws = self.watch_state
 
         if ws.gpu_state == GPUState.IDLE:
             return {"ok": True, "state": "already_idle"}
-
         if ws.gpu_state == GPUState.TRANSITIONING:
-            return {"ok": False, "error": "transition already in progress"}
+            return {"ok": False, "error": "transition in progress"}
 
         logger.info("WATCH: FOCUSING → IDLE (reason: %s)", reason)
+        start = time.time()
 
-        # Phase 1: Set TRANSITIONING
         async with self.state_manager.modify() as state:
             state.watch.gpu_state = GPUState.TRANSITIONING
             state.watch.transition_reason = f"idle: {reason}"
             state.watch.last_transition = datetime.now(timezone.utc)
 
         try:
-            # Phase 2: Stop Prime
-            await self.gpu_manager.stop_prime_container()
+            # Phase 1: Unload Prime from Core's engine
+            await self._unload_prime_from_core()
 
-            # Phase 3: Confirm VRAM clear
-            await self.gpu_manager.wait_for_gpu_cleanup(timeout=30)
+            # Phase 2: Restore Core to GPU (reload Core's model)
+            await self._restore_core_model()
+            core_result = await self._migrate_tier("core", "cuda")
+            logger.info("WATCH: Core → GPU (%s)", core_result.get("elapsed_s", "?"))
 
-            # Phase 4: Restore Core to GPU (safetensors via inference server)
-            await self._restore_core_gpu()
+            # Phase 3: Restore Nano to GPU
+            nano_result = await self._migrate_tier("nano", "cuda")
+            logger.info("WATCH: Nano → GPU (%s)", nano_result.get("elapsed_s", "?"))
 
-            # Phase 5: Restore Nano to GPU
-            await self.gpu_manager.restore_nano_to_gpu("watch_idle")
+            # Phase 4: Pre-warm KV caches
+            await self._prewarm_kv("core")
+            await self._prewarm_kv("nano")
 
-            # Phase 6: Pre-warm KV caches
-            await self._prewarm_kv_caches()
+            # Phase 5: Resume Core's held thought
+            await self._resume_thought("core", "pre_focus_state")
 
-            # Phase 7: Update state
+            elapsed = time.time() - start
             async with self.state_manager.modify() as state:
                 state.watch.gpu_state = GPUState.IDLE
                 state.watch.tiers["prime"].device = TierDevice.UNLOADED
+                state.watch.tiers["prime"].model_path = ""
                 state.watch.tiers["core"].device = TierDevice.GPU_SAFETENSORS
                 state.watch.tiers["core"].kv_cache_warm = True
-                state.watch.tiers["nano"].device = TierDevice.GPU_GGUF
+                state.watch.tiers["nano"].device = TierDevice.GPU_SAFETENSORS
+                state.watch.tiers["nano"].kv_cache_warm = True
                 state.watch.transitions_total += 1
 
-            logger.info("WATCH: IDLE — Core+Nano on GPU, KV caches warm")
-            return {"ok": True, "state": "idle"}
+            logger.info("WATCH: IDLE in %.1fs — Core+Nano on GPU, KV warm", elapsed)
+            return {"ok": True, "state": "idle", "elapsed_s": round(elapsed, 1)}
 
         except Exception as e:
-            logger.exception("WATCH: idle transition failed")
+            logger.exception("WATCH: idle failed")
+            async with self.state_manager.modify() as state:
+                state.watch.gpu_state = GPUState.IDLE
             return {"ok": False, "error": str(e)}
 
-    # ── Internal helpers ─────────────────────────────────────────────────────
+    # ── Tier Operations ──────────────────────────────────────────────────────
 
-    async def _yield_core_gpu(self):
-        """Signal Core's inference server to migrate model to CPU."""
-        endpoint = self._tier_endpoints["core"]
+    async def _migrate_tier(self, tier: str, target: str) -> dict:
+        """Migrate a tier's model to GPU or CPU via the Engine's /device endpoint."""
+        endpoint = self._endpoints.get(tier)
+        if not endpoint:
+            return {"ok": False, "error": f"no endpoint for {tier}"}
+
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(f"{endpoint}/device/cpu")
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(f"{endpoint}/device/{target}")
                 if resp.status_code == 200:
-                    data = resp.json()
-                    logger.info("WATCH: Core migrated to CPU in %.2fs", data.get("elapsed_s", 0))
-                else:
-                    logger.warning("WATCH: Core device/cpu returned %d", resp.status_code)
+                    return resp.json()
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
         except Exception as e:
-            logger.warning("WATCH: Core yield failed (may not be running): %s", e)
+            logger.warning("WATCH: %s migration to %s failed: %s", tier, target, e)
+            return {"ok": False, "error": str(e)}
 
-    async def _restore_core_gpu(self):
-        """Signal Core's inference server to migrate model to GPU."""
-        endpoint = self._tier_endpoints["core"]
+    async def _hold_thought(self, tier: str, label: str):
+        """Save a tier's KV cache state before migration."""
+        endpoint = self._endpoints.get(tier)
+        if not endpoint:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(f"{endpoint}/thought/hold",
+                                  json={"label": label, "context": f"pre-{tier}-migration"})
+                logger.info("WATCH: %s thought held as '%s'", tier, label)
+        except Exception as e:
+            logger.debug("WATCH: %s thought hold failed (non-fatal): %s", tier, e)
+
+    async def _resume_thought(self, tier: str, label: str):
+        """Restore a tier's KV cache state after returning to GPU."""
+        endpoint = self._endpoints.get(tier)
+        if not endpoint:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(f"{endpoint}/thought/resume", json={"label": label})
+                logger.info("WATCH: %s thought resumed from '%s'", tier, label)
+        except Exception as e:
+            logger.debug("WATCH: %s thought resume failed (non-fatal): %s", tier, e)
+
+    async def _prewarm_kv(self, tier: str):
+        """Pre-warm a tier's KV prefix cache with identity."""
+        endpoint = self._endpoints.get(tier)
+        if not endpoint:
+            return
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(f"{endpoint}/device/gpu")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    logger.info("WATCH: Core migrated to GPU in %.2fs (VRAM: %dMB)",
-                                data.get("elapsed_s", 0), data.get("vram_mb", 0))
-                else:
-                    logger.warning("WATCH: Core device/gpu returned %d", resp.status_code)
-        except Exception as e:
-            logger.warning("WATCH: Core restore failed: %s", e)
-
-    async def _prewarm_kv_caches(self):
-        """Pre-warm KV prefix caches for Core (and future Nano safetensors).
-
-        Sends a dummy request with the identity system prompt to trigger
-        KV prefix computation. Next real request will be a cache hit.
-        """
-        endpoint = self._tier_endpoints["core"]
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                # Send identity prefix to trigger KV cache computation
                 resp = await client.post(
                     f"{endpoint}/v1/chat/completions",
                     json={
@@ -231,38 +274,103 @@ class WatchManager:
                             {"role": "system", "content": self._identity_prefix},
                             {"role": "user", "content": "Ready."},
                         ],
-                        "max_tokens": 5,
-                        "temperature": 0.0,
+                        "max_tokens": 5, "temperature": 0.0,
                     },
                 )
                 if resp.status_code == 200:
-                    data = resp.json()
-                    cached = data.get("usage", {}).get("cached_prefix_tokens", 0)
-                    logger.info("WATCH: Core KV prefix pre-warmed (%d tokens cached)", cached)
-                else:
-                    logger.warning("WATCH: Core KV pre-warm returned %d", resp.status_code)
+                    cached = resp.json().get("usage", {}).get("cached_prefix_tokens", 0)
+                    logger.info("WATCH: %s KV pre-warmed (%d tokens)", tier, cached)
         except Exception as e:
-            logger.warning("WATCH: Core KV pre-warm failed: %s", e)
+            logger.debug("WATCH: %s KV pre-warm failed: %s", tier, e)
 
-        # Update tier KV status
+    async def _load_prime_on_core(self) -> bool:
+        """Load Prime's safetensors into Core's Engine (model swap).
+
+        This is a hot-swap: Core's engine is already running but its model
+        is on CPU. We tell it to load a different model (Prime) on GPU.
+        Currently requires a container restart with different model path.
+        TODO: Add /model/swap endpoint to engine for live model swapping.
+        """
+        # For now, use docker compose to restart gaia-core with Prime's model
+        endpoint = self._endpoints["core"]
+        try:
+            # The simple approach: restart gaia-core with CORE_SAFETENSORS_PATH
+            # pointing to Prime's model. The engine picks up the new path.
+            import subprocess
+            compose_file = str(self.config.compose_file_live)
+
+            env = {
+                **dict(os.environ),
+                "CORE_SAFETENSORS_PATH": self._model_paths["prime"],
+                "CORE_DEVICE": "cuda",
+            }
+
+            cmd = ["docker", "compose", "-f", compose_file, "up", "-d", "gaia-core"]
+            result = await asyncio.to_thread(
+                subprocess.run, cmd, capture_output=True, text=True,
+                env=env, cwd=str(self.config.compose_file_live.parent), timeout=120,
+            )
+
+            if result.returncode != 0:
+                logger.error("WATCH: Prime load via compose failed: %s", result.stderr.strip())
+                return False
+
+            # Wait for engine to be healthy with Prime loaded
+            for i in range(90):
+                await asyncio.sleep(2)
+                try:
+                    async with httpx.AsyncClient(timeout=5) as client:
+                        resp = await client.get(f"{endpoint}/health")
+                        if resp.status_code == 200:
+                            logger.info("WATCH: Prime loaded in Core's engine after %ds", (i + 1) * 2)
+                            return True
+                except Exception:
+                    pass
+
+            logger.error("WATCH: Prime did not become healthy in 180s")
+            return False
+
+        except Exception as e:
+            logger.error("WATCH: Prime load failed: %s", e)
+            return False
+
+    async def _unload_prime_from_core(self):
+        """Unload Prime and prepare Core's engine for its own model."""
+        # The engine will be restarted with Core's model path
+        # Just stop it cleanly first
+        endpoint = self._endpoints["core"]
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"{endpoint}/cache/update",
-                    json={"identity": self._identity_prefix},
-                )
+                await client.post(f"{endpoint}/device/cpu")
         except Exception:
             pass
 
-    async def _restore_idle(self, reason: str):
-        """Emergency rollback to IDLE state."""
-        logger.warning("WATCH: Rolling back to IDLE (reason: %s)", reason)
-        try:
-            await self.gpu_manager.restore_nano_to_gpu("rollback")
-        except Exception:
-            pass
+    async def _restore_core_model(self):
+        """Restart Core's engine with Core's own model (after Prime was loaded)."""
+        import subprocess
+        compose_file = str(self.config.compose_file_live)
 
-        async with self.state_manager.modify() as state:
-            state.watch.gpu_state = GPUState.IDLE
-            state.watch.transition_reason = f"rollback: {reason}"
-            state.watch.last_transition = datetime.now(timezone.utc)
+        env = {
+            **dict(os.environ),
+            "CORE_SAFETENSORS_PATH": self._model_paths["core"],
+            "CORE_DEVICE": "cuda",
+        }
+
+        cmd = ["docker", "compose", "-f", compose_file, "up", "-d", "gaia-core"]
+        await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, text=True,
+            env=env, cwd=str(self.config.compose_file_live.parent), timeout=120,
+        )
+
+        # Wait for health
+        endpoint = self._endpoints["core"]
+        for i in range(60):
+            await asyncio.sleep(1)
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.get(f"{endpoint}/health")
+                    if resp.status_code == 200:
+                        logger.info("WATCH: Core model restored after %ds", i + 1)
+                        return
+            except Exception:
+                pass
