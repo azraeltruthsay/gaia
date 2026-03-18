@@ -45,17 +45,23 @@
     <main class="panels">
       <!-- Left: Chat -->
       <section class="panel panel-chat" x-data="chatPanel()">
-        <div class="panel-header">Chat</div>
+        <div class="panel-header">
+          <span>Chat</span>
+          <button class="btn-icon" @click="clearHistory()" title="Clear chat history">&times;</button>
+        </div>
         <div class="panel-body">
           <div x-ref="messages" class="chat-messages">
             <template x-for="msg in messages" :key="msg.id">
-              <div class="chat-msg" :class="msg.type" x-html="renderMessage(msg)"></div>
+              <div class="chat-msg" :class="msg.type">
+                <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
+                <span class="chat-text" x-html="renderMessage(msg)"></span>
+              </div>
             </template>
           </div>
           <div class="chat-input-row">
             <input type="text" x-model="input" placeholder="Talk to GAIA..." autocomplete="off"
                    @keydown.enter.prevent="send()" :disabled="sending">
-            <button @click="send()" :disabled="sending">Send</button>
+            <button @click="send()" :disabled="sending" x-text="sending ? '...' : 'Send'">Send</button>
           </div>
         </div>
       </section>

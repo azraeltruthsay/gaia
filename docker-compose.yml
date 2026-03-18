@@ -120,11 +120,11 @@ services:
     #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
     # Config, volume, and env var are already wired — just needs this flag.
     command: >
-      ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-merged}
+      ${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.60
-      --max-model-len 24576
+      --gpu-memory-utilization 0.85
+      --max-model-len 16384
       --max-num-seqs 1
       --trust-remote-code
       --dtype auto
@@ -259,16 +259,16 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3.5-4B-Abliterated-merged}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
       # Nano reflex endpoint (separate llama-server container)
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-Abliterated-Q8_0.gguf}
       # Core/Lite CPU endpoint (embedded llama-server inside gaia-core)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-Abliterated-Q4_K_M.gguf}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf}
       # Embedded llama-server config
       - CORE_CPU_PORT=8092
-      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf
+      - CORE_CPU_MODEL_PATH=/models/Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf
       - CORE_CPU_CTX=8192
       - CORE_CPU_THREADS=8
       # KV cache persistence for embedded llama-server

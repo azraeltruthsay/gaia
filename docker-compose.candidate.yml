@@ -32,8 +32,8 @@ services:
       - CORE_ENDPOINT=http://gaia-core-candidate:6415
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3.5-4B-Abliterated-merged}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-Abliterated-Q4_K_M.gguf}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf}
       - GAIA_AUTOLOAD_MODELS=1
     
     deploy:
@@ -176,7 +176,7 @@ services:
     # Config, volume, and env var are already wired — just needs this flag.
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model ${PRIME_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-merged}
+      --model ${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.65
