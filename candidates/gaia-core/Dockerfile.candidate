@@ -31,6 +31,18 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server llama-quantize -j$(nproc)
 
+# ── Build causal-conv1d (needs consistent CUDA headers) ──────────────────────
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS fla-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev build-essential git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+RUN pip3 install --no-cache-dir wheel setuptools
+RUN pip3 wheel --no-deps --wheel-dir /tmp/wheels causal-conv1d
+
 # ── Main image ───────────────────────────────────────────────────────────────
 FROM python:3.11-slim AS base
 
@@ -67,6 +79,13 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 
 # Install transformers for safetensors model loading
 RUN pip install --no-cache-dir transformers accelerate
+
+# flash-linear-attention is pure Python — install directly
+RUN pip install --no-cache-dir flash-linear-attention
+
+# causal-conv1d needs CUDA compilation — built in a separate stage below
+COPY --from=fla-builder /tmp/wheels/ /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 WORKDIR /app
 
