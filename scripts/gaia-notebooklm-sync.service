@@ -1,0 +1,23 @@
+[Unit]
+Description=GAIA NotebookLM Sync — watches GAIA_Condensed_flat and pushes to Google NotebookLM
+Documentation=file:///gaia/GAIA_Project/notebooklm_sync.py
+After=network-online.target gaia-flatten-soa.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azrael
+Group=azrael
+WorkingDirectory=/gaia/GAIA_Project
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/gaia/GAIA_Project/venv_notebooklm/bin/python /gaia/GAIA_Project/notebooklm_sync.py
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gaia-notebooklm-sync
+
+[Install]
+WantedBy=multi-user.target
