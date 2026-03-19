@@ -61,6 +61,10 @@ class WatchManager:
         # HTTP timeout for tier operations
         self._timeout = 60.0
 
+        # Auto-detect current GPU state on startup
+        import asyncio
+        asyncio.get_event_loop().call_soon(lambda: asyncio.ensure_future(self._auto_detect_state()))
+
     @property
     def watch_state(self) -> GPUWatchState:
         return self.state_manager.state.watch
@@ -216,6 +220,58 @@ class WatchManager:
             async with self.state_manager.modify() as state:
                 state.watch.gpu_state = GPUState.IDLE
             return {"ok": False, "error": str(e)}
+
+    async def _auto_detect_state(self):
+        """Detect current GPU state by probing tier endpoints on startup."""
+        await asyncio.sleep(10)  # Wait for services to be reachable
+
+        for tier_name, endpoint in self._endpoints.items():
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    # Try /status (GAIA Engine) then /device/status (legacy inference_server)
+                    resp = await client.get(f"{endpoint}/status")
+                    if resp.status_code == 404:
+                        resp = await client.get(f"{endpoint}/device/status")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        vram = data.get("vram_mb", 0)
+                        model = data.get("model", "")
+                        if vram > 100:
+                            device = TierDevice.GPU_SAFETENSORS
+                        elif model:
+                            device = TierDevice.CPU_GGUF
+                        else:
+                            device = TierDevice.UNLOADED
+
+                        async with self.state_manager.modify() as state:
+                            state.watch.tiers[tier_name].device = device
+                            state.watch.tiers[tier_name].vram_mb = vram
+                            state.watch.tiers[tier_name].model_path = model
+                            state.watch.tiers[tier_name].inference_endpoint = endpoint
+
+                        logger.info("WATCH auto-detect: %s = %s (%dMB)", tier_name, device.value, vram)
+            except Exception as e:
+                logger.debug("WATCH auto-detect %s failed: %s", tier_name, e)
+
+        # Check Prime standby
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get("http://gaia-prime:7777/health")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    mode = data.get("mode", "unknown")
+                    loaded = data.get("model_loaded", False)
+                    device = TierDevice.GPU_SAFETENSORS if loaded else TierDevice.UNLOADED
+
+                    async with self.state_manager.modify() as state:
+                        state.watch.tiers["prime"].device = device
+                        state.watch.tiers["prime"].inference_endpoint = "http://gaia-prime:7777"
+
+                    logger.info("WATCH auto-detect: prime = %s (mode=%s)", device.value, mode)
+        except Exception:
+            pass
+
+        logger.info("WATCH auto-detect complete")
 
     # ── Tier Operations ──────────────────────────────────────────────────────
 
