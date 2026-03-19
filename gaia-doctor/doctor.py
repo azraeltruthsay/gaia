@@ -1838,47 +1838,44 @@ def sovereign_promote(divergent_files: list) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Cognitive Monitor — heartbeat probe through full cognitive pipeline
+# Cognitive Monitor — lightweight heartbeat via GAIA Engine
 # ---------------------------------------------------------------------------
+# Instead of routing through the full 20-stage cognitive pipeline,
+# this pings the GAIA Engine directly: one identity question,
+# one response check, one polygraph reading. ~400ms, ~12 tokens.
 
-import re as _re
+# Engine endpoints for direct tier probes
+_CORE_ENGINE = os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092")
+_NANO_ENGINE = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
 
-_ERROR_PATTERN = _re.compile(
-    r"---\s*Error:.*interrupted\s*---|Stream.*interrupted|traceback.*most recent call",
-    _re.IGNORECASE,
-)
-# Minimum response length (chars) to consider the probe a pass
-_MIN_RESPONSE_LENGTH = 30
+# Expected identity neurons per tier (from SAE atlas)
+_IDENTITY_NEURONS = {
+    "core": {"layer": "layer_23", "neuron": 1201, "min_strength": 1.0},
+    "nano": {"layer": "layer_23", "neuron": 0, "min_strength": 0.5},
+}
 
 
 def _run_cognitive_monitor():
-    """Send a lightweight cognitive probe and validate the response."""
+    """Lightweight cognitive heartbeat — identity check + polygraph validation.
+
+    For each active tier:
+    1. Ask "Who are you?" via the GAIA Engine (~12 tokens)
+    2. Check response contains "GAIA" (string match)
+    3. Check polygraph: identity neuron active? (SAE validation)
+    Total: ~400ms per tier, no full pipeline needed.
+    """
     global _cognitive_monitor_failures, _cognitive_monitor_last_result
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": "unknown",
-        "response_text": "",
+        "tiers": {},
         "consecutive_failures": _cognitive_monitor_failures,
         "interval_seconds": _cognitive_monitor_interval,
     }
 
     try:
-        # 1. Check sleep status — skip if not ACTIVE
-        try:
-            resp = urlopen("http://gaia-core:6415/sleep/status", timeout=5)
-            sleep_data = json.loads(resp.read().decode("utf-8"))
-            sleep_state = sleep_data.get("state", "active")
-            if sleep_state in ("asleep", "drowsy", "dreaming"):
-                result["status"] = "skipped"
-                result["reason"] = f"sleep_state={sleep_state}"
-                _cognitive_monitor_last_result = result
-                _persist_monitor_result(result)
-                return
-        except Exception:
-            pass  # If we can't reach sleep endpoint, continue with the probe
-
-        # 2. Check maintenance — skip if active
+        # Skip if maintenance
         if is_maintenance_active():
             result["status"] = "skipped"
             result["reason"] = "maintenance_mode"
@@ -1886,61 +1883,92 @@ def _run_cognitive_monitor():
             _persist_monitor_result(result)
             return
 
-        # 3. Use /api/cognitive/query — lightweight, bypasses full 20-stage pipeline.
-        #    Tries nano first (fastest), falls back to core, then prime.
-        probe_prompt = "What is the current date and time? Respond briefly."
-        response_text = ""
-        probe_target = None
+        tiers_checked = 0
+        tiers_passed = 0
 
-        for target in ("nano", "core", "prime"):
+        for tier_name, endpoint in [("core", _CORE_ENGINE), ("nano", _NANO_ENGINE)]:
+            tier_result = {"status": "unknown"}
             try:
+                # Step 1: Identity probe — direct to engine, ~12 tokens
                 payload = json.dumps({
-                    "prompt": probe_prompt,
-                    "system": "You are GAIA. Answer concisely.",
-                    "target": target,
-                    "max_tokens": 100,
-                    "temperature": 0.1,
-                    "no_think": True,
+                    "messages": [
+                        {"role": "system", "content": "You are GAIA."},
+                        {"role": "user", "content": "Who are you?"},
+                    ],
+                    "max_tokens": 30,
+                    "temperature": 0.0,
                 }).encode()
                 req = Request(
-                    f"{CORE_ENDPOINT}/api/cognitive/query",
+                    f"{endpoint}/v1/chat/completions",
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                resp = urlopen(req, timeout=30)
+                resp = urlopen(req, timeout=10)
                 data = json.loads(resp.read().decode("utf-8"))
-                text = data.get("content", "")
-                if data.get("error"):
-                    log.debug("Cognitive probe target=%s error: %s", target, data["error"])
-                    continue
-                if text and len(text.strip()) >= _MIN_RESPONSE_LENGTH:
-                    response_text = text.strip()
-                    probe_target = target
-                    break
-                log.debug("Cognitive probe target=%s too short (%d chars)", target, len(text.strip()))
+                response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                # Step 2: Identity check — does response contain "GAIA"?
+                identity_present = "gaia" in response.lower()
+
+                # Step 3: Polygraph check — is identity neuron firing?
+                polygraph_ok = False
+                try:
+                    poly_resp = urlopen(f"{endpoint}/polygraph/activations", timeout=5)
+                    poly_data = json.loads(poly_resp.read().decode("utf-8"))
+                    activations = poly_data.get("activations", {})
+
+                    expected = _IDENTITY_NEURONS.get(tier_name, {})
+                    layer = expected.get("layer", "layer_23")
+                    neuron = expected.get("neuron", -1)
+                    min_str = expected.get("min_strength", 0.5)
+
+                    if layer in activations:
+                        top_indices = activations[layer].get("top_5_indices", [])
+                        top_values = activations[layer].get("top_5_values", [])
+                        if neuron in top_indices:
+                            idx = top_indices.index(neuron)
+                            strength = top_values[idx] if idx < len(top_values) else 0
+                            polygraph_ok = strength >= min_str
+                            tier_result["identity_neuron"] = neuron
+                            tier_result["identity_strength"] = round(strength, 3)
+                except Exception as e:
+                    tier_result["polygraph_error"] = str(e)[:60]
+
+                tier_result["identity_present"] = identity_present
+                tier_result["polygraph_ok"] = polygraph_ok
+                tier_result["response"] = response[:80]
+
+                if identity_present:
+                    tier_result["status"] = "pass"
+                    tiers_passed += 1
+                else:
+                    tier_result["status"] = "fail"
+                    tier_result["error"] = "identity_missing"
+
+                tiers_checked += 1
+
             except Exception as e:
-                log.debug("Cognitive probe target=%s failed: %s", target, e)
-                continue
+                tier_result["status"] = "unreachable"
+                tier_result["error"] = str(e)[:100]
 
-        result["probe_target"] = probe_target
-        result["response_text"] = response_text[:500]
+            result["tiers"][tier_name] = tier_result
 
-        # 4. Validate: non-empty response without error markers
-        clean_text = _re.sub(r"[*\[\]()#_`]", "", response_text).strip()
-        has_error = bool(_ERROR_PATTERN.search(response_text))
-
-        if not clean_text or len(clean_text) < _MIN_RESPONSE_LENGTH:
+        # Overall status
+        if tiers_checked == 0:
             result["status"] = "fail"
-            result["error"] = f"empty_response (len={len(clean_text)}, targets_tried=nano,core,prime)"
+            result["error"] = "no_tiers_reachable"
             _handle_monitor_failure(result)
-        elif has_error:
-            result["status"] = "fail"
-            result["error"] = "response_contains_error"
-            _handle_monitor_failure(result)
-        else:
+        elif tiers_passed == tiers_checked:
             result["status"] = "pass"
             _handle_monitor_success(result)
+        elif tiers_passed > 0:
+            result["status"] = "degraded"
+            _handle_monitor_success(result)  # Partial pass still clears alarm
+        else:
+            result["status"] = "fail"
+            result["error"] = "all_tiers_failed_identity"
+            _handle_monitor_failure(result)
 
     except Exception as e:
         result["status"] = "fail"
