@@ -366,7 +366,22 @@ class GAIAEngine:
                 past_kv, prefix_len = self.prefix_cache.get_kv()
 
             # Build conversation tokens
+            # Inject real-time clock in local timezone (PDT/PST for Richland, WA)
+            import time as _time
+            from datetime import datetime, timezone, timedelta
+            try:
+                # Pacific time (UTC-7 during PDT, UTC-8 during PST)
+                # TODO: auto-detect DST from awareness location
+                pacific = timezone(timedelta(hours=-7))  # PDT
+                now = datetime.now(pacific)
+                clock_str = now.strftime('%I:%M %p %Z')
+                date_str = now.strftime('%A, %B %d, %Y')
+            except Exception:
+                clock_str = _time.strftime('%H:%M:%S UTC', _time.gmtime())
+                date_str = ""
+
             parts = []
+            parts.append(f"<|im_start|>system\n[Current time: {clock_str}, {date_str}]<|im_end|>")
             for msg in conversation:
                 parts.append(f"<|im_start|>{msg['role']}\n{msg['content']}<|im_end|>")
             parts.append("<|im_start|>assistant\n")
