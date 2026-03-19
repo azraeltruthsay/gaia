@@ -97,7 +97,7 @@ class AwarenessManager:
     text block for KV prefix injection.
     """
 
-    def __init__(self, awareness_dir: Optional[Path] = None, max_tokens: int = 500):
+    def __init__(self, awareness_dir: Optional[Path] = None, max_tokens: int = 800):
         self.awareness_dir = awareness_dir or AWARENESS_DIR
         self.max_tokens = max_tokens
         self.packages: Dict[str, AwarenessPackage] = {}
