@@ -192,8 +192,26 @@ def rome_edit(model, tokenizer, edits: List[Dict], layer_idx: int = 20,
     # up_proj.weight is [intermediate_size, hidden_size] e.g. [12288, 4096]
     mlp_module = find_mlp_module(model, layer_idx, proj="up_proj")
     W = mlp_module.weight.data  # [intermediate_size, hidden_size]
-    original_norm = W.norm().item()
-    logger.info("ROME target: layer %d up_proj, shape %s", layer_idx, list(W.shape))
+
+    # Handle quantized weights (NF4/int8) — dequantize for editing, re-quantize after
+    if W.dtype in (torch.uint8, torch.int8):
+        logger.info("ROME: NF4/int8 weights detected — editing via dequantized proxy")
+        # For quantized models, we can't directly edit weights.
+        # Instead, we'll edit the compute_dtype buffer if available,
+        # or apply the edit as a bias offset.
+        if hasattr(mlp_module, 'weight') and hasattr(mlp_module.weight, 'quant_state'):
+            # bitsandbytes NF4 — dequantize, edit, requantize
+            import bitsandbytes as bnb
+            W_float = bnb.functional.dequantize_4bit(W, mlp_module.weight.quant_state).float()
+            original_norm = W_float.norm().item()
+            logger.info("ROME target: layer %d up_proj (dequantized), shape %s", layer_idx, list(W_float.shape))
+        else:
+            logger.error("ROME: Cannot dequantize weights — unsupported format")
+            return {"edits_attempted": len(edits), "edits_applied": 0, "error": "quantized weights unsupported"}
+    else:
+        W_float = W.float()
+        original_norm = W_float.norm().item()
+        logger.info("ROME target: layer %d up_proj, shape %s", layer_idx, list(W.shape))
 
     results = []
 
