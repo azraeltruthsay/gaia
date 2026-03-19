@@ -894,9 +894,17 @@ async def websocket_notifications(websocket: WebSocket):
 # =============================================================================
 
 async def _nano_vram_pressure_loop():
-    """Background loop that monitors VRAM and auto-manages Nano GPU placement."""
+    """Background loop that monitors VRAM and auto-manages GPU resources.
+
+    Handles:
+    1. Nano GPU placement (evict to CPU under pressure, restore when free)
+    2. Audio idle detection (sleep audio GPU models after idle timeout)
+    """
     config = get_config()
     interval = config.nano_vram_check_interval
+    audio_idle_timeout = 300  # 5 minutes of no audio → release GPU
+    _audio_last_checked = 0
+    _audio_sleeping = False
 
     # Wait for services to stabilize on startup
     await asyncio.sleep(30)
@@ -904,6 +912,7 @@ async def _nano_vram_pressure_loop():
     while True:
         try:
             if _gpu_manager:
+                # 1. Nano VRAM pressure management
                 action = await _gpu_manager.check_nano_vram_pressure()
                 if action and _notification_manager:
                     await _notification_manager.broadcast(
@@ -917,10 +926,39 @@ async def _nano_vram_pressure_loop():
                             data={"nano_action": action},
                         )
                     )
+
+                # 2. Audio idle detection — release GPU if not processing
+                import time as _time
+                if _time.time() - _audio_last_checked > 60:  # Check every 60s
+                    _audio_last_checked = _time.time()
+                    try:
+                        import httpx
+                        async with httpx.AsyncClient(timeout=5) as client:
+                            resp = await client.get(f"{config.audio_url}/gpu/status")
+                            if resp.status_code == 200:
+                                audio_status = resp.json()
+                                vram_used = audio_status.get("vram_used_mb", 0)
+                                is_sleeping = audio_status.get("gpu_mode") == "sleeping"
+
+                                if vram_used > 100 and not is_sleeping:
+                                    # Audio has GPU models loaded — check if actively used
+                                    # If muted or no recent activity, release
+                                    muted = audio_status.get("muted", True)
+                                    if muted and not _audio_sleeping:
+                                        logger.info("Audio GPU idle (muted, %dMB VRAM) — releasing", vram_used)
+                                        await _gpu_manager.sleep_audio()
+                                        _audio_sleeping = True
+                                elif is_sleeping:
+                                    _audio_sleeping = True
+                                else:
+                                    _audio_sleeping = False
+                    except Exception:
+                        pass  # Audio may not be running
+
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.warning("Nano VRAM pressure check failed: %s", e)
+            logger.warning("VRAM management check failed: %s", e)
 
         await asyncio.sleep(interval)
 
