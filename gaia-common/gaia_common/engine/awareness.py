@@ -40,6 +40,7 @@ STALENESS_THRESHOLDS = {
     "local_news": 86400,       # 1 day
     "tech_news": 43200,        # 12 hours
     "holidays": 604800,        # 1 week
+    "today": 43200,             # 12 hours (refresh twice daily)
     "season": 2592000,         # 30 days
     "system_state": 300,       # 5 minutes
     "recent_work": 3600,       # 1 hour
