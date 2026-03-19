@@ -339,7 +339,14 @@ class GAIAEngine:
                 # Inject situational awareness if available
                 if self.awareness:
                     user_text = " ".join(m.get("content", "") for m in conversation)
-                    awareness_text = self.awareness.compose_awareness_text(context=user_text)
+                    # Boost operational context when question is about architecture/services
+                    boosts = {}
+                    operational_signals = ['port', 'service', 'gaia-', 'tier', 'gpu', 'model', 'architecture']
+                    if any(sig in user_text.lower() for sig in operational_signals):
+                        boosts = {"operational": 0.5}
+                    awareness_text = self.awareness.compose_awareness_text(
+                        context=user_text, boost_categories=boosts,
+                    )
                     if awareness_text:
                         self.prefix_cache.update_segment("world_state", awareness_text)
 
