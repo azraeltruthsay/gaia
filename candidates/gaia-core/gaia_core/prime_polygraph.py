@@ -19,11 +19,9 @@ import json
 import logging
 import time
 import threading
-import uuid
-from typing import Optional
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger("GAIA.PrimePolygraph")
 

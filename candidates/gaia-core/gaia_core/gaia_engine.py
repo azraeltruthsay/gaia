@@ -6,7 +6,7 @@ tier containers). This module re-exports it for backward compatibility
 and adds the CLI entry point.
 """
 
-from gaia_common.engine import GAIAEngine, serve
+from gaia_common.engine import serve
 
 if __name__ == "__main__":
     import argparse
