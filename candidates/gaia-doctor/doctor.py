@@ -2125,7 +2125,7 @@ def poll_cycle():
     # Skip entirely in maintenance mode — promotion during dev sessions causes contention.
     global _last_sovereign_attempt
     all_divergent = _dissonance_report.get("vital_divergent", []) + _dissonance_report.get("standard_divergent", [])
-    _sovereign_cooldown = int(os.environ.get("SOVEREIGN_COOLDOWN", "600"))  # 10 min default
+    _sovereign_cooldown = int(os.environ.get("SOVEREIGN_COOLDOWN", "3600"))  # 60 min — sovereign review now replaced by lightweight cognitive monitor
     if all_divergent and not is_maintenance_active() and (time.time() - _last_sovereign_attempt > _sovereign_cooldown):
         _last_sovereign_attempt = time.time()
         try:
