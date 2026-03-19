@@ -87,60 +87,39 @@ services:
       start_period: 10s
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-prime: The Voice - Standalone vLLM inference server (GPU)
+  # gaia-prime: The Thinker — GAIA Engine in standby mode
+  # Always running. Model loaded/unloaded by orchestrator via /model/load.
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime:
     build:
-      context: ./gaia-prime
-      dockerfile: Dockerfile.qwen35
-    image: gaia-prime:qwen35-lmcache
+      context: .
+      dockerfile: gaia-prime/Dockerfile.gaia-engine
+    image: localhost:5000/gaia-prime:gaia-engine
     container_name: gaia-prime
     hostname: gaia-prime
     restart: unless-stopped
 
     volumes:
       - ./gaia-models:/models:ro
-      - ./gaia-models/lora_adapters:/lora_adapters:ro
-      - ./logs/kvcache/prime:/kvcache:rw
-      - ./gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
+      - gaia-shared:/shared:rw
 
     environment:
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
-      - VLLM_ALLOW_RUNTIME_LORA_UPDATING=true
-      - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
+      - PRIME_PORT=7777
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
+      - PRIME_DEVICE=cuda
+      - PRIME_AUTOLOAD=0
+      - SHARED_DIR=/shared
+      - PYTHONPATH=/gaia-common
 
     ports:
       - "7777:7777"
-
-    # LMCache KV persistence: blocked by vLLM 0.17 + Qwen3.5 hybrid arch.
-    # LMCacheConnectorV1 doesn't implement SupportsHMA, so:
-    #   - With HMA disabled: "failed to convert hybrid KV cache specs to one unified type"
-    #   - With HMA enabled:  "Connector LMCacheConnectorV1 does not support HMA"
-    # When LMCache ships HMA support, add to command block:
-    #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
-    # Config, volume, and env var are already wired — just needs this flag.
-    command: >
-      ${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
-      --host 0.0.0.0
-      --port 7777
-      --gpu-memory-utilization 0.70
-      --max-model-len 8192
-      --max-num-seqs 1
-      --trust-remote-code
-      --dtype auto
-      --enforce-eager
-      --quantization fp8
-      --enable-prefix-caching
-      --enable-lora
-      --max-loras 2
-      --max-lora-rank 16
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 120s
+      retries: 3
+      start_period: 30s
 
     networks:
       - gaia-net
