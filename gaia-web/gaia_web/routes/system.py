@@ -115,9 +115,19 @@ async def system_status():
             if resp.status_code == 200:
                 data = resp.json()
                 result["status"] = data.get("status", "unknown")
-                gpu = data.get("gpu", {})
-                owner = gpu.get("owner", "none")
-                result["gpu_owner"] = owner if owner != "none" else "--"
+                # Prefer new gpu_owner string (from watch state) over old enum
+                gpu_owner = data.get("gpu_owner", "")
+                if gpu_owner and gpu_owner != "--":
+                    result["gpu_owner"] = gpu_owner
+                else:
+                    gpu = data.get("gpu", {})
+                    owner = gpu.get("owner", "none")
+                    result["gpu_owner"] = owner if owner != "none" else "--"
+                # Pass through watch state for dashboard
+                if "gpu_state" in data:
+                    result["gpu_state"] = data["gpu_state"]
+                if "watch" in data:
+                    result["watch"] = data["watch"]
     except Exception as e:
         logger.debug("Failed to fetch orchestrator status: %s", e)
 

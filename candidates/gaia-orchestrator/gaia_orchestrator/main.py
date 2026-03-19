@@ -225,10 +225,21 @@ async def get_status():
         raise HTTPException(status_code=503, detail="State manager not initialized")
 
     state = _state_manager.state
+
+    # Build GPU owner string from watch state
+    watch = state.watch
+    gpu_tiers = [f"{n}({t.vram_mb}MB)" for n, t in watch.tiers.items()
+                 if t.device.value.startswith("gpu")]
+    gpu_owner = " + ".join(gpu_tiers) if gpu_tiers else "--"
+
     return {
         "service": "gaia-orchestrator",
         "status": "operational",
         "gpu": state.gpu.model_dump(),
+        "gpu_owner": gpu_owner,
+        "gpu_state": watch.gpu_state.value,
+        "watch": {n: {"device": t.device.value, "vram_mb": t.vram_mb}
+                  for n, t in watch.tiers.items()},
         "nano": state.nano.model_dump(),
         "containers": state.containers.model_dump(),
         "active_handoff": state.active_handoff.model_dump() if state.active_handoff else None,
