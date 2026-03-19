@@ -330,6 +330,19 @@ class GAIAEngine:
                 else:
                     conversation.append(msg)
 
+            # CogPacket compression — skip sections already in KV cache or weights
+            if system and len(system) > 500:
+                try:
+                    from gaia_common.engine.cogpacket_compressor import compress_system_prompt
+                    system = compress_system_prompt(
+                        system,
+                        kv_cache=self.prefix_cache,
+                        awareness=self.awareness,
+                        sae_confident_topics=["identity"],  # SAE confirmed identity is weight-baked
+                    )
+                except Exception as e:
+                    logger.debug("CogPacket compression failed (using full prompt): %s", e)
+
             # KV prefix cache — identity + situational awareness
             past_kv = None
             prefix_len = 0
@@ -516,6 +529,15 @@ class EngineHandler(BaseHTTPRequestHandler):
                 self._json({"signals": _engine.awareness.get_curiosity_signals()})
             else:
                 self._json({"signals": []})
+        elif self.path == "/compression/stats":
+            # Show what WOULD be compressed from a typical system prompt
+            from gaia_common.engine.cogpacket_compressor import get_compression_stats
+            # Use the last cached system prompt or a representative one
+            sample = "You are GAIA, a sovereign AI. EPISTEMIC HONESTY rules apply. World State: Clock 2026. Reference Cheatsheets available."
+            self._json(get_compression_stats(
+                sample, _engine.prefix_cache, _engine.awareness,
+                sae_confident_topics=["identity"],
+            ))
         else:
             self._json({"error": "not found"}, 404)
 
