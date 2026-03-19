@@ -2126,7 +2126,8 @@ def poll_cycle():
     global _last_sovereign_attempt
     all_divergent = _dissonance_report.get("vital_divergent", []) + _dissonance_report.get("standard_divergent", [])
     _sovereign_cooldown = int(os.environ.get("SOVEREIGN_COOLDOWN", "3600"))  # 60 min — sovereign review now replaced by lightweight cognitive monitor
-    if all_divergent and not is_maintenance_active() and (time.time() - _last_sovereign_attempt > _sovereign_cooldown):
+    _sovereign_enabled = os.environ.get("SOVEREIGN_REVIEW_ENABLED", "0") == "1"
+    if _sovereign_enabled and all_divergent and not is_maintenance_active() and (time.time() - _last_sovereign_attempt > _sovereign_cooldown):
         _last_sovereign_attempt = time.time()
         try:
             candidate_healthy = all(
