@@ -1036,6 +1036,17 @@ async def cognitive_query(req: CognitiveQueryRequest):
     timeout = 60.0 if req.target == "prime" else 45.0
 
     system_content = req.system
+
+    # Inject world state snapshot so the model has live system awareness
+    # (uptime, clock, immune status) — needed for world_state battery tests
+    try:
+        from gaia_common.utils.world_state import format_world_state_snapshot
+        world_state = format_world_state_snapshot(max_lines=6)
+        if world_state:
+            system_content += f"\n\nCurrent System State:\n{world_state}"
+    except Exception:
+        pass
+
     if req.no_think:
         system_content += " /no_think"
 
