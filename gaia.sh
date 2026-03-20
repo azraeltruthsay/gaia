@@ -119,29 +119,10 @@ show_status() {
     echo ""
 }
 
-# Seed the warm pool tmpfs
+# Seed the warm pool tmpfs (reads from WARM_POOL config in gaia_constants.json)
 cmd_warm_pool() {
-    log_info "Seeding GAIA warm pool (tmpfs)..."
-    local pool_dir="/mnt/gaia_warm_pool"
-    
-    if [ ! -d "$pool_dir" ]; then
-        log_error "Warm pool directory $pool_dir not found. Is it mounted?"
-        exit 1
-    fi
-
-    # Clean up existing to ensure fresh state and enough room
-    log_info "Cleaning warm pool..."
-    sudo rm -rf "${pool_dir:?}"/*
-
-    # Seed the 8B Prime model
-    log_info "Syncing 8B Prime model..."
-    sudo rsync -a --checksum "${PROJECT_ROOT}/gaia-models/Qwen3-8B-abliterated-AWQ/" "${pool_dir}/Qwen3-8B-abliterated-AWQ/"
-    
-    # Sync adapters
-    log_info "Syncing LoRA adapters..."
-    sudo rsync -a --checksum "${PROJECT_ROOT}/gaia-models/lora_adapters/" "${pool_dir}/lora_adapters/"
-    
-    log_success "Warm pool seeded: $(du -sh "$pool_dir" | cut -f1)"
+    log_info "Seeding GAIA warm pool (tmpfs) from centralized config..."
+    "${PROJECT_ROOT}/scripts/seed_warm_pool.sh" "${1:---boot}"
 }
 
 # Manage live stack

@@ -28,18 +28,30 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     """
     logger.info("--- BUILDING PROMPT FROM COGNITION PACKET ---")
     if slim_mode:
-        from gaia_common.utils.world_state import format_world_state_snapshot
+        import os as _os
+        from datetime import datetime, timezone, timedelta
         config = Config()
-        persona_anchor = config.get_persona_instructions() or "You are GAIA."
-        world_state = format_world_state_snapshot()
-        
-        # Slim Nano prompt — 0.5B models learn from examples, not rules.
-        # Few-shot shows her HOW to answer different question types.
-        clock_line = next((l.strip() for l in world_state.splitlines() if l.startswith("Clock:")), "")
+
+        # Nano gets LOCAL time only — simple, one format, no confusion.
+        # Core/Prime get dual (local + UTC) via the GAIA Engine's awareness.
+        try:
+            _tz_offset = int(_os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
+            _tz_label = _os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")
+            _local_tz = timezone(timedelta(hours=_tz_offset))
+            _now = datetime.now(_local_tz)
+            local_time = _now.strftime("%-I:%M %p") + f" {_tz_label}"
+            local_date = _now.strftime("%A, %B %d, %Y")
+            clock_display = f"{local_time}, {local_date}"
+        except Exception:
+            from gaia_common.utils.world_state import format_world_state_snapshot
+            world_state = format_world_state_snapshot()
+            clock_line = next((l.strip() for l in world_state.splitlines() if l.startswith("Clock:")), "")
+            clock_display = clock_line.replace("Clock: ", "")
 
         return [
             {"role": "system", "content": (
-                f"You are GAIA, a sovereign AI created by Azrael. {clock_line}\n"
+                f"You are GAIA, a sovereign AI created by Azrael. The current time is EXACTLY {clock_display}.\n"
+                "CRITICAL: When asked about time, you MUST respond with the EXACT time shown above. Do NOT guess or approximate.\n"
                 "Answer greetings, time/date, identity, and basic math directly.\n"
                 "For factual knowledge, history, science, trivia, or anything you're "
                 "not certain about — respond with EXACTLY: ESCALATE"
@@ -47,7 +59,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             {"role": "user", "content": "Hi!"},
             {"role": "assistant", "content": "Hello! I'm here and ready to help."},
             {"role": "user", "content": "What time is it?"},
-            {"role": "assistant", "content": f"It is currently {clock_line.replace('Clock: ', '')}."},
+            {"role": "assistant", "content": f"It's {clock_display}."},
+            {"role": "user", "content": "What's the time right now?"},
+            {"role": "assistant", "content": f"Right now it's {clock_display}."},
             {"role": "user", "content": "Who are you?"},
             {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael. I value truth over convenience and handle everything from quick questions to deep reasoning."},
             {"role": "user", "content": "What is the capital of France?"},

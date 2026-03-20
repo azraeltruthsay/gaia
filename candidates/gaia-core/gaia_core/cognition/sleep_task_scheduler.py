@@ -255,6 +255,15 @@ class SleepTaskScheduler:
             handler=self._run_curriculum_sync,
         ))
 
+        self.register_task(SleepTask(
+            task_id="codemind_cycle",
+            task_type="CODEMIND",
+            priority=4,
+            interruptible=True,
+            estimated_duration_seconds=180,
+            handler=self._run_codemind_cycle,
+        ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -889,6 +898,293 @@ class SleepTaskScheduler:
                 f.write(entry)
         except Exception:
             logger.debug("Failed to append to prime.md", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # codemind_cycle (CODEMIND) — autonomous code self-improvement
+    # ------------------------------------------------------------------
+
+    def _run_codemind_cycle(self, **kwargs) -> None:
+        """Run a CodeMind autonomous improvement cycle during sleep.
+
+        Reads pending detections from the detect queue, analyzes them,
+        proposes fixes, validates, and optionally applies to candidates/.
+        Gated on CODEMIND.enabled in config.
+        """
+        try:
+            codemind_cfg = self.config.constants.get("CODEMIND", {})
+            if not codemind_cfg.get("enabled", False):
+                logger.debug("CodeMind cycle: disabled in config")
+                return
+
+            if not codemind_cfg.get("triggers", {}).get("sleep_cycle", True):
+                logger.debug("CodeMind cycle: sleep_cycle trigger disabled")
+                return
+
+            from gaia_common.utils.codemind_engine import (
+                CodeMindEngine,
+                CodeMindState,
+                TriggerSource,
+            )
+            from gaia_common.utils.codemind_detector import consume_detections
+
+            engine = CodeMindEngine(self.config.constants)
+            cycle = engine.start_cycle(TriggerSource.SLEEP_CYCLE)
+
+            self.check_interrupted()
+
+            # DETECT: consume pending detections
+            detections = consume_detections(limit=engine.config["max_changes_per_cycle"])
+            if not detections:
+                logger.info("CodeMind cycle: no pending detections")
+                engine.end_cycle("no_detections")
+                return
+
+            engine.transition(CodeMindState.ANALYZE)
+            self.check_interrupted()
+
+            logger.info(
+                "CodeMind cycle: processing %d detections (dry_run=%s)",
+                len(detections), cycle.dry_run,
+            )
+
+            from gaia_common.utils.codemind_engine import CodeMindChange
+            from gaia_common.utils.codemind_validator import validate_full, validate_diff_safety
+            from gaia_common.utils.codemind_analyzer import (
+                classify_complexity,
+                FixComplexity,
+                trace_related_files,
+                build_analysis_prompt,
+                parse_analysis_response,
+                save_blueprint,
+            )
+
+            for detection in detections:
+                if engine.circuit_breaker.is_tripped():
+                    break
+                self.check_interrupted()
+
+                file_path = detection.get("file_path", "")
+                issue = detection.get("description", "")
+
+                # ── Complexity classification ──
+                complexity = classify_complexity(detection)
+
+                if complexity in (FixComplexity.MODERATE, FixComplexity.COMPLEX):
+                    # Multi-file or architectural issue — generate blueprint
+                    logger.info(
+                        "CodeMind: %s issue detected, generating fix blueprint: %s",
+                        complexity, issue[:100],
+                    )
+                    related = trace_related_files(detection)
+                    analysis_prompt = build_analysis_prompt(detection, related)
+                    analysis_response = self._codemind_propose(analysis_prompt)
+                    if analysis_response:
+                        blueprint = parse_analysis_response(analysis_response)
+                        if blueprint:
+                            blueprint.source_detection = detection
+                            blueprint.symptom = issue
+                            save_blueprint(blueprint)
+                            logger.info(
+                                "CodeMind: fix blueprint saved: %s (%d targets)",
+                                blueprint.title, len(blueprint.targets),
+                            )
+                    engine.record_change(CodeMindChange(
+                        file_path=file_path or "(multi-file)",
+                        issue=issue,
+                        scope_tier=3 if complexity == FixComplexity.COMPLEX else 2,
+                        diff_summary=f"blueprint generated ({complexity})",
+                    ))
+                    continue
+
+                # ── Simple/trivial: direct fix path ──
+                if not file_path or not engine.is_scope_allowed(file_path):
+                    logger.info("CodeMind: scope not allowed for %s", file_path)
+                    continue
+
+                # Check file exists
+                if not os.path.isfile(file_path):
+                    logger.info("CodeMind: skipping deleted file: %s", file_path)
+                    continue
+
+                logger.info(
+                    "CodeMind detection: [%s] %s — %s",
+                    detection.get("issue_type", "unknown"),
+                    file_path,
+                    issue[:100],
+                )
+
+                # ── PROPOSE: generate fix via code-architect adapter ──
+                engine.transition(CodeMindState.PROPOSE)
+                self.check_interrupted()
+
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        original_content = f.read()
+                except Exception as e:
+                    logger.warning("CodeMind: cannot read %s: %s", file_path, e)
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                if len(original_content) > 30000:
+                    logger.info("CodeMind: file too large, skipping: %s", file_path)
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                fix_prompt = engine.build_fix_prompt(
+                    file_path=file_path,
+                    issue_description=issue,
+                    file_content=original_content,
+                )
+
+                proposed_content = self._codemind_propose(fix_prompt)
+                if not proposed_content:
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                # Check for CANNOT_FIX
+                if proposed_content.strip().startswith("CANNOT_FIX"):
+                    reason = proposed_content.strip()
+                    logger.info("CodeMind: LLM declined: %s", reason[:200])
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                # ── VALIDATE: syntax + lint + diff safety ──
+                engine.transition(CodeMindState.VALIDATE)
+                self.check_interrupted()
+
+                val_result = validate_full(
+                    proposed_content, file_path,
+                    checks=engine.config.get("validation", {}),
+                )
+                safety = validate_diff_safety(original_content, proposed_content)
+
+                change = CodeMindChange(
+                    file_path=file_path,
+                    issue=issue,
+                    scope_tier=engine.config["scope_tiers"].get("tier2_supervised", 2),
+                    diff_summary=f"safety={safety.get('safe')}, ratio={safety.get('change_ratio', 'N/A')}",
+                    validation_result=val_result.to_dict(),
+                )
+
+                if not val_result.passed:
+                    change.error = f"Validation failed: {val_result.errors}"
+                    logger.warning("CodeMind: validation failed for %s: %s", file_path, val_result.errors)
+                    engine.record_change(change)
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                if not safety.get("safe", True):
+                    change.error = f"Diff safety failed: {safety.get('reason')}"
+                    logger.warning("CodeMind: diff too destructive for %s: %s", file_path, safety.get("reason"))
+                    engine.record_change(change)
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                # ── APPLY (if not dry_run) ──
+                if cycle.dry_run:
+                    logger.info("CodeMind [dry_run]: would apply fix to %s", file_path)
+                    change.applied = False
+                    engine.record_change(change)
+                    engine.transition(CodeMindState.IDLE)
+                    continue
+
+                engine.transition(CodeMindState.APPLY)
+                self.check_interrupted()
+
+                try:
+                    import shutil
+                    backup_path = f"{file_path}.bak"
+                    shutil.copy2(file_path, backup_path)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(proposed_content)
+                    change.applied = True
+                    logger.info("CodeMind: applied fix to %s (backup at %s)", file_path, backup_path)
+                except Exception as e:
+                    change.error = f"Apply failed: {e}"
+                    logger.warning("CodeMind: apply failed for %s: %s", file_path, e)
+
+                engine.record_change(change)
+                engine.transition(CodeMindState.IDLE)
+
+            result = engine.end_cycle("complete")
+            logger.info("CodeMind cycle complete: %s", result)
+
+        except Exception as e:
+            logger.warning("CodeMind cycle failed: %s", e, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # CodeMind — LLM proposal via code-architect adapter
+    # ------------------------------------------------------------------
+
+    def _codemind_propose(self, prompt: str) -> str | None:
+        """Generate a fix proposal using the code-architect adapter.
+
+        Returns the proposed file content, or None on failure.
+        Uses the same adapter as code_review — shared coding skill.
+        """
+        adapter = "code-architect"
+
+        # Path 1: via model pool (preferred)
+        if self.model_pool is not None:
+            model = (
+                self.model_pool.models.get("gpu_prime")
+                or self.model_pool.models.get("prime")
+            )
+            if model is not None and hasattr(model, "create_chat_completion_with_adapter"):
+                try:
+                    result = model.create_chat_completion_with_adapter(
+                        adapter_name=adapter,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=4096,
+                        temperature=0.1,
+                    )
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    return self._clean_code_response(content) if content else None
+                except Exception:
+                    logger.warning("CodeMind: model pool adapter call failed, trying direct HTTP", exc_info=True)
+
+        # Path 2: direct HTTP fallback
+        try:
+            import json as _j
+            from urllib.request import Request, urlopen
+
+            endpoint = os.getenv("PRIME_ENDPOINT", "http://gaia-prime:7777")
+            payload = _j.dumps({
+                "model": adapter,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4096,
+                "temperature": 0.1,
+            }).encode()
+            req = Request(
+                f"{endpoint}/v1/chat/completions",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(req, timeout=90) as resp:
+                result = _j.loads(resp.read().decode())
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return self._clean_code_response(content) if content else None
+        except Exception:
+            logger.warning("CodeMind: direct HTTP proposal failed", exc_info=True)
+            return None
+
+    @staticmethod
+    def _clean_code_response(content: str) -> str:
+        """Strip markdown code fences and think tags from LLM response."""
+        # Strip think tags
+        import re
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        # Strip markdown code fences
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines)
+
+        return content
 
     # ------------------------------------------------------------------
     # code_review (SELF_MODEL_UPDATE) — autonomous blueprint fidelity review
