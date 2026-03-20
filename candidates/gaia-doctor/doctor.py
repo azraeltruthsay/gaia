@@ -1230,6 +1230,10 @@ IRRITATION_PATTERNS = [
     "OOM",
     "CUDA out of memory",
     "torch.cuda.OutOfMemoryError",
+    "vLLM returned 503",
+    "Cannot reach vLLM server",
+    "model not loaded",
+    "GPU zombie detected",
 ]
 
 SERVICE_LOGS = {
