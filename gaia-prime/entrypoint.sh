@@ -167,6 +167,26 @@ class StandbyHandler(BaseHTTPRequestHandler):
                     self._json({'ok': False, 'error': 'not found'}, 404)
             else:
                 self._json({'error': 'standby'}, 503)
+
+        elif _engine and self.path in ('/atlas/record', '/polygraph/enable', '/polygraph/disable', '/cache/update', '/cache/invalidate'):
+            # Delegate to the real EngineHandler when model is loaded
+            from gaia_common.engine.core import EngineHandler, _engine as _core_engine
+            import gaia_common.engine.core as _core_mod
+            # Inject our engine into the module so EngineHandler can find it
+            _core_mod._engine = _engine
+            handler = EngineHandler.__new__(EngineHandler)
+            handler.rfile = self.rfile
+            handler.wfile = self.wfile
+            handler.headers = self.headers
+            handler.path = self.path
+            handler.requestline = self.requestline
+            handler.client_address = self.client_address
+            handler.server = self.server
+            handler.command = self.command
+            handler._json = self._json
+            handler._body = self._body
+            handler.do_POST()
+
         else:
             self._json({'error': 'not found'}, 404)
 
