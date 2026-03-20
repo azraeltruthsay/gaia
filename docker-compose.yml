@@ -518,6 +518,7 @@ services:
       - HOME=/tmp
       - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=mcp
+      - GAIA_MCP_BYPASS=${GAIA_MCP_BYPASS:-false}
       - MODELS_DIR=/models
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
