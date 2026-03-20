@@ -1,0 +1,65 @@
+# Dockerfile.engine-base — Unified GAIA Inference Engine base image
+#
+# All cognitive tiers (Nano, Core, Prime) inherit from this image.
+# One dependency set, one update propagates everywhere. Tier-specific
+# behavior via env vars (TIER=nano|core|prime), not different code paths.
+#
+# Capabilities:
+#   - PyTorch inference (safetensors, GPU + CPU)
+#   - Dynamic LoRA adapter loading (PEFT)
+#   - NF4/int8 quantization (bitsandbytes, optimum-quanto)
+#   - SAE atlas recording
+#   - Activation monitoring (Polygraph)
+#   - KV prefix caching
+#   - Thought management
+#
+# Usage:
+#   FROM localhost:5000/gaia-engine-base:latest
+#   COPY my-entrypoint.sh /entrypoint.sh
+#   ENTRYPOINT ["/entrypoint.sh"]
+
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# ── ML Stack (shared across all tiers) ──────────────────────────────────
+# PyTorch with CUDA 12.8
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+
+# Transformers + inference optimizations
+RUN pip install --no-cache-dir \
+    transformers \
+    accelerate \
+    sentencepiece \
+    protobuf
+
+# Adapter support (dynamic LoRA loading)
+RUN pip install --no-cache-dir peft
+
+# Quantization (NF4 for QLoRA, int8 for inference)
+RUN pip install --no-cache-dir \
+    bitsandbytes \
+    optimum-quanto
+
+# ── GAIA Common (shared engine library) ─────────────────────────────────
+# Baked into image for initial boot. Volume mount at /gaia-common:ro
+# overrides this for live development (PYTHONDONTWRITEBYTECODE prevents
+# stale .pyc from image layer taking priority over volume mount .py).
+COPY candidates/gaia-common /gaia-common
+RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
+ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"
+
+# ── Common directories ──────────────────────────────────────────────────
+RUN mkdir -p /shared/thoughts /shared/atlas /shared/heartbeat /shared/codemind
+
+WORKDIR /app
