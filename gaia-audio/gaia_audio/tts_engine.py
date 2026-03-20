@@ -129,20 +129,24 @@ class NanoSpeaker:
 
         t0 = time.monotonic()
 
+        # Resolve reference audio — check configured path, then shared fallback
+        if not ref_audio or not os.path.isfile(ref_audio):
+            ref_audio = os.environ.get("GAIA_VOICE_REF", "/shared/voice/gaia_identity.wav")
+        if not ref_text:
+            ref_text = "I am GAIA, a sovereign artificial intelligence. I was created by Azrael to be curious, truthful, and helpful."
+
         if ref_audio and os.path.isfile(ref_audio):
             wavs, sr = self._model.generate_voice_clone(
                 text=text,
                 language="English",
                 ref_audio=ref_audio,
-                ref_text=ref_text or "",
+                ref_text=ref_text,
             )
         else:
-            # No reference audio — use generate if available, else voice clone with defaults
-            wavs, sr = self._model.generate_voice_clone(
-                text=text,
-                language="English",
-                ref_audio=ref_audio or "",
-                ref_text=ref_text or "",
+            raise RuntimeError(
+                f"No voice reference audio found at {ref_audio}. "
+                "Qwen3-TTS 0.6B requires a reference WAV for voice cloning. "
+                "Generate one with: espeak-ng -v en+f3 'I am GAIA' -w /shared/voice/gaia_identity.wav"
             )
 
         elapsed_ms = (time.monotonic() - t0) * 1000
