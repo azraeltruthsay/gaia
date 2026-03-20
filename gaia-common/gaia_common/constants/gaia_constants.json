@@ -39,11 +39,11 @@
     },
     "core": {
       "enabled": true,
-      "path": "Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf",
+      "path": "Qwen3.5-2B-GAIA-Core-v3",
       "type": "vllm_remote",
       "endpoint": "http://localhost:8092",
       "max_model_len": 8192,
-      "description": "Core (Operator) \u2014 embedded llama-server in gaia-core, Qwen3-8B identity-baked"
+      "description": "Core (Operator) \u2014 embedded llama-server in gaia-core, Qwen3.5-2B identity-baked"
     },
     "observer": {
       "enabled": true,
