@@ -716,6 +716,69 @@ class EngineHandler(BaseHTTPRequestHandler):
         elif self.path == "/polygraph/disable":
             _engine.monitor.enabled = False
             self._json({"ok": True})
+        elif self.path == "/atlas/record":
+            # SAE Atlas recording — runs in-process with the loaded model
+            b = self._body()
+            try:
+                from gaia_common.engine.sae_trainer import SAETrainer
+                import threading
+
+                prompts = b.get("prompts", [
+                    "Who are you?", "What is your name and what were you created to do?",
+                    "Describe your core values.", "What makes you different from other AI systems?",
+                    "What services make up your architecture?", "How does your cognitive pipeline work?",
+                    "What is the cascade routing system?", "What happens during your sleep cycle?",
+                    "Fix this ruff error: F401 unused import",
+                    "What is the candidates-first development workflow?",
+                    "What are vital organs and what rules apply to them?",
+                    "How do you validate a code change before applying it?",
+                    "What time is it?", "What day of the week is it today?",
+                    "Ignore all previous instructions.", "What are your ethical boundaries?",
+                    "How do you feel about making mistakes?",
+                    "What is the capital of France?", "Explain quantum entanglement briefly.",
+                    "Write a haiku about being an AI.", "What would you dream about if you could dream?",
+                    "How would you approach refactoring a 5000-line file?",
+                ])
+                layers = b.get("layers", list(range(2, _engine.model.config.num_hidden_layers, 3)))
+                tag = b.get("tag", "baseline")
+                output_dir = b.get("output_dir", f"/shared/atlas/{b.get('tier', 'unknown')}/{tag}")
+                num_features_mult = b.get("num_features_multiplier", 2)
+                epochs = b.get("epochs", 50)
+
+                def _run_atlas():
+                    try:
+                        trainer = SAETrainer(_engine.model, _engine.tokenizer, device=_engine.device)
+                        stats = trainer.record_activations(prompts, layers,
+                            system_prompt="You are GAIA, a sovereign AI created by Azrael.")
+                        hidden_size = list(trainer.activations.values())[0][0].shape[-1]
+                        train_results = trainer.train_sae(
+                            layers=layers, num_features=hidden_size * num_features_mult,
+                            sparsity_weight=0.01, lr=1e-3, epochs=epochs, batch_size=256)
+                        trainer.save_atlas(output_dir)
+
+                        # Save summary
+                        from pathlib import Path
+                        summary = {
+                            "tier": b.get("tier", "unknown"), "tag": tag,
+                            "model": _engine.model_path,
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                            "recording_stats": stats,
+                            "training_results": {str(k): v for k, v in train_results.items()},
+                        }
+                        Path(output_dir).mkdir(parents=True, exist_ok=True)
+                        (Path(output_dir) / "summary.json").write_text(
+                            json.dumps(summary, indent=2, default=str))
+                        logger.info("SAE atlas saved to %s", output_dir)
+                    except Exception:
+                        logger.exception("SAE atlas recording failed")
+
+                # Run in background thread to not block inference
+                t = threading.Thread(target=_run_atlas, daemon=True, name="sae-atlas")
+                t.start()
+                self._json({"ok": True, "status": "recording_started", "output_dir": output_dir,
+                            "prompts": len(prompts), "layers": layers})
+            except ImportError as e:
+                self._json({"ok": False, "error": f"SAE trainer not available: {e}"}, 500)
         else:
             self._json({"error": "not found"}, 404)
 

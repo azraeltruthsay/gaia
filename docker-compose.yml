@@ -102,9 +102,11 @@ services:
     volumes:
       - ./gaia-models:/models:ro
       - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ./gaia-common:/gaia-common:ro
       - gaia-shared:/shared:rw
 
     environment:
+      - PYTHONDONTWRITEBYTECODE=1
       - PRIME_PORT=7777
       - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       - PRIME_DEVICE=cuda
@@ -148,10 +150,12 @@ services:
     volumes:
       - ./gaia-models:/models:ro
       - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ./gaia-common:/gaia-common:ro
       - ./logs/kvcache/nano:/kvcache:rw
       - gaia-shared:/shared:rw
 
     environment:
+      - PYTHONDONTWRITEBYTECODE=1
       # Safetensors mode (GPU-native, enables polygraph + SAE)
       # Loads from tmpfs warm pool for near-instant startup.
       # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
