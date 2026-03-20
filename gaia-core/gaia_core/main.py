@@ -1037,13 +1037,26 @@ async def cognitive_query(req: CognitiveQueryRequest):
 
     system_content = req.system
 
-    # Inject world state snapshot so the model has live system awareness
-    # (uptime, clock, immune status) — needed for world_state battery tests
+    # Inject world state + architecture awareness so the model has live context.
+    # Operational facts (ports, services, pipeline stages) belong in context,
+    # NOT in weights. This is the Curriculum Split principle.
     try:
         from gaia_common.utils.world_state import format_world_state_snapshot
         world_state = format_world_state_snapshot(max_lines=6)
         if world_state:
             system_content += f"\n\nCurrent System State:\n{world_state}"
+    except Exception:
+        pass
+
+    try:
+        from pathlib import Path
+        awareness_path = Path(os.environ.get("KNOWLEDGE_DIR", "/knowledge")) / "awareness" / "operational" / "architecture_facts.md"
+        if awareness_path.exists():
+            facts = awareness_path.read_text(encoding="utf-8").strip()
+            # Truncate to keep prompt tight — VRAM is limited
+            if len(facts) > 1200:
+                facts = facts[:1200] + "\n..."
+            system_content += f"\n\nArchitecture Reference:\n{facts}"
     except Exception:
         pass
 
