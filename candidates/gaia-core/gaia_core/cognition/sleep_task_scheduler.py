@@ -247,6 +247,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="penpal_review",
+            task_type="PENPAL",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=120,
+            handler=self._run_penpal_review,
+        ))
+
+        self.register_task(SleepTask(
             task_id="curriculum_training",
             task_type="CURRICULUM_SYNC",
             priority=3,
@@ -962,6 +971,30 @@ class SleepTaskScheduler:
                 f.write(entry)
         except Exception:
             logger.debug("Failed to append to prime.md", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # penpal_review (PENPAL) — NotebookLM podcast review cycle
+    # ------------------------------------------------------------------
+
+    def _run_penpal_review(self, **kwargs) -> None:
+        """Review new NotebookLM podcast episodes and generate responses.
+
+        The penpal protocol: GAIA reviews what the podcast hosts said about her,
+        responds with her perspective, and proposes topics for the next episode.
+        Gated on Serenity — only reviews when the system is stable.
+        """
+        if not self._is_serene():
+            logger.debug("Penpal: skipping — not serene")
+            return
+        try:
+            from gaia_core.cognition.penpal_protocol import run_penpal_cycle
+            result = run_penpal_cycle()
+            if result.get("reviewed", 0) > 0:
+                logger.info("Penpal: reviewed %d episodes", result["reviewed"])
+            else:
+                logger.debug("Penpal: no new episodes")
+        except Exception as e:
+            logger.warning("Penpal review failed: %s", e)
 
     # ------------------------------------------------------------------
     # codemind_cycle (CODEMIND) — autonomous code self-improvement
