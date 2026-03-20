@@ -318,83 +318,152 @@ class GAIAEngine:
         logger.info("GAIA Engine ready in %.1fs (VRAM: %dMB)", elapsed, mem_mb)
 
     def generate(self, messages: list, max_tokens: int = 512,
-                 temperature: float = 0.7, top_p: float = 0.9) -> dict:
-        """Generate a chat completion with full introspection."""
+                 temperature: float = 0.7, top_p: float = 0.9,
+                 skip_prefix: bool = False) -> dict:
+        """Generate a chat completion with full introspection.
+
+        Args:
+            skip_prefix: If True, use slim mode — cache the few-shot
+                structure as KV prefix, inject only clock + user query
+                as dynamic tokens. ~20 tokens/request instead of ~240.
+        """
         with self._lock:
-            # Separate system message for prefix cache
-            system = ""
-            conversation = []
-            for msg in messages:
-                if msg.get("role") == "system":
-                    system = msg.get("content", "")
-                else:
-                    conversation.append(msg)
+            import time as _time
+            from datetime import datetime, timezone, timedelta
 
-            # CogPacket compression — skip sections already in KV cache or weights
-            if system and len(system) > 500:
-                try:
-                    from gaia_common.engine.cogpacket_compressor import compress_system_prompt
-                    system = compress_system_prompt(
-                        system,
-                        kv_cache=self.prefix_cache,
-                        awareness=self.awareness,
-                        sae_confident_topics=["identity"],  # SAE confirmed identity is weight-baked
-                    )
-                except Exception as e:
-                    logger.debug("CogPacket compression failed (using full prompt): %s", e)
+            # Compute current time (used by both modes)
+            try:
+                _tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
+                _tz_label = os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")
+                local_tz = timezone(timedelta(hours=_tz_offset))
+                now_utc = datetime.now(timezone.utc)
+                now_local = now_utc.astimezone(local_tz)
+                utc_str = now_utc.strftime('%H:%M UTC')
+                local_str = now_local.strftime('%I:%M %p') + f" {_tz_label} (Local)"
+                local_simple = now_local.strftime('%-I:%M %p') + f" {_tz_label}, " + now_local.strftime('%A, %B %d, %Y')
+                date_str = now_local.strftime('%A, %B %d, %Y')
+            except Exception:
+                utc_str = _time.strftime('%H:%M UTC', _time.gmtime())
+                local_str = ""
+                local_simple = utc_str
+                date_str = ""
 
-            # KV prefix cache — identity + situational awareness
-            past_kv = None
-            prefix_len = 0
-            if system:
+            if skip_prefix:
+                # ── SLIM MODE: full few-shot prompt with live clock ──
+                # The entire slim prompt (system + few-shot examples) is sent
+                # as-is with the current time injected. The prefix cache handles
+                # caching — the prompt changes only when the minute changes
+                # (clock hash invalidation), so most requests hit the cache.
+                system = ""
+                conversation = []
+                for msg in messages:
+                    if msg.get("role") == "system":
+                        system = msg.get("content", "")
+                    else:
+                        conversation.append(msg)
+
+                # Replace any time placeholder in system with live time
+                import re as _re
+                system = _re.sub(r'The current time is EXACTLY [^.]+\.', f'The current time is EXACTLY {local_simple}.', system)
+                # Legacy fallback for old format
+                system = _re.sub(r'The time is [^.]+\.', f'The time is {local_simple}.', system)
+
+                # Cache the full system+fewshot as a single prefix
+                # Build all few-shot messages EXCEPT the last user message (actual query)
+                fewshot_parts = []
+                for msg in conversation[:-1]:  # all but last
+                    content = msg.get("content", "")
+                    # Replace time in few-shot assistant answers with live time
+                    if msg.get("role") == "assistant" and ("AM" in content or "PM" in content):
+                        content = _re.sub(r"It's [^.]+\.", f"It's {local_simple}.", content)
+                        content = _re.sub(r"it's [^.]+\.", f"it's {local_simple}.", content)
+                    fewshot_parts.append(f"<|im_start|>{msg['role']}\n{content}<|im_end|>")
+                fewshot_text = "\n".join(fewshot_parts)
+
+                # Cache as segments — invalidated when clock minute changes
                 self.prefix_cache.update_segment("identity", system)
-
-                # Inject situational awareness if available
-                if self.awareness:
-                    user_text = " ".join(m.get("content", "") for m in conversation)
-                    # Boost operational context when question is about architecture/services
-                    boosts = {}
-                    operational_signals = ['port', 'service', 'gaia-', 'tier', 'gpu', 'model', 'architecture']
-                    if any(sig in user_text.lower() for sig in operational_signals):
-                        boosts = {"operational": 0.5}
-                    awareness_text = self.awareness.compose_awareness_text(
-                        context=user_text, boost_categories=boosts,
-                    )
-                    if awareness_text:
-                        self.prefix_cache.update_segment("world_state", awareness_text)
+                self.prefix_cache.update_segment("tools", fewshot_text)
+                self.prefix_cache.update_segment("world_state", "")
 
                 past_kv, prefix_len = self.prefix_cache.get_kv()
 
-            # Build conversation tokens
-            # Inject real-time clock in local timezone (PDT/PST for Richland, WA)
-            import time as _time
-            from datetime import datetime, timezone, timedelta
-            try:
-                # Pacific time (UTC-7 during PDT, UTC-8 during PST)
-                # TODO: auto-detect DST from awareness location
-                pacific = timezone(timedelta(hours=-7))  # PDT
-                now = datetime.now(pacific)
-                clock_str = now.strftime('%I:%M %p %Z')
-                date_str = now.strftime('%A, %B %d, %Y')
-            except Exception:
-                clock_str = _time.strftime('%H:%M:%S UTC', _time.gmtime())
-                date_str = ""
+                # Dynamic part: only the user's actual question (~10 tokens)
+                actual_question = conversation[-1].get("content", "") if conversation else ""
+                conv_text = f"<|im_start|>user\n{actual_question}<|im_end|>\n<|im_start|>assistant\n"
 
-            parts = []
-            parts.append(f"<|im_start|>system\n[Current time: {clock_str}, {date_str}]<|im_end|>")
-            for msg in conversation:
-                parts.append(f"<|im_start|>{msg['role']}\n{msg['content']}<|im_end|>")
-            parts.append("<|im_start|>assistant\n")
-            conv_text = "\n".join(parts)
+                if past_kv is not None:
+                    input_ids = self.tokenizer.encode(conv_text, return_tensors="pt",
+                                                       add_special_tokens=False).to(self.model.device)
+                    total_input = prefix_len + input_ids.shape[1]
+                else:
+                    full = f"<|im_start|>system\n{system}<|im_end|>\n{fewshot_text}\n{conv_text}"
+                    input_ids = self.tokenizer.encode(full, return_tensors="pt").to(self.model.device)
+                    total_input = input_ids.shape[1]
 
-            if past_kv is not None:
-                input_ids = self.tokenizer.encode(conv_text, return_tensors="pt",
-                                                   add_special_tokens=False).to(self.model.device)
-                total_input = prefix_len + input_ids.shape[1]
             else:
-                full = f"<|im_start|>system\n{system}<|im_end|>\n{conv_text}" if system else conv_text
-                input_ids = self.tokenizer.encode(full, return_tensors="pt").to(self.model.device)
-                total_input = input_ids.shape[1]
+                # ── FULL MODE: identity + awareness + clock prefix ──
+                system = ""
+                conversation = []
+                for msg in messages:
+                    if msg.get("role") == "system":
+                        system = msg.get("content", "")
+                    else:
+                        conversation.append(msg)
+
+                # CogPacket compression — skip sections already in KV cache or weights
+                if system and len(system) > 500:
+                    try:
+                        from gaia_common.engine.cogpacket_compressor import compress_system_prompt
+                        system = compress_system_prompt(
+                            system,
+                            kv_cache=self.prefix_cache,
+                            awareness=self.awareness,
+                            sae_confident_topics=["identity"],
+                        )
+                    except Exception as e:
+                        logger.debug("CogPacket compression failed (using full prompt): %s", e)
+
+                # KV prefix cache — identity + situational awareness
+                past_kv = None
+                prefix_len = 0
+                if system:
+                    self.prefix_cache.update_segment("identity", system)
+
+                    if self.awareness:
+                        user_text = " ".join(m.get("content", "") for m in conversation)
+                        boosts = {}
+                        operational_signals = ['port', 'service', 'gaia-', 'tier', 'gpu', 'model', 'architecture']
+                        if any(sig in user_text.lower() for sig in operational_signals):
+                            boosts = {"operational": 0.5}
+                        awareness_text = self.awareness.compose_awareness_text(
+                            context=user_text, boost_categories=boosts,
+                        )
+                        if awareness_text:
+                            self.prefix_cache.update_segment("world_state", awareness_text)
+
+                    past_kv, prefix_len = self.prefix_cache.get_kv()
+
+                # Clock injection (Core/Prime get dual format)
+                parts = []
+                if local_str and date_str:
+                    parts.append(f"<|im_start|>system\n[Clock: {local_str}, {date_str} | {utc_str}]<|im_end|>")
+                elif local_str:
+                    parts.append(f"<|im_start|>system\n[Clock: {local_str} | {utc_str}]<|im_end|>")
+                else:
+                    parts.append(f"<|im_start|>system\n[Clock: {utc_str}]<|im_end|>")
+                for msg in conversation:
+                    parts.append(f"<|im_start|>{msg['role']}\n{msg['content']}<|im_end|>")
+                parts.append("<|im_start|>assistant\n")
+                conv_text = "\n".join(parts)
+
+                if past_kv is not None:
+                    input_ids = self.tokenizer.encode(conv_text, return_tensors="pt",
+                                                       add_special_tokens=False).to(self.model.device)
+                    total_input = prefix_len + input_ids.shape[1]
+                else:
+                    full = f"<|im_start|>system\n{system}<|im_end|>\n{conv_text}" if system else conv_text
+                    input_ids = self.tokenizer.encode(full, return_tensors="pt").to(self.model.device)
+                    total_input = input_ids.shape[1]
 
             # ── Fused generation loop ────────────────────────────────────
             generated = []
@@ -411,9 +480,25 @@ class GAIAEngine:
             if capture and hasattr(out, "hidden_states") and out.hidden_states:
                 self.monitor.capture(out.hidden_states)
 
-            # Autoregressive loop — minimal overhead
+            # Autoregressive loop — minimal overhead, with entropy tracking
             eos_id = self.tokenizer.eos_token_id
-            for _ in range(max_tokens):
+            # Suppress <think> token — Qwen3.5 defaults to thinking mode.
+            # We mask it in logits so the model generates the answer directly.
+            _think_token_id = 248068  # <think> in Qwen3.5 vocab
+            _entropy_sum = 0.0
+            _entropy_count = 0
+            for step in range(max_tokens):
+                # Suppress <think> on ALL tokens — Qwen3.5 abliterated
+                # defaults to thinking mode which eats the entire context
+                logits[0, _think_token_id] = float("-inf")
+
+                # Track per-token entropy (uncertainty signal)
+                probs = F.softmax(logits, dim=-1)
+                log_probs = torch.log(probs + 1e-10)
+                token_entropy = -(probs * log_probs).sum().item()
+                _entropy_sum += token_entropy
+                _entropy_count += 1
+
                 # Sample
                 if temperature > 0:
                     scaled = logits / temperature
@@ -458,6 +543,7 @@ class GAIAEngine:
                     "completion_tokens": len(generated),
                     "total_tokens": total_input + len(generated),
                     "cached_prefix_tokens": prefix_len if past_kv is not None else 0,
+                    "mean_entropy": round(_entropy_sum / max(_entropy_count, 1), 4),
                 },
             }
 
@@ -561,7 +647,8 @@ class EngineHandler(BaseHTTPRequestHandler):
             try:
                 b = self._body()
                 self._json(_engine.generate(b.get("messages", []), b.get("max_tokens", 512),
-                                             b.get("temperature", 0.7), b.get("top_p", 0.9)))
+                                             b.get("temperature", 0.7), b.get("top_p", 0.9),
+                                             skip_prefix=b.get("skip_prefix", False)))
             except Exception as e:
                 logger.exception("Generation failed")
                 self._json({"error": str(e)}, 500)

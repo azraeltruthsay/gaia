@@ -1,0 +1,84 @@
+{
+  "adapter_name": "code-architect",
+  "adapter_version": 2,
+  "tier": 1,
+  "pillar": "cognition",
+  "priority": "high",
+  "display_name": "Code Architect",
+  "description": "GAIA's unified code skill — blueprint-faithful generation AND surgical code repair. Used by both the code-architect persona (build from blueprint) and the CodeMind persona (diagnose and fix). Covers GAIA codebase conventions, import patterns, error handling, lint interpretation, diff discipline, scope/safety awareness, and candidates-first workflow.",
+  "base_model": "gaia-prime",
+
+  "hyperparameters": {
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj"],
+    "batch_size": 1,
+    "gradient_accumulation_steps": 8,
+    "learning_rate": 1e-4,
+    "max_steps": 500,
+    "max_sequence_length": 4096
+  },
+
+  "chat_template": "auto",
+  "training_objective": "Two modes: (1) Given a blueprint spec and context, generate Python source code with maximum blueprint fidelity. (2) Given a code error and file context, generate the minimal corrected Python code — prefer deletion over addition, never add unnecessary comments or refactoring.",
+
+  "data_sources": {
+    "blueprint_generation": {
+      "description": "Blueprint spec → full Python source code generation for GAIA services",
+      "target_samples": 50,
+      "pair_type": "retroactive"
+    },
+    "lint_fixes": {
+      "description": "Ruff/pylint error messages → minimal Python fix pairs",
+      "target_samples": 40,
+      "pair_type": "lint_fix"
+    },
+    "import_fixes": {
+      "description": "Import resolution patterns specific to GAIA's service layout",
+      "target_samples": 25,
+      "pair_type": "import_fix"
+    },
+    "conventions": {
+      "description": "GAIA codebase conventions: logging, config, dataclasses, error handling, route patterns",
+      "target_samples": 30,
+      "pair_type": "convention"
+    },
+    "safety_awareness": {
+      "description": "Scope tiers, vital organs, production lock, candidates-first, circuit breaker",
+      "target_samples": 25,
+      "pair_type": "safety"
+    },
+    "diagnostic_patterns": {
+      "description": "Reading ruff output, py_compile errors, container debugging, test execution",
+      "target_samples": 20,
+      "pair_type": "diagnostic"
+    },
+    "fix_discipline": {
+      "description": "Minimal diff generation, CANNOT_FIX awareness, change ratio limits, rollback",
+      "target_samples": 15,
+      "pair_type": "fix_discipline"
+    }
+  },
+
+  "total_target_samples": 205,
+  "train_split": 0.85,
+  "validation_split": 0.15,
+
+  "minimum_corpus_size": 50,
+
+  "activation_triggers": ["builder_panel", "gaia_initiated", "codemind_cycle", "self_improvement", "code_fix"],
+  "routing_keywords": [
+    "generate service", "implement blueprint", "write the code for",
+    "fix this", "lint error", "import error", "syntax error",
+    "ruff check", "py_compile", "code fix", "self-improvement",
+    "codemind", "code review", "refactor", "unused import",
+    "undefined name", "type error", "attribute error"
+  ],
+
+  "versioning": {
+    "strategy": "incremental",
+    "retention_count": 3,
+    "rollback_supported": true
+  }
+}

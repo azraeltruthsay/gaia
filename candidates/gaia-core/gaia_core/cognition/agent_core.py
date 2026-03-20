@@ -43,6 +43,7 @@ from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
+    COGPACKET_VERSION, COGPACKET_SCHEMA_ID,
     CognitionPacket, Header, Persona, Routing, Model, Intent, Context, Content, Reasoning, Response, Governance, Safety, Metrics, TokenUsage, Status,
     PersonaRole, Origin, TargetEngine, SystemTask, PacketState,
     DataField, ReflectionLog, RelevantHistorySnippet, SessionHistoryRef, Cheatsheet, Constraints,
@@ -594,8 +595,8 @@ class AgentCore:
         status = Status(finalized=False, state=PacketState.INITIALIZED, next_steps=["Detect intent"])
 
         return CognitionPacket(
-            version="v0.3",
-            schema_id="https://gaia.local/schemas/cognitive_packet/v0.3.json",
+            version=COGPACKET_VERSION,
+            schema_id=COGPACKET_SCHEMA_ID,
             header=header,
             intent=intent,
             context=context,
@@ -1576,6 +1577,9 @@ class AgentCore:
             if not tool_already_executed and self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name):
                 text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
                 if text is not None:
+                    # _run_slim_prompt already handles uncertainty escalation
+                    # internally — if Nano hedged, it already tried Core/Lite.
+                    # The text here is the best answer from the slim path.
                     _header = self._build_response_header(selected_model_name, packet, None, None, None)
                     yield {"type": "token", "value": _header + text}
                     self.session_manager.add_message(session_id, "assistant", text)
@@ -2644,6 +2648,78 @@ class AgentCore:
                 return True
         return False
 
+    # Hedging phrases that signal Nano can't extract an answer from context
+    _HEDGING_ESCALATION_PHRASES = [
+        "i'm not sure", "i'm not certain", "i don't have", "i can't",
+        "i cannot", "i don't know", "not available", "unable to",
+        "i should check", "i need to check", "let me check",
+        "i should be honest", "rather than guessing", "i don't guess",
+        "checking my", "i might be", "i may not",
+    ]
+
+    # Phrases that indicate Nano described the PROCESS but didn't deliver the ANSWER
+    _PROCESS_WITHOUT_ANSWER_PHRASES = [
+        "i check the clock line",
+        "i read the clock",
+        "it shows the time",
+        "it's injected",
+        "it's updated",
+        "from my system context",
+        "from my monitoring",
+    ]
+
+    def _should_escalate_for_uncertainty(self, content: str, user_input: str,
+                                          entropy: float = 0.0) -> bool:
+        """Detect when Nano's response shows uncertainty that warrants escalation.
+
+        Three escalation signals (any one triggers):
+        1. High output entropy (>2.0) — model was uncertain during generation
+        2. Hedging phrases on factual questions — model admits it can't answer
+        3. Process-without-answer — model describes HOW it would answer but doesn't
+           actually provide the answer (e.g., "I check the Clock line" without a time)
+        """
+        lower = content.lower()
+        input_lower = user_input.lower()
+
+        # Signal 1: High entropy from engine
+        if entropy > 2.0:
+            self.logger.info("Uncertainty escalation: high entropy (%.2f > 2.0)", entropy)
+            return True
+
+        # Signal 2: Hedging on factual questions
+        # Only escalate for factual-type questions, not philosophical/creative
+        factual_signals = ["what time", "what port", "how many", "what is the",
+                          "what gpu", "how much", "how long", "what status",
+                          "tell me the", "what's the"]
+        is_factual = any(sig in input_lower for sig in factual_signals)
+        if is_factual:
+            hedging = any(phrase in lower for phrase in self._HEDGING_ESCALATION_PHRASES)
+            if hedging:
+                self.logger.info("Uncertainty escalation: hedging on factual question")
+                return True
+
+        # Signal 3: Process description without actual answer
+        # Nano says "I check the Clock line" but never gives a time
+        describes_process = any(phrase in lower for phrase in self._PROCESS_WITHOUT_ANSWER_PHRASES)
+        if describes_process:
+            # Check if there's an actual data value in the response
+            import re
+            has_value = bool(re.search(r'\d{1,2}:\d{2}|\d+\s*(gb|mb|%|seconds|minutes|hours|days)', lower))
+            if not has_value:
+                self.logger.info("Uncertainty escalation: process description without actual value")
+                return True
+
+        # Signal 4: Factual question asked but NO factual value in response
+        # Catches "I'm ready to share the time" without actually sharing it
+        if is_factual:
+            import re
+            has_value = bool(re.search(r'\d{1,2}:\d{2}|\d+\s*(gb|mb|%|seconds|minutes|hours|days)', lower))
+            if not has_value:
+                self.logger.info("Uncertainty escalation: factual question but no value in response")
+                return True
+
+        return False
+
     # Escalation chain for slim path failures
     _SLIM_ESCALATION_CHAIN = ["core", "lite", "groq_fallback", "oracle"]
 
@@ -2653,6 +2729,14 @@ class AgentCore:
         On success, sets ``self._last_responding_model`` so callers can
         attribute the response to the correct model in headers/tags.
         """
+        # Extract the actual user question from the slim prompt messages
+        # (last user message is the real question, earlier ones are few-shot)
+        user_question = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_question = msg.get("content", "")
+                break
+
         for candidate in self._SLIM_ESCALATION_CHAIN:
             if candidate == failed_model:
                 continue
@@ -2660,9 +2744,15 @@ class AgentCore:
                 continue
             try:
                 self.logger.info("Slim escalation: trying '%s' after '%s' failed", candidate, failed_model)
+                # Build a clean prompt for the escalation target —
+                # don't send Nano's few-shot format to Core/Lite
+                escalation_messages = [
+                    {"role": "system", "content": "You are GAIA, a sovereign AI. Answer directly and concisely."},
+                    {"role": "user", "content": user_question},
+                ]
                 res = self.model_pool.forward_to_model(
                     candidate,
-                    messages=messages,
+                    messages=escalation_messages,
                     max_tokens=max_tokens,
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
@@ -2745,7 +2835,8 @@ class AgentCore:
             reflex_messages = build_from_packet(packet, slim_mode=True)
             user_input = packet.content.original_prompt or ""
 
-            # Direct non-streaming call to Reflex (Nano), capped at 256 tokens
+            # Direct non-streaming call to Reflex (Nano), capped at 256 tokens.
+            # Let the GAIA Engine handle clock injection + KV caching.
             res = self.model_pool.forward_to_model(
                 "reflex",
                 messages=reflex_messages,
@@ -2762,6 +2853,11 @@ class AgentCore:
                 # Strip think tags and suppress repetition
                 reflex_text = strip_think_tags(reflex_text).strip()
                 reflex_text = self._suppress_repetition(reflex_text)
+                # Time sanity check: if Nano claims a time, verify it's within
+                # 2 minutes of now. Small models hallucinate times.
+                if self._reflex_time_is_stale(reflex_text):
+                    self.logger.warning("Speculative reflex returned stale/hallucinated time — deferring to run_turn()")
+                    return ""
                 # Degenerate output → defer to full run_turn() pipeline
                 if self._is_degenerate_output(reflex_text, user_input):
                     self.logger.warning("Speculative reflex produced degenerate output — deferring to run_turn()")
@@ -2775,6 +2871,54 @@ class AgentCore:
         except Exception:
             self.logger.debug("Speculative reflex failed", exc_info=True)
         return ""
+
+    def _reflex_time_is_stale(self, text: str) -> bool:
+        """Check if a Reflex response contains a time that's more than 2 minutes off.
+
+        Small models (0.8B) sometimes hallucinate plausible-looking times instead
+        of copying from the few-shot example. This catches that.
+        """
+        import re
+        from datetime import datetime, timezone, timedelta
+
+        # Look for time patterns like "11:54 AM" or "3:45 PM"
+        time_match = re.search(r'(\d{1,2}):(\d{2})\s*(AM|PM)', text, re.IGNORECASE)
+        if not time_match:
+            return False  # No time claim — not a time question, no check needed
+
+        try:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            ampm = time_match.group(3).upper()
+
+            # Convert to 24h
+            if ampm == "PM" and hour != 12:
+                hour += 12
+            elif ampm == "AM" and hour == 12:
+                hour = 0
+
+            # Get current local time (same tz logic as prompt_builder)
+            _tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
+            local_tz = timezone(timedelta(hours=_tz_offset))
+            now = datetime.now(local_tz)
+
+            # Compare hours and minutes
+            claimed_minutes = hour * 60 + minute
+            actual_minutes = now.hour * 60 + now.minute
+            diff = abs(claimed_minutes - actual_minutes)
+            # Handle midnight wrap
+            if diff > 720:
+                diff = 1440 - diff
+
+            if diff > 2:
+                self.logger.warning(
+                    "Reflex time sanity: claimed %02d:%02d, actual %02d:%02d (diff=%d min)",
+                    hour, minute, now.hour, now.minute, diff,
+                )
+                return True
+        except Exception:
+            pass
+        return False
 
     def _run_speculative_reflex(self, packet: CognitionPacket) -> str:
         """Legacy internal wrapper."""
@@ -3296,6 +3440,8 @@ RESULT: COMPLEX (reason: <brief reason>)
             # its 2K context window is too small for uncapped generation.
             if selected_model_name in ("reflex", "nano"):
                 max_resp_tokens = min(max_resp_tokens, 512)
+            # Let the GAIA Engine handle clock injection + KV caching.
+            # The engine injects [Clock: ...] and caches identity as KV prefix.
             res = self.model_pool.forward_to_model(
                 selected_model_name,
                 messages=messages,
@@ -3308,12 +3454,28 @@ RESULT: COMPLEX (reason: <brief reason>)
             # Strip think tags and suppress repetition (same guards as streaming path)
             content = strip_think_tags(content).strip()
             content = self._suppress_repetition(content)
+            # Nano self-escalation: if response is literally "ESCALATE", defer to Core
+            if content.upper().startswith("ESCALATE"):
+                self.logger.info("Nano self-escalated via ESCALATE signal — trying next tier")
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                if escalated:
+                    return escalated
             # Detect degenerate output and escalate to a higher tier
             if self._is_degenerate_output(content, user_input):
                 self.logger.warning("Degenerate output from '%s' — escalating to next tier", selected_model_name)
                 escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
                 if escalated:
                     return escalated
+            # Uncertainty-based escalation — Nano hedges or describes process
+            # without delivering the actual answer. Uses entropy + hedging signals.
+            if use_slim:
+                resp_entropy = res.get("usage", {}).get("mean_entropy", 0.0)
+                if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy):
+                    self.logger.info("Uncertainty escalation from '%s' (entropy=%.2f) — trying next tier",
+                                     selected_model_name, resp_entropy)
+                    escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                    if escalated:
+                        return escalated
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
             # send a short polish request and return the Thinker output as final.
             try:

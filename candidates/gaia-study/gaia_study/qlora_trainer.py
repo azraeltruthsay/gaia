@@ -282,22 +282,26 @@ class QLoRATrainer:
                         torch_dtype=torch.bfloat16,
                     )
                 else:
-                    # Model too large — split across GPU/CPU (slower training)
-                    bnb_gpu_budget_gib = max(int(max_gpu_gb * 0.7), 5)
+                    # Model too large for direct GPU loading — quantize on
+                    # CPU first, then move to GPU. This avoids the peak VRAM
+                    # spike from bf16→NF4 conversion happening on GPU.
+                    gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     logger.info(
-                        "Model too large for full GPU (bf16: %.1fGiB > %.1fGiB budget) — "
-                        "splitting across GPU (%dGiB) + CPU",
-                        bf16_size_gb, max_gpu_gb * 0.8, bnb_gpu_budget_gib
+                        "Model bf16 size (%.1fGiB) exceeds GPU budget (%.1fGiB free) "
+                        "— loading to CPU for NF4 quantization, then moving to GPU",
+                        bf16_size_gb, gpu_free_gb
                     )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map="auto",
-                        max_memory={0: f"{bnb_gpu_budget_gib}GiB", "cpu": "30GiB"},
+                        device_map="cpu",
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
                     )
+                    # Move quantized model to GPU (only ~4-5GB for 8B NF4)
+                    logger.info("Moving quantized model to GPU...")
+                    self.model = self.model.to("cuda:0")
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")

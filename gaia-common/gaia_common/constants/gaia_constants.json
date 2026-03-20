@@ -297,7 +297,7 @@
     "base_model_path": "/models/Huihui-Qwen3-8B-abliterated-v2",
     "max_training_time_seconds": 600,
     "max_training_samples": 1000,
-    "max_training_content_kb": 200,
+    "max_training_content_kb": 500,
     "qlora_config": {
       "load_in_4bit": true,
       "bnb_4bit_compute_dtype": "bfloat16",
@@ -605,6 +605,32 @@
     "embedding": "/models/all-MiniLM-L6-v2",
     "lora_adapters": "/models/lora_adapters"
   },
+  "WARM_POOL": {
+    "enabled": true,
+    "tmpfs_path": "/mnt/gaia_warm_pool",
+    "source_path": "/gaia/GAIA_Project/gaia-models",
+    "size_gb": 30,
+    "models": {
+      "nano": {
+        "source": "Qwen3.5-0.8B-Abliterated",
+        "description": "Reflex (0.8B) — triage, transcript cleanup"
+      },
+      "core": {
+        "source": "Qwen3.5-2B-GAIA-Core-v3",
+        "description": "Operator (2B) — intent detection, tool selection"
+      },
+      "prime": {
+        "source": "Huihui-Qwen3-8B-GAIA-Prime-adaptive",
+        "description": "Thinker (8B) — complex reasoning, code, long-form"
+      },
+      "embedding": {
+        "source": "all-MiniLM-L6-v2",
+        "description": "Sentence embedding for vector search"
+      }
+    },
+    "stage_on_boot": ["nano", "core", "embedding"],
+    "stage_on_demand": ["prime"]
+  },
   "SYSTEM": {
     "MODELS_DIR": "/models",
     "KNOWLEDGE_DIR": "/knowledge",
@@ -622,6 +648,31 @@
     "compact_interval_seconds": 30,
     "checkpoint_interval_seconds": 300,
     "doctor_critical_threshold": 0.90
+  },
+  "CODEMIND": {
+    "enabled": false,
+    "max_changes_per_cycle": 3,
+    "auto_promote": false,
+    "dry_run": true,
+    "scope_tiers": {
+      "tier1_auto": true,
+      "tier2_supervised": true,
+      "tier3_gated": false
+    },
+    "validation": {
+      "py_compile": true,
+      "ruff": true,
+      "ast_parse": true,
+      "pytest": false
+    },
+    "triggers": {
+      "sleep_cycle": true,
+      "immune_irritation": true,
+      "drift_detection": false,
+      "user_request": true
+    },
+    "cognitive_battery_gate": 0.85,
+    "regression_threshold": 0.05
   },
   "SLEEP_CYCLE": {
     "enabled": true,

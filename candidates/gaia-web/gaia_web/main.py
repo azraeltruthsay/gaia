@@ -32,6 +32,7 @@ from gaia_web.routes.discord import router as discord_router
 from gaia_web.routes.system import router as system_router
 from gaia_web.routes.chaos import router as chaos_router
 from gaia_web.routes.changelog import router as changelog_router
+from gaia_web.routes.codemind import router as codemind_router
 
 # Setup logging
 try:
@@ -116,6 +117,7 @@ app.include_router(discord_router, tags=["discord"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(chaos_router, prefix="/api/chaos", tags=["chaos"])
 app.include_router(changelog_router, prefix="/api/changelog", tags=["changelog"])
+app.include_router(codemind_router, prefix="/api/codemind", tags=["codemind"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):

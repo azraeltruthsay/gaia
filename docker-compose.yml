@@ -101,11 +101,12 @@ services:
 
     volumes:
       - ./gaia-models:/models:ro
+      - /mnt/gaia_warm_pool:/warm_pool:ro
       - gaia-shared:/shared:rw
 
     environment:
       - PRIME_PORT=7777
-      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       - PRIME_DEVICE=cuda
       - PRIME_AUTOLOAD=0
       - SHARED_DIR=/shared
@@ -146,15 +147,20 @@ services:
 
     volumes:
       - ./gaia-models:/models:ro
+      - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./logs/kvcache/nano:/kvcache:rw
       - gaia-shared:/shared:rw
 
     environment:
       # Safetensors mode (GPU-native, enables polygraph + SAE)
-      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-GAIA-Nano-v1}
+      # Loads from tmpfs warm pool for near-instant startup.
+      # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
+      # per-request. Training overrides few-shot pattern-following with hedging.
+      # Identity lives in Core (Operator), not Nano (Reflex).
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/warm_pool/Qwen3.5-0.8B-Abliterated}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
-      # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty)
-      - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf
+      # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
+      - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v7-Q8_0.gguf
       - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
       - NANO_PORT=8080
       - NANO_CTX_SIZE=2048
@@ -213,8 +219,10 @@ services:
       - ./knowledge:/knowledge:rw
       # Vector store (read-only - gaia-study is SOLE WRITER)
       - ./knowledge/vector_store:/vector_store:ro
-      # Model files (read-only)
+      # Model files (read-only, NVMe fallback)
       - ./gaia-models:/models:ro
+      # Warm pool (tmpfs-backed, near-instant model loads)
+      - /mnt/gaia_warm_pool:/warm_pool:ro
       # Logs (consolidated service logs)
       - ./logs:/logs:rw
       # Shared state
@@ -229,6 +237,7 @@ services:
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
+      - WARM_POOL_DIR=/warm_pool
       - SHARED_DIR=/shared
       # Service endpoints (configurable for candidate injection)
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
@@ -242,15 +251,15 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      - PRIME_MODEL=${PRIME_MODEL:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       # Nano reflex endpoint (separate llama-server container)
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-Abliterated-Q8_0.gguf}
       # Core/Operator inference endpoint (safetensors or GGUF, depending on mode)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
       - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-2B-GAIA-Core-v3}
-      # Safetensors mode (GPU-native, enables SAE/ROME): set path to HF model dir
-      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-2B-GAIA-Core-v3}
+      # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/warm_pool/Qwen3.5-2B-GAIA-Core-v3}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092
@@ -261,6 +270,9 @@ services:
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       # HA failover — candidate MCP as fallback
       - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
+      # Cloud fallback API keys (loaded from .env)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
@@ -405,6 +417,8 @@ services:
       - ./knowledge/vector_store:/vector_store:rw
       # Model files (WRITE for LoRA adapters)
       - ./gaia-models:/models:rw
+      # Warm pool (tmpfs-backed, near-instant base model loads)
+      - /mnt/gaia_warm_pool:/warm_pool:ro
       # Logs (consolidated service logs)
       - ./logs:/logs:rw
       # Shared state
@@ -420,15 +434,19 @@ services:
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
+      - WARM_POOL_DIR=/warm_pool
       - SHARED_DIR=/shared
       - GAIA_LOG_DIR=/logs
       # GPU settings for embedding
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-      # Embedding model
+      # Embedding model (loads from warm pool if available, /models fallback)
       - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      # Training limits + GPU memory optimization
+      - MAX_TRAINING_CONTENT_KB=500
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
       # AWQ model is for inference only (GEMM kernels lack backward pass)
-      - BASE_MODEL_PATH=/models/Qwen3.5-4B-Abliterated
+      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

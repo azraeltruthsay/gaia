@@ -108,6 +108,8 @@ class ObserverScorer:
                         "Drift detected: %s scored %.2f < %.2f — buffered for training",
                         entry["id"], score, entry.get("drift_tolerance", 0.4),
                     )
+                    # Emit to CodeMind detect queue for autonomous remediation
+                    self._emit_codemind_detection(entry, score)
 
             self._maybe_trigger_study()
 
@@ -197,6 +199,33 @@ class ObserverScorer:
         buf_path.parent.mkdir(parents=True, exist_ok=True)
         with open(buf_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
+
+    # ── CodeMind Detection ──────────────────────────────────────────────────
+
+    def _emit_codemind_detection(self, entry: dict, score: float) -> None:
+        """Emit a drift detection event to the CodeMind detect queue."""
+        try:
+            from gaia_common.utils.codemind_detector import emit_detection
+            emit_detection(
+                source="drift_detection",
+                issue_type="response_drift",
+                file_path=entry.get("source_file", ""),
+                description=(
+                    f"Rubric {entry['id']}: scored {score:.2f} "
+                    f"(tolerance {entry.get('drift_tolerance', 0.4):.2f})"
+                ),
+                severity="warn",
+                metadata={
+                    "rubric_id": entry["id"],
+                    "score": round(score, 4),
+                    "tolerance": entry.get("drift_tolerance", 0.4),
+                    "prompt": entry.get("prompt", "")[:200],
+                },
+            )
+        except ImportError:
+            pass  # codemind_detector not available
+        except Exception:
+            log.debug("Failed to emit CodeMind detection", exc_info=True)
 
     # ── Study Trigger ─────────────────────────────────────────────────────
 

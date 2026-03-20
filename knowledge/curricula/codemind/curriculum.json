@@ -1,0 +1,77 @@
+{
+  "adapter_name": "codemind",
+  "adapter_version": 1,
+  "tier": 2,
+  "pillar": "cognition",
+  "priority": "medium",
+  "display_name": "CodeMind",
+  "description": "GAIA code self-improvement: reading lint/import errors, generating minimal Python fixes, GAIA codebase conventions, candidates-first workflow, scope-tier safety, and diff discipline. Turns GAIA from a general-purpose model into a competent developer of her own systems.",
+  "base_model": "gaia-prime",
+
+  "training_config": {
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    "learning_rate": 1.5e-4,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "gradient_checkpointing": true,
+    "max_steps": 400,
+    "warmup_steps": 30,
+    "max_seq_length": 2048,
+    "load_in_4bit": true,
+    "bnb_4bit_compute_dtype": "bfloat16",
+    "bnb_4bit_quant_type": "nf4"
+  },
+
+  "chat_template": "auto",
+  "training_objective": "Given a code error (lint, import, syntax, logic) and file context, generate the minimal corrected Python code. Prefer deletion over addition. Never add unnecessary comments or refactoring.",
+
+  "data_sources": {
+    "lint_fixes": {
+      "description": "Ruff/pylint error messages → minimal Python fix pairs",
+      "target_samples": 40
+    },
+    "import_fixes": {
+      "description": "Import resolution patterns specific to GAIA's service layout",
+      "target_samples": 25
+    },
+    "conventions": {
+      "description": "GAIA codebase conventions: error handling, logging, config access, dataclass patterns",
+      "target_samples": 30
+    },
+    "safety_awareness": {
+      "description": "Scope tiers, vital organs, production lock, candidates-first, diff discipline",
+      "target_samples": 25
+    },
+    "diagnostic_patterns": {
+      "description": "Reading ruff output, py_compile errors, AST parse failures, Docker test patterns",
+      "target_samples": 20
+    },
+    "fix_discipline": {
+      "description": "Minimal diff generation, change ratio awareness, rollback patterns",
+      "target_samples": 15
+    }
+  },
+
+  "total_target_samples": 155,
+  "train_split": 0.85,
+  "validation_split": 0.15,
+
+  "minimum_corpus_size": 50,
+
+  "activation_triggers": ["codemind_cycle", "self_improvement", "code_fix"],
+  "routing_keywords": [
+    "fix this", "lint error", "import error", "syntax error",
+    "ruff check", "py_compile", "code fix", "self-improvement",
+    "codemind", "code review", "refactor", "unused import",
+    "undefined name", "type error", "attribute error"
+  ],
+
+  "versioning": {
+    "strategy": "incremental",
+    "retention_count": 3,
+    "rollback_supported": true
+  }
+}
