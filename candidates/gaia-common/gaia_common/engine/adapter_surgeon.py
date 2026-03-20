@@ -338,7 +338,7 @@ class AdapterSurgeon:
         out = Path(output_path)
         out.mkdir(parents=True, exist_ok=True)
         for f in Path(adapter_path).iterdir():
-            if f.name != "adapter_model.safetensors":
+            if f.is_file() and f.name != "adapter_model.safetensors":
                 shutil.copy2(f, out / f.name)
 
         # Load adapter weights
@@ -372,7 +372,9 @@ class AdapterSurgeon:
                     # B_new = B - alpha * (f @ f.T) @ B
                     # Where f is [out_features] and B is [out_features, rank]
                     if B.shape[0] == feature_direction.shape[0]:
-                        projection = alpha * torch.outer(feature_direction, feature_direction) @ B
+                        # Match dtypes for matmul
+                        fd = feature_direction.to(B.dtype)
+                        projection = alpha * torch.outer(fd, fd) @ B
                         B_corrected = B - projection
 
                         adapter_weights[key] = B_corrected
