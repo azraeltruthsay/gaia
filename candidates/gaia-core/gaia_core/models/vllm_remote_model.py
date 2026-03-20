@@ -387,6 +387,29 @@ class VLLMRemoteModel:
         except Exception:
             pass
 
+    # ── Self-Healing ──────────────────────────────────────────────────────────
+
+    def _request_prime_load(self) -> None:
+        """Ask orchestrator to wake Prime when it's unreachable.
+
+        This is GAIA healing herself — Core detects Prime is down and
+        presses the orchestrator button to fix it. Glass stays on.
+        """
+        import os
+        orchestrator = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+        try:
+            resp = requests.post(
+                f"{orchestrator}/gpu/wake",
+                json={"reason": "core_self_healing:prime_unreachable"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info("Self-healing: requested orchestrator to wake Prime")
+            else:
+                logger.debug("Self-healing: orchestrator returned %d", resp.status_code)
+        except Exception as e:
+            logger.debug("Self-healing: could not reach orchestrator: %s", e)
+
     # ── Internals ────────────────────────────────────────────────────────────
 
     def _resolve_model_field(self) -> str:
@@ -432,6 +455,11 @@ class VLLMRemoteModel:
                     )
                     time.sleep(delay)
                     continue
+                # Self-healing: ask orchestrator to load Prime before giving up
+                try:
+                    self._request_prime_load()
+                except Exception:
+                    pass
                 raise RuntimeError(
                     f"Cannot reach vLLM server at {url} after {self._MAX_RETRIES} attempts. "
                     f"Is gaia-prime running?"

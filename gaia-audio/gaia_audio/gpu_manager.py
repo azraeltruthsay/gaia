@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 import time
 import httpx
 
@@ -85,21 +86,28 @@ class GPUManager:
             status_tracker.tts_engine = "nano_speaker" if self.nano.loaded else "espeak_fallback"
             await status_tracker.emit("startup", f"Three-tier audio ready ({elapsed:.0f}ms)", elapsed)
 
+            # Start idle timer — auto-sleep after 5 min of no activity
+            idle_seconds = int(os.environ.get("AUDIO_IDLE_TIMEOUT", "300"))
+            await self.start_idle_timer(idle_seconds)
+
     async def run_stt(self, func, *args, **kwargs):
-        """Run STT function. Listener is always loaded, no contention."""
-        if not self.stt.loaded:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.stt.load)
+        """Run STT function. Auto-wakes if sleeping, resets idle timer."""
+        await self.ensure_awake()
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+        result = await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+        self.touch_activity()
+        return result
 
     async def run_tts_nano(self, func, *args, **kwargs):
         """Run Nano TTS function. Always on CPU, no contention."""
+        self.touch_activity()
         if not self.nano.loaded:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self.nano.load)
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+        result = await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+        self.touch_activity()
+        return result
 
     async def run_tts_prime(self, func, *args, **kwargs):
         """Run Prime TTS function. Acquires GPU from orchestrator, loads model,
@@ -128,6 +136,38 @@ class GPUManager:
                 await loop.run_in_executor(None, self.prime.unload)
                 status_tracker.vram_used_mb = float(self.stt.vram_mb)
                 await self._release_gpu_lease()
+
+    # ── Idle Timer: auto-sleep after inactivity ─────────────────────
+
+    async def start_idle_timer(self, idle_seconds: int = 300) -> None:
+        """Start the idle watchdog. Auto-sleeps after idle_seconds of no activity."""
+        self._idle_timeout = idle_seconds
+        self._last_activity = asyncio.get_event_loop().time()
+        self._idle_task = asyncio.create_task(self._idle_watchdog())
+        logger.info("Idle timer started: %ds timeout", idle_seconds)
+
+    def touch_activity(self) -> None:
+        """Reset the idle timer — called on any STT/TTS activity."""
+        self._last_activity = asyncio.get_event_loop().time()
+
+    async def _idle_watchdog(self) -> None:
+        """Background task: sleep audio if idle for too long."""
+        while True:
+            await asyncio.sleep(30)  # Check every 30s
+            if not hasattr(self, '_idle_timeout'):
+                continue
+            elapsed = asyncio.get_event_loop().time() - self._last_activity
+            if elapsed >= self._idle_timeout and self.stt.loaded:
+                logger.info("Idle timeout (%.0fs) — auto-sleeping audio to free VRAM", elapsed)
+                await self.sleep()
+                await status_tracker.emit("idle_sleep", f"Auto-sleep after {int(elapsed)}s idle")
+
+    async def ensure_awake(self) -> None:
+        """Wake if sleeping — called before any STT/TTS operation."""
+        self.touch_activity()
+        if not self.stt.loaded:
+            logger.info("Audio waking on demand...")
+            await self.wake()
 
     async def sleep(self) -> None:
         """Deep sleep: unload Listener from GPU. Keep Nano Speaker on CPU."""
