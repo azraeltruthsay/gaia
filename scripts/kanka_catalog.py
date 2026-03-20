@@ -32,8 +32,47 @@ ENTITY_TYPES = [
 ]
 
 
+# ── Rolling Rate Limiter ──────────────────────────────────────────────────
+
+class RollingRateLimiter:
+    """Track API calls in a rolling window to respect Kanka's 30 req/min limit."""
+
+    def __init__(self, max_requests: int = 25, window_seconds: float = 60.0):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._timestamps: list = []
+
+    def wait(self):
+        """Block until we're under the rate limit."""
+        now = time.time()
+        # Prune old timestamps outside the window
+        self._timestamps = [t for t in self._timestamps if now - t < self.window_seconds]
+
+        if len(self._timestamps) >= self.max_requests:
+            # Wait until the oldest request falls outside the window
+            oldest = self._timestamps[0]
+            wait_time = self.window_seconds - (now - oldest) + 0.1
+            if wait_time > 0:
+                logger.debug("Rate limit: waiting %.1fs (%d/%d in window)",
+                            wait_time, len(self._timestamps), self.max_requests)
+                time.sleep(wait_time)
+
+        self._timestamps.append(time.time())
+
+    @property
+    def usage(self) -> str:
+        now = time.time()
+        active = sum(1 for t in self._timestamps if now - t < self.window_seconds)
+        return f"{active}/{self.max_requests} in last {self.window_seconds:.0f}s"
+
+
+_rate_limiter = RollingRateLimiter(max_requests=25, window_seconds=60.0)
+
+
 def mcp_call(method: str, params: dict) -> dict:
-    """Call a Kanka MCP tool."""
+    """Call a Kanka MCP tool with rolling rate limiting."""
+    _rate_limiter.wait()
+
     payload = json.dumps({
         "jsonrpc": "2.0",
         "method": method,
@@ -76,7 +115,7 @@ def fetch_all_entities(campaign_id: int, entity_type: str) -> list:
         if len(all_entities) >= total:
             break
         page += 1
-        time.sleep(0.5)  # Rate limiting
+        # Rate limiting handled by RollingRateLimiter in mcp_call()
     return all_entities
 
 
@@ -172,7 +211,7 @@ def catalog_campaign(campaign_id: int, entity_types: list, dry_run: bool = False
             # Fetch full details
             try:
                 detail = fetch_entity_detail(campaign_id, entity_type, entity_id)
-                time.sleep(0.3)  # Rate limiting
+                # Rate limiting handled by RollingRateLimiter in mcp_call(), stay under 25
             except Exception as e:
                 logger.warning("  Failed to fetch %s/%d: %s", name, entity_id, e)
                 detail = entity
