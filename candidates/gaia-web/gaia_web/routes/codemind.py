@@ -95,6 +95,18 @@ async def codemind_blueprints():
         return {"blueprints": [], "error": str(e)}
 
 
+@router.get("/heartbeat")
+async def heartbeat_status():
+    """Return heartbeat time check status."""
+    try:
+        from gaia_common.utils.heartbeat_time_check import read_state
+        return read_state()
+    except ImportError:
+        return {"current": None, "error": "heartbeat_time_check not available"}
+    except Exception as e:
+        return {"current": None, "error": str(e)}
+
+
 @router.post("/trigger")
 async def codemind_trigger(request: Request):
     """Trigger a CodeMind cycle via gaia-core."""

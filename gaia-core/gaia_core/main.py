@@ -178,6 +178,15 @@ def initialize_cognitive_system():
         except Exception:
             logger.debug("Adapter auto-registration skipped", exc_info=True)
 
+        # ── Start Heartbeat Time Check ──
+        try:
+            from gaia_common.utils.heartbeat_time_check import start_heartbeat
+            heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "300"))
+            start_heartbeat(interval_seconds=heartbeat_interval)
+            logger.info("Heartbeat time check started (interval=%ds)", heartbeat_interval)
+        except Exception:
+            logger.debug("Heartbeat time check not started", exc_info=True)
+
         logger.info("GAIA cognitive system initialized successfully")
         return True
 
@@ -747,33 +756,38 @@ async def process_packet(packet_data: Dict[str, Any]):
             history = _ai_manager.session_manager.get_history(session_id)
             if _agent_core.is_eligible_for_reflex(packet, history):
                 logger.info("Main: Triggering instant speculative Reflex...")
-                # The generate_instant_reflex method now returns the full formatted string
-                # with the ⚡ [(Reflex) Reflex] header included.
                 _reflex_t0 = _time.perf_counter()
                 reflex_text = await loop.run_in_executor(
                     None, _agent_core.generate_instant_reflex, packet
                 )
                 if reflex_text:
-                    # Log reflex generation to stream
-                    try:
-                        from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
-                        _gl = _get_gen_logger()
-                        _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
-                        _gid = _gl.start_generation("reflex-0.5B", "nano", "response")
-                        _gl.log_token(_gid, reflex_text)
-                        _gl.end_generation(_gid)
-                    except Exception:
-                        pass
-                    formatted_reflex = f"⚡ **[(Reflex) Nano]**\n{reflex_text}"
-                    yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
-                    yield json.dumps({"type": "flush"}) + "\n"
+                    # Uncertainty check: if Nano hedges or describes process
+                    # without an actual answer, DON'T return — let Core handle it
+                    user_input = packet.content.original_prompt or ""
+                    if _agent_core._should_escalate_for_uncertainty(reflex_text, user_input):
+                        logger.info("Main: Nano reflex uncertain — escalating to full pipeline")
+                        reflex_text = ""  # Clear so full pipeline runs
+                    else:
+                        # Log reflex generation to stream
+                        try:
+                            from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
+                            _gl = _get_gen_logger()
+                            _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
+                            _gid = _gl.start_generation("reflex-0.5B", "nano", "response")
+                            _gl.log_token(_gid, reflex_text)
+                            _gl.end_generation(_gid)
+                        except Exception:
+                            pass
+                        formatted_reflex = f"⚡ **[(Reflex) Nano]**\n{reflex_text}"
+                        yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
+                        yield json.dumps({"type": "flush"}) + "\n"
 
-                    # FINALIZATION: Skip run_turn if reflex already provided the answer
-                    from gaia_common.protocols.cognition_packet import PacketState
-                    packet.status.state = PacketState.COMPLETED
-                    packet.response.candidate = reflex_text
-                    yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
-                    return
+                        # FINALIZATION: Skip run_turn if reflex already provided the answer
+                        from gaia_common.protocols.cognition_packet import PacketState
+                        packet.status.state = PacketState.COMPLETED
+                        packet.response.candidate = reflex_text
+                        yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
+                        return
 
             # Run the cognitive loop
             response_pieces = []
