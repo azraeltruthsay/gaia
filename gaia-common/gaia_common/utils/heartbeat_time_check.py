@@ -210,8 +210,15 @@ _heartbeat_stop = threading.Event()
 
 
 def _heartbeat_loop(interval: int, endpoint: str) -> None:
-    """Background loop that runs time checks at regular intervals."""
-    logger.info("Heartbeat started: interval=%ds, endpoint=%s", interval, endpoint)
+    """Background loop that runs time checks at jittered intervals.
+
+    Uses a random interval between 60% and 120% of the base interval
+    so the check hits different minutes over time. A fixed cadence would
+    create resonance (always :00, :05, :10...) and never prove GAIA can
+    handle arbitrary times.
+    """
+    import random
+    logger.info("Heartbeat started: base_interval=%ds (jittered ±40%%), endpoint=%s", interval, endpoint)
     while not _heartbeat_stop.is_set():
         try:
             result = run_time_check(endpoint)
@@ -248,7 +255,9 @@ def _heartbeat_loop(interval: int, endpoint: str) -> None:
         except Exception:
             logger.debug("Heartbeat check failed", exc_info=True)
 
-        _heartbeat_stop.wait(interval)
+        # Jitter: 60-120% of base interval (e.g., 300s base → 180-360s actual)
+        jittered = random.uniform(interval * 0.6, interval * 1.2)
+        _heartbeat_stop.wait(jittered)
 
     logger.info("Heartbeat stopped")
 
