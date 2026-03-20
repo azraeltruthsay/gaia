@@ -107,6 +107,7 @@ services:
 
     environment:
       - PYTHONDONTWRITEBYTECODE=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
       - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       - PRIME_DEVICE=cuda
