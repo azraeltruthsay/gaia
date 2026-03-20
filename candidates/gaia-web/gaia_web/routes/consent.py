@@ -170,6 +170,7 @@ async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
     Returns the completed packet dict or an error dict.
     """
     from gaia_common.protocols.cognition_packet import (
+        COGPACKET_VERSION,
         CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget,
         Content, DataField, OutputDestination, PersonaRole, Routing, Model,
         OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef,
@@ -184,7 +185,7 @@ async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
     meta["consent_test"] = True
 
     packet = CognitionPacket(
-        version="0.3",
+        version=COGPACKET_VERSION,
         header=Header(
             datetime=now,
             session_id="consent_test_session",

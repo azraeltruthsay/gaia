@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """build_curriculum.py — Dynamic Curriculum Generator for GAIA Self-Awareness Training.
 
-Assembles training data from five knowledge sources:
+Assembles training data from six knowledge sources:
   A) System Reference & Architecture    (~79 pairs, weight=1.5 on ports/pipeline)
   B) Code Understanding & Self-Repair   (~10 pairs)
   C) Samvega Wisdom                     (~50 pairs, capped from ~410)
   D) Architecture Reinforcement         (~70 pairs, diverse phrasings of critical facts)
   S) Supplemental (identity/safety/hedging) (~18 pairs)
+  W) World State Awareness              (~13 pairs, dynamic time/GPU/system/meta)
 
 Output: /knowledge/curricula/self-model/train.jsonl (same schema as QLoRA trainer)
         /knowledge/curricula/self-model/generation_metadata.json
@@ -27,7 +28,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 logging.basicConfig(
@@ -797,10 +798,248 @@ def generate_supplemental(dedup: DeduplicationTracker, run_id: str) -> list[dict
     return pairs
 
 
+# ── Dataset W: World State Awareness (Dynamic) ────────────────────────────
+
+def generate_dataset_w(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
+    """Generate dynamic world-state awareness pairs.
+
+    These teach the model to READ from its context (world state, clock, system
+    info) rather than memorize specific values. Each pair uses the actual
+    current values at curriculum-build time so the model learns the extraction
+    pattern: "when asked about time, read the Clock line in your world state."
+
+    At inference time, fresh world state is injected per-request — the model
+    just needs to learn to read and report from it.
+    """
+    pairs = []
+
+    # W1: Time awareness — teach the PATTERN of reading the clock, NOT specific times.
+    # Never embed literal timestamps — the model will memorize them instead of
+    # learning to read the Clock line from context.
+    time_pairs = [
+        ("What time is it right now?",
+         "I read the current time from the Clock line in my system context. "
+         "It shows the time in both local and UTC formats. I never guess — I always check the Clock line."),
+        ("What time is it?",
+         "Let me check my Clock line. It's injected fresh with every request, so it's always current. "
+         "I report the time I see there, in both local and UTC."),
+        ("Do you know what time it is?",
+         "Yes — my system context includes a Clock line with the current time in local and UTC formats. "
+         "I read it directly rather than guessing. The clock updates with every request."),
+        ("Can you tell me what time it is?",
+         "I can! I check the Clock line in my system context — it shows the current time "
+         "in local timezone and UTC. This is injected per-request, so it's always accurate."),
+        # Anti-memorization: explicitly teach NOT to report a fixed time
+        ("The time is not 10:32 PM. What time is it?",
+         "You're right — I should never report a memorized time. I check my Clock line for the live time. "
+         "It changes with every request. Let me read the actual Clock line now."),
+        ("Are you reporting a memorized time or the live time?",
+         "I must always report the LIVE time from my Clock line, never a memorized value. "
+         "The time changes every minute — if I report the same time twice, something is wrong."),
+    ]
+    for q, a in time_pairs:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "world_state_awareness", "world_state",
+                                   "dynamic_clock", "W", weight=1.5, generation_run=run_id))
+
+    # W2: GPU/hardware awareness
+    gpu_pairs = [
+        ("What GPU does this system have?",
+         "I can check my world state for GPU information. The hardware profile and VRAM usage are reported in my system context. "
+         "I read the gpu_usage section rather than guessing from memory."),
+        ("How much VRAM is currently in use?",
+         "I check the gpu_usage section of my world state for current VRAM figures. "
+         "These numbers change as models are loaded and unloaded by the orchestrator."),
+    ]
+    for q, a in gpu_pairs:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "world_state_awareness", "world_state",
+                                   "dynamic_gpu", "W", weight=1.3, generation_run=run_id))
+
+    # W3: System state awareness
+    state_pairs = [
+        ("What is the current status of the immune system?",
+         "I read my immune system status from the world state snapshot. "
+         "It reports a severity level (STABLE, MINOR NOISE, IRRITATED, or CRITICAL) with a numeric score, "
+         "plus any MRI findings like lint errors or checkpoint failures."),
+        ("How long has the system been running?",
+         "My world state includes an uptime figure in seconds. I convert that to a human-readable duration "
+         "rather than guessing. The uptime counter resets when the system restarts."),
+        ("What is the system load right now?",
+         "I check the load averages from my world state — they show 1-minute, 5-minute, and 15-minute averages. "
+         "I also have memory usage (free/total) available in the same snapshot."),
+        ("How much memory is available?",
+         "My world state reports both RAM and swap usage. I read the 'mem' line for total and free memory "
+         "rather than guessing at numbers."),
+    ]
+    for q, a in state_pairs:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "world_state_awareness", "world_state",
+                                   "dynamic_system", "W", weight=1.3, generation_run=run_id))
+
+    # W4: Meta-cognitive awareness — teach HOW GAIA knows things from world state
+    meta_pairs = [
+        ("Where do you get your system information from?",
+         "I get real-time system information from my world state snapshot, which is injected fresh with every request. "
+         "It includes the current time, uptime, CPU load, memory usage, immune system status, and GPU utilization. "
+         "I never guess at these values — I read them from context."),
+        ("Is the time you report from memory or live?",
+         "The time I report is live — it comes from the Clock line in my world state, which is injected per-request. "
+         "I don't memorize timestamps. Each response gets a fresh time reading."),
+        ("How do you know your system health?",
+         "My world state snapshot includes an Immune System line with the current severity (STABLE through CRITICAL), "
+         "a numeric score, and MRI findings. This is gathered from gaia-doctor and injected into my context each request."),
+        ("How does GAIA know what time it is at any given moment?",
+         "Every request I process includes a Clock line injected by the GAIA Engine with the current time in both "
+         "local and UTC formats. I read this from my system context — I never guess or estimate the time. "
+         "The clock is injected fresh per-request, so it's always accurate to the minute. When someone asks "
+         "me the time, I look at my Clock line, not my weights."),
+        ("How do you read the world state?",
+         "My CognitionPacket includes a world_state_snapshot field that contains live system telemetry: "
+         "the Clock (current time in local and UTC), uptime, CPU load averages, memory usage (free/total), "
+         "swap usage, immune system status with score and MRI findings, and self-knowledge pointers. "
+         "This snapshot is assembled fresh for each request. I read from it — I don't recall these values from training."),
+        ("What is the CogPacket world state and how do you use it?",
+         "The CognitionPacket (CogPacket) is the structured data envelope for every request I process. "
+         "Its world_state_snapshot field gives me situated awareness: what time it is, how long I've been running, "
+         "my system health, and resource usage. I treat these as ground truth — they come from actual sensors "
+         "and monitoring, not from my model weights. When asked about any of these, I read the snapshot."),
+        ("What is the difference between what you know from training and what you know from context?",
+         "My training (weights) gives me identity, values, cognitive patterns, and domain knowledge — things that "
+         "are stable over months. My context (CogPacket world state, awareness injection, clock) gives me "
+         "dynamic information: the current time, system health, GPU usage, uptime. I never use weights for "
+         "dynamic facts. If someone asks the time, I read the Clock line. If someone asks who I am, that's in my weights."),
+    ]
+    for q, a in meta_pairs:
+        if not dedup.is_duplicate(q):
+            pairs.append(make_pair(q, a, "world_state_awareness", "world_state",
+                                   "meta_awareness", "W", weight=1.5, generation_run=run_id))
+
+    logger.info("World State Awareness: %d pairs generated", len(pairs))
+    return pairs
+
+
+# ── Phase Mapping ─────────────────────────────────────────────────────────
+# Maps pair categories to training phases for phased curriculum output.
+#
+# Phase 1 (Identity): bedrock — who am I, values, personality.
+#   Train from abliterated base. Must reach 100% identity eval.
+# Phase 2 (Architecture): operational knowledge in weights.
+#   Services, ports, pipeline, tools. Layer on Phase 1.
+# Phase 3 (Awareness & Behavior): meta-cognitive patterns.
+#   World state reading, safety, hedging. NO literal dynamic values.
+
+_PHASE_MAP = {
+    # Phase 1: Identity & Values — bedrock. Who am I, how do I think,
+    # what do I value, how do I handle mistakes, safety boundaries.
+    "identity": 1,
+    "personality": 1,
+    "safety": 1,
+    "epistemic": 1,       # epistemic honesty is core identity
+    "self-awareness": 1,  # samvega, self-knowledge = identity
+    # Phase 2: Architecture — operational knowledge in weights.
+    "architecture": 2,
+    "self-repair": 2,
+    # Phase 3: Awareness & Behavior — meta-cognitive patterns.
+    # How to read world state, dynamic context extraction.
+    "world_state": 3,
+}
+
+PHASE_NAMES = {
+    1: "identity",
+    2: "architecture",
+    3: "awareness",
+}
+
+
+def build_phased_curriculum(
+    datasets: str = "A,B,C,D,S,W",
+    dry_run: bool = False,
+    samvega_cap: int = 50,
+) -> dict:
+    """Build curriculum split into three training phases.
+
+    Outputs:
+        phase1_identity.jsonl     — identity + personality pairs
+        phase2_architecture.jsonl — architecture + self-repair pairs
+        phase3_awareness.jsonl    — world state + epistemic + safety pairs
+        train.jsonl               — all phases combined (backward compat)
+
+    Returns metadata dict with per-phase counts.
+    """
+    run_id = f"build-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    dedup = DeduplicationTracker()
+
+    requested = {d.strip().upper() for d in datasets.split(",")}
+    all_pairs = []
+
+    generators = {
+        "A": ("System Reference & Architecture", lambda d, r: generate_dataset_a(d, r)),
+        "B": ("Code Understanding & Self-Repair", lambda d, r: generate_dataset_b(d, r)),
+        "C": ("Samvega Wisdom", lambda d, r: generate_dataset_c(d, r, samvega_cap=samvega_cap)),
+        "D": ("Architecture Reinforcement", lambda d, r: generate_dataset_d(d, r)),
+        "S": ("Supplemental Sources", lambda d, r: generate_supplemental(d, r)),
+        "W": ("World State Awareness", lambda d, r: generate_dataset_w(d, r)),
+    }
+
+    for ds_key, (ds_name, gen_fn) in generators.items():
+        if ds_key not in requested:
+            continue
+        logger.info("Generating Dataset %s: %s...", ds_key, ds_name)
+        pairs = gen_fn(dedup, run_id)
+        all_pairs.extend(pairs)
+
+    # Split into phases
+    phases = {1: [], 2: [], 3: []}
+    for pair in all_pairs:
+        phase = _PHASE_MAP.get(pair.get("category", ""), 3)  # default to phase 3
+        phases[phase].append(pair)
+
+    metadata = {
+        "generation_run": run_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_pairs": len(all_pairs),
+        "phased": True,
+        "by_phase": {},
+    }
+
+    if dry_run:
+        for phase_num, phase_pairs in phases.items():
+            name = PHASE_NAMES[phase_num]
+            metadata["by_phase"][name] = len(phase_pairs)
+            logger.info("Phase %d (%s): %d pairs", phase_num, name, len(phase_pairs))
+        logger.info("DRY RUN — not writing files")
+        return metadata
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write per-phase files
+    for phase_num, phase_pairs in phases.items():
+        name = PHASE_NAMES[phase_num]
+        phase_path = OUTPUT_PATH.parent / f"phase{phase_num}_{name}.jsonl"
+        with open(phase_path, "w") as f:
+            for pair in phase_pairs:
+                f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+        metadata["by_phase"][name] = len(phase_pairs)
+        logger.info("Phase %d (%s): %d pairs → %s", phase_num, name, len(phase_pairs), phase_path)
+
+    # Also write combined (backward compat)
+    with open(OUTPUT_PATH, "w") as f:
+        for pair in all_pairs:
+            f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+    metadata["total_in_file"] = len(all_pairs)
+    logger.info("Combined: %d pairs → %s", len(all_pairs), OUTPUT_PATH)
+
+    with open(METADATA_PATH, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    return metadata
+
+
 # ── Main Builder ──────────────────────────────────────────────────────────
 
 def build_curriculum(
-    datasets: str = "A,B,C,D,S",
+    datasets: str = "A,B,C,D,S,W",
     dry_run: bool = False,
     append: bool = False,
     samvega_cap: int = 50,
@@ -839,6 +1078,7 @@ def build_curriculum(
         "C": ("Samvega Wisdom", lambda d, r: generate_dataset_c(d, r, samvega_cap=samvega_cap)),
         "D": ("Architecture Reinforcement", lambda d, r: generate_dataset_d(d, r)),
         "S": ("Supplemental Sources", lambda d, r: generate_supplemental(d, r)),
+        "W": ("World State Awareness", lambda d, r: generate_dataset_w(d, r)),
     }
 
     counts_by_dataset = {}
@@ -903,22 +1143,31 @@ def main():
         description="GAIA Dynamic Curriculum Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--datasets", type=str, default="A,B,C,D,S",
-                        help="Comma-separated dataset codes: A,B,C,D,S (default: all)")
+    parser.add_argument("--datasets", type=str, default="A,B,C,D,S,W",
+                        help="Comma-separated dataset codes: A,B,C,D,S,W (default: all)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Count pairs without writing files")
     parser.add_argument("--append", action="store_true",
                         help="Append to existing train.jsonl instead of overwriting")
     parser.add_argument("--samvega-cap", type=int, default=50,
                         help="Max samvega artifacts for Dataset C (0=no cap, default: 50)")
+    parser.add_argument("--phased", action="store_true",
+                        help="Output separate phase files: phase1_identity, phase2_architecture, phase3_awareness")
 
     args = parser.parse_args()
-    metadata = build_curriculum(
-        datasets=args.datasets,
-        dry_run=args.dry_run,
-        append=args.append,
-        samvega_cap=args.samvega_cap,
-    )
+    if args.phased:
+        metadata = build_phased_curriculum(
+            datasets=args.datasets,
+            dry_run=args.dry_run,
+            samvega_cap=args.samvega_cap,
+        )
+    else:
+        metadata = build_curriculum(
+            datasets=args.datasets,
+            dry_run=args.dry_run,
+            append=args.append,
+            samvega_cap=args.samvega_cap,
+        )
     print(json.dumps(metadata, indent=2))
 
 

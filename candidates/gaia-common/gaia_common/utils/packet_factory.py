@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from gaia_common.protocols.cognition_packet import (
+    COGPACKET_VERSION,
     Constraints,
     CognitionPacket,
     Content,
@@ -252,7 +253,7 @@ def build_packet(
 
     # -- Build packet --
     packet = CognitionPacket(
-        version="0.3",
+        version=COGPACKET_VERSION,
         header=Header(
             datetime=now,
             session_id=_session_id,

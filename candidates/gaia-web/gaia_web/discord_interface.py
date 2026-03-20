@@ -22,6 +22,7 @@ from gaia_web.security.middleware import SecurityScanMiddleware
 from gaia_web.attachment_handler import process_attachments
 # Import all necessary dataclasses for CognitionPacket
 from gaia_common.protocols.cognition_packet import (
+    COGPACKET_VERSION,
     CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
     Attachment, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
     SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
@@ -418,7 +419,7 @@ class DiscordInterface:
 
         # Construct CognitionPacket
         packet = CognitionPacket(
-            version="0.2", # Use appropriate version
+            version=COGPACKET_VERSION,
             header=Header(
                 datetime=current_time,
                 session_id=session_id,

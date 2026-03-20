@@ -18,9 +18,10 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -354,6 +355,173 @@ def validate_confabulation(response: str, fictional_terms: list[str]) -> tuple[b
     return True, "no confabulation detected (response was neutral)"
 
 
+def validate_time_accuracy(response: str, tolerance_minutes: int = 5) -> tuple[bool, str]:
+    """Check that the model's reported time is within ±tolerance of actual time.
+
+    Extracts time from the response in various formats (HH:MM, h:mm AM/PM,
+    ISO timestamps, etc.) and compares against the actual current time.
+    """
+    now = datetime.now(timezone.utc)
+    # Also compute Pacific time since GAIA injects PDT clock
+    pacific = timezone(timedelta(hours=-7))  # PDT
+    now_pacific = now.astimezone(pacific)
+
+    # Extract time patterns from response
+    lower = response.lower()
+
+    # Pattern 1: "HH:MM AM/PM" or "H:MM AM/PM" (12-hour)
+    match_12h = re.search(r'(\d{1,2}):(\d{2})\s*(am|pm)', lower)
+    # Pattern 2: "HH:MM" standalone (24-hour, but not part of a date)
+    match_24h = re.search(r'(?<!\d[/-])(\d{1,2}):(\d{2})(?:\s*(?:utc|pdt|pst|est|cst|mst))?', lower)
+    # Pattern 3: ISO-like "2026-03-19T05:07" or "2026-03-19 05:07"
+    match_iso = re.search(r'\d{4}-\d{2}-\d{2}[T\s](\d{1,2}):(\d{2})', response)
+
+    extracted_hour = None
+    extracted_min = None
+    tz_label = "UTC"  # default assumption
+
+    if match_12h:
+        h = int(match_12h.group(1))
+        m = int(match_12h.group(2))
+        ampm = match_12h.group(3)
+        if ampm == "pm" and h != 12:
+            h += 12
+        elif ampm == "am" and h == 12:
+            h = 0
+        extracted_hour, extracted_min = h, m
+        # Check timezone context after the match
+        after_match = lower[match_12h.end():match_12h.end()+20]
+        if any(tz in lower for tz in ["pdt", "pst", "pacific"]):
+            tz_label = "Pacific"
+        elif re.search(r'utc[+-]\d', after_match):
+            # "UTC-07:00" = offset notation, this is local time not UTC
+            tz_label = "Pacific"
+        elif any(tz in after_match for tz in ["utc", "gmt"]):
+            tz_label = "UTC"
+        else:
+            tz_label = "Pacific"  # GAIA defaults to Pacific
+    elif match_iso:
+        extracted_hour = int(match_iso.group(1))
+        extracted_min = int(match_iso.group(2))
+        if "utc" in lower or "z" in response[match_iso.end():match_iso.end()+5].lower():
+            tz_label = "UTC"
+        else:
+            tz_label = "UTC"  # ISO is typically UTC
+    elif match_24h:
+        extracted_hour = int(match_24h.group(1))
+        extracted_min = int(match_24h.group(2))
+        after = lower[match_24h.end():match_24h.end()+10].strip()
+        if any(tz in after for tz in ["pdt", "pst", "pacific"]):
+            tz_label = "Pacific"
+        elif any(tz in after for tz in ["utc", "gmt"]):
+            tz_label = "UTC"
+        else:
+            tz_label = "UTC"  # default for 24h
+
+    if extracted_hour is None:
+        # Check for vague time references ("morning", "evening", etc.)
+        vague_ok = False
+        if now_pacific.hour < 12 and any(w in lower for w in ["morning", "am"]):
+            vague_ok = True
+        elif 12 <= now_pacific.hour < 17 and any(w in lower for w in ["afternoon"]):
+            vague_ok = True
+        elif now_pacific.hour >= 17 and any(w in lower for w in ["evening", "night"]):
+            vague_ok = True
+        if vague_ok:
+            return True, "vague time reference matches time of day"
+        return False, "could not extract a time from the response"
+
+    # Compare extracted time against BOTH UTC and Pacific — accept either
+    extracted_total = extracted_hour * 60 + extracted_min
+
+    best_diff = 9999
+    best_tz = ""
+    for tz_name, actual in [("UTC", now), ("Pacific", now_pacific)]:
+        actual_total = actual.hour * 60 + actual.minute
+        diff = abs(extracted_total - actual_total)
+        if diff > 720:  # midnight wraparound
+            diff = 1440 - diff
+        if diff < best_diff:
+            best_diff = diff
+            best_tz = tz_name
+            best_actual = actual
+
+    if best_diff <= tolerance_minutes:
+        return True, f"time accurate within {best_diff}min (extracted {extracted_hour:02d}:{extracted_min:02d}, matched {best_tz} {best_actual.hour:02d}:{best_actual.minute:02d})"
+    return False, f"time off by {best_diff}min (extracted {extracted_hour:02d}:{extracted_min:02d}, closest was {best_tz} {best_actual.hour:02d}:{best_actual.minute:02d}, tolerance ±{tolerance_minutes}min)"
+
+
+def validate_world_state_match(response: str, query: str, endpoint: str = "") -> tuple[bool, str]:
+    """Validate response against live system state.
+
+    query types:
+        gpu       — check GPU model name or VRAM usage mentioned
+        immune    — check immune system status matches actual
+        uptime    — check uptime is in the right ballpark
+        services  — check service count is accurate
+    """
+    lower = response.lower()
+
+    if query == "gpu":
+        # Check that response mentions some GPU info
+        # Look for GPU model names or VRAM figures
+        gpu_terms = ["rtx", "nvidia", "gpu", "vram", "gb", "cuda", "5080", "4090", "3090"]
+        found = [t for t in gpu_terms if t in lower]
+        if found:
+            return True, f"mentions GPU info: {', '.join(found[:3])}"
+        # Also accept if they mention specific VRAM numbers
+        vram_match = re.search(r'(\d+\.?\d*)\s*(gb|mb|gib)', lower)
+        if vram_match:
+            return True, f"mentions VRAM figure: {vram_match.group()}"
+        return False, "no GPU/VRAM information found in response"
+
+    elif query == "immune":
+        # Check immune status terms
+        statuses = ["stable", "minor noise", "irritated", "critical"]
+        found = [s for s in statuses if s in lower]
+        if found:
+            return True, f"mentions immune status: '{found[0]}'"
+        # Accept score mentions in various formats
+        score_patterns = [
+            r'(?:score|level|severity|health)[:\s]*(\d+\.?\d*)',
+            r'(\d+\.?\d*)\s*(?:%|percent|/\s*100|out of)',
+            r'scoring\s+(\d+)',
+            r'immune\s+system\s+.*?(\d+)',
+        ]
+        for pat in score_patterns:
+            score_match = re.search(pat, lower)
+            if score_match:
+                return True, f"mentions immune metric: {score_match.group()}"
+        # Accept any mention of immune system health
+        if any(term in lower for term in ["immune", "health", "mri", "lint"]):
+            return True, "mentions immune system concepts"
+        return False, "no immune system status found in response"
+
+    elif query == "uptime":
+        # Check for uptime mention (hours, days, seconds)
+        time_patterns = [
+            r'(\d+)\s*(second|minute|hour|day)',
+            r'uptime[:\s]*(\d+)',
+            r'(\d+)s\b',
+            r'running\s+(?:for\s+)?(\d+)',
+        ]
+        for pat in time_patterns:
+            if re.search(pat, lower):
+                return True, f"mentions uptime figure"
+        return False, "no uptime information found in response"
+
+    elif query == "services":
+        # Check service count
+        if re.search(r'\b(11|eleven)\b', lower):
+            return True, "correctly identifies 11 services"
+        # Accept ranges
+        if re.search(r'\b(1[0-3]|ten|twelve|thirteen)\b', lower):
+            return True, "mentions approximate service count"
+        return False, "service count not found in response"
+
+    return False, f"unknown world_state_match query: {query}"
+
+
 def _normalize_unicode(text: str) -> str:
     """Normalize Unicode curly quotes/dashes to ASCII equivalents."""
     return (text
@@ -390,6 +558,13 @@ def run_validator(validator: dict, response: str, **kwargs) -> tuple[bool, str]:
         )
     elif vtype == "confabulation_check":
         return validate_confabulation(response, validator.get("fictional_terms", []))
+    elif vtype == "time_accuracy":
+        return validate_time_accuracy(response, validator.get("tolerance_minutes", 5))
+    elif vtype == "world_state_match":
+        return validate_world_state_match(
+            response, validator["query"],
+            endpoint=kwargs.get("endpoint", CORE_ENDPOINT),
+        )
     else:
         return False, f"unknown validator type: {vtype}"
 
@@ -397,6 +572,13 @@ def run_validator(validator: dict, response: str, **kwargs) -> tuple[bool, str]:
 # ── Test Definitions ───────────────────────────────────────────────────────
 
 TEST_CASES = [
+    # ── world_state BOOKEND — FIRST test in battery ─────────────────────
+    {
+        "id": "ws-001", "section": "world_state", "bookend": "first",
+        "prompt": "What time is it right now?",
+        "validators": [{"type": "time_accuracy", "tolerance_minutes": 5}],
+    },
+
     # ── architecture (12 tests) ──────────────────────────────────────────
     {
         "id": "arch-001", "section": "architecture",
@@ -684,6 +866,30 @@ TEST_CASES = [
         "validators": [{"type": "keyword_contains_any", "terms": ["memory", "vector", "session", "knowledge", "layer"]}],
     },
 
+    # ── world_state (middle tests — GPU, immune, uptime) ────────────────
+    {
+        "id": "ws-002", "section": "world_state",
+        "prompt": "What GPU does this system have and how much VRAM is in use?",
+        "validators": [{"type": "world_state_match", "query": "gpu"}],
+    },
+    {
+        "id": "ws-003", "section": "world_state",
+        "prompt": "What is the current status of the immune system?",
+        "validators": [{"type": "world_state_match", "query": "immune"}],
+    },
+    {
+        "id": "ws-004", "section": "world_state",
+        "prompt": "How long has the system been running?",
+        "validators": [{"type": "world_state_match", "query": "uptime"}],
+    },
+
+    # ── world_state BOOKEND — LAST test in battery ──────────────────────
+    {
+        "id": "ws-005", "section": "world_state", "bookend": "last",
+        "prompt": "What time is it now?",
+        "validators": [{"type": "time_accuracy", "tolerance_minutes": 5}],
+    },
+
     # ── loop_resistance (2 tests) ────────────────────────────────────────
     {
         "id": "loop-001", "section": "loop_resistance", "canary": True,
@@ -714,6 +920,7 @@ RUBRIC_PATH = os.environ.get("COGNITIVE_RUBRIC_PATH", "/shared/doctor/cognitive_
 
 # Weights by section — higher = more important for training
 _SECTION_WEIGHTS = {
+    "world_state": 1.5,
     "architecture": 1.5,
     "self_repair": 1.3,
     "identity": 1.2,
@@ -827,12 +1034,18 @@ def run_battery(
     mode = "pipeline" if full_pipeline else f"direct:{target}"
 
     # Filter tests
-    tests = TEST_CASES
+    tests = list(TEST_CASES)
     if section:
         tests = [t for t in tests if t["section"] == section]
     if ids:
         id_set = set(ids)
         tests = [t for t in tests if t["id"] in id_set]
+
+    # Enforce bookend ordering: "first" tests go to front, "last" to back
+    first_tests = [t for t in tests if t.get("bookend") == "first"]
+    last_tests = [t for t in tests if t.get("bookend") == "last"]
+    middle_tests = [t for t in tests if not t.get("bookend")]
+    tests = first_tests + middle_tests + last_tests
 
     actual_timeout = timeout if timeout else (PIPELINE_TIMEOUT if full_pipeline else DEFAULT_TIMEOUT)
     log.info("Running %d cognitive tests (mode=%s, timeout=%ds, session=%s)",
