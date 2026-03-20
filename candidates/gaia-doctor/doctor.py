@@ -2227,6 +2227,161 @@ def _persist_monitor_result(result: dict):
         log.debug("Failed to persist cognitive monitor result", exc_info=True)
 
 
+# ── GPU Zombie Cleanup ─────────────────────────────────────────────────────
+
+_zombie_cleanup_cooldown = 0.0
+
+def _cleanup_gpu_zombies():
+    """Detect and kill GPU processes not owned by any running container.
+
+    Runs nvidia-smi to find GPU consumers, cross-references with running
+    containers, and kills any orphans. This prevents VRAM leaks from
+    crashed or stopped containers that left GPU processes behind.
+    """
+    global _zombie_cleanup_cooldown
+    now = time.monotonic()
+    if now - _zombie_cleanup_cooldown < 120:  # Check every 2 min max
+        return
+    _zombie_cleanup_cooldown = now
+
+    try:
+        # Get GPU processes
+        gpu_result = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if gpu_result.returncode != 0:
+            return
+        gpu_pids = [int(p.strip()) for p in gpu_result.stdout.strip().split("\n") if p.strip()]
+        if not gpu_pids:
+            return
+
+        # Get running container PIDs
+        container_pids = set()
+        ps_result = subprocess.run(
+            ["docker", "ps", "-q"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for cid in ps_result.stdout.strip().split("\n"):
+            cid = cid.strip()
+            if not cid:
+                continue
+            try:
+                inspect = subprocess.run(
+                    ["docker", "inspect", "--format", "{{.State.Pid}}", cid],
+                    capture_output=True, text=True, timeout=5,
+                )
+                pid = int(inspect.stdout.strip())
+                if pid > 0:
+                    container_pids.add(pid)
+            except (ValueError, subprocess.TimeoutExpired):
+                pass
+
+        # Find orphans: GPU PIDs not matching any container's main PID
+        # Check if the GPU process's cgroup matches a running container
+        for gpu_pid in gpu_pids:
+            try:
+                cgroup_path = f"/proc/{gpu_pid}/cgroup"
+                with open(cgroup_path, "r") as f:
+                    cgroup = f.read()
+                # Extract docker container ID from cgroup
+                if "docker-" in cgroup:
+                    container_hash = cgroup.split("docker-")[-1].split(".scope")[0][:12]
+                    # Check if this container is still running
+                    check = subprocess.run(
+                        ["docker", "inspect", "--format", "{{.State.Running}}", container_hash],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if check.stdout.strip() == "true":
+                        continue  # Container is running, GPU process is legitimate
+
+                # Orphan detected — container stopped but GPU process remains
+                log.warning("GPU zombie detected: PID %d (container stopped). Killing.", gpu_pid)
+                subprocess.run(["docker", "rm", "-f", container_hash], capture_output=True, timeout=5)
+                os.kill(gpu_pid, 9)
+                _record_irritation("gpu", f"Killed GPU zombie PID {gpu_pid}", "GPUZombie")
+
+                # Notify orchestrator
+                try:
+                    data = json.dumps({"reason": f"zombie_cleanup:pid_{gpu_pid}"}).encode()
+                    req = Request(
+                        f"{ORCHESTRATOR_ENDPOINT}/gpu/release",
+                        data=data,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    urlopen(req, timeout=5)
+                except Exception:
+                    pass
+
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                pass  # Process already gone
+            except Exception as e:
+                log.debug("Zombie check failed for PID %d: %s", gpu_pid, e)
+
+    except FileNotFoundError:
+        pass  # nvidia-smi not available
+    except Exception:
+        log.debug("GPU zombie cleanup error", exc_info=True)
+
+
+# ── VRAM Reconciliation ────────────────────────────────────────────────────
+
+_vram_reconcile_cooldown = 0.0
+
+def _reconcile_vram():
+    """Compare orchestrator's expected GPU state vs actual nvidia-smi usage.
+
+    If the orchestrator thinks the GPU is idle but nvidia-smi shows heavy usage
+    (or vice versa), log the discrepancy. This catches state drift between
+    the orchestrator's model and reality.
+    """
+    global _vram_reconcile_cooldown
+    now = time.monotonic()
+    if now - _vram_reconcile_cooldown < 300:  # Check every 5 min
+        return
+    _vram_reconcile_cooldown = now
+
+    try:
+        # Get orchestrator's view
+        req = Request(f"{ORCHESTRATOR_ENDPOINT}/watch/state", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            watch = json.loads(resp.read().decode())
+
+        expected_vram = sum(
+            t.get("vram_mb", 0)
+            for t in watch.get("tiers", {}).values()
+        )
+
+        # Get actual GPU usage
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return
+        actual_vram = int(result.stdout.strip())
+
+        # Compare — allow 2GB tolerance for overhead, KV cache, etc.
+        drift = abs(actual_vram - expected_vram)
+        if drift > 2000:  # More than 2GB discrepancy
+            log.warning(
+                "VRAM drift: orchestrator expects %dMB, nvidia-smi shows %dMB (drift %dMB)",
+                expected_vram, actual_vram, drift,
+            )
+            _record_irritation(
+                "gpu", f"VRAM drift: expected {expected_vram}MB, actual {actual_vram}MB",
+                "VRAMDrift",
+            )
+
+    except (URLError, OSError, TimeoutError):
+        pass
+    except FileNotFoundError:
+        pass  # nvidia-smi not available
+    except Exception:
+        log.debug("VRAM reconciliation error", exc_info=True)
+
+
 _audio_stt_warned = False  # Track if we've already warned about STT being down
 
 def _check_audio_sensory_health():
@@ -2303,6 +2458,18 @@ def poll_cycle():
         _check_audio_sensory_health()
     except Exception:
         log.debug("Audio sensory health check failed", exc_info=True)
+
+    # GPU zombie cleanup — detect orphaned processes not owned by any container
+    try:
+        _cleanup_gpu_zombies()
+    except Exception:
+        log.debug("GPU zombie cleanup failed", exc_info=True)
+
+    # VRAM reconciliation — compare orchestrator's expected state vs actual nvidia-smi
+    try:
+        _reconcile_vram()
+    except Exception:
+        log.debug("VRAM reconciliation failed", exc_info=True)
 
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():

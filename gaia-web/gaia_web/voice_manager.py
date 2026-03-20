@@ -466,6 +466,14 @@ class VoiceManager:
             # Notify gaia-core so it keeps audio alive and starts waking Prime
             await self._notify_core_voice_state(True)
 
+            # Proactively wake audio STT — don't wait for first utterance
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(f"{self.audio_endpoint}/wake")
+                    logger.info("Proactive audio wake sent for voice channel join")
+            except Exception:
+                logger.debug("Audio wake on voice join failed (will wake on first audio)", exc_info=True)
+
             # Set up py-cord sink → asyncio.Queue pipeline
             self._audio_queue = asyncio.Queue(maxsize=500)  # ~10 s buffer
             loop = asyncio.get_running_loop()
