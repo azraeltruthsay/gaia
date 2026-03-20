@@ -84,12 +84,33 @@ class StandbyHandler(BaseHTTPRequestHandler):
             b = self._body()
             model_path = b.get('model', '$MODEL_PATH')
             device = b.get('device', '$DEVICE')
-            quantize = b.get('quantize', 'int8')
+            quantize = b.get('quantize', 'nf4')
             try:
-                if quantize == 'int8':
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+
+                if quantize == 'nf4':
+                    # NF4 (4-bit): ~4.5GB for 8B model. Best for adapter + generation headroom.
+                    logger.info('Loading Prime (NF4 bitsandbytes): %s', model_path)
+                    from transformers import BitsAndBytesConfig
+                    bnb_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_quant_type='nf4',
+                        bnb_4bit_use_double_quant=True,
+                    )
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_path, trust_remote_code=True,
+                        quantization_config=bnb_config,
+                        device_map='cpu', low_cpu_mem_usage=True,
+                        torch_dtype=torch.bfloat16,
+                    )
+                    if device == 'cuda':
+                        model = model.to('cuda')
+                    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+                elif quantize == 'int8':
                     logger.info('Loading Prime (int8 quanto): %s', model_path)
-                    import torch
-                    from transformers import AutoModelForCausalLM, AutoTokenizer
                     from optimum.quanto import quantize as q_quantize, freeze, qint8
 
                     model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, dtype=torch.bfloat16, device_map='cpu')
