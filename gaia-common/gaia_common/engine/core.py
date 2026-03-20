@@ -313,9 +313,116 @@ class GAIAEngine:
             logger.warning("Awareness system not available: %s", e)
             self.awareness = None
 
+        # ── Dynamic LoRA Adapter Support ──
+        # The base model stays in GPU memory. Adapters overlay on top via PEFT.
+        # Switch adapters per-request without reloading the base model.
+        self._base_model = self.model  # Keep reference to unwrapped base
+        self._adapters: Dict[str, str] = {}  # name → path
+        self._active_adapter: Optional[str] = None
+        self._peft_model = None  # PeftModel wrapper (created on first adapter load)
+
         elapsed = time.time() - start
         mem_mb = torch.cuda.memory_allocated() // (1024 * 1024) if device == "cuda" else 0
         logger.info("GAIA Engine ready in %.1fs (VRAM: %dMB)", elapsed, mem_mb)
+
+    # ── Adapter Management ───────────────────────────────────────────
+
+    def load_adapter(self, name: str, path: str) -> Dict:
+        """Load a LoRA adapter and register it for use.
+
+        The first adapter loaded wraps the base model with PeftModel.
+        Subsequent adapters are added to the same PeftModel.
+        """
+        try:
+            from peft import PeftModel
+        except ImportError:
+            return {"ok": False, "error": "peft not installed"}
+
+        with self._lock:
+            try:
+                if self._peft_model is None:
+                    # First adapter — wrap base model
+                    logger.info("Loading first adapter '%s' from %s", name, path)
+                    self._peft_model = PeftModel.from_pretrained(
+                        self._base_model, path, adapter_name=name,
+                    )
+                    self._peft_model.eval()
+                    self.model = self._peft_model
+                else:
+                    # Additional adapter — add to existing PeftModel
+                    logger.info("Loading additional adapter '%s' from %s", name, path)
+                    self._peft_model.load_adapter(path, adapter_name=name)
+
+                self._adapters[name] = path
+                mem_mb = torch.cuda.memory_allocated() // (1024 * 1024) if self.device == "cuda" else 0
+                logger.info("Adapter '%s' loaded (%dMB VRAM)", name, mem_mb)
+                return {"ok": True, "adapter": name, "vram_mb": mem_mb,
+                        "loaded_adapters": list(self._adapters.keys())}
+            except Exception as e:
+                logger.exception("Failed to load adapter '%s'", name)
+                return {"ok": False, "error": str(e)}
+
+    def unload_adapter(self, name: str) -> Dict:
+        """Unload a specific adapter."""
+        if name not in self._adapters:
+            return {"ok": False, "error": f"adapter '{name}' not loaded"}
+
+        with self._lock:
+            try:
+                if self._active_adapter == name:
+                    self.set_active_adapter(None)
+                if self._peft_model is not None:
+                    self._peft_model.delete_adapter(name)
+                del self._adapters[name]
+
+                # If no adapters left, unwrap back to base model
+                if not self._adapters and self._peft_model is not None:
+                    self.model = self._base_model
+                    self._peft_model = None
+
+                logger.info("Adapter '%s' unloaded", name)
+                return {"ok": True, "remaining_adapters": list(self._adapters.keys())}
+            except Exception as e:
+                logger.exception("Failed to unload adapter '%s'", name)
+                return {"ok": False, "error": str(e)}
+
+    def set_active_adapter(self, name: Optional[str]) -> Dict:
+        """Switch to a specific adapter or back to base model.
+
+        Args:
+            name: Adapter name, or None for base model.
+        """
+        if name is not None and name not in self._adapters:
+            return {"ok": False, "error": f"adapter '{name}' not loaded"}
+
+        with self._lock:
+            try:
+                if name is None:
+                    # Switch to base model
+                    if self._peft_model is not None:
+                        self._peft_model.disable_adapter_layers()
+                    self._active_adapter = None
+                    logger.info("Active adapter: base model")
+                else:
+                    if self._peft_model is not None:
+                        self._peft_model.enable_adapter_layers()
+                        self._peft_model.set_adapter(name)
+                    self._active_adapter = name
+                    logger.info("Active adapter: %s", name)
+
+                return {"ok": True, "active": self._active_adapter,
+                        "loaded": list(self._adapters.keys())}
+            except Exception as e:
+                logger.exception("Failed to set adapter '%s'", name)
+                return {"ok": False, "error": str(e)}
+
+    def adapter_status(self) -> Dict:
+        """Return current adapter state."""
+        return {
+            "active": self._active_adapter,
+            "loaded": list(self._adapters.keys()),
+            "base_model": self.model_path,
+        }
 
     def generate(self, messages: list, max_tokens: int = 512,
                  temperature: float = 0.7, top_p: float = 0.9,
@@ -639,6 +746,8 @@ class EngineHandler(BaseHTTPRequestHandler):
                 sample, _engine.prefix_cache, _engine.awareness,
                 sae_confident_topics=["identity"],
             ))
+        elif self.path == "/adapter/status":
+            self._json(_engine.adapter_status())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -716,6 +825,20 @@ class EngineHandler(BaseHTTPRequestHandler):
         elif self.path == "/polygraph/disable":
             _engine.monitor.enabled = False
             self._json({"ok": True})
+        elif self.path == "/adapter/load":
+            b = self._body()
+            name = b.get("name", "")
+            path = b.get("path", "")
+            if not name or not path:
+                self._json({"ok": False, "error": "name and path required"}, 400)
+            else:
+                self._json(_engine.load_adapter(name, path))
+        elif self.path == "/adapter/unload":
+            b = self._body()
+            self._json(_engine.unload_adapter(b.get("name", "")))
+        elif self.path == "/adapter/set":
+            b = self._body()
+            self._json(_engine.set_active_adapter(b.get("name")))
         elif self.path == "/atlas/record":
             # SAE Atlas recording — runs in-process with the loaded model
             b = self._body()
