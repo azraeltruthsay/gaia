@@ -331,7 +331,7 @@
   },
   "KNOWLEDGE_BASES": {
     "dnd_campaign": {
-      "doc_dir": "dnd_campaign/docs",
+      "doc_dir": "dnd_campaign/heimric_cosmos",
       "vector_store_dir": "dnd_campaign/vector_store"
     },
     "system": {
