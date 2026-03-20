@@ -2387,10 +2387,12 @@ def _reconcile_vram():
 _prime_model_warned = False
 
 def _check_prime_model_health():
-    """Verify Prime has a model loaded, not just container running.
+    """Monitor Prime's model state for dashboard visibility.
 
-    Prime reports healthy (HTTP 200) even in standby with no model.
-    If model_loaded is false, ask orchestrator to load it.
+    Prime in standby is a VALID state — the GPU can't hold all tiers.
+    Doctor observes and reports but does NOT auto-wake. Waking Prime is
+    Core's job when a real request needs it (via _request_prime_load
+    in vllm_remote_model.py on 503 retry).
     """
     global _prime_model_warned
     try:
@@ -2400,32 +2402,16 @@ def _check_prime_model_health():
 
         if health.get("model_loaded"):
             if _prime_model_warned:
-                log.info("Prime model recovered — loaded and active")
+                log.info("Prime model loaded — active")
                 _prime_model_warned = False
-            return
-
-        # Model not loaded — request wake from orchestrator
-        if not _prime_model_warned:
-            log.warning("Prime is in standby (model_loaded=false). Requesting GPU wake...")
-            _prime_model_warned = True
-            _record_irritation("gaia-prime", "Prime in standby — no model loaded", "PrimeStandby")
-
-        try:
-            data = json.dumps({"reason": "doctor_prime_health_check"}).encode()
-            wake_req = Request(
-                f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urlopen(wake_req, timeout=10) as resp:
-                result = json.loads(resp.read().decode())
-            log.info("Prime wake requested: %s", result.get("message", result))
-        except Exception as e:
-            log.debug("Prime wake request failed: %s", e)
+        else:
+            if not _prime_model_warned:
+                log.info("Prime in standby (model_loaded=false) — valid state, Core will wake on demand")
+                _prime_model_warned = True
+            # NOT an irritation — standby is normal. Just track for dashboard.
 
     except (URLError, OSError, TimeoutError):
-        pass  # Container not reachable — normal health check handles this
+        pass
 
 
 _audio_stt_warned = False  # Track if we've already warned about STT being down
