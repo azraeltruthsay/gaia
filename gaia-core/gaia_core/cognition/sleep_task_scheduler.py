@@ -365,6 +365,33 @@ class SleepTaskScheduler:
 
         logger.info("Conversation curation: %d sessions curated", curated)
 
+        # Validate vector embeddings — refresh stale indices
+        try:
+            self.check_interrupted()
+            study_endpoint = os.environ.get("STUDY_ENDPOINT", "http://gaia-study:8766")
+            from urllib.request import Request, urlopen
+            import json as _j2
+
+            for kb_name in ("system", "blueprints", "dnd_campaign"):
+                try:
+                    status_req = Request(f"{study_endpoint}/index/{kb_name}/status")
+                    with urlopen(status_req, timeout=5) as resp:
+                        status = _j2.loads(resp.read().decode())
+                    doc_count = status.get("doc_count", 0)
+                    if doc_count == 0:
+                        logger.info("Embedding validation: %s has 0 docs, triggering rebuild", kb_name)
+                        build_req = Request(
+                            f"{study_endpoint}/index/build",
+                            data=_j2.dumps({"knowledge_base_name": kb_name}).encode(),
+                            headers={"Content-Type": "application/json"},
+                        )
+                        with urlopen(build_req, timeout=10) as resp:
+                            _j2.loads(resp.read().decode())
+                except Exception:
+                    logger.debug("Embedding validation for %s failed", kb_name, exc_info=True)
+        except Exception:
+            logger.debug("Embedding validation skipped", exc_info=True)
+
     def _run_golden_thread_sync(self) -> None:
         """Generate a fresh 'As-Built' report of the codebase at the start of sleep."""
         try:

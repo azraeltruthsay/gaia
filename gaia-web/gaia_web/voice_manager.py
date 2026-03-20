@@ -599,9 +599,10 @@ class VoiceManager:
 
                 logger.info("Transcribed: %s", text[:100])
 
-                # 2. Pause audio capture (echo prevention)
-                if self._sink:
-                    self._sink.paused = True
+                # 2. Full duplex: keep recording but mark as echo-cancellation zone
+                # The sink stays active so we can detect interruptions.
+                # Audio captured during TTS playback is discarded in the drain step.
+                _echo_zone = True
 
                 # 2.5. Check core state — if not active, use Core stalling response
                 core_state = await self._get_core_state()
@@ -647,9 +648,8 @@ class VoiceManager:
             except Exception:
                 logger.error("Utterance processing failed", exc_info=True)
             finally:
-                # Always resume audio capture
-                if self._sink:
-                    self._sink.paused = False
+                # Full duplex: sink was never paused, just drain echo audio
+                _echo_zone = False
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
