@@ -180,7 +180,7 @@ SERVICES = {
     "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
     "gaia-nano": ("http://gaia-nano:8080/health", "restart"),
-    "gaia-audio": ("http://gaia-audio:8080/health", None),
+    "gaia-audio": ("http://gaia-audio:8080/health", "restart"),
     "gaia-study": ("http://gaia-study:8766/health", None),
     "gaia-orchestrator": ("http://gaia-orchestrator:6410/health", None),
     "gaia-monkey": ("http://gaia-monkey:6420/health", None),
@@ -2227,6 +2227,53 @@ def _persist_monitor_result(result: dict):
         log.debug("Failed to persist cognitive monitor result", exc_info=True)
 
 
+_audio_stt_warned = False  # Track if we've already warned about STT being down
+
+def _check_audio_sensory_health():
+    """Deep health check for gaia-audio: verify STT model is loaded.
+
+    The container can be healthy (HTTP 200) but with STT unloaded (no model).
+    This checks /status and attempts a wake if STT is missing.
+    """
+    global _audio_stt_warned
+    try:
+        req = Request("http://gaia-audio:8080/status", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            status = json.loads(resp.read().decode())
+
+        stt_model = status.get("stt_model")
+        tts_engine = status.get("tts_engine")
+
+        if stt_model and "ASR" in stt_model:
+            # STT is loaded — all good
+            if _audio_stt_warned:
+                log.info("Audio STT recovered: %s", stt_model)
+                _audio_stt_warned = False
+            return
+
+        # STT not loaded — attempt wake
+        if not _audio_stt_warned:
+            log.warning("Audio STT not loaded (stt_model=%s). Attempting wake...", stt_model)
+            _audio_stt_warned = True
+            _record_irritation("gaia-audio", f"STT model not loaded: {stt_model}", "AudioSTTDown")
+
+        try:
+            wake_req = Request(
+                "http://gaia-audio:8080/wake",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(wake_req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            log.info("Audio wake requested: %s", result)
+        except Exception as e:
+            log.debug("Audio wake request failed: %s", e)
+
+    except (URLError, OSError, TimeoutError):
+        pass  # Container unreachable — normal health check will catch this
+
+
 def poll_cycle():
     """Run one health check cycle across all services."""
     global _gpu_status_cache, _model_server_cache, _pipeline_status_cache
@@ -2250,6 +2297,12 @@ def poll_cycle():
         poll_kv_cache_pressure()
     except Exception:
         log.debug("KV cache pressure poll failed", exc_info=True)
+
+    # Audio sensory health — verify STT model is loaded (not just container up)
+    try:
+        _check_audio_sensory_health()
+    except Exception:
+        log.debug("Audio sensory health check failed", exc_info=True)
 
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():
