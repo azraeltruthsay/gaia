@@ -22,19 +22,23 @@ Last Updated: 2026-03-19
 | **Dozzle (Logs)** | `http://dozzle:8080` | 9999 |
 
 ## 🧠 Model Pool
-- **Thinker/Prime:** `Huihui-Qwen3-8B-GAIA-Prime-adaptive` (vLLM, GPU)
+- **Thinker/Prime:** `Huihui-Qwen3-8B-GAIA-Prime-adaptive` (Qwen3-8B base, vLLM, GPU)
   - *Context:* 16,384 tokens
   - *GPU Memory:* 85% utilization
   - *LoRA:* Enabled (max 4 adapters, rank 64)
-- **Core/Operator:** `Qwen3-8B-abliterated-Q4_K_M.gguf` (embedded llama-server in gaia-core, CPU)
+- **Core/Operator:** `Qwen3.5-2B-GAIA-Core-v3` (Qwen3.5-2B base, identity-baked)
   - *Context:* 8,192 tokens
-  - *Endpoint:* `http://localhost:8092`
-- **Nano/Reflex:** `Qwen3.5-0.8B-Abliterated-Q8_0.gguf` (llama-server on gaia-nano, GPU primary)
+  - *Endpoint:* `http://localhost:8092` (embedded in gaia-core)
+  - *Modes:* Safetensors on GPU (primary), GGUF on CPU (fallback during FOCUSING state)
+- **Nano/Reflex:** `Qwen3.5-0.8B-Abliterated` (Qwen3.5-0.8B base)
   - *Context:* 2,048 tokens
   - *Endpoint:* `http://gaia-nano:8080`
+  - *Modes:* Safetensors on GPU (primary), GGUF fallback
 - **Oracle:** `gpt-4o-mini` (OpenAI API)
 - **Groq Fallback:** `llama-3.3-70b-versatile` (Groq API)
 - **Embedding:** `all-MiniLM-L6-v2` (sentence-transformers, gaia-study)
+
+Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime.
 
 ## 📂 Knowledge & Paths
 | Resource | Path |
