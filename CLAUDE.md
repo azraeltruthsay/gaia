@@ -27,14 +27,15 @@ Candidate (HA) services mirror production with `+1` ports. Defined in `docker-co
 
 ## Model Tiers
 
-| Tier | Model | Backend | Role |
-|------|-------|---------|------|
-| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | gaia-nano llama-server (GPU primary, GGUF fallback) | Sub-second triage classifier, transcript cleanup |
-| **Core/Operator** | Qwen3-8B-abliterated Q4_K_M GGUF | Embedded llama-server in gaia-core (CPU, port 8092) | Intent detection, tool selection, medium tasks |
-| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked) | vLLM on gaia-prime (GPU) | Complex reasoning, code, heavyweight tasks |
-| **Oracle** | gpt-4o-mini | OpenAI API | Cloud escalation fallback |
-| **Groq** | llama-3.3-70b-versatile | Groq API | Fast external fallback |
+| Tier | Model | Base | Backend | Role |
+|------|-------|------|---------|------|
+| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | Qwen3.5-0.8B | gaia-nano llama-server (GPU primary, GGUF fallback) | Sub-second triage, transcript cleanup |
+| **Core/Operator** | Qwen3.5-2B-GAIA-Core-v3 (identity-baked) | Qwen3.5-2B | Embedded llama-server in gaia-core (safetensors GPU / GGUF CPU fallback, port 8092) | Intent detection, tool selection, medium tasks |
+| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked) | Qwen3-8B | vLLM on gaia-prime (GPU) | Complex reasoning, code, heavyweight tasks |
+| **Oracle** | gpt-4o-mini | — | OpenAI API | Cloud escalation fallback |
+| **Groq** | llama-3.3-70b-versatile | — | Groq API | Fast external fallback |
 
+Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime.
 **Cascade routing**: Nano classifies SIMPLE/COMPLEX → Core handles or escalates → Prime for heavyweight tasks.
 **LoRA adapters**: Loaded dynamically into vLLM via `POST /v1/load_lora_adapter`. Active adapter set via `VLLMRemoteModel.set_active_adapter()`.
 

@@ -29,7 +29,7 @@ The system is built around twelve primary services plus a shared library:
 1.  **`gaia-orchestrator`**: Manages Docker containers, GPU resources, and service lifecycle. Coordinates GPU handoffs between gaia-prime and gaia-study.
 2.  **`gaia-prime`**: Standalone vLLM OpenAI-compatible inference server. Owns the GPU for LLM inference. Built from source targeting RTX 5080 Blackwell (sm_120) with vLLM v0.15.1 and LoRA adapter support. Currently serves Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked, GPU).
 2b. **`gaia-nano`**: Lightweight llama-server container for the Nano/Reflex tier (Qwen3.5-0.8B-Abliterated). Dual-mode: safetensors on GPU (primary) with GGUF fallback. Sub-second triage classification. Built from `gaia-llama/Dockerfile`.
-3.  **`gaia-core`**: The cognitive engine. Runs CPU-only with an embedded llama-server (Core/Operator tier, Qwen3-8B Q4_K_M GGUF on port 8092) and delegates GPU inference to gaia-prime via `PRIME_ENDPOINT`. Handles reasoning, intent detection, planning, self-reflection, tool routing, sleep/wake cycle, and session management. Falls back to Groq API or local GGUF models when prime is unavailable. Supports HA failover via `MCP_FALLBACK_ENDPOINT`.
+3.  **`gaia-core`**: The cognitive engine. Embeds a llama-server for Core/Operator inference (Qwen3.5-2B-GAIA-Core-v3, safetensors on GPU / GGUF CPU fallback, port 8092) and delegates heavy GPU inference to gaia-prime via `PRIME_ENDPOINT`. Handles reasoning, intent detection, planning, self-reflection, tool routing, sleep/wake cycle, and session management. Falls back to Groq API or local GGUF models when prime is unavailable. Supports HA failover via `MCP_FALLBACK_ENDPOINT`.
 4.  **`gaia-web`**: User-facing interface providing HTTP REST API, Discord bot (text + voice), and dashboard. Converts user input to CognitionPackets and routes completed responses back to their origin. Orchestrates Discord voice calls via VoiceManager and gaia-audio. Supports HA failover via `CORE_FALLBACK_ENDPOINT`.
 5.  **`gaia-mcp`**: Sandboxed tool execution environment with approval workflows. Provides file operations, shell execution, vector queries, and knowledge management tools. Security-hardened with dropped capabilities.
 6.  **`gaia-study`**: Background processing for vector indexing, embedding generation, and QLoRA model fine-tuning. Sole writer to the vector store. Uses GPU for embeddings and training.
@@ -85,7 +85,7 @@ In v0.3, GPU inference is fully decoupled from cognition:
 | Backend | Class | Location | Use Case |
 |---------|-------|----------|----------|
 | `thinker` / `gpu_prime` | VLLMRemoteModel | gaia-prime :7777 (HTTP) | Primary GPU inference |
-| `core` | VLLMRemoteModel | gaia-core :8092 (embedded llama-server) | Medium tasks, CPU fallback |
+| `core` | VLLMRemoteModel | gaia-core :8092 (embedded llama-server, Qwen3.5-2B) | Medium tasks, safetensors GPU / GGUF CPU fallback |
 | `reflex` | VLLMRemoteModel | gaia-nano :8080 (llama-server) | Sub-second triage, classification |
 | `groq_fallback` | GroqAPIModel | Groq cloud API | Free-tier fallback |
 | `oracle_openai` | GPTAPIModel | OpenAI API | High-quality reasoning |

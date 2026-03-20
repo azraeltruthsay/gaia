@@ -15,10 +15,10 @@ dozzle (port 9999): The X-Ray — Docker log viewer
 
 Infrastructure: ELK stack (Elasticsearch :9200, Logstash :5044, Kibana :5601, Filebeat)
 
-Cognitive Tiers:
+Cognitive Tiers (two model families: Qwen3.5 for small tiers, Qwen3 for Prime):
 - Nano (Reflex): Qwen3.5-0.8B-Abliterated, instant triage, SIMPLE/COMPLEX classification (gaia-nano)
-- Core (Operator): Qwen3-8B-abliterated Q4_K_M GGUF, mid-tier reasoning, tool routing (embedded in gaia-core, CPU)
-- Prime (Thinker): Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked), complex reasoning, code (gaia-prime, GPU)
+- Core (Operator): Qwen3.5-2B-GAIA-Core-v3 (identity-baked), mid-tier reasoning, tool routing (embedded in gaia-core, safetensors GPU / GGUF CPU fallback)
+- Prime (Thinker): Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked), complex reasoning, code (gaia-prime, vLLM GPU)
 
 GPU: NVIDIA RTX 5080, 16GB VRAM
 GPU States: IDLE (Nano on GPU), FOCUSING (Prime on GPU), TRANSITIONING
