@@ -2382,6 +2382,52 @@ def _reconcile_vram():
         log.debug("VRAM reconciliation error", exc_info=True)
 
 
+# ── Prime Model Health ─────────────────────────────────────────────────────
+
+_prime_model_warned = False
+
+def _check_prime_model_health():
+    """Verify Prime has a model loaded, not just container running.
+
+    Prime reports healthy (HTTP 200) even in standby with no model.
+    If model_loaded is false, ask orchestrator to load it.
+    """
+    global _prime_model_warned
+    try:
+        req = Request("http://gaia-prime:7777/health", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            health = json.loads(resp.read().decode())
+
+        if health.get("model_loaded"):
+            if _prime_model_warned:
+                log.info("Prime model recovered — loaded and active")
+                _prime_model_warned = False
+            return
+
+        # Model not loaded — request wake from orchestrator
+        if not _prime_model_warned:
+            log.warning("Prime is in standby (model_loaded=false). Requesting GPU wake...")
+            _prime_model_warned = True
+            _record_irritation("gaia-prime", "Prime in standby — no model loaded", "PrimeStandby")
+
+        try:
+            data = json.dumps({"reason": "doctor_prime_health_check"}).encode()
+            wake_req = Request(
+                f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(wake_req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            log.info("Prime wake requested: %s", result.get("message", result))
+        except Exception as e:
+            log.debug("Prime wake request failed: %s", e)
+
+    except (URLError, OSError, TimeoutError):
+        pass  # Container not reachable — normal health check handles this
+
+
 _audio_stt_warned = False  # Track if we've already warned about STT being down
 
 def _check_audio_sensory_health():
@@ -2452,6 +2498,12 @@ def poll_cycle():
         poll_kv_cache_pressure()
     except Exception:
         log.debug("KV cache pressure poll failed", exc_info=True)
+
+    # Prime deep health — verify model is loaded, not just container healthy
+    try:
+        _check_prime_model_health()
+    except Exception:
+        log.debug("Prime model health check failed", exc_info=True)
 
     # Audio sensory health — verify STT model is loaded (not just container up)
     try:

@@ -436,9 +436,16 @@ class VLLMRemoteModel:
                 r = self._session.post(url, json=payload, timeout=self.timeout)
                 # Retry on 503 (vLLM model-loading state), not other errors
                 if r.status_code == 503 and attempt < self._MAX_RETRIES:
-                    delay = self._RETRY_BASE_DELAY * attempt
+                    # On first 503, request model load from orchestrator
+                    if attempt == 1:
+                        try:
+                            self._request_prime_load()
+                        except Exception:
+                            pass
+                    # Wait longer after wake request — model takes ~30s to load
+                    delay = max(self._RETRY_BASE_DELAY * attempt, 10.0 if attempt == 1 else 5.0)
                     logger.warning(
-                        "vLLM returned 503 on attempt %d/%d, retrying in %.1fs...",
+                        "vLLM returned 503 on attempt %d/%d, retrying in %.1fs (wake requested)...",
                         attempt, self._MAX_RETRIES, delay,
                     )
                     time.sleep(delay)
