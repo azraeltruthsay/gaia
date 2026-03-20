@@ -509,6 +509,15 @@ class SleepTaskScheduler:
                         )
                         logger.info("Created promotion request %s for %s", req.request_id, service_id)
 
+                        # Auto-promote if: verdict is "ready" (not just warnings),
+                        # Serenity is active, and service is NOT a vital organ
+                        if report.verdict == "ready" and self._is_serene():
+                            vital = {"gaia-core", "gaia-mcp", "gaia-prime"}
+                            if service_id not in vital:
+                                self._auto_promote(service_id, report)
+                            else:
+                                logger.info("Skipping auto-promote for vital organ %s — requires Azrael approval", service_id)
+
                         # Write council note
                         try:
                             from gaia_core.cognition.council_notes import CouncilNoteManager
@@ -523,6 +532,61 @@ class SleepTaskScheduler:
                             logger.debug("Could not write council note for promotion readiness", exc_info=True)
                     except Exception:
                         logger.warning("Could not create promotion request for %s", service_id, exc_info=True)
+
+    def _auto_promote(self, service_id: str, report) -> None:
+        """Autonomously promote a candidate service to production.
+
+        GAIA promotes herself: copies candidate files to production paths,
+        restarts the service. Only for non-vital organs when Serene.
+        Vital organs (gaia-core, gaia-mcp, gaia-prime) always need Azrael.
+        """
+        import shutil
+        project_root = Path("/gaia/GAIA_Project")
+        candidate_dir = project_root / "candidates" / service_id
+        live_dir = project_root / service_id
+
+        if not candidate_dir.exists():
+            return
+
+        try:
+            logger.info("AUTO-PROMOTE: %s (verdict=%s)", service_id, report.verdict)
+
+            # Sync candidate → production
+            if live_dir.exists():
+                # Copy files, preserving structure
+                for src_file in candidate_dir.rglob("*.py"):
+                    rel = src_file.relative_to(candidate_dir)
+                    dst = live_dir / rel
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_file, dst)
+                    logger.debug("  Promoted: %s", rel)
+            else:
+                shutil.copytree(candidate_dir, live_dir)
+
+            # Restart the service
+            import subprocess
+            subprocess.run(
+                ["docker", "restart", service_id],
+                capture_output=True, timeout=30,
+            )
+            logger.info("AUTO-PROMOTE: %s promoted and restarted", service_id)
+
+            # Record in changelog
+            try:
+                from gaia_common.utils.codemind_changelog import append_entry
+                append_entry({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "cycle_id": f"auto-promote-{service_id}",
+                    "trigger": "sleep_promotion_readiness",
+                    "outcome": "promoted",
+                    "changes": [{"file_path": str(candidate_dir), "issue": "auto-promotion", "scope_tier": 3}],
+                    "dry_run": False,
+                })
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.warning("AUTO-PROMOTE failed for %s: %s", service_id, e, exc_info=True)
 
     def _run_blueprint_validation(self, **kwargs) -> None:
         """Scan blueprints against source files and flag stale content.

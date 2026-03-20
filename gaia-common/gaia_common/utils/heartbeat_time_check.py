@@ -205,6 +205,43 @@ def read_state() -> Dict[str, Any]:
 
 # ── Background Thread ────────────────────────────────────────────────────
 
+def _get_focus_multiplier() -> float:
+    """Determine heartbeat rate based on GAIA's cognitive state.
+
+    Returns a multiplier: <1.0 = faster (focused), 1.0 = normal, >1.0 = slower (idle).
+
+    Like a real heartbeat: quickens during activity, slows during rest.
+    """
+    try:
+        # Check sleep state — if sleeping, slow way down
+        sleep_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "sleep_state" / "state.json"
+        if sleep_path.exists():
+            state = json.loads(sleep_path.read_text())
+            if state.get("state") in ("SLEEPING", "DREAMING"):
+                return 3.0  # Slow pulse during sleep
+
+        # Check recent request activity via heartbeat history
+        state = read_state()
+        history = state.get("history", [])
+        if len(history) >= 2:
+            # If recent checks had errors, speed up (something might be wrong)
+            recent_errors = sum(1 for h in history[:5] if h.get("status") != "pass")
+            if recent_errors >= 2:
+                return 0.5  # Fast pulse — something's off
+
+        # Check immune system — if irritated, speed up
+        immune_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "serenity.json"
+        if immune_path.exists():
+            serenity = json.loads(immune_path.read_text())
+            if not serenity.get("serene", True):
+                return 0.7  # Elevated pulse — not serene
+
+    except Exception:
+        pass
+
+    return 1.0  # Normal resting pulse
+
+
 _heartbeat_thread: Optional[threading.Thread] = None
 _heartbeat_stop = threading.Event()
 
@@ -255,8 +292,11 @@ def _heartbeat_loop(interval: int, endpoint: str) -> None:
         except Exception:
             logger.debug("Heartbeat check failed", exc_info=True)
 
-        # Jitter: 60-120% of base interval (e.g., 300s base → 180-360s actual)
-        jittered = random.uniform(interval * 0.6, interval * 1.2)
+        # Focus-adaptive interval: faster when active, slower when idle
+        # Reads cognitive state to determine arousal level
+        focus_multiplier = _get_focus_multiplier()
+        base = interval * focus_multiplier
+        jittered = random.uniform(base * 0.6, base * 1.2)
         _heartbeat_stop.wait(jittered)
 
     logger.info("Heartbeat stopped")
