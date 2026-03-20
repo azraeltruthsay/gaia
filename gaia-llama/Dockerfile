@@ -1,6 +1,6 @@
-# gaia-nano: Dual-mode Reflex tier — GGUF (llama-server) + Safetensors (inference_server.py)
+# gaia-nano: Dual-mode Reflex tier — GGUF (llama-server) + Safetensors (GAIAEngine)
 # GGUF mode: fast inference via llama.cpp with CUDA
-# Safetensors mode: full activation monitoring (polygraph), SAE analysis, device migration
+# Safetensors mode: full activation monitoring (polygraph), SAE analysis, adapter loading
 ARG LLAMA_CPP_TAG=b8250
 ARG CUDA_VERSION=12.8.1
 
@@ -30,37 +30,20 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server -j$(nproc)
 
-# ── Runtime stage ──────────────────────────────────────────────────────────
-FROM python:3.11-slim
+# ── Runtime stage (from unified engine base) ──────────────────────────────
+FROM localhost:5000/gaia-engine-base:latest
 
-ENV DEBIAN_FRONTEND=noninteractive
-
+# GGUF support: llama-server binary + CUDA runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates libcurl4 libgomp1 \
+    libcurl4 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# CUDA runtime libs for llama-server GPU mode
 COPY --from=builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
 COPY --from=builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
 COPY --from=builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
-
-# llama-server binary and shared libs
 COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
 RUN ldconfig
-
-# PyTorch + transformers for safetensors mode
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
-RUN pip install --no-cache-dir transformers accelerate
-# Note: flash-linear-attention omitted — Qwen3.5 falls back to torch implementation
-# which works correctly. FLA's custom_device_ctx has a torch.cpu.device bug.
-
-WORKDIR /app
-
-# Install gaia-common (shared engine library)
-COPY candidates/gaia-common /gaia-common
-RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
-ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"
 
 # Copy entrypoint
 COPY gaia-llama/entrypoint.sh /entrypoint.sh

@@ -1,30 +1,11 @@
-# gaia-prime: GAIA Engine for the Thinker tier
-# Runs the shared inference engine with Prime's model (8B int8 quanto)
-# Always-on container — model loaded/unloaded by orchestrator via /model/load and /model/unload
+# gaia-prime: The Thinker tier
+# Inherits unified GAIA engine base with all ML capabilities.
+# Runs in standby mode — model loaded/unloaded by orchestrator.
 
-FROM python:3.11-slim
+FROM localhost:5000/gaia-engine-base:latest
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# PyTorch with CUDA 12.8
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
-
-# Transformers + quantization
-RUN pip install --no-cache-dir transformers accelerate optimum-quanto
-
-WORKDIR /app
-
-# Install gaia-common (shared engine library)
-COPY candidates/gaia-common /gaia-common
-RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
-ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"
+# Prime-specific: nothing extra needed — base has everything
+# (torch, transformers, peft, bitsandbytes, optimum-quanto)
 
 # Entrypoint
 COPY gaia-prime/entrypoint.sh /entrypoint.sh
