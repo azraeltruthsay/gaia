@@ -266,15 +266,58 @@ class GAIAEngine:
         logger.info("GAIA Engine initializing: %s on %s", model_path, device)
         start = time.time()
 
-        # Load tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        # Detect if model is multimodal (vision-language)
+        import json as _json
+        _config_path = os.path.join(model_path, "config.json")
+        _model_config = {}
+        try:
+            with open(_config_path) as f:
+                _model_config = _json.load(f)
+        except Exception:
+            pass
+        self.has_vision = "vision_config" in _model_config or \
+            "VL" in str(_model_config.get("architectures", "")) or \
+            "ConditionalGeneration" in str(_model_config.get("architectures", ""))
+
+        # Load tokenizer / processor
+        if self.has_vision:
+            try:
+                from transformers import AutoProcessor
+                self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+                self.tokenizer = self.processor.tokenizer
+                logger.info("Vision-language model detected — processor loaded")
+            except Exception as e:
+                logger.warning("Failed to load VL processor, falling back to tokenizer: %s", e)
+                self.has_vision = False
+                self.processor = None
+                self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        else:
+            self.processor = None
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Load model
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path, trust_remote_code=True, dtype=dtype,
-        )
+        # Load model — use AutoModel for vision, AutoModelForCausalLM for text
+        if self.has_vision:
+            from transformers import AutoModelForImageTextToText
+            try:
+                self.model = AutoModelForImageTextToText.from_pretrained(
+                    model_path, trust_remote_code=True, dtype=dtype,
+                )
+                logger.info("Loaded as vision-language model (AutoModelForImageTextToText)")
+            except Exception:
+                # Fallback to generic auto
+                from transformers import AutoModel
+                self.model = AutoModel.from_pretrained(
+                    model_path, trust_remote_code=True, dtype=dtype,
+                )
+                logger.info("Loaded as generic model (AutoModel)")
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path, trust_remote_code=True, dtype=dtype,
+            )
+
         if device == "cuda" and torch.cuda.is_available():
             self.model = self.model.to("cuda")
         self.model.eval()
@@ -748,6 +791,8 @@ class EngineHandler(BaseHTTPRequestHandler):
             ))
         elif self.path == "/adapter/status":
             self._json(_engine.adapter_status())
+        elif self.path == "/vision/status":
+            self._json({"has_vision": _engine.has_vision, "model": _engine.model_path})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -839,6 +884,72 @@ class EngineHandler(BaseHTTPRequestHandler):
         elif self.path == "/adapter/set":
             b = self._body()
             self._json(_engine.set_active_adapter(b.get("name")))
+        elif self.path == "/vision/describe":
+            if not _engine.has_vision:
+                self._json({"error": "model does not support vision"}, 400)
+            else:
+                b = self._body()
+                try:
+                    import base64 as _b64
+                    from PIL import Image
+                    import io as _io
+
+                    # Accept base64 image or file path
+                    image_b64 = b.get("image_base64", "")
+                    image_path = b.get("image_path", "")
+                    prompt = b.get("prompt", "Describe this image in detail.")
+                    max_tokens = b.get("max_tokens", 256)
+
+                    if image_b64:
+                        img_bytes = _b64.b64decode(image_b64)
+                        image = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+                    elif image_path and os.path.isfile(image_path):
+                        image = Image.open(image_path).convert("RGB")
+                    else:
+                        self._json({"error": "image_base64 or image_path required"}, 400)
+                        return
+
+                    # Build conversation with image
+                    messages = [
+                        {"role": "system", "content": [{"type": "text", "text": "You are GAIA, a sovereign AI with vision capabilities."}]},
+                        {"role": "user", "content": [
+                            {"type": "image", "image": image},
+                            {"type": "text", "text": prompt},
+                        ]},
+                    ]
+
+                    # Process with VL processor
+                    text_input = _engine.processor.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True,
+                    )
+                    inputs = _engine.processor(
+                        text=[text_input], images=[image],
+                        return_tensors="pt", padding=True,
+                    ).to(_engine.device)
+
+                    with torch.no_grad():
+                        output_ids = _engine.model.generate(
+                            **inputs,
+                            max_new_tokens=max_tokens,
+                            temperature=0.7,
+                            do_sample=True,
+                        )
+
+                    # Decode only the new tokens
+                    generated = output_ids[0][inputs.input_ids.shape[1]:]
+                    description = _engine.tokenizer.decode(generated, skip_special_tokens=True)
+
+                    self._json({
+                        "description": description.strip(),
+                        "image_size": list(image.size),
+                        "prompt": prompt,
+                    })
+                except ImportError as e:
+                    self._json({"error": f"Missing dependency: {e}. Install Pillow."}, 500)
+                except Exception as e:
+                    logger.exception("Vision describe failed")
+                    self._json({"error": str(e)}, 500)
+
         elif self.path == "/atlas/record":
             # SAE Atlas recording — runs in-process with the loaded model
             b = self._body()
