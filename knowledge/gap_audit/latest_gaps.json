@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-14T15:21:05Z",
-  "gap_count": 37,
+  "timestamp": "2026-03-20T01:00:06Z",
+  "gap_count": 38,
   "gaps": [
     {
       "type": "undocumented_module",
@@ -60,6 +60,11 @@
     {
       "type": "undocumented_module",
       "module": "history_review",
+      "search_dir": "knowledge/system_reference/core_documents/"
+    },
+    {
+      "type": "undocumented_module",
+      "module": "idle_heartbeat",
       "search_dir": "knowledge/system_reference/core_documents/"
     },
     {

@@ -7,6 +7,10 @@ import hashlib
 from datetime import datetime, timezone
 from dataclasses_json import dataclass_json
 
+# --- CognitionPacket Version — single source of truth ---
+COGPACKET_VERSION = "v0.3"
+COGPACKET_SCHEMA_ID = f"https://gaia.local/schemas/cognitive_packet/{COGPACKET_VERSION}.json"
+
 # --- Enums for Type Safety ---
 class PersonaRole(Enum):
     DEFAULT = "Default"
@@ -558,7 +562,7 @@ class Status:
 @dataclass_json
 @dataclass
 class CognitionPacket:
-    version: str = "v0.3"
+    version: str = COGPACKET_VERSION
     header: Header = field(default_factory=lambda: Header(
         session_id="default", packet_id="default", 
         persona=Persona(), routing=Routing(), model=Model()

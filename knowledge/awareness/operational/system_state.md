@@ -1,7 +1,7 @@
 GPU: RTX 5080 (16GB VRAM)
-Current state: IDLE (Core + Nano on GPU, Prime sleeping)
-Core: Qwen3.5-2B-GAIA-Core-v3 (safetensors, GPU, 3.6GB)
-Nano: Qwen3.5-0.8B-Abliterated-merged (safetensors, GPU, 1.6GB)
-Prime: Huihui-Qwen3-8B-abliterated-v2-merged (unloaded, loads as int8 ~8.4GB)
-Services: 11 production + candidates
-Doctor: Healthy, maintenance mode off, sovereign review rate-limited (10min)
+Current state: Dynamic — managed by gaia-orchestrator watch rotation
+Nano: Qwen3.5-0.8B-Abliterated (gaia-nano, llama-server, GPU primary + GGUF fallback)
+Core: Qwen3-8B-abliterated Q4_K_M GGUF (embedded llama-server in gaia-core, CPU, port 8092)
+Prime: Huihui-Qwen3-8B-GAIA-Prime-adaptive (gaia-prime, vLLM GPU, identity-baked)
+Services: 12 production + candidates + ELK stack
+Doctor: Healthy, sovereign review rate-limited (60min cooldown)

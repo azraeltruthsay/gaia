@@ -53,7 +53,8 @@ EXCLUDE_NOTEBOOK_PATTERNS=(
 # Files to exclude by exact name or pattern (NotebookLM filler)
 # 2026-03-07: Added large low-signal files (rescue, loop detector, curriculum, study scripts)
 #             Added tiny persona stubs, stale system_reference files
-EXCLUDE_FILLER_PATTERNS="code_analyzer|background/|MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$|gaia_rescue\.py$|loop_detector\.py$|loop_patterns\.py$|generate_curriculum\.py$|study_mode_manager\.py$|blueprint_fidelity\.py$|test_memory\.md$|milestones_archive\.json$|cheat_sheet\.json$|codemind_instructions\.txt$|codemind\.json$|dnd_player_assistant\.json$|dev\.json$|lite\.json$|prime\.json$"
+# 2026-03-18: Added pipeline_artifacts, gaia-core/shared, generator/tooling utils
+EXCLUDE_FILLER_PATTERNS="code_analyzer|background/|MagicMock|functions_reference\.md$|capabilities\.json$|latest_gaps\.json$|Journal_Template\.md$|knowledge_index\.json$|setup\.py$|distinction_consciousness_cyclical_universe_v3\.md$|StarTalk_Hinton|requirements.*\.txt$|Dockerfile$|gaia_direct_response.*\.py$|agent_core\.py\.fragment.*\.py$|_exemplars\.json$|_Template\.md$|test_library\.json$|gaia_rescue\.py$|loop_detector\.py$|loop_patterns\.py$|generate_curriculum\.py$|study_mode_manager\.py$|blueprint_fidelity\.py$|test_memory\.md$|milestones_archive\.json$|cheat_sheet\.json$|codemind_instructions\.txt$|codemind\.json$|dnd_player_assistant\.json$|dev\.json$|lite\.json$|prime\.json$|E9_pipeline_artifacts/|gaia-core/shared/|ast_summarizer\.py$|blueprint_generator\.py$|blueprint_precheck\.py$|generate_capability_map\.py$|generate_function_reference\.py$|register_dev_model\.py$|review_prompt_builder\.py$|gaia_rescue_helper\.py$|changelog\.py$|promotion_readiness\.py$|promotion_request\.py$|heartbeat_logger\.py$|hf_prompting\.py$|init_registry\.py$|json_formatter\.py$"
 
 
 
@@ -133,6 +134,7 @@ FILE_LIST=$(
         -path 'knowledge/Dev_Notebook/Blueprint_System' -prune -o \
         -path 'gaia-study/scripts' -prune -o \
         -path 'gaia-study/gptqmodel_offload' -prune -o \
+        -path 'gaia-study/unsloth_compiled_cache' -prune -o \
         -path '*/session_vectors' -prune -o \
         -path '*/archive' -prune -o \
         -path '*/.mypy_cache' -prune -o \
@@ -147,7 +149,7 @@ FILE_LIST=$(
         \) -print | \
     grep -vE '__init__\.py$|_backup\.py$|\.py\.new$|\(backup\)|\.egg-info/|\.pyc$|\.lock$|\.map$|index_store\.json$|embeddings\.json$|final_prompt_for_review\.json$|last_activity\.timestamp$|sessions\.json$|/e2e_.*\.py$|/test_.*\.py$|/conftest\.py$|/README\.md$|/dev_matrix\.json$|/sketchpad\.json$|/response_fragments\.json$|\.claude/' | \
     grep -vE "$EXCLUDE_FILLER_PATTERNS" | \
-    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-|Dev_Notebook/2026-03-0[12]_|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.|Dev_Notebook/Blueprint_System/' | \
+    grep -vE 'Dev_Notebook/2026-01-|Dev_Notebook/2026-02-|Dev_Notebook/2026-03-0[1-9]_|Dev_Notebook/model_comparison/|Dev_Notebook/.*_proposal\.|Dev_Notebook/.*_plan\.|Dev_Notebook/CoPilot_|Dev_Notebook/Contemplations|Dev_Notebook/.*Recommendation|Dev_Notebook/SOA-decoupled|Dev_Notebook/prime_dual_backend|Dev_Notebook/.*_implementation_plan\.|Dev_Notebook/Blueprint_System/' | \
     grep -vE 'blueprints/gaia-(core|web|mcp|study|prime|orchestrator)\.md$'
 )
 
@@ -160,13 +162,27 @@ done
 
 # Combine and deduplicate
 ALL_FILES=$(printf '%s\n%s' "$FILE_LIST" "$ROOT_FOUND" | sort -u | grep -v '^$')
-file_count=$(echo "$ALL_FILES" | wc -l)
+source_count=$(echo "$ALL_FILES" | wc -l)
+
+# --- Directories whose files should be concatenated into a single output file ---
+# Each entry becomes one flat file instead of N, saving (N-1) slots against the 300 limit.
+CONCAT_DIRS=(
+    "knowledge/transcripts"
+    "knowledge/system_reference/core_documents"
+    "knowledge/blueprints"
+    "knowledge/personas"
+    "knowledge/system_reference"
+)
+
+# Dev_Notebook gets special treatment: newest N stay individual, rest get concatenated.
+DEV_NOTEBOOK_DIR="knowledge/Dev_Notebook"
+DEV_NOTEBOOK_KEEP_INDIVIDUAL=5
 
 # --- Process Files ---
 
 if [ "$DRY_RUN" = true ]; then
     echo "--- Dry Run Verification ---"
-    echo "Total files found: $file_count"
+    echo "Total source files found: $source_count"
     echo "$ALL_FILES"
 else
     echo "--- Processing and Copying ---"
@@ -179,19 +195,43 @@ else
 
     copied=0
     skipped=0
+    concatenated=0
     declare -A WANTED_FLAT
+    # Collect files per concat dir: CONCAT_BUCKET[dir] = newline-separated file list
+    declare -A CONCAT_BUCKET
 
     empty_skipped=0
     while IFS= read -r file_path; do
         [ -z "$file_path" ] && continue
-        # Remove leading ./ if present
         clean_path="${file_path#./}"
         # Skip empty files (NotebookLM rejects them)
         if [ ! -s "$clean_path" ]; then
             empty_skipped=$((empty_skipped + 1))
             continue
         fi
-        # Flatten path: replace / with __
+
+        # Check if this file belongs to a concat directory or Dev_Notebook
+        is_concat=false
+        for cdir in "${CONCAT_DIRS[@]}"; do
+            case "$clean_path" in
+                "$cdir"/*)
+                    CONCAT_BUCKET["$cdir"]+="$clean_path"$'\n'
+                    is_concat=true
+                    break
+                    ;;
+            esac
+        done
+        if ! $is_concat; then
+            case "$clean_path" in
+                "$DEV_NOTEBOOK_DIR"/*)
+                    CONCAT_BUCKET["$DEV_NOTEBOOK_DIR"]+="$clean_path"$'\n'
+                    is_concat=true
+                    ;;
+            esac
+        fi
+        $is_concat && continue
+
+        # Normal file — flatten path: replace / with __
         flat_name="${clean_path//\//__}.txt"
         WANTED_FLAT["$flat_name"]=1
 
@@ -210,6 +250,80 @@ else
         fi
     done <<< "$ALL_FILES"
 
+    # Process concatenated directories
+    for cdir in "${!CONCAT_BUCKET[@]}"; do
+        # Dev_Notebook: keep newest N as individual files, concat the rest
+        if [ "$cdir" = "$DEV_NOTEBOOK_DIR" ]; then
+            # Sort files reverse by name (date-prefixed, so newest first)
+            sorted_files=$(echo -n "${CONCAT_BUCKET[$cdir]}" | grep -v '^$' | sort -r)
+            individual_count=0
+            older_files=""
+
+            while IFS= read -r fpath; do
+                [ -z "$fpath" ] && continue
+                if [ "$individual_count" -lt "$DEV_NOTEBOOK_KEEP_INDIVIDUAL" ]; then
+                    # Copy as individual file
+                    flat_name="${fpath//\//__}.txt"
+                    WANTED_FLAT["$flat_name"]=1
+                    dest_file="$DEST_DIR/$flat_name"
+                    if cp "$fpath" "$dest_file" 2>/dev/null; then
+                        copied=$((copied + 1))
+                    fi
+                    individual_count=$((individual_count + 1))
+                else
+                    older_files+="$fpath"$'\n'
+                fi
+            done <<< "$sorted_files"
+
+            # Concatenate older files into a bundle (if any)
+            if [ -n "$older_files" ]; then
+                flat_name="${cdir//\//__}__COMBINED.txt"
+                WANTED_FLAT["$flat_name"]=1
+                dest_file="$DEST_DIR/$flat_name"
+                concat_content=""
+                bundle_count=0
+                while IFS= read -r fpath; do
+                    [ -z "$fpath" ] && continue
+                    concat_content+="
+========== ${fpath} ==========
+"
+                    concat_content+="$(cat "$fpath" 2>/dev/null)"
+                    concat_content+=$'\n'
+                    bundle_count=$((bundle_count + 1))
+                done <<< "$older_files"
+                printf '%s' "$concat_content" > "$dest_file"
+                concatenated=$((concatenated + bundle_count))
+                copied=$((copied + 1))
+                echo "  Dev_Notebook: $individual_count newest individual, $bundle_count older → COMBINED"
+            else
+                echo "  Dev_Notebook: $individual_count files (all individual, none to bundle)"
+            fi
+            continue
+        fi
+
+        # Standard concatenation for other directories
+        flat_name="${cdir//\//__}__COMBINED.txt"
+        WANTED_FLAT["$flat_name"]=1
+        dest_file="$DEST_DIR/$flat_name"
+
+        concat_content=""
+        file_count_in_bundle=0
+        while IFS= read -r fpath; do
+            [ -z "$fpath" ] && continue
+            concat_content+="
+========== ${fpath} ==========
+"
+            concat_content+="$(cat "$fpath" 2>/dev/null)"
+            concat_content+=$'\n'
+            file_count_in_bundle=$((file_count_in_bundle + 1))
+        done <<< "${CONCAT_BUCKET[$cdir]}"
+
+        printf '%s' "$concat_content" > "$dest_file"
+        concatenated=$((concatenated + file_count_in_bundle))
+        copied=$((copied + 1))
+        echo "  Concatenated $file_count_in_bundle files → $flat_name"
+    done
+
     # Remove stale files from DEST_DIR that are no longer in the source list
     removed=0
     for existing in "$DEST_DIR"/*; do
@@ -221,26 +335,32 @@ else
         fi
     done
 
+    # Count actual output files
+    output_count=$(ls -1 "$DEST_DIR" 2>/dev/null | wc -l)
+
     echo "--- Flattening Complete ---"
-    echo "Total source files: $file_count"
-    echo "Copied (new/updated): $copied"
+    echo "Total source files: $source_count"
+    echo "Output files: $output_count (Google NotebookLM limit: $MAX_FILES)"
+    echo "Copied (individual): $copied"
+    echo "Concatenated (bundled): $concatenated source files into bundles"
     echo "Skipped (unchanged): $skipped"
     echo "Skipped (empty): $empty_skipped"
     echo "Removed (stale): $removed"
     echo "Output Directory: $DEST_DIR"
 fi
 
-# --- Verification ---
+# --- Verification (counts OUTPUT files, not source files) ---
 
-if [ "$file_count" -gt "$MAX_FILES" ]; then
-    echo "ERROR: File count ($file_count) exceeds hard limit of $MAX_FILES. Aborting."
-    echo "   Add more exclusions before syncing to NotebookLM."
+output_count=$(ls -1 "$DEST_DIR" 2>/dev/null | wc -l)
+if [ "$output_count" -gt "$MAX_FILES" ]; then
+    echo "ERROR: Output file count ($output_count) exceeds hard limit of $MAX_FILES. Aborting."
+    echo "   Add more exclusions or concat dirs before syncing to NotebookLM."
     rm -rf "$DEST_DIR"
     exit 1
-elif [ "$file_count" -gt "$WARN_FILES" ]; then
-    echo "Warning: File count ($file_count) exceeds soft limit of $WARN_FILES. Consider pruning."
+elif [ "$output_count" -gt "$WARN_FILES" ]; then
+    echo "Warning: Output file count ($output_count) exceeds soft limit of $WARN_FILES. Consider pruning."
 else
-    echo "File count ($file_count) is within limits."
+    echo "Output file count ($output_count) is within limits."
 fi
 
 # Wait for background tasks

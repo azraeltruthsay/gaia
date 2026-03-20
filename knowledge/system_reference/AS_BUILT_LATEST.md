@@ -1,20 +1,20 @@
 # Code Evolution Snapshot
-Generated: 2026-03-18T00:34:13.740261+00:00
+Generated: 2026-03-20T00:55:29.417011+00:00
 
 ## Pending Candidate Changes
-- **gaia-core**: 2 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json), 516 added, 3810 removed
+- **gaia-core**: 5 changed (discord_dm_596925786208993283.json, gaia_heartbeat_session.json, gaia_engine.py +2), 516 added, 3875 removed
 
 ## Recent Commits
-- `94cf2ee` (2026-03-17): feat: Nano GPU acceleration + VRAM-pressure backoff via orchestrator
-- `1c94981` (2026-03-17): feat: knowledge ingestion, dashboard UI, changelog, attachment handler, E8/E9 penpal responses
-- `3051ad8` (2026-03-17): feat: CFR system, Qwen3-8B identity baking, penpal pipeline, sleep hold
-- `fb2a789` (2026-03-16): feat: centralized MODEL_REGISTRY — single source of truth for all model paths
-- `2410ac7` (2026-03-16): feat: structured MCP errors (isRetryable/errorCategory) + workflow commands
-- `bce255f` (2026-03-15): fix: Nano repetition loop + degenerate output escalation + mind tag accuracy
-- `88c8fb6` (2026-03-15): feat: KV cache auto-compaction & pressure monitoring
-- `6e54871` (2026-03-15): feat: doctor auto-fix for trivial lint errors (F401/F541/F811/F841)
-- `9f50f63` (2026-03-15): feat: prime wake triggers, cascade triage skip, error tests, gitignore fix
-- `0d48d57` (2026-03-15): feat: Doctor & Immunity dashboard panel + Surgeon approval queue
+- `8fc2be3` (2026-03-19): fix: heartbeat jitter — avoid temporal resonance
+- `dd29a4e` (2026-03-19): feat: heartbeat time check — autonomic temporal canary
+- `598bf13` (2026-03-19): feat: CodeMind autonomous self-improvement system + code-architect QLoRA training
+- `72cac66` (2026-03-18): milestone: ALIGNED + SERENE + 44 commits
+- `f652c8c` (2026-03-18): fix: sovereign review disabled by default, safe maintenance exit
+- `dbe3ba7` (2026-03-18): docs: comprehensive dev journal + memory encoding for session continuity
+- `d25463f` (2026-03-18): feat: GPU Owner dashboard tile shows live tier VRAM usage
+- `bc0031e` (2026-03-18): feat: GPU watch auto-detect + dashboard GPU Owner populated
+- `83fac10` (2026-03-18): fix: sovereign review cooldown 10min → 60min, VRAM leak identified
+- `b091092` (2026-03-18): feat: automatic audio GPU release when idle/muted
 
 ## Backup History
 - 124 .bak files (oldest: 2026-01-07, newest: 2026-01-27)

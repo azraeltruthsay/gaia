@@ -1,6 +1,6 @@
 # GAIA Project — Claude Code Instructions
 
-> **Last updated**: 2026-03-13 | **Era**: Sovereign Autonomy | **Services**: 11
+> **Last updated**: 2026-03-19 | **Era**: Sovereign Autonomy | **Services**: 12
 
 ## What is GAIA?
 
@@ -10,9 +10,10 @@ GAIA is a sovereign AI agent built as a Service-Oriented Architecture (SOA). It 
 
 | Service | Role | Port |
 |---------|------|------|
-| `gaia-core` | The Brain — cognitive loop, LLM routing, reasoning | 6415 |
-| `gaia-web` | The Face — dashboard, API gateway, Discord bridge | 6414 |
+| `gaia-core` | The Brain — cognitive loop, LLM routing, reasoning + embedded Core CPU inference | 6415 |
+| `gaia-nano` | The Reflex — Nano triage classifier (llama-server, GPU primary + GGUF fallback) | 8090 |
 | `gaia-prime` | The Voice — vLLM inference server (GPU, OpenAI-compatible, LoRA-enabled) | 7777 |
+| `gaia-web` | The Face — dashboard, API gateway, Discord bridge | 6414 |
 | `gaia-mcp` | The Hands — sandboxed tool execution (JSON-RPC 2.0) | 8765 |
 | `gaia-study` | The Subconscious — QLoRA subprocess training, vector indexing | 8766 |
 | `gaia-audio` | The Ears & Mouth — Whisper STT, Nano-Refiner, TTS | 8080 |
@@ -28,13 +29,13 @@ Candidate (HA) services mirror production with `+1` ports. Defined in `docker-co
 
 | Tier | Model | Backend | Role |
 |------|-------|---------|------|
-| **Nano** | Qwen2.5-0.5B GGUF | llama_cpp (CPU) | Triage classifier, transcript cleanup |
-| **Lite/Operator** | Qwen3-8B-abliterated GGUF | llama_cpp (CPU) | Intent detection, tool selection |
-| **Prime/Thinker** | Qwen3.5-4B-Abliterated (identity-baked, fp8) | vLLM (GPU) | Complex reasoning, code |
+| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | gaia-nano llama-server (GPU primary, GGUF fallback) | Sub-second triage classifier, transcript cleanup |
+| **Core/Operator** | Qwen3-8B-abliterated Q4_K_M GGUF | Embedded llama-server in gaia-core (CPU, port 8092) | Intent detection, tool selection, medium tasks |
+| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked) | vLLM on gaia-prime (GPU) | Complex reasoning, code, heavyweight tasks |
 | **Oracle** | gpt-4o-mini | OpenAI API | Cloud escalation fallback |
 | **Groq** | llama-3.3-70b-versatile | Groq API | Fast external fallback |
 
-**Cascade routing**: Nano classifies SIMPLE/COMPLEX → Lite handles or escalates → Prime for heavyweight tasks.
+**Cascade routing**: Nano classifies SIMPLE/COMPLEX → Core handles or escalates → Prime for heavyweight tasks.
 **LoRA adapters**: Loaded dynamically into vLLM via `POST /v1/load_lora_adapter`. Active adapter set via `VLLMRemoteModel.set_active_adapter()`.
 
 ## Key Paths
@@ -60,11 +61,15 @@ Candidate (HA) services mirror production with `+1` ports. Defined in `docker-co
 ## Inter-Service Communication
 
 - **gaia-web → gaia-core**: HTTP POST `/chat` (primary), fallback to candidate
-- **gaia-core → gaia-prime**: OpenAI-compatible API at `:7777/v1/` (supports LoRA model field)
+- **gaia-core → gaia-prime**: OpenAI-compatible API at `:7777/v1/` (Thinker GPU inference, supports LoRA model field)
+- **gaia-core → gaia-nano**: OpenAI-compatible API at `gaia-nano:8080` (Nano/Reflex triage)
+- **gaia-core embedded**: llama-server at `localhost:8092` (Core/Operator CPU inference)
 - **gaia-core → gaia-mcp**: JSON-RPC 2.0 at `:8765/jsonrpc`
 - **gaia-core → gaia-study**: HTTP for training, vector indexing
 - **gaia-study training**: Subprocess isolation (multiprocessing spawn) for deterministic VRAM release
 - **gaia-orchestrator → all**: Health polling, GPU lifecycle, training monitoring
+- **gaia-doctor → all**: Health watchdog, cognitive battery, auto-restart
+- **gaia-monkey → services**: Chaos drills, fault injection, serenity tracking
 
 ## Domain Rules
 
@@ -74,3 +79,4 @@ Detailed instructions for specific domains are in `.claude/rules/`:
 - **promotion.md** — Candidate → production promotion pipeline
 - **safety.md** — Sovereign Shield, Blast Shield, Circuit Breaker
 - **workflow.md** — Context management, planning, token conservation
+- **candidate-first.md** — Always edit candidates/ first, never production directly

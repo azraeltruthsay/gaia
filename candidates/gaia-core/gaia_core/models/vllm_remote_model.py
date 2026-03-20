@@ -189,6 +189,7 @@ class VLLMRemoteModel:
         "guided_json", "guided_regex", "guided_choice",
         "guided_grammar", "guided_decoding_backend",
         "response_format", "stop", "chat_template_kwargs",
+        "skip_prefix",  # GAIA Engine: skip KV prefix/awareness/clock injection
     })
 
     def create_chat_completion(

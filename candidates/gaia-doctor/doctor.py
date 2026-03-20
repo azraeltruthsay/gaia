@@ -17,7 +17,7 @@ import os
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.error import URLError
@@ -1938,6 +1938,60 @@ def _run_cognitive_monitor():
                 tier_result["identity_present"] = identity_present
                 tier_result["polygraph_ok"] = polygraph_ok
                 tier_result["response"] = response[:80]
+
+                # Step 4: Time awareness probe — ask time, compare to actual
+                time_ok = False
+                try:
+                    time_payload = json.dumps({
+                        "messages": [
+                            {"role": "system", "content": "You are GAIA. Read the Clock line for the current time."},
+                            {"role": "user", "content": "What time is it?"},
+                        ],
+                        "max_tokens": 40,
+                        "temperature": 0.0,
+                    }).encode()
+                    time_req = Request(
+                        f"{endpoint}/v1/chat/completions",
+                        data=time_payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    time_resp = urlopen(time_req, timeout=10)
+                    time_data = json.loads(time_resp.read().decode("utf-8"))
+                    time_response = time_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                    # Extract time and compare to actual (±10 min tolerance)
+                    import re as _re
+                    now_utc = datetime.now(timezone.utc)
+                    pacific = timezone(timedelta(hours=int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))))
+                    now_local = now_utc.astimezone(pacific)
+
+                    # Try 12h format first, then 24h
+                    m12 = _re.search(r'(\d{1,2}):(\d{2})\s*(am|pm)', time_response.lower())
+                    m24 = _re.search(r'(\d{1,2}):(\d{2})', time_response)
+                    ext_h, ext_m = None, None
+                    if m12:
+                        ext_h, ext_m = int(m12.group(1)), int(m12.group(2))
+                        if m12.group(3) == "pm" and ext_h != 12: ext_h += 12
+                        elif m12.group(3) == "am" and ext_h == 12: ext_h = 0
+                    elif m24:
+                        ext_h, ext_m = int(m24.group(1)), int(m24.group(2))
+
+                    if ext_h is not None:
+                        ext_total = ext_h * 60 + ext_m
+                        # Check against both UTC and local
+                        best_diff = 9999
+                        for actual in [now_utc, now_local]:
+                            act_total = actual.hour * 60 + actual.minute
+                            diff = abs(ext_total - act_total)
+                            if diff > 720: diff = 1440 - diff
+                            best_diff = min(best_diff, diff)
+                        time_ok = best_diff <= 10
+                        tier_result["time_accuracy_min"] = best_diff
+                    tier_result["time_response"] = time_response[:80]
+                except Exception as e:
+                    tier_result["time_error"] = str(e)[:60]
+                tier_result["time_ok"] = time_ok
 
                 if identity_present:
                     tier_result["status"] = "pass"
