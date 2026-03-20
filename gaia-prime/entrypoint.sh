@@ -70,6 +70,11 @@ class StandbyHandler(BaseHTTPRequestHandler):
                 self._json({'activations': _engine.monitor._last_snapshot, 'timestamp': _engine.monitor._last_timestamp})
             else:
                 self._json({'activations': None, 'message': 'standby'})
+        elif self.path == '/adapter/status':
+            if _engine and hasattr(_engine, 'adapter_status'):
+                self._json(_engine.adapter_status())
+            else:
+                self._json({'active': None, 'loaded': [], 'base_model': 'standby'})
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -168,7 +173,7 @@ class StandbyHandler(BaseHTTPRequestHandler):
             else:
                 self._json({'error': 'standby'}, 503)
 
-        elif _engine and self.path in ('/atlas/record', '/polygraph/enable', '/polygraph/disable', '/cache/update', '/cache/invalidate'):
+        elif _engine and self.path in ('/atlas/record', '/polygraph/enable', '/polygraph/disable', '/cache/update', '/cache/invalidate', '/adapter/load', '/adapter/unload', '/adapter/set'):
             # Delegate to the real EngineHandler when model is loaded
             from gaia_common.engine.core import EngineHandler, _engine as _core_engine
             import gaia_common.engine.core as _core_mod
