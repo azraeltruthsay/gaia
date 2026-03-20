@@ -46,6 +46,9 @@ def write(
         return # Cannot write if directory cannot be created
 
     path = ts_dir / f"{session_id}_{time.strftime('%Y%m%d')}.jsonl"
+    # Wrap string entries as dicts
+    if isinstance(entry, str):
+        entry = {"type": "thought_seed", "value": entry}
     entry["ts_utc"] = stamp
 
     # Add source and destination context if provided
