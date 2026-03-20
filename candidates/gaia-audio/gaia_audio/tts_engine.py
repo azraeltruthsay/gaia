@@ -17,8 +17,6 @@ import time
 
 import numpy as np
 
-from gaia_audio.status import status_tracker
-
 logger = logging.getLogger("GAIA.Audio.TTS")
 
 
@@ -64,10 +62,16 @@ class NanoSpeaker:
 
     def __init__(
         self,
-        model_path: str = "/models/Qwen3-TTS-12Hz-0.6B-Base",
+        model_path: str | None = None,
         voice_ref_audio: str | None = None,
         voice_ref_text: str | None = None,
     ) -> None:
+        if model_path is None:
+            try:
+                from gaia_audio.config import get_config
+                model_path = get_config().nano_speaker_model_path
+            except Exception:
+                model_path = "/models/Qwen3-TTS-12Hz-0.6B-Base"
         self.model_path = model_path
         self.voice_ref_audio = voice_ref_audio
         self.voice_ref_text = voice_ref_text
@@ -125,20 +129,24 @@ class NanoSpeaker:
 
         t0 = time.monotonic()
 
+        # Resolve reference audio — check configured path, then shared fallback
+        if not ref_audio or not os.path.isfile(ref_audio):
+            ref_audio = os.environ.get("GAIA_VOICE_REF", "/shared/voice/gaia_identity.wav")
+        if not ref_text:
+            ref_text = "I am GAIA, a sovereign artificial intelligence. I was created by Azrael to be curious, truthful, and helpful."
+
         if ref_audio and os.path.isfile(ref_audio):
             wavs, sr = self._model.generate_voice_clone(
                 text=text,
                 language="English",
                 ref_audio=ref_audio,
-                ref_text=ref_text or "",
+                ref_text=ref_text,
             )
         else:
-            # No reference audio — use generate if available, else voice clone with defaults
-            wavs, sr = self._model.generate_voice_clone(
-                text=text,
-                language="English",
-                ref_audio=ref_audio or "",
-                ref_text=ref_text or "",
+            raise RuntimeError(
+                f"No voice reference audio found at {ref_audio}. "
+                "Qwen3-TTS 0.6B requires a reference WAV for voice cloning. "
+                "Generate one with: espeak-ng -v en+f3 'I am GAIA' -w /shared/voice/gaia_identity.wav"
             )
 
         elapsed_ms = (time.monotonic() - t0) * 1000
@@ -172,10 +180,16 @@ class PrimeSpeaker:
 
     def __init__(
         self,
-        model_path: str = "/models/Qwen3-TTS-12Hz-1.7B-Base",
+        model_path: str | None = None,
         voice_ref_audio: str | None = None,
         voice_ref_text: str | None = None,
     ) -> None:
+        if model_path is None:
+            try:
+                from gaia_audio.config import get_config
+                model_path = get_config().prime_speaker_model_path
+            except Exception:
+                model_path = "/models/Qwen3-TTS-12Hz-1.7B-Base"
         self.model_path = model_path
         self.voice_ref_audio = voice_ref_audio
         self.voice_ref_text = voice_ref_text
