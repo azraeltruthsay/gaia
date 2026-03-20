@@ -113,6 +113,11 @@ class StandbyHandler(BaseHTTPRequestHandler):
                     _engine.monitor = ActivationMonitor()
                     _engine.thoughts = ThoughtManager()
                     _engine.awareness = None
+                    # Dynamic adapter support
+                    _engine._base_model = model
+                    _engine._adapters = {}
+                    _engine._active_adapter = None
+                    _engine._peft_model = None
 
                     vram = torch.cuda.memory_allocated() // (1024**2) if device == 'cuda' else 0
                     logger.info('Prime loaded: %dMB VRAM', vram)
