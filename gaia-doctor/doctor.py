@@ -1273,7 +1273,6 @@ def scan_logs():
 
 def _record_irritation(service: str, line: str, pattern: str):
     """Record a detected irritation in the state."""
-    # Avoid duplicate recordings of the same line if multiple patterns match
     entry = {
         "service": service,
         "time": datetime.now(timezone.utc).isoformat(),
@@ -1281,12 +1280,166 @@ def _record_irritation(service: str, line: str, pattern: str):
         "message": line.strip()[:500],
     }
     _irritations.append(entry)
-    
+
     # Keep only the last 100 irritations
     if len(_irritations) > 100:
         _irritations.pop(0)
-    
+
     log.warning("IRRITATION detected in %s: %s", service, pattern)
+
+    # ── OOM Auto-Resolution: negotiate VRAM via Orchestrator ──
+    # When a GPU service hits OOM, Doctor presses the orchestrator buttons
+    # to free VRAM. Glass stays on — no manual intervention needed.
+    if pattern in ("OOM", "CUDA out of memory", "torch.cuda.OutOfMemoryError"):
+        _attempt_oom_resolution(service, line)
+
+
+# ── OOM Resolution ────────────────────────────────────────────────────────
+
+_oom_cooldown: dict = {}  # service → last_attempt_time
+OOM_COOLDOWN_SECONDS = 60  # Don't spam orchestrator
+
+def _attempt_oom_resolution(service: str, error_line: str):
+    """Ask Orchestrator to free VRAM when a service hits OOM.
+
+    Resolution strategy (escalating):
+    1. Backoff Nano to CPU (frees ~1.5 GB)
+    2. If still insufficient, request full GPU release (frees Core too)
+    3. Emit CodeMind detection for investigation
+
+    The Pinball Machine pattern: Doctor detects the problem, presses
+    Orchestrator's buttons, and watches the resolution through the glass.
+    """
+    now = time.monotonic()
+    last = _oom_cooldown.get(service, 0)
+    if now - last < OOM_COOLDOWN_SECONDS:
+        log.debug("OOM resolution for %s on cooldown (%ds remaining)",
+                  service, int(OOM_COOLDOWN_SECONDS - (now - last)))
+        return
+    _oom_cooldown[service] = now
+
+    log.warning("OOM resolution triggered for %s — negotiating VRAM via Orchestrator", service)
+
+    # Step 1: Check current GPU state
+    try:
+        req = Request(f"{ORCHESTRATOR_ENDPOINT}/watch/state", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            watch_state = json.loads(resp.read().decode())
+        tiers = watch_state.get("tiers", {})
+        log.info("OOM: Current GPU state — %s",
+                 {k: f"{v.get('device')}({v.get('vram_mb')}MB)" for k, v in tiers.items()})
+    except Exception as e:
+        log.warning("OOM: Could not read Orchestrator watch state: %s", e)
+        return
+
+    # Step 2: Identify what can be offloaded
+    nano_on_gpu = tiers.get("nano", {}).get("device", "") != "unloaded"
+    core_on_gpu = tiers.get("core", {}).get("device", "") != "unloaded"
+
+    resolution_log = []
+
+    # Step 2a: Backoff Nano first (smallest, safest)
+    if nano_on_gpu:
+        try:
+            log.info("OOM: Requesting Nano backoff to CPU...")
+            data = json.dumps({"reason": f"oom_resolution:{service}"}).encode()
+            req = Request(
+                f"{ORCHESTRATOR_ENDPOINT}/nano/backoff",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            if result.get("ok"):
+                resolution_log.append("nano_backoff:success")
+                log.info("OOM: Nano backed off to CPU — freed ~1.5GB VRAM")
+            else:
+                resolution_log.append(f"nano_backoff:failed:{result.get('error', 'unknown')}")
+        except Exception as e:
+            resolution_log.append(f"nano_backoff:error:{e}")
+            log.warning("OOM: Nano backoff failed: %s", e)
+
+    # Step 2b: If the OOM service is Prime and Core is also on GPU, release Core
+    if service in ("gaia-prime", "gaia-study") and core_on_gpu:
+        try:
+            log.info("OOM: Requesting GPU sleep (release Core)...")
+            data = json.dumps({"reason": f"oom_resolution:{service}"}).encode()
+            req = Request(
+                f"{ORCHESTRATOR_ENDPOINT}/gpu/sleep",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            if result.get("ok"):
+                resolution_log.append("gpu_sleep:success")
+                log.info("OOM: GPU sleep — Core released VRAM")
+            else:
+                resolution_log.append(f"gpu_sleep:failed:{result.get('error', 'unknown')}")
+        except Exception as e:
+            resolution_log.append(f"gpu_sleep:error:{e}")
+            log.warning("OOM: GPU sleep failed: %s", e)
+
+    # Step 3: Emit to CodeMind detect queue for deeper investigation
+    try:
+        _emit_codemind_oom(service, error_line, resolution_log)
+    except Exception:
+        pass
+
+    # Step 4: Write resolution to shared state for dashboard
+    _write_oom_resolution(service, error_line, resolution_log)
+
+    log.info("OOM resolution complete for %s: %s", service, resolution_log)
+
+
+def _emit_codemind_oom(service: str, error_line: str, resolution_log: list):
+    """Emit OOM event to CodeMind detect queue for investigation."""
+    try:
+        queue_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "codemind" / "detect_queue.jsonl"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "immune_irritation",
+            "issue_type": "oom_error",
+            "file_path": "",
+            "description": f"OOM in {service}: {error_line[:200]}. Resolution: {resolution_log}",
+            "severity": "warn",
+            "priority": 2,
+            "metadata": {"service": service, "resolution": resolution_log},
+        }
+        with open(queue_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log.debug("Failed to emit CodeMind OOM detection: %s", e)
+
+
+def _write_oom_resolution(service: str, error_line: str, resolution_log: list):
+    """Write OOM resolution record to shared state for dashboard visibility."""
+    try:
+        state_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "oom_resolutions.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+
+        state = {"history": []}
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        state["history"].insert(0, {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "service": service,
+            "error": error_line[:300],
+            "resolution": resolution_log,
+        })
+        state["history"] = state["history"][:20]  # Keep last 20
+        state["last"] = state["history"][0] if state["history"] else None
+
+        state_path.write_text(json.dumps(state, indent=2))
+    except Exception as e:
+        log.debug("Failed to write OOM resolution state: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -2462,6 +2615,15 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._handle_logs()
         elif self.path == "/errors":
             self._handle_errors()
+        elif self.path == "/oom/history":
+            try:
+                state_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "oom_resolutions.json"
+                if state_path.exists():
+                    self._json_response(200, json.loads(state_path.read_text()))
+                else:
+                    self._json_response(200, {"history": [], "last": None})
+            except Exception:
+                self._json_response(200, {"history": [], "last": None})
         else:
             self._json_response(404, {"error": "not found"})
 

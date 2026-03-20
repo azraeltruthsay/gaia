@@ -326,6 +326,19 @@ async def doctor_irritations():
     return {"irritations": []}
 
 
+@router.get("/oom/history")
+async def oom_history():
+    """Get OOM resolution history from gaia-doctor."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/oom/history")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch OOM history: %s", e)
+    return {"history": [], "last": None}
+
+
 @router.get("/dissonance")
 async def doctor_dissonance():
     """Get prod vs candidate dissonance report from gaia-doctor."""
