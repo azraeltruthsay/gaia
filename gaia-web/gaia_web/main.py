@@ -67,7 +67,13 @@ async def lifespan(app: FastAPI):
         from gaia_web.discord_interface import DiscordInterface
         global discord_bot
         
-        bot_token = os.getenv("DISCORD_BOT_TOKEN")
+        # Prefer Docker secret file, fall back to env var
+        bot_token = None
+        secret_path = "/run/secrets/discord_bot_token"
+        if os.path.exists(secret_path):
+            bot_token = open(secret_path).read().strip()
+        if not bot_token:
+            bot_token = os.getenv("DISCORD_BOT_TOKEN")
         core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
         core_fallback = os.getenv("CORE_FALLBACK_ENDPOINT", "")
         

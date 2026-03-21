@@ -398,6 +398,9 @@ services:
         reservations:
           memory: 2048M
 
+    secrets:
+      - discord_bot_token
+
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-study: The Subconscious - Background processing
   # SOLE WRITER to vector store and LoRA adapters
