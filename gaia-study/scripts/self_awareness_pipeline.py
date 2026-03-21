@@ -18,10 +18,10 @@ Usage:
     docker compose exec gaia-study python scripts/self_awareness_pipeline.py --resume
 
     # Jump to a specific stage
-    docker compose exec gaia-study python scripts/self_awareness_pipeline.py --stage TRAIN_4B
+    docker compose exec gaia-study python scripts/self_awareness_pipeline.py --stage TRAIN_CORE
 
     # Run up to a stage and pause
-    docker compose exec gaia-study python scripts/self_awareness_pipeline.py --pause-after MERGE_4B
+    docker compose exec gaia-study python scripts/self_awareness_pipeline.py --pause-after MERGE_CORE
 
     # Dry run (print stages, don't execute)
     docker compose exec gaia-study python scripts/self_awareness_pipeline.py --dry-run
@@ -69,9 +69,9 @@ def _registry_path(role: str, variant: str = "merged") -> str:
     except Exception:
         return ""
 
-BASE_4B = _registry_path("prime", "base") or "/models/Qwen3.5-4B-Abliterated"
+BASE_CORE = _registry_path("prime", "base") or "/models/Qwen3.5-4B-Abliterated"
 BASE_08B = _registry_path("nano", "base") or "/models/Qwen3.5-0.8B-Abliterated"
-MERGED_4B = _registry_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged"
+MERGED_CORE = _registry_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged"
 GGUF_CORE = _registry_path("prime", "gguf") or "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf"
 GGUF_NANO = _registry_path("nano", "gguf") or "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"
 BAKED_DIR = "/models/baked"
@@ -97,12 +97,12 @@ DEFAULT_THRESHOLD = 0.5
 STAGES = [
     "BUILD_CURRICULUM",
     "VERIFY_CURRICULUM",
-    "PRE_EVAL_4B",
-    "FILTER_DELTA_4B",
+    "PRE_EVAL_CORE",
+    "FILTER_DELTA_CORE",
     "WEIGHT_CURRICULUM",
     "GPU_ACQUIRE",
-    "TRAIN_4B",
-    "MERGE_4B",
+    "TRAIN_CORE",
+    "MERGE_CORE",
     "DEPLOY_PRIME",
     "RELOAD_CORE",
     "TRAIN_NANO",
@@ -147,11 +147,11 @@ class PipelineContext:
     pre_eval_metrics: dict = field(default_factory=dict)
     post_eval_metrics: dict = field(default_factory=dict)
     delta_count: int = 0
-    adapter_4b_path: str = ""
+    adapter_core_path: str = ""
     adapter_nano_path: str = ""
-    merged_4b_path: str = MERGED_4B
+    merged_core_path: str = MERGED_CORE
     gpu_lease_id: str = ""
-    final_loss_4b: float | None = None
+    final_loss_core: float | None = None
     final_loss_nano: float | None = None
 
 
@@ -190,7 +190,7 @@ def init_state(ctx: PipelineContext) -> dict:
         "threshold": ctx.threshold,
         "stages": {stage: {"status": "pending"} for stage in STAGES + GGUF_STAGES},
         "adapters": {
-            "4b": {"path": None, "final_loss": None},
+            "core": {"path": None, "final_loss": None},
             "nano": {"path": None, "final_loss": None},
         },
         "pre_eval": {"core_avg_f1": None, "nano_avg_f1": None},
@@ -258,7 +258,7 @@ def preflight_check(stages_to_run: list[str]) -> list[str]:
 
     # Map stages → endpoints they call (method, url, payload_or_None)
     CONTRACTS: dict[str, list[tuple[str, str, dict | None]]] = {
-        "PRE_EVAL_4B": [
+        "PRE_EVAL_CORE": [
             ("GET", f"{CORE_EVAL_ENDPOINT}/health", None),
         ],
         "GPU_ACQUIRE": [
@@ -456,9 +456,9 @@ def stage_verify_curriculum(ctx: PipelineContext) -> StageResult:
         return StageResult(ok=False, message=str(e))
 
 
-def stage_pre_eval_4b(ctx: PipelineContext) -> StageResult:
+def stage_pre_eval_core(ctx: PipelineContext) -> StageResult:
     """Score curriculum samples against eval endpoint."""
-    logger.info("═══ PRE_EVAL_4B: Evaluating %s against %s ═══", ctx.curriculum_path, CORE_EVAL_ENDPOINT)
+    logger.info("═══ PRE_EVAL_CORE: Evaluating %s against %s ═══", ctx.curriculum_path, CORE_EVAL_ENDPOINT)
 
     # Import pre_eval functions
     sys.path.insert(0, str(Path(__file__).parent))
@@ -509,14 +509,14 @@ def stage_pre_eval_4b(ctx: PipelineContext) -> StageResult:
         "avg_f1": round(avg_f1, 4),
     }
     ctx.pre_eval_metrics = metrics
-    logger.info("PRE_EVAL_4B complete: %s", metrics)
+    logger.info("PRE_EVAL_CORE complete: %s", metrics)
 
     return StageResult(ok=True, message=f"avg_f1={avg_f1:.4f}", metrics=metrics)
 
 
-def stage_filter_delta_4b(ctx: PipelineContext) -> StageResult:
+def stage_filter_delta_core(ctx: PipelineContext) -> StageResult:
     """Write train_filtered.jsonl with GAP samples only."""
-    logger.info("═══ FILTER_DELTA_4B: Filtering curriculum for gaps ═══")
+    logger.info("═══ FILTER_DELTA_CORE: Filtering curriculum for gaps ═══")
 
     sys.path.insert(0, str(Path(__file__).parent))
     from pre_eval_curriculum import load_curriculum, query_model, token_f1
@@ -702,8 +702,8 @@ def stage_gpu_acquire(ctx: PipelineContext) -> StageResult:
         return StageResult(ok=False, message=str(e))
 
 
-def stage_train_4b(ctx: PipelineContext) -> StageResult:
-    """QLoRA training on the 4B model using filtered delta.
+def stage_train_core(ctx: PipelineContext) -> StageResult:
+    """QLoRA training on the Core model using filtered delta.
 
     Uses the previously merged model if it exists (incremental baking),
     otherwise falls back to the pristine bf16 base. This means each
@@ -713,11 +713,11 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
     """
     # Incremental: train on merged weights (default). --from-base: train from pristine.
     if ctx.from_base:
-        base_4b = BASE_4B
-        logger.info("═══ TRAIN_4B: QLoRA on BASE (--from-base) %s ═══", base_4b)
+        base_4b = BASE_CORE
+        logger.info("═══ TRAIN_CORE: QLoRA on BASE (--from-base) %s ═══", base_4b)
     else:
-        base_4b = MERGED_4B if Path(MERGED_4B).exists() else BASE_4B
-        logger.info("═══ TRAIN_4B: QLoRA on %s ═══", base_4b)
+        base_4b = MERGED_CORE if Path(MERGED_CORE).exists() else BASE_CORE
+        logger.info("═══ TRAIN_CORE: QLoRA on %s ═══", base_4b)
 
     # Use weighted path (adaptive) or filtered path (flat)
     train_path = ctx.weighted_path
@@ -732,7 +732,7 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
 
     # Create adapter output path
     timestamp = datetime.now().strftime("%Y%m%d")
-    adapter_path = f"{ADAPTER_DIR}/self-model-4b-{timestamp}"
+    adapter_path = f"{ADAPTER_DIR}/self-model-core-{timestamp}"
     os.makedirs(adapter_path, exist_ok=True)
 
     try:
@@ -771,7 +771,7 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
         sys.stderr.flush()
         dataset = trainer.prepare_dataset(samples, format_type="instruction")
 
-        adapter_name = f"self-model-4b-{datetime.now().strftime('%Y%m%d')}"
+        adapter_name = f"self-model-core-{datetime.now().strftime('%Y%m%d')}"
         logger.info("Starting QLoRA training: adapter=%s epochs=%s lr=%s...",
                      adapter_name, config.num_train_epochs or "steps", config.learning_rate)
         sys.stderr.flush()
@@ -783,8 +783,8 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
         # Save adapter to top-level output dir (train() only saves to checkpoints/)
         logger.info("Saving adapter to %s ...", adapter_path)
         saved_path = trainer.save_adapter(adapter_name)
-        ctx.adapter_4b_path = str(saved_path)
-        ctx.final_loss_4b = metrics.get("final_loss")
+        ctx.adapter_core_path = str(saved_path)
+        ctx.final_loss_core = metrics.get("final_loss")
 
         # Free GPU memory before merge stage
         logger.info("Freeing trainer model from GPU...")
@@ -794,20 +794,20 @@ def stage_train_4b(ctx: PipelineContext) -> StageResult:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        logger.info("TRAIN_4B complete: adapter=%s loss=%.4f success=%s",
-                     ctx.adapter_4b_path, ctx.final_loss_4b or -1, success)
+        logger.info("TRAIN_CORE complete: adapter=%s loss=%.4f success=%s",
+                     ctx.adapter_core_path, ctx.final_loss_core or -1, success)
 
         return StageResult(
             ok=True,
-            message=f"Training complete, loss={ctx.final_loss_4b}",
-            metrics={"adapter_path": adapter_path, "final_loss": ctx.final_loss_4b},
+            message=f"Training complete, loss={ctx.final_loss_core}",
+            metrics={"adapter_path": adapter_path, "final_loss": ctx.final_loss_core},
         )
     except Exception as e:
-        logger.exception("TRAIN_4B failed")
+        logger.exception("TRAIN_CORE failed")
         return StageResult(ok=False, message=str(e))
 
 
-def stage_merge_4b(ctx: PipelineContext) -> StageResult:
+def stage_merge_core(ctx: PipelineContext) -> StageResult:
     """Merge LoRA adapter into the same base used for training.
 
     If training ran on the previously merged model (incremental baking),
@@ -815,56 +815,56 @@ def stage_merge_4b(ctx: PipelineContext) -> StageResult:
     are relative to whatever base was used for training.
     """
     # Must merge into the same base that was trained on
-    base_4b = MERGED_4B if Path(MERGED_4B).exists() else BASE_4B
-    logger.info("═══ MERGE_4B: Merging adapter into %s ═══", base_4b)
+    base_4b = MERGED_CORE if Path(MERGED_CORE).exists() else BASE_CORE
+    logger.info("═══ MERGE_CORE: Merging adapter into %s ═══", base_4b)
 
-    if not ctx.adapter_4b_path:
-        return StageResult(ok=False, message="No 4B adapter path set — was TRAIN_4B skipped?")
+    if not ctx.adapter_core_path:
+        return StageResult(ok=False, message="No Core adapter path set — was TRAIN_CORE skipped?")
 
     # Handle previous merged model before overwriting.
     # If we trained on merged weights, we need to preserve a copy for
     # merge_adapter to read from while writing to the canonical path.
     archive_dest = None
-    if Path(MERGED_4B).exists():
+    if Path(MERGED_CORE).exists():
         if ctx.backup:
             archive_name = f"Qwen3.5-4B-Abliterated-merged.{int(time.time())}"
             os.makedirs(BAKED_DIR, exist_ok=True)
             archive_dest = os.path.join(BAKED_DIR, archive_name)
             logger.info("Backing up merged model to %s", archive_dest)
-            shutil.copytree(MERGED_4B, archive_dest)
-            if base_4b == MERGED_4B:
+            shutil.copytree(MERGED_CORE, archive_dest)
+            if base_4b == MERGED_CORE:
                 base_4b = archive_dest
-            shutil.rmtree(MERGED_4B)
+            shutil.rmtree(MERGED_CORE)
         else:
             # No backup — if training base was merged, copy to temp for merge input
-            if base_4b == MERGED_4B:
-                tmp_base = f"{MERGED_4B}.tmp_merge_input"
-                shutil.move(MERGED_4B, tmp_base)
+            if base_4b == MERGED_CORE:
+                tmp_base = f"{MERGED_CORE}.tmp_merge_input"
+                shutil.move(MERGED_CORE, tmp_base)
                 base_4b = tmp_base
             else:
-                shutil.rmtree(MERGED_4B)
+                shutil.rmtree(MERGED_CORE)
 
     try:
         from gaia_study.merge_and_requantize import merge_adapter
-        output = merge_adapter(base_4b, ctx.adapter_4b_path, MERGED_4B)
-        ctx.merged_4b_path = output
-        logger.info("MERGE_4B complete: %s", output)
+        output = merge_adapter(base_4b, ctx.adapter_core_path, MERGED_CORE)
+        ctx.merged_core_path = output
+        logger.info("MERGE_CORE complete: %s", output)
 
         # Clean up temp merge input if we created one (no-backup path)
-        tmp_base = f"{MERGED_4B}.tmp_merge_input"
+        tmp_base = f"{MERGED_CORE}.tmp_merge_input"
         if Path(tmp_base).exists():
             shutil.rmtree(tmp_base)
 
         return StageResult(ok=True, message=f"Merged to {output}",
                            metrics={"backup": archive_dest})
     except Exception as e:
-        logger.exception("MERGE_4B failed")
+        logger.exception("MERGE_CORE failed")
         return StageResult(ok=False, message=str(e))
 
 
 def stage_gguf_core(ctx: PipelineContext) -> StageResult:
-    """Convert merged 4B → GGUF Q4_K_M for Core CPU inference."""
-    logger.info("═══ GGUF_CORE: Converting merged 4B → Q4_K_M ═══")
+    """Convert merged Core → GGUF Q4_K_M for CPU fallback inference."""
+    logger.info("═══ GGUF_CORE: Converting merged Core → Q4_K_M ═══")
 
     # Archive previous GGUF (handle both file and stale directory)
     gguf_path = Path(GGUF_CORE)
@@ -880,8 +880,8 @@ def stage_gguf_core(ctx: PipelineContext) -> StageResult:
 
     # Also clean up the generated GGUF path (derived from merged dir name)
     # in case a stale directory exists there from a previous failed run
-    if ctx.merged_4b_path:
-        merged_name = os.path.basename(ctx.merged_4b_path)
+    if ctx.merged_core_path:
+        merged_name = os.path.basename(ctx.merged_core_path)
         generated_gguf = os.path.join(os.path.dirname(GGUF_CORE), f"{merged_name}-Q4_K_M.gguf")
         gen_path = Path(generated_gguf)
         if gen_path.is_dir():
@@ -894,12 +894,12 @@ def stage_gguf_core(ctx: PipelineContext) -> StageResult:
         # The merged model dir is "Qwen3.5-4B-Abliterated-merged", so GGUF will be
         # Qwen3.5-4B-Abliterated-merged-Q4_K_M.gguf. We need to rename it.
         output_dir = os.path.dirname(GGUF_CORE)
-        ok = convert_to_gguf(ctx.merged_4b_path, output_dir, "Q4_K_M")
+        ok = convert_to_gguf(ctx.merged_core_path, output_dir, "Q4_K_M")
         if not ok:
             return StageResult(ok=False, message="GGUF conversion failed")
 
         # Rename to expected filename if different
-        merged_name = os.path.basename(ctx.merged_4b_path)
+        merged_name = os.path.basename(ctx.merged_core_path)
         generated_gguf = os.path.join(output_dir, f"{merged_name}-Q4_K_M.gguf")
         if Path(generated_gguf).exists() and generated_gguf != GGUF_CORE:
             shutil.move(generated_gguf, GGUF_CORE)
@@ -919,7 +919,7 @@ def stage_deploy_prime(ctx: PipelineContext) -> StageResult:
 
     try:
         # Return GPU to prime (handoff study→prime, which restarts gaia-prime)
-        # The merged model is already at MERGED_4B path on the shared /models volume
+        # The merged model is already at MERGED_CORE path on the shared /models volume
         logger.info("Handing GPU back to prime (study→prime)...")
         sys.stderr.flush()
         result = http_post(f"{ORCHESTRATOR}/handoff/study-to-prime",
@@ -951,7 +951,7 @@ def stage_reload_core(ctx: PipelineContext) -> StageResult:
 
     # The GAIA Engine runs on port 8092 inside gaia-core
     engine_endpoint = os.environ.get("CORE_ENGINE_ENDPOINT", "http://gaia-core:8092")
-    model_path = ctx.merged_4b_path or MERGED_4B
+    model_path = ctx.merged_core_path or MERGED_CORE
 
     try:
         # Try GAIA Engine /model/swap first (safetensors, preferred)
@@ -992,7 +992,7 @@ def stage_reload_core(ctx: PipelineContext) -> StageResult:
 def stage_train_nano(ctx: PipelineContext) -> StageResult:
     """QLoRA on 0.8B Nano with the same filtered delta.
 
-    Like TRAIN_4B, uses previously merged Nano weights if they exist
+    Like TRAIN_CORE, uses previously merged Nano weights if they exist
     for incremental identity baking.
     """
     merged_nano = f"{BASE_08B}-merged"
@@ -1337,12 +1337,12 @@ def stage_cognitive_smoke(ctx: PipelineContext) -> StageResult:
 STAGE_FUNCTIONS: dict[str, Callable[[PipelineContext], StageResult]] = {
     "BUILD_CURRICULUM": stage_build_curriculum,
     "VERIFY_CURRICULUM": stage_verify_curriculum,
-    "PRE_EVAL_4B": stage_pre_eval_4b,
-    "FILTER_DELTA_4B": stage_filter_delta_4b,
+    "PRE_EVAL_CORE": stage_pre_eval_core,
+    "FILTER_DELTA_CORE": stage_filter_delta_core,
     "WEIGHT_CURRICULUM": stage_weight_curriculum,
     "GPU_ACQUIRE": stage_gpu_acquire,
-    "TRAIN_4B": stage_train_4b,
-    "MERGE_4B": stage_merge_4b,
+    "TRAIN_CORE": stage_train_core,
+    "MERGE_CORE": stage_merge_core,
     "GGUF_CORE": stage_gguf_core,
     "DEPLOY_PRIME": stage_deploy_prime,
     "RELOAD_CORE": stage_reload_core,
@@ -1406,9 +1406,9 @@ def run_pipeline(args: argparse.Namespace):
         pre_eval = state.get("pre_eval", {})
         ctx.pre_eval_metrics = {"avg_f1": pre_eval.get("core_avg_f1", 0.0)}
         adapters = state.get("adapters", {})
-        ctx.adapter_4b_path = adapters.get("4b", {}).get("path", "")
+        ctx.adapter_core_path = adapters.get("core", adapters.get("4b", {})).get("path", "")
         ctx.adapter_nano_path = adapters.get("nano", {}).get("path", "")
-        ctx.delta_count = state.get("stages", {}).get("FILTER_DELTA_4B", {}).get("delta_count", 0)
+        ctx.delta_count = state.get("stages", {}).get("FILTER_DELTA_CORE", {}).get("delta_count", 0)
         logger.info("Resuming pipeline: %s", ctx.pipeline_id)
 
     # Determine starting stage
@@ -1437,9 +1437,9 @@ def run_pipeline(args: argparse.Namespace):
 
     # GGUF stages only run with --gguf flag (emergency/offline CPU fallback)
     if getattr(args, "gguf", False):
-        # Insert GGUF_CORE after MERGE_4B (before DEPLOY_PRIME)
-        if "MERGE_4B" in stages_to_run and "GGUF_CORE" not in stages_to_run:
-            idx = stages_to_run.index("MERGE_4B") + 1
+        # Insert GGUF_CORE after MERGE_CORE (before DEPLOY_PRIME)
+        if "MERGE_CORE" in stages_to_run and "GGUF_CORE" not in stages_to_run:
+            idx = stages_to_run.index("MERGE_CORE") + 1
             stages_to_run.insert(idx, "GGUF_CORE")
         # Insert GGUF_NANO after MERGE_NANO (before DEPLOY_NANO)
         if "MERGE_NANO" in stages_to_run and "GGUF_NANO" not in stages_to_run:
@@ -1490,7 +1490,7 @@ def run_pipeline(args: argparse.Namespace):
             # Update alignment status
             if stage == "BUILD_CURRICULUM":
                 state["alignment_status"] = "TRAINING"
-            elif stage == "FILTER_DELTA_4B" and ctx.delta_count == 0:
+            elif stage == "FILTER_DELTA_CORE" and ctx.delta_count == 0:
                 state["alignment_status"] = "SELF_ALIGNED"
                 logger.info("★ Zero gaps found — model is SELF-ALIGNED")
             elif stage == "COGNITIVE_SMOKE":
@@ -1503,16 +1503,16 @@ def run_pipeline(args: argparse.Namespace):
                     logger.info("✓ ALIGNED: cognitive smoke passed (%.1f%%)", smoke_rate * 100)
 
             # Update state with stage-specific data
-            if stage == "PRE_EVAL_4B":
+            if stage == "PRE_EVAL_CORE":
                 state["pre_eval"]["core_avg_f1"] = result.metrics.get("avg_f1")
-            elif stage == "FILTER_DELTA_4B":
-                state["stages"]["FILTER_DELTA_4B"]["delta_count"] = ctx.delta_count
-                state["stages"]["FILTER_DELTA_4B"]["output_path"] = ctx.filtered_path
+            elif stage == "FILTER_DELTA_CORE":
+                state["stages"]["FILTER_DELTA_CORE"]["delta_count"] = ctx.delta_count
+                state["stages"]["FILTER_DELTA_CORE"]["output_path"] = ctx.filtered_path
             elif stage == "WEIGHT_CURRICULUM":
                 state["stages"]["WEIGHT_CURRICULUM"]["weighted_path"] = ctx.weighted_path
-            elif stage == "TRAIN_4B":
-                state["adapters"]["4b"]["path"] = ctx.adapter_4b_path
-                state["adapters"]["4b"]["final_loss"] = ctx.final_loss_4b
+            elif stage == "TRAIN_CORE":
+                state["adapters"]["core"]["path"] = ctx.adapter_core_path
+                state["adapters"]["core"]["final_loss"] = ctx.final_loss_core
             elif stage == "TRAIN_NANO":
                 state["adapters"]["nano"]["path"] = ctx.adapter_nano_path
                 state["adapters"]["nano"]["final_loss"] = ctx.final_loss_nano
@@ -1559,7 +1559,7 @@ def main():
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last completed stage")
     parser.add_argument("--stage", type=str, default=None,
-                        help="Start from a specific stage (e.g., TRAIN_4B)")
+                        help="Start from a specific stage (e.g., TRAIN_CORE)")
     parser.add_argument("--pause-after", type=str, default=None,
                         help="Pause after this stage completes")
     parser.add_argument("--dry-run", action="store_true",
