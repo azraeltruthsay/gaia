@@ -20,26 +20,26 @@ OUTPUT_DIR = Path("/tmp/journal-site")
 
 # Minimal dark theme CSS matching the blog
 CSS = """
-body { background: #1e1e2e; color: #cdd6f4; font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 2rem; line-height: 1.6; }
-a { color: #b4befe; text-decoration: none; } a:hover { text-decoration: underline; }
-h1 { color: #cba6f7; border-bottom: 1px solid #45475a; padding-bottom: 0.5rem; }
-h2 { color: #89b4fa; } h3 { color: #a6e3a1; }
-pre { background: #181825; padding: 1rem; border-radius: 8px; overflow-x: auto; }
-code { background: #181825; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+body { background: #0f1b23; color: #b0c4ce; font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 2rem; line-height: 1.6; }
+a { color: #4db8d1; text-decoration: none; } a:hover { color: #8fd4a8; text-decoration: underline; }
+h1 { color: #4db8d1; border-bottom: 1px solid rgba(77,184,209,0.3); padding-bottom: 0.5rem; }
+h2 { color: #5cb87a; } h3 { color: #7dd3e8; }
+pre { background: #071520; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+code { background: rgba(13,59,84,0.3); color: #b8e6f0; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
 pre code { padding: 0; background: none; }
 table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-th, td { border: 1px solid #45475a; padding: 0.5rem; text-align: left; }
-th { background: #181825; }
-.journal-entry { border: 1px solid #313244; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
-.journal-entry:hover { border-color: #585b70; }
-.journal-date { color: #f5c2e7; font-size: 0.85em; }
+th, td { border: 1px solid rgba(77,184,209,0.2); padding: 0.5rem; text-align: left; }
+th { background: #0a1520; }
+.journal-entry { border: 1px solid rgba(77,184,209,0.2); border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+.journal-entry:hover { border-color: #5cb87a; }
+.journal-date { color: #7dd3e8; font-size: 0.85em; }
 .journal-title { font-size: 1.1em; }
-.nav { margin-bottom: 2rem; padding: 1rem 0; border-bottom: 1px solid #45475a; }
-.nav a { margin-right: 1rem; color: #cba6f7; }
-.badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 4px; font-size: 0.8em; }
-.badge-dev { background: #89b4fa33; color: #89b4fa; }
-.badge-promo { background: #a6e3a133; color: #a6e3a1; }
-.badge-plan { background: #f5c2e733; color: #f5c2e7; }
+.nav { margin-bottom: 2rem; padding: 1rem 0; border-bottom: 1px solid rgba(77,184,209,0.3); }
+.nav a { margin-right: 1rem; color: #4db8d1; }
+.badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 12px; font-size: 0.8em; }
+.badge-dev { background: rgba(77,184,209,0.15); color: #4db8d1; }
+.badge-promo { background: rgba(92,184,122,0.15); color: #5cb87a; }
+.badge-plan { background: rgba(125,211,232,0.15); color: #7dd3e8; }
 """
 
 
