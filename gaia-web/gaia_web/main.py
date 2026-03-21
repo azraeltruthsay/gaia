@@ -186,15 +186,32 @@ async def update_presence(request: Request):
         activity = body.get("activity", "over the studio")
         status = body.get("status")
 
-        from gaia_web.discord_interface import change_presence_from_external
-        change_presence_from_external(activity, status)
+        from gaia_web.discord_interface import _bot, _bot_loop
+        if _bot is None or not _bot.is_ready():
+            return {"ok": False, "error": "Bot not connected"}
+        if _bot_loop is None or _bot_loop.is_closed():
+            return {"ok": False, "error": "Bot event loop not available"}
+
+        import discord as _discord
+        status_map = {"idle": _discord.Status.idle, "online": _discord.Status.online,
+                      "dnd": _discord.Status.dnd, "invisible": _discord.Status.invisible}
+        effective_status = status_map.get(status, _discord.Status.online)
+
+        async def _change():
+            if effective_status == _discord.Status.invisible:
+                await _bot.change_presence(status=effective_status, activity=None)
+            else:
+                await _bot.change_presence(
+                    status=effective_status,
+                    activity=_discord.Activity(type=_discord.ActivityType.watching, name=activity),
+                )
+
+        # Fire-and-forget — don't block on the bot's congested event loop
+        asyncio.run_coroutine_threadsafe(_change(), _bot_loop)
         return {"ok": True, "activity": activity, "status": status or "online"}
-    except RuntimeError as e:
-        # Bot not connected — non-fatal
-        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.warning("Presence update failed: %s", e)
-        return {"ok": False, "error": str(e)}
+        logger.warning("Presence update failed: %s: %s", type(e).__name__, e)
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 @app.get("/health")
