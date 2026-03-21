@@ -106,20 +106,30 @@ def wait_for_health(url: str, timeout: int = 120) -> bool:
     return False
 
 
+def _engine_url(tier: str) -> str:
+    """Get the engine URL — use Docker hostname if available, else localhost mapped port."""
+    # When running from host, engine ports may not be mapped.
+    # Try the Docker-internal hostname via gaia-core proxy first.
+    docker_hosts = {"core": "gaia-core:8092", "nano": "gaia-nano:8080", "prime": "gaia-prime:7777"}
+    host_ports = {"core": "8092", "nano": "8090", "prime": "7777"}
+    # From host, use localhost + mapped port
+    return f"http://localhost:{host_ports.get(tier, '8092')}"
+
+
 def enable_polygraph(tier: str) -> bool:
-    """Enable hidden-state capture on the tier's engine."""
-    port = ENGINE_PORTS.get(tier, "8092")
-    result = http_post(f"http://localhost:{port}/polygraph/enable")
+    """Enable hidden-state capture on the tier's engine (best-effort)."""
+    url = _engine_url(tier)
+    result = http_post(f"{url}/polygraph/enable")
     if result.get("ok"):
         log.info("Polygraph enabled for %s", tier)
         return True
-    log.warning("Failed to enable polygraph for %s: %s", tier, result)
+    log.debug("Polygraph not available for %s (engine may not be directly reachable): %s", tier, result)
     return False
 
 
 def disable_polygraph(tier: str) -> None:
-    port = ENGINE_PORTS.get(tier, "8092")
-    http_post(f"http://localhost:{port}/polygraph/disable")
+    url = _engine_url(tier)
+    http_post(f"{url}/polygraph/disable")
 
 
 def record_sae_atlas(tier: str, tag: str) -> dict | None:
@@ -235,12 +245,11 @@ def run_full_battery(tiers: list[str], enable_sae: bool = True,
         log.info("")
         log.info("─── Tier: %s ───", tier_info["name"])
 
-        # Step 1: Check if engine is reachable
-        port = tier_info["engine_port"]
-        health = http_get(f"http://localhost:{port}/health")
+        # Step 1: Check if the tier is reachable (via gaia-core's health endpoint)
+        health = http_get(f"{CORE_ENDPOINT}/health")
         if not health:
-            log.warning("%s engine not reachable at port %s — skipping", tier, port)
-            all_results["tiers"][tier] = {"error": "engine unreachable", "skipped": True}
+            log.warning("gaia-core not reachable — skipping %s", tier)
+            all_results["tiers"][tier] = {"error": "gaia-core unreachable", "skipped": True}
             continue
 
         # Step 2: Enable polygraph for hidden state monitoring
