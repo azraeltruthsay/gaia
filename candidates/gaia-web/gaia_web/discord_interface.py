@@ -220,6 +220,29 @@ class DiscordInterface:
                     names = ", ".join(a["filename"] for a in attachments)
                     content = f"[Attached: {names}]"
 
+                # Auto-translate non-English messages
+                if content and not content.startswith("!"):
+                    try:
+                        from gaia_web.translation import detect_and_translate_to_english
+                        translation_result = await detect_and_translate_to_english(content)
+                        if translation_result:
+                            translated_text, src_lang, src_lang_name = translation_result
+                            await message.reply(
+                                f"\U0001f310 **[{message.author.display_name}, {src_lang_name}]:** {translated_text}",
+                                mention_author=False,
+                            )
+                            logger.info(
+                                "Auto-translated %s->en for %s (%d chars)",
+                                src_lang, message.author.display_name, len(content),
+                            )
+                            content = translated_text
+                    except Exception as _translate_exc:
+                        try:
+                            from gaia_common.utils.error_logging import log_gaia_error
+                            log_gaia_error(logger, "GAIA-WEB-066", f"Auto-translate: {_translate_exc}")
+                        except ImportError:
+                            logger.warning("Auto-translate failed: %s", _translate_exc)
+
                 if content:
                     logger.info(f"Discord processing message from {message.author.display_name}: {content[:50]}")
                     await self._handle_message(
@@ -336,6 +359,68 @@ class DiscordInterface:
 
             await _voice_manager.disconnect()
             await ctx.send("Disconnected. Talk to you later!")
+
+        @bot.command(name="translate")
+        async def translate_cmd(ctx, lang_code: str = "en"):
+            """Translate a replied-to message. Usage: !translate ja"""
+            if not ctx.message.reference:
+                await ctx.send("Reply to a message with `!translate [lang]` to translate it.\n"
+                               "Example: reply to a message and type `!translate ja`")
+                return
+
+            try:
+                ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            except Exception:
+                await ctx.send("Couldn't fetch the referenced message.")
+                return
+
+            text_to_translate = ref_msg.content
+            if not text_to_translate:
+                await ctx.send("That message has no text content to translate.")
+                return
+
+            try:
+                from gaia_web.translation import detect_language, translate as do_translate, LANG_NAMES
+
+                detection = await detect_language(text_to_translate)
+                if detection is None:
+                    try:
+                        from gaia_common.utils.error_logging import log_gaia_error
+                        log_gaia_error(logger, "GAIA-WEB-067", "!translate: detection failed")
+                    except ImportError:
+                        pass
+                    await ctx.send("Couldn't detect the language. The translation service may be down.")
+                    return
+
+                src_lang = detection[0]
+                if src_lang == lang_code:
+                    await ctx.send(f"That message is already in `{lang_code}`.")
+                    return
+
+                translated = await do_translate(text_to_translate, source=src_lang, target=lang_code)
+                if translated is None:
+                    try:
+                        from gaia_common.utils.error_logging import log_gaia_error
+                        log_gaia_error(logger, "GAIA-WEB-066", f"!translate: {src_lang}->{lang_code} failed")
+                    except ImportError:
+                        pass
+                    await ctx.send("Translation failed. The translation service may be down.")
+                    return
+
+                target_name = LANG_NAMES.get(lang_code, lang_code.upper())
+                await ref_msg.reply(
+                    f"\U0001f310 **[{target_name}]:** {translated}",
+                    mention_author=False,
+                )
+                logger.info("!translate %s->%s for %s (%d chars)",
+                            src_lang, lang_code, ctx.author.display_name, len(text_to_translate))
+            except Exception as exc:
+                try:
+                    from gaia_common.utils.error_logging import log_gaia_error
+                    log_gaia_error(logger, "GAIA-WEB-066", f"!translate error: {exc}")
+                except ImportError:
+                    logger.warning("!translate error: %s", exc)
+                await ctx.send("An error occurred during translation.")
 
         self._bot = bot
         global _bot

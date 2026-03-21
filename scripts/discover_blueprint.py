@@ -53,6 +53,7 @@ KNOWN_SERVICES = {
     "gaia-doctor": {"port": 6419, "role": "The Immune System (Health Watchdog)", "gpu": False},
     "gaia-monkey": {"port": 6420, "role": "The Adversary (Chaos Testing)", "gpu": False},
     "gaia-nano": {"port": 8090, "role": "The Reflex (Nano Triage)", "gpu": True},
+    "gaia-translate": {"port": 5100, "role": "The Tongue (Multi-language Translation)", "gpu": False},
 }
 
 

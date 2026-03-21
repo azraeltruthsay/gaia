@@ -1,0 +1,107 @@
+id: gaia-translate
+version: '0.1'
+role: The Tongue (Multi-language Translation)
+service_status: live
+runtime:
+  port: 5000
+  base_image: libretranslate/libretranslate:v1.6.3
+  gpu: false
+  startup_cmd: null
+  health_check: curl -sf http://localhost:5000/languages
+  gpu_count: null
+  user: null
+  dockerfile: null
+  compose_service: gaia-translate
+  security: null
+
+interfaces:
+- id: translate
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /translate
+    method: POST
+    input_schema: '{"q": "text", "source": "ja", "target": "en"}'
+    output_schema: '{"translatedText": "..."}'
+  description: Translate text between supported languages.
+  status: active
+
+- id: detect
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /detect
+    method: POST
+    input_schema: '{"q": "text"}'
+    output_schema: '[{"confidence": 0.95, "language": "ja"}]'
+  description: Detect the language of input text. Returns array of candidates with confidence scores.
+  status: active
+
+- id: languages
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /languages
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List supported languages and available translation directions. Also serves as health check.
+  status: active
+
+dependencies:
+  services: []
+  volumes: []
+  external_apis: []
+
+source_files: []
+
+failure_modes:
+- condition: Translation service unreachable
+  response: Messages pass through untranslated. No user-facing impact beyond missing translations.
+  severity: degraded
+  auto_recovers: true
+- condition: Unsupported language pair
+  response: LibreTranslate returns 400. Client logs warning, message passes through untranslated.
+  severity: degraded
+  auto_recovers: true
+- condition: Model loading (first 90s after start)
+  response: All endpoints return errors until Argos models finish loading. Health check start_period covers this.
+  severity: partial
+  auto_recovers: true
+
+intent:
+  purpose: >
+    Headless translation microservice providing GAIA's Discord gateway with
+    automatic language detection and translation. Uses Argos Translate models
+    on CPU. Passive service — only called by gaia-web, has no outbound
+    dependencies. Enables GAIA's Grotto to welcome all languages rather than
+    enforcing English-only. Self-hosted for sovereignty — no external API dependency.
+
+  design_decisions:
+  - Upstream Docker image with zero custom code — maintenance-free
+  - CPU-only to avoid GPU contention with inference services
+  - Best-effort integration — translation failures never block message processing
+  - Web UI disabled (LT_DISABLE_WEB_UI=true) for security — API-only
+  - 10 languages chosen for broad coverage without excessive model download
+  - Confidence threshold (0.65) prevents garbage translations of short/ambiguous text
+
+  open_questions: []
+  cognitive_role: The Tongue
+
+meta:
+  status: live
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: '0.1'
+  schema_version: '1.0'
+  created_at: '2026-03-21T00:00:00Z'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: high
+  reflection_notes: null
+  divergence_score: null

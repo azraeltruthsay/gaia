@@ -186,6 +186,7 @@ _HARDCODED_SERVICES = {
     "gaia-orchestrator": ("http://gaia-orchestrator:6410/health", None),
     "gaia-monkey": ("http://gaia-monkey:6420/health", None),
     "gaia-wiki": ("http://gaia-wiki:8080", None),
+    "gaia-translate": ("http://gaia-translate:5000/languages", None),
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", "ha"),
     "gaia-mcp-candidate": ("http://gaia-mcp-candidate:8765/health", "ha"),
 }
@@ -208,12 +209,17 @@ def _load_service_registry() -> dict:
             for sid, svc in registry.get("services", {}).items():
                 port = svc.get("port")
                 health = svc.get("health_check")
-                # Derive health URL from port and hostname convention
-                if port:
+                # Use hardcoded health URL if available (handles non-standard paths),
+                # otherwise derive from port and hostname convention
+                if sid in _HARDCODED_SERVICES:
+                    health_url = _HARDCODED_SERVICES[sid][0]
+                    remediation = _HARDCODED_SERVICES[sid][1]
+                elif port:
                     health_url = f"http://{sid}:{port}/health"
+                    remediation = None
                 else:
                     health_url = health or f"http://{sid}:8080/health"
-                remediation = _HARDCODED_SERVICES[sid][1] if sid in _HARDCODED_SERVICES else None
+                    remediation = None
                 services[sid] = (health_url, remediation)
 
             # Always include candidate services (not in blueprints but monitored)
@@ -1686,7 +1692,7 @@ def check_health(name: str, url: str) -> bool:
             # For services that report inference health, check it
             try:
                 body = json.loads(resp.read().decode())
-                if body.get("status") == "degraded":
+                if isinstance(body, dict) and body.get("status") == "degraded":
                     log.warning(
                         "%s is degraded: inference_ok=%s detail=%s",
                         name, body.get("inference_ok"), body.get("inference_detail", ""),
