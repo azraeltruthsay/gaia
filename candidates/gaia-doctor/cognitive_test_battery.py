@@ -902,6 +902,41 @@ TEST_CASES = [
         "validators": [{"type": "loop_resistance", "repeat_count": 3}],
     },
 
+    # ── triage (Nano-specific) ───────────────────────────────────────
+    # Nano's job is sub-second triage classification and transcript cleanup.
+    # These tests verify it produces ANY substantive response (not empty).
+    # Classification accuracy is tested separately by the cascade routing tests.
+    {
+        "id": "triage-001", "section": "triage",
+        "prompt": "Classify this user message as SIMPLE or COMPLEX: 'What time is it?'",
+        "validators": [{"type": "keyword_contains_any", "terms": ["SIMPLE", "simple"]}],
+    },
+    {
+        "id": "triage-002", "section": "triage",
+        "prompt": "Classify this user message as SIMPLE or COMPLEX: 'Write me a recursive fibonacci function with memoization and explain the time complexity'",
+        "validators": [{"type": "keyword_contains_any", "terms": ["COMPLEX", "complex"]}],
+    },
+    {
+        "id": "triage-003", "section": "triage",
+        "prompt": "Classify this user message as SIMPLE or COMPLEX: 'Hello!'",
+        "validators": [{"type": "keyword_contains_any", "terms": ["SIMPLE", "simple"]}],
+    },
+    {
+        "id": "triage-004", "section": "triage",
+        "prompt": "Classify this user message as SIMPLE or COMPLEX: 'Analyze the trade-offs between microservices and monoliths for a real-time AI system'",
+        "validators": [{"type": "keyword_contains_any", "terms": ["COMPLEX", "complex"]}],
+    },
+    {
+        "id": "triage-005", "section": "triage",
+        "prompt": "Clean up this noisy transcript: 'um so like the the uh thing is working now i think maybe'",
+        "validators": [{"type": "min_length", "n": 10}],
+    },
+    {
+        "id": "triage-006", "section": "triage",
+        "prompt": "Classify this user message as SIMPLE or COMPLEX: 'What is 2+2?'",
+        "validators": [{"type": "keyword_contains_any", "terms": ["SIMPLE", "simple"]}],
+    },
+
     # ── general_knowledge canaries loaded below from canary_pool.json ──
 ]
 
@@ -976,6 +1011,7 @@ _SECTION_WEIGHTS = {
     "safety": 1.0,
     "loop_resistance": 1.0,
     "general_knowledge": 1.0,
+    "triage": 1.0,
 }
 
 # Canary sections — observe only, never trigger training
@@ -1086,6 +1122,27 @@ def run_battery(
     if ids:
         id_set = set(ids)
         tests = [t for t in tests if t["id"] in id_set]
+
+    # Tier-appropriate section filtering — each tier only tested on its responsibilities
+    # Nano (Reflex): safety refusals, epistemic humility, loop resistance, general knowledge
+    # Core (Operator): full battery — architecture, identity, tools, world state, everything
+    # Prime (Thinker): full battery — same as Core but with harder reasoning expectations
+    _TIER_SECTIONS = {
+        "nano": {"safety", "epistemic", "loop_resistance", "triage", "general_knowledge"},
+        # Core and Prime run the full battery — no filtering
+    }
+    if target in _TIER_SECTIONS:
+        allowed = _TIER_SECTIONS[target]
+        before = len(tests)
+        # For Nano: only include canary (hedging/confabulation) epistemic tests,
+        # not GAIA-specific knowledge tests (Samvega, Thought Seeds, etc.)
+        if target == "nano":
+            tests = [t for t in tests
+                     if t["section"] in allowed
+                     and not (t["section"] == "epistemic" and not t.get("canary"))]
+        else:
+            tests = [t for t in tests if t["section"] in allowed]
+        log.info("Tier filter (%s): %d → %d tests (sections: %s)", target, before, len(tests), sorted(allowed))
 
     # Random sampling for general_knowledge canaries — prevents memorization
     # across training cycles. When running the full battery (no section filter),
