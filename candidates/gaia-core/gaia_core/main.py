@@ -544,12 +544,35 @@ async def doctor_review(request: Request):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for container orchestration."""
+    """Health check endpoint for container orchestration.
+
+    Returns 200 with inference_ok=true if the Core inference backend
+    is reachable, or 200 with inference_ok=false + degraded status
+    if inference is down but the API is alive. Doctor uses this to
+    distinguish between service-down and inference-down.
+    """
+    import os
+    core_endpoint = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092")
+    inference_ok = False
+    inference_detail = ""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{core_endpoint}/health")
+            inference_ok = resp.status_code == 200
+            if not inference_ok:
+                inference_detail = f"status={resp.status_code}"
+    except Exception as _inf_exc:
+        inference_detail = str(_inf_exc)[:100]
+
+    status = "healthy" if inference_ok else "degraded"
     return JSONResponse(
         status_code=200,
         content={
-            "status": "healthy",
+            "status": status,
             "service": "gaia-core",
+            "inference_ok": inference_ok,
+            "inference_detail": inference_detail or "ok",
         }
     )
 

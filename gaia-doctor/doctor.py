@@ -1252,6 +1252,7 @@ IRRITATION_PATTERNS = [
     "Voice processing loop",
     "Speech playback failed",
     "Transcribe request failed",
+    "inference degraded",
 ]
 
 SERVICE_LOGS = {
@@ -1598,11 +1599,29 @@ def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
 # ---------------------------------------------------------------------------
 
 def check_health(name: str, url: str) -> bool:
-    """HTTP GET the health endpoint. Returns True if 200."""
+    """HTTP GET the health endpoint. Returns True if healthy.
+
+    For gaia-core: also checks the inference_ok field — a "degraded"
+    service (API alive but inference dead) is treated as unhealthy.
+    """
     try:
         req = Request(url, method="GET")
         with urlopen(req, timeout=5) as resp:
-            return resp.status == 200
+            if resp.status != 200:
+                return False
+            # For services that report inference health, check it
+            try:
+                body = json.loads(resp.read().decode())
+                if body.get("status") == "degraded":
+                    log.warning(
+                        "%s is degraded: inference_ok=%s detail=%s",
+                        name, body.get("inference_ok"), body.get("inference_detail", ""),
+                    )
+                    _record_irritation(name, f"inference degraded: {body.get('inference_detail', '')}", "inference degraded")
+                    return False
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass  # Non-JSON health response — just check HTTP status
+            return True
     except (URLError, OSError, TimeoutError):
         return False
 
