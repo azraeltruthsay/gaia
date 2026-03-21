@@ -1133,11 +1133,7 @@ class AgentCore:
                 # best-effort guard; continue even if wrapping fails
                 logger.debug("AgentCore: runtime wrapping guard failed for %s", selected_model_name, exc_info=True)
             if not selected_model:
-                try:
-                    from gaia_common.utils.error_logging import log_gaia_error
-                    log_gaia_error(logger, "GAIA-CORE-065", f"model={selected_model_name}")
-                except ImportError:
-                    logger.error("AgentCore: No suitable model available: %s", selected_model_name)
+                log_gaia_error(logger, "GAIA-CORE-065", f"model={selected_model_name}")
                 yield {"type": "token", "value": (
                     "**[GAIA-CORE-065]** I am currently unable to process your request — "
                     "my primary model is busy or unavailable. This has been logged for self-diagnosis."
@@ -1258,7 +1254,7 @@ class AgentCore:
     
             except Exception as e:
                 log_gaia_error(self.logger, "GAIA-CORE-045", str(e), exc_info=True)
-    
+
             # If RAG query returns no results, attempt to find and embed the knowledge
             if any(df.key == 'rag_no_results' and df.value for df in packet.content.data_fields):
                 packet = self._knowledge_acquisition_workflow(packet)
@@ -1442,11 +1438,7 @@ class AgentCore:
                                 f"{result['error']}"
                             )}
                     except Exception as e:
-                        try:
-                            from gaia_common.utils.error_logging import log_gaia_error
-                            log_gaia_error(self.logger, "GAIA-CORE-079", f"file={att.name} error={e}", exc_info=True)
-                        except ImportError:
-                            self.logger.error("Attachment ingestion failed for '%s': %s", att.name, e, exc_info=True)
+                        log_gaia_error(self.logger, "GAIA-CORE-079", f"file={att.name} error={e}", exc_info=True)
                         yield {"type": "token", "value": (
                             f"**[GAIA-CORE-079]** Failed to process attachment **{att.name}**: {e}"
                         )}
@@ -1663,15 +1655,11 @@ class AgentCore:
                     adapter_name=self._resolve_adapter(selected_model_name),
                 )
             except Exception as exc:
-                try:
-                    from gaia_common.utils.error_logging import log_gaia_error
-                    log_gaia_error(
-                        logger, "GAIA-CORE-078",
-                        f"model={selected_model_name} error={type(exc).__name__}: {exc}",
-                        exc_info=True,
-                    )
-                except ImportError:
-                    logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
+                log_gaia_error(
+                    logger, "GAIA-CORE-078",
+                    f"model={selected_model_name} error={type(exc).__name__}: {exc}",
+                    exc_info=True,
+                )
                 yield {"type": "token", "value": (
                     f"**[GAIA-CORE-078]** Plan generation failed ({type(exc).__name__}). "
                     f"Logged for self-diagnosis."
@@ -1949,17 +1937,13 @@ class AgentCore:
                     _exc_type = type(_stream_exc).__name__
                     _exc_detail = f"{_exc_type}: {_stream_exc}"
                     _tokens_received = len(current_turn_pieces)
-                    try:
-                        from gaia_common.utils.error_logging import log_gaia_error
-                        log_gaia_error(
-                            logger, "GAIA-CORE-075",
-                            f"model={selected_model_name} role={role_label} "
-                            f"tokens_before_break={_tokens_received} "
-                            f"error={_exc_detail}",
-                            exc_info=True,
-                        )
-                    except ImportError:
-                        logger.exception(f"AgentCore: Stream from {selected_model_name} failed: {_exc_detail}")
+                    log_gaia_error(
+                        logger, "GAIA-CORE-075",
+                        f"model={selected_model_name} role={role_label} "
+                        f"tokens_before_break={_tokens_received} "
+                        f"error={_exc_detail}",
+                        exc_info=True,
+                    )
                     # Persist seed so sleep cycle can analyze the failure pattern
                     try:
                         from gaia_core.cognition.thought_seed import save_thought_seed
@@ -2035,15 +2019,11 @@ class AgentCore:
                         full_response = routing_result.get("response_to_user", "")
                         break
                 except Exception as _swap_exc:
-                    try:
-                        from gaia_common.utils.error_logging import log_gaia_error
-                        log_gaia_error(
-                            logger, "GAIA-CORE-076",
-                            f"target_role={next_model_role} error={type(_swap_exc).__name__}: {_swap_exc}",
-                            exc_info=True,
-                        )
-                    except ImportError:
-                        logger.exception(f"AgentCore: Error swapping to {next_model_role}")
+                    log_gaia_error(
+                        logger, "GAIA-CORE-076",
+                        f"target_role={next_model_role} error={type(_swap_exc).__name__}: {_swap_exc}",
+                        exc_info=True,
+                    )
                     full_response = routing_result.get("response_to_user", "")
                     break
     
