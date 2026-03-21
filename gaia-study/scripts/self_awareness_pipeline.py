@@ -102,20 +102,22 @@ STAGES = [
     "GPU_ACQUIRE",
     "TRAIN_4B",
     "MERGE_4B",
-    "GGUF_CORE",
     "DEPLOY_PRIME",
     "RELOAD_CORE",
     "TRAIN_NANO",
     "MERGE_NANO",
-    "GGUF_NANO",
     "DEPLOY_NANO",
     "POST_EVAL",
     "COGNITIVE_SMOKE",
 ]
 
+# GGUF stages — only run with --gguf flag (emergency/offline use)
+GGUF_STAGES = ["GGUF_CORE", "GGUF_NANO"]
+
 DOCTOR_ENDPOINT = os.environ.get("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
 
-NANO_STAGES = {"TRAIN_NANO", "MERGE_NANO", "GGUF_NANO", "DEPLOY_NANO"}
+NANO_STAGES = {"TRAIN_NANO", "MERGE_NANO", "DEPLOY_NANO"}
+NANO_GGUF_STAGES = {"GGUF_NANO"}
 
 
 # ── Pipeline Context ─────────────────────────────────────────────────────────
@@ -185,7 +187,7 @@ def init_state(ctx: PipelineContext) -> dict:
         "started_at": ctx.started_at,
         "curriculum_path": ctx.curriculum_path,
         "threshold": ctx.threshold,
-        "stages": {stage: {"status": "pending"} for stage in STAGES},
+        "stages": {stage: {"status": "pending"} for stage in STAGES + GGUF_STAGES},
         "adapters": {
             "4b": {"path": None, "final_loss": None},
             "nano": {"path": None, "final_loss": None},
@@ -855,31 +857,50 @@ def stage_deploy_prime(ctx: PipelineContext) -> StageResult:
 
 
 def stage_reload_core(ctx: PipelineContext) -> StageResult:
-    """Hot-reload gaia-core's embedded llama-server with new GGUF."""
-    logger.info("═══ RELOAD_CORE: Hot-reloading Core CPU model ═══")
+    """Hot-reload gaia-core's GAIA Engine with updated safetensors model.
+
+    Uses the GAIA Engine /model/swap endpoint (port 8092) to atomically
+    unload the current model and load the newly merged safetensors.
+    Falls back to the legacy llama-server /model/release + /model/reload
+    path if the Engine is not available.
+    """
+    logger.info("═══ RELOAD_CORE: Hot-reloading Core model ═══")
+
+    # The GAIA Engine runs on port 8092 inside gaia-core
+    engine_endpoint = os.environ.get("CORE_ENGINE_ENDPOINT", "http://gaia-core:8092")
+    model_path = ctx.merged_4b_path or MERGED_4B
 
     try:
-        # Release current model
-        logger.info("Releasing current Core model...")
-        result = http_post(f"{CORE_CPU_ENDPOINT}/model/release")
-        logger.info("Release result: %s", result)
+        # Try GAIA Engine /model/swap first (safetensors, preferred)
+        logger.info("Swapping Core model via GAIA Engine: %s", model_path)
+        result = http_post(
+            f"{engine_endpoint}/model/swap",
+            {"model_path": model_path},
+            timeout=180,
+        )
+        logger.info("Engine swap result: %s", result)
 
-        # Small delay for cleanup
+        if result.get("ok"):
+            return StageResult(ok=True, message=f"Core model swapped to {model_path}", metrics=result)
+
+        # If Engine swap fails, fall back to legacy llama-server reload
+        logger.warning("Engine swap failed (%s), trying legacy llama-server reload...", result.get("error", "unknown"))
+        logger.info("Releasing current llama-server model...")
+        http_post(f"{CORE_CPU_ENDPOINT}/model/release")
         time.sleep(2)
 
-        # Reload with the (possibly updated) GGUF path
-        logger.info("Reloading Core model: %s", GGUF_CORE)
+        logger.info("Reloading llama-server with: %s", GGUF_CORE)
         result = http_post(
             f"{CORE_CPU_ENDPOINT}/model/reload",
             {"model_path": GGUF_CORE},
             timeout=180,
         )
-        logger.info("Reload result: %s", result)
+        logger.info("Legacy reload result: %s", result)
 
         if not result.get("ok"):
-            return StageResult(ok=False, message=f"Reload failed: {result}")
+            return StageResult(ok=False, message=f"Both Engine swap and legacy reload failed: {result}")
 
-        return StageResult(ok=True, message="Core model reloaded", metrics=result)
+        return StageResult(ok=True, message="Core model reloaded (legacy llama-server)", metrics=result)
     except Exception as e:
         logger.exception("RELOAD_CORE failed")
         return StageResult(ok=False, message=str(e))
@@ -1308,12 +1329,17 @@ def run_pipeline(args: argparse.Namespace):
 
     # Determine starting stage
     stages_to_run = list(STAGES)
+    all_valid_stages = STAGES + GGUF_STAGES
     if args.stage:
-        if args.stage not in STAGES:
-            logger.error("Unknown stage: %s. Valid: %s", args.stage, STAGES)
+        if args.stage not in all_valid_stages:
+            logger.error("Unknown stage: %s. Valid: %s", args.stage, all_valid_stages)
             sys.exit(1)
-        idx = STAGES.index(args.stage)
-        stages_to_run = STAGES[idx:]
+        if args.stage in STAGES:
+            idx = STAGES.index(args.stage)
+            stages_to_run = STAGES[idx:]
+        else:
+            # Direct GGUF stage invocation — run just that stage
+            stages_to_run = [args.stage]
     elif args.resume:
         # Skip completed stages
         for stage in STAGES:
@@ -1324,6 +1350,18 @@ def run_pipeline(args: argparse.Namespace):
     # Skip nano stages if requested
     if ctx.skip_nano:
         stages_to_run = [s for s in stages_to_run if s not in NANO_STAGES]
+
+    # GGUF stages only run with --gguf flag (emergency/offline CPU fallback)
+    if getattr(args, "gguf", False):
+        # Insert GGUF_CORE after MERGE_4B (before DEPLOY_PRIME)
+        if "MERGE_4B" in stages_to_run and "GGUF_CORE" not in stages_to_run:
+            idx = stages_to_run.index("MERGE_4B") + 1
+            stages_to_run.insert(idx, "GGUF_CORE")
+        # Insert GGUF_NANO after MERGE_NANO (before DEPLOY_NANO)
+        if "MERGE_NANO" in stages_to_run and "GGUF_NANO" not in stages_to_run:
+            idx = stages_to_run.index("MERGE_NANO") + 1
+            stages_to_run.insert(idx, "GGUF_NANO")
+        logger.info("GGUF conversion enabled (--gguf)")
 
     logger.info("Stages to run: %s", stages_to_run)
 
@@ -1458,6 +1496,8 @@ def main():
                         help="Train from pristine base weights instead of merged (full retrain)")
     parser.add_argument("--no-adaptive", action="store_true",
                         help="Skip difficulty weighting — train on flat filtered set (uniform epochs)")
+    parser.add_argument("--gguf", action="store_true",
+                        help="Also run GGUF conversion stages (emergency/offline CPU fallback)")
 
     args = parser.parse_args()
     run_pipeline(args)

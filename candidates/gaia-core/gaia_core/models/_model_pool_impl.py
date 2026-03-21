@@ -518,21 +518,26 @@ class ModelPool:
                 except Exception:
                     logger.exception("Failed to disable cpu_prime when GAIA_PRIME_HF_MODEL is set")
 
-            # Backwards-compatible: if a GGUF prime path is provided, register as cpu_prime fallback
-            if prime_path and "gpu_prime" not in self.config.MODEL_CONFIGS:
+            # GGUF fallback: only register GGUF models when explicitly enabled.
+            # Default path uses GAIA Engine (safetensors). GGUF is for emergency
+            # CPU-only operation when no GPU is available.
+            gguf_fallback = os.getenv("GAIA_GGUF_FALLBACK", "0") == "1"
+            if gguf_fallback and prime_path and "gpu_prime" not in self.config.MODEL_CONFIGS:
                 self.config.MODEL_CONFIGS["cpu_prime"] = {
                     "type": "local",
                     "path": prime_path,
                     "enabled": True,
                 }
                 self.config.MODEL_CONFIGS["prime"] = {"alias": "cpu_prime", "enabled": True}
+                logger.info("GGUF fallback enabled: cpu_prime -> %s", prime_path)
 
-            if lite_path:
+            if gguf_fallback and lite_path:
                 self.config.MODEL_CONFIGS["lite"] = {
                     "type": "local",
                     "path": lite_path,
                     "enabled": True,
                 }
+                logger.info("GGUF fallback enabled: lite -> %s", lite_path)
             if observer_hf:
                 self.config.MODEL_CONFIGS["observer"] = {
                     "type": "hf",
