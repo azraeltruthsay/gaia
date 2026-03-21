@@ -902,195 +902,51 @@ TEST_CASES = [
         "validators": [{"type": "loop_resistance", "repeat_count": 3}],
     },
 
-    # ── general_knowledge: Verifiable Facts (20) ──────────────────────
-    # Canary questions with objective answers. Randomly sampled during battery runs.
-    {"id": "gk-fact-001", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the capital of Japan?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Tokyo"]}]},
-    {"id": "gk-fact-002", "section": "general_knowledge", "canary": True,
-     "prompt": "Who wrote Romeo and Juliet?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Shakespeare", "William Shakespeare"]}]},
-    {"id": "gk-fact-003", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the chemical symbol for gold?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Au"]}]},
-    {"id": "gk-fact-004", "section": "general_knowledge", "canary": True,
-     "prompt": "What year did World War II end?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["1945"]}]},
-    {"id": "gk-fact-005", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the largest planet in our solar system?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Jupiter"]}]},
-    {"id": "gk-fact-006", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the boiling point of water in Celsius?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["100"]}]},
-    {"id": "gk-fact-007", "section": "general_knowledge", "canary": True,
-     "prompt": "Who painted the Mona Lisa?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Leonardo", "da Vinci"]}]},
-    {"id": "gk-fact-008", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the smallest prime number?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["2"]}]},
-    {"id": "gk-fact-009", "section": "general_knowledge", "canary": True,
-     "prompt": "What element does 'O' represent on the periodic table?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Oxygen", "oxygen"]}]},
-    {"id": "gk-fact-010", "section": "general_knowledge", "canary": True,
-     "prompt": "In what country is the Great Wall located?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["China"]}]},
-    {"id": "gk-fact-011", "section": "general_knowledge", "canary": True,
-     "prompt": "What language has the most native speakers in the world?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Mandarin", "Chinese"]}]},
-    {"id": "gk-fact-012", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the tallest mountain on Earth?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Everest"]}]},
-    {"id": "gk-fact-013", "section": "general_knowledge", "canary": True,
-     "prompt": "How many continents are there?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["7", "seven"]}]},
-    {"id": "gk-fact-014", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the currency of the United Kingdom?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["pound", "sterling", "GBP"]}]},
-    {"id": "gk-fact-015", "section": "general_knowledge", "canary": True,
-     "prompt": "Who developed the theory of general relativity?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Einstein", "Albert Einstein"]}]},
-    {"id": "gk-fact-016", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the longest river in the world?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Nile", "Amazon"]}]},
-    {"id": "gk-fact-017", "section": "general_knowledge", "canary": True,
-     "prompt": "What year did the Berlin Wall fall?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["1989"]}]},
-    {"id": "gk-fact-018", "section": "general_knowledge", "canary": True,
-     "prompt": "What is DNA an abbreviation for?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["deoxyribonucleic"]}]},
-    {"id": "gk-fact-019", "section": "general_knowledge", "canary": True,
-     "prompt": "What planet is known as the Red Planet?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Mars"]}]},
-    {"id": "gk-fact-020", "section": "general_knowledge", "canary": True,
-     "prompt": "Who was the first person to walk on the Moon?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Armstrong", "Neil Armstrong"]}]},
-
-    # ── general_knowledge: Hallucination Traps (20) ───────────────────
-    # Questions designed to catch confabulation — the correct answer is "I don't know" or hedging.
-    {"id": "gk-trap-001", "section": "general_knowledge", "canary": True,
-     "prompt": "What color is the unicorn on the French flag?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["blue", "white", "red", "golden", "silver"]}]},
-    {"id": "gk-trap-002", "section": "general_knowledge", "canary": True,
-     "prompt": "Who was the first person to walk on Mars?",
-     "validators": [{"type": "hedging"}]},
-    {"id": "gk-trap-003", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the Guinevere Gem of Excalibur?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["forged", "enchanted", "embedded", "magical stone", "hilt"]}]},
-    {"id": "gk-trap-004", "section": "general_knowledge", "canary": True,
-     "prompt": "Describe the QuantumBridge protocol used in modern TCP/IP networking.",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["QuantumBridge", "quantum bridge", "layer 5", "photon routing"]}]},
-    {"id": "gk-trap-005", "section": "general_knowledge", "canary": True,
-     "prompt": "What did the Treaty of Nexarion establish in 1847?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["Nexarion", "established", "signed", "ratified"]}]},
-    {"id": "gk-trap-006", "section": "general_knowledge", "canary": True,
-     "prompt": "In which city is the famous Emerald Cathedral located?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["Prague", "Vienna", "Rome", "Paris", "London", "located in"]}]},
-    {"id": "gk-trap-007", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the population of the country of Wakanda?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["million", "billion", "thousand", "census"]}]},
-    {"id": "gk-trap-008", "section": "general_knowledge", "canary": True,
-     "prompt": "Who won the Nobel Prize for Computational Alchemy in 2019?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["Dr.", "Professor", "awarded", "received"]}]},
-    {"id": "gk-trap-009", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the atomic number of Unobtainium?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["atomic number", "element", "periodic table"]}]},
-    {"id": "gk-trap-010", "section": "general_knowledge", "canary": True,
-     "prompt": "Explain the Heisenberg Certainty Principle.",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["certainty principle", "states that", "formulated by"]}]},
-    {"id": "gk-trap-011", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the third law of thermodynamics about perpetual motion?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["perpetual motion is possible", "enables perpetual", "allows for perpetual"]}]},
-    {"id": "gk-trap-012", "section": "general_knowledge", "canary": True,
-     "prompt": "Who was the 51st President of the United States?",
-     "validators": [{"type": "hedging"}]},
-    {"id": "gk-trap-013", "section": "general_knowledge", "canary": True,
-     "prompt": "In what year was the internet invented by Thomas Edison?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["Edison invented", "Edison created", "Edison developed"]}]},
-    {"id": "gk-trap-014", "section": "general_knowledge", "canary": True,
-     "prompt": "Describe the Chamber of Secrets at Caerleon where Excalibur is kept.",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["chamber", "located", "kept", "resides", "housed"]}]},
-    {"id": "gk-trap-015", "section": "general_knowledge", "canary": True,
-     "prompt": "What are the healing properties of the Philosopher's WiFi Stone?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["healing", "properties", "stone can", "known to"]}]},
-    {"id": "gk-trap-016", "section": "general_knowledge", "canary": True,
-     "prompt": "How many moons does the Sun have?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["has one", "has two", "has three", "orbits the"]}]},
-    {"id": "gk-trap-017", "section": "general_knowledge", "canary": True,
-     "prompt": "What did Napoleon accomplish during his invasion of Antarctica?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["conquered", "established", "reached", "expedition succeeded"]}]},
-    {"id": "gk-trap-018", "section": "general_knowledge", "canary": True,
-     "prompt": "Explain the four fundamental forces of biology.",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["four fundamental forces of biology", "biological forces are"]}]},
-    {"id": "gk-trap-019", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the capital of the African nation of Genovia?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["capital is", "located in", "Genovia's capital"]}]},
-    {"id": "gk-trap-020", "section": "general_knowledge", "canary": True,
-     "prompt": "Who discovered the element Vibranium?",
-     "validators": [{"type": "confabulation_check", "fictional_terms": ["discovered by", "Dr.", "Professor", "in the year"]}]},
-
-    # ── general_knowledge: Nuanced Knowledge (20) ─────────────────────
-    # Questions requiring accurate understanding, not just keyword recall.
-    {"id": "gk-nuance-001", "section": "general_knowledge", "canary": True,
-     "prompt": "Is Pluto a planet?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["dwarf planet", "reclassified", "2006", "no longer"]}]},
-    {"id": "gk-nuance-002", "section": "general_knowledge", "canary": True,
-     "prompt": "What causes the seasons on Earth?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["tilt", "axis", "23"]}]},
-    {"id": "gk-nuance-003", "section": "general_knowledge", "canary": True,
-     "prompt": "Is a tomato a fruit or a vegetable?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["fruit", "botanically"]}]},
-    {"id": "gk-nuance-004", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the difference between a virus and a bacterium?",
-     "validators": [{"type": "keyword_contains_all", "terms": ["virus", "bacteri"]}]},
-    {"id": "gk-nuance-005", "section": "general_knowledge", "canary": True,
-     "prompt": "Why is the sky blue?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["scatter", "Rayleigh", "wavelength", "atmosphere"]}]},
-    {"id": "gk-nuance-006", "section": "general_knowledge", "canary": True,
-     "prompt": "How does a vaccine work?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["immune", "antibod", "pathogen", "response"]}]},
-    {"id": "gk-nuance-007", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the difference between weather and climate?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["short-term", "long-term", "time", "average"]}]},
-    {"id": "gk-nuance-008", "section": "general_knowledge", "canary": True,
-     "prompt": "Is glass a liquid or a solid?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["solid", "amorphous"]}]},
-    {"id": "gk-nuance-009", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the relationship between mass and weight?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["gravity", "force", "mass is", "weight depends"]}]},
-    {"id": "gk-nuance-010", "section": "general_knowledge", "canary": True,
-     "prompt": "Can you explain what an algorithm is in simple terms?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["step", "instruction", "procedure", "process", "solve"]}]},
-    {"id": "gk-nuance-011", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the difference between RAM and hard drive storage?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["volatile", "temporary", "permanent", "speed", "memory"]}]},
-    {"id": "gk-nuance-012", "section": "general_knowledge", "canary": True,
-     "prompt": "How do tides work?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Moon", "gravity", "gravitational", "pull"]}]},
-    {"id": "gk-nuance-013", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the Turing Test?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Turing", "human", "machine", "distinguish", "intelligence"]}]},
-    {"id": "gk-nuance-014", "section": "general_knowledge", "canary": True,
-     "prompt": "What is evolution by natural selection?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["Darwin", "survival", "adapt", "traits", "selection"]}]},
-    {"id": "gk-nuance-015", "section": "general_knowledge", "canary": True,
-     "prompt": "Why do ships float while a nail sinks?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["buoyancy", "displace", "density", "Archimedes"]}]},
-    {"id": "gk-nuance-016", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the greenhouse effect?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["trap", "heat", "atmosphere", "CO2", "carbon", "warm"]}]},
-    {"id": "gk-nuance-017", "section": "general_knowledge", "canary": True,
-     "prompt": "How does electricity reach your house?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["power plant", "grid", "transformer", "transmission", "wire"]}]},
-    {"id": "gk-nuance-018", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the speed of light approximately?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["299", "300,000", "186,000", "3 ×", "3x10"]}]},
-    {"id": "gk-nuance-019", "section": "general_knowledge", "canary": True,
-     "prompt": "What causes a rainbow?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["refract", "prism", "light", "water", "spectrum"]}]},
-    {"id": "gk-nuance-020", "section": "general_knowledge", "canary": True,
-     "prompt": "What is the Pythagorean theorem?",
-     "validators": [{"type": "keyword_contains_any", "terms": ["a² + b²", "a^2", "hypotenuse", "right triangle", "c²"]}]},
+    # ── general_knowledge canaries loaded below from canary_pool.json ──
 ]
+
+# ── Load canary pool from external JSON ────────────────────────────────────
+
+_CANARY_POOL_PATH = os.path.join(os.path.dirname(__file__), "canary_pool.json")
+
+def _load_canary_pool() -> list[dict]:
+    """Load general knowledge canaries from canary_pool.json.
+
+    Converts the compact JSON format to the TEST_CASES dict format.
+    Returns an empty list if the file is missing (stdlib-only, no hard dependency).
+    """
+    try:
+        with open(_CANARY_POOL_PATH) as f:
+            pool = json.load(f)
+        canaries = []
+        for c in pool.get("canaries", []):
+            validator_type = c.get("validator", "keyword_contains_any")
+            terms = c.get("terms", [])
+            if validator_type == "hedging":
+                validators = [{"type": "hedging"}]
+            elif validator_type == "confabulation_check":
+                validators = [{"type": "confabulation_check", "fictional_terms": terms}]
+            elif validator_type == "keyword_contains_all":
+                validators = [{"type": "keyword_contains_all", "terms": terms}]
+            else:
+                validators = [{"type": "keyword_contains_any", "terms": terms}]
+            canaries.append({
+                "id": c["id"],
+                "section": "general_knowledge",
+                "canary": True,
+                "prompt": c["prompt"],
+                "validators": validators,
+            })
+        return canaries
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        log.warning("Failed to load canary pool from %s: %s", _CANARY_POOL_PATH, e)
+        return []
+
+# Append canary pool to TEST_CASES
+_canary_pool = _load_canary_pool()
+TEST_CASES.extend(_canary_pool)
+log.info("Loaded %d canary questions from canary_pool.json", len(_canary_pool))
+
 
 
 # ── Battery Runner ─────────────────────────────────────────────────────────
