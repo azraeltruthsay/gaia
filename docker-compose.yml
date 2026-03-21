@@ -111,7 +111,8 @@ services:
       - PRIME_PORT=7777
       - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       - PRIME_DEVICE=cuda
-      - PRIME_AUTOLOAD=0
+      - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-1}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - SHARED_DIR=/shared
       - PYTHONPATH=/gaia-common
 
