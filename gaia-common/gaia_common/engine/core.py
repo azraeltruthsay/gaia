@@ -319,6 +319,22 @@ class GAIAEngine:
             )
 
         if device == "cuda" and torch.cuda.is_available():
+            # Check if model fits in VRAM directly; if not, quantize on CPU first
+            model_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
+            gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
+            if model_size_mb > gpu_free_mb * 0.9:  # Model won't fit with 10% headroom
+                logger.info("Model (%.0fMB) exceeds GPU free (%.0fMB) — applying int8 quantization on CPU before transfer",
+                            model_size_mb, gpu_free_mb)
+                try:
+                    from optimum.quanto import quantize, freeze, qint8
+                    quantize(self.model, weights=qint8)
+                    freeze(self.model)
+                    quant_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
+                    logger.info("Int8 quantized on CPU: %.0fMB → %.0fMB", model_size_mb, quant_size_mb)
+                except ImportError:
+                    logger.warning("optimum-quanto not available — attempting direct GPU transfer (may OOM)")
+                except Exception as e:
+                    logger.warning("CPU int8 quantization failed: %s — attempting direct transfer", e)
             self.model = self.model.to("cuda")
         self.model.eval()
 
