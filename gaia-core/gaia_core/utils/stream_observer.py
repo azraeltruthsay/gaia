@@ -212,6 +212,30 @@ class StreamObserver:
             return Interrupt(level="CAUTION", reason=reason,
                              suggestion="Only cite files from Retrieved Documents or verified via read_file.")
 
+        # ── Identity/Context Confusion Check ──────────────────────────────
+        # Detect when GAIA conflates retrieved knowledge (D&D campaign, user
+        # documents) with her own architecture. Pattern: response contains
+        # knowledge-base terms AND self-referential framing ("my sleep cycle",
+        # "my architecture", "part of my system").
+        _identity_confusion = self._check_identity_confusion(output, packet)
+        if _identity_confusion:
+            logger.warning("StreamObserver: IDENTITY CONFUSION — %s", _identity_confusion)
+            try:
+                from gaia_core.cognition.thought_seed import save_thought_seed
+                save_thought_seed(
+                    f"THOUGHT_SEED: Identity confusion detected — "
+                    f"GAIA conflated retrieved knowledge with self-reference. "
+                    f"Detail: {_identity_confusion}",
+                    packet, self.config,
+                )
+            except Exception:
+                pass
+            return Interrupt(
+                level="CAUTION",
+                reason=_identity_confusion,
+                suggestion="Distinguish between GAIA's real architecture and external knowledge (games, user documents).",
+            )
+
         # identity may be on older packets as packet.identity (dict), or on v0.3 packets in header.persona
         identity_text = ""
         try:
@@ -657,6 +681,49 @@ class StreamObserver:
                         reason="Response may contain unprocessed internal reasoning",
                         suggestion="Consider reviewing response quality"
                     )
+
+        return None
+
+    def _check_identity_confusion(self, output: str, packet) -> Optional[str]:
+        """Detect when GAIA conflates retrieved knowledge with self-reference.
+
+        Returns a reason string if confusion is detected, None otherwise.
+        Checks if the response uses self-referential framing ("my sleep cycle",
+        "part of my architecture") while the active knowledge base is external
+        content (D&D campaign, user documents, etc.).
+        """
+        if not output or len(output) < 30:
+            return None
+
+        # Determine active knowledge base from packet
+        kb_name = ""
+        try:
+            for df in packet.content.data_fields:
+                if getattr(df, "key", "") == "active_knowledge_base":
+                    kb_name = str(getattr(df, "value", "")).lower()
+                    break
+        except Exception:
+            return None
+
+        # Only check for external knowledge bases (not gaia's own docs)
+        _external_kbs = ("dnd_campaign", "dnd", "user_docs", "external")
+        if not any(ext in kb_name for ext in _external_kbs):
+            return None
+
+        # Check if response conflates external knowledge with self-reference
+        _lower = output.lower()
+        _self_refs = [
+            "my sleep cycle", "my architecture", "part of my system",
+            "my internal", "my cognitive", "my pipeline",
+            "in my codebase", "my inference", "my neural",
+        ]
+        _has_self_ref = any(ref in _lower for ref in _self_refs)
+
+        if _has_self_ref:
+            return (
+                f"Response uses self-referential framing while knowledge base is '{kb_name}'. "
+                f"GAIA may be conflating external content (game/document) with her own architecture."
+            )
 
         return None
 
