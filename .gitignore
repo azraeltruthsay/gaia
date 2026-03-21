@@ -84,6 +84,7 @@ knowledge/logs/
 knowledge/.obsidian/
 knowledge/creative_writing/
 knowledge/transcripts/
+knowledge/awareness/
 
 # --- Runtime / session data ---
 **/sessions.json
