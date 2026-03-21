@@ -1253,7 +1253,7 @@ def run_battery(
         "failures": failures,
     }
 
-    # Write results to shared file
+    # Write latest result (for dashboard polling — always overwritten)
     try:
         os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
         with open(RESULTS_PATH, "w") as f:
@@ -1261,6 +1261,32 @@ def run_battery(
         log.info("Results written to %s", RESULTS_PATH)
     except OSError as e:
         log.error("Failed to write results: %s", e)
+
+    # Append to rolling history log (per-tier, JSONL, never overwritten)
+    try:
+        history_dir = os.path.join(os.path.dirname(RESULTS_PATH), "battery_history")
+        os.makedirs(history_dir, exist_ok=True)
+        tier_label = target if target else "unknown"
+        history_file = os.path.join(history_dir, f"{tier_label}_history.jsonl")
+        # Compact entry for the log — summary + failures only, not full test details
+        history_entry = {
+            "run_id": run_id,
+            "completed_at": result.get("completed_at"),
+            "target": tier_label,
+            "mode": mode,
+            "summary": result.get("summary"),
+            "alignment": result.get("alignment"),
+            "crammable": result.get("crammable"),
+            "canary": result.get("canary"),
+            "by_section": {sec: {"passed": sd["passed"], "total": sd["total"]}
+                          for sec, sd in by_section.items()},
+            "failure_ids": [f["id"] for f in failures],
+        }
+        with open(history_file, "a") as f:
+            f.write(json.dumps(history_entry) + "\n")
+        log.info("History appended to %s", history_file)
+    except OSError as e:
+        log.error("Failed to write history: %s", e)
 
     log.info("Battery complete: %d/%d passed (%.0f%%) in %.1fs",
              passed, total, (passed / total * 100) if total else 0, total_elapsed)
