@@ -300,7 +300,8 @@ def generate_samvega_analysis(
                 if df.key == "auditory_environment":
                     try:
                         auditory_env = json.loads(df.value) if isinstance(df.value, str) else df.value
-                    except Exception:
+                    except Exception as _aud_exc:
+                        logger.debug("Samvega: auditory environment parse failed: %s", _aud_exc)
                         auditory_env = {"raw": str(df.value)}
                     break
         if hasattr(packet, "response"):

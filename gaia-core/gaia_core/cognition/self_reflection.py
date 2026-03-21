@@ -67,7 +67,8 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
         # Build a reflection packet snapshot to ground the summarization
         try:
             reflection_packet_snapshot = build_packet_snapshot(session_id=getattr(config, 'session_id', 'reflection'), persona_id='Reflector', original_prompt=output, history=[{'role':'assistant','content':output}])
-        except Exception:
+        except Exception as _snap_exc:
+            logger.debug("SelfReflection: packet snapshot build failed: %s", _snap_exc)
             reflection_packet_snapshot = None
         summary = summarizer.generate_summary([{'role': 'assistant', 'content': output}], packet=reflection_packet_snapshot)
         output = summary
@@ -155,7 +156,8 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
             model_name = None
             try:
                 model_name = getattr(llm, 'name', None) or llm.__class__.__name__
-            except Exception:
+            except Exception as _name_exc:
+                logger.debug("SelfReflection: model name extraction failed: %s", _name_exc)
                 model_name = None
             ts_write({
                 "type": "reflection_iteration",
@@ -175,8 +177,8 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
             if score >= threshold:
                 logger.info(f"SelfReflection: confidence threshold reached (iter {i})")
                 break
-        except Exception:
-            pass
+        except Exception as _thr_exc:
+            logger.warning("SelfReflection: confidence threshold check failed (score=%s, threshold=%s): %s", score, threshold, _thr_exc)
 
         # Stop early if the model has produced a concrete plan
         if "PLAN:" in final_thought:
@@ -212,7 +214,8 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
                 persona_traits = {}
                 try:
                     persona_traits = getattr(packet.header.persona, 'traits', {}) or {}
-                except Exception:
+                except Exception as _trait_exc:
+                    logger.debug("SelfReflection: persona traits extraction failed: %s", _trait_exc)
                     persona_traits = {}
 
                 # Handle cases where reflection_log entries are deserialized as dicts instead of objects

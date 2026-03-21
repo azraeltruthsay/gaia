@@ -337,6 +337,37 @@ CURRENT CODE:
 Respond with ONLY the complete fixed file content. No markdown fences. No explanation.
 Start with the first line of the file."""
 
+    # ── Awareness Prompt Construction ─────────────────────────────────
+
+    @staticmethod
+    def build_awareness_prompt(
+        gap_description: str,
+        current_awareness: str,
+    ) -> str:
+        """Build LLM prompt for awareness file additions (not code fixes).
+
+        Used when CodeMind detects a capability_gap — generates a markdown
+        addition to an awareness file rather than a code diff.
+        """
+        return f"""You are CodeMind, GAIA's self-awareness layer. A capability gap was detected.
+
+RULES:
+- Add a SINGLE concise markdown bullet or short paragraph to the awareness file
+- State what GAIA CANNOT do or does NOT have access to
+- Do NOT remove or modify existing content
+- Do NOT add speculative capabilities — only document confirmed limitations
+- Keep additions under 3 lines
+- If this gap is already documented, respond: ALREADY_DOCUMENTED
+
+GAP DETECTED:
+{gap_description}
+
+CURRENT AWARENESS FILE:
+{current_awareness}
+
+Respond with ONLY the new markdown content to APPEND (no fences, no explanation).
+Start with a bullet point (- )."""
+
     # ── Changelog ────────────────────────────────────────────────────
 
     def _write_changelog(self, result: dict) -> None:

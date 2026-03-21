@@ -19,6 +19,8 @@ Service code ranges
 | GAIA-DOCTOR | gaia-doctor     | 001 – 099 |
 | GAIA-ORCH   | gaia-orchestr.  | 001 – 099 |
 | GAIA-AUDIO  | gaia-audio      | 001 – 099 |
+| GAIA-ENGINE | gaia engine lib | 001 – 099 |
+| GAIA-MONKEY | gaia-monkey     | 001 – 099 |
 | GAIA-COMMON | gaia-common     | 001 – 049 |
 +-------------+-----------------+-----------+
 
@@ -195,7 +197,7 @@ register("GAIA-CORE-050", "Model load failed",
          logging.ERROR, ErrorCategory.MODEL)
 
 register("GAIA-CORE-055", "Prime model unreachable",
-         "Cannot connect to the vLLM Prime inference server (port 7777). "
+         "Cannot connect to the GAIA Engine Prime server (port 7777). "
          "Check that gaia-prime is running.",
          logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
 
@@ -209,8 +211,40 @@ register("GAIA-CORE-065", "No suitable model available",
          logging.ERROR, ErrorCategory.MODEL)
 
 register("GAIA-CORE-070", "LoRA adapter load failed",
-         "Failed to load LoRA adapter into vLLM. Check adapter path and compatibility.",
+         "Failed to load LoRA adapter into the GAIA Engine. Check adapter path and compatibility.",
          logging.WARNING, ErrorCategory.MODEL)
+
+register("GAIA-CORE-075", "Inference stream interrupted",
+         "Streaming inference from model was interrupted mid-generation. "
+         "Common causes: GPU OOM, vLLM crash, httpx timeout, network drop. "
+         "Check gaia-prime logs and GPU memory. Doctor will auto-detect via irritation patterns.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
+
+register("GAIA-CORE-076", "Model swap failed during debate",
+         "Failed to swap between Core and Thinker models during council debate. "
+         "The partial response from the previous model will be used. "
+         "Check model pool health and VRAM availability.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
+
+register("GAIA-CORE-077", "Loop detector disabled",
+         "Loop detection observer failed to initialize or check. "
+         "GAIA may not detect repetitive output. Check loop_recovery.py imports.",
+         logging.WARNING, ErrorCategory.LOOP)
+
+register("GAIA-CORE-078", "Plan generation failed",
+         "Forward-to-model call failed during planning stage. "
+         "Check model availability and VRAM. The user will see a plan-error message.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
+
+register("GAIA-CORE-079", "Attachment ingestion failed",
+         "Failed to process a user-uploaded attachment. "
+         "Check file size limits, supported formats, and disk space.",
+         logging.ERROR, ErrorCategory.INTERNAL)
+
+register("GAIA-CORE-080", "Model stream error",
+         "Error during model streaming in ExternalVoice. "
+         "The generation was aborted. Check model server health and VRAM.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
 
 # --- GAIA-CORE: Session (100-149) -------------------------------------
 
@@ -279,6 +313,32 @@ register("GAIA-WEB-030", "SSE stream error",
 register("GAIA-WEB-035", "Consent validation failed",
          "User consent could not be validated. Request rejected.",
          logging.WARNING, ErrorCategory.SAFETY)
+
+register("GAIA-WEB-040", "Discord message send failed",
+         "Failed to send response to Discord channel or DM. "
+         "User's message was processed but the reply was lost. "
+         "Check Discord API rate limits and bot permissions.",
+         logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
+
+register("GAIA-WEB-045", "Voice channel join failed",
+         "Failed to join Discord voice channel. "
+         "Check bot voice permissions and channel availability.",
+         logging.ERROR, ErrorCategory.NETWORK)
+
+register("GAIA-WEB-050", "Voice processing error",
+         "Voice processing loop crashed or utterance handling failed. "
+         "Voice channel may become unresponsive. Check gaia-audio health.",
+         logging.ERROR, ErrorCategory.INTERNAL)
+
+register("GAIA-WEB-055", "Speech playback failed",
+         "TTS output could not be played in voice channel. "
+         "Check audio encoding, FFmpeg, and voice connection state.",
+         logging.ERROR, ErrorCategory.INTERNAL)
+
+register("GAIA-WEB-060", "Transcription failed",
+         "Speech-to-text request to gaia-audio failed. "
+         "User's voice input was lost. Check gaia-audio service health.",
+         logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
 
 # --- GAIA-MCP (001-099) -----------------------------------------------
 
@@ -353,3 +413,91 @@ register("GAIA-AUDIO-001", "STT transcription failed",
 register("GAIA-AUDIO-010", "TTS synthesis failed",
          "Text-to-speech synthesis failed.",
          logging.ERROR, ErrorCategory.MODEL)
+
+# --- GAIA-ENGINE (001-099) --------------------------------------------
+
+register("GAIA-ENGINE-001", "Model load failed",
+         "GAIA Engine failed to load the model from disk. Check model path, disk space, and VRAM.",
+         logging.CRITICAL, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-005", "Model not loaded",
+         "Inference requested but no model is loaded. Send POST /model/load first.",
+         logging.ERROR, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-010", "Generation failed",
+         "Model generation raised an exception. Check input format and token limits.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
+
+register("GAIA-ENGINE-015", "Empty generation",
+         "Model produced zero tokens. May indicate prompt issues or context overflow.",
+         logging.WARNING, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-020", "KV cache allocation failed",
+         "Static KV cache could not be allocated. Likely insufficient VRAM for the requested sequence length.",
+         logging.ERROR, ErrorCategory.RESOURCE)
+
+register("GAIA-ENGINE-025", "KV cache overflow",
+         "Input exceeded the pre-allocated KV cache max_seq_len. Truncation or reallocation needed.",
+         logging.WARNING, ErrorCategory.RESOURCE)
+
+register("GAIA-ENGINE-030", "Thought snapshot failed",
+         "ThoughtHold failed to save or resume a KV cache snapshot. Check /shared/thoughts directory.",
+         logging.ERROR, ErrorCategory.MEMORY)
+
+register("GAIA-ENGINE-035", "Prefix cache miss",
+         "SegmentedKVManager segment hash mismatch — cache invalidated and rebuilt.",
+         logging.WARNING, ErrorCategory.MEMORY)
+
+register("GAIA-ENGINE-040", "LoRA adapter load failed",
+         "Failed to load a LoRA adapter via PEFT. Check adapter path, rank compatibility, and VRAM.",
+         logging.ERROR, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-045", "LoRA adapter not found",
+         "Requested adapter name is not loaded. Load it first via POST /adapter/load.",
+         logging.WARNING, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-050", "Device migration failed",
+         "GPU↔CPU migration raised an exception. Model may be in inconsistent state.",
+         logging.ERROR, ErrorCategory.RESOURCE)
+
+register("GAIA-ENGINE-055", "Polygraph capture failed",
+         "HiddenStatePolygraph failed to capture activations. Generation continues without introspection.",
+         logging.WARNING, ErrorCategory.INTERNAL)
+
+register("GAIA-ENGINE-060", "Vision processing failed",
+         "Multimodal image processing raised an exception. Check image format and processor availability.",
+         logging.ERROR, ErrorCategory.MODEL, is_retryable=True)
+
+register("GAIA-ENGINE-065", "Vision processor not available",
+         "Model was loaded without vision support but received an image input.",
+         logging.WARNING, ErrorCategory.MODEL)
+
+register("GAIA-ENGINE-070", "torch.compile failed",
+         "Model compilation with reduce-overhead mode failed. Falling back to eager execution.",
+         logging.WARNING, ErrorCategory.INTERNAL)
+
+register("GAIA-ENGINE-075", "SAE atlas recording failed",
+         "Failed to record SAE atlas baseline activations.",
+         logging.WARNING, ErrorCategory.INTERNAL)
+
+register("GAIA-ENGINE-080", "ROME edit failed",
+         "ROME weight edit operation failed. Model weights unchanged.",
+         logging.ERROR, ErrorCategory.MODEL)
+
+# --- GAIA-MONKEY (001-099) --------------------------------------------
+
+register("GAIA-MONKEY-001", "Chaos drill failed",
+         "A chaos drill could not be executed. Check target service connectivity.",
+         logging.ERROR, ErrorCategory.INTERNAL)
+
+register("GAIA-MONKEY-010", "Serenity state write failed",
+         "Failed to update serenity.json. Check /shared/doctor/ permissions.",
+         logging.ERROR, ErrorCategory.RESOURCE)
+
+register("GAIA-MONKEY-015", "Meditation flag error",
+         "Failed to read or write defensive_meditation.json.",
+         logging.WARNING, ErrorCategory.RESOURCE)
+
+register("GAIA-MONKEY-020", "PromptFoo suite failed",
+         "A PromptFoo red-team test suite failed to execute.",
+         logging.WARNING, ErrorCategory.INTERNAL)

@@ -282,8 +282,8 @@ class AgentCore:
                     "role": role,
                     "source": source,
                 })
-            except Exception:
-                pass  # Timeline failures must never break cognition
+            except Exception as _tl_exc:
+                logger.debug("Timeline write failed (non-fatal): %s", _tl_exc)
 
     def _build_output_routing(self, source: str, destination: str, metadata: dict) -> OutputRouting:
         """Build OutputRouting from source/destination/metadata.
@@ -647,8 +647,8 @@ class AgentCore:
                             # header.persona may be frozen or not support assignment; record in content
                             try:
                                 packet.content.data_fields.append(DataField(key='immutable_identity', value=cfg_identity))
-                            except Exception:
-                                pass
+                            except Exception as _id_exc:
+                                logger.debug("AgentCore: immutable identity fallback failed: %s", _id_exc)
                         logger.warning(f"AgentCore: injected missing persona identity into packet: {cfg_identity}")
                 except Exception:
                     logger.debug("AgentCore: failed to inject config identity into packet", exc_info=True)
@@ -1055,8 +1055,8 @@ class AgentCore:
                                 if cand not in self.model_pool.models:
                                     try:
                                         self.model_pool.ensure_model_loaded(cand)
-                                    except Exception:
-                                        pass
+                                    except Exception as _load_exc:
+                                        logger.warning("AgentCore: cascade escalation preload failed for %s: %s", cand, _load_exc)
                                 if cand in self.model_pool.models:
                                     # Verify the model endpoint is actually reachable before escalating
                                     _model_obj = self.model_pool.models.get(cand)
@@ -1133,7 +1133,15 @@ class AgentCore:
                 # best-effort guard; continue even if wrapping fails
                 logger.debug("AgentCore: runtime wrapping guard failed for %s", selected_model_name, exc_info=True)
             if not selected_model:
-                yield {"type": "token", "value": "I am currently unable to process your request as my primary model is busy or unavailable."}
+                try:
+                    from gaia_common.utils.error_logging import log_gaia_error
+                    log_gaia_error(logger, "GAIA-CORE-065", f"model={selected_model_name}")
+                except ImportError:
+                    logger.error("AgentCore: No suitable model available: %s", selected_model_name)
+                yield {"type": "token", "value": (
+                    "**[GAIA-CORE-065]** I am currently unable to process your request — "
+                    "my primary model is busy or unavailable. This has been logged for self-diagnosis."
+                )}
                 return
     
             # 2. Create the initial v0.3 Cognition Packet
@@ -1434,8 +1442,14 @@ class AgentCore:
                                 f"{result['error']}"
                             )}
                     except Exception as e:
-                        self.logger.error("Attachment ingestion failed for '%s': %s", att.name, e, exc_info=True)
-                        yield {"type": "token", "value": f"Failed to process attachment **{att.name}**: {e}"}
+                        try:
+                            from gaia_common.utils.error_logging import log_gaia_error
+                            log_gaia_error(self.logger, "GAIA-CORE-079", f"file={att.name} error={e}", exc_info=True)
+                        except ImportError:
+                            self.logger.error("Attachment ingestion failed for '%s': %s", att.name, e, exc_info=True)
+                        yield {"type": "token", "value": (
+                            f"**[GAIA-CORE-079]** Failed to process attachment **{att.name}**: {e}"
+                        )}
 
                 # If the message was ONLY attachments (no real user text), we're done
                 if user_input.startswith("[Attached:"):
@@ -1478,8 +1492,8 @@ class AgentCore:
             _embed_model = None
             try:
                 _embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
-            except Exception:
-                pass
+            except Exception as _emb_exc:
+                logger.debug("AgentCore: embed model lazy load failed (non-fatal): %s", _emb_exc)
     
             plan = None
             try:
@@ -1638,8 +1652,8 @@ class AgentCore:
                 # Release any earlier acquisition so forward_to_model manages lifecycle.
                 try:
                     self.model_pool.release_model(selected_model_name)
-                except Exception:
-                    pass
+                except Exception as _rel_exc:
+                    logger.warning("AgentCore: model release before planning failed for %s: %s", selected_model_name, _rel_exc)
                 plan_res = self.model_pool.forward_to_model(
                     selected_model_name,
                     messages=plan_messages,
@@ -1649,8 +1663,19 @@ class AgentCore:
                     adapter_name=self._resolve_adapter(selected_model_name),
                 )
             except Exception as exc:
-                logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
-                yield {"type": "token", "value": f"[plan-error] {type(exc).__name__}: {exc}"}
+                try:
+                    from gaia_common.utils.error_logging import log_gaia_error
+                    log_gaia_error(
+                        logger, "GAIA-CORE-078",
+                        f"model={selected_model_name} error={type(exc).__name__}: {exc}",
+                        exc_info=True,
+                    )
+                except ImportError:
+                    logger.exception("AgentCore: forward_to_model failed for %s", selected_model_name)
+                yield {"type": "token", "value": (
+                    f"**[GAIA-CORE-078]** Plan generation failed ({type(exc).__name__}). "
+                    f"Logged for self-diagnosis."
+                )}
                 yield {"type": "flush"}
                 return
             logger.warning("AgentCore: planning call returned type=%s", type(plan_res))
@@ -1666,14 +1691,14 @@ class AgentCore:
                             pieces.append(text)
                             continue
                     except Exception:
-                        pass
+                        pass  # per-token parse; fallback below
                     # fallback to non-stream shape
                     try:
                         text = item.get("choices", [{}])[0].get("message", {}).get("content")
                         if text:
                             pieces.append(text)
                     except Exception:
-                        pass
+                        logger.debug("AgentCore: plan stream piece unparseable: %s", type(item))
                 initial_plan_text = "".join(pieces).strip()
             else:
                 try:
@@ -1827,15 +1852,15 @@ class AgentCore:
                     try:
                         if self.model_pool.ensure_model_loaded("lite"):
                             observer_model_name = "lite"
-                    except Exception:
-                        pass
-    
+                    except Exception as _obs_exc:
+                        logger.warning("AgentCore: observer lite model load failed: %s", _obs_exc)
+
                 if observer_model_name is None:
                     try:
                         # Exclude embed (SentenceTransformer) — it can't do chat completion
                         observer_model_name = self.model_pool.get_idle_model(exclude=[selected_model_name, "embed"])
-                    except Exception:
-                        pass
+                    except Exception as _obs_exc:
+                        logger.warning("AgentCore: observer model selection failed: %s", _obs_exc)
     
                 observer_model = None
                 if observer_model_name:
@@ -1919,9 +1944,42 @@ class AgentCore:
                             current_turn_pieces.append(token_str)
                             # Yield token for real-time streaming
                             yield {"type": "token", "value": token_str}
-                except Exception:
-                    logger.exception(f"AgentCore: Stream from {selected_model_name} failed")
-                    yield {"type": "token", "value": f"--- Error: Stream from {role_label} {identity_label} interrupted ---"}
+                except Exception as _stream_exc:
+                    # ── GAIA-CORE-075: Inference stream interrupted ──
+                    _exc_type = type(_stream_exc).__name__
+                    _exc_detail = f"{_exc_type}: {_stream_exc}"
+                    _tokens_received = len(current_turn_pieces)
+                    try:
+                        from gaia_common.utils.error_logging import log_gaia_error
+                        log_gaia_error(
+                            logger, "GAIA-CORE-075",
+                            f"model={selected_model_name} role={role_label} "
+                            f"tokens_before_break={_tokens_received} "
+                            f"error={_exc_detail}",
+                            exc_info=True,
+                        )
+                    except ImportError:
+                        logger.exception(f"AgentCore: Stream from {selected_model_name} failed: {_exc_detail}")
+                    # Persist seed so sleep cycle can analyze the failure pattern
+                    try:
+                        from gaia_core.cognition.thought_seed import save_thought_seed
+                        save_thought_seed(
+                            f"THOUGHT_SEED: Inference stream interrupted — "
+                            f"model={selected_model_name}, error={_exc_type}, "
+                            f"tokens_before_break={_tokens_received}. "
+                            f"Prompt: '{user_input[:50]}...'",
+                            packet, self.config,
+                        )
+                    except Exception as _seed_exc:
+                        logger.debug("AgentCore: thought seed save failed (non-fatal): %s", _seed_exc)
+                    yield {
+                        "type": "token",
+                        "value": (
+                            f"\n\n--- **[GAIA-CORE-075]** Stream from {role_label} {identity_label} "
+                            f"interrupted ({_exc_type}) after {_tokens_received} tokens. "
+                            f"Logging for self-diagnosis. ---"
+                        ),
+                    }
 
                 current_response = "".join(current_turn_pieces)
 
@@ -1976,8 +2034,16 @@ class AgentCore:
                         logger.warning(f"AgentCore: Could not acquire {next_model_role} for debate; terminating.")
                         full_response = routing_result.get("response_to_user", "")
                         break
-                except Exception:
-                    logger.exception(f"AgentCore: Error swapping to {next_model_role}")
+                except Exception as _swap_exc:
+                    try:
+                        from gaia_common.utils.error_logging import log_gaia_error
+                        log_gaia_error(
+                            logger, "GAIA-CORE-076",
+                            f"target_role={next_model_role} error={type(_swap_exc).__name__}: {_swap_exc}",
+                            exc_info=True,
+                        )
+                    except ImportError:
+                        logger.exception(f"AgentCore: Error swapping to {next_model_role}")
                     full_response = routing_result.get("response_to_user", "")
                     break
     
@@ -2201,6 +2267,12 @@ class AgentCore:
                         # Log thought seed for Samvega introspection (internal only, not user-facing)
                         seed_msg = f"THOUGHT_SEED: Nano hallucination detected on prompt '{user_input[:30]}...'. Reflex said '{reflex_text[:30]}...', Core said '{user_facing_response[:30]}...'. Investigating prevention."
                         self.logger.info(seed_msg)
+                        # Persist to /knowledge/seeds/ so heartbeat can triage
+                        try:
+                            from gaia_core.cognition.thought_seed import save_thought_seed
+                            save_thought_seed(seed_msg, packet, self.config)
+                        except Exception as _seed_exc:
+                            logger.debug("AgentCore: thought seed save failed (non-fatal): %s", _seed_exc)
                     else:
                         self.logger.info(f"AgentCore: reflex insufficient (match={ratio:.2f}); yielding full response as refinement.")
                         final_yield_text = "\n\n---\n🔄 **[Refinement — here's the fuller answer]**\n" + user_facing_response
@@ -2235,6 +2307,12 @@ class AgentCore:
                     )
                     self.logger.info(seed_msg)
                     ts_write(seed_msg)
+                    # Persist to /knowledge/seeds/ so heartbeat can triage
+                    try:
+                        from gaia_core.cognition.thought_seed import save_thought_seed
+                        save_thought_seed(seed_msg, packet, self.config)
+                    except Exception as _seed_exc:
+                        logger.debug("AgentCore: thought seed save failed (non-fatal): %s", _seed_exc)
             # ── End Epistemic Confabulation Gate ──────────────────────────
 
             # IMPORTANT: If we already streamed the response tokens, do NOT yield it again as a single chunk.
@@ -2285,8 +2363,8 @@ class AgentCore:
                     _kv_role = _kv_role_map.get(selected_model_name)
                     if _kv_role:
                         _kv_mgr.notify_inference(_kv_role)
-            except Exception:
-                pass
+            except Exception as _kv_exc:
+                logger.debug("AgentCore: KV cache notify failed (non-fatal): %s", _kv_exc)
 
             log_chat_entry(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
             log_chat_entry_structured(user_input, user_facing_response, source=source, session_id=session_id, metadata=_metadata)
@@ -2408,8 +2486,8 @@ class AgentCore:
             try:
                 from gaia_common.utils.immune_system import clear_grit_mode
                 clear_grit_mode()
-            except Exception:
-                pass
+            except Exception as _grit_exc:
+                logger.warning("AgentCore: grit mode clear failed: %s", _grit_exc)
             # Release observer/selected models using the ModelPool API directly.
             try:
                 if observer_model_name:
@@ -2804,8 +2882,8 @@ class AgentCore:
             if "Immune System: CRITICAL" in health or "SyntaxError" in health:
                 logger.warning(f"[IMMUNE EMERGENCY] System irritation detected: {health}")
                 return health
-        except Exception:
-            pass
+        except Exception as _imm_exc:
+            logger.error("AgentCore: immune system health check failed — safety blind spot: %s", _imm_exc, exc_info=True)
         return None
 
     def is_eligible_for_reflex(self, packet: CognitionPacket, history: list) -> bool:
@@ -2916,8 +2994,8 @@ class AgentCore:
                     hour, minute, now.hour, now.minute, diff,
                 )
                 return True
-        except Exception:
-            pass
+        except Exception as _time_exc:
+            logger.debug("AgentCore: reflex time stale check failed: %s", _time_exc)
         return False
 
     def _run_speculative_reflex(self, packet: CognitionPacket) -> str:
@@ -3427,8 +3505,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                 )
             try:
                 packet.intent.user_intent = intent or "other"
-            except Exception:
-                pass
+            except Exception as _int_exc:
+                logger.debug("AgentCore: intent assignment failed: %s", _int_exc)
             messages = build_from_packet(packet, slim_mode=use_slim)
             self.logger.info("AgentCore: slim prompt routed through GCP builder (slim_mode=%s)", use_slim)
             # Use configured MAX_ALLOWED_RESPONSE_TOKENS (default 1000) instead of hardcoded 256
@@ -3713,8 +3791,8 @@ Present {doc_title}:"""
 
         try:
             packet.intent.user_intent = "recitation"
-        except Exception:
-            pass
+        except Exception as _int_exc:
+            logger.debug("AgentCore: recitation intent assignment failed: %s", _int_exc)
 
         messages = build_from_packet(packet)
 
@@ -3893,8 +3971,8 @@ Present {doc_title}:"""
                     "is_complete": not truncation_info["truncated"],
                     "token_count": truncation_info.get("approx_tokens", 0)
                 }))
-            except Exception:
-                pass  # MCP storage is optional
+            except Exception as _mcp_exc:
+                logger.debug("AgentCore: MCP fragment storage failed (optional): %s", _mcp_exc)
 
             fragment_sequence += 1
 
@@ -3945,8 +4023,8 @@ Present {doc_title}:"""
         # Cleanup: clear fragments from MCP storage
         try:
             asyncio.run(mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id}))
-        except Exception:
-            pass
+        except Exception as _frag_exc:
+            logger.debug("AgentCore: MCP fragment cleanup failed (non-fatal): %s", _frag_exc)
 
         self.logger.info(f"Sketchpad-based generation complete: {fragment_sequence} fragments, "
                         f"{len(final_response)} chars final output")
@@ -4533,8 +4611,8 @@ ALTERNATIVE: [if low confidence: what could you do instead?]"""
             try:
                 packet.intent.system_task = SystemTask.INTENT_DETECTION
                 packet.intent.user_intent = "confidence_assessment"
-            except Exception:
-                pass
+            except Exception as _int_exc:
+                logger.debug("AgentCore: confidence intent assignment failed: %s", _int_exc)
 
             # Build messages using the GCP pipeline
             # This includes identity, world state, MCP tools, knowledge base awareness
@@ -5627,8 +5705,8 @@ Start your response with the first line of the file."""
             if selection_model_name:
                 try:
                     self.model_pool.release_model(selection_model_name)
-                except Exception:
-                    pass
+                except Exception as _rel_exc:
+                    logger.debug("AgentCore: tool selection model release failed: %s", _rel_exc)
 
         if primary_tool is None:
             logger.info("Tool selector determined no tool needed")
@@ -5681,8 +5759,8 @@ Start your response with the first line of the file."""
                 if review_model_name:
                     try:
                         self.model_pool.release_model(review_model_name)
-                    except Exception:
-                        pass
+                    except Exception as _rel_exc:
+                        logger.debug("AgentCore: tool review model release failed: %s", _rel_exc)
         else:
             # No review model available, use selection confidence directly
             confidence = primary_tool.selection_confidence

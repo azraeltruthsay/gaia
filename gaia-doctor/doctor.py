@@ -1234,6 +1234,24 @@ IRRITATION_PATTERNS = [
     "Cannot reach vLLM server",
     "model not loaded",
     "GPU zombie detected",
+    "GAIA-CORE-075",
+    "GAIA-CORE-076",
+    "GAIA-CORE-077",
+    "GAIA-CORE-078",
+    "GAIA-CORE-080",
+    "Inference stream interrupted",
+    "Model swap failed",
+    "Loop detector",
+    "Plan generation failed",
+    "GAIA-WEB-040",
+    "GAIA-WEB-045",
+    "GAIA-WEB-050",
+    "GAIA-WEB-055",
+    "GAIA-WEB-060",
+    "Discord message send failed",
+    "Voice processing loop",
+    "Speech playback failed",
+    "Transcribe request failed",
 ]
 
 SERVICE_LOGS = {
@@ -1296,6 +1314,17 @@ def _record_irritation(service: str, line: str, pattern: str):
     # to free VRAM. Glass stays on — no manual intervention needed.
     if pattern in ("OOM", "CUDA out of memory", "torch.cuda.OutOfMemoryError"):
         _attempt_oom_resolution(service, line)
+
+    # ── Audio Auto-Resolution: restart gaia-audio on voice/STT failures ──
+    if pattern in ("GAIA-WEB-050", "GAIA-WEB-055", "GAIA-WEB-060",
+                    "Voice processing loop", "Speech playback failed",
+                    "Transcribe request failed"):
+        _attempt_audio_restart(service, line, pattern)
+
+    # ── Inference Auto-Resolution: request Prime wake on stream failures ──
+    if pattern in ("GAIA-CORE-075", "GAIA-CORE-080",
+                    "Inference stream interrupted"):
+        _attempt_inference_recovery(service, line, pattern)
 
 
 # ── OOM Resolution ────────────────────────────────────────────────────────
@@ -1444,6 +1473,124 @@ def _write_oom_resolution(service: str, error_line: str, resolution_log: list):
         state_path.write_text(json.dumps(state, indent=2))
     except Exception as e:
         log.debug("Failed to write OOM resolution state: %s", e)
+
+
+# ── Audio Auto-Resolution ─────────────────────────────────────────────────
+
+_audio_restart_cooldown: dict = {}
+AUDIO_RESTART_COOLDOWN = 120  # seconds — longer than OOM since restarts are heavier
+
+def _attempt_audio_restart(service: str, error_line: str, pattern: str):
+    """Restart gaia-audio when voice/STT failures are detected.
+
+    Pinball Machine: Doctor sees voice failures in gaia-web logs,
+    presses the gaia-audio restart button, watches through the glass.
+    """
+    now = time.monotonic()
+    last = _audio_restart_cooldown.get("gaia-audio", 0)
+    if now - last < AUDIO_RESTART_COOLDOWN:
+        log.debug("Audio restart on cooldown (%ds remaining)",
+                  int(AUDIO_RESTART_COOLDOWN - (now - last)))
+        return
+    _audio_restart_cooldown["gaia-audio"] = now
+
+    log.warning("Audio restart triggered by %s in %s — restarting gaia-audio", pattern, service)
+
+    try:
+        docker_restart("gaia-audio")
+    except Exception as e:
+        log.warning("Audio restart failed: %s", e)
+
+    # Emit to CodeMind for pattern analysis
+    try:
+        queue_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "codemind" / "detect_queue.jsonl"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "immune_irritation",
+            "issue_type": "audio_failure",
+            "file_path": "",
+            "description": f"Audio restart in {service} due to {pattern}: {error_line[:200]}",
+            "severity": "warn",
+            "priority": 2,
+            "metadata": {"service": service, "pattern": pattern, "action": "restart_gaia-audio"},
+        }
+        with open(queue_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log.debug("Failed to emit CodeMind audio detection: %s", e)
+
+
+# ── Inference Auto-Resolution ─────────────────────────────────────────────
+
+_inference_recovery_cooldown: dict = {}
+INFERENCE_RECOVERY_COOLDOWN = 90  # seconds
+
+def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
+    """Request Prime wake when inference stream failures are detected.
+
+    When gaia-core logs a stream interruption, the most common cause is
+    Prime being in standby or crashed. Doctor asks Orchestrator to wake it.
+    """
+    now = time.monotonic()
+    last = _inference_recovery_cooldown.get("inference", 0)
+    if now - last < INFERENCE_RECOVERY_COOLDOWN:
+        log.debug("Inference recovery on cooldown (%ds remaining)",
+                  int(INFERENCE_RECOVERY_COOLDOWN - (now - last)))
+        return
+    _inference_recovery_cooldown["inference"] = now
+
+    log.warning("Inference recovery triggered by %s — requesting Prime wake via Orchestrator", pattern)
+
+    # Step 1: Check if Prime is actually down
+    try:
+        req = Request("http://gaia-prime:7777/health", method="GET")
+        with urlopen(req, timeout=3) as resp:
+            if resp.status == 200:
+                health = json.loads(resp.read().decode())
+                if health.get("model_loaded"):
+                    log.info("Inference recovery: Prime is healthy and loaded — stream error was transient")
+                    return
+                log.info("Inference recovery: Prime healthy but model not loaded — requesting wake")
+    except Exception:
+        log.info("Inference recovery: Prime unreachable — requesting wake")
+
+    # Step 2: Ask Orchestrator to wake Prime
+    try:
+        data = json.dumps({"reason": f"inference_recovery:{pattern}"}).encode()
+        req = Request(
+            f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+        if result.get("ok"):
+            log.info("Inference recovery: Orchestrator accepted wake request")
+        else:
+            log.warning("Inference recovery: Orchestrator wake failed: %s", result.get("error"))
+    except Exception as e:
+        log.warning("Inference recovery: Could not reach Orchestrator: %s", e)
+
+    # Step 3: Emit to CodeMind
+    try:
+        queue_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "codemind" / "detect_queue.jsonl"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "immune_irritation",
+            "issue_type": "inference_failure",
+            "file_path": "",
+            "description": f"Inference recovery in {service} due to {pattern}: {error_line[:200]}",
+            "severity": "warn",
+            "priority": 2,
+            "metadata": {"service": service, "pattern": pattern, "action": "wake_prime"},
+        }
+        with open(queue_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log.debug("Failed to emit CodeMind inference detection: %s", e)
 
 
 # ---------------------------------------------------------------------------

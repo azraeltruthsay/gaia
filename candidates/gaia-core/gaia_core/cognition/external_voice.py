@@ -122,8 +122,12 @@ class ExternalVoice:
                         think_tag_char_threshold=int(think_cfg.get("char_threshold", 500)),
                         think_tag_ratio_threshold=float(think_cfg.get("ratio_threshold", 0.90)),
                     )
-            except Exception:
-                logger.debug("ExternalVoice: failed to initialize loop detector observer", exc_info=True)
+            except Exception as _loop_init_exc:
+                try:
+                    from gaia_common.utils.error_logging import log_gaia_error
+                    log_gaia_error(logger, "GAIA-CORE-077", f"init error: {_loop_init_exc}", exc_info=True)
+                except ImportError:
+                    logger.warning("ExternalVoice: failed to initialize loop detector observer: %s", _loop_init_exc, exc_info=True)
 
     # --------------------------------------------------------------------- #
     # streaming
@@ -336,8 +340,12 @@ class ExternalVoice:
                                 "type": interrupt_type
                             }}
                             break
-                    except Exception:
-                        logger.debug("ExternalVoice: loop detector check failed", exc_info=True)
+                    except Exception as _loop_chk_exc:
+                        try:
+                            from gaia_common.utils.error_logging import log_gaia_error
+                            log_gaia_error(logger, "GAIA-CORE-077", f"check error: {_loop_chk_exc}", exc_info=True)
+                        except ImportError:
+                            logger.warning("ExternalVoice: loop detector check failed: %s", _loop_chk_exc, exc_info=True)
 
                 since_check += 1
                 # compute whether we need to call the observer
@@ -457,7 +465,11 @@ class ExternalVoice:
         except StopIteration:
             logger.info("ExternalVoice: generation halted due to repetition guard.")
         except Exception as e:
-            logger.error(f"Error during model stream: {e}", exc_info=True)
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-CORE-080", f"{type(e).__name__}: {e}", exc_info=True)
+            except ImportError:
+                logger.error(f"Error during model stream: {e}", exc_info=True)
             raise
         finally:
             # Finalise generation stream log

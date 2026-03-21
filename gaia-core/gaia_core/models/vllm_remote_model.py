@@ -384,8 +384,8 @@ class VLLMRemoteModel:
         """No-op — server lifecycle is managed externally (Docker)."""
         try:
             self._session.close()
-        except Exception:
-            pass
+        except Exception as _close_exc:
+            logger.debug("VLLMRemoteModel: session close failed: %s", _close_exc)
 
     # ── Self-Healing ──────────────────────────────────────────────────────────
 
@@ -440,8 +440,8 @@ class VLLMRemoteModel:
                     if attempt == 1:
                         try:
                             self._request_prime_load()
-                        except Exception:
-                            pass
+                        except Exception as _wake_exc:
+                            logger.warning("VLLMRemoteModel: prime wake request failed: %s", _wake_exc)
                     # Wait longer after wake request — model takes ~30s to load
                     delay = max(self._RETRY_BASE_DELAY * attempt, 10.0 if attempt == 1 else 5.0)
                     logger.warning(
@@ -465,8 +465,8 @@ class VLLMRemoteModel:
                 # Self-healing: ask orchestrator to load Prime before giving up
                 try:
                     self._request_prime_load()
-                except Exception:
-                    pass
+                except Exception as _wake_exc:
+                    logger.warning("VLLMRemoteModel: prime wake request failed on final attempt: %s", _wake_exc)
                 raise RuntimeError(
                     f"Cannot reach vLLM server at {url} after {self._MAX_RETRIES} attempts. "
                     f"Is gaia-prime running?"
@@ -547,8 +547,8 @@ class VLLMRemoteModel:
             error_text = ""
             try:
                 error_text = r.text[:500]
-            except Exception:
-                pass
+            except Exception as _txt_exc:
+                logger.debug("VLLMRemoteModel: could not read error response body: %s", _txt_exc)
             if ("lora" in error_text.lower()
                     or "adapter" in error_text.lower()
                     or self._active_adapter in error_text

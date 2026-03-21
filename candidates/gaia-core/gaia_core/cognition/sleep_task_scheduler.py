@@ -116,6 +116,36 @@ class SleepTaskScheduler:
 
         self.check_interrupted()
 
+        # ── Bridge capability-gap seeds → CodeMind detect queue ──
+        try:
+            from gaia_core.cognition.thought_seed import list_unreviewed_seeds
+            from gaia_common.utils.codemind_detector import emit_detection
+
+            for path, seed_data in list_unreviewed_seeds():
+                _seed_type = seed_data.get("seed_type", "")
+                if _seed_type in ("knowledge_gap", "confabulation"):
+                    emit_detection(
+                        source="sleep_cycle",
+                        issue_type="capability_gap",
+                        file_path="knowledge/awareness/operational/architecture_facts.md",
+                        description=seed_data.get("seed", ""),
+                        severity="info",
+                        metadata={"seed_file": str(path)},
+                    )
+                    logger.info("Initiative cycle: bridged seed → CodeMind detect queue: %s", path.name)
+                elif _seed_type == "inference_failure":
+                    emit_detection(
+                        source="sleep_cycle",
+                        issue_type="inference_failure",
+                        file_path="",
+                        description=seed_data.get("seed", ""),
+                        severity="warn",
+                        metadata={"seed_file": str(path)},
+                    )
+                    logger.info("Initiative cycle: bridged inference_failure seed → CodeMind: %s", path.name)
+        except Exception as exc:
+            logger.warning("Initiative cycle: seed→CodeMind bridge failed: %s", exc)
+
         try:
             # AgentCore owns the initiative engine logic
             if hasattr(self.agent_core, "run_initiative_cycle"):
@@ -1089,6 +1119,53 @@ class SleepTaskScheduler:
 
                 file_path = detection.get("file_path", "")
                 issue = detection.get("description", "")
+
+                # ── Capability gap → awareness update (not code fix) ──
+                if detection.get("issue_type") == "capability_gap":
+                    try:
+                        awareness_path = file_path or "knowledge/awareness/operational/architecture_facts.md"
+                        current_awareness = ""
+                        if os.path.isfile(awareness_path):
+                            with open(awareness_path, "r", encoding="utf-8") as f:
+                                current_awareness = f.read()
+
+                        awareness_prompt = engine.build_awareness_prompt(issue, current_awareness)
+                        proposed_addition = self._codemind_propose(awareness_prompt)
+
+                        if proposed_addition and not proposed_addition.strip().startswith("ALREADY_DOCUMENTED"):
+                            # Validate: must be short markdown, not code
+                            lines = proposed_addition.strip().splitlines()
+                            if len(lines) <= 5 and all(len(l) < 200 for l in lines):
+                                if not cycle.dry_run:
+                                    os.makedirs(os.path.dirname(awareness_path), exist_ok=True)
+                                    with open(awareness_path, "a", encoding="utf-8") as f:
+                                        f.write("\n" + proposed_addition.strip() + "\n")
+                                    logger.info("CodeMind: awareness updated: %s", awareness_path)
+                                else:
+                                    logger.info("CodeMind [dry_run]: would append to %s: %s", awareness_path, proposed_addition.strip()[:100])
+
+                                engine.record_change(CodeMindChange(
+                                    file_path=awareness_path,
+                                    issue=issue,
+                                    scope_tier=1,
+                                    diff_summary=f"awareness addition ({len(lines)} lines)",
+                                    applied=not cycle.dry_run,
+                                ))
+                            else:
+                                logger.warning("CodeMind: awareness proposal too long (%d lines), skipping", len(lines))
+                        elif proposed_addition and proposed_addition.strip().startswith("ALREADY_DOCUMENTED"):
+                            logger.info("CodeMind: capability gap already documented, skipping")
+                            # Mark seed as reviewed via metadata
+                            seed_file = detection.get("metadata", {}).get("seed_file")
+                            if seed_file:
+                                try:
+                                    from gaia_core.cognition.thought_seed import update_seed
+                                    update_seed(os.path.basename(seed_file), {"reviewed": True, "review_decision": "already_documented"})
+                                except Exception:
+                                    pass
+                    except Exception as exc:
+                        logger.error("CodeMind: awareness update failed: %s", exc, exc_info=True)
+                    continue
 
                 # ── Complexity classification ──
                 complexity = classify_complexity(detection)

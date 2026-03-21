@@ -466,6 +466,14 @@ class VoiceManager:
             # Notify gaia-core so it keeps audio alive and starts waking Prime
             await self._notify_core_voice_state(True)
 
+            # Proactively wake audio STT — don't wait for first utterance
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(f"{self.audio_endpoint}/wake")
+                    logger.info("Proactive audio wake sent for voice channel join")
+            except Exception:
+                logger.debug("Audio wake on voice join failed (will wake on first audio)", exc_info=True)
+
             # Set up py-cord sink → asyncio.Queue pipeline
             self._audio_queue = asyncio.Queue(maxsize=500)  # ~10 s buffer
             loop = asyncio.get_running_loop()
@@ -479,8 +487,12 @@ class VoiceManager:
 
             # Start async processing loop
             self._listen_task = asyncio.create_task(self._process_audio_loop())
-        except Exception:
-            logger.error("Failed to join voice channel %s", channel.name, exc_info=True)
+        except Exception as _join_exc:
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-WEB-045", f"channel={channel.name} error={_join_exc}", exc_info=True)
+            except ImportError:
+                logger.error("Failed to join voice channel %s: %s", channel.name, _join_exc, exc_info=True)
             self._vc = None
             self._state = "disconnected"
 
@@ -572,8 +584,12 @@ class VoiceManager:
 
         except asyncio.CancelledError:
             logger.info("Voice processing loop cancelled")
-        except Exception:
-            logger.error("Voice processing loop error", exc_info=True)
+        except Exception as _loop_exc:
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-WEB-050", f"processing loop crashed: {_loop_exc}", exc_info=True)
+            except ImportError:
+                logger.error("Voice processing loop error: %s", _loop_exc, exc_info=True)
 
     # -- Utterance processing pipeline --
 
@@ -591,9 +607,10 @@ class VoiceManager:
 
                 logger.info("Transcribed: %s", text[:100])
 
-                # 2. Pause audio capture (echo prevention)
-                if self._sink:
-                    self._sink.paused = True
+                # 2. Full duplex: keep recording but mark as echo-cancellation zone
+                # The sink stays active so we can detect interruptions.
+                # Audio captured during TTS playback is discarded in the drain step.
+                _echo_zone = True
 
                 # 2.5. Check core state — if not active, use Core stalling response
                 core_state = await self._get_core_state()
@@ -639,9 +656,8 @@ class VoiceManager:
             except Exception:
                 logger.error("Utterance processing failed", exc_info=True)
             finally:
-                # Always resume audio capture
-                if self._sink:
-                    self._sink.paused = False
+                # Full duplex: sink was never paused, just drain echo audio
+                _echo_zone = False
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
@@ -657,8 +673,12 @@ class VoiceManager:
                 if resp.status_code == 200:
                     return resp.json().get("text", "")
                 logger.error("Transcribe failed: %d %s", resp.status_code, resp.text[:200])
-        except Exception:
-            logger.error("Transcribe request failed", exc_info=True)
+        except Exception as _stt_exc:
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-WEB-060", f"STT request: {_stt_exc}", exc_info=True)
+            except ImportError:
+                logger.error("Transcribe request failed: %s", _stt_exc, exc_info=True)
         return None
 
     @staticmethod
@@ -842,5 +862,9 @@ class VoiceManager:
                 if self._vc.is_playing():
                     self._vc.stop()
 
-        except Exception:
-            logger.error("Speech playback failed", exc_info=True)
+        except Exception as _play_exc:
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-WEB-055", f"playback: {_play_exc}", exc_info=True)
+            except ImportError:
+                logger.error("Speech playback failed: %s", _play_exc, exc_info=True)

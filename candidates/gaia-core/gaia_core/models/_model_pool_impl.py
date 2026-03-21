@@ -209,10 +209,10 @@ def _get_gpu_free_total_bytes() -> tuple:
             try:
                 pynvml.nvmlShutdown()
             except Exception:
-                pass
+                pass  # pynvml shutdown is best-effort
             return free, total
-    except Exception:
-        pass
+    except Exception as _nvml_exc:
+        logger.debug("GPU memory: pynvml probe failed: %s", _nvml_exc)
 
     # Fallback: nvidia-smi query
     try:
@@ -224,7 +224,8 @@ def _get_gpu_free_total_bytes() -> tuple:
         line = out.strip().splitlines()[0]
         free_mb, total_mb = [int(x.strip()) for x in line.split(',')]
         return free_mb * 1024 * 1024, total_mb * 1024 * 1024
-    except Exception:
+    except Exception as _smi_exc:
+        logger.warning("GPU memory: both pynvml and nvidia-smi failed — VRAM unknown: %s", _smi_exc)
         return None, None
 
 
@@ -314,7 +315,8 @@ class ModelPool:
         # persistent state for model roles (avoids re-discovery each run)
         try:
             self.MODEL_STATE_FILE = Path(self.config.LOGS_DIR) / "model_pool_state.json"
-        except Exception:
+        except Exception as _state_exc:
+            logger.warning("ModelPool: could not set state file path: %s", _state_exc)
             self.MODEL_STATE_FILE = None
         # If requested, pre-warm the embedder synchronously at startup for deterministic tests
         try:
@@ -461,21 +463,21 @@ class ModelPool:
             finally:
                 try:
                     self._embed_ready.set()
-                except Exception:
-                    pass
+                except Exception as _evt_exc:
+                    logger.warning("ModelPool: embed_ready.set() failed — embed may appear stuck: %s", _evt_exc)
 
         logger.info("--- ENTERING _start_embed_loader ---")
         try:
             self._embed_ready.clear()
-        except Exception:
-            pass
+        except Exception as _evt_exc:
+            logger.debug("ModelPool: embed_ready.clear() failed: %s", _evt_exc)
         # If an embedder is already loaded (e.g., via prewarm_embed), just mark it ready.
         if 'embed' in self.models and self.models['embed'] is not None:
             try:
                 self._embed_load_status = 'loaded'
                 self._embed_ready.set()
-            except Exception:
-                pass
+            except Exception as _evt_exc:
+                logger.debug("ModelPool: embed already-loaded signal failed: %s", _evt_exc)
             logger.info("--- LEAVING _start_embed_loader (already loaded) ---")
             return
         _load_embed() # Call directly for synchronous loading and direct error reporting

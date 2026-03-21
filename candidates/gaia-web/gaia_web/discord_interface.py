@@ -208,8 +208,12 @@ class DiscordInterface:
                 if message.attachments:
                     try:
                         attachments = await process_attachments(message)
-                    except Exception:
-                        logger.error("Attachment processing failed", exc_info=True)
+                    except Exception as _att_exc:
+                        try:
+                            from gaia_common.utils.error_logging import log_gaia_error
+                            log_gaia_error(logger, "GAIA-CORE-079", f"discord attachment: {_att_exc}", exc_info=True)
+                        except ImportError:
+                            logger.error("Attachment processing failed", exc_info=True)
 
                 # If user sent only file(s) with no text, synthesize a content string
                 if not content and attachments:
@@ -637,7 +641,11 @@ class DiscordInterface:
                 await message_obj.channel.send(msg)
             logger.info(f"Discord: Sent {len(messages)} message(s) to {'DM' if is_dm else 'channel'}")
         except Exception as e:
-            logger.error(f"Discord: Failed to send response: {e}")
+            try:
+                from gaia_common.utils.error_logging import log_gaia_error
+                log_gaia_error(logger, "GAIA-WEB-040", f"target={'DM' if is_dm else 'channel'} error={e}", exc_info=True)
+            except ImportError:
+                logger.error(f"Discord: Failed to send response: {e}", exc_info=True)
 
     def _split_message(self, content: str, max_length: int = 2000) -> list:
         """Split message into chunks respecting Discord's character limit."""
@@ -886,7 +894,11 @@ async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Op
     try:
         return _run_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
-        logger.error(f"Failed to send to channel {channel_id}: {e}")
+        try:
+            from gaia_common.utils.error_logging import log_gaia_error
+            log_gaia_error(logger, "GAIA-WEB-040", f"channel={channel_id} error={e}", exc_info=True)
+        except ImportError:
+            logger.error(f"Failed to send to channel {channel_id}: {e}", exc_info=True)
         return False
 
 
@@ -913,7 +925,11 @@ async def send_to_user(user_id: str, content: str) -> bool:
     try:
         return _run_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
-        logger.error(f"Failed to send DM to user {user_id}: {e}")
+        try:
+            from gaia_common.utils.error_logging import log_gaia_error
+            log_gaia_error(logger, "GAIA-WEB-040", f"dm_user={user_id} error={e}", exc_info=True)
+        except ImportError:
+            logger.error(f"Failed to send DM to user {user_id}: {e}", exc_info=True)
         return False
 
 

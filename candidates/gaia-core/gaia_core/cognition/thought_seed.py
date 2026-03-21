@@ -43,11 +43,18 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
 
         fname = f"seed_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S%f')}.json"
 
-        # Detect knowledge gap seeds by marker phrases
+        # Detect seed type by marker phrases
         seed_type = "general"
+        _lower = seed_text.lower()
+        confab_markers = ["confabulation detected", "without grounding", "hallucination detected"]
+        infra_markers = ["inference stream interrupted", "stream interrupted", "gaia-core-075"]
         gap_markers = config.constants.get("EPISTEMIC_DRIVE", {}).get(
             "gap_seed_markers", ["knowledge gap", "could be researched"])
-        if any(marker in seed_text.lower() for marker in gap_markers):
+        if any(marker in _lower for marker in confab_markers):
+            seed_type = "confabulation"
+        elif any(marker in _lower for marker in infra_markers):
+            seed_type = "inference_failure"
+        elif any(marker in _lower for marker in gap_markers):
             seed_type = "knowledge_gap"
 
         seed_obj = {
