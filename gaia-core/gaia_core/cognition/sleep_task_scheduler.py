@@ -97,8 +97,8 @@ class SleepTaskScheduler:
             if serenity_file.exists():
                 data = json.loads(serenity_file.read_text())
                 return data.get("serene", False)
-        except Exception:
-            pass
+        except Exception as _ser_exc:
+            logger.debug("Serenity check failed: %s", _ser_exc)
         return False
 
     def _run_initiative_cycle(self, **kwargs) -> None:
@@ -648,8 +648,8 @@ class SleepTaskScheduler:
                     "changes": [{"file_path": str(candidate_dir), "issue": "auto-promotion", "scope_tier": 3}],
                     "dry_run": False,
                 })
-            except Exception:
-                pass
+            except Exception as _cl_exc:
+                logger.debug("Promotion changelog write failed: %s", _cl_exc)
 
         except Exception as e:
             logger.warning("AUTO-PROMOTE failed for %s: %s", service_id, e, exc_info=True)
@@ -1560,8 +1560,8 @@ class SleepTaskScheduler:
             if model is not None and hasattr(model, "health_check"):
                 try:
                     return model.health_check()
-                except Exception:
-                    pass
+                except Exception as _hc_exc:
+                    logger.debug("Model health check failed: %s", _hc_exc)
 
         # Fallback: check if adapter directory exists
         adapter_dir = Path("/shared/adapters/code-architect")
@@ -1767,8 +1767,8 @@ class SleepTaskScheduler:
                         data = yaml.safe_load(bp_path.read_text(encoding="utf-8"))
                         if data:
                             index_rows.append(self._index_row_from_data(service_id, data))
-                    except Exception:
-                        pass
+                    except Exception as _bp_exc:
+                        logger.debug("Blueprint index parse failed for %s: %s", service_id, _bp_exc)
                 skipped += 1
                 continue
 

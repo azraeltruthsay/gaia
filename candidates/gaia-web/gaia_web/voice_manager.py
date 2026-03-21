@@ -653,8 +653,12 @@ class VoiceManager:
                         except asyncio.QueueEmpty:
                             break
 
-            except Exception:
-                logger.error("Utterance processing failed", exc_info=True)
+            except Exception as _utt_exc:
+                try:
+                    from gaia_common.utils.error_logging import log_gaia_error
+                    log_gaia_error(logger, "GAIA-WEB-050", f"utterance pipeline: {_utt_exc}", exc_info=True)
+                except ImportError:
+                    logger.error("Utterance processing failed: %s", _utt_exc, exc_info=True)
             finally:
                 # Full duplex: sink was never paused, just drain echo audio
                 _echo_zone = False

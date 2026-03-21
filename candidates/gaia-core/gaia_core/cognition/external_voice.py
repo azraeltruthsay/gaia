@@ -312,8 +312,8 @@ class ExternalVoice:
                 if _gen_logger and _gen_id and isinstance(token, str):
                     try:
                         _gen_logger.log_token(_gen_id, token)
-                    except Exception:
-                        pass
+                    except Exception as _tl_exc:
+                        logger.debug("ExternalVoice: token log failed: %s", _tl_exc)
 
                 yield token
 
@@ -356,8 +356,8 @@ class ExternalVoice:
                 min_tokens = 6
                 try:
                     min_tokens = int(self.config.constants.get("OBSERVER_CONFIG", {}).get("min_tokens", min_tokens))
-                except Exception:
-                    pass
+                except Exception as _cfg_exc:
+                    logger.debug("ExternalVoice: observer min_tokens config parse failed: %s", _cfg_exc)
 
                 punct_seen = any(p in token for p in self.logical_stop_punct)
                 need_check = (
@@ -385,8 +385,8 @@ class ExternalVoice:
                                 # Observer call timed out; cancel future and continue
                                 try:
                                     fut.cancel()
-                                except Exception:
-                                    pass
+                                except Exception as _cancel_exc:
+                                    logger.debug("ExternalVoice: observer future cancel failed: %s", _cancel_exc)
                                 logger.warning("ExternalVoice: observer.observe timed out after %.2fs; skipping this check", self._observer_call_timeout)
                                 # do not update last_observer_at or call count so we'll retry later
                                 interrupt = None
@@ -476,8 +476,8 @@ class ExternalVoice:
             if _gen_logger and _gen_id:
                 try:
                     _gen_logger.end_generation(_gen_id)
-                except Exception:
-                    pass
+                except Exception as _gl_exc:
+                    logger.debug("ExternalVoice: generation log finalize failed: %s", _gl_exc)
 
     # --------------------------------------------------------------------- #
     # repetition guard helper

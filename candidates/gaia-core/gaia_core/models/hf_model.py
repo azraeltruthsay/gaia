@@ -46,7 +46,8 @@ class HFModel:
                     try:
                         import torch as _torch
                         preferred_dtype = _torch.float16
-                    except Exception:
+                    except Exception as _dt_exc:
+                        logger.warning("HFModel: torch unavailable for fp16 — falling back to default dtype: %s", _dt_exc)
                         preferred_dtype = None
 
                 # encourage accelerate to keep weights on GPU: construct an explicit max_memory mapping
@@ -59,8 +60,8 @@ class HFModel:
                 # in CPU RAM before moving them to GPU.
                 try:
                     load_kwargs["low_cpu_mem_usage"] = True
-                except Exception:
-                    pass
+                except Exception as _mem_exc:
+                    logger.debug("HFModel: low_cpu_mem_usage not supported: %s", _mem_exc)
                 if device_map:
                     load_kwargs["device_map"] = device_map
                     # prefer GPU: allow user to override GAIA_MAX_MEMORY_PER_GPU
@@ -73,7 +74,8 @@ class HFModel:
                                 mm = max_mem_env
                             else:
                                 mm = f"{int(max_mem_env)}MB"
-                        except Exception:
+                        except Exception as _mm_exc:
+                            logger.warning("HFModel: GAIA_MAX_MEMORY_PER_GPU parse failed ('%s'): %s", max_mem_env, _mm_exc)
                             mm = None
 
                     # If user didn't provide a cap, try to compute a conservative default
@@ -89,22 +91,23 @@ class HFModel:
                                 cap_mb = int(total_mb * 0.65)
                                 mm = f"{cap_mb}MB"
                                 self.logger.info(f"GAIA_MAX_MEMORY_PER_GPU not set; using conservative default {mm}")
-                        except Exception:
+                        except Exception as _cuda_exc:
+                            logger.debug("HFModel: CUDA memory cap detection failed: %s", _cuda_exc)
                             mm = None
 
                     if mm:
                         try:
                             # map device index 0 to the provided memory cap
                             load_kwargs["max_memory"] = {"0": mm}
-                        except Exception:
-                            pass
+                        except Exception as _mm_exc:
+                            logger.debug("HFModel: max_memory assignment failed: %s", _mm_exc)
                     # If an offload directory is provided via env, pass it through
                     offload_dir = os.getenv("GAIA_OFFLOAD_DIR")
                     if offload_dir:
                         try:
                             load_kwargs["offload_folder"] = offload_dir
-                        except Exception:
-                            pass
+                        except Exception as _off_exc:
+                            logger.debug("HFModel: offload_folder assignment failed: %s", _off_exc)
                 if preferred_dtype is not None:
                     # use the modern 'dtype' argument instead of deprecated 'torch_dtype'
                     load_kwargs["dtype"] = preferred_dtype
@@ -133,7 +136,8 @@ class HFModel:
         # Best-effort device info: model.device may not exist for sharded/accelerate loads
         try:
             self._device = next(self.model.parameters()).device
-        except Exception:
+        except Exception as _dev_exc:
+            logger.debug("HFModel: device detection failed (sharded/accelerate load): %s", _dev_exc)
             self._device = None
 
     def _messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str:
@@ -164,7 +168,8 @@ class HFModel:
                         temperature=float(temperature),
                         **kwargs,
                     )
-            except Exception:
+            except Exception as _inf_exc:
+                logger.warning("HFModel: inference_mode failed, running without (perf impact): %s", _inf_exc)
                 gen = self.pipeline(
                     prompt,
                     max_new_tokens=max_tokens,
@@ -198,14 +203,16 @@ class HFModel:
                 try:
                     device = next(self.model.parameters()).device
                     inputs = self.tokenizer(prompt, return_tensors="pt").to(device)
-                except Exception:
+                except Exception as _dev_exc:
+                    logger.debug("HFModel: device placement failed, using CPU: %s", _dev_exc)
                     inputs = self.tokenizer(prompt, return_tensors="pt")
                 # run generation under no_grad/inference mode for better performance
                 try:
                     import torch
                     with torch.inference_mode():
                         self.model.generate(**inputs, max_new_tokens=max_tokens, temperature=temperature, do_sample=(temperature>0.0), streamer=streamer, **kwargs)
-                except Exception:
+                except Exception as _inf_exc:
+                    logger.warning("HFModel: streaming inference_mode failed, running without: %s", _inf_exc)
                     self.model.generate(**inputs, max_new_tokens=max_tokens, temperature=temperature, do_sample=(temperature>0.0), streamer=streamer, **kwargs)
             except Exception as e:
                 logger.error(f"HFModel streaming generation error: {e}")
@@ -257,13 +264,13 @@ class HFModel:
                             pieces.append(text)
                             continue
                     except Exception:
-                        pass
+                        pass  # per-token parse; fallback below
                     try:
                         text = item.get("choices", [{}])[0].get("message", {}).get("content")
                         if text:
                             pieces.append(text)
                     except Exception:
-                        pass
+                        logger.debug("HFModel: generator chunk unparseable: %s", type(item))
                 assembled = "".join(pieces).strip()
                 return {"choices": [{"message": {"content": assembled}}]}
         except Exception:
