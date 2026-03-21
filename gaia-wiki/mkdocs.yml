@@ -42,9 +42,14 @@ nav:
       - gaia-study: architecture/gaia-study.md
       - gaia-mcp: architecture/gaia-mcp.md
       - gaia-orchestrator: architecture/gaia-orchestrator.md
+      - gaia-doctor: architecture/gaia-doctor.md
+      - gaia-monkey: architecture/gaia-monkey.md
+      - gaia-audio: architecture/gaia-audio.md
+      - gaia-nano: architecture/gaia-nano.md
       - gaia-wiki: architecture/gaia-wiki.md
   - Systems:
       - Blueprint System: systems/blueprint-system.md
+      - Service Registry: systems/service-registry.md
       - Sleep Cycle: systems/sleep-cycle.md
       - Cognition Packets: systems/cognition-packets.md
       - LoRA Adapters: systems/lora-adapters.md

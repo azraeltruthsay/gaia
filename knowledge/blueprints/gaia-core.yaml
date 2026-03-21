@@ -137,6 +137,266 @@ interfaces:
   description: Graceful shutdown — completes current cycle, writes checkpoint, enters
     sleep.
   status: active
+- id: sleep_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Toggle sleep cycle on/off.
+  status: active
+- id: sleep_hold
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/hold
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Hold sleep — prevent automatic sleep transition.
+  status: active
+- id: sleep_hold_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/hold-release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Release sleep hold — allow automatic sleep transitions.
+  status: active
+- id: sleep_force
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/force
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Force immediate sleep transition.
+  status: active
+- id: sleep_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Current sleep cycle configuration.
+  status: active
+- id: sleep_voice_state
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/voice-state
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Voice channel state notification from Discord — affects sleep timing.
+  status: active
+- id: sleep_wake_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Wake configuration — auto-wake settings.
+  status: active
+- id: sleep_wake_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Toggle auto-wake on/off.
+  status: active
+- id: sleep_wake_activity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-activity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Report activity to reset wake timers.
+  status: active
+- id: model_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Release embedded Core CPU model from memory.
+  status: active
+- id: model_reload
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/reload
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Reload embedded Core CPU model into memory.
+  status: active
+- id: model_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Status of embedded Core CPU model — loaded, path, adapter.
+  status: active
+- id: model_adapters_notify
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/adapters/notify
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Notification that new LoRA adapters are available for hot-reload.
+  status: active
+- id: repair_structural
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/repair/structural
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: LLM-powered structural code repair — receives broken code, returns fix.
+  status: active
+- id: doctor_diagnose
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/doctor/diagnose
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: LLM-powered diagnosis — doctor sends symptoms, gets analysis.
+  status: active
+- id: doctor_review
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/doctor/review
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: LLM-powered code review for surgeon repair proposals.
+  status: active
+- id: cognition_checkpoint
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognition/checkpoint
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Save cognitive state checkpoint — used during sleep transition.
+  status: active
+- id: kv_cache_save
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/save
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Persist KV cache snapshot for continuity across restarts.
+  status: active
+- id: kv_cache_restore
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/restore/{role}
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Restore KV cache snapshot for a given model role.
+  status: active
+- id: kv_cache_pressure
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/pressure
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Current KV cache utilization across all active model roles.
+  status: active
+- id: kv_cache_compact
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/compact/{role}
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Force KV cache compaction for a given model role.
+  status: active
+- id: cognitive_similarity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/cognitive/similarity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Semantic similarity scoring — Nano model rates 0.0-1.0, used by cognitive battery.
+  status: active
+- id: cognitive_query
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/cognitive/query
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Cognitive query endpoint for test battery probes.
+  status: active
+- id: audio_ingest
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/ingest
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Audio transcript ingestion from gaia-audio — feeds into cognition pipeline.
+  status: active
+- id: audio_listen
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/listen
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Audio listen mode toggle — start/stop passive listening.
+  status: active
+- id: audio_context
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/context
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Current audio context — recent transcripts and conversation state.
+  status: active
 - id: prime_inference
   direction: outbound
   transport:
@@ -212,6 +472,26 @@ interfaces:
     output_schema: null
   description: Presence updates to gaia-web — online/typing/sleeping status for Discord.
   status: active
+- id: nano_inference
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /v1/chat/completions
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Nano triage requests to gaia-nano via OpenAI-compatible API — SIMPLE/COMPLEX classification.
+  status: active
+- id: audio_notify
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Health/wake probe to gaia-audio for sleep/wake lifecycle coordination.
+  status: active
 dependencies:
   services:
   - id: gaia-prime
@@ -228,6 +508,14 @@ dependencies:
     fallback: null
   - id: gaia-orchestrator
     role: gpu_lifecycle
+    required: false
+    fallback: null
+  - id: gaia-nano
+    role: triage_classifier
+    required: false
+    fallback: null
+  - id: gaia-audio
+    role: audio_pipeline
     required: false
     fallback: null
   volumes:

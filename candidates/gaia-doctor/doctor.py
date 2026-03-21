@@ -172,7 +172,8 @@ log = logging.getLogger("gaia-doctor")
 # Service registry
 # ---------------------------------------------------------------------------
 
-SERVICES = {
+# Hardcoded fallback — used when compiled registry is unavailable
+_HARDCODED_SERVICES = {
     # name: (health_url, remediation)
     # remediation: None = observe only, "restart" = docker restart, "ha" = compose HA overlay
     "gaia-core": ("http://gaia-core:6415/health", "restart"),
@@ -188,6 +189,49 @@ SERVICES = {
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", "ha"),
     "gaia-mcp-candidate": ("http://gaia-mcp-candidate:8765/health", "ha"),
 }
+
+REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "registry" / "service_registry.json"
+
+
+def _load_service_registry() -> dict:
+    """
+    Load SERVICES dict from compiled service registry JSON.
+    Falls back to hardcoded dict if registry file is missing or corrupt.
+
+    Registry is compiled by scripts/compile_registry.py from blueprint YAMLs.
+    """
+    try:
+        if REGISTRY_PATH.exists():
+            with REGISTRY_PATH.open() as f:
+                registry = json.load(f)
+            services = {}
+            for sid, svc in registry.get("services", {}).items():
+                port = svc.get("port")
+                health = svc.get("health_check")
+                # Derive health URL from port and hostname convention
+                if port:
+                    health_url = f"http://{sid}:{port}/health"
+                else:
+                    health_url = health or f"http://{sid}:8080/health"
+                remediation = _HARDCODED_SERVICES[sid][1] if sid in _HARDCODED_SERVICES else None
+                services[sid] = (health_url, remediation)
+
+            # Always include candidate services (not in blueprints but monitored)
+            for cand_id in ("gaia-core-candidate", "gaia-mcp-candidate"):
+                if cand_id not in services:
+                    services[cand_id] = _HARDCODED_SERVICES.get(cand_id, (f"http://{cand_id}:6415/health", "ha"))
+
+            if services:
+                log.info("Loaded service registry from %s (%d services)", REGISTRY_PATH, len(services))
+                return services
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        log.warning("Failed to load service registry from %s: %s — falling back to hardcoded", REGISTRY_PATH, e)
+
+    log.info("Using hardcoded service registry (%d services)", len(_HARDCODED_SERVICES))
+    return dict(_HARDCODED_SERVICES)
+
+
+SERVICES = _load_service_registry()
 
 # Orchestrator endpoint for GPU status enrichment
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
@@ -214,6 +258,11 @@ _dissonance_report: dict = {}            # module-level divergence detection
 _hash_registry: dict = {}               # file -> {hash, mtime} for atomic hashing
 _cognitive_running: bool = False         # True while cognitive battery is executing
 _cognitive_last_result: dict | None = None  # cached last battery run result
+
+# Registry wiring validation state
+_wiring_check_interval = int(os.environ.get("WIRING_CHECK_INTERVAL", "300"))  # 5 minutes
+_wiring_last_check: float = 0.0
+_wiring_last_result: dict | None = None
 
 # Sovereign promotion rate limiter
 _last_sovereign_attempt: float = 0.0
@@ -1234,6 +1283,25 @@ IRRITATION_PATTERNS = [
     "Cannot reach vLLM server",
     "model not loaded",
     "GPU zombie detected",
+    "GAIA-CORE-075",
+    "GAIA-CORE-076",
+    "GAIA-CORE-077",
+    "GAIA-CORE-078",
+    "GAIA-CORE-080",
+    "Inference stream interrupted",
+    "Model swap failed",
+    "Loop detector",
+    "Plan generation failed",
+    "GAIA-WEB-040",
+    "GAIA-WEB-045",
+    "GAIA-WEB-050",
+    "GAIA-WEB-055",
+    "GAIA-WEB-060",
+    "Discord message send failed",
+    "Voice processing loop",
+    "Speech playback failed",
+    "Transcribe request failed",
+    "inference degraded",
 ]
 
 SERVICE_LOGS = {
@@ -1296,6 +1364,17 @@ def _record_irritation(service: str, line: str, pattern: str):
     # to free VRAM. Glass stays on — no manual intervention needed.
     if pattern in ("OOM", "CUDA out of memory", "torch.cuda.OutOfMemoryError"):
         _attempt_oom_resolution(service, line)
+
+    # ── Audio Auto-Resolution: restart gaia-audio on voice/STT failures ──
+    if pattern in ("GAIA-WEB-050", "GAIA-WEB-055", "GAIA-WEB-060",
+                    "Voice processing loop", "Speech playback failed",
+                    "Transcribe request failed"):
+        _attempt_audio_restart(service, line, pattern)
+
+    # ── Inference Auto-Resolution: request Prime wake on stream failures ──
+    if pattern in ("GAIA-CORE-075", "GAIA-CORE-080",
+                    "Inference stream interrupted"):
+        _attempt_inference_recovery(service, line, pattern)
 
 
 # ── OOM Resolution ────────────────────────────────────────────────────────
@@ -1446,16 +1525,177 @@ def _write_oom_resolution(service: str, error_line: str, resolution_log: list):
         log.debug("Failed to write OOM resolution state: %s", e)
 
 
+# ── Audio Auto-Resolution ─────────────────────────────────────────────────
+
+_audio_restart_cooldown: dict = {}
+AUDIO_RESTART_COOLDOWN = 120  # seconds — longer than OOM since restarts are heavier
+
+def _attempt_audio_restart(service: str, error_line: str, pattern: str):
+    """Restart gaia-audio when voice/STT failures are detected.
+
+    Pinball Machine: Doctor sees voice failures in gaia-web logs,
+    presses the gaia-audio restart button, watches through the glass.
+    """
+    now = time.monotonic()
+    last = _audio_restart_cooldown.get("gaia-audio", 0)
+    if now - last < AUDIO_RESTART_COOLDOWN:
+        log.debug("Audio restart on cooldown (%ds remaining)",
+                  int(AUDIO_RESTART_COOLDOWN - (now - last)))
+        return
+    _audio_restart_cooldown["gaia-audio"] = now
+
+    log.warning("Audio restart triggered by %s in %s — restarting gaia-audio", pattern, service)
+
+    try:
+        docker_restart("gaia-audio")
+    except Exception as e:
+        log.warning("Audio restart failed: %s", e)
+
+    # Emit to CodeMind for pattern analysis
+    try:
+        queue_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "codemind" / "detect_queue.jsonl"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "immune_irritation",
+            "issue_type": "audio_failure",
+            "file_path": "",
+            "description": f"Audio restart in {service} due to {pattern}: {error_line[:200]}",
+            "severity": "warn",
+            "priority": 2,
+            "metadata": {"service": service, "pattern": pattern, "action": "restart_gaia-audio"},
+        }
+        with open(queue_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log.debug("Failed to emit CodeMind audio detection: %s", e)
+
+
+# ── Inference Auto-Resolution ─────────────────────────────────────────────
+
+_inference_recovery_cooldown: dict = {}
+INFERENCE_RECOVERY_COOLDOWN = 90  # seconds
+
+def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
+    """Request Prime wake when inference stream failures are detected.
+
+    When gaia-core logs a stream interruption, the most common cause is
+    Prime being in standby or crashed. Doctor asks Orchestrator to wake it.
+    """
+    now = time.monotonic()
+    last = _inference_recovery_cooldown.get("inference", 0)
+    if now - last < INFERENCE_RECOVERY_COOLDOWN:
+        log.debug("Inference recovery on cooldown (%ds remaining)",
+                  int(INFERENCE_RECOVERY_COOLDOWN - (now - last)))
+        return
+    _inference_recovery_cooldown["inference"] = now
+
+    log.warning("Inference recovery triggered by %s — requesting Prime wake via Orchestrator", pattern)
+
+    # Step 1: Check if Prime is actually down
+    try:
+        req = Request("http://gaia-prime:7777/health", method="GET")
+        with urlopen(req, timeout=3) as resp:
+            if resp.status == 200:
+                health = json.loads(resp.read().decode())
+                if health.get("model_loaded"):
+                    log.info("Inference recovery: Prime is healthy and loaded — stream error was transient")
+                    return
+                log.info("Inference recovery: Prime healthy but model not loaded — requesting wake")
+    except Exception:
+        log.info("Inference recovery: Prime unreachable — requesting wake")
+
+    # Step 2: Try to load Prime's model directly
+    # The orchestrator's /watch/focus is broken (can't docker compose from
+    # inside a container). gaia-prime accepts POST /model/load directly.
+    # If VRAM is insufficient, this will fail — that's OK, Core handles it.
+    try:
+        prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
+        data = json.dumps({
+            "model_path": os.environ.get(
+                "PRIME_MODEL_PATH",
+                "/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
+            ),
+        }).encode()
+        req = Request(
+            f"{prime_endpoint}/model/load",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode())
+        if result.get("ok") or result.get("model_loaded"):
+            log.info("Inference recovery: Prime model load accepted")
+        else:
+            log.warning("Inference recovery: Prime model load response: %s", result)
+    except Exception as e:
+        log.warning("Inference recovery: direct Prime model load failed: %s", e)
+        # Fallback: ask orchestrator to wake (marks GPU available at least)
+        try:
+            wake_data = json.dumps({"reason": f"inference_recovery:{pattern}"}).encode()
+            req = Request(
+                f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
+                data=wake_data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            log.info("Inference recovery: fallback /gpu/wake result: %s", result)
+        except Exception:
+            pass
+    except Exception as e:
+        log.warning("Inference recovery: Could not reach Orchestrator: %s", e)
+
+    # Step 3: Emit to CodeMind
+    try:
+        queue_path = Path(os.environ.get("SHARED_DIR", "/shared")) / "codemind" / "detect_queue.jsonl"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "immune_irritation",
+            "issue_type": "inference_failure",
+            "file_path": "",
+            "description": f"Inference recovery in {service} due to {pattern}: {error_line[:200]}",
+            "severity": "warn",
+            "priority": 2,
+            "metadata": {"service": service, "pattern": pattern, "action": "wake_prime"},
+        }
+        with open(queue_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log.debug("Failed to emit CodeMind inference detection: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # Health checking
 # ---------------------------------------------------------------------------
 
 def check_health(name: str, url: str) -> bool:
-    """HTTP GET the health endpoint. Returns True if 200."""
+    """HTTP GET the health endpoint. Returns True if healthy.
+
+    For gaia-core: also checks the inference_ok field — a "degraded"
+    service (API alive but inference dead) is treated as unhealthy.
+    """
     try:
         req = Request(url, method="GET")
         with urlopen(req, timeout=5) as resp:
-            return resp.status == 200
+            if resp.status != 200:
+                return False
+            # For services that report inference health, check it
+            try:
+                body = json.loads(resp.read().decode())
+                if body.get("status") == "degraded":
+                    log.warning(
+                        "%s is degraded: inference_ok=%s detail=%s",
+                        name, body.get("inference_ok"), body.get("inference_detail", ""),
+                    )
+                    _record_irritation(name, f"inference degraded: {body.get('inference_detail', '')}", "inference degraded")
+                    return False
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass  # Non-JSON health response — just check HTTP status
+            return True
     except (URLError, OSError, TimeoutError):
         return False
 
@@ -2390,6 +2630,56 @@ def _reconcile_vram():
 
 _prime_model_warned = False
 
+def _check_wiring_health():
+    """Periodic wiring validation from compiled service registry.
+
+    Reads the compiled registry JSON (produced by scripts/compile_registry.py)
+    and checks for orphaned outbound calls. Runs every _wiring_check_interval
+    seconds. Results cached in _wiring_last_result for the /registry endpoint.
+    """
+    global _wiring_last_check, _wiring_last_result
+
+    now = time.monotonic()
+    if now - _wiring_last_check < _wiring_check_interval:
+        return
+
+    try:
+        with REGISTRY_PATH.open() as f:
+            registry = json.load(f)
+        if not isinstance(registry, dict):
+            raise ValueError(f"Expected dict, got {type(registry).__name__}")
+
+        validation = registry.get("validation", {})
+        orphaned = validation.get("orphaned_outbound", [])
+        _wiring_last_result = {
+            "status": validation.get("status", "unknown"),
+            "services_covered": registry.get("blueprint_count", 0),
+            "edges": registry.get("edge_count", 0),
+            "orphaned_outbound": len(orphaned),
+            "uncalled_inbound": len(validation.get("uncalled_inbound", [])),
+            "compiled_at": registry.get("compiled_at"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if orphaned:
+            log.info("Wiring check: %d orphaned outbound calls detected", len(orphaned))
+
+    except FileNotFoundError:
+        _wiring_last_result = {
+            "status": "not_compiled",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
+        _wiring_last_result = {
+            "status": "error",
+            "error": str(e),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        log.warning("Wiring validation failed: %s", e)
+
+    _wiring_last_check = now
+
+
 def _check_prime_model_health():
     """Monitor Prime's model state for dashboard visibility.
 
@@ -2512,6 +2802,12 @@ def poll_cycle():
         _reconcile_vram()
     except Exception:
         log.debug("VRAM reconciliation failed", exc_info=True)
+
+    # Blueprint wiring validation (periodic — every _wiring_check_interval seconds)
+    try:
+        _check_wiring_health()
+    except Exception:
+        log.debug("Wiring validation check failed", exc_info=True)
 
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():
@@ -2886,6 +3182,11 @@ class DoctorHandler(BaseHTTPRequestHandler):
                     self._json_response(200, {"history": [], "last": None})
             except Exception:
                 self._json_response(200, {"history": [], "last": None})
+        elif self.path == "/registry":
+            if _wiring_last_result is not None:
+                self._json_response(200, _wiring_last_result)
+            else:
+                self._json_response(200, {"status": "not_checked", "message": "Wiring validation has not run yet"})
         else:
             self._json_response(404, {"error": "not found"})
 

@@ -1,126 +1,241 @@
-# gaia-audio blueprint — MANUAL SEED
-# Drafted 2026-03-01 following Nano-Refiner and TCP implementation.
-# Defines the ears and mouth of the GAIA sensory mesh.
-
 id: gaia-audio
-version: "0.4"
-role: "The Ears & Mouth (Sensory STT/TTS)"
+version: '0.4'
+role: The Ears & Mouth (Sensory STT/TTS)
 service_status: live
-
 runtime:
   port: 8080
   base_image: python:3.11-slim
   gpu: true
-  gpu_sharing: true # Shares GPU with gaia-prime
-  startup_cmd: "uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080"
-  health_check: "curl -f http://localhost:8080/health"
-  user: "${UID}:${GID}"
+  gpu_sharing: true
+  startup_cmd: uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080
+  health_check: curl -f http://localhost:8080/health
+  user: ${UID}:${GID}
   dockerfile: gaia-audio/Dockerfile
   compose_service: gaia-audio
-
 interfaces:
+- id: transcribe
+  direction: inbound
+  description: Speech-to-Text conversion. Accepts audio bytes (m4a, wav, mp3), returns
+    transcribed text. Supports long-form transcription via segmenting.
+  status: active
+  transport:
+    type: http_rest
+    path: /transcribe
+    method: POST
+- id: refine
+  direction: inbound
+  description: Text cleanup and semantic diarization using 0.5B Nano model on CPU.
+    High-speed surgery for transcripts.
+  status: active
+  transport:
+    type: http_rest
+    path: /refine
+    method: POST
+- id: synthesize
+  direction: inbound
+  description: Text-to-Speech conversion. Accepts text, returns audio stream (wav/mp3)
+    using Coqui XTTS v2 or espeak-ng fallback.
+  status: active
+  transport:
+    type: http_rest
+    path: /synthesize
+    method: POST
+- id: health
+  direction: inbound
+  description: Sensory health check — verifies model availability.
+  status: active
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+- id: elevenlabs_fallback
+  direction: outbound
+  description: Cloud TTS fallback when local Coqui synthesis fails or VRAM is tight.
+  status: active
+  transport:
+    type: http_rest
+    path: /v1/text-to-speech
+    method: POST
+- id: analyze
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /analyze
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Perform deep musical and environmental analysis of audio.
+  status: active
+- id: config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return current audio config (read-only).
+  status: active
+- id: gpu_reclaim
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/reclaim
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Reclaim GPU by reloading STT model in background.
 
-  # ── Inbound ────────────────────────────────────────────────────────────────
 
-  - id: transcribe
-    direction: inbound
-    description: "Speech-to-Text conversion. Accepts audio bytes (m4a, wav, mp3), returns transcribed text. Supports long-form transcription via segmenting."
-    status: active
-    transport:
-      type: http_rest
-      path: /transcribe
-      method: POST
+    Returns immediately — model reload runs as a background task.
 
-  - id: refine
-    direction: inbound
-    description: "Text cleanup and semantic diarization using 0.5B Nano model on CPU. High-speed surgery for transcripts."
-    status: active
-    transport:
-      type: http_rest
-      path: /refine
-      method: POST
+    Use after /gpu/release when the GPU is available again.'
+  status: active
+- id: gpu_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Release GPU VRAM by unloading all GPU models.
 
-  - id: synthesize
-    direction: inbound
-    description: "Text-to-Speech conversion. Accepts text, returns audio stream (wav/mp3) using Coqui XTTS v2 or espeak-ng fallback."
-    status: active
-    transport:
-      type: http_rest
-      path: /synthesize
-      method: POST
 
-  - id: health
-    direction: inbound
-    description: "Sensory health check — verifies model availability."
-    status: active
-    transport:
-      type: http_rest
-      path: /health
-      method: GET
+    Unlike /sleep, this does NOT mute the service — STT will lazy-reload
 
-  # ── Outbound ───────────────────────────────────────────────────────────────
+    on the next /transcribe request when GPU is available again.
 
-  - id: elevenlabs_fallback
-    direction: outbound
-    description: "Cloud TTS fallback when local Coqui synthesis fails or VRAM is tight."
-    status: active
-    transport:
-      type: http_rest
-      method: POST
+    Use this when another service needs the GPU temporarily.
 
+
+    Pair with /gpu/reclaim to reload models afterward.'
+  status: active
+- id: gpu_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Current GPU usage by the audio service.
+  status: active
+- id: mute
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /mute
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Mute the audio service (called by gaia-core on sleep).
+  status: active
+- id: sleep
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Deep sleep: mute + unload Listener from GPU.'
+  status: active
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Full status snapshot for dashboard polling.
+  status: active
+- id: unmute
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /unmute
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Unmute the audio service (called by gaia-core on wake).
+  status: active
+- id: voices
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /voices
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List available TTS voices across all tiers.
+  status: active
+- id: wake
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Wake from deep sleep: unmute + reload Listener on GPU in background.
+
+
+    Returns immediately — model reload runs as a background task.
+
+    Idempotent — safe to call multiple times.'
+  status: active
 dependencies:
-  services: [] # Receives calls only
-
+  services: []
   volumes:
-    - name: gaia-models
-      access: ro
-      purpose: "Whisper and Coqui model weights"
-      mount_path: /models
-    - name: logs
-      access: rw
-      purpose: "Audio processing telemetry"
-      mount_path: /logs
-
+  - name: gaia-models
+    access: ro
+    purpose: Whisper and Coqui model weights
+    mount_path: /models
+  - name: logs
+    access: rw
+    purpose: Audio processing telemetry
+    mount_path: /logs
 source_files:
-  - path: gaia-audio/gaia_audio/main.py
-    role: entrypoint
-    file_type: python
-  - path: gaia-audio/gaia_audio/stt_engine.py
-    role: speech_to_text
-    file_type: python
-  - path: gaia-audio/gaia_audio/tts_engine.py
-    role: text_to_speech
-    file_type: python
-  - path: gaia-audio/gaia_audio/refiner_engine.py
-    role: text_refinement
-    file_type: python
-
+- path: gaia-audio/gaia_audio/main.py
+  role: entrypoint
+  file_type: python
+- path: gaia-audio/gaia_audio/stt_engine.py
+  role: speech_to_text
+  file_type: python
+- path: gaia-audio/gaia_audio/tts_engine.py
+  role: text_to_speech
+  file_type: python
+- path: gaia-audio/gaia_audio/refiner_engine.py
+  role: text_refinement
+  file_type: python
 failure_modes:
-  - condition: "VRAM OOM during transcription"
-    response: "Triggers GPU model cleanup; transcription retried once on CPU (slower)"
-    severity: degraded
-    auto_recovers: true
-
-  - condition: "Coqui synthesis failure"
-    response: "Falls back to espeak-ng (local) or ElevenLabs (cloud)"
-    severity: degraded
-    auto_recovers: true
-
+- condition: VRAM OOM during transcription
+  response: Triggers GPU model cleanup; transcription retried once on CPU (slower)
+  severity: degraded
+  auto_recovers: true
+- condition: Coqui synthesis failure
+  response: Falls back to espeak-ng (local) or ElevenLabs (cloud)
+  severity: degraded
+  auto_recovers: true
 intent:
-  purpose: >
-    Sensory microservice providing GAIA with auditory input, text refinement, and vocal output.
-    Uses a full-duplex GPU management strategy to allow simultaneous STT and TTS while 
-    offloading text refinement to a CPU-based Nano model.
-  cognitive_role: "The Ears & Mouth"
-  design_decisions:
-    - "Decoupled sensory processing from cognition to allow for independent model scaling"
-    - "Full-duplex model loading enables 'Hearing while Speaking' capabilities"
-    - "CPU-based Nano-Refiner (0.5B) provides blazingly fast text cleanup without VRAM impact"
-    - "Aggressive speech sanitization removes markdown artifacts for natural artisanal voice"
+  purpose: 'Sensory microservice providing GAIA with auditory input, text refinement,
+    and vocal output. Uses a full-duplex GPU management strategy to allow simultaneous
+    STT and TTS while  offloading text refinement to a CPU-based Nano model.
 
+    '
+  cognitive_role: The Ears & Mouth
+  design_decisions:
+  - Decoupled sensory processing from cognition to allow for independent model scaling
+  - Full-duplex model loading enables 'Hearing while Speaking' capabilities
+  - CPU-based Nano-Refiner (0.5B) provides blazingly fast text cleanup without VRAM
+    impact
+  - Aggressive speech sanitization removes markdown artifacts for natural artisanal
+    voice
 meta:
   status: live
   genesis: false
-  generated_by: gemini_cli
-  blueprint_version: "0.4"
-  schema_version: "1.0"
+  generated_by: manual_seed
+  blueprint_version: '0.4'
+  schema_version: '1.0'

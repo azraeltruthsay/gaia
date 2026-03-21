@@ -174,6 +174,29 @@ async def process_user_input(user_input: str, request: Request):
 
     return StreamingResponse(_stream_response(), media_type="application/x-ndjson")
 
+@app.post("/presence")
+async def update_presence(request: Request):
+    """Update Discord bot presence from gaia-core sleep cycle.
+
+    Called by gaia-core's _update_presence() in SOA mode (no direct Discord connector).
+    Payload: {"activity": "sleeping...", "status": "idle"|"invisible"|"dnd"|"online"}
+    """
+    try:
+        body = await request.json()
+        activity = body.get("activity", "over the studio")
+        status = body.get("status")
+
+        from gaia_web.discord_interface import change_presence_from_external
+        change_presence_from_external(activity, status)
+        return {"ok": True, "activity": activity, "status": status or "online"}
+    except RuntimeError as e:
+        # Bot not connected — non-fatal
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        logger.warning("Presence update failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/health")
 async def health_check():
     """System health check."""

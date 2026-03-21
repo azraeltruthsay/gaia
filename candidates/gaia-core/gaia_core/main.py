@@ -396,6 +396,10 @@ app.include_router(gpu_router)
 from gaia_core.api.sleep_endpoints import router as sleep_router
 app.include_router(sleep_router)
 
+# Register model/adapter management endpoints (adapter notifications from gaia-study)
+from gaia_core.api.model_endpoints import router as model_router
+app.include_router(model_router)
+
 
 @app.post("/api/repair/structural")
 async def repair_structural_error(request: Request):

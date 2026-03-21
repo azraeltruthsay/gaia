@@ -19,6 +19,7 @@
 # Options:
 #   --dry-run        Run all validation without promoting
 #   --skip-validate  Skip lint/type/unit testing (Stage 3)
+#   --skip-wiring    Skip blueprint wiring validation (Stage 3.5)
 #   --skip-smoke     Skip cognitive smoke tests (Stage 4)
 #   --skip-flatten   Skip flatten_soa.sh after promotion
 #   --qlora          Run QLoRA validation cycle (Stage 8)
@@ -94,6 +95,7 @@ RESET='\033[0m'
 
 DRY_RUN=false
 SKIP_VALIDATE=false
+SKIP_WIRING=false
 SKIP_SMOKE=false
 SKIP_FLATTEN=false
 DO_QLORA=false
@@ -109,6 +111,7 @@ for arg in "$@"; do
     case $arg in
         --dry-run)       DRY_RUN=true ;;
         --skip-validate) SKIP_VALIDATE=true ;;
+        --skip-wiring)   SKIP_WIRING=true ;;
         --skip-smoke)    SKIP_SMOKE=true ;;
         --skip-flatten)  SKIP_FLATTEN=true ;;
         --qlora)         DO_QLORA=true ;;
@@ -616,6 +619,80 @@ else
         stage_pass "Validation"
     else
         stage_fail "Validation" "validate.sh exited with code $validate_exit"
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Stage 3.5: Blueprint Wiring Validation
+# ═══════════════════════════════════════════════════════════════════════════
+
+stage_header 3 "Blueprint Wiring Validation"
+
+COMPILE_REGISTRY="$SCRIPTS_DIR/compile_registry.py"
+VALIDATE_WIRING="$SCRIPTS_DIR/validate_wiring.py"
+VALIDATE_PATHS="$SCRIPTS_DIR/validate_paths.py"
+
+if [ "$SKIP_WIRING" = true ]; then
+    stage_skip "Wiring Validation"
+else
+    if [ ! -f "$COMPILE_REGISTRY" ] || [ ! -f "$VALIDATE_WIRING" ]; then
+        stage_skip "Wiring Validation (scripts not found)"
+    else
+        WIRING_REGISTRY="/tmp/promote_wiring_registry.json"
+        log "  Compiling blueprint registry..."
+
+        set +e
+        compile_output=$(python3 "$COMPILE_REGISTRY" \
+            --blueprints-root "$GAIA_ROOT/knowledge/blueprints" \
+            --output "$WIRING_REGISTRY" 2>&1)
+        compile_exit=$?
+        set -e
+
+        echo "$compile_output"
+
+        if [ $compile_exit -ne 0 ]; then
+            stage_warn "Wiring Validation" "Registry compilation failed — non-blocking"
+        else
+            log "  Validating service wiring..."
+            set +e
+            wiring_output=$(python3 "$VALIDATE_WIRING" --registry "$WIRING_REGISTRY" 2>&1)
+            wiring_exit=$?
+            set -e
+
+            echo "$wiring_output"
+            echo "$wiring_output" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+
+            if [ $wiring_exit -eq 0 ]; then
+                stage_pass "Wiring Validation"
+            elif [ $wiring_exit -eq 1 ]; then
+                stage_warn "Wiring Validation" "Orphaned outbound connections detected — review recommended"
+            else
+                stage_warn "Wiring Validation" "Wiring validation failed — non-blocking"
+            fi
+
+            # Copy to shared dir if accessible
+            if [ -d "/shared/registry" ] || mkdir -p "/shared/registry" 2>/dev/null; then
+                cp "$WIRING_REGISTRY" "/shared/registry/service_registry.json" 2>/dev/null || true
+            fi
+
+            # Live path validation (requires services to be running)
+            if [ -f "$VALIDATE_PATHS" ]; then
+                log "  Validating live path interconnectivity..."
+                set +e
+                paths_output=$(python3 "$VALIDATE_PATHS" --registry "$WIRING_REGISTRY" 2>&1)
+                paths_exit=$?
+                set -e
+
+                echo "$paths_output"
+                echo "$paths_output" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+
+                if [ $paths_exit -eq 0 ]; then
+                    log "  ${GREEN}All paths verified${RESET}"
+                elif [ $paths_exit -eq 1 ]; then
+                    stage_warn "Wiring Validation" "Path mismatches detected — review recommended"
+                fi
+            fi
+        fi
     fi
 fi
 

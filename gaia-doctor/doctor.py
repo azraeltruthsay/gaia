@@ -172,7 +172,8 @@ log = logging.getLogger("gaia-doctor")
 # Service registry
 # ---------------------------------------------------------------------------
 
-SERVICES = {
+# Hardcoded fallback — used when compiled registry is unavailable
+_HARDCODED_SERVICES = {
     # name: (health_url, remediation)
     # remediation: None = observe only, "restart" = docker restart, "ha" = compose HA overlay
     "gaia-core": ("http://gaia-core:6415/health", "restart"),
@@ -188,6 +189,49 @@ SERVICES = {
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", "ha"),
     "gaia-mcp-candidate": ("http://gaia-mcp-candidate:8765/health", "ha"),
 }
+
+REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "registry" / "service_registry.json"
+
+
+def _load_service_registry() -> dict:
+    """
+    Load SERVICES dict from compiled service registry JSON.
+    Falls back to hardcoded dict if registry file is missing or corrupt.
+
+    Registry is compiled by scripts/compile_registry.py from blueprint YAMLs.
+    """
+    try:
+        if REGISTRY_PATH.exists():
+            with REGISTRY_PATH.open() as f:
+                registry = json.load(f)
+            services = {}
+            for sid, svc in registry.get("services", {}).items():
+                port = svc.get("port")
+                health = svc.get("health_check")
+                # Derive health URL from port and hostname convention
+                if port:
+                    health_url = f"http://{sid}:{port}/health"
+                else:
+                    health_url = health or f"http://{sid}:8080/health"
+                remediation = _HARDCODED_SERVICES[sid][1] if sid in _HARDCODED_SERVICES else None
+                services[sid] = (health_url, remediation)
+
+            # Always include candidate services (not in blueprints but monitored)
+            for cand_id in ("gaia-core-candidate", "gaia-mcp-candidate"):
+                if cand_id not in services:
+                    services[cand_id] = _HARDCODED_SERVICES.get(cand_id, (f"http://{cand_id}:6415/health", "ha"))
+
+            if services:
+                log.info("Loaded service registry from %s (%d services)", REGISTRY_PATH, len(services))
+                return services
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        log.warning("Failed to load service registry from %s: %s — falling back to hardcoded", REGISTRY_PATH, e)
+
+    log.info("Using hardcoded service registry (%d services)", len(_HARDCODED_SERVICES))
+    return dict(_HARDCODED_SERVICES)
+
+
+SERVICES = _load_service_registry()
 
 # Orchestrator endpoint for GPU status enrichment
 ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
@@ -214,6 +258,11 @@ _dissonance_report: dict = {}            # module-level divergence detection
 _hash_registry: dict = {}               # file -> {hash, mtime} for atomic hashing
 _cognitive_running: bool = False         # True while cognitive battery is executing
 _cognitive_last_result: dict | None = None  # cached last battery run result
+
+# Registry wiring validation state
+_wiring_check_interval = int(os.environ.get("WIRING_CHECK_INTERVAL", "300"))  # 5 minutes
+_wiring_last_check: float = 0.0
+_wiring_last_result: dict | None = None
 
 # Sovereign promotion rate limiter
 _last_sovereign_attempt: float = 0.0
@@ -2581,6 +2630,56 @@ def _reconcile_vram():
 
 _prime_model_warned = False
 
+def _check_wiring_health():
+    """Periodic wiring validation from compiled service registry.
+
+    Reads the compiled registry JSON (produced by scripts/compile_registry.py)
+    and checks for orphaned outbound calls. Runs every _wiring_check_interval
+    seconds. Results cached in _wiring_last_result for the /registry endpoint.
+    """
+    global _wiring_last_check, _wiring_last_result
+
+    now = time.monotonic()
+    if now - _wiring_last_check < _wiring_check_interval:
+        return
+
+    try:
+        with REGISTRY_PATH.open() as f:
+            registry = json.load(f)
+        if not isinstance(registry, dict):
+            raise ValueError(f"Expected dict, got {type(registry).__name__}")
+
+        validation = registry.get("validation", {})
+        orphaned = validation.get("orphaned_outbound", [])
+        _wiring_last_result = {
+            "status": validation.get("status", "unknown"),
+            "services_covered": registry.get("blueprint_count", 0),
+            "edges": registry.get("edge_count", 0),
+            "orphaned_outbound": len(orphaned),
+            "uncalled_inbound": len(validation.get("uncalled_inbound", [])),
+            "compiled_at": registry.get("compiled_at"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if orphaned:
+            log.info("Wiring check: %d orphaned outbound calls detected", len(orphaned))
+
+    except FileNotFoundError:
+        _wiring_last_result = {
+            "status": "not_compiled",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
+        _wiring_last_result = {
+            "status": "error",
+            "error": str(e),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        log.warning("Wiring validation failed: %s", e)
+
+    _wiring_last_check = now
+
+
 def _check_prime_model_health():
     """Monitor Prime's model state for dashboard visibility.
 
@@ -2703,6 +2802,12 @@ def poll_cycle():
         _reconcile_vram()
     except Exception:
         log.debug("VRAM reconciliation failed", exc_info=True)
+
+    # Blueprint wiring validation (periodic — every _wiring_check_interval seconds)
+    try:
+        _check_wiring_health()
+    except Exception:
+        log.debug("Wiring validation check failed", exc_info=True)
 
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():
@@ -3077,6 +3182,11 @@ class DoctorHandler(BaseHTTPRequestHandler):
                     self._json_response(200, {"history": [], "last": None})
             except Exception:
                 self._json_response(200, {"history": [], "last": None})
+        elif self.path == "/registry":
+            if _wiring_last_result is not None:
+                self._json_response(200, _wiring_last_result)
+            else:
+                self._json_response(200, {"status": "not_checked", "message": "Wiring validation has not run yet"})
         else:
             self._json_response(404, {"error": "not found"})
 

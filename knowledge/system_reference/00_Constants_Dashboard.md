@@ -22,7 +22,7 @@ Last Updated: 2026-03-19
 | **Dozzle (Logs)** | `http://dozzle:8080` | 9999 |
 
 ## 🧠 Model Pool
-- **Thinker/Prime:** `Huihui-Qwen3-8B-GAIA-Prime-adaptive` (Qwen3-8B base, vLLM, GPU)
+- **Thinker/Prime:** `Huihui-Qwen3-8B-GAIA-Prime-adaptive` (Qwen3-8B base, GAIA Engine, GPU)
   - *Context:* 16,384 tokens
   - *GPU Memory:* 85% utilization
   - *LoRA:* Enabled (max 4 adapters, rank 64)

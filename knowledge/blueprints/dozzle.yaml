@@ -1,0 +1,76 @@
+id: dozzle
+version: '1.0'
+role: The X-Ray (Log Viewer)
+service_status: live
+runtime:
+  port: 9999
+  base_image: amir20/dozzle
+  gpu: false
+  startup_cmd: null
+  health_check: null
+  gpu_count: null
+  user: null
+  dockerfile: null
+  compose_service: dozzle
+  security: null
+
+interfaces:
+- id: web_ui
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Web UI for real-time Docker container log viewing.
+  status: active
+
+dependencies:
+  services: []
+  volumes:
+  - name: docker_sock
+    access: ro
+    purpose: Read Docker container logs and metadata
+    mount_path: /var/run/docker.sock
+  external_apis: []
+
+source_files: []
+
+failure_modes:
+- condition: Docker socket unavailable
+  response: Cannot read container logs; web UI shows error
+  severity: fatal
+  auto_recovers: false
+
+intent:
+  purpose: >
+    Third-party log viewer (Dozzle). Provides a web-based real-time view of all
+    Docker container logs. Infrastructure-only — no GAIA application code. Useful
+    for debugging and monitoring during development and operations.
+
+  design_decisions:
+  - Off-the-shelf container — no custom code needed
+  - Read-only Docker socket access for security
+  - Port 9999 to avoid conflict with GAIA services
+
+  open_questions: []
+  cognitive_role: The X-Ray
+
+meta:
+  status: live
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: '1.0'
+  schema_version: '1.0'
+  created_at: '2026-03-20T00:00:00Z'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: high
+    intent: high
+  reflection_notes: null
+  divergence_score: null

@@ -492,7 +492,7 @@ def create_app() -> FastAPI:
         """Notify gaia-core that an adapter has changed."""
         import httpx
         core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
-        url = f"{core_url}/models/adapters/notify"
+        url = f"{core_url}/model/adapters/notify"
         try:
             async with httpx.AsyncClient() as client:
                 payload = {

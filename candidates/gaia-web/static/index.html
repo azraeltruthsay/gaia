@@ -88,6 +88,11 @@
               <div class="state-label">Cognitive Monitor</div>
               <div class="state-value" :class="cogMonitorClass" x-text="cogMonitorText"></div>
             </div>
+            <div class="state-card">
+              <div class="state-label">Service Registry</div>
+              <div class="state-value" :class="registryClass" x-text="registryText"></div>
+              <div x-show="registryDetail" class="state-extra" x-text="registryDetail"></div>
+            </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
                 <div class="state-label">

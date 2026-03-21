@@ -444,6 +444,130 @@ async def training_progress():
     return {"state": "idle"}
 
 
+# ── Service Registry Validation ────────────────────────────────────────
+
+@router.get("/registry/validation")
+async def registry_validation():
+    """Get service registry wiring validation status from gaia-doctor."""
+    _default = {
+        "status": "not_checked",
+        "services_covered": 0,
+        "edges": 0,
+        "orphaned_outbound": 0,
+        "uncalled_inbound": 0,
+        "compiled_at": None,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{DOCTOR_URL}/registry")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Failed to fetch registry validation: %s", e)
+    return _default
+
+
+@router.get("/registry/paths")
+async def registry_paths():
+    """Live path interconnectivity validation — checks edges against running services' OpenAPI."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    registry_path = _Path("/shared/registry/service_registry.json")
+    try:
+        with registry_path.open() as f:
+            registry = _json.load(f)
+    except (FileNotFoundError, _json.JSONDecodeError, OSError):
+        return {"status": "not_compiled", "summary": {}}
+
+    edges = registry.get("edges", [])
+    services = registry.get("services", {})
+
+    verified, mismatched, unreachable, skipped = 0, [], 0, 0
+    openapi_cache: dict[str, dict | None] = {}
+
+    no_openapi = {"gaia-doctor", "gaia-nano", "dozzle", "gaia-wiki"}
+    import re
+
+    for edge in edges:
+        if edge.get("transport") != "http_rest":
+            skipped += 1
+            continue
+
+        to_svc = edge["to_service"]
+        iface_to = edge.get("interface_to", "")
+
+        if to_svc in no_openapi:
+            skipped += 1
+            continue
+
+        # Get live routes for target
+        if to_svc not in openapi_cache:
+            try:
+                svc_data = services.get(to_svc, {})
+                port = svc_data.get("port", 8080)
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(f"http://{to_svc}:{port}/openapi.json")
+                    if resp.status_code == 200:
+                        schema = resp.json()
+                        routes = {}
+                        for path, methods in schema.get("paths", {}).items():
+                            norm = re.sub(r"\{[^}]+\}", "{param}", path)
+                            for method in methods:
+                                m = method.upper()
+                                if m not in ("HEAD", "OPTIONS", "TRACE"):
+                                    routes[(norm, m)] = True
+                        openapi_cache[to_svc] = routes
+                    else:
+                        openapi_cache[to_svc] = None
+            except Exception:
+                openapi_cache[to_svc] = None
+
+        routes = openapi_cache.get(to_svc)
+        if routes is None:
+            unreachable += 1
+            continue
+
+        # Find expected path
+        target_iface = None
+        for iface in services.get(to_svc, {}).get("inbound", []):
+            if iface["id"] == iface_to:
+                target_iface = iface
+                break
+
+        if not target_iface:
+            mismatched.append({"from": edge["from_service"], "to": to_svc, "interface": iface_to, "issue": "interface not in registry"})
+            continue
+
+        expected_path = target_iface.get("endpoint", "")
+        expected_method = (target_iface.get("method") or "GET").upper()
+        normalized = re.sub(r"\{[^}]+\}", "{param}", expected_path) if expected_path else ""
+
+        if (normalized, expected_method) in routes:
+            verified += 1
+        else:
+            mismatched.append({
+                "from": edge["from_service"],
+                "to": to_svc,
+                "interface": iface_to,
+                "path": expected_path,
+                "method": expected_method,
+                "issue": "not found in live OpenAPI",
+            })
+
+    return {
+        "status": "clean" if not mismatched else "mismatches",
+        "summary": {
+            "total_edges": len(edges),
+            "verified": verified,
+            "mismatched": len(mismatched),
+            "unreachable": unreachable,
+            "skipped": skipped,
+        },
+        "mismatched": mismatched,
+    }
+
+
 @router.get("/surgeon/history")
 async def surgeon_history():
     """Get surgeon repair history from gaia-doctor."""

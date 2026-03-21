@@ -16,7 +16,7 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 
 | Tier | Model | Base | Container | Backend | Context |
 |------|-------|------|-----------|---------|---------|
-| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive | Qwen3-8B | gaia-prime | vLLM (GPU), LoRA-enabled (max 4, rank 64) | 16,384 |
+| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive | Qwen3-8B | gaia-prime | GAIA Engine (GPU), LoRA-enabled | 16,384 |
 | **Core/Operator** | Qwen3.5-2B-GAIA-Core-v3 | Qwen3.5-2B | gaia-core (embedded llama-server :8092) | Safetensors (GPU) / GGUF (CPU fallback) | 8,192 |
 | **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | Qwen3.5-0.8B | gaia-nano | llama-server (GPU primary, GGUF fallback) | 2,048 |
 
@@ -58,7 +58,7 @@ Sentence-transformer model used by gaia-study for document embeddings and vector
 | Service | Role | Port | Runtime |
 |---------|------|------|---------|
 | **gaia-orchestrator** | GPU scheduling, container lifecycle, handoff state machine | 6410 | Python 3.11 |
-| **gaia-prime** | vLLM inference server (Thinker/Prime model, GPU) | 7777 | NGC PyTorch 25.03 + NVIDIA GPU |
+| **gaia-prime** | GAIA Engine inference (Thinker/Prime model, GPU) | 7777 | gaia-engine-base + NVIDIA GPU |
 | **gaia-nano** | Nano/Reflex triage classifier (llama-server, GPU primary) | 8090 | llama-server + NVIDIA GPU |
 | **gaia-core** | Cognitive pipeline, model pool, embedded Core CPU inference | 6415 | Python 3.11 |
 | **gaia-web** | Discord bot, HTTP API, voice manager, CognitionPacket routing | 6414 | Python 3.11 |
@@ -126,27 +126,27 @@ GAIA can join Discord voice channels for real-time voice conversations.
 
 ## GPU Handoff
 
-The single GPU is shared between inference (gaia-prime) and training (gaia-study) via an orchestrator-driven container stop/start protocol.
+The single GPU is shared between inference and training via the orchestrator-driven watch rotation. The GAIA Inference Engine (shared library in gaia-common) manages model loading across all tiers.
 
-### Release (prime -> study): ~1 second
+### Release (inference -> study): ~1 second
 
 ```
-Orchestrator stops gaia-prime container
-  -> VRAM drops from ~13 GB to ~2 GB (desktop baseline)
-  -> Core demotes gpu_prime from model pool, fallback chain activates
+Orchestrator signals GPU release
+  -> GAIA Engine unloads inference models from VRAM
+  -> Fallback chain activates (Core CPU GGUF + Groq/Oracle cloud)
   -> Study receives gpu-ready signal, begins QLoRA training
 ```
 
-### Reclaim (study -> prime): ~60 seconds
+### Reclaim (study -> inference): seconds
 
 ```
 Study releases CUDA resources
-  -> Orchestrator starts gaia-prime container
-  -> vLLM loads model from disk (~40-60s cold start)
-  -> Core restores gpu_prime in model pool
+  -> Orchestrator signals reclaim
+  -> GAIA Engine loads models from tmpfs warm pool (/mnt/gaia_warm_pool)
+  -> Tiers restored: Nano (0.8B) + Core (2B) + Prime (8B) via GAIA Engine
 ```
 
-During handoff, GAIA remains responsive via the CPU GGUF model and cloud API fallbacks.
+During handoff, GAIA remains responsive via the Core CPU GGUF fallback and cloud API fallbacks.
 
 ## Sleep/Wake Cycle
 
@@ -157,7 +157,7 @@ GAIA has a biologically-inspired sleep/wake cycle managed by gaia-core:
 - **Asleep** — minimal processing, queues incoming messages
 - **REM/Dreaming** — background consolidation (QLoRA self-study)
 
-Incoming Discord messages or voice calls trigger a wake signal. While waking, a lightweight Lite model provides stalling responses until Prime is online.
+Incoming Discord messages or voice calls trigger a wake signal. While waking, the Core tier (CPU) provides stalling responses until Prime is loaded from the warm pool.
 
 ## MCP Tools
 

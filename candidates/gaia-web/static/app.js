@@ -267,6 +267,9 @@ function systemPanel() {
     alignmentClass: '',
     cogMonitorText: '--',
     cogMonitorClass: '',
+    registryText: '--',
+    registryClass: '',
+    registryDetail: '',
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
@@ -300,7 +303,7 @@ function systemPanel() {
     },
 
     async poll() {
-      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment(), this.pollCognitiveMonitor()]);
+      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment(), this.pollCognitiveMonitor(), this.pollRegistry()]);
     },
 
     async pollServices() {
@@ -382,6 +385,35 @@ function systemPanel() {
           }
         }
       } catch { this.cogMonitorText = '--'; this.cogMonitorClass = ''; }
+    },
+
+    async pollRegistry() {
+      try {
+        const resp = await fetch('/api/system/registry/validation');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.status === 'not_compiled' || data.status === 'not_checked') {
+          this.registryText = 'not compiled';
+          this.registryClass = 'warn';
+          this.registryDetail = '';
+        } else if (data.status === 'clean') {
+          this.registryText = `${data.services_covered} svc · ${data.edges} edges`;
+          this.registryClass = 'ok';
+          this.registryDetail = '';
+        } else if (data.status === 'warnings') {
+          this.registryText = `${data.services_covered} svc · ${data.orphaned_outbound} orphaned`;
+          this.registryClass = 'warn';
+          this.registryDetail = `${data.edges} edges`;
+        } else if (data.status === 'error') {
+          this.registryText = 'error';
+          this.registryClass = 'error';
+          this.registryDetail = '';
+        } else {
+          this.registryText = data.status || 'unknown';
+          this.registryClass = '';
+          this.registryDetail = '';
+        }
+      } catch { this.registryText = '--'; this.registryClass = ''; this.registryDetail = ''; }
     },
 
     // ── Graph ──────────────────────────────────────────────────────────

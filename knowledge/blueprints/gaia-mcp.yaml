@@ -87,24 +87,6 @@ interfaces:
       path: /study/start
       method: POST
 
-  - id: web_research
-    direction: outbound
-    description: "External web research via DuckDuckGo (ddgs library with Instant Answer API fallback). Rate-limited: 20 searches/hr, 50 fetches/hr."
-    status: active
-    transport:
-      type: http_rest
-      path: /
-      method: GET
-
-  - id: discord_webhook
-    direction: outbound
-    description: "Optional Discord webhook for send_discord_message tool. Requires DISCORD_WEBHOOK_URL env var."
-    status: active
-    transport:
-      type: http_rest
-      path: /
-      method: POST
-
 dependencies:
   services:
     - id: gaia-study
