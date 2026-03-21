@@ -634,13 +634,16 @@ class GAIAEngine:
             eos_id = self.tokenizer.eos_token_id
             # Suppress <think> token — Qwen3.5 defaults to thinking mode.
             # We mask it in logits so the model generates the answer directly.
-            _think_token_id = 248068  # <think> in Qwen3.5 vocab
+            # Token ID varies by model family — resolve dynamically
+            _think_token_id = self.tokenizer.convert_tokens_to_ids("<think>")
+            if _think_token_id is None or _think_token_id == self.tokenizer.unk_token_id:
+                _think_token_id = -1  # Not in vocab — skip suppression
             _entropy_sum = 0.0
             _entropy_count = 0
             for step in range(max_tokens):
-                # Suppress <think> on ALL tokens — Qwen3.5 abliterated
-                # defaults to thinking mode which eats the entire context
-                logits[0, _think_token_id] = float("-inf")
+                # Suppress <think> if the token exists in this model's vocab
+                if 0 <= _think_token_id < logits.shape[-1]:
+                    logits[0, _think_token_id] = float("-inf")
 
                 # Track per-token entropy (uncertainty signal)
                 probs = F.softmax(logits, dim=-1)
@@ -718,6 +721,83 @@ class GAIAEngine:
             mem = torch.cuda.memory_allocated() // (1024**2) if target == "cuda" else 0
             return {"ok": True, "device": target, "elapsed_s": round(elapsed, 2), "vram_mb": mem}
 
+    def unload_completely(self) -> dict:
+        """Fully unload model and all subsystems, releasing all GPU memory.
+
+        Unlike simple `model = None`, this cleans up KV cache, adapters,
+        activation monitor, thought snapshots, and vision processor.
+        """
+        with self._lock:
+            vram_before = 0
+            try:
+                vram_before = torch.cuda.memory_allocated() // (1024 ** 2)
+            except Exception:
+                pass
+
+            previous_model = self.model_path
+
+            # Unload adapters first (PeftModel wraps base model)
+            if self._peft_model is not None:
+                try:
+                    self._peft_model = None
+                except Exception:
+                    pass
+            self._adapters.clear()
+            self._active_adapter = None
+            self._base_model = None
+
+            # Release model and tokenizer
+            self.model = None
+            self.tokenizer = None
+
+            # Vision processor
+            if hasattr(self, "processor") and self.processor is not None:
+                self.processor = None
+
+            # Subsystems
+            if self.prefix_cache is not None:
+                try:
+                    self.prefix_cache.invalidate()
+                except Exception:
+                    pass
+            if self.monitor is not None:
+                try:
+                    self.monitor.reset()
+                except Exception:
+                    pass
+            if self.thoughts is not None:
+                try:
+                    self.thoughts.clear_all()
+                except Exception:
+                    pass
+
+            # Force GPU memory release
+            gc.collect()
+            try:
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            vram_after = 0
+            try:
+                vram_after = torch.cuda.memory_allocated() // (1024 ** 2)
+            except Exception:
+                pass
+
+            self.model_path = ""
+            self.device = "cpu"
+
+            logger.info(
+                "Engine: model fully unloaded (%s). VRAM: %dMB → %dMB (freed %dMB)",
+                previous_model, vram_before, vram_after, vram_before - vram_after,
+            )
+            return {
+                "ok": True,
+                "previous_model": previous_model,
+                "vram_mb_freed": vram_before - vram_after,
+            }
+
     def status(self) -> dict:
         mem = torch.cuda.memory_allocated() // (1024**2) if self.device == "cuda" else 0
         return {
@@ -741,6 +821,24 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 _engine: Optional[GAIAEngine] = None
 
 
+def _set_engine(new_engine: Optional[GAIAEngine], unload: bool = False) -> None:
+    """Set the module-level engine reference. If unload=True, clean up the old one first."""
+    global _engine
+    if unload and _engine is not None:
+        try:
+            _engine.unload_completely()
+        except Exception:
+            pass
+        _engine = None
+        gc.collect()
+        try:
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+    _engine = new_engine
+
+
 class EngineHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
@@ -761,7 +859,13 @@ class EngineHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "engine": "gaia"})
+            loaded = _engine is not None and _engine.model is not None
+            self._json({
+                "status": "ok",
+                "engine": "gaia",
+                "model_loaded": loaded,
+                "mode": "active" if loaded else "standby",
+            })
         elif self.path == "/v1/models":
             self._json({"object": "list", "data": [{"id": _engine.model_path, "object": "model", "owned_by": "gaia"}]})
         elif self.path == "/status":
@@ -1013,6 +1117,79 @@ class EngineHandler(BaseHTTPRequestHandler):
                             "prompts": len(prompts), "layers": layers})
             except ImportError as e:
                 self._json({"ok": False, "error": f"SAE trainer not available: {e}"}, 500)
+        elif self.path == "/model/unload":
+            _set_engine(None, unload=True)
+            self._json({"ok": True, "message": "model unloaded"})
+
+        elif self.path == "/model/swap":
+            b = self._body()
+            new_path = b.get("model") or b.get("model_path", "")
+            if not new_path:
+                self._json({"ok": False, "error": "model path required"}, 400)
+                return
+            device = b.get("device", "cuda")
+            compile_mode = b.get("compile_mode", "reduce-overhead")
+
+            old_model = _engine.model_path if _engine else ""
+            _set_engine(None, unload=True)
+
+            try:
+                new_engine = GAIAEngine(new_path, device=device, compile_mode=compile_mode)
+                _set_engine(new_engine)
+                vram = torch.cuda.memory_allocated() // (1024 ** 2) if device == "cuda" else 0
+                self._json({
+                    "ok": True,
+                    "old_model": old_model,
+                    "new_model": new_path,
+                    "device": device,
+                    "vram_mb": vram,
+                })
+            except Exception as e:
+                logger.exception("Model swap failed during load")
+                self._json({"ok": False, "error": str(e), "old_model": old_model}, 500)
+
+        elif self.path == "/model/load":
+            b = self._body()
+            new_path = b.get("model") or b.get("model_path", "")
+            if not new_path:
+                self._json({"ok": False, "error": "model path required"}, 400)
+                return
+            if _engine is not None and _engine.model is not None:
+                self._json({"ok": False, "error": "model already loaded — unload first or use /model/swap"}, 409)
+                return
+            device = b.get("device", "cuda")
+            compile_mode = b.get("compile_mode", "reduce-overhead")
+            try:
+                new_engine = GAIAEngine(new_path, device=device, compile_mode=compile_mode)
+                _set_engine(new_engine)
+                vram = torch.cuda.memory_allocated() // (1024 ** 2) if device == "cuda" else 0
+                self._json({"ok": True, "model": new_path, "vram_mb": vram, "model_loaded": True})
+            except Exception as e:
+                logger.exception("Model load failed")
+                self._json({"ok": False, "error": str(e)}, 500)
+
+        elif self.path == "/model/info":
+            if _engine is None:
+                self._json({"model_loaded": False, "model_path": "", "device": "none", "vram_mb": 0})
+            else:
+                vram = 0
+                try:
+                    vram = torch.cuda.memory_allocated() // (1024 ** 2)
+                except Exception:
+                    pass
+                self._json({
+                    "model_loaded": _engine.model is not None,
+                    "model_path": _engine.model_path,
+                    "device": _engine.device,
+                    "vram_mb": vram,
+                    "has_vision": getattr(_engine, "has_vision", False),
+                    "adapters": {
+                        "loaded": list(_engine._adapters.keys()),
+                        "active": _engine._active_adapter,
+                    },
+                    "uptime_s": round(time.time() - _engine._started_at, 1),
+                })
+
         else:
             self._json({"error": "not found"}, 404)
 
