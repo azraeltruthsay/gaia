@@ -1079,7 +1079,35 @@ class SleepTaskScheduler:
                 CodeMindState,
                 TriggerSource,
             )
-            from gaia_common.utils.codemind_detector import consume_detections
+            from gaia_common.utils.codemind_detector import consume_detections, emit_detection
+
+            # ── Direct seed bridge (fallback if initiative_cycle didn't run) ──
+            # Initiative cycle is gated on serenity; this ensures seeds
+            # reach the detect queue even when GAIA isn't serene.
+            try:
+                from gaia_core.cognition.thought_seed import list_unreviewed_seeds
+                for path, seed_data in list_unreviewed_seeds():
+                    _seed_type = seed_data.get("seed_type", "")
+                    if _seed_type in ("knowledge_gap", "confabulation"):
+                        emit_detection(
+                            source="sleep_cycle",
+                            issue_type="capability_gap",
+                            file_path="knowledge/awareness/operational/architecture_facts.md",
+                            description=seed_data.get("seed", ""),
+                            severity="info",
+                            metadata={"seed_file": str(path)},
+                        )
+                    elif _seed_type == "inference_failure":
+                        emit_detection(
+                            source="sleep_cycle",
+                            issue_type="inference_failure",
+                            file_path="",
+                            description=seed_data.get("seed", ""),
+                            severity="warn",
+                            metadata={"seed_file": str(path)},
+                        )
+            except Exception as _seed_exc:
+                logger.debug("CodeMind cycle: seed bridge failed: %s", _seed_exc)
 
             engine = CodeMindEngine(self.config.constants)
             cycle = engine.start_cycle(TriggerSource.SLEEP_CYCLE)
@@ -1151,18 +1179,13 @@ class SleepTaskScheduler:
                                     diff_summary=f"awareness addition ({len(lines)} lines)",
                                     applied=not cycle.dry_run,
                                 ))
+                                # Mark seed as reviewed so it doesn't re-queue
+                                self._mark_seed_reviewed(detection, "awareness_updated")
                             else:
                                 logger.warning("CodeMind: awareness proposal too long (%d lines), skipping", len(lines))
                         elif proposed_addition and proposed_addition.strip().startswith("ALREADY_DOCUMENTED"):
                             logger.info("CodeMind: capability gap already documented, skipping")
-                            # Mark seed as reviewed via metadata
-                            seed_file = detection.get("metadata", {}).get("seed_file")
-                            if seed_file:
-                                try:
-                                    from gaia_core.cognition.thought_seed import update_seed
-                                    update_seed(os.path.basename(seed_file), {"reviewed": True, "review_decision": "already_documented"})
-                                except Exception:
-                                    pass
+                            self._mark_seed_reviewed(detection, "already_documented")
                     except Exception as exc:
                         logger.error("CodeMind: awareness update failed: %s", exc, exc_info=True)
                     continue
@@ -1314,6 +1337,23 @@ class SleepTaskScheduler:
             logger.warning("CodeMind cycle failed: %s", e, exc_info=True)
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _mark_seed_reviewed(detection: dict, decision: str) -> None:
+        """Mark the originating thought seed as reviewed so it doesn't re-queue."""
+        seed_file = detection.get("metadata", {}).get("seed_file")
+        if not seed_file:
+            return
+        try:
+            from gaia_core.cognition.thought_seed import get_seed_by_id, update_seed
+            fname = os.path.basename(seed_file)
+            seed_data = get_seed_by_id(fname)
+            if seed_data:
+                seed_data["reviewed"] = True
+                seed_data["review_decision"] = decision
+                update_seed(fname, seed_data)
+        except Exception as exc:
+            logger.debug("CodeMind: failed to mark seed reviewed: %s", exc)
+
     # CodeMind — LLM proposal via code-architect adapter
     # ------------------------------------------------------------------
 

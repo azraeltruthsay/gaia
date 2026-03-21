@@ -655,10 +655,10 @@
     "doctor_critical_threshold": 0.90
   },
   "CODEMIND": {
-    "enabled": false,
+    "enabled": true,
     "max_changes_per_cycle": 3,
     "auto_promote": false,
-    "dry_run": true,
+    "dry_run": false,
     "scope_tiers": {
       "tier1_auto": true,
       "tier2_supervised": true,
