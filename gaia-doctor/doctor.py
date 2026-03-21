@@ -1556,21 +1556,46 @@ def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
     except Exception:
         log.info("Inference recovery: Prime unreachable — requesting wake")
 
-    # Step 2: Ask Orchestrator to wake Prime
+    # Step 2: Try to load Prime's model directly
+    # The orchestrator's /watch/focus is broken (can't docker compose from
+    # inside a container). gaia-prime accepts POST /model/load directly.
+    # If VRAM is insufficient, this will fail — that's OK, Core handles it.
     try:
-        data = json.dumps({"reason": f"inference_recovery:{pattern}"}).encode()
+        prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
+        data = json.dumps({
+            "model_path": os.environ.get(
+                "PRIME_MODEL_PATH",
+                "/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
+            ),
+        }).encode()
         req = Request(
-            f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
+            f"{prime_endpoint}/model/load",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(req, timeout=10) as resp:
+        with urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read().decode())
-        if result.get("ok"):
-            log.info("Inference recovery: Orchestrator accepted wake request")
+        if result.get("ok") or result.get("model_loaded"):
+            log.info("Inference recovery: Prime model load accepted")
         else:
-            log.warning("Inference recovery: Orchestrator wake failed: %s", result.get("error"))
+            log.warning("Inference recovery: Prime model load response: %s", result)
+    except Exception as e:
+        log.warning("Inference recovery: direct Prime model load failed: %s", e)
+        # Fallback: ask orchestrator to wake (marks GPU available at least)
+        try:
+            wake_data = json.dumps({"reason": f"inference_recovery:{pattern}"}).encode()
+            req = Request(
+                f"{ORCHESTRATOR_ENDPOINT}/gpu/wake",
+                data=wake_data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+            log.info("Inference recovery: fallback /gpu/wake result: %s", result)
+        except Exception:
+            pass
     except Exception as e:
         log.warning("Inference recovery: Could not reach Orchestrator: %s", e)
 
