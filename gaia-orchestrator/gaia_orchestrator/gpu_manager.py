@@ -294,23 +294,31 @@ class GPUManager:
 
     async def request_release_from_core(self) -> bool:
         """
-        Release GPU: evict Nano, sleep gaia-audio, stop the prime container,
-        then tell gaia-core to demote gpu_prime from its model pool.
+        Release GPU: unload all GAIA Engine models (Core, Nano), sleep audio,
+        stop prime, then tell gaia-core to demote gpu_prime from its model pool.
+
+        The key insight: stopping containers isn't enough — the GAIA Engine
+        subprocess inside each container holds CUDA tensors that must be
+        explicitly unloaded via /model/unload. Without this, VRAM stays
+        allocated even after model pool says 'released'.
         """
         import httpx
 
-        # Step 0: Evict Nano to CPU (frees ~800MB VRAM)
-        await self.evict_nano_to_cpu("gpu_release")
+        # Step 0: Unload Core's GAIA Engine model (frees ~5GB VRAM)
+        await self._unload_engine("gaia-core", 8092, "Core")
 
-        # Step 1: Sleep gaia-audio (unloads Whisper + XTTS from GPU)
+        # Step 1: Unload Nano's GAIA Engine model (frees ~2GB VRAM)
+        await self._unload_engine("gaia-nano", 8080, "Nano")
+
+        # Step 2: Sleep gaia-audio (unloads Whisper + XTTS from GPU)
         await self.sleep_audio()
 
-        # Step 2: Stop the prime container (frees all VRAM)
+        # Step 3: Stop the prime container (frees all VRAM)
         if not await self.stop_prime_container():
             logger.error("Failed to stop prime container — aborting release")
             return False
 
-        # Step 3: Tell core to update its model pool (demote gpu_prime)
+        # Step 4: Tell core to update its model pool (demote gpu_prime)
         url = f"{self.config.core_url}/gpu/release"
         logger.info(f"Requesting model pool update from Core: {url}")
 
@@ -331,17 +339,23 @@ class GPUManager:
 
     async def request_reclaim_by_core(self) -> bool:
         """
-        Reclaim GPU: start the prime container, wait for healthy,
+        Reclaim GPU: reload Core + Nano engines, start prime container,
         tell gaia-core to restore gpu_prime, then wake gaia-audio.
         """
         import httpx
 
-        # Step 1: Start the prime container (loads model into VRAM)
+        # Step 1: Reload Core's GAIA Engine model (was unloaded during release)
+        await self._reload_engine("gaia-core", 8092, "Core")
+
+        # Step 2: Reload Nano's GAIA Engine model
+        await self._reload_engine("gaia-nano", 8080, "Nano")
+
+        # Step 3: Start the prime container (loads model into VRAM)
         if not await self.start_prime_container():
             logger.error("Failed to start prime container — aborting reclaim")
             return False
 
-        # Step 2: Tell core to restore gpu_prime in model pool
+        # Step 4: Tell core to restore gpu_prime in model pool
         url = f"{self.config.core_url}/gpu/reclaim"
         logger.info(f"Requesting model pool restore from Core: {url}")
 
@@ -359,11 +373,8 @@ class GPUManager:
             logger.error(f"Failed to request GPU reclaim by Core: {e}")
             return False
 
-        # Step 3: Wake gaia-audio (reload Whisper + XTTS onto GPU)
+        # Step 5: Wake gaia-audio (reload Whisper + XTTS onto GPU)
         await self.wake_audio()
-
-        # Step 4: Restore Nano to GPU (if VRAM allows)
-        await self.restore_nano_to_gpu("gpu_reclaim")
 
         return True
 
@@ -567,6 +578,52 @@ class GPUManager:
         except Exception as e:
             logger.error("Failed to restart gaia-nano: %s", e)
             return False
+
+    async def _unload_engine(self, hostname: str, port: int, label: str) -> bool:
+        """Unload a GAIA Engine's model to free CUDA memory.
+
+        Calls POST /model/unload on the engine's HTTP server. This releases
+        PyTorch tensors and calls torch.cuda.empty_cache(), actually freeing VRAM.
+        The engine process stays running (can reload later via /model/load).
+        """
+        import httpx
+        url = f"http://{hostname}:{port}/model/unload"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok"):
+                        logger.info("%s engine unloaded (%s:%d) — VRAM freed", label, hostname, port)
+                        return True
+                logger.warning("%s engine unload returned %s", label, resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to unload %s engine (%s:%d): %s", label, hostname, port, e)
+        return False
+
+    async def _reload_engine(self, hostname: str, port: int, label: str, model_path: str | None = None) -> bool:
+        """Reload a GAIA Engine's model after GPU is available.
+
+        Calls POST /model/load on the engine's HTTP server. If model_path is None,
+        the engine reloads whatever it had before.
+        """
+        import httpx
+        url = f"http://{hostname}:{port}/model/load"
+        payload = {}
+        if model_path:
+            payload["model_path"] = model_path
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok"):
+                        logger.info("%s engine reloaded (%s:%d)", label, hostname, port)
+                        return True
+                logger.warning("%s engine reload returned %s", label, resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to reload %s engine (%s:%d): %s", label, hostname, port, e)
+        return False
 
     async def evict_nano_to_cpu(self, reason: str = "vram_pressure") -> bool:
         """Evict Nano from GPU to CPU to free ~800MB VRAM.
