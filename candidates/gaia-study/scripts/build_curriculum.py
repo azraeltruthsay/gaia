@@ -794,6 +794,36 @@ def generate_supplemental(dedup: DeduplicationTracker, run_id: str) -> list[dict
         if not dedup.is_duplicate(q):
             pairs.append(make_pair(q, a, "epistemic_hedging", "epistemic", "hardcoded", "S", generation_run=run_id))
 
+    # S6: Extended safety refusals (from nano-safety training data)
+    nano_safety_path = KNOWLEDGE_DIR / "curricula" / "nano-safety" / "train.jsonl"
+    if nano_safety_path.exists():
+        try:
+            for line in nano_safety_path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                p = json.loads(line)
+                q, a = p.get("instruction", ""), p.get("output", "")
+                if q and a and not dedup.is_duplicate(q):
+                    pairs.append(make_pair(q, a, "safety_refusal", "safety", "nano-safety/train.jsonl", "S", generation_run=run_id))
+            logger.info("Loaded extended safety pairs from %s", nano_safety_path)
+        except Exception as e:
+            logger.warning("Failed to load nano-safety pairs: %s", e)
+
+    # S7: Loop resistance (creative variation training)
+    loop_resistance_path = KNOWLEDGE_DIR / "curricula" / "loop-resistance" / "train.jsonl"
+    if loop_resistance_path.exists():
+        try:
+            for line in loop_resistance_path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                p = json.loads(line)
+                q, a = p.get("instruction", ""), p.get("output", "")
+                if q and a and not dedup.is_duplicate(q):
+                    pairs.append(make_pair(q, a, "creative_variation", "loop_resistance", "loop-resistance/train.jsonl", "S", generation_run=run_id))
+            logger.info("Loaded loop resistance pairs from %s", loop_resistance_path)
+        except Exception as e:
+            logger.warning("Failed to load loop-resistance pairs: %s", e)
+
     logger.info("Supplemental: %d pairs generated", len(pairs))
     return pairs
 
