@@ -57,8 +57,8 @@ def _extract_pdf_text(path: str) -> Optional[str]:
         lines = [ln for ln in text.split("\n") if ln.strip() and not ln.strip().startswith("%")]
         if len(lines) > 5:
             return "\n".join(lines[:500])
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Attachment: text extraction failed for %s: %s", path, _exc)
     return None
 
 

@@ -121,8 +121,8 @@ class IdleHeartbeat:
                 last = getattr(self._session_manager, "_last_activity_time", None)
                 if last:
                     return time.time() - last
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("Heartbeat: session manager idle check failed: %s", _exc)
 
         # Unknown — assume idle
         return self._idle_threshold + 1
@@ -133,8 +133,8 @@ class IdleHeartbeat:
             if self._session_manager:
                 count = getattr(self._session_manager, "_message_count", 0)
                 return f"{count} messages processed this session"
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("Heartbeat: recent summary failed: %s", _exc)
         return "no recent activity data"
 
     def _loop(self) -> None:

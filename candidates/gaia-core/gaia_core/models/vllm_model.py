@@ -169,13 +169,13 @@ class VLLMChatModel:
         try:
             if env_override is not None:
                 return int(env_override)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("VLLMModel: env override parse failed for %s: %s", key, _exc)
         try:
             if key in self.model_config:
                 return int(self.model_config.get(key))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("VLLMModel: config parse failed for %s: %s", key, _exc)
         return default
 
     def _resolve_gpu_utilization(self) -> float:
@@ -196,8 +196,8 @@ class VLLMChatModel:
                 cfg_val = self.model_config.get("gpu_memory_utilization")
                 if cfg_val is not None:
                     target = float(cfg_val)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("VLLMModel: gpu_memory_utilization config parse failed: %s", _exc)
         if target is None:
             # Default to 0.85 - the Claude model is ~7.4 GiB and needs room for KV cache
             target = 0.85
@@ -242,8 +242,8 @@ class VLLMChatModel:
                 longform = True
                 # For poetry/recitation, need much more tokens (The Raven is ~1000 tokens)
                 max_tokens = max(max_tokens, 2048)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("VLLMModel: longform detection failed: %s", _exc)
         # Presence penalty to reduce loops; bump it for long-form recitations.
         pp = presence_penalty
         # Base repetition penalty from env or default
@@ -332,8 +332,8 @@ class VLLMChatModel:
                 pp = 0.8  # Higher presence penalty
                 rp = max(rp, 1.25)  # Stronger repetition penalty
                 temperature = min(temperature, 0.5)  # Lower temp for faithful recitation
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("VLLMModel: streaming longform detection failed: %s", _exc)
 
         sampling_params = self._build_sampling_params(max_tokens, temperature, top_p, stop, presence_penalty=pp, repetition_penalty=rp)
         if stream:
@@ -429,8 +429,8 @@ class VLLMChatModel:
             any_delta = True
             try:
                 logger.info("VLLM stream chunk: req=%s len=%s preview=%r", req_id, len(delta), delta[:120])
-            except Exception:
-                pass
+            except Exception as _log_exc:
+                logger.debug("VLLMModel: stream chunk log failed: %s", _log_exc)
             yield {"choices": [{"delta": {"content": delta}}]}
         if not any_delta:
             logger.info("VLLMChatModel.stream yielded no deltas; cache=%s", cache)
@@ -474,8 +474,8 @@ class VLLMChatModel:
                 return first.outputs[0].text or ""
             if isinstance(first, dict):
                 return first.get("text") or ""
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("VLLMModel: output text extraction failed: %s", _exc)
         return ""
 
     def _summarize_outputs(self, outputs) -> str:

@@ -158,8 +158,8 @@ class DiscordInterface:
                     _voice_manager.whitelist.record_seen(
                         str(message.author.id), message.author.display_name, guild_id
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("Discord: whitelist record_seen failed: %s", _exc)
 
             is_dm = message.guild is None
 
@@ -172,8 +172,8 @@ class DiscordInterface:
             if is_dm and _dm_blocklist:
                 try:
                     _dm_blocklist.record_dm(str(message.author.id), message.author.display_name)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("Discord: DM blocklist record failed: %s", _exc)
 
             # Check for pending approval waiter before normal processing
             waiter_key = (str(message.channel.id), str(message.author.id))
@@ -577,8 +577,8 @@ class DiscordInterface:
             if is_dm and _dm_blocklist:
                 try:
                     _dm_blocklist.record_gaia_reply(user_id)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("Discord: DM reply record failed: %s", _exc)
 
         except httpx.TimeoutException:
             log_gaia_error(logger, "GAIA-WEB-001", "Request to gaia-core timed out")

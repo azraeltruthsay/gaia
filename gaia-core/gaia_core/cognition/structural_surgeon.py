@@ -125,8 +125,8 @@ class StructuralSurgeon:
             if e.msg:
                 for m in re.finditer(r'\bline\s+(\d+)', e.msg, re.IGNORECASE):
                     found.add(int(m.group(1)))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("StructuralSurgeon: line extraction from SyntaxError failed: %s", _exc)
 
         # Supplement with error_msg string mentions, but only near the primary error
         # to avoid noise from file paths or unrelated content.

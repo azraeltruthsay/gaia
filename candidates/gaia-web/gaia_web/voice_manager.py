@@ -192,8 +192,8 @@ class SimpleVAD:
         if self._vad is not None:
             try:
                 return self._vad.is_speech(frame, 16000)
-            except Exception:
-                pass
+            except Exception as _vad_exc:
+                logger.debug("VoiceManager: VAD speech detection failed, using energy fallback: %s", _vad_exc)
         # Energy-based fallback
         if len(frame) < 4:
             return False

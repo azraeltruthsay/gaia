@@ -25,8 +25,8 @@ def _model_manager_child_loader(q, force_flag):
         from gaia_core.models.model_pool import model_pool as child_pool
         try:
             child_pool.enable_prime_load()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("ModelManager: enable_prime_load failed: %s", _exc)
         results = {"ok": True}
         try:
             ok = child_pool.load_prime_only(force=force_flag)
@@ -116,8 +116,8 @@ class ModelManager:
             if _os.getenv("GAIA_FORCE_SPAWN", "0") == "1":
                 prefer_spawn = True
                 logger.info("ModelManager: GAIA_FORCE_SPAWN=1; forcing spawn-based loader")
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelManager: GAIA_FORCE_SPAWN env check failed: %s", _exc)
 
         try:
             # Avoid importing torch at module import time; only import when

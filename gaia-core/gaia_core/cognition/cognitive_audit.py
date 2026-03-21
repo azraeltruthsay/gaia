@@ -61,8 +61,8 @@ def _build_audit_context(packet: CognitionPacket) -> str:
                 if isinstance(docs, list):
                     rag_docs = docs
                 break
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Cognitive audit: RAG field extraction failed: %s", _exc)
     parts.append(f"RAG docs retrieved: {len(rag_docs)}")
 
     # Semantic probe hits
@@ -70,8 +70,8 @@ def _build_audit_context(packet: CognitionPacket) -> str:
         probe = getattr(packet.metrics, "semantic_probe", None)
         if probe and isinstance(probe, dict):
             parts.append(f"Semantic probe hits: {probe.get('hit_count', 0)}")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Cognitive audit: semantic probe extraction failed: %s", _exc)
 
     # Knowledge base
     try:
@@ -79,15 +79,15 @@ def _build_audit_context(packet: CognitionPacket) -> str:
             if getattr(df, "key", "") == "active_knowledge_base":
                 parts.append(f"KB: {getattr(df, 'value', 'unknown')}")
                 break
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Cognitive audit: KB extraction failed: %s", _exc)
 
     # History depth
     try:
         n_hist = len(packet.context.relevant_history_snippet or [])
         parts.append(f"History turns in window: {n_hist}")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Cognitive audit: history depth extraction failed: %s", _exc)
 
     return " | ".join(parts) if parts else "No state context available"
 

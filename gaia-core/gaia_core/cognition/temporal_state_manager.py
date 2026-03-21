@@ -171,8 +171,8 @@ class TemporalStateManager:
         if self.model_pool is not None:
             try:
                 llm = self.model_pool.get_model_for_role("lite")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("TemporalState: lite model acquisition failed: %s", _exc)
 
         if llm is None:
             return False
@@ -509,8 +509,8 @@ class TemporalStateManager:
                     sid for sid in sessions
                     if not sid.startswith("gaia_")
                 ]
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("TemporalState: session list failed: %s", _exc)
 
         # Journal entries
         if self._lite_journal is not None:
@@ -518,8 +518,8 @@ class TemporalStateManager:
                 meta["journal_entries_included"] = min(
                     3, self._lite_journal.get_entry_count()
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("TemporalState: journal entry count failed: %s", _exc)
 
         return meta
 

@@ -349,8 +349,8 @@ class ModelPool:
         self._prime_guard_override = True
         try:
             os.environ.setdefault("GAIA_ALLOW_PRIME_LOAD", "1")
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelPool: env setdefault failed: %s", _exc)
 
     def load_models(self, use_oracle=False):
         logger.info("--- ENTERING load_models ---")
@@ -375,8 +375,8 @@ class ModelPool:
 
         try:
             self._models_loaded = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelPool: _models_loaded flag set failed: %s", _exc)
         logger.info("--- LEAVING load_models ---")
 
     def load_prime_only(self, force: bool = False) -> bool:
@@ -400,8 +400,8 @@ class ModelPool:
         try:
             if os.getenv("GAIA_ALLOW_PRIME_LOAD_FORCE", "0") == "1":
                 return True
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelPool: prime guard env check failed: %s", _exc)
         if getattr(self, "_prime_guard_override", False):
             return True
         try:
@@ -422,8 +422,8 @@ class ModelPool:
                     chosen = min(existing, max_layers) if existing > 0 else max_layers
                     try:
                         self.config.n_gpu_layers = int(chosen)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("ModelPool: n_gpu_layers assignment failed: %s", _exc)
                     logger.info(
                         "[GAIA] Computed gpu_layer_cap=%s (est=%s, env_cap=%s); using n_gpu_layers=%s",
                         max_layers,
@@ -787,10 +787,10 @@ class ModelPool:
                     setattr(self.config, "llm_backend", "gpu_prime")
                     os.environ.setdefault("GAIA_BACKEND", "gpu_prime")
                     logger.info("GAIA backend set to 'gpu_prime' by default because CUDA is available")
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as _exc:
+                    logger.debug("ModelPool: backend env assignment failed: %s", _exc)
+        except Exception as _exc:
+            logger.debug("ModelPool: prime alias promotion failed: %s", _exc)
 
     def wait_for_embed(self, timeout: float = None):
         """Block up to `timeout` seconds for the embed model to finish loading.
@@ -799,8 +799,8 @@ class ModelPool:
         """
         try:
             self._embed_ready.wait(timeout=timeout)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelPool: embed_ready.wait() failed: %s", _exc)
         return self.models.get('embed')
 
     def get_embed_model(self, timeout: float = 0, lazy_load: bool = True):
@@ -876,8 +876,8 @@ class ModelPool:
                     if c.exists():
                         emb_path = c
                         break
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("ModelPool: embed path check failed for %s: %s", c, _exc)
         if emb_path is None:
             raise RuntimeError(f"Embedding model path could not be resolved. Tried: {tried}")
         if embed_on_gpu:
@@ -1015,8 +1015,8 @@ class ModelPool:
             if role in ('lite', 'observer') and share_lite_with:
                 if share_lite_with in self.models:
                     return self.models[share_lite_with]
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ModelPool: GAIA_SHARE_LITE_WITH check failed: %s", _exc)
 
         # --- LAZY LOADING ---
         # If we haven't found the model yet and lazy_load is enabled, try loading it
@@ -1213,14 +1213,14 @@ class ModelPool:
                     if delta:
                         try:
                             gen_logger.log_token(gen_id, delta)
-                        except Exception:
-                            pass
+                        except Exception as _tl_exc:
+                            logger.debug("ModelPool: gen token log failed: %s", _tl_exc)
                     yield chunk
             finally:
                 try:
                     gen_logger.end_generation(gen_id)
-                except Exception:
-                    pass
+                except Exception as _gl_exc:
+                    logger.debug("ModelPool: gen log finalize failed: %s", _gl_exc)
 
         return _logged_stream()
 

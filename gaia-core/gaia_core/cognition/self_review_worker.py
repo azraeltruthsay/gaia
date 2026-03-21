@@ -140,8 +140,8 @@ def run_review_once(config: Config = None):
                             proposal = proposal or entry.get("proposal")
                             created_at = created_at or entry.get("created_at")
                             expiry = expiry or entry.get("expiry")
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("SelfReview: MCP fetch failed for action %s: %s", action_id, _exc)
                 proposal = req.get("proposal")
                 logger.info(f"Pending dev_matrix update action created: action_id={action_id} challenge={challenge} created_at={created_at} expiry={expiry}")
                 # Mark seed as reviewed and record pending action

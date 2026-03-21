@@ -196,8 +196,8 @@ class LiteJournal:
                 state = status.get("state", "unknown").upper()
                 secs = status.get("seconds_in_state", 0)
                 state_duration = self._format_duration(secs)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("LiteJournal: state extraction failed: %s", _exc)
 
         # Session count
         session_count = "unknown"
@@ -212,8 +212,8 @@ class LiteJournal:
                     for e in events:
                         lines.append(f"- [{e.ts[:19]}] {e.event}: {self._summarize_event(e.data)}")
                     recent_events = "\n".join(lines)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("LiteJournal: state extraction failed: %s", _exc)
 
         # Last activity
         last_activity = "unknown"
@@ -223,8 +223,8 @@ class LiteJournal:
                 if last_msg and last_msg.timestamp:
                     gap = (now - last_msg.timestamp).total_seconds()
                     last_activity = f"{self._format_duration(gap)} ago"
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("LiteJournal: state extraction failed: %s", _exc)
 
         user_msg = _JOURNAL_USER_TEMPLATE.format(
             semantic_time=semantic_time,
@@ -252,8 +252,8 @@ class LiteJournal:
                 state = status.get("state", "unknown").upper()
                 secs = status.get("seconds_in_state", 0)
                 state_duration = self._format_duration(secs)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("LiteJournal: state extraction failed: %s", _exc)
 
         entry_block = (
             f"\n## Entry: {ts}\n"
