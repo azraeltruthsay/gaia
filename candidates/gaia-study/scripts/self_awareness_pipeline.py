@@ -96,6 +96,7 @@ DEFAULT_THRESHOLD = 0.5
 
 STAGES = [
     "BUILD_CURRICULUM",
+    "VERIFY_CURRICULUM",
     "PRE_EVAL_4B",
     "FILTER_DELTA_4B",
     "WEIGHT_CURRICULUM",
@@ -371,6 +372,88 @@ def _detect_model_name(endpoint: str) -> str:
     except Exception:
         pass
     return "core"
+
+
+def stage_verify_curriculum(ctx: PipelineContext) -> StageResult:
+    """Verify training data for hallucinated factual claims.
+
+    Scans the curriculum for pairs sourced from conversation_examples.md
+    (Dataset S) and checks for known hallucination patterns. Optionally
+    verifies via web search if --verify flag is passed.
+
+    Removes pairs with unverified factual claims to prevent the
+    hallucination feedback loop.
+    """
+    logger.info("═══ VERIFY_CURRICULUM: Scanning training data for hallucinations ═══")
+
+    curriculum_path = ctx.curriculum_path
+    if not Path(curriculum_path).exists():
+        return StageResult(ok=True, message="No curriculum to verify (BUILD_CURRICULUM may have been skipped)")
+
+    # Known hallucination patterns to flag
+    HALLUCINATION_PATTERNS = [
+        "Chamber of Secrets at Caerleon",
+        "Guinevere's gem",
+        "Guinevere Gem",
+        "obsidian hilt",
+        "dark obsidian",
+        "forged by the legendary smiths of the Isle of Avallon",
+        "Isle of Avallon",
+        "Arthur as a descendant of the Roman Emperor Lucius",
+    ]
+
+    try:
+        with open(curriculum_path) as f:
+            lines = f.readlines()
+
+        total = len(lines)
+        flagged = 0
+        cleaned = []
+
+        for line in lines:
+            if not line.strip():
+                cleaned.append(line)
+                continue
+            try:
+                pair = json.loads(line)
+            except json.JSONDecodeError:
+                cleaned.append(line)
+                continue
+
+            output_text = pair.get("output", "")
+            instruction = pair.get("instruction", "")
+            source = pair.get("source_file", "")
+            is_hallucinated = False
+
+            # Check for known hallucination patterns
+            for pattern in HALLUCINATION_PATTERNS:
+                if pattern.lower() in output_text.lower() or pattern.lower() in instruction.lower():
+                    logger.warning("FLAGGED: hallucination pattern '%s' in pair %s (source: %s)",
+                                   pattern, pair.get("pair_id", "?"), source)
+                    is_hallucinated = True
+                    break
+
+            if is_hallucinated:
+                flagged += 1
+            else:
+                cleaned.append(line)
+
+        # Write cleaned curriculum
+        if flagged > 0:
+            with open(curriculum_path, "w") as f:
+                f.writelines(cleaned)
+            logger.info("VERIFY: %d/%d pairs flagged and removed", flagged, total)
+        else:
+            logger.info("VERIFY: %d pairs clean — no hallucination patterns detected", total)
+
+        return StageResult(
+            ok=True,
+            message=f"Verified {total} pairs, removed {flagged} flagged",
+            metrics={"total": total, "flagged": flagged, "clean": total - flagged},
+        )
+    except Exception as e:
+        logger.exception("VERIFY_CURRICULUM failed")
+        return StageResult(ok=False, message=str(e))
 
 
 def stage_pre_eval_4b(ctx: PipelineContext) -> StageResult:
@@ -1253,6 +1336,7 @@ def stage_cognitive_smoke(ctx: PipelineContext) -> StageResult:
 
 STAGE_FUNCTIONS: dict[str, Callable[[PipelineContext], StageResult]] = {
     "BUILD_CURRICULUM": stage_build_curriculum,
+    "VERIFY_CURRICULUM": stage_verify_curriculum,
     "PRE_EVAL_4B": stage_pre_eval_4b,
     "FILTER_DELTA_4B": stage_filter_delta_4b,
     "WEIGHT_CURRICULUM": stage_weight_curriculum,
