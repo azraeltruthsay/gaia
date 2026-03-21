@@ -77,10 +77,13 @@ test_gaia_core_imports.sh
 prompt
 recall
 
-# --- Knowledge exclusions (DND project) ---
+# --- Knowledge exclusions (local content, not source) ---
 knowledge/dnd_campaign/
 knowledge/projects/dnd-campaign/
 knowledge/logs/
+knowledge/.obsidian/
+knowledge/creative_writing/
+knowledge/transcripts/
 
 # --- Runtime / session data ---
 **/sessions.json
