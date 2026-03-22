@@ -298,81 +298,84 @@ class GAIAEngine:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Load model — use AutoModel for vision, AutoModelForCausalLM for text
-        if self.has_vision:
-            from transformers import AutoModelForImageTextToText
-            try:
-                self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_path, trust_remote_code=True, dtype=dtype,
-                )
-                logger.info("Loaded as vision-language model (AutoModelForImageTextToText)")
-            except Exception:
-                # Fallback to generic auto
-                from transformers import AutoModel
-                self.model = AutoModel.from_pretrained(
-                    model_path, trust_remote_code=True, dtype=dtype,
-                )
-                logger.info("Loaded as generic model (AutoModel)")
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path, trust_remote_code=True, dtype=dtype,
-            )
-
+        # Estimate model size BEFORE loading to decide quantization strategy
+        # Check config.json for num_params or estimate from file sizes
+        use_nf4 = False
         if device == "cuda" and torch.cuda.is_available():
-            # Check if model fits in VRAM directly; if not, quantize on CPU first
-            model_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
-            gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
-            # Need headroom for generation (KV cache, attention, activations)
-            # Rule: model should use <40% of free VRAM to leave plenty of room for inference
-            # This ensures NF4 (4-bit) is used for large models on 16GB GPUs
-            if model_size_mb > gpu_free_mb * 0.4:
-                logger.info("Model (%.0fMB) needs quantization for GPU (%.0fMB free, need 50%% headroom)",
-                            model_size_mb, gpu_free_mb)
+            try:
+                import json as _json
+                config_path = Path(model_path) / "config.json"
+                if config_path.exists():
+                    cfg = _json.loads(config_path.read_text())
+                    # Estimate bf16 size: 2 bytes per param
+                    num_params = cfg.get("num_parameters", 0)
+                    if not num_params:
+                        # Estimate from hidden_size * num_layers * ~12 (typical ratio)
+                        h = cfg.get("hidden_size", 0)
+                        n = cfg.get("num_hidden_layers", 0)
+                        num_params = h * h * n * 12 if h and n else 0
+                    est_size_mb = num_params * 2 / (1024**2)  # bf16 = 2 bytes
+                    gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
+                    # Need 40% headroom for generation (KV cache, attention, activations)
+                    if est_size_mb > gpu_free_mb * 0.6:
+                        logger.info("Model estimated at %.0fMB, GPU has %.0fMB free — using NF4 quantization",
+                                    est_size_mb, gpu_free_mb)
+                        use_nf4 = True
+            except Exception as e:
+                logger.debug("Size estimation failed: %s — loading normally", e)
+
+        # Load model — use NF4 if needed, otherwise bf16
+        if use_nf4:
+            try:
+                import bitsandbytes as bnb
+                from transformers import BitsAndBytesConfig
+                nf4_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                )
+                # CPU-first NF4: load to CPU, quantize there, then dispatch to GPU
+                # This never holds bf16 weights on GPU — only the 4-bit version
+                logger.info("Loading NF4 to CPU first (avoids bf16 GPU peak)...")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_path, trust_remote_code=True,
+                    quantization_config=nf4_config,
+                    device_map={"": "cpu"},
+                    low_cpu_mem_usage=True,
+                )
+                # Move quantized model to GPU via accelerate
+                from accelerate import dispatch_model, infer_auto_device_map
+                device_map = infer_auto_device_map(self.model, max_memory={0: f"{int(gpu_free_mb * 0.8)}MB", "cpu": "32GB"})
+                self.model = dispatch_model(self.model, device_map)
+                quant_mb = torch.cuda.memory_allocated() / (1024**2)
+                logger.info("NF4 model loaded: %.0fMB on GPU (CPU-first)", quant_mb)
+            except Exception as e:
+                logger.warning("NF4 load failed (%s) — falling back to bf16", e)
+                use_nf4 = False
+
+        if not use_nf4:
+            if self.has_vision:
+                from transformers import AutoModelForImageTextToText
                 try:
-                    # Prefer NF4 (4-bit) — uses ~25% of bf16 size, leaves most VRAM for inference
-                    # CPU-first pattern: load bf16 to CPU, quantize there, then transfer to GPU
-                    import bitsandbytes as bnb
-                    from transformers import BitsAndBytesConfig
-                    logger.info("Applying NF4 quantization (CPU-first) before GPU transfer...")
-                    nf4_config = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.bfloat16,
-                        bnb_4bit_quant_type="nf4",
-                        bnb_4bit_use_double_quant=True,
+                    self.model = AutoModelForImageTextToText.from_pretrained(
+                        model_path, trust_remote_code=True, dtype=dtype,
                     )
-                    # Delete bf16 model to free RAM
-                    del self.model
-                    torch.cuda.empty_cache()
-                    # Reload with NF4 quantization — force CPU-first load
-                    # bitsandbytes quantizes during from_pretrained, then we move to GPU
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        model_path, trust_remote_code=True,
-                        quantization_config=nf4_config,
-                        device_map={"": "cpu"},
-                        low_cpu_mem_usage=True,
+                    logger.info("Loaded as vision-language model")
+                except Exception:
+                    from transformers import AutoModel
+                    self.model = AutoModel.from_pretrained(
+                        model_path, trust_remote_code=True, dtype=dtype,
                     )
-                    # Now move the quantized model to GPU
-                    self.model = self.model.to("cuda")
-                    quant_size_mb = torch.cuda.memory_allocated() / (1024**2)
-                    logger.info("NF4 quantized and loaded: %.0fMB → %.0fMB on GPU (budget: %dMB)", model_size_mb, quant_size_mb, gpu_budget_mb)
-                except (ImportError, Exception) as e:
-                    logger.warning("NF4 quantization failed (%s) — trying int8 quanto fallback", e)
-                    # Reload model (NF4 path may have deleted it)
-                    if not hasattr(self, 'model') or self.model is None:
-                        self.model = AutoModelForCausalLM.from_pretrained(
-                            model_path, trust_remote_code=True, dtype=dtype,
-                        )
-                    try:
-                        from optimum.quanto import quantize, freeze, qint8
-                        quantize(self.model, weights=qint8)
-                        freeze(self.model)
-                        self.model = self.model.to("cuda")
-                        logger.info("Int8 quanto fallback loaded")
-                    except Exception as e2:
-                        logger.warning("All quantization failed — attempting direct transfer (may OOM): %s", e2)
-                        self.model = self.model.to("cuda")
+                    logger.info("Loaded as generic model")
             else:
-                self.model = self.model.to("cuda")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_path, trust_remote_code=True, dtype=dtype,
+                )
+
+        # Move bf16 model to GPU (skip if NF4 already loaded on GPU)
+        if device == "cuda" and torch.cuda.is_available() and not use_nf4:
+            self.model = self.model.to("cuda")
         self.model.eval()
 
         # Compile for speed — disable CUDA graphs to avoid conflicts
