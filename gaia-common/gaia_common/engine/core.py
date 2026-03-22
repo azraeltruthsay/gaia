@@ -322,20 +322,57 @@ class GAIAEngine:
             # Check if model fits in VRAM directly; if not, quantize on CPU first
             model_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
             gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
-            if model_size_mb > gpu_free_mb * 0.9:  # Model won't fit with 10% headroom
-                logger.info("Model (%.0fMB) exceeds GPU free (%.0fMB) — applying int8 quantization on CPU before transfer",
+            # Need headroom for generation (KV cache, attention, activations)
+            # Rule: model should use <40% of free VRAM to leave plenty of room for inference
+            # This ensures NF4 (4-bit) is used for large models on 16GB GPUs
+            if model_size_mb > gpu_free_mb * 0.4:
+                logger.info("Model (%.0fMB) needs quantization for GPU (%.0fMB free, need 50%% headroom)",
                             model_size_mb, gpu_free_mb)
                 try:
-                    from optimum.quanto import quantize, freeze, qint8
-                    quantize(self.model, weights=qint8)
-                    freeze(self.model)
-                    quant_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
-                    logger.info("Int8 quantized on CPU: %.0fMB → %.0fMB", model_size_mb, quant_size_mb)
-                except ImportError:
-                    logger.warning("optimum-quanto not available — attempting direct GPU transfer (may OOM)")
-                except Exception as e:
-                    logger.warning("CPU int8 quantization failed: %s — attempting direct transfer", e)
-            self.model = self.model.to("cuda")
+                    # Prefer NF4 (4-bit) — uses ~25% of bf16 size, leaves most VRAM for inference
+                    # CPU-first pattern: load bf16 to CPU, quantize there, then transfer to GPU
+                    import bitsandbytes as bnb
+                    from transformers import BitsAndBytesConfig
+                    logger.info("Applying NF4 quantization (CPU-first) before GPU transfer...")
+                    nf4_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                    )
+                    # Delete bf16 model to free RAM
+                    del self.model
+                    torch.cuda.empty_cache()
+                    # Reload with NF4 quantization — force CPU-first load
+                    # bitsandbytes quantizes during from_pretrained, then we move to GPU
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_path, trust_remote_code=True,
+                        quantization_config=nf4_config,
+                        device_map={"": "cpu"},
+                        low_cpu_mem_usage=True,
+                    )
+                    # Now move the quantized model to GPU
+                    self.model = self.model.to("cuda")
+                    quant_size_mb = torch.cuda.memory_allocated() / (1024**2)
+                    logger.info("NF4 quantized and loaded: %.0fMB → %.0fMB on GPU (budget: %dMB)", model_size_mb, quant_size_mb, gpu_budget_mb)
+                except (ImportError, Exception) as e:
+                    logger.warning("NF4 quantization failed (%s) — trying int8 quanto fallback", e)
+                    # Reload model (NF4 path may have deleted it)
+                    if not hasattr(self, 'model') or self.model is None:
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            model_path, trust_remote_code=True, dtype=dtype,
+                        )
+                    try:
+                        from optimum.quanto import quantize, freeze, qint8
+                        quantize(self.model, weights=qint8)
+                        freeze(self.model)
+                        self.model = self.model.to("cuda")
+                        logger.info("Int8 quanto fallback loaded")
+                    except Exception as e2:
+                        logger.warning("All quantization failed — attempting direct transfer (may OOM): %s", e2)
+                        self.model = self.model.to("cuda")
+            else:
+                self.model = self.model.to("cuda")
         self.model.eval()
 
         # Compile for speed — disable CUDA graphs to avoid conflicts
