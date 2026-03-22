@@ -298,43 +298,106 @@ class GAIAEngine:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Load model — use AutoModel for vision, AutoModelForCausalLM for text
-        if self.has_vision:
-            from transformers import AutoModelForImageTextToText
-            try:
-                self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_path, trust_remote_code=True, dtype=dtype,
-                )
-                logger.info("Loaded as vision-language model (AutoModelForImageTextToText)")
-            except Exception:
-                # Fallback to generic auto
-                from transformers import AutoModel
-                self.model = AutoModel.from_pretrained(
-                    model_path, trust_remote_code=True, dtype=dtype,
-                )
-                logger.info("Loaded as generic model (AutoModel)")
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path, trust_remote_code=True, dtype=dtype,
-            )
+        # Check if model is pre-quantized (AWQ/GPTQ) — these load directly
+        # via transformers integration, no manual quantization needed
+        is_prequantized = False
+        try:
+            import json as _json
+            config_path = Path(model_path) / "config.json"
+            if config_path.exists():
+                cfg = _json.loads(config_path.read_text())
+                quant_cfg = cfg.get("quantization_config", {})
+                quant_method = quant_cfg.get("quant_method", "")
+                if quant_method in ("awq", "gptq"):
+                    is_prequantized = True
+                    logger.info("Detected pre-quantized model (%s) — loading directly", quant_method)
+                    # Import gptqmodel to register transformers backend
+                    if quant_method == "gptq":
+                        try:
+                            import gptqmodel  # noqa: F401 — registers GPTQ backend
+                            logger.info("gptqmodel backend registered for GPTQ loading")
+                        except ImportError:
+                            logger.warning("gptqmodel not installed — GPTQ loading may fail")
+        except Exception:
+            pass
 
-        if device == "cuda" and torch.cuda.is_available():
-            # Check if model fits in VRAM directly; if not, quantize on CPU first
-            model_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
-            gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
-            if model_size_mb > gpu_free_mb * 0.9:  # Model won't fit with 10% headroom
-                logger.info("Model (%.0fMB) exceeds GPU free (%.0fMB) — applying int8 quantization on CPU before transfer",
-                            model_size_mb, gpu_free_mb)
+        # Estimate model size BEFORE loading to decide quantization strategy
+        # Check config.json for num_params or estimate from file sizes
+        use_nf4 = False
+        if device == "cuda" and torch.cuda.is_available() and not is_prequantized:
+            try:
+                import json as _json
+                config_path = Path(model_path) / "config.json"
+                if config_path.exists():
+                    cfg = _json.loads(config_path.read_text())
+                    # Estimate bf16 size: 2 bytes per param
+                    num_params = cfg.get("num_parameters", 0)
+                    if not num_params:
+                        # Estimate from hidden_size * num_layers * ~12 (typical ratio)
+                        h = cfg.get("hidden_size", 0)
+                        n = cfg.get("num_hidden_layers", 0)
+                        num_params = h * h * n * 12 if h and n else 0
+                    est_size_mb = num_params * 2 / (1024**2)  # bf16 = 2 bytes
+                    gpu_free_mb = torch.cuda.mem_get_info()[0] / (1024**2)
+                    # Need 40% headroom for generation (KV cache, attention, activations)
+                    if est_size_mb > gpu_free_mb * 0.6:
+                        logger.info("Model estimated at %.0fMB, GPU has %.0fMB free — using NF4 quantization",
+                                    est_size_mb, gpu_free_mb)
+                        use_nf4 = True
+            except Exception as e:
+                logger.debug("Size estimation failed: %s — loading normally", e)
+
+        # Load model — use NF4 if needed, otherwise bf16
+        if use_nf4:
+            try:
+                import bitsandbytes as bnb
+                from transformers import BitsAndBytesConfig
+                nf4_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                )
+                # CPU-first NF4: load to CPU, quantize there, then dispatch to GPU
+                # This never holds bf16 weights on GPU — only the 4-bit version
+                logger.info("Loading NF4 to CPU first (avoids bf16 GPU peak)...")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_path, trust_remote_code=True,
+                    quantization_config=nf4_config,
+                    device_map={"": "cpu"},
+                    low_cpu_mem_usage=True,
+                )
+                # Move quantized model to GPU via accelerate
+                from accelerate import dispatch_model, infer_auto_device_map
+                device_map = infer_auto_device_map(self.model, max_memory={0: f"{int(gpu_free_mb * 0.8)}MB", "cpu": "32GB"})
+                self.model = dispatch_model(self.model, device_map)
+                quant_mb = torch.cuda.memory_allocated() / (1024**2)
+                logger.info("NF4 model loaded: %.0fMB on GPU (CPU-first)", quant_mb)
+            except Exception as e:
+                logger.warning("NF4 load failed (%s) — falling back to bf16", e)
+                use_nf4 = False
+
+        if not use_nf4:
+            if self.has_vision:
+                from transformers import AutoModelForImageTextToText
                 try:
-                    from optimum.quanto import quantize, freeze, qint8
-                    quantize(self.model, weights=qint8)
-                    freeze(self.model)
-                    quant_size_mb = sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024**2)
-                    logger.info("Int8 quantized on CPU: %.0fMB → %.0fMB", model_size_mb, quant_size_mb)
-                except ImportError:
-                    logger.warning("optimum-quanto not available — attempting direct GPU transfer (may OOM)")
-                except Exception as e:
-                    logger.warning("CPU int8 quantization failed: %s — attempting direct transfer", e)
+                    self.model = AutoModelForImageTextToText.from_pretrained(
+                        model_path, trust_remote_code=True, dtype=dtype,
+                    )
+                    logger.info("Loaded as vision-language model")
+                except Exception:
+                    from transformers import AutoModel
+                    self.model = AutoModel.from_pretrained(
+                        model_path, trust_remote_code=True, dtype=dtype,
+                    )
+                    logger.info("Loaded as generic model")
+            else:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_path, trust_remote_code=True, dtype=dtype,
+                )
+
+        # Move bf16 model to GPU (skip if NF4 already loaded on GPU)
+        if device == "cuda" and torch.cuda.is_available() and not use_nf4:
             self.model = self.model.to("cuda")
         self.model.eval()
 

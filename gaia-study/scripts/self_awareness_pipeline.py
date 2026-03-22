@@ -103,6 +103,7 @@ STAGES = [
     "GPU_ACQUIRE",
     "TRAIN_PRIME",
     "MERGE_PRIME",
+    "QUANTIZE_PRIME",
     "DEPLOY_PRIME",
     "RELOAD_CORE",
     "TRAIN_NANO",
@@ -913,6 +914,46 @@ def stage_gguf_core(ctx: PipelineContext) -> StageResult:
         return StageResult(ok=False, message=str(e))
 
 
+def stage_quantize_prime(ctx: PipelineContext) -> StageResult:
+    """Quantize merged bf16 Prime model to 4-bit for deployment.
+
+    Uses GPTQ (via gptqmodel) to produce a 4-bit model that the GAIA Engine
+    can load directly via transformers. ~7GB VRAM vs ~16GB for bf16.
+    Requires GPU — should run during MEDITATION state while Study owns GPU.
+    """
+    merged_path = ctx.merged_prime_path or MERGED_CORE
+    if not Path(merged_path).exists():
+        return StageResult(ok=False, message=f"Merged model not found at {merged_path}")
+
+    # Output path: same dir with -GPTQ suffix
+    quantized_path = f"{merged_path}-GPTQ"
+    logger.info("═══ QUANTIZE_PRIME: %s → GPTQ 4-bit ═══", merged_path)
+
+    try:
+        from gaia_study.merge_and_requantize import quantize_prime
+        ok = quantize_prime(merged_path, quantized_path)
+        if not ok:
+            return StageResult(ok=False, message="GPTQ quantization failed")
+
+        size_gb = sum(
+            f.stat().st_size for f in Path(quantized_path).rglob("*.safetensors")
+        ) / (1024**3)
+        logger.info("QUANTIZE_PRIME complete: %s (%.2f GB)", quantized_path, size_gb)
+
+        # Update context so DEPLOY_PRIME uses the quantized model
+        ctx.merged_prime_path = quantized_path
+
+        return StageResult(ok=True, message=f"GPTQ at {quantized_path}",
+                           metrics={"size_gb": round(size_gb, 2), "format": "gptq_4bit"})
+    except Exception as e:
+        logger.exception("QUANTIZE_PRIME failed")
+        # Non-fatal: DEPLOY_PRIME can still use the bf16 merged model
+        # (GAIA Engine will auto-NF4 if it doesn't fit)
+        logger.warning("Falling back to bf16 merged model for deployment")
+        return StageResult(ok=True, message=f"Quantization failed ({e}), using bf16 fallback",
+                           metrics={"fallback": True})
+
+
 def stage_deploy_prime(ctx: PipelineContext) -> StageResult:
     """Sync merged model to warm pool and restart gaia-prime."""
     logger.info("═══ DEPLOY_PRIME: Syncing to warm pool + restarting gaia-prime ═══")
@@ -1343,6 +1384,7 @@ STAGE_FUNCTIONS: dict[str, Callable[[PipelineContext], StageResult]] = {
     "GPU_ACQUIRE": stage_gpu_acquire,
     "TRAIN_PRIME": stage_train_prime,
     "MERGE_PRIME": stage_merge_prime,
+    "QUANTIZE_PRIME": stage_quantize_prime,
     "GGUF_CORE": stage_gguf_core,
     "DEPLOY_PRIME": stage_deploy_prime,
     "RELOAD_CORE": stage_reload_core,
@@ -1437,9 +1479,9 @@ def run_pipeline(args: argparse.Namespace):
 
     # GGUF stages only run with --gguf flag (emergency/offline CPU fallback)
     if getattr(args, "gguf", False):
-        # Insert GGUF_CORE after MERGE_PRIME (before DEPLOY_PRIME)
-        if "MERGE_PRIME" in stages_to_run and "GGUF_CORE" not in stages_to_run:
-            idx = stages_to_run.index("MERGE_PRIME") + 1
+        # Insert GGUF_CORE after QUANTIZE_PRIME (before DEPLOY_PRIME)
+        if "QUANTIZE_PRIME" in stages_to_run and "GGUF_CORE" not in stages_to_run:
+            idx = stages_to_run.index("QUANTIZE_PRIME") + 1
             stages_to_run.insert(idx, "GGUF_CORE")
         # Insert GGUF_NANO after MERGE_NANO (before DEPLOY_NANO)
         if "MERGE_NANO" in stages_to_run and "GGUF_NANO" not in stages_to_run:

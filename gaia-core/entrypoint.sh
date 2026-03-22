@@ -2,14 +2,18 @@
 # gaia-core entrypoint: starts the Core/Operator inference server,
 # then launches the main uvicorn cognitive pipeline.
 #
-# Two serving modes:
-#   1. Safetensors (GPU-native): transformers-based inference server.
-#      Enables SAE analysis, ROME editing, live GPU↔CPU migration.
+# Three serving modes:
+#   1. Managed engine (subprocess isolation): zero-GPU standby server.
+#      Model loaded via POST /model/load after startup.
+#      Unloading kills the subprocess — guaranteed zero VRAM.
 #      Used when CORE_SAFETENSORS_PATH points to an HF model directory.
 #
 #   2. GGUF (CPU fallback): llama-server with optimized C++ kernels.
 #      Used when only a GGUF file is available, or as CPU fallback
 #      during FOCUSING state (Prime owns GPU).
+#
+#   3. Direct engine (legacy): in-process model loading.
+#      Used when GAIA_ENGINE_DIRECT=1 is set.
 #
 # The server provides an OpenAI-compatible API on CORE_CPU_PORT (default 8092).
 # gaia-core connects to it via CORE_CPU_ENDPOINT.
@@ -26,17 +30,54 @@ CORE_CPU_SLOT_SAVE_PATH="${CORE_CPU_SLOT_SAVE_PATH:-/shared/kvcache/core}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-0}"
 # Initial device for safetensors server: cuda or cpu
 CORE_DEVICE="${CORE_DEVICE:-cuda}"
+# Set GAIA_ENGINE_DIRECT=1 to skip managed mode and load model in-process
+GAIA_ENGINE_DIRECT="${GAIA_ENGINE_DIRECT:-0}"
 
 # Ensure shared directories exist
 mkdir -p "$CORE_CPU_SLOT_SAVE_PATH" 2>/dev/null || true
 mkdir -p "${SHARED_DIR:-/shared}/doctor" 2>/dev/null || true
 
-# ── Mode 1: Safetensors inference server (GPU-native) ────────────────────────
-if [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ]; then
-    echo "[entrypoint] Starting GAIA Inference Engine (device=$CORE_DEVICE)..."
+# ── Mode 1: Managed engine with subprocess isolation ──────────────────────────
+if [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$GAIA_ENGINE_DIRECT" != "1" ]; then
+    echo "[entrypoint] Starting GAIA Engine Manager (zero-GPU standby)..."
+    echo "[entrypoint] Model will be loaded via POST /model/load"
+    COMPILE_MODE="${GAIA_COMPILE_MODE:-reduce-overhead}"
+
+    python -m gaia_common.engine --managed \
+        --port "$CORE_CPU_PORT" \
+        2>&1 | sed 's/^/[engine-manager] /' &
+
+    MANAGER_PID=$!
+    echo "$MANAGER_PID" > /tmp/inference_server.pid
+    echo "[entrypoint] Engine Manager started (PID $MANAGER_PID)"
+
+    # Wait for manager to be ready (fast — no model loading)
+    for i in $(seq 1 30); do
+        if curl -sf "http://localhost:$CORE_CPU_PORT/health" > /dev/null 2>&1; then
+            echo "[entrypoint] Engine Manager healthy after ${i}s"
+            break
+        fi
+        if ! kill -0 "$MANAGER_PID" 2>/dev/null; then
+            echo "[entrypoint] WARNING: Engine Manager exited prematurely"
+            break
+        fi
+        sleep 1
+    done
+
+    # Load the model via HTTP (spawns worker subprocess)
+    echo "[entrypoint] Loading model via managed engine: $CORE_SAFETENSORS_PATH (device=$CORE_DEVICE)"
+    LOAD_RESULT=$(curl -sf -X POST "http://localhost:$CORE_CPU_PORT/model/load" \
+        -H "Content-Type: application/json" \
+        -d "{\"model\":\"$CORE_SAFETENSORS_PATH\",\"device\":\"$CORE_DEVICE\",\"compile_mode\":\"$COMPILE_MODE\"}" \
+        2>&1) || true
+    echo "[entrypoint] Model load result: $LOAD_RESULT"
+
+# ── Mode 1b: Direct engine (legacy, opt-in) ──────────────────────────────────
+elif [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$GAIA_ENGINE_DIRECT" = "1" ]; then
+    echo "[entrypoint] Starting GAIA Inference Engine DIRECT (device=$CORE_DEVICE)..."
     echo "[entrypoint] Model: $CORE_SAFETENSORS_PATH"
     COMPILE_MODE="${GAIA_COMPILE_MODE:-reduce-overhead}"
-    python -m gaia_core.gaia_engine \
+    python -m gaia_common.engine \
         --model "$CORE_SAFETENSORS_PATH" \
         --port "$CORE_CPU_PORT" \
         --device "$CORE_DEVICE" \

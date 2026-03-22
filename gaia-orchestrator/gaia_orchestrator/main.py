@@ -60,6 +60,7 @@ _health_watchdog = None
 _gpu_lock = asyncio.Lock()
 _nano_pressure_task: Optional[asyncio.Task] = None
 _watch_manager = None
+_tier_router = None
 
 
 @asynccontextmanager
@@ -119,6 +120,15 @@ async def lifespan(app: FastAPI):
         logger.info("Health watchdog started")
     except ImportError:
         logger.warning("Health watchdog not available yet")
+
+    # Initialize tier router (auto-handoff)
+    try:
+        global _tier_router
+        from .tier_router import TierRouter
+        _tier_router = TierRouter(_state_manager)
+        logger.info("Tier router initialized")
+    except ImportError:
+        logger.warning("Tier router not available yet")
 
     # Start Nano VRAM pressure monitor
     global _nano_pressure_task
@@ -1042,6 +1052,81 @@ async def watch_idle(reason: str = "inactivity"):
     if not result.get("ok"):
         raise HTTPException(status_code=500, detail=result.get("error", "idle failed"))
     return result
+
+
+# =============================================================================
+# Tier Router — Automatic GPU Handoff
+# =============================================================================
+
+class TierInferRequest(BaseModel):
+    """Request to infer on a specific tier with automatic GPU handoff."""
+    tier: str
+    messages: list
+    max_tokens: int = 512
+    temperature: float = 0.7
+    top_p: float = 0.9
+    device: str = "cuda"
+
+
+class TierEnsureRequest(BaseModel):
+    """Request to ensure a tier's model is loaded."""
+    tier: str
+    device: str = "cuda"
+
+
+@app.post("/tier/infer")
+async def tier_infer(req: TierInferRequest):
+    """Infer on a specific tier with automatic GPU handoff.
+
+    Just specify which tier you want to talk to — the router handles
+    loading/unloading models transparently.
+    """
+    if _tier_router is None:
+        raise HTTPException(status_code=501, detail="Tier router not available")
+    result = await _tier_router.infer(
+        tier=req.tier, messages=req.messages, max_tokens=req.max_tokens,
+        temperature=req.temperature, top_p=req.top_p, device=req.device)
+    if "error" in result and "_handoff" not in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    return result
+
+
+@app.post("/tier/ensure")
+async def tier_ensure(req: TierEnsureRequest):
+    """Ensure a tier's model is loaded on GPU.
+
+    If another tier is loaded, it will be unloaded first.
+    """
+    if _tier_router is None:
+        raise HTTPException(status_code=501, detail="Tier router not available")
+    result = await _tier_router.ensure_tier(tier=req.tier, device=req.device)
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=result.get("error", "ensure failed"))
+    return result
+
+
+@app.get("/tier/status")
+async def tier_status():
+    """Check which tiers currently have models loaded."""
+    if _tier_router is None:
+        raise HTTPException(status_code=501, detail="Tier router not available")
+    return await _tier_router.get_loaded_tiers()
+
+
+@app.post("/tier/unload-all")
+async def tier_unload_all():
+    """Unload all tiers — zero GPU memory."""
+    if _tier_router is None:
+        raise HTTPException(status_code=501, detail="Tier router not available")
+    return await _tier_router.unload_all()
+
+
+@app.post("/tier/sae-record")
+async def tier_sae_record(tier: str, tag: str = "handoff_test"):
+    """Trigger SAE atlas recording on a loaded tier."""
+    if _tier_router is None:
+        raise HTTPException(status_code=501, detail="Tier router not available")
+    return await _tier_router.sae_record(tier=tier, tag=tag)
 
 
 # =============================================================================

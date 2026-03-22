@@ -298,10 +298,33 @@ class GAIAEngine:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        # Check if model is pre-quantized (AWQ/GPTQ) — these load directly
+        # via transformers integration, no manual quantization needed
+        is_prequantized = False
+        try:
+            import json as _json
+            config_path = Path(model_path) / "config.json"
+            if config_path.exists():
+                cfg = _json.loads(config_path.read_text())
+                quant_cfg = cfg.get("quantization_config", {})
+                quant_method = quant_cfg.get("quant_method", "")
+                if quant_method in ("awq", "gptq"):
+                    is_prequantized = True
+                    logger.info("Detected pre-quantized model (%s) — loading directly", quant_method)
+                    # Import gptqmodel to register transformers backend
+                    if quant_method == "gptq":
+                        try:
+                            import gptqmodel  # noqa: F401 — registers GPTQ backend
+                            logger.info("gptqmodel backend registered for GPTQ loading")
+                        except ImportError:
+                            logger.warning("gptqmodel not installed — GPTQ loading may fail")
+        except Exception:
+            pass
+
         # Estimate model size BEFORE loading to decide quantization strategy
         # Check config.json for num_params or estimate from file sizes
         use_nf4 = False
-        if device == "cuda" and torch.cuda.is_available():
+        if device == "cuda" and torch.cuda.is_available() and not is_prequantized:
             try:
                 import json as _json
                 config_path = Path(model_path) / "config.json"
