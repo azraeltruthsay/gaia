@@ -39,6 +39,14 @@ logger = logging.getLogger("GAIA.SleepWake")
 
 
 class GaiaState(Enum):
+    """Legacy state enum — preserved for backward compatibility.
+
+    The authoritative state machine is now LifecycleState in
+    gaia_common.lifecycle.states, running in the orchestrator.
+    GaiaState is used by the local SleepWakeManager for internal
+    sleep/wake tracking. New code should use LifecycleState via
+    LifecycleClient instead.
+    """
     OFFLINE = "offline"
     ACTIVE = "active"
     DROWSY = "drowsy"  # Checkpoint in progress — cancellable

@@ -327,7 +327,8 @@ class ModelPool:
             self._prime_guard_override = os.getenv("GAIA_ALLOW_PRIME_LOAD", "0") == "1"
         except Exception:
             self._prime_guard_override = False
-        # GPU sleep flag: when True, gpu_prime must not be lazy-loaded or selected
+        # GPU sleep flag: LEGACY — replaced by LifecycleClient._is_prime_available
+        # in agent_core.py. Kept for backward compat with gpu_endpoints.py.
         self._gpu_released = False
 
     def register_dev_model(self, name: str):
