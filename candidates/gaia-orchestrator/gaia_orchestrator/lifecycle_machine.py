@@ -296,6 +296,16 @@ class LifecycleMachine:
             logger.info("LIFECYCLE: %s → %s in %.1fs (%s)",
                          current.value, resolved_target.value, elapsed, actions_taken)
 
+            # Log to event buffer for episodic memory
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("lifecycle",
+                          f"{current.value} → {resolved_target.value} ({reason or trigger.value}, {round(elapsed, 1)}s)",
+                          source="lifecycle_machine",
+                          details={"trigger": trigger.value, "actions": actions_taken})
+            except Exception:
+                pass
+
             return TransitionResult(
                 ok=True,
                 from_state=current.value,

@@ -249,6 +249,16 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     if affordances:
         lines.append("Affordances: " + " ".join(affordances))
 
+    # Recent events — episodic memory from the event buffer
+    try:
+        from gaia_common.event_buffer import EventBuffer
+        recent = EventBuffer.instance().recent_formatted(n=6)
+        if recent and "No recent events" not in recent:
+            lines.append("Recent Events:")
+            lines.append(recent)
+    except Exception:
+        pass
+
     # Self-knowledge hint - where GAIA's core documents live
     lines.append(
         "Self-knowledge: Your core documents (constitution, identity, cognitive protocol) "

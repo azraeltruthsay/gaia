@@ -787,6 +787,16 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
+            # Log to event buffer for episodic memory
+            try:
+                from gaia_common.event_buffer import log_event
+                user_name = metadata.get("user_id", "unknown")
+                log_event("conversation",
+                          f"Message from {source}: \"{user_input[:80]}\"",
+                          source="cognitive_pipeline")
+            except Exception:
+                pass
+
             # --- PRE-FLIGHT: Speculative Reflex ---
             # Trigger this BEFORE the heavy run_turn loop starts
             loop = asyncio.get_event_loop()

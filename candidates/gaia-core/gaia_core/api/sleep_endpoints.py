@@ -35,6 +35,13 @@ async def receive_wake_signal(request: Request):
 
     manager.receive_wake_signal()
 
+    try:
+        from gaia_common.event_buffer import log_event
+        log_event("sleep", f"Wake signal received (state: {manager.get_state().value})",
+                  source="sleep_endpoints")
+    except Exception:
+        pass
+
     return {
         "received": True,
         "state": manager.get_state().value,
