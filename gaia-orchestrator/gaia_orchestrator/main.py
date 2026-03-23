@@ -148,11 +148,28 @@ async def lifespan(app: FastAPI):
         _nano_pressure_task = asyncio.create_task(_nano_vram_pressure_loop())
         logger.info("Nano VRAM pressure monitor started")
 
+    # Start periodic lifecycle reconciliation (detect model drift)
+    _lifecycle_reconcile_task = None
+    if _lifecycle_machine:
+        async def _lifecycle_reconcile_loop():
+            await asyncio.sleep(30)  # Initial delay
+            while True:
+                try:
+                    await _lifecycle_machine.reconcile()
+                except Exception:
+                    logger.debug("Lifecycle reconcile failed", exc_info=True)
+                await asyncio.sleep(60)  # Every 60 seconds
+
+        _lifecycle_reconcile_task = asyncio.create_task(_lifecycle_reconcile_loop())
+        logger.info("Lifecycle reconciliation loop started (60s interval)")
+
     logger.info("GAIA Orchestrator ready")
     yield
 
     # Shutdown
     logger.info("GAIA Orchestrator shutting down...")
+    if _lifecycle_reconcile_task and not _lifecycle_reconcile_task.done():
+        _lifecycle_reconcile_task.cancel()
     if _nano_pressure_task and not _nano_pressure_task.done():
         _nano_pressure_task.cancel()
     if _health_watchdog:

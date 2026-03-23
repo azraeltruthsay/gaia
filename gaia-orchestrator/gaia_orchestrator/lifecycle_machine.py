@@ -154,6 +154,29 @@ class LifecycleMachine:
         logger.info("LIFECYCLE: reconciled %s → %s (core_gpu=%s, nano_gpu=%s, prime_gpu=%s)",
                      old_state, inferred, core_gpu, nano_gpu, prime_gpu)
 
+        # Auto-fix: reload missing required tiers for the current state
+        expected = TIER_EXPECTATIONS.get(inferred, {})
+        repaired = []
+        for tier, exp in expected.items():
+            if not exp.required:
+                continue
+            tier_status = probed.get(tier, TierLiveStatus())
+            if exp.device == "gpu" and not (tier_status.model_loaded and tier_status.device == "gpu"):
+                logger.warning("LIFECYCLE: auto-repairing %s (expected gpu, got %s)", tier, tier_status.device)
+                if await self._load_tier(tier, "cuda"):
+                    repaired.append(f"{tier}:reload_gpu")
+            elif exp.device == "cpu" and not tier_status.model_loaded:
+                logger.warning("LIFECYCLE: auto-repairing %s (expected cpu, got unloaded)", tier)
+                if await self._load_tier(tier, "cpu"):
+                    repaired.append(f"{tier}:reload_cpu")
+        if repaired:
+            logger.info("LIFECYCLE: auto-repaired tiers: %s", repaired)
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("lifecycle", f"Auto-repaired: {', '.join(repaired)}", source="reconcile")
+            except Exception:
+                pass
+
         await self._persist()
 
         return {
