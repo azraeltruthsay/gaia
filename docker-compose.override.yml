@@ -52,8 +52,12 @@ services:
     environment:
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    # Enable uvicorn reload
-    command: ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414", "--reload", "--reload-dir", "/app/gaia_web"]
+    # NOTE: No --reload for gaia-web. The Discord bot runs as an asyncio task
+    # inside the uvicorn process. Uvicorn's reloader kills the process on file
+    # changes, which kills the Discord gateway connection. Rapid reconnects
+    # exhaust Discord's IDENTIFY rate limit, leaving the bot permanently offline.
+    # Use `docker restart gaia-web` for code changes instead.
+    command: ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414"]
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-study: Development overrides
