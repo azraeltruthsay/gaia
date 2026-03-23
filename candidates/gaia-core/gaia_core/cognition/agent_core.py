@@ -1131,6 +1131,15 @@ class AgentCore:
                 pipeline_depth = "THINKER"
             logger.info("[PIPELINE_DEPTH] %s (model: %s)", pipeline_depth, selected_model_name)
             logger.debug("[DEBUG] AgentCore selected_model=%s", selected_model_name)
+
+            # Log model routing decision to event buffer
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("routing", f"Model: {selected_model_name} ({pipeline_depth})",
+                          source="agent_core",
+                          details={"model": selected_model_name, "depth": pipeline_depth})
+            except Exception:
+                pass
             # Extra runtime guard: if a raw llama_cpp.Llama escaped into the pool
             # (some scripts/tests assign directly to model_pool.models), wrap it
             # now so downstream calls always operate on SafeModelProxy.

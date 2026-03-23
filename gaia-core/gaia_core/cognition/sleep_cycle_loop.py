@@ -175,6 +175,12 @@ class SleepCycleLoop:
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
             self._update_presence("drifting off...")
 
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("sleep", f"Idle {idle_minutes:.0f}min — entering sleep", source="sleep_cycle")
+            except Exception:
+                pass
+
             success = self.sleep_wake_manager.initiate_drowsy()
             if success:
                 self._release_gpu_for_sleep()
