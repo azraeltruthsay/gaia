@@ -156,6 +156,22 @@ def _capability_affordances(tools: List[str]) -> List[str]:
             "You can write files (with operator approval) to persist thoughts, notes, or outputs."
         )
 
+    # Web research capabilities
+    web_tools = [t for t in tools if any(w in t.lower() for w in ['web', 'search', 'fetch'])]
+    if web_tools:
+        affordances.append(
+            "You can search the web (web_search) and fetch pages (web_fetch) "
+            "to find real, verifiable information. "
+            "When a user asks you to 'look something up', USE these tools."
+        )
+
+    # Episodic memory
+    if "recall_events" in tools:
+        affordances.append(
+            'You have episodic memory — use recall_events to remember what happened recently. '
+            'When asked "what do you remember?" or "what happened?", use this tool instead of guessing.'
+        )
+
     return affordances
 
 
@@ -175,12 +191,25 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
     
-    # Immune System (SIEM-lite) awareness
+    # Immune System — one-line summary only (full MRI available via introspect_logs)
     try:
         immune_health = immune_system.get_immune_summary()
-        lines.append(immune_health)
+        # Truncate to first line to prevent 700+ lint errors from filling context
+        if immune_health:
+            first_line = immune_health.split("|")[0].strip()
+            lines.append(f"Immune System: {first_line}")
     except Exception:
-        lines.append("Immune System: Status unavailable")
+        pass
+
+    # Recent events — episodic memory from the event buffer
+    try:
+        from gaia_common.event_buffer import EventBuffer
+        recent = EventBuffer.instance().recent_formatted(n=6)
+        if recent and "No recent events" not in recent:
+            lines.append("Recent Events:")
+            lines.append(recent)
+    except Exception:
+        pass
 
     models = snap.get("models", {})
     model_bits = []
