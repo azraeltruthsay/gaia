@@ -2075,6 +2075,18 @@ class AgentCore:
 
             # --- Finalize response processing ---
             full_response = self._suppress_repetition(full_response)
+
+            # Strip triage markers that should never reach the user.
+            # Nano sometimes outputs "ESCALATE", "SIMPLE", "COMPLEX" as part of
+            # triage classification. These are internal routing signals.
+            _TRIAGE_MARKERS = ["ESCALATE", "SIMPLE", "COMPLEX"]
+            for _marker in _TRIAGE_MARKERS:
+                if _marker in full_response.upper():
+                    import re as _re_triage
+                    full_response = _re_triage.sub(
+                        rf'\b{_marker}\b[.,;:\s]*', '', full_response,
+                        flags=_re_triage.IGNORECASE).strip()
+
             logger.info(f"Full LLM response before routing: {full_response}")
 
             # ── Think-tag-only recovery ──────────────────────────────────
