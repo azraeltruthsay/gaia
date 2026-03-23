@@ -77,6 +77,19 @@ async def sleep_force():
         return JSONResponse(status_code=502, content={"error": str(e)})
 
 
+@router.post("/sleep/deep")
+async def sleep_deep():
+    """Proxy POST gaia-core /sleep/deep — unload ALL models from GPU."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{CORE_ENDPOINT}/sleep/deep")
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.ConnectError:
+        return JSONResponse(status_code=503, content={"error": "gaia-core unreachable"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
 @router.get("/sleep/config")
 async def sleep_config():
     """Proxy GET gaia-core /sleep/config."""

@@ -238,6 +238,93 @@ async def force_sleep(request: Request):
     }
 
 
+@router.post("/deep")
+async def deep_sleep(request: Request):
+    """Deep sleep — unload ALL models from GPU AND system RAM.
+
+    Transitions to ASLEEP, then unloads Core and Nano engines via
+    the orchestrator's tier router. GPU goes to zero. Core engine
+    stays in managed standby (HTTP server alive, no model loaded).
+    """
+    import httpx as _httpx
+
+    manager = getattr(request.app.state, "sleep_wake_manager", None)
+    if manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SleepWakeManager not initialized"},
+        )
+
+    state = manager.get_state().value
+    if state not in ("active", "drowsy", "asleep"):
+        return JSONResponse(
+            status_code=409,
+            content={"error": f"Cannot deep sleep from state: {state}", "state": state},
+        )
+
+    # Step 1: Enter drowsy/asleep if not already
+    if state == "active":
+        manager.initiate_drowsy()
+
+    # Step 2: Release GPU via orchestrator (stops Prime)
+    sleep_loop = getattr(request.app.state, "sleep_cycle_loop", None)
+    if sleep_loop:
+        try:
+            sleep_loop._release_gpu_for_sleep()
+        except Exception:
+            logger.warning("GPU release on deep-sleep failed", exc_info=True)
+
+    # Step 3: Unload ALL tier models via orchestrator tier router
+    orchestrator_url = "http://gaia-orchestrator:6410"
+    if sleep_loop:
+        orchestrator_url = getattr(sleep_loop, "_orchestrator_url", orchestrator_url)
+
+    unload_result = {}
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(f"{orchestrator_url}/tier/unload-all")
+            if resp.status_code == 200:
+                unload_result = resp.json()
+                logger.info("Deep sleep: all tiers unloaded via orchestrator")
+            else:
+                logger.warning("Deep sleep: tier unload returned %d", resp.status_code)
+    except Exception:
+        logger.warning("Deep sleep: orchestrator tier unload failed", exc_info=True)
+
+    # Step 4: Kill Core's local inference server (managed engine OR llama-server)
+    core_engine_url = "http://localhost:8092"
+    try:
+        async with _httpx.AsyncClient(timeout=10) as client:
+            # Try managed engine unload first
+            resp = await client.post(f"{core_engine_url}/model/unload")
+            if resp.status_code == 200:
+                logger.info("Deep sleep: Core engine model unloaded (managed)")
+            else:
+                raise Exception(f"HTTP {resp.status_code}")
+    except Exception:
+        # Fallback: kill the inference server process by PID file
+        import os
+        import signal
+        for pid_file in ("/tmp/inference_server.pid", "/tmp/llama_server.pid"):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGTERM)
+                logger.info("Deep sleep: killed inference server PID %d (%s)", pid, pid_file)
+            except (FileNotFoundError, ValueError, ProcessLookupError):
+                pass
+            except Exception as e:
+                logger.warning("Deep sleep: kill PID from %s failed: %s", pid_file, e)
+
+    return {
+        "accepted": True,
+        "mode": "deep_sleep",
+        "state": manager.get_state().value,
+        "unloaded_tiers": unload_result,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/config")
 async def get_sleep_config(request: Request):
     """Return current sleep configuration for the dashboard."""

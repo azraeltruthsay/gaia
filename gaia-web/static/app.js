@@ -523,21 +523,26 @@ function systemPanel() {
         .call(d3.drag()
           .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
           .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); /* keep d.fx/d.fy — node stays where dropped */ })
         )
         .on('click', (event, d) => {
           window.dispatchEvent(new CustomEvent('select-blueprint', { detail: { id: d.id } }));
         });
 
+      // Log scale for node radius — prevents gateway services (gaia-web: 94 interfaces)
+      // from dwarfing focused services (gaia-nano: 5 interfaces).
+      // Base 15px, log scale with floor of 1 to avoid log(0).
+      const nodeRadius = d => 15 + Math.log2(Math.max(d.interface_count || 1, 1)) * 8;
+
       node.append('circle')
-        .attr('r', d => 10 + (d.interface_count || 0) * 1.5)
+        .attr('r', nodeRadius)
         .attr('fill', nodeColor)
         .attr('stroke', d => d.genesis ? '#e94560' : nodeColor(d))
         .attr('stroke-dasharray', d => d.genesis ? '3,3' : '')
         .attr('opacity', 0.85);
 
       node.append('text')
-        .attr('dy', d => 10 + (d.interface_count || 0) * 1.5 + 14)
+        .attr('dy', d => nodeRadius(d) + 14)
         .text(d => d.id.replace('gaia-', ''));
 
       sim.on('tick', () => {
@@ -633,22 +638,24 @@ function systemPanel() {
         .call(d3.drag()
           .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
           .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); /* keep d.fx/d.fy — node stays where dropped */ })
         )
         .on('click', (event, d) => {
           event.stopPropagation();
           window.dispatchEvent(new CustomEvent('show-component-detail', { detail: d }));
         });
 
+      const compRadius = d => 12 + Math.log2(Math.max(d.interface_count || 1, 1)) * 6;
+
       node.append('circle')
-        .attr('r', d => 8 + (d.interface_count || 0) * 1.2)
+        .attr('r', compRadius)
         .attr('fill', d => colorScale(d.id))
         .attr('stroke', d => d3.color(colorScale(d.id)).darker(0.5))
         .attr('stroke-width', 2)
         .attr('opacity', 0.9);
 
       node.append('text')
-        .attr('dy', d => 8 + (d.interface_count || 0) * 1.2 + 14)
+        .attr('dy', d => compRadius(d) + 14)
         .text(d => d.label);
 
       sim.on('tick', () => {
@@ -1210,18 +1217,18 @@ function hooksPanel() {
     },
 
     async forceSleep() {
-      this.logEntry('sleep/force', 'sending...', false);
+      this.logEntry('sleep/deep', 'entering deep sleep — unloading all models...', false);
       try {
-        const resp = await fetch('/api/hooks/sleep/force', { method: 'POST' });
+        const resp = await fetch('/api/hooks/sleep/deep', { method: 'POST' });
         const data = await resp.json();
         if (resp.ok) {
-          this.logEntry('sleep/force', JSON.stringify(data).substring(0, 120), false);
-          this.sleepState = data.state || 'drowsy';
+          this.logEntry('sleep/deep', JSON.stringify(data).substring(0, 150), false);
+          this.sleepState = data.state || 'asleep';
         } else {
-          this.logEntry('sleep/force', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
+          this.logEntry('sleep/deep', `Error ${resp.status}: ${data.error || 'unknown'}`, true);
         }
       } catch (e) {
-        this.logEntry('sleep/force', `Failed: ${e.message}`, true);
+        this.logEntry('sleep/deep', `Failed: ${e.message}`, true);
       }
     },
 

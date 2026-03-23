@@ -109,7 +109,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
-      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ}
       - PRIME_DEVICE=cuda
       - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-1}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -265,7 +265,7 @@ services:
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
       - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-2B-GAIA-Core-v3}
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
-      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/warm_pool/Qwen3.5-2B-GAIA-Core-v3}
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-2B-GAIA-Core-v3}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092

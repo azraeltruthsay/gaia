@@ -231,6 +231,16 @@ class TierRouter:
                 resp = await client.post(f"{endpoint}/model/unload")
                 if resp.status_code == 200:
                     return resp.json()
+                # Fallback: try /slots/idle (llama-server GPU release) then /shutdown
+                if resp.status_code == 404:
+                    logger.info("TIER: /model/unload not supported, trying llama-server /slots/idle")
+                    try:
+                        # Free GPU memory by clearing all slots
+                        resp2 = await client.post(f"{endpoint}/slots/idle")
+                        if resp2.status_code == 200:
+                            return {"ok": True, "method": "slots_idle"}
+                    except Exception:
+                        pass
                 return {"ok": False, "error": f"HTTP {resp.status_code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
