@@ -581,7 +581,11 @@ def probe_collections(
         phrases_to_probe.append(phrase)
 
     # Probe each collection with new phrases
-    collection_names = list(knowledge_bases.keys())
+    # Exclude domain-specific collections (e.g. D&D campaigns) from general
+    # queries to prevent knowledge contamination. These should only be probed
+    # when the user explicitly engages with that domain.
+    _EXCLUDED_COLLECTIONS = frozenset({"dnd_campaign"})
+    collection_names = [c for c in knowledge_bases.keys() if c not in _EXCLUDED_COLLECTIONS]
     for cname in collection_names:
         if not phrases_to_probe:
             break
