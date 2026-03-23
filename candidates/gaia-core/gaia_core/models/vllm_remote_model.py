@@ -562,24 +562,70 @@ class VLLMRemoteModel:
                 r = self._session.post(url, json=payload, timeout=self.timeout, stream=True)
         r.raise_for_status()
         with r:
-            for line in r.iter_lines(decode_unicode=True):
-                if not line or not line.startswith("data: "):
-                    continue
-                data = line[len("data: "):]
-                if data.strip() == "[DONE]":
-                    break
+            content_type = r.headers.get("Content-Type", "")
+            # GAIA Engine returns plain JSON (not SSE) — handle both formats
+            if "text/event-stream" in content_type or "chunked" in r.headers.get("Transfer-Encoding", ""):
+                # SSE streaming (vLLM, llama-server)
+                for line in r.iter_lines(decode_unicode=True):
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[len("data: "):]
+                    if data.strip() == "[DONE]":
+                        break
+                    import json
+                    chunk = json.loads(data)
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        content_buffer.append(content)
+                        yield {
+                            "choices": [{
+                                "delta": {"content": content},
+                                "finish_reason": None,
+                            }]
+                        }
+            else:
+                # Plain JSON response (GAIA Engine managed proxy)
                 import json
-                chunk = json.loads(data)
-                delta = chunk["choices"][0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    content_buffer.append(content)
-                    yield {
-                        "choices": [{
-                            "delta": {"content": content},
-                            "finish_reason": None,
-                        }]
-                    }
+                try:
+                    body = r.content if hasattr(r, 'content') else r.read()
+                    if isinstance(body, bytes):
+                        body = body.decode("utf-8")
+                    # Try SSE parsing first (some proxies don't set content-type)
+                    sse_found = False
+                    for line in body.split("\n"):
+                        if line.startswith("data: "):
+                            data = line[len("data: "):]
+                            if data.strip() == "[DONE]":
+                                break
+                            chunk = json.loads(data)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                content_buffer.append(content)
+                                sse_found = True
+                                yield {
+                                    "choices": [{
+                                        "delta": {"content": content},
+                                        "finish_reason": None,
+                                    }]
+                                }
+                    # If no SSE data found, parse as single JSON response
+                    if not sse_found:
+                        result = json.loads(body)
+                        full = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if not full:
+                            full = result.get("content", result.get("text", ""))
+                        if full:
+                            content_buffer.append(full)
+                            yield {
+                                "choices": [{
+                                    "delta": {"content": full},
+                                    "finish_reason": None,
+                                }]
+                            }
+                except Exception as parse_err:
+                    logger.warning("vLLM stream: failed to parse non-SSE response: %s", parse_err)
 
         full_content = "".join(content_buffer)
         yield {
