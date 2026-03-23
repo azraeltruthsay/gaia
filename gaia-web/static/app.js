@@ -205,13 +205,23 @@ function chatPanel() {
         let buffer = '';
         let responseText = '';
 
+        // Create a streaming message that updates in real time
+        const streamId = this._nextId++;
+        this.messages.push({
+          text: '',
+          type: 'gaia streaming',
+          id: streamId,
+          ts: new Date().toISOString(),
+        });
+        this._saveHistory();
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
           const lines = buffer.split('\n');
-          buffer = lines.pop(); // keep incomplete line in buffer
+          buffer = lines.pop();
 
           for (const line of lines) {
             if (!line.trim()) continue;
@@ -219,22 +229,33 @@ function chatPanel() {
               const chunk = JSON.parse(line);
               if (chunk.type === 'token') {
                 responseText += chunk.value || '';
+                // Update the streaming message in place
+                const msg = this.messages.find(m => m.id === streamId);
+                if (msg) {
+                  msg.text = responseText;
+                }
+                this.$nextTick(() => {
+                  const el = this.$refs.messages;
+                  if (el) el.scrollTop = el.scrollHeight;
+                });
               } else if (chunk.type === 'final') {
                 responseText = chunk.value || responseText;
               } else if (chunk.type === 'error') {
-                this.addMessage(`Error: ${chunk.value || 'unknown'}`, 'system');
+                const msg = this.messages.find(m => m.id === streamId);
+                if (msg) { msg.text = `Error: ${chunk.value || 'unknown'}`; msg.type = 'system'; }
                 return;
               }
-              // Ignore other chunk types (metadata, routing, etc.)
             } catch { /* skip unparseable lines */ }
           }
         }
 
-        if (responseText.trim()) {
-          this.addMessage(responseText.trim(), 'gaia');
-        } else {
-          this.addMessage('(no response)', 'system');
+        // Finalize the streaming message
+        const finalMsg = this.messages.find(m => m.id === streamId);
+        if (finalMsg) {
+          finalMsg.type = 'gaia';  // Remove 'streaming' class
+          finalMsg.text = responseText.trim() || '(no response)';
         }
+        this._saveHistory();
       } catch (err) {
         this.addMessage(`Connection error: ${err.message}`, 'system');
       } finally {
