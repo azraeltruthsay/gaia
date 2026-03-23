@@ -170,7 +170,115 @@ html, body {
 
 /* ── Chat Panel ─────────────────────── */
 
-/* ── Chat Interface (Claude-inspired) ──── */
+/* ── Full-page Chat (Claude-inspired) ──── */
+
+.chat-fullpage {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 88px);
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.chat-fullpage-header {
+  text-align: center;
+  padding: 20px 16px 12px;
+  position: relative;
+}
+.chat-fp-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--highlight);
+  letter-spacing: 3px;
+}
+.chat-fp-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+.chat-fp-clear {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+  opacity: 0.4;
+}
+.chat-fp-clear:hover { opacity: 1; color: var(--error); }
+
+.chat-fp-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.chat-fp-input-area {
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--border);
+}
+.chat-fp-input-wrap {
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 4px 4px 4px 16px;
+  transition: border-color 0.2s;
+}
+.chat-fp-input-wrap:focus-within {
+  border-color: var(--highlight);
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.08);
+}
+.chat-fp-input-wrap textarea {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  padding: 8px 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.chat-fp-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--highlight);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+.chat-fp-send:hover { opacity: 0.9; }
+.chat-fp-send:disabled { opacity: 0.3; cursor: not-allowed; }
+.chat-fp-spinner { animation: blink 1s infinite; }
+.chat-fp-hint {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* ── Compact Chat (dashboard panel) ──── */
+
+/* ── Chat Messages (shared styles) ────── */
 
 .chat-messages {
   flex: 1;

@@ -40,10 +40,42 @@
     </template>
   </nav>
 
+  <!-- ── Chat View (full-page Claude-style) ── -->
+  <section class="view" x-show="$store.nav.currentView === 'chat'" x-cloak>
+    <div class="chat-fullpage" x-data="chatPanel()">
+      <div class="chat-fullpage-header">
+        <div class="chat-fp-title">GAIA</div>
+        <div class="chat-fp-subtitle">General Artisanal Intelligence Architecture</div>
+        <button class="chat-fp-clear" @click="clearHistory()" title="Clear history">&times;</button>
+      </div>
+      <div x-ref="messages" class="chat-fp-messages">
+        <template x-for="msg in messages" :key="msg.id">
+          <div class="chat-msg" :class="msg.type">
+            <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
+            <span class="chat-text" x-html="renderMessage(msg)"></span>
+          </div>
+        </template>
+      </div>
+      <div class="chat-fp-input-area">
+        <div class="chat-fp-input-wrap">
+          <textarea x-model="input" placeholder="Message GAIA..." rows="1"
+                    @keydown.enter.prevent="if (!$event.shiftKey) send()"
+                    @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
+                    :disabled="sending"></textarea>
+          <button @click="send()" :disabled="sending || !input.trim()" class="chat-fp-send">
+            <span x-show="!sending">&#9654;</span>
+            <span x-show="sending" class="chat-fp-spinner">&#9679;</span>
+          </button>
+        </div>
+        <div class="chat-fp-hint">Enter to send, Shift+Enter for new line</div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Dashboard View (original 3-panel layout) ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'dashboard'" x-cloak>
     <main class="panels">
-      <!-- Left: Chat -->
+      <!-- Left: Chat (compact version) -->
       <section class="panel panel-chat" x-data="chatPanel()">
         <div class="panel-header">
           <span>Chat</span>

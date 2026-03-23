@@ -64,6 +64,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.store('nav', {
     currentView: 'dashboard',
     tabs: [
+      { id: 'chat', label: 'Chat' },
       { id: 'dashboard', label: 'Dashboard' },
       { id: 'hooks', label: 'Commands' },
       { id: 'files', label: 'Files' },
