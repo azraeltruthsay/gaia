@@ -175,10 +175,11 @@ html, body {
 .chat-fullpage {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 88px);
+  height: 100%;
   max-width: 800px;
   margin: 0 auto;
   padding: 0;
+  overflow: hidden;
 }
 
 .chat-fullpage-header {
