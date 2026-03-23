@@ -149,8 +149,19 @@ class EngineManager:
                 return {"ok": True, "message": "already unloaded"}
 
             old_model = self.model_path
+            # Log the caller for debugging silent unloads
+            import traceback
+            caller = "".join(traceback.format_stack()[-4:-1]).strip()
+            logger.warning("Worker stop requested for %s — caller:\n%s", old_model, caller)
             self._kill_worker_process()
             logger.info("Worker killed — model %s unloaded, GPU memory freed", old_model)
+
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("engine", f"Model unloaded: {old_model}",
+                          source="engine_manager", details={"caller": caller[:200]})
+            except Exception:
+                pass
             return {"ok": True, "message": "model unloaded", "old_model": old_model}
 
     def swap_worker(self, model_path: str, device: str = "cuda",
@@ -200,7 +211,15 @@ class EngineManager:
         except URLError as e:
             # Worker might have crashed
             if self.worker_process and self.worker_process.poll() is not None:
-                logger.error("Worker process died (exit code %d)", self.worker_process.returncode)
+                exit_code = self.worker_process.returncode
+                logger.error("Worker process died (exit code %d) — this causes 'silent unload'", exit_code)
+                try:
+                    from gaia_common.event_buffer import log_event
+                    log_event("engine", f"Worker CRASHED (exit code {exit_code})",
+                              source="engine_manager",
+                              details={"model": self.model_path, "exit_code": exit_code})
+                except Exception:
+                    pass
                 with self._lock:
                     self._cleanup_worker_state()
                 return (503, {"Content-Type": "application/json"},
