@@ -923,7 +923,36 @@ class AgentCore:
             selected_model_name = None
             # Check if Prime is available via lifecycle state machine
             _gpu_sleeping = not self._is_prime_available
-    
+
+            # 0. Programmatic intercept: letter-counting questions
+            # Models can't count letters due to tokenization. Intercept these
+            # questions and call count_chars directly.
+            import re as _re_count
+            # Pattern 1: greedy — handles "how many times does r appear in strawberry"
+            _count_match = _re_count.search(
+                r"how many\s+(?:times?\s+(?:does?\s+)?)?(?:the\s+)?(?:letter\s+)?([a-zA-Z])(?:'s)?\s+.*\bin\s+(?:the\s+)?(?:word\s+)?(\w+)",
+                user_input, _re_count.IGNORECASE)
+            if not _count_match:
+                # Pattern 2: simpler "how many Rs are in strawberry"
+                _count_match = _re_count.search(
+                    r"how many\s+([a-zA-Z])s?\s+(?:are\s+)?(?:there\s+)?(?:in\s+)?(?:the\s+)?(?:word\s+)?(\w+)",
+                    user_input, _re_count.IGNORECASE)
+            if _count_match:
+                _char, _word = _count_match.group(1).lower(), _count_match.group(2).lower()
+                _count = _word.count(_char)
+                _positions = [i + 1 for i, c in enumerate(_word) if c == _char]
+                _spelled = "-".join(_word)
+                _answer = (
+                    f"The letter '{_char}' appears {_count} time{'s' if _count != 1 else ''} "
+                    f"in the word \"{_word}\": {_spelled}. "
+                    f"Position{'s' if _count != 1 else ''}: {', '.join(str(p) for p in _positions)}."
+                )
+                logger.info("[INTERCEPT] Letter-counting question answered programmatically: %s", _answer)
+                self.session_manager.add_message(session_id, "user", user_input)
+                self.session_manager.add_message(session_id, "assistant", _answer)
+                yield {"type": "token", "value": _answer}
+                return
+
             # 1. Model Selection (Prioritize Fast-Path & Overrides)
             text_lower = user_input.lower()
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
