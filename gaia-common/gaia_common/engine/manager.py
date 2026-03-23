@@ -67,7 +67,7 @@ def _wait_for_health(port: int, timeout: int = 180) -> bool:
 class EngineManager:
     """Zero-GPU engine manager with subprocess isolation."""
 
-    def __init__(self, port: int, host: str = "0.0.0.0"):
+    def __init__(self, port: int, host: str = "0.0.0.0", max_concurrent: int = 1):
         self.port = port
         self.host = host
         self.worker_process = None
@@ -75,6 +75,10 @@ class EngineManager:
         self.model_path = None
         self.device = None
         self._lock = threading.Lock()
+        # Inference queue: limits concurrent requests to the worker.
+        # Additional requests block until a slot opens. Prevents overwhelming
+        # the model with rapid-fire Discord messages.
+        self._inference_semaphore = threading.Semaphore(max_concurrent)
         self._worker_stdout_thread = None
         self._worker_stderr_thread = None
 
@@ -162,12 +166,24 @@ class EngineManager:
 
     def proxy_to_worker(self, method: str, path: str, headers: dict,
                         body: bytes = b"") -> tuple:
-        """Forward a request to the worker. Returns (status, headers_dict, body_bytes)."""
+        """Forward a request to the worker. Returns (status, headers_dict, body_bytes).
+
+        Inference requests (/v1/chat/completions) are serialized through a
+        semaphore to prevent overwhelming the model with concurrent requests.
+        """
         with self._lock:
             port = self.worker_port
             if port is None:
                 return (503, {"Content-Type": "application/json"},
                         json.dumps({"error": "no model loaded — engine is in standby"}).encode())
+
+        # Queue inference requests — only one at a time
+        is_inference = "/v1/chat/completions" in path
+        if is_inference:
+            acquired = self._inference_semaphore.acquire(timeout=120)
+            if not acquired:
+                return (429, {"Content-Type": "application/json"},
+                        json.dumps({"error": "inference queue full — try again shortly"}).encode())
 
         url = f"http://127.0.0.1:{port}{path}"
         try:
@@ -194,6 +210,9 @@ class EngineManager:
         except Exception as e:
             return (502, {"Content-Type": "application/json"},
                     json.dumps({"error": f"proxy error: {e}"}).encode())
+        finally:
+            if is_inference:
+                self._inference_semaphore.release()
 
     def health_response(self) -> dict:
         """Build health response based on worker state."""
