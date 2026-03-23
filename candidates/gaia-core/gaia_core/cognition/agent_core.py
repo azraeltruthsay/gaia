@@ -494,7 +494,16 @@ class AgentCore:
         # Older turns are retrieved via semantic RAG (see session_history_indexer).
         SLIDING_WINDOW_SIZE = 6  # Last 3 turn-pairs
         all_history = history or []
-        window = all_history[-SLIDING_WINDOW_SIZE:]
+
+        # Skip history for simple greetings — prevents old conversation turns
+        # from polluting trivial responses (e.g. "good afternoon" → strawberry answer)
+        _greeting_words = {"hello", "hi", "hey", "good", "morning", "afternoon", "evening",
+                           "night", "howdy", "greetings", "yo", "sup", "gaia"}
+        _input_words = set(user_input.lower().split())
+        if len(_input_words) <= 5 and _input_words.issubset(_greeting_words | {".", "!", ",", "?"}):
+            window = all_history[-2:]  # Only last exchange, not full window
+        else:
+            window = all_history[-SLIDING_WINDOW_SIZE:]
 
         relevant_history_snippet = []
         for i, msg in enumerate(window):
