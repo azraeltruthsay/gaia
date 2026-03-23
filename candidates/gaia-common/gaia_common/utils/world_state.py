@@ -165,6 +165,14 @@ def _capability_affordances(tools: List[str]) -> List[str]:
             "When a user asks you to 'look something up', USE these tools."
         )
 
+    # Character counting (compensates for tokenization blindness)
+    if "count_chars" in tools:
+        affordances.append(
+            'IMPORTANT: You CANNOT count letters in words — your tokenizer groups letters '
+            'into chunks. For ANY letter-counting question, use count_chars tool. '
+            'Example: count_chars({"text": "strawberry", "char": "r"}) → 3.'
+        )
+
     # Episodic memory
     if "recall_events" in tools:
         affordances.append(

@@ -75,6 +75,17 @@ TOOLS = {
         "description": "Lists all available tools on the server.",
         "params": {}
     },
+    "count_chars": {
+        "description": "Count occurrences of a character in a word or text. Use this for ANY letter-counting question — do NOT try to count letters yourself, you will get it wrong due to tokenization. Example: count_chars({\"text\": \"strawberry\", \"char\": \"r\"}) → 3",
+        "params": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The text to search in"},
+                "char": {"type": "string", "description": "The character to count (single letter)"}
+            },
+            "required": ["text", "char"]
+        }
+    },
     "world_state": {
         "description": "Returns an expanded dynamic world-state snapshot (telemetry + models + MCP tool list).",
         "params": {}

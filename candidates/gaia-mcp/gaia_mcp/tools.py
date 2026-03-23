@@ -106,6 +106,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "list_dir": lambda p: _list_dir_impl(p),
         "list_files": lambda p: _list_files_impl(p),
         "list_tree": lambda p: _list_tree_impl(p),
+        "count_chars": lambda p: _count_chars_impl(p),
         "world_state": lambda p: world_state_detail(),
         "gpu_status": lambda p: world_state_detail(),
         "recall_events": lambda p: _recall_events_impl(p),
@@ -473,6 +474,24 @@ def _read_file_impl(params: dict):
 # VECTOR_INDEX_PATH (from mcp_lite_server.py) is missing here. It was a global constant.
 # Need to decide how to provide it. Perhaps through config.
 VECTOR_INDEX_PATH = Path("./knowledge/vector_store/index.json") # Placeholder for now.
+
+
+def _count_chars_impl(params: dict):
+    """Count character occurrences — compensates for tokenization blindness."""
+    text = params.get("text", "")
+    char = params.get("char", "")
+    if not text or not char:
+        return {"error": "text and char required"}
+    char = char[0].lower()  # Single character
+    count = text.lower().count(char)
+    positions = [i + 1 for i, c in enumerate(text.lower()) if c == char]
+    return {
+        "text": text,
+        "char": char,
+        "count": count,
+        "positions": positions,
+        "spelled_out": "-".join(text.lower()),
+    }
 
 
 def _recall_events_impl(params: dict):
