@@ -536,13 +536,20 @@ async def swap_service(request: ContainerSwapRequest):
 
 @app.post("/handoff/prime-to-study")
 async def handoff_prime_to_study(request: HandoffRequest = None):
-    """Initiate GPU handoff from Core (Prime) to Study."""
+    """Initiate GPU handoff to Study — transition to MEDITATION via lifecycle."""
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.TRAINING_SCHEDULED,
+            reason="handoff_prime_to_study")
+        return {"ok": result.ok, "state": result.to_state,
+                "elapsed_s": result.elapsed_s, "error": result.error}
+
+    # Legacy fallback
     if _handoff_manager is None:
         raise HTTPException(status_code=501, detail="Handoff manager not available")
-
     if request is None:
         request = HandoffRequest(handoff_type=HandoffType.PRIME_TO_STUDY)
-
     try:
         handoff = await _handoff_manager.start_prime_to_study(request)
         return handoff
@@ -553,13 +560,20 @@ async def handoff_prime_to_study(request: HandoffRequest = None):
 
 @app.post("/handoff/study-to-prime")
 async def handoff_study_to_prime(request: HandoffRequest = None):
-    """Initiate GPU handoff from Study back to Core (Prime)."""
+    """Return GPU from Study — transition from MEDITATION to AWAKE via lifecycle."""
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.TRAINING_COMPLETE,
+            reason="handoff_study_to_prime")
+        return {"ok": result.ok, "state": result.to_state,
+                "elapsed_s": result.elapsed_s, "error": result.error}
+
+    # Legacy fallback
     if _handoff_manager is None:
         raise HTTPException(status_code=501, detail="Handoff manager not available")
-
     if request is None:
         request = HandoffRequest(handoff_type=HandoffType.STUDY_TO_PRIME)
-
     try:
         handoff = await _handoff_manager.start_study_to_prime(request)
         return handoff
