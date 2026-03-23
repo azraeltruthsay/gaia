@@ -226,6 +226,79 @@
 
   <!-- ── Commands View (Hooks Panel) ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'hooks'" x-cloak>
+    <!-- ── Mission Control: Lifecycle State Machine ── -->
+    <div class="lifecycle-panel" x-data="lifecyclePanel()">
+      <div class="lifecycle-header">
+        <span class="lifecycle-title">Mission Control</span>
+        <span class="lifecycle-state-badge" :class="'ls-' + state" x-text="state.replace('_',' ')"></span>
+      </div>
+
+      <!-- GPU Memory Bar -->
+      <div class="lifecycle-vram-bar">
+        <div class="vram-label">GPU <span x-text="vramUsed + '/' + vramTotal + ' MB'"></span></div>
+        <div class="vram-track">
+          <template x-for="seg in vramSegments" :key="seg.tier">
+            <div class="vram-segment" :class="'vram-' + seg.tier"
+                 :style="'width:' + seg.pct + '%'" :title="seg.tier + ': ' + seg.mb + 'MB'">
+              <span x-show="seg.pct > 6" x-text="seg.tier" class="vram-seg-label"></span>
+            </div>
+          </template>
+          <div class="vram-segment vram-free" :style="'width:' + freePct + '%'"></div>
+        </div>
+      </div>
+
+      <!-- Tier Cards -->
+      <div class="lifecycle-tiers">
+        <template x-for="(info, tier) in tiers" :key="tier">
+          <div class="tier-card" :class="'tc-' + info.device">
+            <div class="tier-card-head">
+              <span class="tier-name" x-text="tier"></span>
+              <span class="tier-health" :class="info.healthy ? 'th-ok' : 'th-down'"></span>
+            </div>
+            <div class="tier-device" x-text="info.device"></div>
+            <div class="tier-vram" x-show="info.vram_mb > 0" x-text="info.vram_mb + ' MB'"></div>
+            <div class="tier-managed" x-show="info.managed">managed</div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Transition Controls -->
+      <div class="lifecycle-controls">
+        <template x-for="t in transitions" :key="t.trigger + (t.target || '')">
+          <button class="lc-btn" :class="'lc-' + (t.target || t.targets?.[0] || 'default')"
+                  @click="doTransition(t.trigger, t.target || t.targets?.[0])"
+                  :disabled="transitioning"
+                  x-text="transitionLabel(t)"></button>
+        </template>
+        <button class="lc-btn lc-reconcile" @click="reconcile()" :disabled="transitioning">Reconcile</button>
+      </div>
+
+      <!-- Transition Status -->
+      <div class="lifecycle-status" x-show="transitioning || lastResult">
+        <div x-show="transitioning" class="ls-transitioning">
+          Transitioning: <span x-text="transPhase"></span>...
+        </div>
+        <div x-show="lastResult && !transitioning" class="ls-result" :class="lastResult?.ok ? 'ls-ok' : 'ls-err'">
+          <span x-text="lastResult?.ok ? '✓' : '✗'"></span>
+          <span x-text="(lastResult?.from_state || '') + ' → ' + (lastResult?.to_state || '')"></span>
+          <span x-show="lastResult?.elapsed_s" x-text="lastResult?.elapsed_s + 's'"></span>
+          <span x-show="lastResult?.error" x-text="lastResult?.error" class="ls-error-text"></span>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="lifecycle-history" x-show="history.length > 0">
+        <div class="lh-title">Recent Transitions</div>
+        <template x-for="h in history.slice(-6).reverse()" :key="h.at">
+          <div class="lh-entry" :class="h.error ? 'lh-err' : ''">
+            <span class="lh-states" x-text="h.from_state + ' → ' + h.to_state"></span>
+            <span class="lh-trigger" x-text="h.trigger"></span>
+            <span class="lh-time" x-text="h.elapsed_s + 's'"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <div class="hooks-grid" x-data="hooksPanel()">
 
       <!-- Sleep Control -->

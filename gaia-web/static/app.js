@@ -1121,6 +1121,138 @@ function blueprintPanel() {
   };
 }
 
+// ── Lifecycle Mission Control Component ───────────────────────────────────────
+
+function lifecyclePanel() {
+  return {
+    state: 'unknown',
+    tiers: {},
+    transitions: [],
+    history: [],
+    vramUsed: 0,
+    vramTotal: 15833,
+    vramSegments: [],
+    freePct: 100,
+    transitioning: false,
+    transPhase: '',
+    lastResult: null,
+    _poll: null,
+
+    init() {
+      this.refresh();
+      this._poll = setInterval(() => this.refresh(), 5000);
+    },
+
+    destroy() {
+      if (this._poll) clearInterval(this._poll);
+    },
+
+    async refresh() {
+      try {
+        const resp = await fetch('/api/system/lifecycle/state');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        this.state = data.state || 'unknown';
+        this.tiers = data.tiers || {};
+        this.vramUsed = data.vram_used_mb || 0;
+        this.vramTotal = data.vram_total_mb || 15833;
+        this.freePct = Math.max(0, ((this.vramTotal - this.vramUsed) / this.vramTotal) * 100);
+
+        // Build VRAM segments
+        const segs = [];
+        for (const [tier, info] of Object.entries(this.tiers)) {
+          if (info.vram_mb > 0) {
+            segs.push({
+              tier,
+              mb: info.vram_mb,
+              pct: (info.vram_mb / this.vramTotal) * 100,
+            });
+          }
+        }
+        this.vramSegments = segs;
+
+        // Check for transitioning state
+        if (data.state === 'transitioning') {
+          this.transitioning = true;
+          this.transPhase = data.transition_phase || 'working';
+        } else {
+          this.transitioning = false;
+        }
+
+        // Fetch available transitions
+        const tResp = await fetch('/api/system/lifecycle/transitions');
+        if (tResp.ok) this.transitions = await tResp.json();
+
+        // Fetch history
+        const hResp = await fetch('/api/system/lifecycle/history');
+        if (hResp.ok) this.history = await hResp.json();
+      } catch { /* silent */ }
+    },
+
+    async doTransition(trigger, target) {
+      this.transitioning = true;
+      this.transPhase = 'requesting';
+      this.lastResult = null;
+      try {
+        const body = { trigger, reason: 'dashboard' };
+        if (target) body.target = target;
+        const resp = await fetch('/api/system/lifecycle/transition', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        this.lastResult = await resp.json();
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    async reconcile() {
+      this.transitioning = true;
+      this.transPhase = 'reconciling';
+      try {
+        const resp = await fetch('/api/system/lifecycle/reconcile', { method: 'POST' });
+        this.lastResult = await resp.json();
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    transitionLabel(t) {
+      const labels = {
+        wake_signal: 'Wake',
+        idle_timeout: 'Sleep',
+        voice_join: 'Listen',
+        voice_leave: 'Stop Listening',
+        escalation_needed: 'Focus (Prime)',
+        task_complete: 'Relax (Core)',
+        training_scheduled: 'Meditate (Train)',
+        training_complete: 'Wake from Training',
+        extended_idle: 'Deep Sleep',
+        preempt: 'Preempt Training',
+      };
+      if (t.trigger === 'user_request') {
+        const target = t.target || t.targets?.[0] || '';
+        const tLabels = {
+          awake: 'Wake',
+          focusing: 'Focus (Prime)',
+          sleep: 'Sleep',
+          deep_sleep: 'Deep Sleep',
+          meditation: 'Meditate',
+          listening: 'Listen',
+        };
+        return tLabels[target] || target;
+      }
+      return labels[t.trigger] || t.trigger;
+    },
+  };
+}
+
+
 // ── Hooks / Commands Panel Component ──────────────────────────────────────────
 
 function hooksPanel() {

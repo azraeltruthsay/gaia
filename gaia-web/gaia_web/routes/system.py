@@ -579,3 +579,71 @@ async def surgeon_history():
     except Exception as e:
         logger.debug("Failed to fetch surgeon history: %s", e)
     return {"history": []}
+
+
+# ── Lifecycle State Machine Proxies ──────────────────────────────────────
+
+@router.get("/lifecycle/state")
+async def lifecycle_state():
+    """Proxy orchestrator lifecycle state — the single source of truth."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/state")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.debug("Lifecycle state fetch failed: %s", e)
+    return {"state": "unknown", "tiers": {}}
+
+
+@router.get("/lifecycle/transitions")
+async def lifecycle_transitions():
+    """Available transitions from current state."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/transitions")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return []
+
+
+@router.post("/lifecycle/transition")
+async def lifecycle_transition(request: Request):
+    """Request a lifecycle state transition."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/transition",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/lifecycle/history")
+async def lifecycle_history():
+    """Recent transition history."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/history")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return []
+
+
+@router.post("/lifecycle/reconcile")
+async def lifecycle_reconcile():
+    """Force lifecycle reconciliation."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{ORCHESTRATOR_URL}/lifecycle/reconcile")
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

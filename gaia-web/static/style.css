@@ -928,6 +928,156 @@ html, body {
   .tab { padding: 0 10px; font-size: 11px; }
 }
 
+/* ── Lifecycle Mission Control ───────── */
+
+.lifecycle-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px;
+  margin-bottom: 4px;
+}
+.lifecycle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.lifecycle-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--highlight);
+  letter-spacing: 1px;
+}
+.lifecycle-state-badge {
+  padding: 3px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.ls-awake { background: rgba(76,175,80,0.2); color: #4caf50; }
+.ls-listening { background: rgba(156,39,176,0.2); color: #ce93d8; }
+.ls-focusing { background: rgba(33,150,243,0.2); color: #42a5f5; }
+.ls-meditation { background: rgba(255,152,0,0.2); color: #ffb74d; }
+.ls-sleep { background: rgba(158,158,158,0.2); color: #9e9e9e; }
+.ls-deep_sleep { background: rgba(97,97,97,0.15); color: #757575; }
+.ls-transitioning { background: rgba(255,235,59,0.2); color: #fff176; animation: pulse-badge 1.5s infinite; }
+.ls-unknown { background: rgba(255,82,82,0.2); color: var(--error); }
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* VRAM Bar */
+.lifecycle-vram-bar { margin-bottom: 10px; }
+.vram-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.vram-track {
+  display: flex;
+  height: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+}
+.vram-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2px;
+  transition: width 0.5s ease;
+}
+.vram-seg-label { font-size: 9px; font-weight: 600; color: #000; opacity: 0.7; }
+.vram-core { background: #42a5f5; }
+.vram-nano { background: #66bb6a; }
+.vram-prime { background: #ffa726; }
+.vram-study { background: #ef5350; }
+.vram-audio { background: #ab47bc; }
+.vram-free { background: rgba(255,255,255,0.03); }
+
+/* Tier Cards */
+.lifecycle-tiers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tier-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+}
+.tier-card-head { display: flex; justify-content: space-between; align-items: center; }
+.tier-name { font-weight: 700; text-transform: uppercase; font-size: 12px; }
+.tier-health { width: 8px; height: 8px; border-radius: 50%; }
+.th-ok { background: #4caf50; }
+.th-down { background: #616161; }
+.tier-device { color: var(--text-muted); margin-top: 2px; }
+.tier-vram { color: var(--highlight); }
+.tier-managed { color: var(--text-dim); font-size: 10px; }
+.tc-gpu .tier-device { color: #66bb6a; }
+.tc-cpu .tier-device { color: #ffb74d; }
+.tc-unloaded .tier-device { color: #616161; }
+
+/* Transition Controls */
+.lifecycle-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.lc-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.lc-btn:hover:not(:disabled) { background: var(--accent); }
+.lc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.lc-awake, .lc-wake_signal { border-color: #4caf50; color: #4caf50; }
+.lc-focusing { border-color: #42a5f5; color: #42a5f5; }
+.lc-sleep { border-color: #9e9e9e; color: #9e9e9e; }
+.lc-deep_sleep { border-color: #616161; color: #757575; }
+.lc-meditation { border-color: #ffa726; color: #ffa726; }
+.lc-listening { border-color: #ce93d8; color: #ce93d8; }
+.lc-reconcile { border-color: var(--text-dim); color: var(--text-dim); }
+
+/* Status */
+.lifecycle-status { margin-bottom: 6px; font-size: 11px; }
+.ls-transitioning { color: #fff176; }
+.ls-result { padding: 4px 8px; border-radius: 4px; }
+.ls-ok { background: rgba(76,175,80,0.1); color: #4caf50; }
+.ls-err { background: rgba(255,82,82,0.1); color: var(--error); }
+.ls-error-text { font-size: 10px; display: block; margin-top: 2px; word-break: break-all; }
+
+/* History */
+.lifecycle-history { font-size: 11px; }
+.lh-title { color: var(--text-muted); margin-bottom: 4px; font-weight: 600; }
+.lh-entry {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.lh-states { color: var(--text); font-weight: 500; }
+.lh-trigger { color: var(--text-muted); }
+.lh-time { color: var(--text-dim); margin-left: auto; }
+.lh-err .lh-states { color: var(--error); }
+
+@media (max-width: 800px) {
+  .lifecycle-tiers { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* ── Hook/Command Panel ──────────────── */
 
 .hooks-grid {
