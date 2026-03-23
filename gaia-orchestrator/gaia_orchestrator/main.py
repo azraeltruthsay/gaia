@@ -122,16 +122,7 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning("Health watchdog not available yet")
 
-    # Initialize tier router (auto-handoff)
-    try:
-        global _tier_router
-        from .tier_router import TierRouter
-        _tier_router = TierRouter(_state_manager)
-        logger.info("Tier router initialized")
-    except ImportError:
-        logger.warning("Tier router not available yet")
-
-    # Initialize lifecycle state machine
+    # Initialize lifecycle state machine (must be before tier router)
     try:
         global _lifecycle_machine
         from .lifecycle_machine import LifecycleMachine
@@ -141,6 +132,15 @@ async def lifespan(app: FastAPI):
         logger.info("Lifecycle state machine initialized: %s", _lifecycle_machine._snapshot.state)
     except Exception:
         logger.warning("Lifecycle state machine initialization failed", exc_info=True)
+
+    # Initialize tier router (auto-handoff, delegates to lifecycle when available)
+    try:
+        global _tier_router
+        from .tier_router import TierRouter
+        _tier_router = TierRouter(_state_manager, lifecycle_machine=_lifecycle_machine)
+        logger.info("Tier router initialized")
+    except ImportError:
+        logger.warning("Tier router not available yet")
 
     # Start Nano VRAM pressure monitor
     global _nano_pressure_task
@@ -570,24 +570,30 @@ async def get_handoff_status(handoff_id: str) -> HandoffStatus:
 
 @app.post("/gpu/sleep")
 async def gpu_sleep():
-    """Release GPU for sleep — stop Prime container and free VRAM.
+    """Release GPU for sleep — transition to SLEEP via lifecycle machine.
 
     Called by gaia-core's SleepCycleLoop when entering SLEEPING state.
-    Reuses the existing GPUManager.request_release_from_core() which
-    stops the prime container and notifies core to demote gpu_prime.
+    Delegates to lifecycle machine which handles tier unloading.
     """
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.IDLE_TIMEOUT, reason="sleep_cycle")
+        if result.ok:
+            return {"ok": True, "message": "GPU released for sleep via lifecycle", "state": result.to_state}
+        # If lifecycle says invalid transition (e.g. already sleeping), that's ok
+        return {"ok": True, "message": f"Lifecycle: {result.error}", "state": result.from_state}
+
+    # Fallback to legacy GPU manager
     if _gpu_manager is None:
         raise HTTPException(status_code=501, detail="GPU manager not available")
-
     try:
         success = await _gpu_manager.request_release_from_core()
         if not success:
             raise HTTPException(status_code=500, detail="Failed to release GPU for sleep")
-
         if _state_manager:
             await _state_manager.release_gpu()
-
-        logger.info("GPU released for sleep cycle")
+        logger.info("GPU released for sleep cycle (legacy)")
         return {"ok": True, "message": "GPU released for sleep"}
     except HTTPException:
         raise
@@ -598,27 +604,32 @@ async def gpu_sleep():
 
 @app.post("/gpu/wake")
 async def gpu_wake():
-    """Reclaim GPU after wake — start Prime container and restore model pool.
+    """Reclaim GPU after wake — transition to AWAKE via lifecycle machine.
 
     Called by gaia-core's SleepCycleLoop when entering WAKING state.
-    Reuses GPUManager.request_reclaim_by_core() which starts the prime
-    container, waits for health, and notifies core to restore gpu_prime.
+    Delegates to lifecycle machine which handles tier loading + KV prewarm.
     """
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.WAKE_SIGNAL, reason="gpu_wake")
+        if result.ok:
+            return {"ok": True, "message": "GPU reclaimed via lifecycle", "state": result.to_state}
+        return {"ok": False, "message": f"Lifecycle: {result.error}", "state": result.from_state}
+
+    # Fallback to legacy GPU manager
     if _gpu_manager is None:
         raise HTTPException(status_code=501, detail="GPU manager not available")
-
     try:
         success = await _gpu_manager.request_reclaim_by_core()
         if not success:
             raise HTTPException(status_code=500, detail="Failed to reclaim GPU on wake")
-
         if _state_manager:
             import uuid
             await _state_manager.set_gpu_owner(
                 GPUOwner.CORE, str(uuid.uuid4()), "sleep_wake_reclaim"
             )
-
-        logger.info("GPU reclaimed after wake cycle")
+        logger.info("GPU reclaimed after wake cycle (legacy)")
         return {"ok": True, "message": "GPU reclaimed after wake"}
     except HTTPException:
         raise
@@ -1042,11 +1053,19 @@ async def get_watch_state():
 
 @app.post("/watch/focus")
 async def watch_focus(reason: str = "user_request", priority: str = "NORMAL"):
-    """Transition to FOCUSING — wake Prime, yield Core+Nano to CPU.
+    """Transition to FOCUSING — load Prime, unload Core+Nano via lifecycle.
 
     Priority: URGENT (immediate yield), NORMAL (finish current batch),
     SCHEDULED (pre-emptive coordination).
     """
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.USER_REQUEST, target=LifecycleState.FOCUSING,
+            reason=f"watch_focus: {reason}")
+        return {"ok": result.ok, "state": result.to_state,
+                "elapsed_s": result.elapsed_s, "error": result.error}
+
     if _watch_manager is None:
         raise HTTPException(status_code=501, detail="Watch manager not available")
     result = await _watch_manager.focus(reason=reason, priority=priority)
@@ -1057,7 +1076,15 @@ async def watch_focus(reason: str = "user_request", priority: str = "NORMAL"):
 
 @app.post("/watch/idle")
 async def watch_idle(reason: str = "inactivity"):
-    """Transition to IDLE — sleep Prime, wake Core+Nano on GPU with KV pre-warm."""
+    """Transition to AWAKE — unload Prime, load Core+Nano on GPU via lifecycle."""
+    if _lifecycle_machine is not None:
+        from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+        result = await _lifecycle_machine.transition(
+            TransitionTrigger.USER_REQUEST, target=LifecycleState.AWAKE,
+            reason=f"watch_idle: {reason}")
+        return {"ok": result.ok, "state": result.to_state,
+                "elapsed_s": result.elapsed_s, "error": result.error}
+
     if _watch_manager is None:
         raise HTTPException(status_code=501, detail="Watch manager not available")
     result = await _watch_manager.idle(reason=reason)

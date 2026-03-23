@@ -359,22 +359,25 @@ class LifecycleMachine:
                     model_loaded = data.get("model_loaded", False)
                     managed = data.get("managed", False)
 
-                    # Try to get VRAM from /model/info or /status
+                    # Get VRAM and model info — try /status first (proxied to
+                    # worker, has real data), fall back to /model/info
                     vram_mb = 0
                     model_path = ""
                     try:
-                        info_resp = await client.get(f"{endpoint}/model/info")
-                        if info_resp.status_code == 200:
-                            info = info_resp.json()
-                            vram_mb = info.get("vram_mb", 0)
-                            model_path = info.get("model_path", "")
+                        status_resp = await client.get(f"{endpoint}/status")
+                        if status_resp.status_code == 200:
+                            status = status_resp.json()
+                            vram_mb = status.get("vram_mb", 0)
+                            model_path = status.get("model", "")
                     except Exception:
+                        pass
+                    if vram_mb == 0:
                         try:
-                            status_resp = await client.get(f"{endpoint}/status")
-                            if status_resp.status_code == 200:
-                                status = status_resp.json()
-                                vram_mb = status.get("vram_mb", 0)
-                                model_path = status.get("model", "")
+                            info_resp = await client.get(f"{endpoint}/model/info")
+                            if info_resp.status_code == 200:
+                                info = info_resp.json()
+                                vram_mb = info.get("vram_mb", 0)
+                                model_path = model_path or info.get("model_path", "")
                         except Exception:
                             pass
 

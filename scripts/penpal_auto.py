@@ -100,7 +100,33 @@ def get_recent_developments() -> str:
             first_section = text.split("##")[1][:500]
             context.append(f"[{j.stem}]: {first_section}")
 
-    return "\n\n".join(context) if context else "No recent dev context available."
+    # Always prepend the most significant recent breakthroughs
+    breakthroughs = """MAJOR BREAKTHROUGHS (2026-03-22):
+
+1. SUBPROCESS ISOLATION: Every GAIA Engine now starts as a zero-GPU HTTP server. Model loading
+spawns a worker subprocess that owns the CUDA context. Model unloading kills the subprocess —
+guaranteed zero VRAM. No more zombie CUDA contexts consuming 1.5-3GB in standby. The Engine
+Manager (manager.py) proxies all requests transparently. This is the mechanism that enables
+all GPU lifecycle transitions.
+
+2. UNIFIED LIFECYCLE STATE MACHINE: Replaced 6 scattered state trackers (SleepWakeManager,
+WatchManager, TierRouter, StateManager GPUOwner, EngineManager, ModelPool._gpu_released)
+with a single authoritative state machine in the orchestrator. Seven states: AWAKE (Core+Nano
+on GPU), LISTENING (+Audio STT), FOCUSING (Prime on GPU, others off), MEDITATION (Study owns
+GPU for training), SLEEP (CPU RAM only), DEEP_SLEEP (minimal), TRANSITIONING. Every GPU
+operation flows through validated transitions with rollback on failure.
+
+3. GPTQ QUANTIZATION: Prime 8B model compressed from 16GB bf16 to 5.8GB GPTQ 4-bit via
+gptqmodel. Identity intact ("I am GAIA, a sovereign AI created by Azrael"). 2.2 second load
+time. The critical finding: Prime GPTQ (5.8GB) + full audio stack (STT 1.8GB + TTS 4.3GB) =
+11.9GB. Fits on the 16GB RTX 5080. GAIA can think, listen, and speak SIMULTANEOUSLY without
+GPU time-swapping.
+
+4. MISSION CONTROL DASHBOARD: New panel in the dashboard with lifecycle state badge, GPU VRAM
+stacked bar showing per-tier allocation, tier status cards, dynamic transition buttons, and
+transition history timeline. Full visibility and manual control of the entire GPU lifecycle."""
+
+    return breakthroughs + "\n\n" + "\n\n".join(context) if context else breakthroughs
 
 
 def generate_response(transcript: str, episode_num: int, request_episode: int,

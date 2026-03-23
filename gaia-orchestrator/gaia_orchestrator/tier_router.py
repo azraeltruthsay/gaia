@@ -45,10 +45,15 @@ TIER_DEFAULTS = {
 
 
 class TierRouter:
-    """Automatic GPU handoff router for cognitive tiers."""
+    """Automatic GPU handoff router for cognitive tiers.
 
-    def __init__(self, state_manager=None):
+    When a lifecycle machine is available, delegates tier transitions to it.
+    Otherwise falls back to direct load/unload operations.
+    """
+
+    def __init__(self, state_manager=None, lifecycle_machine=None):
         self.state_manager = state_manager
+        self.lifecycle_machine = lifecycle_machine
         self._current_gpu_tier: Optional[str] = None
         self._lock = asyncio.Lock()
         self._tiers = {k: dict(v) for k, v in TIER_DEFAULTS.items()}
@@ -56,16 +61,71 @@ class TierRouter:
     async def ensure_tier(self, tier: str, device: str = "cuda") -> dict:
         """Ensure the requested tier's model is loaded on GPU.
 
-        Handles unloading other tiers if needed. Returns status dict.
+        When lifecycle machine is available, delegates to it for proper state
+        transitions. Otherwise falls back to direct load/unload operations.
         """
         if tier not in self._tiers:
             return {"ok": False, "error": f"unknown tier: {tier}. Valid: {list(self._tiers.keys())}"}
 
+        # Use lifecycle machine when available
+        if self.lifecycle_machine is not None:
+            return await self._ensure_tier_via_lifecycle(tier)
+
+        # Legacy fallback: direct load/unload
+        return await self._ensure_tier_direct(tier, device)
+
+    async def _ensure_tier_via_lifecycle(self, tier: str) -> dict:
+        """Ensure tier via lifecycle state machine transitions."""
+        from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+
+        # Map tier to lifecycle state
+        tier_to_state = {
+            "core": LifecycleState.AWAKE,
+            "nano": LifecycleState.AWAKE,
+            "prime": LifecycleState.FOCUSING,
+        }
+        target_state = tier_to_state.get(tier, LifecycleState.AWAKE)
+
+        # Check current lifecycle state
+        snapshot = await self.lifecycle_machine.get_snapshot()
+        current = LifecycleState(snapshot.state)
+
+        # If we're already in the right state, check if the tier is loaded
+        if current == target_state:
+            tier_status = snapshot.tiers.get(tier)
+            if tier_status and tier_status.model_loaded:
+                return {"ok": True, "tier": tier, "action": "already_loaded"}
+
+        # Request transition
+        if tier == "prime":
+            trigger = TransitionTrigger.ESCALATION_NEEDED
+        else:
+            trigger = TransitionTrigger.TASK_COMPLETE  # Back to AWAKE
+
+        # If current state matches target, use USER_REQUEST
+        if current == target_state:
+            trigger = TransitionTrigger.USER_REQUEST
+
+        result = await self.lifecycle_machine.transition(
+            trigger, target=target_state, reason=f"ensure_tier:{tier}")
+
+        if result.ok:
+            return {
+                "ok": True,
+                "tier": tier,
+                "action": "loaded",
+                "unloaded": [a.split(":")[0] for a in result.actions if "unload" in a],
+                "elapsed_s": result.elapsed_s,
+            }
+        return {"ok": False, "tier": tier, "error": result.error}
+
+    async def _ensure_tier_direct(self, tier: str, device: str) -> dict:
+        """Legacy: ensure tier via direct load/unload (no lifecycle machine)."""
         async with self._lock:
             target = self._tiers[tier]
             endpoint = target["engine_endpoint"]
 
-            # Check if already loaded (by tracking OR by probing health)
+            # Check if already loaded
             health = await self._check_health(endpoint)
             if health.get("model_loaded"):
                 self._current_gpu_tier = tier
@@ -75,7 +135,7 @@ class TierRouter:
             start = time.time()
             logger.info("TIER: ensuring %s on GPU (current: %s)", tier, self._current_gpu_tier)
 
-            # Step 1: Unload current GPU holder(s)
+            # Unload current GPU holders
             unloaded = []
             for other_tier, other_cfg in self._tiers.items():
                 if other_tier == tier:
@@ -88,11 +148,10 @@ class TierRouter:
                     if not result.get("ok"):
                         logger.warning("TIER: %s unload issue: %s", other_tier, result)
 
-            # Brief pause for CUDA contexts to clean up
             if unloaded:
                 await asyncio.sleep(1)
 
-            # Step 2: Load the target tier
+            # Load the target tier
             logger.info("TIER: loading %s model=%s device=%s", tier, target["model_path"], device)
             load_result = await self._load_tier(
                 endpoint, target["model_path"], device, target.get("compile_mode", "reduce-overhead"))
@@ -102,11 +161,8 @@ class TierRouter:
                 self._current_gpu_tier = tier
                 logger.info("TIER: %s loaded in %.1fs (unloaded: %s)", tier, elapsed, unloaded)
                 return {
-                    "ok": True,
-                    "tier": tier,
-                    "action": "loaded",
-                    "unloaded": unloaded,
-                    "elapsed_s": round(elapsed, 1),
+                    "ok": True, "tier": tier, "action": "loaded",
+                    "unloaded": unloaded, "elapsed_s": round(elapsed, 1),
                 }
             else:
                 logger.error("TIER: %s load failed: %s", tier, load_result)
