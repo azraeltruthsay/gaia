@@ -983,9 +983,29 @@ class EngineHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             try:
                 b = self._body()
-                self._json(_engine.generate(b.get("messages", []), b.get("max_tokens", 512),
-                                             b.get("temperature", 0.7), b.get("top_p", 0.9),
-                                             skip_prefix=b.get("skip_prefix", False)))
+                stream = b.get("stream", False)
+                result = _engine.generate(
+                    b.get("messages", []), b.get("max_tokens", 512),
+                    b.get("temperature", 0.7), b.get("top_p", 0.9),
+                    skip_prefix=b.get("skip_prefix", False))
+
+                if stream:
+                    # SSE format — compatible with vllm_remote_model._stream_chat()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+
+                    # Send content as a single SSE chunk (true token streaming is future work)
+                    chunk = json.dumps({
+                        "choices": [{"delta": {"content": content}, "finish_reason": None}]
+                    })
+                    self.wfile.write(f"data: {chunk}\n\n".encode())
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                else:
+                    self._json(result)
             except Exception as e:
                 logger.exception("Generation failed")
                 self._json({"error": str(e)}, 500)
