@@ -417,11 +417,68 @@ class ManagedEngineHandler(BaseHTTPRequestHandler):
             self._json(result, status)
 
         else:
-            # Proxy all other POSTs to worker
-            headers = {k: v for k, v in self.headers.items()}
-            status, resp_headers, body = self.manager.proxy_to_worker(
-                "POST", self.path, headers, raw_body)
-            self._send_proxy_response(status, resp_headers, body)
+            # Check if this is a streaming inference request
+            is_stream = False
+            if self.path == "/v1/chat/completions" and raw_body:
+                try:
+                    is_stream = json.loads(raw_body).get("stream", False)
+                except Exception:
+                    pass
+
+            if is_stream:
+                self._proxy_stream(raw_body)
+            else:
+                headers = {k: v for k, v in self.headers.items()}
+                status, resp_headers, body = self.manager.proxy_to_worker(
+                    "POST", self.path, headers, raw_body)
+                self._send_proxy_response(status, resp_headers, body)
+
+    def _proxy_stream(self, body: bytes):
+        """Stream SSE response from worker to client, token by token."""
+        import http.client
+
+        with self.manager._lock:
+            port = self.manager.worker_port
+        if port is None:
+            self._json({"error": "no model loaded"}, 503)
+            return
+
+        # Acquire inference semaphore
+        acquired = self.manager._inference_semaphore.acquire(timeout=120)
+        if not acquired:
+            self._json({"error": "inference queue full"}, 429)
+            return
+
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=300)
+            conn.request("POST", "/v1/chat/completions", body=body,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+
+            # Forward headers to client
+            self.send_response(resp.status)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+
+            # Stream chunks as they arrive
+            while True:
+                line = resp.readline()
+                if not line:
+                    break
+                self.wfile.write(line)
+                self.wfile.flush()
+
+            conn.close()
+        except Exception as e:
+            logger.warning("Stream proxy error: %s", e)
+            try:
+                self.wfile.write(f"data: {{\"error\": \"{e}\"}}\n\n".encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+        finally:
+            self.manager._inference_semaphore.release()
 
     def _send_proxy_response(self, status: int, headers: dict, body: bytes):
         """Send a proxied response back to the client."""
