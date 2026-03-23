@@ -203,7 +203,33 @@ async def release_hold(request: Request):
 
 @router.post("/force")
 async def force_sleep(request: Request):
-    """Immediately trigger sleep transition (ACTIVE → DROWSY → ASLEEP)."""
+    """Immediately trigger sleep transition via lifecycle machine."""
+    # Try lifecycle machine first
+    lifecycle = getattr(request.app.state, "lifecycle_client", None)
+    if lifecycle:
+        try:
+            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+            result = lifecycle.request_transition_sync(
+                TransitionTrigger.USER_REQUEST,
+                target=LifecycleState.SLEEP,
+                reason="force_sleep",
+                timeout=60.0,
+            )
+            # Also transition the local sleep state machine for compatibility
+            manager = getattr(request.app.state, "sleep_wake_manager", None)
+            if manager and result.ok:
+                manager.initiate_drowsy()
+            return {
+                "accepted": result.ok,
+                "state": result.to_state if result.ok else result.from_state,
+                "lifecycle": True,
+                "error": result.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.warning("Lifecycle force-sleep failed, falling back: %s", e)
+
+    # Fallback: legacy local state machine
     manager = getattr(request.app.state, "sleep_wake_manager", None)
     if manager is None:
         return JSONResponse(
@@ -221,8 +247,6 @@ async def force_sleep(request: Request):
         )
 
     entered_sleep = manager.initiate_drowsy()
-
-    # Release GPU via the sleep cycle loop (same path as idle-triggered sleep)
     sleep_loop = getattr(request.app.state, "sleep_cycle_loop", None)
     if sleep_loop and entered_sleep:
         try:
@@ -240,12 +264,39 @@ async def force_sleep(request: Request):
 
 @router.post("/deep")
 async def deep_sleep(request: Request):
-    """Deep sleep — unload ALL models from GPU AND system RAM.
+    """Deep sleep — unload ALL models from GPU via lifecycle machine.
 
-    Transitions to ASLEEP, then unloads Core and Nano engines via
-    the orchestrator's tier router. GPU goes to zero. Core engine
-    stays in managed standby (HTTP server alive, no model loaded).
+    Transitions to DEEP_SLEEP via the orchestrator's lifecycle state machine.
+    The lifecycle machine handles all tier unloading with rollback on failure.
     """
+    # Try lifecycle machine first
+    lifecycle = getattr(request.app.state, "lifecycle_client", None)
+    if lifecycle:
+        try:
+            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+            result = lifecycle.request_transition_sync(
+                TransitionTrigger.USER_REQUEST,
+                target=LifecycleState.DEEP_SLEEP,
+                reason="deep_sleep_button",
+                timeout=60.0,
+            )
+            # Also transition the local sleep state machine
+            manager = getattr(request.app.state, "sleep_wake_manager", None)
+            if manager and result.ok:
+                manager.initiate_drowsy()
+            return {
+                "accepted": result.ok,
+                "mode": "deep_sleep",
+                "state": result.to_state if result.ok else result.from_state,
+                "lifecycle": True,
+                "actions": result.actions,
+                "error": result.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.warning("Lifecycle deep-sleep failed, falling back: %s", e)
+
+    # Fallback: legacy direct unload
     import httpx as _httpx
 
     manager = getattr(request.app.state, "sleep_wake_manager", None)
@@ -291,7 +342,7 @@ async def deep_sleep(request: Request):
     except Exception:
         logger.warning("Deep sleep: orchestrator tier unload failed", exc_info=True)
 
-    # Step 4: Kill Core's local inference server (managed engine OR llama-server)
+    # Step 4: Unload Core's local inference server (managed engine OR llama-server)
     core_engine_url = "http://localhost:8092"
     try:
         async with _httpx.AsyncClient(timeout=10) as client:
@@ -299,22 +350,18 @@ async def deep_sleep(request: Request):
             resp = await client.post(f"{core_engine_url}/model/unload")
             if resp.status_code == 200:
                 logger.info("Deep sleep: Core engine model unloaded (managed)")
-            else:
-                raise Exception(f"HTTP {resp.status_code}")
+            elif resp.status_code == 404:
+                # llama-server doesn't have /model/unload — drop KV cache to free some VRAM
+                # We don't kill it because that would kill the container
+                logger.info("Deep sleep: Core running llama-server (no unload endpoint)")
+                try:
+                    # Clear all KV cache slots
+                    resp2 = await client.post(f"{core_engine_url}/slots/idle")
+                    logger.info("Deep sleep: Core llama-server slots cleared")
+                except Exception:
+                    pass
     except Exception:
-        # Fallback: kill the inference server process by PID file
-        import os
-        import signal
-        for pid_file in ("/tmp/inference_server.pid", "/tmp/llama_server.pid"):
-            try:
-                with open(pid_file) as f:
-                    pid = int(f.read().strip())
-                os.kill(pid, signal.SIGTERM)
-                logger.info("Deep sleep: killed inference server PID %d (%s)", pid, pid_file)
-            except (FileNotFoundError, ValueError, ProcessLookupError):
-                pass
-            except Exception as e:
-                logger.warning("Deep sleep: kill PID from %s failed: %s", pid_file, e)
+        logger.warning("Deep sleep: Core engine unload failed", exc_info=True)
 
     return {
         "accepted": True,

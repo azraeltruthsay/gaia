@@ -203,7 +203,33 @@ async def release_hold(request: Request):
 
 @router.post("/force")
 async def force_sleep(request: Request):
-    """Immediately trigger sleep transition (ACTIVE → DROWSY → ASLEEP)."""
+    """Immediately trigger sleep transition via lifecycle machine."""
+    # Try lifecycle machine first
+    lifecycle = getattr(request.app.state, "lifecycle_client", None)
+    if lifecycle:
+        try:
+            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+            result = lifecycle.request_transition_sync(
+                TransitionTrigger.USER_REQUEST,
+                target=LifecycleState.SLEEP,
+                reason="force_sleep",
+                timeout=60.0,
+            )
+            # Also transition the local sleep state machine for compatibility
+            manager = getattr(request.app.state, "sleep_wake_manager", None)
+            if manager and result.ok:
+                manager.initiate_drowsy()
+            return {
+                "accepted": result.ok,
+                "state": result.to_state if result.ok else result.from_state,
+                "lifecycle": True,
+                "error": result.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.warning("Lifecycle force-sleep failed, falling back: %s", e)
+
+    # Fallback: legacy local state machine
     manager = getattr(request.app.state, "sleep_wake_manager", None)
     if manager is None:
         return JSONResponse(
@@ -221,8 +247,6 @@ async def force_sleep(request: Request):
         )
 
     entered_sleep = manager.initiate_drowsy()
-
-    # Release GPU via the sleep cycle loop (same path as idle-triggered sleep)
     sleep_loop = getattr(request.app.state, "sleep_cycle_loop", None)
     if sleep_loop and entered_sleep:
         try:
@@ -240,12 +264,39 @@ async def force_sleep(request: Request):
 
 @router.post("/deep")
 async def deep_sleep(request: Request):
-    """Deep sleep — unload ALL models from GPU AND system RAM.
+    """Deep sleep — unload ALL models from GPU via lifecycle machine.
 
-    Transitions to ASLEEP, then unloads Core and Nano engines via
-    the orchestrator's tier router. GPU goes to zero. Core engine
-    stays in managed standby (HTTP server alive, no model loaded).
+    Transitions to DEEP_SLEEP via the orchestrator's lifecycle state machine.
+    The lifecycle machine handles all tier unloading with rollback on failure.
     """
+    # Try lifecycle machine first
+    lifecycle = getattr(request.app.state, "lifecycle_client", None)
+    if lifecycle:
+        try:
+            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+            result = lifecycle.request_transition_sync(
+                TransitionTrigger.USER_REQUEST,
+                target=LifecycleState.DEEP_SLEEP,
+                reason="deep_sleep_button",
+                timeout=60.0,
+            )
+            # Also transition the local sleep state machine
+            manager = getattr(request.app.state, "sleep_wake_manager", None)
+            if manager and result.ok:
+                manager.initiate_drowsy()
+            return {
+                "accepted": result.ok,
+                "mode": "deep_sleep",
+                "state": result.to_state if result.ok else result.from_state,
+                "lifecycle": True,
+                "actions": result.actions,
+                "error": result.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.warning("Lifecycle deep-sleep failed, falling back: %s", e)
+
+    # Fallback: legacy direct unload
     import httpx as _httpx
 
     manager = getattr(request.app.state, "sleep_wake_manager", None)

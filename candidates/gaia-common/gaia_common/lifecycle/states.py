@@ -97,7 +97,7 @@ USER_REQUEST_TARGETS: Dict[LifecycleState, Set[LifecycleState]] = {
         LifecycleState.AWAKE, LifecycleState.FOCUSING,
     },
     LifecycleState.FOCUSING: {
-        LifecycleState.AWAKE, LifecycleState.SLEEP,
+        LifecycleState.AWAKE, LifecycleState.SLEEP, LifecycleState.DEEP_SLEEP,
     },
     LifecycleState.MEDITATION: {
         LifecycleState.AWAKE,

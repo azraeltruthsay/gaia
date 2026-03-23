@@ -237,6 +237,16 @@ async def lifespan(app: FastAPI):
                 if _sleep_loop.heartbeat else None
             )
 
+            # Lifecycle client — queries the orchestrator's unified state machine
+            try:
+                from gaia_common.lifecycle.client import LifecycleClient
+                _orchestrator_url = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+                app.state.lifecycle_client = LifecycleClient(_orchestrator_url)
+                logger.info("Lifecycle client initialized (orchestrator: %s)", _orchestrator_url)
+            except ImportError:
+                app.state.lifecycle_client = None
+                logger.debug("Lifecycle client not available")
+
             # Wire timeline store to agent_core for message events
             if _agent_core is not None:
                 _agent_core.timeline_store = _sleep_loop.timeline_store
