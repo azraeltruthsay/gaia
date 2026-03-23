@@ -228,6 +228,7 @@ class AgentCore:
         self.config = ai_manager.config
         self.ethical_sentinel = ethical_sentinel
         self.session_manager = ai_manager.session_manager
+        self._lifecycle_client = None  # Set by main.py after init
         # Ensure instance-level logger exists for use throughout the class
         # Some code paths reference self.logger; initialize it to the module logger
         try:
@@ -248,6 +249,23 @@ class AgentCore:
 
         # Initialize Identity Guardian for reflex and prompt validation
         self.identity_guardian = CoreIdentityGuardian(self.config)
+
+    @property
+    def _is_prime_available(self) -> bool:
+        """Check if Prime (gpu_prime) is available for inference.
+
+        Uses the lifecycle state machine when available, falls back to
+        the legacy _gpu_released flag on the model pool.
+        """
+        if self._lifecycle_client:
+            try:
+                snapshot = self._lifecycle_client.get_state_sync(timeout=2.0)
+                from gaia_common.lifecycle.states import LifecycleState
+                return LifecycleState(snapshot.state) == LifecycleState.FOCUSING
+            except Exception:
+                pass
+        # Legacy fallback
+        return not getattr(self.model_pool, '_gpu_released', False)
 
     def _resolve_adapter(self, model_name: str) -> Optional[str]:
         """Return the LoRA adapter name to use for the given model, or None.
@@ -894,8 +912,8 @@ class AgentCore:
             # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
             # - "oracle" => External/cloud escalation
             selected_model_name = None
-            # Check if GPU is released for sleep — skip gpu_prime in all selection paths
-            _gpu_sleeping = getattr(self.model_pool, '_gpu_released', False)
+            # Check if Prime is available via lifecycle state machine
+            _gpu_sleeping = not self._is_prime_available
     
             # 1. Model Selection (Prioritize Fast-Path & Overrides)
             text_lower = user_input.lower()
@@ -3539,7 +3557,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             try:
                 polish_flag = os.getenv("GAIA_THINKER_POLISH", "").lower() in ("1", "true", "yes")
                 if polish_flag and selected_model_name == "lite":
-                    _gpu_sleeping_polish = getattr(self.model_pool, '_gpu_released', False)
+                    _gpu_sleeping_polish = not self._is_prime_available
                     thinker_name = None
                     for cand in ["gpu_prime", "prime", "cpu_prime"]:
                         if cand == "gpu_prime" and _gpu_sleeping_polish:

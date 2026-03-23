@@ -247,9 +247,10 @@ async def lifespan(app: FastAPI):
                 app.state.lifecycle_client = None
                 logger.debug("Lifecycle client not available")
 
-            # Wire timeline store to agent_core for message events
+            # Wire timeline store and lifecycle client to agent_core
             if _agent_core is not None:
                 _agent_core.timeline_store = _sleep_loop.timeline_store
+                _agent_core._lifecycle_client = app.state.lifecycle_client
 
             _sleep_loop.start()
             logger.info("Sleep cycle loop started")
