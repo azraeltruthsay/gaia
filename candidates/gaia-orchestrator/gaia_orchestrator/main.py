@@ -61,6 +61,7 @@ _gpu_lock = asyncio.Lock()
 _nano_pressure_task: Optional[asyncio.Task] = None
 _watch_manager = None
 _tier_router = None
+_lifecycle_machine = None
 
 
 @asynccontextmanager
@@ -129,6 +130,17 @@ async def lifespan(app: FastAPI):
         logger.info("Tier router initialized")
     except ImportError:
         logger.warning("Tier router not available yet")
+
+    # Initialize lifecycle state machine
+    try:
+        global _lifecycle_machine
+        from .lifecycle_machine import LifecycleMachine
+        _lifecycle_machine = LifecycleMachine(_state_manager)
+        await _lifecycle_machine.load_persisted_state()
+        await _lifecycle_machine.reconcile()
+        logger.info("Lifecycle state machine initialized: %s", _lifecycle_machine._snapshot.state)
+    except Exception:
+        logger.warning("Lifecycle state machine initialization failed", exc_info=True)
 
     # Start Nano VRAM pressure monitor
     global _nano_pressure_task
@@ -1127,6 +1139,85 @@ async def tier_sae_record(tier: str, tag: str = "handoff_test"):
     if _tier_router is None:
         raise HTTPException(status_code=501, detail="Tier router not available")
     return await _tier_router.sae_record(tier=tier, tag=tag)
+
+
+# =============================================================================
+# Lifecycle State Machine — Unified GPU Lifecycle
+# =============================================================================
+
+class LifecycleTransitionRequest(BaseModel):
+    """Request a lifecycle state transition."""
+    trigger: str
+    target: Optional[str] = None
+    reason: str = ""
+
+
+@app.get("/lifecycle/state")
+async def lifecycle_state():
+    """Get current lifecycle snapshot — the single source of truth."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    snapshot = await _lifecycle_machine.get_snapshot()
+    return snapshot.model_dump()
+
+
+@app.post("/lifecycle/transition")
+async def lifecycle_transition(req: LifecycleTransitionRequest):
+    """Request a lifecycle state transition."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+
+    from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+
+    try:
+        trigger = TransitionTrigger(req.trigger)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid trigger: {req.trigger}")
+
+    target = None
+    if req.target:
+        try:
+            target = LifecycleState(req.target)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid target: {req.target}")
+
+    result = await _lifecycle_machine.transition(trigger, target, req.reason)
+    status = 200 if result.ok else 409
+    return JSONResponse(status_code=status, content=result.model_dump())
+
+
+@app.get("/lifecycle/transitions")
+async def lifecycle_transitions():
+    """Get available transitions from current state."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    return await _lifecycle_machine.get_available_transitions()
+
+
+@app.get("/lifecycle/history")
+async def lifecycle_history(limit: int = 50):
+    """Get recent transition history."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    records = await _lifecycle_machine.get_history(limit)
+    return [r.model_dump() for r in records]
+
+
+@app.post("/lifecycle/reconcile")
+async def lifecycle_reconcile():
+    """Force reconciliation — probe all tiers and infer actual state."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    return await _lifecycle_machine.reconcile()
+
+
+@app.get("/lifecycle/tiers")
+async def lifecycle_tiers():
+    """Get live per-tier status (probes all engines)."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    snapshot = await _lifecycle_machine.get_snapshot()
+    return {k: v.model_dump() for k, v in snapshot.tiers.items()}
 
 
 # =============================================================================

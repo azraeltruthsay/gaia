@@ -163,7 +163,7 @@ services:
       # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
       # per-request. Training overrides few-shot pattern-following with hedging.
       # Identity lives in Core (Operator), not Nano (Reflex).
-      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/warm_pool/Qwen3.5-0.8B-Abliterated}
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-Abliterated}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
       # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
       - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v7-Q8_0.gguf
