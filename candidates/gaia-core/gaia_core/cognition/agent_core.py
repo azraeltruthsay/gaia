@@ -1768,11 +1768,20 @@ class AgentCore:
                     reflection_model = selected_model
             try:
                 # REFLEX: skip reflection entirely
-                # OPERATOR: run reflection (TODO: cap to 1 iteration)
+                # OPERATOR: 1 reflection iteration (simple queries don't need deep reflection)
                 # THINKER: full reflection (up to 3 iterations)
                 if pipeline_depth == "REFLEX":
                     logger.info("[PIPELINE_DEPTH] REFLEX — skipping reflection")
                     refined_plan_text = initial_plan_text
+                elif pipeline_depth == "OPERATOR":
+                    # Cap OPERATOR to 1 reflection iteration — prevents over-thinking
+                    # trivial questions like "how much wood could a woodchuck chuck"
+                    orig_iters = getattr(self.config, 'max_reflection_iterations', 3)
+                    self.config.max_reflection_iterations = 1
+                    try:
+                        refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
+                    finally:
+                        self.config.max_reflection_iterations = orig_iters
                 else:
                     refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
                 # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
