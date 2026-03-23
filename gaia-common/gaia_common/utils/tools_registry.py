@@ -79,6 +79,17 @@ TOOLS = {
         "description": "Returns an expanded dynamic world-state snapshot (telemetry + models + MCP tool list).",
         "params": {}
     },
+    "recall_events": {
+        "description": "Recall recent system events from episodic memory. Use this when asked about recent activity, what happened, or what you remember. Returns a timeline of lifecycle transitions, conversations, training runs, and system events.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "number", "description": "How many hours of history to recall (default: 6, max: 72). Use small values for 'what just happened' and larger for 'what happened today'."},
+                "limit": {"type": "integer", "description": "Maximum number of events to return (default: 20)."},
+                "cfr": {"type": "boolean", "description": "If true, return the full detailed log suitable for CFR analysis. Default false (returns concise summary)."}
+            }
+        }
+    },
     "describe_tool": {
         "description": "Returns the JSON schema for a specified tool.",
         "params": {

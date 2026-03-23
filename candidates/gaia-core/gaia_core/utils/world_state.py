@@ -80,6 +80,7 @@ def _get_registry() -> Dict:
 # its core capabilities.  Keep this list tight (≤10) — it's injected
 # into every turn.
 ESSENTIAL_TOOLS = [
+    "recall_events",    # recall recent system events from episodic memory
     "web_search",       # search the web via DuckDuckGo
     "web_fetch",        # fetch + extract text from a trusted URL
     "read_file",        # read a file's contents
@@ -199,6 +200,14 @@ def _capability_affordances(tools: List[str]) -> List[str]:
             'introspect_logs with params: service (gaia-core|gaia-web|gaia-mcp|gaia-study|discord), '
             'lines (int, default 50), search (substring filter), level (DEBUG|INFO|WARNING|ERROR). '
             'Use this when debugging your own behavior, sleep/wake state, or response routing.'
+        )
+
+    # Episodic memory — recall recent events
+    if "recall_events" in tools:
+        affordances.append(
+            'You have episodic memory — use recall_events to remember what happened recently. '
+            'When asked "what do you remember?" or "what happened?", use this tool instead of guessing. '
+            'Params: hours (float, default 6), limit (int, default 20), cfr (bool, for deep analysis).'
         )
 
     return affordances

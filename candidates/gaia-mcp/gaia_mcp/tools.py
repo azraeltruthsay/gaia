@@ -108,6 +108,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "list_tree": lambda p: _list_tree_impl(p),
         "world_state": lambda p: world_state_detail(),
         "gpu_status": lambda p: world_state_detail(),
+        "recall_events": lambda p: _recall_events_impl(p),
         "memory_status": lambda p: _memory_status_impl(p),
         "memory_query": lambda p: _memory_query_impl(p),
         "memory_rebuild_index": lambda p: _memory_rebuild_index_impl(p),
@@ -472,6 +473,43 @@ def _read_file_impl(params: dict):
 # VECTOR_INDEX_PATH (from mcp_lite_server.py) is missing here. It was a global constant.
 # Need to decide how to provide it. Perhaps through config.
 VECTOR_INDEX_PATH = Path("./knowledge/vector_store/index.json") # Placeholder for now.
+
+
+def _recall_events_impl(params: dict):
+    """Recall recent system events from episodic memory."""
+    try:
+        from gaia_common.event_buffer import EventBuffer
+        buf = EventBuffer.instance()
+
+        hours = float(params.get("hours", 6))
+        limit = int(params.get("limit", 20))
+        use_cfr = bool(params.get("cfr", False))
+
+        if use_cfr:
+            # Full detailed log for CFR analysis
+            text = buf.full_formatted(hours=hours)
+            events = buf.full(hours=hours)
+            return {
+                "ok": True,
+                "mode": "cfr",
+                "hours": hours,
+                "event_count": len(events),
+                "timeline": text,
+            }
+        else:
+            # Concise recent summary
+            events = buf.recent(n=limit)
+            text = buf.recent_formatted(n=limit)
+            return {
+                "ok": True,
+                "mode": "recent",
+                "event_count": len(events),
+                "timeline": text,
+            }
+    except ImportError:
+        return {"ok": False, "error": "Event buffer not available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _memory_status_impl(params: dict):
