@@ -11,9 +11,19 @@ Each container imports this library and serves one model through it.
 
     # Or run as a standalone server:
     serve("/models/Qwen3.5-2B-GAIA-Core-v3", port=8092)
+
+When the standalone gaia-engine package is installed, this module
+re-exports from it. Otherwise, uses the local implementation.
 """
 
-from gaia_common.engine.core import GAIAEngine, serve
-from gaia_common.engine.thought_composer import compose_thoughts, estimate_composed_size
-
-__all__ = ["GAIAEngine", "serve", "compose_thoughts", "estimate_composed_size"]
+try:
+    # Prefer standalone gaia-engine package when installed
+    from gaia_engine import GAIAEngine, serve, EngineManager, serve_managed
+    from gaia_engine import compose_thoughts, estimate_composed_size
+    __all__ = ["GAIAEngine", "serve", "EngineManager", "serve_managed",
+               "compose_thoughts", "estimate_composed_size"]
+except ImportError:
+    # Fall back to local implementation
+    from gaia_common.engine.core import GAIAEngine, serve
+    from gaia_common.engine.thought_composer import compose_thoughts, estimate_composed_size
+    __all__ = ["GAIAEngine", "serve", "compose_thoughts", "estimate_composed_size"]

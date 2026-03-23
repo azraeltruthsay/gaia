@@ -26,6 +26,11 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies.engine]
+# Install the standalone GAIA Engine package for inference capabilities.
+# When installed, gaia_common.engine and gaia_common.lifecycle re-export from it.
+engine = ["gaia-engine @ git+https://github.com/azraeltruthsay/gaia-engine.git@v1.1.0"]
+
 [project.urls]
 "Homepage" = "https://github.com/your-repo/gaia"
 "Bug Tracker" = "https://github.com/your-repo/gaia/issues"
