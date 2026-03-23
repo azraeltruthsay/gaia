@@ -286,6 +286,13 @@ class LifecycleMachine:
             for tier, endpoint in self._tier_endpoints.items():
                 self._snapshot.tiers[tier] = await self._probe_tier(tier, endpoint)
 
+            # Update audio flags based on target state
+            if resolved_target == LifecycleState.LISTENING:
+                self._snapshot.audio_stt = True
+            elif resolved_target == LifecycleState.AWAKE:
+                self._snapshot.audio_stt = False
+                self._snapshot.audio_tts = False
+
             # Success — enter target state
             elapsed = time.time() - start
             record = TransitionRecord(

@@ -419,10 +419,10 @@ class VoiceManager:
     # -- Core sleep-state integration --
 
     async def _notify_core_voice_state(self, connected: bool) -> None:
-        """Tell gaia-core we joined/left voice (best-effort).
+        """Tell gaia-core we joined/left voice + trigger lifecycle transition.
 
-        When connected=True, gaia-core sets voice_active and sends an implicit
-        wake signal so Prime starts booting while audio stays alive.
+        When connected=True: AWAKE → LISTENING (STT loaded alongside Core+Nano).
+        When connected=False: LISTENING → AWAKE (STT can be unloaded).
         """
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -432,6 +432,29 @@ class VoiceManager:
                 )
         except Exception:
             logger.debug("Voice state notification to core failed (non-fatal)", exc_info=True)
+
+        # Lifecycle transition: AWAKE ↔ LISTENING
+        orchestrator = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+        trigger = "voice_join" if connected else "voice_leave"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{orchestrator}/lifecycle/transition",
+                    json={"trigger": trigger, "reason": f"Discord voice {'join' if connected else 'leave'}"},
+                )
+                if resp.status_code in (200, 409):
+                    data = resp.json()
+                    logger.info("Lifecycle: %s (%s)", data.get("to_state", data.get("error", "?")), trigger)
+        except Exception:
+            logger.debug("Lifecycle voice transition failed (non-fatal)", exc_info=True)
+
+        # Log to event buffer
+        try:
+            from gaia_common.event_buffer import log_event
+            log_event("voice", f"Voice {'connected' if connected else 'disconnected'}",
+                      source="voice_manager")
+        except Exception:
+            pass
 
     async def _get_core_state(self) -> str | None:
         """Query gaia-core sleep state (best-effort)."""
