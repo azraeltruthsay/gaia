@@ -52,10 +52,27 @@ Caddy reverse proxy with self-signed cert for WireGuard access:
 
 Config at `/etc/caddy/conf.d/gaia.caddyfile`. Manual cert at `/etc/caddy/gaia.crt`.
 
-## Known Issues for Next Session
+## Extended Sprint (25 commits total)
 
-1. **No periodic reconciliation** — lifecycle machine reconciles on startup but not continuously. Models can drift without detection.
-2. **GAIA Engine needs SSE streaming** — managed proxy buffers full response. Not a blocker but adds latency for long responses.
-3. **Engine queueing** — GAIA Engine has no request queue. Multiple rapid requests can overwhelm it.
-4. **Discord rate limiting** — rapid container restarts exhaust Discord's IDENTIFY quota. Need a reconnect backoff strategy.
-5. **Phase 5 cleanup** — old state enums (GaiaState, GPUState, GPUOwner) still exist as dead code.
+After the initial 12 commits, continued pushing through the backlog:
+
+13. **Periodic lifecycle reconciliation** — 60s loop auto-detects and reloads missing models
+14. **Knowledge contamination fix** — excluded dnd_campaign from semantic probe
+15. **World state fix** — correct file used, immune system truncated, Recent Events visible
+16. **Reflection cap** — OPERATOR capped to 1 iteration (was 3, caused over-thinking)
+17. **Engine queueing** — semaphore limits concurrent inference to 1
+18. **Event buffer expansion** — sleep transitions + model routing decisions logged
+19. **Warm pool config** — GPTQ Prime + boot seeding
+20. **Worker crash tracing** — traceback + event buffer logging for silent unloads
+21. **Discord bot fix** — root cause: docker-compose.override.yml had --reload on gaia-web
+22. **LISTENING state** — voice join/leave triggers lifecycle transitions
+23. **MEDITATION state** — training handoffs delegate to lifecycle machine
+24. **SSE streaming** — EngineHandler returns text/event-stream for stream=true
+25. **Legacy deprecation** — GaiaState + _gpu_released marked as legacy with migration notes
+
+## Remaining for Next Session
+
+1. **GAIA Engine standalone repo** — extract to own GitHub repo with semver
+2. **True per-token SSE streaming** — current SSE sends full response as single chunk
+3. **Nano silent unloading root cause** — instrumented but not yet observed/diagnosed
+4. **Full Phase 5 cleanup** — remove GaiaState, GPUState, GPUOwner entirely (needs test updates)
