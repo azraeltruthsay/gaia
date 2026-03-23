@@ -924,16 +924,19 @@ class AgentCore:
             # Check if Prime is available via lifecycle state machine
             _gpu_sleeping = not self._is_prime_available
 
-            # 0. Programmatic intercept: letter-counting questions
-            # Models can't count letters due to tokenization. Intercept these
-            # questions and call count_chars directly.
+            # 0. Character-level analysis injection
+            # Models can't see individual letters due to tokenization.
+            # When a question involves letter counting, spelling, or character
+            # analysis, inject a character map so the model can READ the answer.
             import re as _re_count
-            # Pattern 1: greedy — handles "how many times does r appear in strawberry"
+
+            _char_maps = []
+
+            # Pattern A: "how many [char] in [word]" (specific letter count)
             _count_match = _re_count.search(
                 r"how many\s+(?:times?\s+(?:does?\s+)?)?(?:the\s+)?(?:letter\s+)?([a-zA-Z])(?:'s)?\s+.*\bin\s+(?:the\s+)?(?:word\s+)?(\w+)",
                 user_input, _re_count.IGNORECASE)
             if not _count_match:
-                # Pattern 2: simpler "how many Rs are in strawberry"
                 _count_match = _re_count.search(
                     r"how many\s+([a-zA-Z])s?\s+(?:are\s+)?(?:there\s+)?(?:in\s+)?(?:the\s+)?(?:word\s+)?(\w+)",
                     user_input, _re_count.IGNORECASE)
@@ -942,17 +945,58 @@ class AgentCore:
                 _count = _word.count(_char)
                 _positions = [i + 1 for i, c in enumerate(_word) if c == _char]
                 _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
-                # Inject character map into the user's prompt so the model can READ the answer
-                _char_map = (
-                    f"\n\n[Character Analysis — your tokenizer cannot see individual letters, "
-                    f"so here is the word spelled out for you]\n"
-                    f'The word "{_word}" has {len(_word)} characters: {_spelled}\n'
-                    f'The letter "{_char}" appears at position(s): {", ".join(str(p) for p in _positions)} '
-                    f'— that is {_count} occurrence{"s" if _count != 1 else ""}.\n'
-                    f"[Use this data to answer the user's question naturally.]"
+                _char_maps.append(
+                    f'Word "{_word}" ({len(_word)} chars): {_spelled}\n'
+                    f'Letter "{_char}" appears at position(s): {", ".join(str(p) for p in _positions)} '
+                    f'— {_count} occurrence{"s" if _count != 1 else ""}.'
                 )
-                user_input = user_input + _char_map
-                logger.info("[INTERCEPT] Injected character map for '%s' in '%s' (%d occurrences)", _char, _word, _count)
+
+            # Pattern B: "spell [word]" / "letters in [word]" / "how many letters"
+            # Also catch "how do you spell", "what letters are in", "break down the word"
+            if not _char_maps:
+                _spell_match = _re_count.search(
+                    r"(?:spell(?:ing)?|letters?\s+in|how many letters|break\s*down|character[s]?\s+in)\s+(?:the\s+)?(?:word\s+)?['\"]?(\w{3,})['\"]?",
+                    user_input, _re_count.IGNORECASE)
+                if _spell_match:
+                    _word = _spell_match.group(1).lower()
+                    _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
+                    # Build letter frequency
+                    _freq = {}
+                    for c in _word:
+                        _freq[c] = _freq.get(c, 0) + 1
+                    _freq_str = ", ".join(f"{c}={n}" for c, n in sorted(_freq.items()) if n > 1)
+                    _char_maps.append(
+                        f'Word "{_word}" ({len(_word)} chars): {_spelled}'
+                        + (f'\nRepeated letters: {_freq_str}' if _freq_str else '')
+                    )
+
+            # Pattern C: quoted words in questions about letters/counting/spelling
+            if not _char_maps:
+                _quoted = _re_count.findall(r'["\'](\w{3,})["\']', user_input)
+                _has_letter_context = any(w in user_input.lower() for w in
+                    ["letter", "spell", "character", "count", "how many", "contain"])
+                if _quoted and _has_letter_context:
+                    for _word in _quoted[:3]:  # Max 3 words
+                        _word = _word.lower()
+                        _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
+                        _freq = {}
+                        for c in _word:
+                            _freq[c] = _freq.get(c, 0) + 1
+                        _freq_str = ", ".join(f"{c}={n}" for c, n in sorted(_freq.items()) if n > 1)
+                        _char_maps.append(
+                            f'Word "{_word}" ({len(_word)} chars): {_spelled}'
+                            + (f'\nRepeated letters: {_freq_str}' if _freq_str else '')
+                        )
+
+            if _char_maps:
+                _injection = (
+                    "\n\n[Character Analysis — your tokenizer groups letters into chunks, "
+                    "so you cannot see individual characters. Use this pre-computed data:]\n"
+                    + "\n".join(_char_maps) +
+                    "\n[Answer the user's question naturally using this data.]"
+                )
+                user_input = user_input + _injection
+                logger.info("[INTERCEPT] Injected character map(s) for %d word(s)", len(_char_maps))
 
             # 1. Model Selection (Prioritize Fast-Path & Overrides)
             text_lower = user_input.lower()
