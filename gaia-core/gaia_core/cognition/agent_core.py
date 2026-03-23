@@ -2940,8 +2940,10 @@ class AgentCore:
 
             if isinstance(res, dict):
                 reflex_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                # Capability gate: Nano signals it can't answer confidently
-                if reflex_text.upper().startswith("ESCALATE"):
+                # Capability gate: Nano signals it can't answer confidently.
+                # Check anywhere in the response, not just start — Nano often
+                # prepends time/context before the ESCALATE marker.
+                if "ESCALATE" in reflex_text.upper():
                     self.logger.info("Reflex: Nano self-escalated — deferring to run_turn()")
                     return ""
                 # Strip think tags and suppress repetition
