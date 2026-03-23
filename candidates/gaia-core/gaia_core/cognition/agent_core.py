@@ -941,17 +941,18 @@ class AgentCore:
                 _char, _word = _count_match.group(1).lower(), _count_match.group(2).lower()
                 _count = _word.count(_char)
                 _positions = [i + 1 for i, c in enumerate(_word) if c == _char]
-                _spelled = "-".join(_word)
-                _answer = (
-                    f"The letter '{_char}' appears {_count} time{'s' if _count != 1 else ''} "
-                    f"in the word \"{_word}\": {_spelled}. "
-                    f"Position{'s' if _count != 1 else ''}: {', '.join(str(p) for p in _positions)}."
+                _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
+                # Inject character map into the user's prompt so the model can READ the answer
+                _char_map = (
+                    f"\n\n[Character Analysis — your tokenizer cannot see individual letters, "
+                    f"so here is the word spelled out for you]\n"
+                    f'The word "{_word}" has {len(_word)} characters: {_spelled}\n'
+                    f'The letter "{_char}" appears at position(s): {", ".join(str(p) for p in _positions)} '
+                    f'— that is {_count} occurrence{"s" if _count != 1 else ""}.\n'
+                    f"[Use this data to answer the user's question naturally.]"
                 )
-                logger.info("[INTERCEPT] Letter-counting question answered programmatically: %s", _answer)
-                self.session_manager.add_message(session_id, "user", user_input)
-                self.session_manager.add_message(session_id, "assistant", _answer)
-                yield {"type": "token", "value": _answer}
-                return
+                user_input = user_input + _char_map
+                logger.info("[INTERCEPT] Injected character map for '%s' in '%s' (%d occurrences)", _char, _word, _count)
 
             # 1. Model Selection (Prioritize Fast-Path & Overrides)
             text_lower = user_input.lower()
