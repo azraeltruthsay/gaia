@@ -2378,7 +2378,13 @@ class AgentCore:
             packet.response.candidate = user_facing_response
             packet.response.confidence = 0.93 # Placeholder
             self.ai_manager.status["last_response"] = user_facing_response
-            self.session_manager.add_message(session_id, "assistant", strip_think_tags(user_facing_response))
+            # Don't save degenerate or triage-contaminated responses to session history
+            _save_text = strip_think_tags(user_facing_response).strip()
+            if _save_text and len(_save_text) > 5 and not any(
+                m in _save_text.upper() for m in ["ESCALATE", "CONFIDENCE ASSESSMENT TASK"]):
+                self.session_manager.add_message(session_id, "assistant", _save_text)
+            else:
+                logger.warning("Skipping session save — degenerate response: %s", _save_text[:100])
             self._emit_timeline_message(session_id, "assistant", source)
 
             if execution_results:
