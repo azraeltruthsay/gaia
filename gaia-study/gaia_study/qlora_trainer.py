@@ -256,6 +256,13 @@ class QLoRATrainer:
                 # kernel issues with non-64-divisible layers.
                 try:
                     from gptqmodel import GPTQModel, BACKEND
+                    # Register Qwen3.5 model def — multimodal model needs special handling
+                    try:
+                        from gaia_study.merge_and_requantize import _register_qwen3_5
+                        _register_qwen3_5()
+                        logger.info("Registered Qwen3.5 model definition for gptqmodel")
+                    except Exception as _reg_err:
+                        logger.debug("Qwen3.5 registration skipped: %s", _reg_err)
                     logger.info("Loading GPTQ model via gptqmodel with TORCH backend...")
                     self.model = GPTQModel.load(
                         self.base_model_path,
