@@ -221,15 +221,13 @@ class QLoRATrainer:
             )
 
             if is_prequantized:
-                # Pre-quantized models (AWQ/GPTQ) have broken gradient flow —
-                # their GEMM kernels don't implement backward pass, causing
-                # grad_norm: inf and no learning. Use the bf16 base model with
-                # BnB NF4 for training instead. Set BASE_MODEL_PATH to bf16 weights.
-                raise ValueError(
-                    f"Model at {self.base_model_path} is pre-quantized ({model_cfg['quantization_config'].get('quant_method', 'unknown')}). "
-                    "Pre-quantized models cannot be fine-tuned (no gradient flow through GEMM kernels). "
-                    "Set BASE_MODEL_PATH to the bf16 base model — BnB NF4 will quantize it for training, "
-                    "and the trained LoRA adapter can be applied to the AWQ model at inference time."
+                # GPTQ models: peft >=0.10 supports LoRA on GPTQ via autograd-compatible
+                # wrappers. Load without BnB — GPTQ is already quantized.
+                quant_method = model_cfg['quantization_config'].get('quant_method', 'unknown')
+                logger.info(
+                    "Model is pre-quantized (%s). Loading for GPTQ+LoRA fine-tuning "
+                    "(peft %s handles gradient flow through LoRA adapters).",
+                    quant_method, peft.__version__ if 'peft' in dir() else '?'
                 )
 
             # Detect multimodal model — use AutoModelForImageTextToText to
@@ -246,7 +244,20 @@ class QLoRATrainer:
             except Exception:
                 pass
 
-            if self.config.load_in_4bit and bitsandbytes is not None:
+            if is_prequantized:
+                # GPTQ model — already quantized, load directly. No BnB needed.
+                logger.info("Loading pre-quantized GPTQ model directly to GPU...")
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                self.model = auto_cls.from_pretrained(
+                    self.base_model_path,
+                    trust_remote_code=True,
+                    device_map={"": 0},
+                    low_cpu_mem_usage=True,
+                    torch_dtype=torch.bfloat16,
+                )
+            elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
                 bnb_config = transformers.BitsAndBytesConfig(
