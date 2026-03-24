@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gaia_web.routes.blueprints import router as blueprints_router
@@ -101,8 +101,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="GAIA Web Gateway")
 
-# Mount static files
+# Static files directory
 static_dir = Path(__file__).parent.parent / "static"
+
+# Root route — serve dashboard at /
+@app.get("/")
+async def root():
+    """Serve the Mission Control dashboard."""
+    return FileResponse(str(static_dir / "index.html"))
+
+# Mount static assets at /static
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 

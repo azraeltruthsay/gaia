@@ -104,9 +104,27 @@ function chatPanel() {
     init() {
       this._loadHistory();
       if (this.messages.length === 0) {
-        this.addMessage('Mission Control online. Type a message to talk to GAIA.', 'system');
+        this.addMessage('Mission Control online.', 'system');
+        this._fetchGreeting();
       }
       this._connectAutoStream();
+    },
+
+    async _fetchGreeting() {
+      try {
+        const resp = await fetch('/api/system/sleep');
+        if (resp.ok) {
+          const data = await resp.json();
+          const state = data.state || data.sleep_state || 'unknown';
+          if (state === 'ASLEEP' || state === 'DROWSY') {
+            this.addMessage("I'm currently resting. Send a message to wake me up.", 'gaia');
+          } else {
+            this.addMessage("I'm here. What would you like to talk about?", 'gaia');
+          }
+        }
+      } catch {
+        // Core unreachable — system message is enough
+      }
     },
 
     _loadHistory() {
