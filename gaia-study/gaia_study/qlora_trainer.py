@@ -251,18 +251,27 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Force gptqmodel to use Torch backend (not Marlin) — some layers
-                # have out_features not divisible by 64 which Marlin can't handle
-                import os as _os2
-                _os2.environ["GPTQMODEL_BACKEND"] = "torch"
-                logger.info("Set GPTQMODEL_BACKEND=torch to avoid Marlin kernel issues")
-                self.model = auto_cls.from_pretrained(
-                    self.base_model_path,
-                    trust_remote_code=True,
-                    device_map={"": 0},
-                    low_cpu_mem_usage=True,
-                    torch_dtype=torch.bfloat16,
-                )
+                # Load GPTQ model via gptqmodel directly (not transformers) to
+                # control backend selection. Use TORCH backend to avoid Marlin
+                # kernel issues with non-64-divisible layers.
+                try:
+                    from gptqmodel import GPTQModel, BACKEND
+                    logger.info("Loading GPTQ model via gptqmodel with TORCH backend...")
+                    self.model = GPTQModel.load(
+                        self.base_model_path,
+                        backend=BACKEND.TORCH,
+                        device_map={"": 0},
+                        trust_remote_code=True,
+                    )
+                except ImportError:
+                    logger.info("gptqmodel not available, falling back to transformers...")
+                    self.model = auto_cls.from_pretrained(
+                        self.base_model_path,
+                        trust_remote_code=True,
+                        device_map={"": 0},
+                        low_cpu_mem_usage=True,
+                        torch_dtype=torch.bfloat16,
+                    )
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
