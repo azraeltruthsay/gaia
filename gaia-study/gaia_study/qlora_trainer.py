@@ -308,7 +308,10 @@ class QLoRATrainer:
                         f.stat().st_size for f in base_p.glob("*.bin")
                     ) / (1024**3)
 
-                if bf16_size_gb < max_gpu_gb * 0.8:
+                # NF4 is ~4x compression. The actual GPU usage will be bf16/4.
+                # Allow direct GPU loading if NF4 size fits with headroom.
+                nf4_estimated_gb = bf16_size_gb / 4
+                if nf4_estimated_gb < max_gpu_gb * 0.7:
                     # Model fits on GPU — load directly for full GPU training
                     logger.info(
                         "Loading model to GPU (bf16 size: %.1fGiB fits in %.1fGiB VRAM)",

@@ -468,7 +468,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
       # AWQ model is for inference only (GEMM kernels lack backward pass)
-      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/Huihui-Qwen3.5-9B-abliterated-GPTQ-4bit}
+      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:256
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
