@@ -41,7 +41,7 @@
   </nav>
 
   <!-- ── Chat View (full-page Claude-style) ── -->
-  <section class="view" x-show="$store.nav.currentView === 'chat'" style="display:none">
+  <section class="view" x-data x-show="$store.nav.currentView === 'chat'" style="display:none">
     <div class="chat-fullpage" x-data="chatPanel()">
       <div class="chat-fullpage-header">
         <div class="chat-fp-title">GAIA</div>
