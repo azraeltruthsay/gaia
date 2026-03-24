@@ -291,17 +291,23 @@ class QLoRATrainer:
                         "— loading to CPU for NF4 quantization, then moving to GPU",
                         bf16_size_gb, gpu_free_gb
                     )
-                    # NF4 quantization must happen on GPU — bnb doesn't support CPU.
-                    # The NF4 model is ~5GB for 9B params. Load directly to GPU.
-                    # The caller MUST ensure GPU is clear before calling train.
+                    # NF4 quantization: model too large for direct bf16 GPU load.
+                    # With low_cpu_mem_usage=True and expandable_segments, transformers
+                    # loads shards one at a time and quantizes incrementally. Peak VRAM
+                    # is one shard (~5GB bf16) not the full model.
                     logger.info(
-                        "Loading model directly to GPU with NF4 quantization "
-                        "(bf16 size: %.1fGiB → NF4 ~%.1fGiB on GPU)",
-                        bf16_size_gb, bf16_size_gb / 4
+                        "Loading model to GPU with shard-by-shard NF4 quantization "
+                        "(bf16 size: %.1fGiB, shards loaded incrementally)",
+                        bf16_size_gb
                     )
-                    import gc
+                    import gc, os as _os
                     gc.collect()
                     torch.cuda.empty_cache()
+                    # Ensure expandable segments is set for memory efficiency
+                    _os.environ.setdefault(
+                        "PYTORCH_CUDA_ALLOC_CONF",
+                        "expandable_segments:True,max_split_size_mb:256"
+                    )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
