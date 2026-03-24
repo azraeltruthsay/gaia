@@ -38,13 +38,18 @@ if [ -n "$SAFETENSORS_PATH" ] && [ -d "$SAFETENSORS_PATH" ] && [ "$GAIA_ENGINE_D
         sleep 1
     done
 
-    # Load model via managed engine
-    echo "[nano-entrypoint] Loading model: $SAFETENSORS_PATH (device=$DEVICE)"
-    LOAD_RESULT=$(curl -sf -X POST "http://localhost:$PORT/model/load" \
-        -H "Content-Type: application/json" \
-        -d "{\"model\":\"$SAFETENSORS_PATH\",\"device\":\"$DEVICE\"}" \
-        2>&1) || true
-    echo "[nano-entrypoint] Model load result: $LOAD_RESULT"
+    # Load model — only if GAIA_AUTOLOAD_MODEL=1 (default: standby)
+    GAIA_AUTOLOAD_MODEL="${GAIA_AUTOLOAD_MODEL:-0}"
+    if [ "$GAIA_AUTOLOAD_MODEL" = "1" ]; then
+        echo "[nano-entrypoint] Auto-loading model: $SAFETENSORS_PATH (device=$DEVICE)"
+        LOAD_RESULT=$(curl -sf -X POST "http://localhost:$PORT/model/load" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"$SAFETENSORS_PATH\",\"device\":\"$DEVICE\"}" \
+            2>&1) || true
+        echo "[nano-entrypoint] Model load result: $LOAD_RESULT"
+    else
+        echo "[nano-entrypoint] Standby mode — model will be loaded by orchestrator"
+    fi
 
     wait "$MANAGER_PID"
 

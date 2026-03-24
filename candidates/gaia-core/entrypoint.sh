@@ -64,13 +64,19 @@ if [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$GAI
         sleep 1
     done
 
-    # Load the model via HTTP (spawns worker subprocess)
-    echo "[entrypoint] Loading model via managed engine: $CORE_SAFETENSORS_PATH (device=$CORE_DEVICE)"
-    LOAD_RESULT=$(curl -sf -X POST "http://localhost:$CORE_CPU_PORT/model/load" \
-        -H "Content-Type: application/json" \
-        -d "{\"model\":\"$CORE_SAFETENSORS_PATH\",\"device\":\"$CORE_DEVICE\",\"compile_mode\":\"$COMPILE_MODE\"}" \
-        2>&1) || true
-    echo "[entrypoint] Model load result: $LOAD_RESULT"
+    # Load the model — only if GAIA_AUTOLOAD_MODEL=1 (default: standby)
+    # The orchestrator sends POST /model/load when it's time to use the GPU.
+    GAIA_AUTOLOAD_MODEL="${GAIA_AUTOLOAD_MODEL:-0}"
+    if [ "$GAIA_AUTOLOAD_MODEL" = "1" ]; then
+        echo "[entrypoint] Auto-loading model: $CORE_SAFETENSORS_PATH (device=$CORE_DEVICE)"
+        LOAD_RESULT=$(curl -sf -X POST "http://localhost:$CORE_CPU_PORT/model/load" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"$CORE_SAFETENSORS_PATH\",\"device\":\"$CORE_DEVICE\",\"compile_mode\":\"$COMPILE_MODE\"}" \
+            2>&1) || true
+        echo "[entrypoint] Model load result: $LOAD_RESULT"
+    else
+        echo "[entrypoint] Standby mode — model will be loaded by orchestrator via POST /model/load"
+    fi
 
 # ── Mode 1b: Direct engine (legacy, opt-in) ──────────────────────────────────
 elif [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$GAIA_ENGINE_DIRECT" = "1" ]; then

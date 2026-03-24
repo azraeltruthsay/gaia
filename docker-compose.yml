@@ -113,7 +113,7 @@ services:
       - PRIME_PORT=7777
       - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ}
       - PRIME_DEVICE=cuda
-      - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-1}
+      - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-0}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - SHARED_DIR=/shared
       - PYTHONPATH=/gaia-common
@@ -163,6 +163,7 @@ services:
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - GAIA_ENGINE_TIER=nano
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       # Safetensors mode (GPU-native, enables polygraph + SAE)
       # Loads from tmpfs warm pool for near-instant startup.
       # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
@@ -243,6 +244,7 @@ services:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
