@@ -788,11 +788,20 @@ class GAIAEngine:
                     break
                 generated.append(token)
 
-                # Forward single token (no hidden states capture for speed)
+                # Forward single token
                 with torch.no_grad():
-                    out = self.model(next_id, past_key_values=current_kv, use_cache=True)
+                    out = self.model(next_id, past_key_values=current_kv,
+                                     use_cache=True, output_hidden_states=capture)
                 current_kv = out.past_key_values
                 logits = out.logits[:, -1, :]
+
+                # Write activation for live visualization
+                if capture and hasattr(out, "hidden_states") and out.hidden_states:
+                    snap = self.monitor.capture(out.hidden_states)
+                    token_text = self.tokenizer.decode([token], skip_special_tokens=True)
+                    _write_activation(
+                        os.environ.get("GAIA_ENGINE_TIER", "core"),
+                        token_text, step, "", snap)
 
             # Decode
             text = self.tokenizer.decode(generated, skip_special_tokens=True)
