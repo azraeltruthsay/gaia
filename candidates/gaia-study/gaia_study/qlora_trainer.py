@@ -251,16 +251,14 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Override GPTQ config to use basic kernel (not Marlin/exllama)
-                from transformers import GPTQConfig
-                _gptq_cfg = GPTQConfig(
-                    bits=model_cfg['quantization_config'].get('bits', 4),
-                    use_exllama=False,
-                )
+                # Force gptqmodel to use Torch backend (not Marlin) — some layers
+                # have out_features not divisible by 64 which Marlin can't handle
+                import os as _os2
+                _os2.environ["GPTQMODEL_BACKEND"] = "torch"
+                logger.info("Set GPTQMODEL_BACKEND=torch to avoid Marlin kernel issues")
                 self.model = auto_cls.from_pretrained(
                     self.base_model_path,
                     trust_remote_code=True,
-                    quantization_config=_gptq_cfg,
                     device_map={"": 0},
                     low_cpu_mem_usage=True,
                     torch_dtype=torch.bfloat16,
