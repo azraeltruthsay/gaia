@@ -384,13 +384,8 @@ html, body {
 .neuron-fiber.tier-core.idle { stroke: #90caf9; }
 .neuron-fiber.tier-prime.idle { stroke: #ce93d8; }
 /* Firing animation — animated dash simulates current racing through fiber */
+/* Firing class reserved but no dash animation — clean solid lines only */
 .neuron-fiber.firing {
-  stroke-dasharray: 6 4;
-  animation: fiber-current 0.3s linear infinite;
-}
-@keyframes fiber-current {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -10; }
 }
 /* Depth pathway flash animation */
 .pathway.depth {

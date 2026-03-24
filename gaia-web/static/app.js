@@ -836,9 +836,9 @@ function mindMapPanel() {
         .attr('x2', d => d.x2)
         .attr('y2', d => d.y2)
         .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
-        .attr('stroke-width', 1)
+        .attr('stroke-width', 0.5)
         .attr('stroke-linecap', 'round')
-        .attr('opacity', 0.06)
+        .attr('opacity', 0.04)
         .on('mouseover', function(evt, d) {
           const active = self._activeNeurons.get(d.id);
           self.hoveredFeature = active ? {
@@ -985,43 +985,38 @@ function mindMapPanel() {
 
         if (frameActiveIds.has(d.id) && active) {
           const str = active.strength;
-          const width = Math.max(2, Math.min(5, 1.5 + str * 0.25));
-          // Concept color if this neuron has a named feature, else heat scale
+          // Thin lines: 1px idle → max 2px active. No bulbous strokes.
+          const width = Math.min(2, 1 + str * 0.06);
           const conceptColor = _getConceptColor(active.label);
           const activeColor = conceptColor || colorScale(str);
           el.classed('idle', false)
             .classed('active', true)
-            .classed('firing', true)
-            .classed('glow', str > 5);
-          el.attr('stroke', '#ffffff')
-            .attr('stroke-width', width + 1.5)
-            .attr('opacity', 1)
-            .attr('filter', `url(#neuron-glow-${tier})`)
-            .transition().duration(250)
+            .classed('firing', false);  // no dash animation — just color
+          // No white flash — go straight to concept color
+          el.transition().duration(200)
             .attr('stroke', activeColor)
             .attr('stroke-width', width)
-            .attr('opacity', 0.85)
-            .attr('filter', str > 5 ? `url(#neuron-glow-${tier})` : null);
+            .attr('opacity', 0.8)
+            .attr('filter', str > 12 ? `url(#neuron-glow-${tier})` : null);
 
           // Stretch outer endpoint toward strongest connected synapse
           const mySynapses = self._synapses.filter(s => s.neuronA === d.id || s.neuronB === d.id);
           if (mySynapses.length > 0) {
             const strongest = mySynapses.reduce((a, b) => a.strength > b.strength ? a : b);
-            const targetX = d.ox2 + (strongest.x - d.ox2) * 0.4;
-            const targetY = d.oy2 + (strongest.y - d.oy2) * 0.4;
-            el.transition().duration(300)
+            const targetX = d.ox2 + (strongest.x - d.ox2) * 0.3;
+            const targetY = d.oy2 + (strongest.y - d.oy2) * 0.3;
+            el.transition().duration(400)
               .attr('x2', targetX)
               .attr('y2', targetY);
           }
-        } else if (active && (Date.now() - active.timestamp) < 1500) {
+        } else if (active && (Date.now() - active.timestamp) < 1200) {
           const elapsed = Date.now() - active.timestamp;
-          const decay = 1 - (elapsed / 1500);
+          const decay = 1 - (elapsed / 1200);
           const str = active.strength * decay;
-          const width = Math.max(1, 1 + str * 0.15);
+          const width = Math.max(0.8, 0.8 + str * 0.04);
           const decayConceptColor = _getConceptColor(active.label);
-          el.classed('glow', false)
-            .classed('firing', decay > 0.3)
-            .transition().duration(400)
+          el.classed('firing', false)
+            .transition().duration(500)
             .attr('stroke', decayConceptColor || colorScale(str))
             .attr('stroke-width', width)
             .attr('opacity', Math.max(0.06, 0.9 * decay))
@@ -1039,10 +1034,10 @@ function mindMapPanel() {
             .classed('active', false)
             .classed('firing', false)
             .classed('glow', false)
-            .transition().duration(800)
+            .transition().duration(600)
             .attr('stroke', idleColor)
-            .attr('stroke-width', 1)
-            .attr('opacity', 0.06)
+            .attr('stroke-width', 0.5)
+            .attr('opacity', 0.04)
             .attr('filter', null)
             .attr('x2', d.ox2)
             .attr('y2', d.oy2);
