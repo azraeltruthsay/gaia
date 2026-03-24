@@ -127,6 +127,45 @@ class ActivationMonitor:
             "last_snapshot": self._last_snapshot,
         }
 
+    def reset(self):
+        self._last_snapshot = None
+        self._last_timestamp = 0.0
+
+
+def _write_activation(tier, token_text, token_idx, session_id, snapshot):
+    """Write per-token activation to JSONL for live dashboard visualization."""
+    if not snapshot:
+        return
+    features = []
+    for layer_key, layer_data in snapshot.items():
+        layer_idx = int(layer_key.split("_")[1])
+        for idx, val in zip(
+            layer_data.get("top_5_indices", []),
+            layer_data.get("top_5_values", []),
+        ):
+            features.append({
+                "idx": int(idx), "strength": round(float(val), 4),
+                "label": f"neuron_{idx}", "layer": layer_idx,
+            })
+    features.sort(key=lambda f: f["strength"], reverse=True)
+    features = features[:10]
+    if not features:
+        return
+    line = json.dumps({
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+        "tier": tier,
+        "token": token_text,
+        "token_idx": token_idx,
+        "session_id": session_id or "",
+        "features": features,
+    })
+    try:
+        log_path = os.environ.get("ACTIVATION_STREAM_PATH", "/logs/activation_stream.jsonl")
+        with open(log_path, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
 
 # ── Thought Manager ──────────────────────────────────────────────────────────
 
@@ -780,12 +819,15 @@ class GAIAEngine:
             }
 
     def generate_stream(self, messages: list, max_tokens: int = 512,
-                         temperature: float = 0.7, top_p: float = 0.9):
+                         temperature: float = 0.7, top_p: float = 0.9,
+                         session_id: str = ""):
         """Generate a chat completion with per-token streaming.
 
         Yields dicts with delta content for each token, compatible with
         the OpenAI SSE streaming format. Final yield has finish_reason.
         """
+        _capture = self.monitor.enabled
+        _tier = os.environ.get("GAIA_ENGINE_TIER", "core")
         # Reuse the same setup as generate() — build input_ids and KV cache
         # This is a simplified version that skips prefix cache for streaming
         with self._lock:
@@ -819,9 +861,12 @@ class GAIAEngine:
                 pass
 
             with torch.no_grad():
-                out = self.model(input_ids, use_cache=True)
+                out = self.model(input_ids, use_cache=True,
+                                 output_hidden_states=_capture)
             current_kv = out.past_key_values
             logits = out.logits[:, -1, :]
+            if _capture and hasattr(out, "hidden_states") and out.hidden_states:
+                self.monitor.capture(out.hidden_states)
 
             generated = []
             gen_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -862,9 +907,15 @@ class GAIAEngine:
 
                 # Forward single token
                 with torch.no_grad():
-                    out = self.model(next_id, past_key_values=current_kv, use_cache=True)
+                    out = self.model(next_id, past_key_values=current_kv,
+                                     use_cache=True, output_hidden_states=_capture)
                 current_kv = out.past_key_values
                 logits = out.logits[:, -1, :]
+
+                # Write activation for live visualization
+                if _capture and hasattr(out, "hidden_states") and out.hidden_states:
+                    snap = self.monitor.capture(out.hidden_states)
+                    _write_activation(_tier, delta or "?", step, session_id, snap)
 
             self._request_count += 1
             self._total_tokens += len(generated)
@@ -1098,7 +1149,8 @@ class EngineHandler(BaseHTTPRequestHandler):
 
                     for chunk in _engine.generate_stream(
                         b.get("messages", []), b.get("max_tokens", 512),
-                        b.get("temperature", 0.7), b.get("top_p", 0.9)):
+                        b.get("temperature", 0.7), b.get("top_p", 0.9),
+                        session_id=b.get("session_id", "")):
                         self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
                         self.wfile.flush()
                     self.wfile.write(b"data: [DONE]\n\n")
