@@ -129,9 +129,12 @@
         <div class="unified-brain" id="mindmap-unified"></div>
         <div class="mind-map-legend" x-show="hoveredFeature">
           <span class="legend-tier" x-text="hoveredFeature?.tier"></span>
-          <span class="legend-label" x-text="hoveredFeature?.label || ('neuron_' + hoveredFeature?.idx)"></span>
+          <span class="legend-label" x-text="hoveredFeature?.type === 'synapse' ? hoveredFeature?.neuronLabels : (hoveredFeature?.label || ('neuron_' + hoveredFeature?.idx))"></span>
           <span class="legend-strength" x-text="hoveredFeature ? hoveredFeature.strength.toFixed(1) : ''"></span>
           <span class="legend-region" x-text="hoveredFeature?.region"></span>
+          <template x-if="hoveredFeature?.type === 'synapse'">
+            <span class="legend-cocount" x-text="'co:' + hoveredFeature?.coCount"></span>
+          </template>
         </div>
       </aside>
     </div>

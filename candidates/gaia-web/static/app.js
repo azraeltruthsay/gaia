@@ -582,13 +582,17 @@ function _generateNeurons(tier, count) {
       const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
       const y2 = cy + Math.sin(fiberAngle) * fiberLen / 2;
 
+      const rx1 = Math.round(x1 * 10) / 10;
+      const ry1 = Math.round(y1 * 10) / 10;
+      const rx2 = Math.round(x2 * 10) / 10;
+      const ry2 = Math.round(y2 * 10) / 10;
       neurons.push({
         x: Math.round(cx * 10) / 10,
         y: Math.round(cy * 10) / 10,
-        x1: Math.round(x1 * 10) / 10,
-        y1: Math.round(y1 * 10) / 10,
-        x2: Math.round(x2 * 10) / 10,
-        y2: Math.round(y2 * 10) / 10,
+        x1: rx1, y1: ry1,
+        x2: rx2, y2: ry2,
+        ox1: rx1, oy1: ry1,  // original endpoints for relaxation
+        ox2: rx2, oy2: ry2,
         fiberLen: Math.round(fiberLen * 10) / 10,
         region: region.name,
         tier: tier,
@@ -615,6 +619,8 @@ function mindMapPanel() {
     _featureLabels: {},
     _colorScale: null,
     _reconnectTimer: null,
+    _synapses: [],           // [{id, x, y, strength, pairKey, neuronA, neuronB, lastActive, tier}]
+    _maxSynapses: 40,       // cap
 
     init() {
       this._colorScale = d3.scaleLinear()
@@ -696,6 +702,9 @@ function mindMapPanel() {
 
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
+
+      // Synapse layer (between pathways and neurons)
+      zoomG.append('g').attr('class', 'synapses');
 
       // Neuron fiber layer — all tiers in one group, color-coded
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
@@ -892,6 +901,7 @@ function mindMapPanel() {
 
       // Update neuron fiber visuals — only for this tier's neurons
       const fiberSel = svg.select('g.neuron-group').selectAll('line.tier-' + tier);
+      const self = this;
 
       fiberSel.each(function(d) {
         const el = d3.select(this);
@@ -913,6 +923,17 @@ function mindMapPanel() {
             .attr('stroke-width', width)
             .attr('opacity', 0.85)
             .attr('filter', str > 5 ? `url(#neuron-glow-${tier})` : null);
+
+          // Stretch outer endpoint toward strongest connected synapse
+          const mySynapses = self._synapses.filter(s => s.neuronA === d.id || s.neuronB === d.id);
+          if (mySynapses.length > 0) {
+            const strongest = mySynapses.reduce((a, b) => a.strength > b.strength ? a : b);
+            const targetX = d.ox2 + (strongest.x - d.ox2) * 0.4;
+            const targetY = d.oy2 + (strongest.y - d.oy2) * 0.4;
+            el.transition().duration(300)
+              .attr('x2', targetX)
+              .attr('y2', targetY);
+          }
         } else if (active && (Date.now() - active.timestamp) < 1500) {
           const elapsed = Date.now() - active.timestamp;
           const decay = 1 - (elapsed / 1500);
@@ -928,6 +949,10 @@ function mindMapPanel() {
           if (decay <= 0.05) {
             activeMap.delete(d.id);
           }
+          // Relax endpoint back toward original during decay
+          el.transition().duration(800)
+            .attr('x2', d.ox2)
+            .attr('y2', d.oy2);
         } else {
           if (activeMap.has(d.id)) activeMap.delete(d.id);
           el.classed('idle', true)
@@ -938,12 +963,124 @@ function mindMapPanel() {
             .attr('stroke', idleColor)
             .attr('stroke-width', 1)
             .attr('opacity', 0.06)
-            .attr('filter', null);
+            .attr('filter', null)
+            .attr('x2', d.ox2)
+            .attr('y2', d.oy2);
         }
       });
 
       // Draw pathways (cross-tier pathways now visible in the unified brain)
       this._drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons);
+
+      // Update and render synapses from co-occurrence data
+      this._updateSynapses();
+      this._renderSynapses();
+    },
+
+    _updateSynapses() {
+      const coMap = this._cooccurrence;
+      if (!coMap) return;
+      const neurons = this._neurons;
+      const synapses = this._synapses;
+
+      // Create synapses for strong co-occurrences
+      for (const [key, count] of coMap) {
+        if (count < 3) continue; // need at least 3 co-firings
+        const parts = key.split('-');
+        const idA = parseInt(parts[0], 10);
+        const idB = parseInt(parts[1], 10);
+        const nA = neurons[idA];
+        const nB = neurons[idB];
+        if (!nA || !nB) continue;
+
+        let existing = synapses.find(s => s.pairKey === key);
+        if (existing) {
+          existing.strength = Math.min(1, count / 15);
+          existing.lastActive = Date.now();
+          // Update position as midpoint of current neuron anchors
+          existing.x = (nA.x + nB.x) / 2;
+          existing.y = (nA.y + nB.y) / 2;
+        } else if (synapses.length < this._maxSynapses) {
+          synapses.push({
+            id: 'syn-' + key,
+            x: (nA.x + nB.x) / 2,
+            y: (nA.y + nB.y) / 2,
+            strength: Math.min(1, count / 15),
+            pairKey: key,
+            neuronA: idA,
+            neuronB: idB,
+            lastActive: Date.now(),
+            tier: nA.tier,
+            coCount: count,
+          });
+        }
+      }
+
+      // Remove weak/old synapses
+      this._synapses = synapses.filter(s =>
+        (Date.now() - s.lastActive) < 10000 && coMap.get(s.pairKey) > 1
+      );
+
+      // Keep strongest if over cap
+      if (this._synapses.length > this._maxSynapses) {
+        this._synapses.sort((a, b) => b.strength - a.strength);
+        this._synapses = this._synapses.slice(0, this._maxSynapses);
+      }
+    },
+
+    _renderSynapses() {
+      const svg = this._svg;
+      if (!svg) return;
+      const self = this;
+
+      const synSel = svg.select('g.synapses').selectAll('circle.synapse')
+        .data(this._synapses, d => d.id);
+
+      synSel.exit()
+        .transition().duration(500)
+        .attr('r', 0)
+        .attr('opacity', 0)
+        .remove();
+
+      synSel.enter().append('circle')
+        .attr('class', 'synapse')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', 0)
+        .attr('fill', '#ffffff')
+        .attr('opacity', 0)
+        .on('mouseover', function(evt, d) {
+          const nA = self._neurons[d.neuronA];
+          const nB = self._neurons[d.neuronB];
+          const activeA = self._activeNeurons.get(d.neuronA);
+          const activeB = self._activeNeurons.get(d.neuronB);
+          const labelA = activeA ? activeA.label : ('neuron_' + d.neuronA);
+          const labelB = activeB ? activeB.label : ('neuron_' + d.neuronB);
+          self.hoveredFeature = {
+            type: 'synapse',
+            label: 'Synapse',
+            tier: d.tier.toUpperCase(),
+            region: 'Functional connectivity',
+            strength: d.strength,
+            idx: d.pairKey,
+            neuronLabels: labelA + ' \u2194 ' + labelB,
+            coCount: d.coCount || 0,
+          };
+        })
+        .on('mouseout', function() {
+          self.hoveredFeature = null;
+        })
+        .transition().duration(300)
+        .attr('r', d => 2 + d.strength * 3)
+        .attr('opacity', d => 0.3 + d.strength * 0.5);
+
+      // Update existing synapses
+      synSel
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .transition().duration(200)
+        .attr('r', d => 2 + d.strength * 3)
+        .attr('opacity', d => 0.3 + d.strength * 0.5);
     },
 
     _drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons) {
