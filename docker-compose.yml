@@ -104,6 +104,8 @@ services:
       - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       - gaia-shared:/shared:rw
+      # Logs (activation stream for Neural Mind Map)
+      - ./logs:/logs:rw
 
     environment:
       - PYTHONDONTWRITEBYTECODE=1
@@ -115,6 +117,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - SHARED_DIR=/shared
       - PYTHONPATH=/gaia-common
+      - GAIA_ENGINE_TIER=prime
 
     ports:
       - "7777:7777"

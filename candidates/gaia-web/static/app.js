@@ -523,6 +523,320 @@ function chatPanel() {
   };
 }
 
+// ── Neural Mind Map Component ─────────────────────────────────────────────────
+
+function mindMapColumn() {
+  return {
+    live: true,
+    activeTier: null,
+    focusTier: null,
+    hoveredFeature: null,
+    _es: null,
+    _sims: {},
+    _svgs: {},
+    _tierNodes: { nano: [], core: [], prime: [] },
+    _tierLinks: { nano: [], core: [] , prime: [] },
+    _featureLabels: {},
+    _colorScale: null,
+    _reconnectTimer: null,
+
+    init() {
+      this._colorScale = d3.scaleLinear()
+        .domain([0, 0.5, 1])
+        .range(['#4fc3f7', '#ffa726', '#e94560']);
+      this._loadAtlas();
+      this.$nextTick(() => {
+        ['nano', 'core', 'prime'].forEach(tier => this._initTierGraph(tier));
+        if (this.live) this._connect();
+      });
+    },
+
+    destroy() {
+      if (this._es) { this._es.close(); this._es = null; }
+      if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+      Object.values(this._sims).forEach(sim => sim.stop());
+    },
+
+    _initTierGraph(tier) {
+      const container = document.getElementById('mindmap-' + tier);
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const width = rect.width || 280;
+      const height = rect.height || 100;
+
+      const svg = d3.select(container).append('svg')
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('preserveAspectRatio', 'xMidYMid meet');
+
+      // Glow filter
+      const defs = svg.append('defs');
+      const filter = defs.append('filter').attr('id', 'glow-' + tier)
+        .attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+      filter.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'glow');
+      filter.append('feMerge').selectAll('feMergeNode')
+        .data(['glow', 'SourceGraphic']).enter()
+        .append('feMergeNode').attr('in', d => d);
+
+      svg.append('g').attr('class', 'links');
+      svg.append('g').attr('class', 'nodes');
+
+      // Idle label
+      svg.append('text')
+        .attr('class', 'idle-label')
+        .attr('x', width / 2).attr('y', height / 2)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-dim)')
+        .attr('font-size', '10px')
+        .attr('opacity', 0.5)
+        .text('waiting for activity...');
+
+      const sim = d3.forceSimulation([])
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('charge', d3.forceManyBody().strength(-30))
+        .force('collide', d3.forceCollide().radius(d => (d.r || 4) + 2))
+        .alphaTarget(0.05)
+        .alphaDecay(0.05)
+        .on('tick', () => this._tick(tier));
+
+      sim.stop(); // Don't burn CPU until we have data
+
+      this._sims[tier] = sim;
+      this._svgs[tier] = svg;
+
+      // Resize observer to update viewBox
+      const ro = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          const w = entry.contentRect.width || 280;
+          const h = entry.contentRect.height || 100;
+          svg.attr('viewBox', `0 0 ${w} ${h}`);
+          const centerForce = this._sims[tier].force('center');
+          if (centerForce) centerForce.x(w / 2).y(h / 2);
+        }
+      });
+      ro.observe(container);
+    },
+
+    _tick(tier) {
+      const svg = this._svgs[tier];
+      if (!svg) return;
+
+      const nodes = svg.select('g.nodes').selectAll('g.feature-node');
+      nodes.attr('transform', d => `translate(${d.x || 0},${d.y || 0})`);
+
+      const links = svg.select('g.links').selectAll('line');
+      links
+        .attr('x1', d => d.source.x || 0)
+        .attr('y1', d => d.source.y || 0)
+        .attr('x2', d => d.target.x || 0)
+        .attr('y2', d => d.target.y || 0);
+    },
+
+    _connect() {
+      if (this._es) { this._es.close(); this._es = null; }
+      const sessionId = Alpine.store('chat').getSessionId();
+      this._es = new EventSource('/api/activations/stream?session_id=' + encodeURIComponent(sessionId));
+
+      this._es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (data.tier) {
+            if (!this.focusTier) this.activeTier = data.tier;
+            this._updateTier(data.tier, data);
+          }
+        } catch { /* skip malformed */ }
+      };
+
+      this._es.onerror = () => {
+        if (this._es) this._es.close();
+        this._es = null;
+        if (this.live) {
+          this._reconnectTimer = setTimeout(() => this._connect(), 3000);
+        }
+      };
+    },
+
+    _updateTier(tier, data) {
+      if (!data.features || !Array.isArray(data.features)) return;
+
+      const nodes = this._tierNodes[tier];
+      const svg = this._svgs[tier];
+      if (!svg) return;
+
+      // Hide idle label
+      svg.select('.idle-label').attr('opacity', 0);
+
+      // Build set of incoming feature indices
+      const incomingSet = new Set(data.features.map(f => f.idx));
+
+      // Update existing or add new
+      for (const feat of data.features) {
+        const label = feat.label || this._featureLabels[feat.idx] || ('feature_' + feat.idx);
+        const existing = nodes.find(n => n.idx === feat.idx);
+        if (existing) {
+          existing.strength = feat.strength;
+          existing.label = label;
+          existing.layer = feat.layer;
+          existing.r = this._strengthToRadius(feat.strength);
+          existing.fadeTimer = 50;
+        } else {
+          const container = document.getElementById('mindmap-' + tier);
+          const rect = container ? container.getBoundingClientRect() : { width: 280, height: 100 };
+          const w = rect.width || 280;
+          const h = rect.height || 100;
+          nodes.push({
+            idx: feat.idx,
+            label: label,
+            layer: feat.layer,
+            strength: feat.strength,
+            r: this._strengthToRadius(feat.strength),
+            fadeTimer: 50,
+            x: w / 2 + (Math.random() - 0.5) * w * 0.6,
+            y: h / 2 + (Math.random() - 0.5) * h * 0.6,
+          });
+        }
+      }
+
+      // Decay nodes not in current data
+      for (const node of nodes) {
+        if (!incomingSet.has(node.idx)) {
+          node.fadeTimer = Math.max(0, node.fadeTimer - 1);
+        }
+      }
+
+      // Remove fully faded, keep top 30 by strength
+      const alive = nodes.filter(n => n.fadeTimer > 0);
+      alive.sort((a, b) => b.strength - a.strength);
+      this._tierNodes[tier] = alive.slice(0, 30);
+
+      // Build co-activation links (features in same data packet)
+      const activeNodes = this._tierNodes[tier].filter(n => incomingSet.has(n.idx));
+      const links = [];
+      for (let i = 0; i < activeNodes.length; i++) {
+        for (let j = i + 1; j < activeNodes.length; j++) {
+          links.push({ source: activeNodes[i], target: activeNodes[j] });
+        }
+      }
+      this._tierLinks[tier] = links;
+
+      // D3 update
+      this._renderTier(tier);
+    },
+
+    _renderTier(tier) {
+      const svg = this._svgs[tier];
+      const sim = this._sims[tier];
+      const nodes = this._tierNodes[tier];
+      const links = this._tierLinks[tier];
+      const colorScale = this._colorScale;
+      const self = this;
+
+      if (!svg || !sim) return;
+
+      // Links
+      const linkSel = svg.select('g.links').selectAll('line')
+        .data(links, d => d.source.idx + '-' + d.target.idx);
+
+      linkSel.exit().remove();
+
+      linkSel.enter().append('line')
+        .attr('stroke', 'var(--text-dim)')
+        .attr('stroke-opacity', 0.3)
+        .attr('stroke-width', 0.5);
+
+      // Nodes
+      const nodeSel = svg.select('g.nodes').selectAll('g.feature-node')
+        .data(nodes, d => d.idx);
+
+      // Exit
+      nodeSel.exit().each(function() {
+        d3.select(this).select('circle')
+          .transition().duration(300).attr('r', 0);
+        d3.select(this).transition().delay(300).remove();
+      });
+
+      // Enter
+      const enter = nodeSel.enter().append('g')
+        .attr('class', d => 'feature-node' + (d.strength > 0.7 ? ' strong' : ''))
+        .on('mouseover', function(evt, d) {
+          self.hoveredFeature = d;
+        })
+        .on('mouseout', function() {
+          self.hoveredFeature = null;
+        })
+        .call(d3.drag()
+          .on('start', (evt, d) => { if (!evt.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on('drag', (evt, d) => { d.fx = evt.x; d.fy = evt.y; })
+          .on('end', (evt, d) => { if (!evt.active) sim.alphaTarget(0.05); d.fx = null; d.fy = null; })
+        );
+
+      enter.append('circle')
+        .attr('r', 0)
+        .attr('fill', d => colorScale(d.strength))
+        .transition().duration(300)
+        .attr('r', d => d.r);
+
+      enter.append('text')
+        .attr('dy', d => -d.r - 3)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '8px')
+        .attr('fill', 'var(--text-dim)')
+        .attr('pointer-events', 'none')
+        .text(d => d.strength > 0.5 ? d.label : '');
+
+      // Update (merged enter+update)
+      const merged = enter.merge(nodeSel);
+
+      merged.attr('class', d => 'feature-node' + (d.strength > 0.7 ? ' strong' : '') + (d.fadeTimer < 15 ? ' fading' : ''));
+
+      merged.select('circle')
+        .transition().duration(200)
+        .attr('r', d => d.r)
+        .attr('fill', d => colorScale(d.strength))
+        .attr('opacity', d => Math.min(1, d.fadeTimer / 20))
+        .attr('filter', d => d.strength > 0.7 ? `url(#glow-${tier})` : null);
+
+      merged.select('text')
+        .text(d => d.strength > 0.5 ? d.label : '')
+        .attr('dy', d => -d.r - 3)
+        .attr('opacity', d => d.strength > 0.5 ? Math.min(1, d.fadeTimer / 20) : 0);
+
+      // Update simulation
+      sim.nodes(nodes);
+      sim.force('link', d3.forceLink(links).distance(40).strength(0.1));
+      sim.alpha(0.3).restart();
+    },
+
+    _strengthToRadius(strength) {
+      return Math.max(3, Math.min(18, strength * 20));
+    },
+
+    async _loadAtlas() {
+      try {
+        const resp = await fetch('/api/activations/atlas');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.labels) {
+            this._featureLabels = data.labels;
+          }
+        }
+      } catch { /* atlas unavailable — use fallback labels */ }
+    },
+
+    toggleLive() {
+      this.live = !this.live;
+      if (this.live) {
+        this._connect();
+      } else {
+        if (this._es) { this._es.close(); this._es = null; }
+        if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+      }
+    },
+  };
+}
+
 // ── System State Panel Component ──────────────────────────────────────────────
 
 const SERVICE_LABELS = {
