@@ -2273,6 +2273,69 @@ class AgentCore:
                         )
             # ── End think-tag recovery ────────────────────────────────────
 
+            # ── Post-generation quality gate — escalate to Prime if needed ──
+            _stripped_response = strip_think_tags(full_response).strip() if full_response else ""
+            _response_too_short = len(_stripped_response) < 10 and not any(
+                tag in (user_input or "").lower() for tag in ["hi", "hello", "hey", "bye", "thanks"]
+            )
+            _response_empty = not _stripped_response
+
+            if (_response_empty or _response_too_short) and selected_model_name not in (
+                "gpu_prime", "prime", "thinker", "groq_fallback", "oracle_openai"
+            ):
+                _escalation_reason = "empty response" if _response_empty else f"response too short ({len(_stripped_response)} chars)"
+                logger.warning(
+                    "Post-generation quality gate: %s from %s. Attempting Prime escalation.",
+                    _escalation_reason, selected_model_name
+                )
+                # Try to escalate to a higher-tier model
+                _escalated_ok = False
+                for _esc_cand in ["gpu_prime", "prime", "groq_fallback"]:
+                    if _esc_cand not in self.model_pool.models:
+                        try:
+                            self.model_pool.ensure_model_loaded(_esc_cand)
+                        except Exception:
+                            continue
+                    if _esc_cand in self.model_pool.models:
+                        _esc_model = self.model_pool.models[_esc_cand]
+                        # Health check
+                        if hasattr(_esc_model, 'endpoint'):
+                            try:
+                                import requests as _req_esc
+                                _h = _req_esc.get(f"{_esc_model.endpoint}/health", timeout=2)
+                                if _h.status_code != 200:
+                                    continue
+                            except Exception:
+                                continue
+                        try:
+                            yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Escalating to {_esc_cand}...]\n\n"}
+                            _esc_result = _esc_model.generate(
+                                user_input,
+                                system_prompt=getattr(packet, '_system_prompt', ''),
+                                max_tokens=packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048,
+                            )
+                            _esc_text = ""
+                            if isinstance(_esc_result, dict):
+                                _esc_text = _esc_result.get("response", "") or _esc_result.get("text", "")
+                                if not _esc_text and "choices" in _esc_result:
+                                    _esc_text = _esc_result["choices"][0].get("message", {}).get("content", "")
+                            elif isinstance(_esc_result, str):
+                                _esc_text = _esc_result
+                            _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+                            if _esc_text and len(_esc_text) > len(_stripped_response):
+                                full_response = _esc_text
+                                selected_model_name = _esc_cand
+                                _escalated_ok = True
+                                logger.info("Post-generation escalation to %s succeeded (%d chars)", _esc_cand, len(_esc_text))
+                                yield {"type": "token", "value": _esc_text}
+                                break
+                        except Exception:
+                            logger.warning("Post-generation escalation to %s failed", _esc_cand, exc_info=True)
+                            continue
+                if not _escalated_ok:
+                    logger.warning("Post-generation escalation failed; using original response")
+            # ── End quality gate ──────────────────────────────────────────────
+
             if post_run_observer and not disable_observer:
                 try:
                     review = post_run_observer.observe(packet, full_response)
