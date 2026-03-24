@@ -133,7 +133,7 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
         device = _engine.device
         logger.info("Model: %s (device=%s)", _engine.model_path, device)
     except ImportError:
-        logger.error("gaia_common.engine.core not available")
+        logger.error("gaia_engine.core not available")
         sys.exit(1)
     except Exception as e:
         logger.error("Failed to get model from GAIAEngine: %s", e)

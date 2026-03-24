@@ -65,10 +65,16 @@ RUN apt-get purge -y build-essential libpcre2-dev pkg-config \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# ── GAIA Common (shared engine library) ─────────────────────────────────
+# ── GAIA Engine (standalone inference library) ────────────────────────────
+# Installed from the separate gaia-engine repo. This is the primary source.
+RUN pip install --no-cache-dir gaia-engine@git+https://github.com/azraeltruthsay/gaia-engine.git@main
+
+# ── GAIA Common (shared protocols, utils, constants) ─────────────────────
 # Baked into image for initial boot. Volume mount at /gaia-common:ro
 # overrides this for live development (PYTHONDONTWRITEBYTECODE prevents
 # stale .pyc from image layer taking priority over volume mount .py).
+# The engine/ subpackage is a backward-compat shim that delegates to
+# the gaia_engine package installed above.
 COPY candidates/gaia-common /gaia-common
 RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
 ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"

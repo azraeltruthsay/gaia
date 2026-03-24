@@ -27,7 +27,7 @@ The system is built around twelve primary services plus a shared library:
 ### Service Descriptions
 
 1.  **`gaia-orchestrator`**: Manages Docker containers, GPU resources, and service lifecycle. Coordinates GPU handoffs between gaia-prime and gaia-study.
-2.  **`gaia-prime`**: Thinker inference server running the GAIA Engine (`gaia_common.engine`). Owns the GPU for heavyweight inference. Runs in standby mode — orchestrator loads/unloads the model via `POST /model/load`. Serves Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked) with LoRA adapter support, hidden state polygraph, and KV cache thought snapshots.
+2.  **`gaia-prime`**: Thinker inference server running the GAIA Engine (`gaia_engine`, [separate repo](https://github.com/azraeltruthsay/gaia-engine)). Owns the GPU for heavyweight inference. Runs in standby mode — orchestrator loads/unloads the model via `POST /model/load`. Serves Huihui-Qwen3-8B-GAIA-Prime-adaptive (identity-baked) with LoRA adapter support, hidden state polygraph, and KV cache thought snapshots.
 2b. **`gaia-nano`**: Lightweight llama-server container for the Nano/Reflex tier (Qwen3.5-0.8B-Abliterated). Dual-mode: safetensors on GPU (primary) with GGUF fallback. Sub-second triage classification. Built from `gaia-llama/Dockerfile`.
 3.  **`gaia-core`**: The cognitive engine. Embeds a llama-server for Core/Operator inference (Qwen3.5-2B-GAIA-Core-v3, safetensors on GPU / GGUF CPU fallback, port 8092) and delegates heavy GPU inference to gaia-prime via `PRIME_ENDPOINT`. Handles reasoning, intent detection, planning, self-reflection, tool routing, sleep/wake cycle, and session management. Falls back to Groq API or local GGUF models when prime is unavailable. Supports HA failover via `MCP_FALLBACK_ENDPOINT`.
 4.  **`gaia-web`**: User-facing interface providing HTTP REST API, Discord bot (text + voice), and dashboard. Converts user input to CognitionPackets and routes completed responses back to their origin. Orchestrates Discord voice calls via VoiceManager and gaia-audio. Supports HA failover via `CORE_FALLBACK_ENDPOINT`.
@@ -75,7 +75,7 @@ gaia-study (independent, GPU-enabled)
 In v0.3, GPU inference is fully decoupled from cognition:
 
 - **gaia-core** runs CPU-only (`GAIA_FORCE_CPU=1`, `GAIA_BACKEND=gpu_prime`)
-- All three tiers run the **GAIA Engine** (`gaia_common.engine.GAIAEngine`) — a shared inference library with introspection, KV cache management, LoRA adapters, and hidden state access
+- All three tiers run the **GAIA Engine** (`gaia_engine.GAIAEngine`, [separate repo](https://github.com/azraeltruthsay/gaia-engine)) — a purpose-built inference library with introspection, KV cache management, LoRA adapters, and hidden state access
 - **gaia-prime** owns the GPU for Thinker inference (port 7777), loaded/unloaded by orchestrator
 - Communication is via HTTP: gaia-core's `VLLMRemoteModel` calls the OpenAI-compatible API on each tier
 - **Cascade**: Nano/Reflex (gaia-nano, sub-second triage) → Core/Operator (gaia-core embedded, medium tasks) → Thinker/Prime (gaia-prime, heavyweight)
@@ -94,7 +94,7 @@ In v0.3, GPU inference is fully decoupled from cognition:
 
 ## GAIA Inference Engine
 
-The GAIA Engine (`gaia_common.engine.GAIAEngine`) is a purpose-built inference library shared by all three tiers. Unlike general-purpose servers (vLLM, llama.cpp) designed for multi-tenant throughput, the GAIA Engine is optimized for single-user, self-aware inference:
+The GAIA Engine (`gaia_engine.GAIAEngine`) is a purpose-built inference library maintained in a [separate GitHub repository](https://github.com/azraeltruthsay/gaia-engine) (Apache-2.0). Shared by all three tiers. Unlike general-purpose servers (vLLM, llama.cpp) designed for multi-tenant throughput, the GAIA Engine is optimized for single-user, self-aware inference:
 
 | Capability | Description |
 |------------|-------------|
@@ -107,8 +107,9 @@ The GAIA Engine (`gaia_common.engine.GAIAEngine`) is a purpose-built inference l
 | **Thought Composition** | `compose_thoughts` — structured multi-step reasoning assembly |
 | **Companion Modules** | `rome.py` (factual edits), `sae_trainer.py` (feature mapping), `weighted_trainer.py` (adaptive QLoRA), `awareness.py` (world state injection) |
 
-**Location**: `gaia-common/gaia_common/engine/` (shared library, mounted into all containers)
-**Entrypoint**: `from gaia_common.engine import GAIAEngine, serve`
+**Location**: `gaia-engine/` (separate repo: `github.com/azraeltruthsay/gaia-engine`). Backward-compat shim at `gaia-common/gaia_common/engine/` delegates to `gaia_engine` package.
+**Entrypoint**: `from gaia_engine import GAIAEngine, serve` (or backward-compat: `from gaia_common.engine import GAIAEngine, serve`)
+**Contract**: `contracts/services/gaia-engine.yaml`
 **Server**: Built-in OpenAI-compatible HTTP server (`serve(model_path, port)`)
 **Standby mode**: gaia-prime starts with no model loaded; orchestrator triggers `POST /model/load` during FOCUSING state
 
@@ -117,7 +118,7 @@ The GAIA Engine (`gaia_common.engine.GAIAEngine`) is a purpose-built inference l
 *   **Stateful Cognitive Packet**: The `CognitionPacket` (v0.3) maintains state through the entire cognitive pipeline with header, content, context, reasoning, response, governance, metrics, and status sections.
 *   **GPU Offload**: Inference is fully decoupled from cognition. gaia-core delegates GPU inference to gaia-prime via HTTP.
 *   **Read/Write Segregation**: `gaia-study` is the exclusive writer for the vector store. Other services have read-only access via `VectorClient`.
-*   **Unified Inference Engine**: All three tiers run the GAIA Engine (`gaia_common.engine`) — a purpose-built inference library with hidden state polygraph, KV cache thought snapshots, LoRA adapter management, GPU↔CPU migration, and vision support. Cloud fallbacks (Groq, OpenAI) for when GPU is unavailable.
+*   **Unified Inference Engine**: All three tiers run the GAIA Engine (`gaia_engine`, [separate repo](https://github.com/azraeltruthsay/gaia-engine)) — a purpose-built inference library with hidden state polygraph, KV cache thought snapshots, LoRA adapter management, GPU↔CPU migration, and vision support. Cloud fallbacks (Groq, OpenAI) for when GPU is unavailable.
 *   **Continuous Learning Loop**: `gaia-study` processes new information and fine-tunes LoRA adapters using QLoRA. The self-awareness pipeline (15 stages) orchestrates curriculum generation, gap-filtered training, merge+requantize, deployment, and cognitive verification.
 *   **Dynamic Curriculum**: `build_curriculum.py` assembles training data from three living knowledge sources: System Reference (architecture), Code Understanding (self-repair), and Samvega Wisdom (epistemic), plus supplemental seeds and conversation examples. Deduplicates by SHA-256 of instruction text.
 *   **Cognitive Test Battery**: `cognitive_test_battery.py` in gaia-doctor validates learned knowledge across 9 sections (~50 tests): architecture, self-repair, epistemic, identity, personality, tool routing, safety, knowledge retrieval, and loop resistance. Stdlib-only.
