@@ -135,9 +135,10 @@
           </div>
         </template>
         <div class="mind-map-legend" x-show="hoveredFeature">
-          <span class="legend-label" x-text="hoveredFeature?.label || ('feature_' + hoveredFeature?.idx)"></span>
+          <span class="legend-label" x-text="hoveredFeature?.label || ('neuron_' + hoveredFeature?.idx)"></span>
           <span class="legend-strength" x-text="hoveredFeature ? hoveredFeature.strength.toFixed(3) : ''"></span>
           <span class="legend-layer" x-text="hoveredFeature ? 'L' + hoveredFeature.layer : ''"></span>
+          <span class="legend-region" x-text="hoveredFeature?.region || ''"></span>
         </div>
       </aside>
     </div>

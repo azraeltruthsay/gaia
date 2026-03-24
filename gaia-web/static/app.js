@@ -525,6 +525,52 @@ function chatPanel() {
 }
 
 // ── Neural Mind Map Component ─────────────────────────────────────────────────
+// Brain-shaped activation display — neurons at fixed positions light up on activity
+
+// Brain silhouette paths (sagittal side view, 280x160 viewport)
+const BRAIN_OUTLINE = 'M 70,20 C 30,20 10,50 15,80 C 20,110 40,130 80,135 C 100,137 130,130 160,125 C 200,118 230,100 250,80 C 265,65 260,40 240,30 C 220,22 190,18 160,18 C 130,17 100,18 70,20 Z';
+const BRAIN_STEM = 'M 240,80 C 245,95 240,115 235,130 C 232,140 228,145 225,140';
+
+// Brain regions mapped to transformer layer ranges
+const BRAIN_REGIONS = [
+  { name: 'Occipital',  layerRange: [0, 4],   cx: 245, cy: 55,  rx: 22, ry: 25 },
+  { name: 'Temporal',   layerRange: [5, 11],   cx: 145, cy: 115, rx: 45, ry: 18 },
+  { name: 'Parietal',   layerRange: [12, 16],  cx: 145, cy: 35,  rx: 40, ry: 20 },
+  { name: 'Central',    layerRange: [17, 21],  cx: 130, cy: 75,  rx: 35, ry: 25 },
+  { name: 'Frontal',    layerRange: [22, 32],  cx: 55,  cy: 70,  rx: 30, ry: 35 },
+];
+
+// Pre-compute neuron positions within brain regions using seeded pseudo-random
+function _generateNeurons(count) {
+  const neurons = [];
+  const perRegion = Math.ceil(count / BRAIN_REGIONS.length);
+  // Simple seeded random for deterministic layout
+  let seed = 42;
+  function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
+
+  for (const region of BRAIN_REGIONS) {
+    for (let i = 0; i < perRegion && neurons.length < count; i++) {
+      // Distribute in elliptical region with some jitter
+      const angle = rand() * Math.PI * 2;
+      const dist = Math.sqrt(rand()); // sqrt for uniform area distribution
+      const x = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
+      const y = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
+      neurons.push({
+        x: Math.round(x * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        region: region.name,
+        layerRange: region.layerRange,
+        id: neurons.length,
+        strength: 0,
+        active: false,
+      });
+    }
+  }
+  return neurons;
+}
+
+// Neuron counts per tier
+const TIER_NEURON_COUNTS = { nano: 30, core: 45, prime: 60 };
 
 function mindMapColumn() {
   return {
@@ -533,20 +579,26 @@ function mindMapColumn() {
     focusTier: null,
     hoveredFeature: null,
     _es: null,
-    _sims: {},
     _svgs: {},
-    _tierNodes: { nano: [], core: [], prime: [] },
-    _tierLinks: { nano: [], core: [] , prime: [] },
+    _neurons: { nano: [], core: [], prime: [] },
+    _activeNeurons: { nano: new Map(), core: new Map(), prime: new Map() },
+    _pathways: { nano: [], core: [], prime: [] },
     _featureLabels: {},
     _colorScale: null,
     _reconnectTimer: null,
 
     init() {
-      // Raw activation strengths range ~0-20; normalize to 0-1 for color
+      // Raw activation strengths range ~0-20; color scale
       this._colorScale = d3.scaleLinear()
         .domain([0, 5, 15])
         .range(['#4fc3f7', '#ffa726', '#e94560'])
         .clamp(true);
+
+      // Pre-generate neuron positions for each tier
+      for (const tier of ['nano', 'core', 'prime']) {
+        this._neurons[tier] = _generateNeurons(TIER_NEURON_COUNTS[tier]);
+      }
+
       this._loadAtlas();
       this.$nextTick(() => {
         ['nano', 'core', 'prime'].forEach(tier => this._initTierGraph(tier));
@@ -557,84 +609,104 @@ function mindMapColumn() {
     destroy() {
       if (this._es) { this._es.close(); this._es = null; }
       if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
-      Object.values(this._sims).forEach(sim => sim.stop());
     },
 
     _initTierGraph(tier) {
       const container = document.getElementById('mindmap-' + tier);
       if (!container) return;
 
-      const rect = container.getBoundingClientRect();
-      const width = rect.width || 280;
-      const height = rect.height || 100;
-
       const svg = d3.select(container).append('svg')
         .attr('width', '100%')
         .attr('height', '100%')
-        .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('viewBox', '0 0 280 160')
         .attr('preserveAspectRatio', 'xMidYMid meet');
 
-      // Glow filter
+      // Glow filter for strong activations
       const defs = svg.append('defs');
-      const filter = defs.append('filter').attr('id', 'glow-' + tier)
-        .attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
-      filter.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'glow');
+      const filter = defs.append('filter').attr('id', 'neuron-glow-' + tier)
+        .attr('x', '-100%').attr('y', '-100%').attr('width', '300%').attr('height', '300%');
+      filter.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'glow');
       filter.append('feMerge').selectAll('feMergeNode')
         .data(['glow', 'SourceGraphic']).enter()
         .append('feMergeNode').attr('in', d => d);
 
-      svg.append('g').attr('class', 'links');
-      svg.append('g').attr('class', 'nodes');
+      // Brain outline — always visible, dim
+      svg.append('path')
+        .attr('class', 'brain-outline')
+        .attr('d', BRAIN_OUTLINE);
 
-      // Idle label
+      // Brain stem
+      svg.append('path')
+        .attr('class', 'brain-stem')
+        .attr('d', BRAIN_STEM);
+
+      // Pathway layer (below neurons)
+      svg.append('g').attr('class', 'pathways');
+
+      // Neuron layer
+      const neuronGroup = svg.append('g').attr('class', 'neuron-group');
+      const neurons = this._neurons[tier];
+      const self = this;
+
+      neuronGroup.selectAll('circle.neuron')
+        .data(neurons, d => d.id)
+        .enter()
+        .append('circle')
+        .attr('class', 'neuron idle')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', 2)
+        .attr('fill', '#4fc3f7')
+        .attr('opacity', 0.08)
+        .on('mouseover', function(evt, d) {
+          const active = self._activeNeurons[tier].get(d.id);
+          self.hoveredFeature = active ? {
+            label: active.label,
+            strength: active.strength,
+            layer: active.layer,
+            region: d.region,
+            idx: d.id,
+          } : {
+            label: 'neuron_' + d.id,
+            strength: 0,
+            layer: d.layerRange[0],
+            region: d.region,
+            idx: d.id,
+          };
+        })
+        .on('mouseout', function() {
+          self.hoveredFeature = null;
+        });
+
+      // Region labels — subtle, inside each region
+      const regionLabels = [
+        { name: 'Occipital', x: 248, y: 42 },
+        { name: 'Temporal',  x: 145, y: 130 },
+        { name: 'Parietal',  x: 145, y: 24 },
+        { name: 'Central',   x: 130, y: 65 },
+        { name: 'Frontal',   x: 45,  y: 50 },
+      ];
+      svg.selectAll('text.region-label')
+        .data(regionLabels)
+        .enter()
+        .append('text')
+        .attr('class', 'region-label')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y)
+        .attr('text-anchor', 'middle')
+        .text(d => d.name);
+
+      // Idle label (shown until first activity)
       svg.append('text')
         .attr('class', 'idle-label')
-        .attr('x', width / 2).attr('y', height / 2)
+        .attr('x', 140).attr('y', 85)
         .attr('text-anchor', 'middle')
         .attr('fill', 'var(--text-dim)')
         .attr('font-size', '10px')
         .attr('opacity', 0.5)
         .text('waiting for activity...');
 
-      const sim = d3.forceSimulation([])
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('charge', d3.forceManyBody().strength(-30))
-        .force('collide', d3.forceCollide().radius(d => (d.r || 4) + 2))
-        .alphaTarget(0.05)
-        .alphaDecay(0.05)
-        .on('tick', () => this._tick(tier));
-
-      sim.stop(); // Don't burn CPU until we have data
-
-      this._sims[tier] = sim;
       this._svgs[tier] = svg;
-
-      // Resize observer to update viewBox
-      const ro = new ResizeObserver(entries => {
-        for (const entry of entries) {
-          const w = entry.contentRect.width || 280;
-          const h = entry.contentRect.height || 100;
-          svg.attr('viewBox', `0 0 ${w} ${h}`);
-          const centerForce = this._sims[tier].force('center');
-          if (centerForce) centerForce.x(w / 2).y(h / 2);
-        }
-      });
-      ro.observe(container);
-    },
-
-    _tick(tier) {
-      const svg = this._svgs[tier];
-      if (!svg) return;
-
-      const nodes = svg.select('g.nodes').selectAll('g.feature-node');
-      nodes.attr('transform', d => `translate(${d.x || 0},${d.y || 0})`);
-
-      const links = svg.select('g.links').selectAll('line');
-      links
-        .attr('x1', d => d.source.x || 0)
-        .attr('y1', d => d.source.y || 0)
-        .attr('x2', d => d.target.x || 0)
-        .attr('y2', d => d.target.y || 0);
     },
 
     _connect() {
@@ -661,160 +733,177 @@ function mindMapColumn() {
       };
     },
 
+    _mapFeatureToNeuron(feature, tier) {
+      const neurons = this._neurons[tier];
+      const layer = feature.layer != null ? feature.layer : 0;
+
+      // Find neurons in the matching brain region for this layer
+      const candidates = neurons.filter(n =>
+        layer >= n.layerRange[0] && layer <= n.layerRange[1]
+      );
+
+      if (candidates.length === 0) {
+        // Fallback: use any neuron, modulo total count
+        return neurons[feature.idx % neurons.length];
+      }
+
+      // Pick a specific neuron within the region based on feature index
+      return candidates[feature.idx % candidates.length];
+    },
+
     _updateTier(tier, data) {
       if (!data.features || !Array.isArray(data.features)) return;
 
-      const nodes = this._tierNodes[tier];
       const svg = this._svgs[tier];
       if (!svg) return;
 
-      // Hide idle label
+      // Hide idle label on first activity
       svg.select('.idle-label').attr('opacity', 0);
 
-      // Build set of incoming feature indices
-      const incomingSet = new Set(data.features.map(f => f.idx));
+      const colorScale = this._colorScale;
+      const neurons = this._neurons[tier];
+      const activeMap = this._activeNeurons[tier];
 
-      // Update existing or add new
+      // Track which neurons are active this frame
+      const frameActiveIds = new Set();
+      const frameActiveRegions = new Map(); // region -> [neuronId, ...]
+
       for (const feat of data.features) {
         const label = feat.label || this._featureLabels[feat.idx] || ('feature_' + feat.idx);
-        const existing = nodes.find(n => n.idx === feat.idx);
-        if (existing) {
-          existing.strength = feat.strength;
-          existing.label = label;
-          existing.layer = feat.layer;
-          existing.r = this._strengthToRadius(feat.strength);
-          existing.fadeTimer = 50;
+        const neuron = this._mapFeatureToNeuron(feat, tier);
+        if (!neuron) continue;
+
+        frameActiveIds.add(neuron.id);
+        activeMap.set(neuron.id, {
+          label: label,
+          strength: feat.strength,
+          layer: feat.layer,
+          timestamp: Date.now(),
+        });
+
+        // Track by region for pathway drawing
+        const regionList = frameActiveRegions.get(neuron.region) || [];
+        regionList.push(neuron.id);
+        frameActiveRegions.set(neuron.region, regionList);
+      }
+
+      // Update neuron visuals via D3
+      const neuronSel = svg.select('g.neuron-group').selectAll('circle.neuron');
+
+      neuronSel.each(function(d) {
+        const el = d3.select(this);
+        const active = activeMap.get(d.id);
+
+        if (frameActiveIds.has(d.id) && active) {
+          // Active this frame — light up
+          const str = active.strength;
+          const r = Math.max(2, Math.min(8, 2 + str * 0.4));
+          el.classed('idle', false)
+            .classed('active', true)
+            .classed('glow', str > 7)
+            .transition().duration(200)
+            .attr('r', r)
+            .attr('fill', colorScale(str))
+            .attr('opacity', 0.9)
+            .attr('filter', str > 7 ? `url(#neuron-glow-${tier})` : null);
+        } else if (active && (Date.now() - active.timestamp) < 1500) {
+          // Recently active — decaying
+          const elapsed = Date.now() - active.timestamp;
+          const decay = 1 - (elapsed / 1500);
+          const str = active.strength * decay;
+          const r = Math.max(2, 2 + str * 0.3);
+          el.classed('glow', false)
+            .transition().duration(400)
+            .attr('r', r)
+            .attr('fill', colorScale(str))
+            .attr('opacity', Math.max(0.08, 0.9 * decay))
+            .attr('filter', null);
+          if (decay <= 0.05) {
+            activeMap.delete(d.id);
+          }
         } else {
-          const container = document.getElementById('mindmap-' + tier);
-          const rect = container ? container.getBoundingClientRect() : { width: 280, height: 100 };
-          const w = rect.width || 280;
-          const h = rect.height || 100;
-          nodes.push({
-            idx: feat.idx,
-            label: label,
-            layer: feat.layer,
-            strength: feat.strength,
-            r: this._strengthToRadius(feat.strength),
-            fadeTimer: 50,
-            x: w / 2 + (Math.random() - 0.5) * w * 0.6,
-            y: h / 2 + (Math.random() - 0.5) * h * 0.6,
-          });
+          // Idle
+          if (activeMap.has(d.id)) activeMap.delete(d.id);
+          el.classed('idle', true)
+            .classed('active', false)
+            .classed('glow', false)
+            .transition().duration(800)
+            .attr('r', 2)
+            .attr('fill', '#4fc3f7')
+            .attr('opacity', 0.08)
+            .attr('filter', null);
         }
-      }
-
-      // Decay nodes not in current data
-      for (const node of nodes) {
-        if (!incomingSet.has(node.idx)) {
-          node.fadeTimer = Math.max(0, node.fadeTimer - 1);
-        }
-      }
-
-      // Remove fully faded, keep top 30 by strength
-      const alive = nodes.filter(n => n.fadeTimer > 0);
-      alive.sort((a, b) => b.strength - a.strength);
-      this._tierNodes[tier] = alive.slice(0, 30);
-
-      // Build co-activation links (features in same data packet)
-      const activeNodes = this._tierNodes[tier].filter(n => incomingSet.has(n.idx));
-      const links = [];
-      for (let i = 0; i < activeNodes.length; i++) {
-        for (let j = i + 1; j < activeNodes.length; j++) {
-          links.push({ source: activeNodes[i], target: activeNodes[j] });
-        }
-      }
-      this._tierLinks[tier] = links;
-
-      // D3 update
-      this._renderTier(tier);
-    },
-
-    _renderTier(tier) {
-      const svg = this._svgs[tier];
-      const sim = this._sims[tier];
-      const nodes = this._tierNodes[tier];
-      const links = this._tierLinks[tier];
-      const colorScale = this._colorScale;
-      const self = this;
-
-      if (!svg || !sim) return;
-
-      // Links
-      const linkSel = svg.select('g.links').selectAll('line')
-        .data(links, d => d.source.idx + '-' + d.target.idx);
-
-      linkSel.exit().remove();
-
-      linkSel.enter().append('line')
-        .attr('stroke', 'var(--text-dim)')
-        .attr('stroke-opacity', 0.3)
-        .attr('stroke-width', 0.5);
-
-      // Nodes
-      const nodeSel = svg.select('g.nodes').selectAll('g.feature-node')
-        .data(nodes, d => d.idx);
-
-      // Exit
-      nodeSel.exit().each(function() {
-        d3.select(this).select('circle')
-          .transition().duration(300).attr('r', 0);
-        d3.select(this).transition().delay(300).remove();
       });
 
-      // Enter
-      const enter = nodeSel.enter().append('g')
-        .attr('class', d => 'feature-node' + (d.strength > 7 ? ' strong' : ''))
-        .on('mouseover', function(evt, d) {
-          self.hoveredFeature = d;
-        })
-        .on('mouseout', function() {
-          self.hoveredFeature = null;
-        })
-        .call(d3.drag()
-          .on('start', (evt, d) => { if (!evt.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-          .on('drag', (evt, d) => { d.fx = evt.x; d.fy = evt.y; })
-          .on('end', (evt, d) => { if (!evt.active) sim.alphaTarget(0.05); d.fx = null; d.fy = null; })
-        );
-
-      enter.append('circle')
-        .attr('r', 0)
-        .attr('fill', d => colorScale(d.strength))
-        .transition().duration(300)
-        .attr('r', d => d.r);
-
-      enter.append('text')
-        .attr('dy', d => -d.r - 3)
-        .attr('text-anchor', 'middle')
-        .attr('font-size', '8px')
-        .attr('fill', 'var(--text-dim)')
-        .attr('pointer-events', 'none')
-        .text(d => d.strength > 0.5 ? d.label : '');
-
-      // Update (merged enter+update)
-      const merged = enter.merge(nodeSel);
-
-      merged.attr('class', d => 'feature-node' + (d.strength > 7 ? ' strong' : '') + (d.fadeTimer < 15 ? ' fading' : ''));
-
-      merged.select('circle')
-        .transition().duration(200)
-        .attr('r', d => d.r)
-        .attr('fill', d => colorScale(d.strength))
-        .attr('opacity', d => Math.min(1, d.fadeTimer / 20))
-        .attr('filter', d => d.strength > 7 ? `url(#glow-${tier})` : null);
-
-      merged.select('text')
-        .text(d => d.strength > 0.5 ? d.label : '')
-        .attr('dy', d => -d.r - 3)
-        .attr('opacity', d => d.strength > 0.5 ? Math.min(1, d.fadeTimer / 20) : 0);
-
-      // Update simulation
-      sim.nodes(nodes);
-      sim.force('link', d3.forceLink(links).distance(40).strength(0.1));
-      sim.alpha(0.3).restart();
+      // Draw pathways between co-active neurons in DIFFERENT regions
+      this._drawPathways(tier, frameActiveRegions, neurons);
     },
 
-    _strengthToRadius(strength) {
-      // Raw strengths range ~0-20; map to radius 3-18px
-      return Math.max(3, Math.min(18, 3 + strength * 1.0));
+    _drawPathways(tier, frameActiveRegions, neurons) {
+      const svg = this._svgs[tier];
+      const colorScale = this._colorScale;
+      const activeMap = this._activeNeurons[tier];
+
+      // Build pathway lines between regions that have co-active neurons
+      const regionNames = Array.from(frameActiveRegions.keys());
+      const pathways = [];
+
+      for (let i = 0; i < regionNames.length; i++) {
+        for (let j = i + 1; j < regionNames.length; j++) {
+          const idsA = frameActiveRegions.get(regionNames[i]);
+          const idsB = frameActiveRegions.get(regionNames[j]);
+          // Connect strongest neuron from each region
+          let bestA = null, bestStrA = 0;
+          for (const id of idsA) {
+            const a = activeMap.get(id);
+            if (a && a.strength > bestStrA) { bestStrA = a.strength; bestA = id; }
+          }
+          let bestB = null, bestStrB = 0;
+          for (const id of idsB) {
+            const a = activeMap.get(id);
+            if (a && a.strength > bestStrB) { bestStrB = a.strength; bestB = id; }
+          }
+          if (bestA != null && bestB != null) {
+            const nA = neurons.find(n => n.id === bestA);
+            const nB = neurons.find(n => n.id === bestB);
+            if (nA && nB) {
+              pathways.push({
+                x1: nA.x, y1: nA.y,
+                x2: nB.x, y2: nB.y,
+                strength: (bestStrA + bestStrB) / 2,
+                key: regionNames[i] + '-' + regionNames[j],
+              });
+            }
+          }
+        }
+      }
+
+      // D3 update pathways
+      const pathSel = svg.select('g.pathways').selectAll('line.pathway')
+        .data(pathways, d => d.key);
+
+      pathSel.exit()
+        .classed('active', false)
+        .classed('fading', true)
+        .transition().duration(500)
+        .attr('opacity', 0)
+        .remove();
+
+      const enter = pathSel.enter().append('line')
+        .attr('class', 'pathway active')
+        .attr('x1', d => d.x1).attr('y1', d => d.y1)
+        .attr('x2', d => d.x2).attr('y2', d => d.y2)
+        .attr('stroke', d => colorScale(d.strength))
+        .attr('stroke-width', 1)
+        .attr('opacity', 0);
+
+      enter.transition().duration(200).attr('opacity', 0.4);
+
+      pathSel
+        .attr('x1', d => d.x1).attr('y1', d => d.y1)
+        .attr('x2', d => d.x2).attr('y2', d => d.y2)
+        .attr('stroke', d => colorScale(d.strength))
+        .attr('opacity', 0.4);
     },
 
     async _loadAtlas() {
