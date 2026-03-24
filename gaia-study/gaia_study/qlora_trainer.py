@@ -251,29 +251,29 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Load GPTQ model — force non-Marlin kernel by setting env before import
-                logger.info("Loading GPTQ model via transformers...")
-                import gc, os as _os3
+                # Load GPTQ model via gptqmodel with AUTO_TRAINABLE backend
+                # This selects a kernel that supports backward pass for LoRA training
+                logger.info("Loading GPTQ model with AUTO_TRAINABLE backend...")
+                import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Tell gptqmodel to use CUDA_OLD backend (supports all dimensions + backward)
-                _os3.environ["GPTQMODEL_PREFER_BACKEND"] = "cuda_old"
-                # Also patch the quantization config to disable Marlin
-                import transformers as _tf
-                _orig_cfg = _tf.AutoConfig.from_pretrained(
-                    self.base_model_path, trust_remote_code=True
-                )
-                if hasattr(_orig_cfg, 'quantization_config'):
-                    _orig_cfg.quantization_config['use_exllama'] = False
-                    _orig_cfg.quantization_config['backend'] = 'cuda_old'
-                self.model = auto_cls.from_pretrained(
-                    self.base_model_path,
-                    config=_orig_cfg,
-                    trust_remote_code=True,
-                    device_map={"": 0},
-                    low_cpu_mem_usage=True,
-                    torch_dtype=torch.bfloat16,
-                )
+                try:
+                    from gptqmodel import GPTQModel, BACKEND
+                    # Register Qwen3.5 multimodal model definition
+                    try:
+                        from gaia_study.merge_and_requantize import _register_qwen3_5
+                        _register_qwen3_5()
+                    except Exception:
+                        pass
+                    self.model = GPTQModel.load(
+                        self.base_model_path,
+                        backend=BACKEND.AUTO_TRAINABLE,
+                        device_map={"": 0},
+                        trust_remote_code=True,
+                    )
+                except Exception as _gptq_err:
+                    logger.error("GPTQModel.load with AUTO_TRAINABLE failed: %s", _gptq_err)
+                    raise
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
