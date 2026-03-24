@@ -2,7 +2,7 @@
 #
 # Services:
 #   - gaia-core:  The Brain   - Cognitive loop + embedded Core CPU inference (delegates to gaia-prime for GPU)
-#   - gaia-nano:  The Reflex  - Nano triage classifier (GPU, llama-server)
+#   - gaia-nano:  The Reflex  - Nano triage classifier (GPU, GAIA Engine managed mode)
 #   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
@@ -141,7 +141,7 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-nano: The Reflex — dual-mode (safetensors + GGUF fallback)
+  # gaia-nano: The Reflex — GAIA Engine managed mode (safetensors on GPU, GGUF CPU fallback)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-nano:
     build:
@@ -157,10 +157,12 @@ services:
       - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       - ./logs/kvcache/nano:/kvcache:rw
+      - ./logs:/logs:rw
       - gaia-shared:/shared:rw
 
     environment:
       - PYTHONDONTWRITEBYTECODE=1
+      - GAIA_ENGINE_TIER=nano
       # Safetensors mode (GPU-native, enables polygraph + SAE)
       # Loads from tmpfs warm pool for near-instant startup.
       # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
