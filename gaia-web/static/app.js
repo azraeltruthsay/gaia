@@ -528,16 +528,14 @@ function chatPanel() {
 // Unified brain — all three cognitive tiers mapped to anatomical regions
 // Sagittal side-view: Frontal/Prime (left/top), Brain stem/Nano (bottom-right)
 
-// Anatomically accurate brain (sagittal/medial view, 280x400 viewport)
-// Based on standard neuroanatomical proportions:
-// - Cerebrum: ~170mm long, ~130mm tall. Frontal=40%, Parietal=25%, Occipital=20%, Temporal=below
-// - Central sulcus at ~60% from frontal pole
-// - Sylvian fissure separates temporal from frontal/parietal
-// - Cerebellum: ~55mm, tucked under occipital, distinct foliated texture
-// - Brain stem: medulla + pons descending from center-base
-// Viewport scaled: brain fills 30-255 x, 25-275 y (with cerebellum/stem below)
+// Brain visualization uses a real anatomical SVG (Human-brain.svg from Wikimedia)
+// loaded as an <image> element in the SVG, with our neural fibers overlaid.
+// Original SVG viewBox: 0 0 1024 732 — we scale to fit our 280x400 viewport.
+// Brain regions are positioned to match the anatomical illustration.
+const BRAIN_SVG_URL = '/static/brain.svg';
+const BRAIN_SVG_VIEWBOX = { w: 1024, h: 732 };  // original dimensions
 
-// Cerebrum — the main cortical outline with gyri bumps
+// Legacy path data kept as fallback (not rendered when SVG image loads)
 const BRAIN_OUTLINE =
   // Frontal pole (bottom-left, rounded)
   'M 32,215 C 28,205 25,192 24,178' +
@@ -635,20 +633,23 @@ const BRAIN_STEM =
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
 // Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
+// Brain regions positioned to match the Wikimedia anatomical SVG
+// SVG scaled to ~280x200 with y-offset of 20. Brain faces LEFT.
+// Scale factor: 280/1024 ≈ 0.273
 const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (reflexes, triage, fast classification)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 175, cy: 340, rx: 12, ry: 22 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 215, cy: 285, rx: 28, ry: 22 },
+  // NANO — brain stem & cerebellum (bottom-right in the SVG)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 165, cy: 200, rx: 12, ry: 18 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 210, cy: 175, rx: 28, ry: 20 },
 
-  // CORE — temporal, parietal, occipital (operational thinking, medium tasks)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 125, cy: 228, rx: 42, ry: 14 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 198, cy: 52,  rx: 25, ry: 20 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 238, cy: 165, rx: 15, ry: 32 },
+  // CORE — temporal (bottom-center), parietal (top-center), occipital (back)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 110, cy: 170, rx: 35, ry: 14 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 130, cy: 60,  rx: 28, ry: 20 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 230, cy: 100, rx: 18, ry: 28 },
 
-  // PRIME — frontal cortex (deep reasoning, complex analysis, planning)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 35,  cy: 178, rx: 16, ry: 32 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 130, cy: 58,  rx: 28, ry: 20 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 75,  cy: 85,  rx: 32, ry: 28 },
+  // PRIME — frontal cortex (left side of brain — front)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 30,  cy: 130, rx: 18, ry: 30 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 80,  cy: 55,  rx: 25, ry: 18 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 50,  cy: 90,  rx: 28, ry: 28 },
 ];
 
 // Tier idle colors — anatomically coded
@@ -779,7 +780,7 @@ function mindMapPanel() {
       const svg = d3.select(container).append('svg')
         .attr('width', '100%')
         .attr('height', '100%')
-        .attr('viewBox', '0 0 280 400')
+        .attr('viewBox', '0 0 280 250')
         .attr('preserveAspectRatio', 'xMidYMid meet');
 
       // Zoom + pan
@@ -803,24 +804,17 @@ function mindMapPanel() {
           .append('feMergeNode').attr('in', d => d);
       }
 
-      // Brain anatomy — anatomically accurate sagittal silhouette
-      // Main cerebrum outline
-      zoomG.append('path').attr('class', 'brain-outline').attr('d', BRAIN_OUTLINE);
-      // Cerebellum (separate structure)
-      zoomG.append('path').attr('class', 'brain-cerebellum').attr('d', BRAIN_CEREBELLUM);
-      // Brain stem (pons + medulla)
-      zoomG.append('path').attr('class', 'brain-stem').attr('d', BRAIN_STEM);
-      // Major sulci — key anatomical landmarks
-      zoomG.append('path').attr('class', 'brain-sulcus major').attr('d', BRAIN_SYLVIAN);
-      zoomG.append('path').attr('class', 'brain-sulcus major').attr('d', BRAIN_CENTRAL_SULCUS);
-      // Minor gyri texture — subtle cortical folds
-      for (const gyrus of BRAIN_GYRI) {
-        zoomG.append('path').attr('class', 'brain-sulcus minor').attr('d', gyrus);
-      }
-      // Cerebellum folia — tree-of-life striations
-      for (const folia of BRAIN_CEREBELLUM_FOLIA) {
-        zoomG.append('path').attr('class', 'brain-folia').attr('d', folia);
-      }
+      // Brain anatomy — load real anatomical SVG as background image
+      // The SVG (1024x732) is scaled to fit our viewBox (280x400)
+      // We apply CSS filters to make it a dim wireframe-style backdrop
+      zoomG.append('image')
+        .attr('class', 'brain-image')
+        .attr('href', BRAIN_SVG_URL)
+        .attr('x', 0).attr('y', 20)
+        .attr('width', 280)
+        .attr('height', 280 * (BRAIN_SVG_VIEWBOX.h / BRAIN_SVG_VIEWBOX.w))
+        .attr('preserveAspectRatio', 'xMidYMid meet')
+        .attr('opacity', 0.25);
 
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
@@ -870,7 +864,7 @@ function mindMapPanel() {
       // Idle label (shown until first activity)
       zoomG.append('text')
         .attr('class', 'idle-label')
-        .attr('x', 140).attr('y', 210)
+        .attr('x', 140).attr('y', 125)
         .attr('text-anchor', 'middle')
         .attr('fill', 'var(--text-dim)')
         .attr('font-size', '10px')
