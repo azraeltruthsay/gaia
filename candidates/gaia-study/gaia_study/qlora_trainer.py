@@ -367,9 +367,10 @@ class QLoRATrainer:
             # Skip for GPTQ — prepare_model_for_kbit_training OOMs on large GPTQ models
             # and is designed for BnB NF4, not GPTQ. Just enable gradient checkpointing.
             if is_prequantized:
-                if self.config.gradient_checkpointing:
-                    self.model.gradient_checkpointing_enable()
-                logger.info("GPTQ model: skipping prepare_model_for_kbit_training (not needed for GPTQ+LoRA)")
+                # GPTQ + gradient checkpointing can segfault on some backends.
+                # Disable it for GPTQ models — the 4-bit quantization already saves VRAM.
+                self.config.gradient_checkpointing = False
+                logger.info("GPTQ model: disabled gradient checkpointing (can segfault with GPTQ kernels)")
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 self.model = peft.prepare_model_for_kbit_training(
                     self.model,
