@@ -319,32 +319,35 @@ class QLoRATrainer:
                         "— loading to CPU for NF4 quantization, then moving to GPU",
                         bf16_size_gb, gpu_free_gb
                     )
-                    # NF4 quantization: model too large for direct GPU load.
-                    # Use device_map="auto" with llm_int8_enable_fp32_cpu_offload
-                    # to keep NF4 layers on GPU and overflow embedding/lm_head to CPU.
+                    # Model too large for from_pretrained GPU quantization.
+                    # Load bf16 to CPU, quantize with quanto int4 on CPU,
+                    # then move to GPU. This avoids the bf16 VRAM peak entirely.
                     logger.info(
-                        "Loading model with NF4 + CPU offload "
-                        "(bf16 size: %.1fGiB, GPU budget: %dGiB)",
-                        bf16_size_gb, max_gpu_gb
+                        "Loading bf16 model to CPU for quanto int4 quantization "
+                        "(bf16 size: %.1fGiB → int4 ~%.1fGiB on GPU)",
+                        bf16_size_gb, bf16_size_gb / 4
                     )
-                    import gc, os as _os
+                    import gc
                     gc.collect()
                     torch.cuda.empty_cache()
-                    _os.environ.setdefault(
-                        "PYTORCH_CUDA_ALLOC_CONF",
-                        "expandable_segments:True,max_split_size_mb:256"
-                    )
-                    # Enable CPU offload for layers that don't fit
-                    bnb_config.llm_int8_enable_fp32_cpu_offload = True
+                    # Step 1: Load bf16 to CPU
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
-                        quantization_config=bnb_config,
-                        device_map="auto",
-                        max_memory={0: f"{max_gpu_gb}GiB", "cpu": "40GiB"},
-                        low_cpu_mem_usage=True,
+                        device_map="cpu",
                         torch_dtype=torch.bfloat16,
+                        low_cpu_mem_usage=True,
                     )
+                    logger.info("Model loaded to CPU. Quantizing with quanto int4...")
+                    # Step 2: Quantize on CPU with quanto
+                    from optimum.quanto import quantize, qint4, freeze
+                    quantize(self.model, weights=qint4)
+                    freeze(self.model)
+                    logger.info("Quantized on CPU. Moving to GPU...")
+                    # Step 3: Move quantized model to GPU
+                    self.model = self.model.to("cuda:0")
+                    gpu_used = torch.cuda.memory_allocated(0) / (1024**3)
+                    logger.info("Model on GPU: %.1fGiB", gpu_used)
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")
