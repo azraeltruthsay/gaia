@@ -265,12 +265,25 @@ class QLoRATrainer:
                         _register_qwen3_5()
                     except Exception:
                         pass
-                    self.model = GPTQModel.load(
-                        self.base_model_path,
-                        backend=BACKEND.AUTO_TRAINABLE,
-                        device_map={"": 0},
-                        trust_remote_code=True,
-                    )
+                    # Try TRITON backend first (best backward support),
+                    # fall back to AUTO_TRAINABLE
+                    _load_backend = BACKEND.TRITON
+                    try:
+                        self.model = GPTQModel.load(
+                            self.base_model_path,
+                            backend=_load_backend,
+                            device_map={"": 0},
+                            trust_remote_code=True,
+                        )
+                    except Exception as _triton_err:
+                        logger.warning("TRITON backend failed: %s. Trying AUTO_TRAINABLE...", _triton_err)
+                        _load_backend = BACKEND.AUTO_TRAINABLE
+                        self.model = GPTQModel.load(
+                            self.base_model_path,
+                            backend=_load_backend,
+                            device_map={"": 0},
+                            trust_remote_code=True,
+                        )
                 except Exception as _gptq_err:
                     logger.error("GPTQModel.load with AUTO_TRAINABLE failed: %s", _gptq_err)
                     raise
