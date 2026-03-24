@@ -251,34 +251,20 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Load GPTQ model via gptqmodel directly (not transformers) to
-                # control backend selection. Use TORCH backend to avoid Marlin
-                # kernel issues with non-64-divisible layers.
-                try:
-                    from gptqmodel import GPTQModel, BACKEND
-                    # Register Qwen3.5 model def — multimodal model needs special handling
-                    try:
-                        from gaia_study.merge_and_requantize import _register_qwen3_5
-                        _register_qwen3_5()
-                        logger.info("Registered Qwen3.5 model definition for gptqmodel")
-                    except Exception as _reg_err:
-                        logger.debug("Qwen3.5 registration skipped: %s", _reg_err)
-                    logger.info("Loading GPTQ model via gptqmodel with TORCH backend...")
-                    self.model = GPTQModel.load(
-                        self.base_model_path,
-                        backend=BACKEND.TORCH,
-                        device_map={"": 0},
-                        trust_remote_code=True,
-                    )
-                except ImportError:
-                    logger.info("gptqmodel not available, falling back to transformers...")
-                    self.model = auto_cls.from_pretrained(
-                        self.base_model_path,
-                        trust_remote_code=True,
-                        device_map={"": 0},
-                        low_cpu_mem_usage=True,
-                        torch_dtype=torch.bfloat16,
-                    )
+                # Load GPTQ model via transformers — config.json patched with
+                # use_exllama=False to avoid Marlin kernel issues.
+                # Transformers' GPTQ wrapper supports backward pass (unlike gptqmodel TORCH).
+                logger.info("Loading GPTQ model via transformers (exllama disabled in config)...")
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                self.model = auto_cls.from_pretrained(
+                    self.base_model_path,
+                    trust_remote_code=True,
+                    device_map={"": 0},
+                    low_cpu_mem_usage=True,
+                    torch_dtype=torch.bfloat16,
+                )
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
                 # This is the canonical QLoRA technique — proper gradient flow via STE.
