@@ -341,11 +341,24 @@ html, body {
 .brain-outline { fill: rgba(255,255,255,0.02); stroke: var(--text-dim); stroke-width: 1; opacity: 0.2; }
 .brain-stem { fill: none; stroke: var(--text-dim); stroke-width: 1; opacity: 0.15; }
 
-/* Neuron dots — always present, fixed positions */
-.neuron { transition: r 0.3s ease, opacity 0.5s ease, fill 0.3s ease; cursor: pointer; }
-.neuron.idle { opacity: 0.08; }
-.neuron.active { opacity: 0.9; }
-.neuron.glow { filter: url(#neuron-glow); }
+/* Neuron fibers — short line segments representing axons */
+.neuron-fiber {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease, opacity 0.4s ease;
+  cursor: pointer;
+  stroke-linecap: round;
+}
+.neuron-fiber.idle { opacity: 0.06; }
+.neuron-fiber.active { opacity: 0.9; }
+.neuron-fiber.glow { /* glow filter applied via D3 */ }
+/* Firing animation — dashed stroke animates to simulate current flow */
+.neuron-fiber.firing {
+  stroke-dasharray: 3 2;
+  animation: fiber-current 0.4s linear infinite;
+}
+@keyframes fiber-current {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -5; }
+}
 
 /* Neural pathways — two types */
 .pathway { opacity: 0; transition: opacity 0.3s ease; }

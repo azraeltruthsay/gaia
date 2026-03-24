@@ -540,29 +540,40 @@ const BRAIN_REGIONS = [
   { name: 'Frontal',    layerRange: [22, 32],  cx: 55,  cy: 70,  rx: 30, ry: 35 },
 ];
 
-// Pre-compute neuron positions within brain regions using seeded pseudo-random
+// Pre-compute neuron fiber segments within brain regions
+// Each neuron is a short line (axon fiber) at a random angle
 function _generateNeurons(count) {
   const neurons = [];
   const perRegion = Math.ceil(count / BRAIN_REGIONS.length);
-  // Simple seeded random for deterministic layout
   let seed = 42;
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
   for (const region of BRAIN_REGIONS) {
     for (let i = 0; i < perRegion && neurons.length < count; i++) {
-      // Distribute in elliptical region with some jitter
       const angle = rand() * Math.PI * 2;
-      const dist = Math.sqrt(rand()); // sqrt for uniform area distribution
-      const x = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
-      const y = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
+      const dist = Math.sqrt(rand());
+      const cx = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
+      const cy = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
+
+      // Each neuron is a short fiber line at a random angle
+      const fiberAngle = rand() * Math.PI; // 0-180 degrees
+      const fiberLen = 6 + rand() * 10; // 6-16px length
+      const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
+      const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
+      const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
+      const y2 = cy + Math.sin(fiberAngle) * fiberLen / 2;
+
       neurons.push({
-        x: Math.round(x * 10) / 10,
-        y: Math.round(y * 10) / 10,
+        x: Math.round(cx * 10) / 10,
+        y: Math.round(cy * 10) / 10,
+        x1: Math.round(x1 * 10) / 10,
+        y1: Math.round(y1 * 10) / 10,
+        x2: Math.round(x2 * 10) / 10,
+        y2: Math.round(y2 * 10) / 10,
+        fiberLen: Math.round(fiberLen * 10) / 10,
         region: region.name,
         layerRange: region.layerRange,
         id: neurons.length,
-        strength: 0,
-        active: false,
       });
     }
   }
@@ -653,21 +664,28 @@ function mindMapColumn() {
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
 
-      // Neuron layer
+      // Neuron fiber layer — each neuron is a short line segment (axon fiber)
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
       const neurons = this._neurons[tier];
       const self = this;
 
-      neuronGroup.selectAll('circle.neuron')
+      // Animated dash pattern for "current flowing" effect
+      const dashAnim = defs.append('animate')
+        ? null : null; // CSS handles animation
+
+      neuronGroup.selectAll('line.neuron-fiber')
         .data(neurons, d => d.id)
         .enter()
-        .append('circle')
-        .attr('class', 'neuron idle')
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y)
-        .attr('r', 2)
-        .attr('fill', '#4fc3f7')
-        .attr('opacity', 0.08)
+        .append('line')
+        .attr('class', 'neuron-fiber idle')
+        .attr('x1', d => d.x1)
+        .attr('y1', d => d.y1)
+        .attr('x2', d => d.x2)
+        .attr('y2', d => d.y2)
+        .attr('stroke', '#4fc3f7')
+        .attr('stroke-width', 1)
+        .attr('stroke-linecap', 'round')
+        .attr('opacity', 0.06)
         .on('mouseover', function(evt, d) {
           const active = self._activeNeurons[tier].get(d.id);
           self.hoveredFeature = active ? {
@@ -823,50 +841,53 @@ function mindMapColumn() {
         }
       }
 
-      // Update neuron visuals via D3
-      const neuronSel = svg.select('g.neuron-group').selectAll('circle.neuron');
+      // Update neuron fiber visuals via D3
+      const fiberSel = svg.select('g.neuron-group').selectAll('line.neuron-fiber');
 
-      neuronSel.each(function(d) {
+      fiberSel.each(function(d) {
         const el = d3.select(this);
         const active = activeMap.get(d.id);
 
         if (frameActiveIds.has(d.id) && active) {
-          // Active this frame — light up
+          // Active — fiber lights up, thickens, gets flowing dash animation
           const str = active.strength;
-          const r = Math.max(2, Math.min(8, 2 + str * 0.4));
+          const width = Math.max(1.5, Math.min(4, 1 + str * 0.2));
           el.classed('idle', false)
             .classed('active', true)
+            .classed('firing', true)
             .classed('glow', str > 7)
-            .transition().duration(200)
-            .attr('r', r)
-            .attr('fill', colorScale(str))
+            .transition().duration(150)
+            .attr('stroke', colorScale(str))
+            .attr('stroke-width', width)
             .attr('opacity', 0.9)
             .attr('filter', str > 7 ? `url(#neuron-glow-${tier})` : null);
         } else if (active && (Date.now() - active.timestamp) < 1500) {
-          // Recently active — decaying
+          // Decaying — fiber fades back
           const elapsed = Date.now() - active.timestamp;
           const decay = 1 - (elapsed / 1500);
           const str = active.strength * decay;
-          const r = Math.max(2, 2 + str * 0.3);
+          const width = Math.max(1, 1 + str * 0.15);
           el.classed('glow', false)
+            .classed('firing', decay > 0.3)
             .transition().duration(400)
-            .attr('r', r)
-            .attr('fill', colorScale(str))
-            .attr('opacity', Math.max(0.08, 0.9 * decay))
+            .attr('stroke', colorScale(str))
+            .attr('stroke-width', width)
+            .attr('opacity', Math.max(0.06, 0.9 * decay))
             .attr('filter', null);
           if (decay <= 0.05) {
             activeMap.delete(d.id);
           }
         } else {
-          // Idle
+          // Idle — thin dim fiber
           if (activeMap.has(d.id)) activeMap.delete(d.id);
           el.classed('idle', true)
             .classed('active', false)
+            .classed('firing', false)
             .classed('glow', false)
             .transition().duration(800)
-            .attr('r', 2)
-            .attr('fill', '#4fc3f7')
-            .attr('opacity', 0.08)
+            .attr('stroke', '#4fc3f7')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.06)
             .attr('filter', null);
         }
       });
