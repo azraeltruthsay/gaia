@@ -28,6 +28,13 @@ wireguard_setup/
 # --- Audio inbox (user audio files) ---
 audio_inbox/
 
+# --- Fabric patterns (downloaded by scripts/sync_fabric_patterns.py) ---
+# Only _config.json is tracked; pattern data is fetched from GitHub
+knowledge/fabric_patterns/*/
+knowledge/fabric_patterns/_hashes.json
+knowledge/fabric_patterns/_last_sync.json
+knowledge/fabric_patterns/_pending_review.json
+
 # --- Logs ---
 logs/
 *.log
