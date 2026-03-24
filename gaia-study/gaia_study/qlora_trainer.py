@@ -251,15 +251,24 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
-                # Load GPTQ model via transformers — config.json patched with
-                # use_exllama=False to avoid Marlin kernel issues.
-                # Transformers' GPTQ wrapper supports backward pass (unlike gptqmodel TORCH).
-                logger.info("Loading GPTQ model via transformers (exllama disabled in config)...")
-                import gc
+                # Load GPTQ model — force non-Marlin kernel by setting env before import
+                logger.info("Loading GPTQ model via transformers...")
+                import gc, os as _os3
                 gc.collect()
                 torch.cuda.empty_cache()
+                # Tell gptqmodel to use CUDA_OLD backend (supports all dimensions + backward)
+                _os3.environ["GPTQMODEL_PREFER_BACKEND"] = "cuda_old"
+                # Also patch the quantization config to disable Marlin
+                import transformers as _tf
+                _orig_cfg = _tf.AutoConfig.from_pretrained(
+                    self.base_model_path, trust_remote_code=True
+                )
+                if hasattr(_orig_cfg, 'quantization_config'):
+                    _orig_cfg.quantization_config['use_exllama'] = False
+                    _orig_cfg.quantization_config['backend'] = 'cuda_old'
                 self.model = auto_cls.from_pretrained(
                     self.base_model_path,
+                    config=_orig_cfg,
                     trust_remote_code=True,
                     device_map={"": 0},
                     low_cpu_mem_usage=True,
