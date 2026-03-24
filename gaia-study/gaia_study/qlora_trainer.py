@@ -364,7 +364,13 @@ class QLoRATrainer:
             logger.info("Model loaded: %.1f GiB on GPU", gpu_mem_gb)
 
             # Prepare quantized model for training (casts layernorm to fp32, etc.)
-            if self.config.load_in_4bit and bitsandbytes is not None:
+            # Skip for GPTQ — prepare_model_for_kbit_training OOMs on large GPTQ models
+            # and is designed for BnB NF4, not GPTQ. Just enable gradient checkpointing.
+            if is_prequantized:
+                if self.config.gradient_checkpointing:
+                    self.model.gradient_checkpointing_enable()
+                logger.info("GPTQ model: skipping prepare_model_for_kbit_training (not needed for GPTQ+LoRA)")
+            elif self.config.load_in_4bit and bitsandbytes is not None:
                 self.model = peft.prepare_model_for_kbit_training(
                     self.model,
                     use_gradient_checkpointing=self.config.gradient_checkpointing,
