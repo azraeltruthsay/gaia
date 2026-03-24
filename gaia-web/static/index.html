@@ -126,6 +126,12 @@
           <span>Neural Activity</span>
           <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
         </div>
+        <div class="brain-legend-key">
+          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano (Reflex)</span>
+          <span class="legend-swatch core"></span><span class="legend-key-label">Core (Operator)</span>
+          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime (Thinker)</span>
+          <span class="legend-swatch synapse-dot"></span><span class="legend-key-label">Synapse</span>
+        </div>
         <div class="unified-brain" id="mindmap-unified"></div>
         <div class="mind-map-legend" x-show="hoveredFeature">
           <span class="legend-tier" x-text="hoveredFeature?.tier"></span>

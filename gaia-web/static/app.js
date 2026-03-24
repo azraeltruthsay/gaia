@@ -528,27 +528,66 @@ function chatPanel() {
 // Unified brain — all three cognitive tiers mapped to anatomical regions
 // Sagittal side-view: Frontal/Prime (left/top), Brain stem/Nano (bottom-right)
 
-// Brain silhouette paths (sagittal side view, 280x400 viewport — taller to fill column)
-const BRAIN_OUTLINE = 'M 60,30 C 25,30 8,70 12,120 C 16,165 35,210 55,245 C 70,270 95,295 130,315 C 155,328 185,330 210,320 C 235,310 252,285 260,255 C 268,225 270,190 265,155 C 260,120 248,90 230,65 C 212,42 185,28 155,25 C 125,22 90,25 60,30 Z';
-const BRAIN_STEM = 'M 225,280 C 235,305 240,340 238,365 C 237,378 233,388 228,380 C 224,372 222,355 225,340';
-const BRAIN_CEREBELLUM = 'M 230,255 C 255,260 268,280 260,300 C 252,318 232,320 220,310 C 208,300 210,275 230,255 Z';
+// Anatomically accurate brain silhouette (sagittal view, 280x400)
+// Features: frontal pole, prefrontal bulge, central sulcus, parietal rise,
+// occipital notch, calcarine sulcus, temporal lobe, Sylvian fissure
+const BRAIN_OUTLINE =
+  // Frontal pole (bottom-left front)
+  'M 28,210 C 20,195 18,170 22,148' +
+  // Prefrontal — ascending with gentle gyri bumps
+  ' C 26,126 35,105 42,88 C 48,74 55,62 68,50' +
+  // Superior frontal — top of the dome, gentle undulation
+  ' C 80,40 95,32 110,28 C 125,25 140,24 155,26' +
+  // Central sulcus notch — dip between frontal and parietal
+  ' C 162,27 166,34 168,30 C 170,26 174,24 178,26' +
+  // Parietal lobe — rises then curves back
+  ' C 188,28 198,32 208,40 C 218,48 225,60 230,75' +
+  // Parieto-occipital transition
+  ' C 235,90 238,108 240,125' +
+  // Occipital lobe — back of the head with slight point
+  ' C 242,145 244,165 245,182 C 246,198 244,215 238,228' +
+  // Occipital notch — dip above cerebellum
+  ' C 234,238 228,244 222,248' +
+  // Temporal-occipital boundary — curves under
+  ' C 210,255 195,262 178,265' +
+  // Temporal lobe — underside, extending forward
+  ' C 155,268 130,268 108,264 C 85,260 65,252 50,240' +
+  // Temporal pole — front of temporal lobe
+  ' C 38,230 30,220 28,210 Z';
+// Sylvian fissure — lateral sulcus separating frontal/parietal from temporal
+const BRAIN_SYLVIAN = 'M 55,218 C 80,205 110,198 140,200 C 165,202 185,210 200,225';
+// Central sulcus — between frontal and parietal
+const BRAIN_CENTRAL_SULCUS = 'M 168,30 C 165,55 158,85 150,115 C 145,135 140,155 138,175';
+// Cerebellum — tucked under occipital
+const BRAIN_CEREBELLUM =
+  'M 222,248 C 240,252 258,268 255,288' +
+  ' C 252,305 238,315 222,318 C 206,320 192,312 188,298' +
+  ' C 184,284 190,265 205,255 C 210,252 216,250 222,248 Z';
+// Cerebellum folia (texture lines)
+const BRAIN_CEREBELLUM_FOLIA = [
+  'M 200,272 C 215,268 235,272 248,280',
+  'M 195,285 C 210,280 230,282 245,290',
+  'M 195,298 C 210,294 228,296 240,304',
+];
+// Brain stem
+const BRAIN_STEM = 'M 210,305 C 215,325 218,350 216,370 C 215,380 212,388 208,382 C 205,376 204,360 206,345';
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
 // Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
 const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (bottom-right, reflexes/triage)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 232, cy: 345, rx: 18, ry: 25 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 242, cy: 285, rx: 22, ry: 22 },
+  // NANO — brain stem & cerebellum (reflexes, triage)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 212, cy: 348, rx: 14, ry: 22 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 222, cy: 288, rx: 25, ry: 20 },
 
-  // CORE — mid-brain, temporal, parietal, occipital (middle, operational thinking)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 170, cy: 280, rx: 38, ry: 22 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 155, cy: 175, rx: 42, ry: 28 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 235, cy: 200, rx: 25, ry: 30 },
+  // CORE — temporal, parietal, occipital (operational thinking)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 130, cy: 248, rx: 40, ry: 16 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 185, cy: 55,  rx: 30, ry: 22 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 238, cy: 180, rx: 18, ry: 35 },
 
-  // PRIME — frontal cortex (front/top-left, deep reasoning)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 55,  cy: 175, rx: 35, ry: 45 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 100, cy: 110, rx: 32, ry: 25 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 70,  cy: 100, rx: 40, ry: 32 },
+  // PRIME — frontal cortex (deep reasoning)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 38,  cy: 185, rx: 18, ry: 35 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 120, cy: 65,  rx: 30, ry: 22 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 72,  cy: 90,  rx: 35, ry: 30 },
 ];
 
 // Tier idle colors — anatomically coded
@@ -685,25 +724,22 @@ function mindMapPanel() {
           .append('feMergeNode').attr('in', d => d);
       }
 
-      // Brain outline — always visible, dim
-      zoomG.append('path')
-        .attr('class', 'brain-outline')
-        .attr('d', BRAIN_OUTLINE);
-
-      // Cerebellum
-      zoomG.append('path')
-        .attr('class', 'brain-cerebellum')
-        .attr('d', BRAIN_CEREBELLUM);
-
-      // Brain stem
-      zoomG.append('path')
-        .attr('class', 'brain-stem')
-        .attr('d', BRAIN_STEM);
+      // Brain anatomy — anatomically accurate sagittal silhouette
+      zoomG.append('path').attr('class', 'brain-outline').attr('d', BRAIN_OUTLINE);
+      zoomG.append('path').attr('class', 'brain-cerebellum').attr('d', BRAIN_CEREBELLUM);
+      zoomG.append('path').attr('class', 'brain-stem').attr('d', BRAIN_STEM);
+      // Sulci — surface folds giving depth
+      zoomG.append('path').attr('class', 'brain-sulcus').attr('d', BRAIN_SYLVIAN);
+      zoomG.append('path').attr('class', 'brain-sulcus').attr('d', BRAIN_CENTRAL_SULCUS);
+      // Cerebellum folia texture
+      for (const folia of BRAIN_CEREBELLUM_FOLIA) {
+        zoomG.append('path').attr('class', 'brain-folia').attr('d', folia);
+      }
 
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
 
-      // Synapse layer (between pathways and neurons)
+      // Synapse layer
       zoomG.append('g').attr('class', 'synapses');
 
       // Neuron fiber layer — all tiers in one group, color-coded
@@ -743,47 +779,7 @@ function mindMapPanel() {
           self.hoveredFeature = null;
         });
 
-      // Region labels — subtle, inside each anatomical region
-      const regionLabels = [
-        // Nano
-        { name: 'Brain Stem',   x: 232, y: 360, tier: 'nano' },
-        { name: 'Cerebellum',   x: 242, y: 270, tier: 'nano' },
-        // Core
-        { name: 'Temporal',     x: 170, y: 295, tier: 'core' },
-        { name: 'Parietal',     x: 155, y: 160, tier: 'core' },
-        { name: 'Occipital',    x: 240, y: 188, tier: 'core' },
-        // Prime
-        { name: 'Prefrontal',   x: 50,  y: 160, tier: 'prime' },
-        { name: 'Motor',        x: 100, y: 98,  tier: 'prime' },
-        { name: 'Frontal',      x: 65,  y: 82,  tier: 'prime' },
-      ];
-      zoomG.selectAll('text.region-label')
-        .data(regionLabels)
-        .enter()
-        .append('text')
-        .attr('class', 'region-label')
-        .attr('x', d => d.x)
-        .attr('y', d => d.y)
-        .attr('text-anchor', 'middle')
-        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .text(d => d.name);
-
-      // Tier labels — larger, always visible, marking the three cognitive zones
-      const tierLabels = [
-        { label: 'NANO',  x: 248, y: 320, tier: 'nano' },
-        { label: 'CORE',  x: 190, y: 225, tier: 'core' },
-        { label: 'PRIME', x: 55,  y: 65,  tier: 'prime' },
-      ];
-      zoomG.selectAll('text.tier-label')
-        .data(tierLabels)
-        .enter()
-        .append('text')
-        .attr('class', 'tier-label')
-        .attr('x', d => d.x)
-        .attr('y', d => d.y)
-        .attr('text-anchor', 'middle')
-        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .text(d => d.label);
+      // No text labels on the brain — color legend key is in the HTML above
 
       // Idle label (shown until first activity)
       zoomG.append('text')
