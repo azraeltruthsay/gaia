@@ -355,6 +355,21 @@ html, body {
 }
 .legend-key-label { color: var(--text-dim); }
 
+/* Dynamic concept legend — active features with their unique colors */
+.concept-legend {
+  display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 6px;
+  border-bottom: 1px solid var(--border); max-height: 52px; overflow-y: auto;
+}
+.concept-tag {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 8px; padding: 1px 5px; border-radius: 8px;
+  border: 1px solid; opacity: 0.85;
+}
+.concept-dot {
+  width: 5px; height: 5px; border-radius: 50%; display: inline-block;
+  flex-shrink: 0;
+}
+
 /* Neuron fibers — short line segments representing axons */
 .neuron-fiber {
   transition: x2 0.3s ease, y2 0.3s ease, stroke 0.2s ease, stroke-width 0.2s ease, opacity 0.4s ease;

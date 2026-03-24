@@ -597,6 +597,23 @@ const TIER_IDLE_COLORS = {
   prime: '#ce93d8',  // light purple — deep thought
 };
 
+// Concept color palette — distinct hues for named features
+const CONCEPT_PALETTE = [
+  '#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5',
+  '#2196f3', '#00bcd4', '#009688', '#4caf50', '#8bc34a',
+  '#cddc39', '#ffeb3b', '#ffc107', '#ff9800', '#ff5722',
+  '#ef5350', '#ab47bc', '#5c6bc0', '#26a69a', '#66bb6a',
+];
+const _conceptColorMap = {};  // label -> color
+let _conceptColorIdx = 0;
+function _getConceptColor(label) {
+  if (!label || label.startsWith('neuron_') || label.startsWith('feature_')) return null;
+  if (_conceptColorMap[label]) return _conceptColorMap[label];
+  _conceptColorMap[label] = CONCEPT_PALETTE[_conceptColorIdx % CONCEPT_PALETTE.length];
+  _conceptColorIdx++;
+  return _conceptColorMap[label];
+}
+
 // Pre-compute neuron fiber segments within brain regions for a specific tier
 function _generateNeurons(tier, count) {
   const neurons = [];
@@ -650,6 +667,7 @@ function mindMapPanel() {
   return {
     live: true,
     hoveredFeature: null,
+    activeConcepts: [],     // [{label, color, strength}] — for dynamic legend
     _es: null,
     _svg: null,
     _neurons: [],           // all neurons, all tiers, single array
@@ -906,6 +924,9 @@ function mindMapPanel() {
         if (frameActiveIds.has(d.id) && active) {
           const str = active.strength;
           const width = Math.max(2, Math.min(5, 1.5 + str * 0.25));
+          // Concept color if this neuron has a named feature, else heat scale
+          const conceptColor = _getConceptColor(active.label);
+          const activeColor = conceptColor || colorScale(str);
           el.classed('idle', false)
             .classed('active', true)
             .classed('firing', true)
@@ -915,7 +936,7 @@ function mindMapPanel() {
             .attr('opacity', 1)
             .attr('filter', `url(#neuron-glow-${tier})`)
             .transition().duration(250)
-            .attr('stroke', colorScale(str))
+            .attr('stroke', activeColor)
             .attr('stroke-width', width)
             .attr('opacity', 0.85)
             .attr('filter', str > 5 ? `url(#neuron-glow-${tier})` : null);
@@ -935,10 +956,11 @@ function mindMapPanel() {
           const decay = 1 - (elapsed / 1500);
           const str = active.strength * decay;
           const width = Math.max(1, 1 + str * 0.15);
+          const decayConceptColor = _getConceptColor(active.label);
           el.classed('glow', false)
             .classed('firing', decay > 0.3)
             .transition().duration(400)
-            .attr('stroke', colorScale(str))
+            .attr('stroke', decayConceptColor || colorScale(str))
             .attr('stroke-width', width)
             .attr('opacity', Math.max(0.06, 0.9 * decay))
             .attr('filter', null);
@@ -971,6 +993,23 @@ function mindMapPanel() {
       // Update and render synapses from co-occurrence data
       this._updateSynapses();
       this._renderSynapses();
+
+      // Update active concepts legend — show currently-firing named features
+      const conceptMap = new Map();
+      for (const [nid, info] of activeMap) {
+        if (info.label && !info.label.startsWith('neuron_') && !info.label.startsWith('feature_')) {
+          const color = _getConceptColor(info.label);
+          if (color) {
+            const existing = conceptMap.get(info.label);
+            if (!existing || info.strength > existing.strength) {
+              conceptMap.set(info.label, { label: info.label, color, strength: info.strength });
+            }
+          }
+        }
+      }
+      this.activeConcepts = Array.from(conceptMap.values())
+        .sort((a, b) => b.strength - a.strength)
+        .slice(0, 12);
     },
 
     _updateSynapses() {

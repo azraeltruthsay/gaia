@@ -127,10 +127,19 @@
           <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
         </div>
         <div class="brain-legend-key">
-          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano (Reflex)</span>
-          <span class="legend-swatch core"></span><span class="legend-key-label">Core (Operator)</span>
-          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime (Thinker)</span>
+          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano</span>
+          <span class="legend-swatch core"></span><span class="legend-key-label">Core</span>
+          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime</span>
           <span class="legend-swatch synapse-dot"></span><span class="legend-key-label">Synapse</span>
+        </div>
+        <!-- Dynamic concept legend — shows currently active named features with their colors -->
+        <div class="concept-legend" x-show="activeConcepts.length > 0" x-transition>
+          <template x-for="c in activeConcepts" :key="c.label">
+            <span class="concept-tag" :style="'border-color:' + c.color + '; color:' + c.color">
+              <span class="concept-dot" :style="'background:' + c.color"></span>
+              <span x-text="c.label"></span>
+            </span>
+          </template>
         </div>
         <div class="unified-brain" id="mindmap-unified"></div>
         <div class="mind-map-legend" x-show="hoveredFeature">
