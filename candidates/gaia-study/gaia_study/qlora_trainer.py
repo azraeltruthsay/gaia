@@ -246,6 +246,7 @@ class QLoRATrainer:
 
             if is_prequantized:
                 # GPTQ model — already quantized, load directly. No BnB needed.
+                # Disable Marlin backend — some layers have out_features not divisible by 64
                 logger.info("Loading pre-quantized GPTQ model directly to GPU...")
                 import gc
                 gc.collect()
@@ -256,6 +257,7 @@ class QLoRATrainer:
                     device_map={"": 0},
                     low_cpu_mem_usage=True,
                     torch_dtype=torch.bfloat16,
+                    disable_exllama=True,
                 )
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
