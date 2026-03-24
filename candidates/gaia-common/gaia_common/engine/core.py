@@ -788,15 +788,16 @@ class GAIAEngine:
                     break
                 generated.append(token)
 
-                # Forward single token
+                # Forward single token — sample activations every 4th step
+                _capture_this = capture and (step % 4 == 0)
                 with torch.no_grad():
                     out = self.model(next_id, past_key_values=current_kv,
-                                     use_cache=True, output_hidden_states=capture)
+                                     use_cache=True, output_hidden_states=_capture_this)
                 current_kv = out.past_key_values
                 logits = out.logits[:, -1, :]
 
-                # Write activation for live visualization
-                if capture and hasattr(out, "hidden_states") and out.hidden_states:
+                # Write activation for live visualization (sampled)
+                if _capture_this and hasattr(out, "hidden_states") and out.hidden_states:
                     snap = self.monitor.capture(out.hidden_states)
                     token_text = self.tokenizer.decode([token], skip_special_tokens=True)
                     _write_activation(
@@ -914,15 +915,16 @@ class GAIAEngine:
                         "choices": [{"delta": {"content": delta}, "finish_reason": None}],
                     }
 
-                # Forward single token
+                # Forward single token — sample activations every 4th step
+                _capture_this = _capture and (step % 4 == 0)
                 with torch.no_grad():
                     out = self.model(next_id, past_key_values=current_kv,
-                                     use_cache=True, output_hidden_states=_capture)
+                                     use_cache=True, output_hidden_states=_capture_this)
                 current_kv = out.past_key_values
                 logits = out.logits[:, -1, :]
 
-                # Write activation for live visualization
-                if _capture and hasattr(out, "hidden_states") and out.hidden_states:
+                # Write activation for live visualization (sampled)
+                if _capture_this and hasattr(out, "hidden_states") and out.hidden_states:
                     snap = self.monitor.capture(out.hidden_states)
                     _write_activation(_tier, delta or "?", step, session_id, snap)
 
