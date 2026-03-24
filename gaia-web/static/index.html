@@ -40,34 +40,84 @@
     </template>
   </nav>
 
-  <!-- ── Chat View (full-page Claude-style) ── -->
+  <!-- ── Chat View (full-page Claude-style with sidebar) ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'chat'" style="display:none">
-    <div class="chat-fullpage" x-data="chatPanel()">
-      <div class="chat-fullpage-header">
-        <div class="chat-fp-title">GAIA</div>
-        <div class="chat-fp-subtitle">General Artisanal Intelligence Architecture</div>
-        <button class="chat-fp-clear" @click="clearHistory()" title="Clear history">&times;</button>
-      </div>
-      <div x-ref="messages" class="chat-fp-messages">
-        <template x-for="msg in $store.chat.messages" :key="msg.id">
-          <div class="chat-msg" :class="msg.type">
-            <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
-            <span class="chat-text" x-html="renderMessage(msg)"></span>
-          </div>
-        </template>
-      </div>
-      <div class="chat-fp-input-area">
-        <div class="chat-fp-input-wrap">
-          <textarea x-model="input" placeholder="Message GAIA..." rows="1"
-                    @keydown.enter.prevent="if (!$event.shiftKey) send()"
-                    @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
-                    :disabled="$store.chat.sending"></textarea>
-          <button @click="send()" :disabled="$store.chat.sending || !input.trim()" class="chat-fp-send">
-            <span x-show="!$store.chat.sending">&#9654;</span>
-            <span x-show="$store.chat.sending" class="chat-fp-spinner">&#9679;</span>
-          </button>
+    <div class="chat-layout" :class="{ 'sidebar-open': $store.chat.sidebarPinned }">
+
+      <!-- Conversation Sidebar -->
+      <aside class="chat-sidebar"
+             x-show="$store.chat.sidebarOpen"
+             x-transition>
+        <div class="chat-sidebar-header">
+          <span>Conversations</span>
+          <button @click="$store.chat.sidebarPinned = !$store.chat.sidebarPinned"
+                  :class="{ active: $store.chat.sidebarPinned }"
+                  class="pin-btn" title="Pin sidebar">&#x1F4CC;</button>
         </div>
-        <div class="chat-fp-hint">Enter to send, Shift+Enter for new line</div>
+        <button class="sidebar-new-btn" @click="$store.chat.createConversation()">
+          + New Conversation
+        </button>
+        <div class="sidebar-conv-list">
+          <template x-for="conv in $store.chat.getSortedList()" :key="conv.id">
+            <div class="sidebar-conv-item"
+                 :class="{ active: conv.id === $store.chat.activeId }"
+                 @click="$store.chat.switchConversation(conv.id)">
+              <span class="conv-title" x-text="conv.title"></span>
+              <span class="conv-time" x-text="timeAgo(conv.updatedAt)"></span>
+              <button class="conv-delete" @click.stop="$store.chat.deleteConversation(conv.id)">&times;</button>
+            </div>
+          </template>
+        </div>
+        <!-- Context controls for active conversation -->
+        <div class="sidebar-context" x-show="$store.chat.getActive()">
+          <div class="context-mode-label">Context mode</div>
+          <div class="context-mode-toggle">
+            <button :class="{ active: $store.chat.getActive()?.contextMode === 'isolated' }"
+                    @click="$store.chat.setContextMode($store.chat.activeId, 'isolated')">Isolated</button>
+            <button :class="{ active: $store.chat.getActive()?.contextMode === 'pooled' }"
+                    @click="$store.chat.setContextMode($store.chat.activeId, 'pooled')">Pooled</button>
+          </div>
+          <button class="sidebar-action-btn"
+                  @click="$store.chat.addToPool($store.chat.activeId)">Add to Pool</button>
+          <select class="join-select"
+                  @change="if($event.target.value) { $store.chat.joinContext($store.chat.activeId, $event.target.value); $event.target.value=''; }">
+            <option value="">Join from...</option>
+            <template x-for="c in $store.chat.getSortedList().filter(c => c.id !== $store.chat.activeId)" :key="c.id">
+              <option :value="c.id" x-text="c.title"></option>
+            </template>
+          </select>
+        </div>
+      </aside>
+
+      <!-- Chat area -->
+      <div class="chat-fullpage" x-data="chatPanel()">
+        <div class="chat-fullpage-header">
+          <button class="chat-sidebar-toggle" @click="$store.chat.sidebarOpen = !$store.chat.sidebarOpen">&#8801;</button>
+          <div class="chat-fp-title" x-text="$store.chat.getActive()?.title || 'GAIA'"></div>
+          <div class="chat-fp-subtitle">General Artisanal Intelligence Architecture</div>
+          <button class="chat-fp-clear" @click="clearHistory()" title="Clear history">&times;</button>
+        </div>
+        <div x-ref="messages" class="chat-fp-messages">
+          <template x-for="msg in $store.chat.getMessages()" :key="msg.id">
+            <div class="chat-msg" :class="msg.type">
+              <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
+              <span class="chat-text" x-html="renderMessage(msg)"></span>
+            </div>
+          </template>
+        </div>
+        <div class="chat-fp-input-area">
+          <div class="chat-fp-input-wrap">
+            <textarea x-model="input" placeholder="Message GAIA..." rows="1"
+                      @keydown.enter.prevent="if (!$event.shiftKey) send()"
+                      @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
+                      :disabled="$store.chat.sending"></textarea>
+            <button @click="send()" :disabled="$store.chat.sending || !input.trim()" class="chat-fp-send">
+              <span x-show="!$store.chat.sending">&#9654;</span>
+              <span x-show="$store.chat.sending" class="chat-fp-spinner">&#9679;</span>
+            </button>
+          </div>
+          <div class="chat-fp-hint">Enter to send, Shift+Enter for new line</div>
+        </div>
       </div>
     </div>
   </section>
@@ -79,11 +129,18 @@
       <section class="panel panel-chat" x-data="chatPanel()">
         <div class="panel-header">
           <span>Chat</span>
+          <select class="compact-conv-select"
+                  x-model="$store.chat.activeId"
+                  @change="$store.chat.switchConversation($store.chat.activeId)">
+            <template x-for="c in $store.chat.getSortedList()" :key="c.id">
+              <option :value="c.id" x-text="c.title"></option>
+            </template>
+          </select>
           <button class="btn-icon" @click="clearHistory()" title="Clear chat history">&times;</button>
         </div>
         <div class="panel-body">
           <div x-ref="messages" class="chat-messages">
-            <template x-for="msg in $store.chat.messages" :key="msg.id">
+            <template x-for="msg in $store.chat.getMessages()" :key="msg.id">
               <div class="chat-msg" :class="msg.type">
                 <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
                 <span class="chat-text" x-html="renderMessage(msg)"></span>

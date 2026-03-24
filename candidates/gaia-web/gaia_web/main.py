@@ -33,6 +33,7 @@ from gaia_web.routes.system import router as system_router
 from gaia_web.routes.chaos import router as chaos_router
 from gaia_web.routes.changelog import router as changelog_router
 from gaia_web.routes.codemind import router as codemind_router
+from gaia_web.routes.conversations import router as conversations_router
 
 # Setup logging
 try:
@@ -132,6 +133,7 @@ app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(chaos_router, prefix="/api/chaos", tags=["chaos"])
 app.include_router(changelog_router, prefix="/api/changelog", tags=["changelog"])
 app.include_router(codemind_router, prefix="/api/codemind", tags=["codemind"])
+app.include_router(conversations_router, prefix="/api/conversations", tags=["conversations"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):
@@ -140,6 +142,7 @@ async def process_user_input(user_input: str, request: Request):
     Routes to the Core service and returns an NDJSON stream.
     """
     session_id = request.headers.get("X-Session-ID", f"web_{uuid.uuid4().hex[:8]}")
+    context_pool = request.headers.get("X-Context-Pool", "").lower() in ("true", "1", "yes")
     core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
     packet_id = f"web_{uuid.uuid4().hex[:8]}"
 
@@ -169,7 +172,8 @@ async def process_user_input(user_input: str, request: Request):
                             "ran": scan.ran,
                             "passed": scan.passed,
                             "injection_score": scan.injection_score,
-                        }
+                        },
+                        "context_pool": context_pool,
                     },
                 }
                 

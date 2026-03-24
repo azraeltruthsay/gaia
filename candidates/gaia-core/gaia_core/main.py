@@ -612,6 +612,10 @@ async def root():
             "/sleep/distracted-check": "Check for canned response (GET)",
             "/sleep/shutdown": "Graceful shutdown (POST)",
             "/cognition/checkpoint": "Write cognitive checkpoints (POST)",
+            "/api/sessions": "List all sessions (GET) / Create session (POST)",
+            "/api/sessions/{id}/history": "Get session message history (GET)",
+            "/api/sessions/{id}/summary": "Generate session summary (POST)",
+            "/api/sessions/{id}/meta": "Update session metadata (PUT)",
         }
     }
 
@@ -723,6 +727,150 @@ async def kv_cache_compact(role: str):
         "role": role,
         "pressure_after": mgr.get_cache_pressure(role),
     }
+
+
+# ── Session / Conversation Management ──────────────────────────────────────
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """List all sessions with metadata."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    sm = _ai_manager.session_manager
+    sessions_out = []
+    for sid, session in sm.sessions.items():
+        last_ts = session.last_message_timestamp()
+        sessions_out.append({
+            "session_id": sid,
+            "title": session.meta.get("title", sid),
+            "message_count": len(session.history),
+            "created_at": session.created_at.isoformat(),
+            "updated_at": last_ts.isoformat() if last_ts else session.created_at.isoformat(),
+        })
+    # Sort by most recently updated first
+    sessions_out.sort(key=lambda s: s["updated_at"], reverse=True)
+    return {"sessions": sessions_out}
+
+
+@app.post("/api/sessions")
+async def create_session(request: Request):
+    """Create a new conversation session."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    data = await request.json()
+    session_id = data.get("session_id", f"web_{__import__('uuid').uuid4().hex[:8]}")
+    title = data.get("title", "New conversation")
+
+    sm = _ai_manager.session_manager
+    session = sm.get_or_create_session(session_id)
+    session.meta["title"] = title
+    sm._save_state()
+
+    return {
+        "session_id": session_id,
+        "title": title,
+        "created_at": session.created_at.isoformat(),
+    }
+
+
+@app.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: str):
+    """Get full message history for a session."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    sm = _ai_manager.session_manager
+    if session_id not in sm.sessions:
+        return JSONResponse(status_code=404, content={"error": f"Session '{session_id}' not found"})
+
+    history = sm.get_history(session_id)
+    session = sm.sessions[session_id]
+    return {
+        "session_id": session_id,
+        "title": session.meta.get("title", session_id),
+        "messages": history,
+    }
+
+
+@app.post("/api/sessions/{session_id}/summary")
+async def generate_session_summary(session_id: str):
+    """Generate a summary of the conversation for the context pool."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    sm = _ai_manager.session_manager
+    if session_id not in sm.sessions:
+        return JSONResponse(status_code=404, content={"error": f"Session '{session_id}' not found"})
+
+    session = sm.sessions[session_id]
+    if not session.history:
+        return {"session_id": session_id, "summary": "", "keywords": []}
+
+    try:
+        summary = sm.summarizer.generate_summary(session.history, packet=None)
+        keywords = sm.keyword_extractor.extract_keywords(session.history)
+    except Exception as e:
+        logger.warning("Summary generation failed for %s: %s", session_id, e)
+        # Fallback: take first and last messages as a crude summary
+        first_msg = session.history[0].get("content", "")[:200]
+        last_msg = session.history[-1].get("content", "")[:200] if len(session.history) > 1 else ""
+        summary = f"Conversation starting with: {first_msg}"
+        if last_msg:
+            summary += f" ... ending with: {last_msg}"
+        keywords = []
+
+    return {
+        "session_id": session_id,
+        "title": session.meta.get("title", session_id),
+        "summary": summary,
+        "keywords": keywords,
+    }
+
+
+@app.put("/api/sessions/{session_id}/meta")
+async def update_session_meta(request: Request, session_id: str):
+    """Update session metadata (title, etc.)."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    sm = _ai_manager.session_manager
+    if session_id not in sm.sessions:
+        return JSONResponse(status_code=404, content={"error": f"Session '{session_id}' not found"})
+
+    data = await request.json()
+    session = sm.sessions[session_id]
+    for key, value in data.items():
+        session.meta[key] = value
+    sm._save_state()
+
+    return {"session_id": session_id, "meta": session.meta}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Archive and remove a session."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+
+    sm = _ai_manager.session_manager
+    if session_id not in sm.sessions:
+        return JSONResponse(status_code=404, content={"error": f"Session '{session_id}' not found"})
+
+    session = sm.sessions[session_id]
+
+    # Archive before deletion if there is history
+    if session.history:
+        try:
+            sm.summarize_and_archive(session_id)
+        except Exception as e:
+            logger.warning("Pre-delete archive failed for %s: %s", session_id, e)
+
+    # Remove from active sessions
+    sm.reset_session(session_id)
+
+    return {"status": "deleted", "session_id": session_id}
 
 
 @app.post("/process_packet")

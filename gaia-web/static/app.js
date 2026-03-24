@@ -32,6 +32,23 @@ function formatDuration(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function timeAgo(isoString) {
+  if (!isoString) return '';
+  const diff = Date.now() - new Date(isoString).getTime();
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function _genHex8() {
+  return Math.random().toString(16).slice(2, 10);
+}
+
 function drawSparkline(canvas, values, color) {
   if (!canvas || values.length < 2) return;
   const ctx = canvas.getContext('2d');
@@ -88,49 +105,246 @@ document.addEventListener('alpine:init', () => {
     discordTitle: 'Discord connectivity',
   });
 
-  // ── Shared Chat Store ──────────────────────────────────────────────────
-  // Single source of truth for messages, shared between Chat tab and Dashboard panel.
-  const CHAT_STORAGE_KEY = 'gaia_chat_history';
+  // ── Shared Chat Store (Multi-Conversation) ────────────────────────────
+  // Single source of truth for all conversations, shared between Chat tab and Dashboard panel.
+  const CONV_STORAGE_KEY = 'gaia_conversations';
+  const OLD_CHAT_STORAGE_KEY = 'gaia_chat_history';
   const CHAT_MAX_STORED = 200;
 
   const chatStore = {
-    messages: [],
+    conversations: {},
+    activeId: null,
     sending: false,
-    _nextId: 0,
+    sidebarOpen: false,
+    sidebarPinned: false,
+    _nextMsgId: 0,
     _sseConnected: false,
     _autoSSE: null,
 
-    _loadHistory() {
-      try {
-        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-        if (raw) {
-          const saved = JSON.parse(raw);
-          if (Array.isArray(saved) && saved.length > 0) {
-            this.messages = saved;
-            this._nextId = Math.max(...saved.map(m => m.id ?? 0)) + 1;
-          }
-        }
-      } catch { /* ignore corrupt storage */ }
+    // Context pool
+    contextPool: { summaries: [], lastUpdated: null },
+
+    // ── Getters ──
+
+    getActive() {
+      return this.conversations[this.activeId] || null;
     },
 
-    _saveHistory() {
-      try {
-        const toSave = this.messages.slice(-CHAT_MAX_STORED);
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave));
-      } catch { /* storage full or unavailable */ }
+    getMessages() {
+      const active = this.getActive();
+      return active ? active.messages : [];
     },
+
+    getSortedList() {
+      return Object.values(this.conversations).sort((a, b) => {
+        return new Date(b.updatedAt) - new Date(a.updatedAt);
+      });
+    },
+
+    // ── Conversation CRUD ──
+
+    createConversation(title) {
+      const id = `conv_${_genHex8()}`;
+      const sessionId = `web_${_genHex8()}`;
+      const now = new Date().toISOString();
+      this.conversations[id] = {
+        id,
+        sessionId,
+        title: title || 'New conversation',
+        messages: [],
+        contextMode: 'pooled',
+        joinedFrom: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.activeId = id;
+      this._save();
+      return id;
+    },
+
+    switchConversation(id) {
+      if (this.conversations[id]) {
+        this.activeId = id;
+        this._save();
+      }
+    },
+
+    deleteConversation(id) {
+      delete this.conversations[id];
+      const remaining = this.getSortedList();
+      if (remaining.length > 0) {
+        this.activeId = remaining[0].id;
+      } else {
+        this.createConversation('General');
+      }
+      this._save();
+    },
+
+    renameConversation(id, title) {
+      const conv = this.conversations[id];
+      if (conv) {
+        conv.title = title;
+        conv.updatedAt = new Date().toISOString();
+        this._save();
+      }
+    },
+
+    // ── Messages (operate on active conversation) ──
 
     addMessage(text, type) {
-      this.messages.push({ text, type, id: this._nextId++, ts: new Date().toISOString() });
-      this._saveHistory();
+      const active = this.getActive();
+      if (!active) return;
+      active.messages.push({ text, type, id: this._nextMsgId++, ts: new Date().toISOString() });
+      active.updatedAt = new Date().toISOString();
+      // Trim to max stored
+      if (active.messages.length > CHAT_MAX_STORED) {
+        active.messages = active.messages.slice(-CHAT_MAX_STORED);
+      }
+      this._save();
     },
 
     clearHistory() {
-      this.messages = [];
-      this._nextId = 0;
-      localStorage.removeItem(CHAT_STORAGE_KEY);
+      const active = this.getActive();
+      if (!active) return;
+      active.messages = [];
+      this._nextMsgId = 0;
+      active.updatedAt = new Date().toISOString();
+      this._save();
       this.addMessage('Chat history cleared.', 'system');
     },
+
+    // ── Session plumbing ──
+
+    getSessionId() {
+      const active = this.getActive();
+      return active ? active.sessionId : `web_${_genHex8()}`;
+    },
+
+    // ── Context ──
+
+    setContextMode(id, mode) {
+      const conv = this.conversations[id];
+      if (conv) {
+        conv.contextMode = mode;
+        this._save();
+      }
+    },
+
+    joinContext(targetId, srcId) {
+      const target = this.conversations[targetId];
+      const src = this.conversations[srcId];
+      if (!target || !src) return;
+      if (!target.joinedFrom.includes(srcId)) {
+        target.joinedFrom.push(srcId);
+      }
+      // Add a system message noting the join
+      const prevActive = this.activeId;
+      this.activeId = targetId;
+      this.addMessage(`Context joined from "${src.title}"`, 'system');
+      this.activeId = prevActive;
+    },
+
+    addToPool(convId) {
+      const conv = this.conversations[convId];
+      if (!conv || conv.messages.length === 0) return;
+      // Generate a simple summary from recent messages
+      const userMsgs = conv.messages.filter(m => m.type === 'user').map(m => m.text);
+      const summary = userMsgs.slice(-5).join(' | ').slice(0, 200) || '(empty conversation)';
+      this.contextPool.summaries.push({
+        conversationId: convId,
+        title: conv.title,
+        summary,
+        addedAt: new Date().toISOString(),
+      });
+      // Prune to 20 max
+      if (this.contextPool.summaries.length > 20) {
+        this.contextPool.summaries = this.contextPool.summaries.slice(-20);
+      }
+      this.contextPool.lastUpdated = new Date().toISOString();
+      this._save();
+      this.addMessage('Conversation added to context pool.', 'system');
+    },
+
+    // ── Auto-title ──
+
+    autoTitle(convId, firstMsg) {
+      const conv = this.conversations[convId];
+      if (!conv) return;
+      let title = firstMsg.trim();
+      if (title.length > 40) {
+        title = title.slice(0, 37) + '...';
+      }
+      conv.title = title;
+      conv.updatedAt = new Date().toISOString();
+      this._save();
+    },
+
+    // ── Persistence ──
+
+    _save() {
+      try {
+        const data = {
+          activeId: this.activeId,
+          conversations: this.conversations,
+          contextPool: this.contextPool,
+        };
+        localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(data));
+      } catch { /* storage full or unavailable */ }
+    },
+
+    _load() {
+      try {
+        const raw = localStorage.getItem(CONV_STORAGE_KEY);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (data.conversations && typeof data.conversations === 'object') {
+            this.conversations = data.conversations;
+            this.activeId = data.activeId || null;
+            if (data.contextPool) this.contextPool = data.contextPool;
+            // Recalculate _nextMsgId from all messages
+            let maxId = 0;
+            for (const conv of Object.values(this.conversations)) {
+              for (const msg of (conv.messages || [])) {
+                if ((msg.id ?? 0) > maxId) maxId = msg.id;
+              }
+            }
+            this._nextMsgId = maxId + 1;
+            return true;
+          }
+        }
+      } catch { /* ignore corrupt storage */ }
+      return false;
+    },
+
+    _migrate() {
+      try {
+        const raw = localStorage.getItem(OLD_CHAT_STORAGE_KEY);
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (!Array.isArray(saved) || saved.length === 0) return false;
+        const id = `conv_${_genHex8()}`;
+        const sessionId = `web_${_genHex8()}`;
+        const now = new Date().toISOString();
+        this.conversations[id] = {
+          id,
+          sessionId,
+          title: 'General',
+          messages: saved,
+          contextMode: 'pooled',
+          joinedFrom: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+        this.activeId = id;
+        this._nextMsgId = Math.max(...saved.map(m => m.id ?? 0)) + 1;
+        // Remove old key
+        localStorage.removeItem(OLD_CHAT_STORAGE_KEY);
+        this._save();
+        return true;
+      } catch { return false; }
+    },
+
+    // ── SSE (messages go to active conversation) ──
 
     connectAutoStream() {
       if (this._sseConnected) return;
@@ -168,11 +382,26 @@ document.addEventListener('alpine:init', () => {
     },
   };
 
-  // Initialize once
-  chatStore._loadHistory();
-  if (chatStore.messages.length === 0) {
-    chatStore.addMessage('Mission Control online.', 'system');
-    chatStore.fetchGreeting();
+  // Initialize: load existing data, migrate old format, or create first conversation
+  const loaded = chatStore._load();
+  if (!loaded) {
+    const migrated = chatStore._migrate();
+    if (!migrated) {
+      chatStore.createConversation('General');
+      chatStore.addMessage('Mission Control online.', 'system');
+      chatStore.fetchGreeting();
+    }
+  }
+  // Ensure there's an active conversation
+  if (!chatStore.activeId || !chatStore.conversations[chatStore.activeId]) {
+    const list = Object.keys(chatStore.conversations);
+    if (list.length > 0) {
+      chatStore.activeId = list[0];
+    } else {
+      chatStore.createConversation('General');
+      chatStore.addMessage('Mission Control online.', 'system');
+      chatStore.fetchGreeting();
+    }
   }
   chatStore.connectAutoStream();
 
@@ -211,12 +440,23 @@ function chatPanel() {
       const store = Alpine.store('chat');
       const text = this.input.trim();
       if (!text || store.sending) return;
+
+      // Auto-title on first user message in a new conversation
+      const active = store.getActive();
+      const isFirstUserMsg = active && active.messages.filter(m => m.type === 'user').length === 0;
+
       store.addMessage(text, 'user');
       this.input = '';
       store.sending = true;
+
+      if (isFirstUserMsg && active) {
+        store.autoTitle(active.id, text);
+      }
+
       try {
         const resp = await fetch(`/process_user_input?user_input=${encodeURIComponent(text)}`, {
           method: 'POST',
+          headers: { 'X-Session-ID': store.getSessionId() },
           signal: AbortSignal.timeout(CHAT_TIMEOUT),
         });
         if (!resp.ok) {
@@ -233,9 +473,10 @@ function chatPanel() {
         let buffer = '';
         let responseText = '';
 
-        const streamId = store._nextId++;
-        store.messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });
-        store._saveHistory();
+        const messages = store.getMessages();
+        const streamId = store._nextMsgId++;
+        messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });
+        store._save();
 
         while (true) {
           const { done, value } = await reader.read();
@@ -250,7 +491,7 @@ function chatPanel() {
               const chunk = JSON.parse(line);
               if (chunk.type === 'token') {
                 responseText += chunk.value || '';
-                const msg = store.messages.find(m => m.id === streamId);
+                const msg = messages.find(m => m.id === streamId);
                 if (msg) msg.text = responseText;
                 this.$nextTick(() => {
                   const el = this.$refs.messages;
@@ -259,7 +500,7 @@ function chatPanel() {
               } else if (chunk.type === 'final') {
                 responseText = chunk.value || responseText;
               } else if (chunk.type === 'error') {
-                const msg = store.messages.find(m => m.id === streamId);
+                const msg = messages.find(m => m.id === streamId);
                 if (msg) { msg.text = `Error: ${chunk.value || 'unknown'}`; msg.type = 'system'; }
                 return;
               }
@@ -267,12 +508,12 @@ function chatPanel() {
           }
         }
 
-        const finalMsg = store.messages.find(m => m.id === streamId);
+        const finalMsg = messages.find(m => m.id === streamId);
         if (finalMsg) {
           finalMsg.type = 'gaia';
           finalMsg.text = responseText.trim() || '(no response)';
         }
-        store._saveHistory();
+        store._save();
       } catch (err) {
         Alpine.store('chat').addMessage(`Connection error: ${err.message}`, 'system');
       } finally {
