@@ -2332,6 +2332,32 @@ class AgentCore:
                         except Exception:
                             logger.warning("Post-generation escalation to %s failed", _esc_cand, exc_info=True)
                             continue
+                # Last resort: direct Groq API call (doesn't need model pool)
+                if not _escalated_ok:
+                    _groq_key = os.environ.get("GROQ_API_KEY", "")
+                    if _groq_key:
+                        try:
+                            import httpx as _httpx_esc
+                            yield {"type": "token", "value": "\n\n[(i) Trying Groq cloud fallback...]\n\n"}
+                            _groq_resp = _httpx_esc.post(
+                                "https://api.groq.com/openai/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {_groq_key}", "Content-Type": "application/json"},
+                                json={"model": "llama-3.3-70b-versatile",
+                                      "messages": [{"role": "user", "content": user_input}],
+                                      "max_tokens": 1024},
+                                timeout=30.0,
+                            )
+                            if _groq_resp.status_code == 200:
+                                _groq_text = _groq_resp.json()["choices"][0]["message"]["content"].strip()
+                                if _groq_text:
+                                    full_response = _groq_text
+                                    selected_model_name = "groq_direct"
+                                    _escalated_ok = True
+                                    logger.info("Direct Groq escalation succeeded (%d chars)", len(_groq_text))
+                                    yield {"type": "token", "value": _groq_text}
+                        except Exception:
+                            logger.warning("Direct Groq escalation failed", exc_info=True)
+
                 if not _escalated_ok:
                     logger.warning("Post-generation escalation failed; using original response")
             # ── End quality gate ──────────────────────────────────────────────
