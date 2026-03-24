@@ -41,6 +41,7 @@ from .inbox_tools import (
     audio_inbox_status, audio_inbox_list, audio_inbox_review,
     audio_inbox_process,
 )
+from .fabric_tools import fabric_schemas, execute_fabric_tool
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,11 @@ _cfr_manager = CFRManager()
 
 # Placeholder for TOOLS registry (will be populated from gaia-common.utils.tools_registry)
 from gaia_common.utils.tools_registry import TOOLS
+
+# Merge dynamically-loaded Fabric pattern tools into the TOOLS registry.
+# This runs at import time within gaia-mcp's process only — other services
+# importing TOOLS from gaia-common won't see fabric tools.
+TOOLS.update(fabric_schemas)
 
 # Tools that require explicit human approval before execution
 SENSITIVE_TOOLS = {
@@ -196,6 +202,11 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "adapter_delete": _adapter_delete_impl,
         "adapter_info": _adapter_info_impl,
     }
+
+    # Fabric pattern tools (all async — call gaia-core over HTTP)
+    for _fn in fabric_schemas:
+        if _fn not in async_tool_map:
+            async_tool_map[_fn] = lambda p, _name=_fn: execute_fabric_tool(_name, p)
 
     if method not in tool_map and method not in async_tool_map:
         log_gaia_error(logger, "GAIA-MCP-001", f"Tool '{method}' not found")
