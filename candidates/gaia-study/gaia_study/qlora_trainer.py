@@ -251,13 +251,19 @@ class QLoRATrainer:
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
+                # Override GPTQ config to use basic kernel (not Marlin/exllama)
+                from transformers import GPTQConfig
+                _gptq_cfg = GPTQConfig(
+                    bits=model_cfg['quantization_config'].get('bits', 4),
+                    use_exllama=False,
+                )
                 self.model = auto_cls.from_pretrained(
                     self.base_model_path,
                     trust_remote_code=True,
+                    quantization_config=_gptq_cfg,
                     device_map={"": 0},
                     low_cpu_mem_usage=True,
                     torch_dtype=torch.bfloat16,
-                    disable_exllama=True,
                 )
             elif self.config.load_in_4bit and bitsandbytes is not None:
                 # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
