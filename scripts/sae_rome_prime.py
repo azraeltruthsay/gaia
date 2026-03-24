@@ -92,7 +92,7 @@ if not failures:
 # ══════════════════════════════════════════════════════════
 print(f'\n{"="*60}\n  PHASE 2: SAE Mapping\n{"="*60}', flush=True)
 
-from gaia_common.engine.sae_trainer import SAETrainer
+from gaia_engine.sae_trainer import SAETrainer
 trainer = SAETrainer(model, tokenizer, device=model.device)
 
 # Record activations for failed AND passed questions
@@ -127,7 +127,7 @@ print(f'\nFailure-specific features (layer 24): {failure_only}', flush=True)
 # ══════════════════════════════════════════════════════════
 print(f'\n{"="*60}\n  PHASE 3: SAE-Guided ROME\n{"="*60}', flush=True)
 
-from gaia_common.engine.rome import rome_edit
+from gaia_engine.rome import rome_edit
 
 # Build ROME edits from factual failures
 edits = []

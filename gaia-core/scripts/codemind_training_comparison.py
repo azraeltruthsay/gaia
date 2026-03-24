@@ -143,10 +143,10 @@ def run_sae_atlas(output_dir: Path, phase: str):
     atlas_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        from gaia_common.engine.sae_trainer import SAETrainer
+        from gaia_engine.sae_trainer import SAETrainer
         # Try to get model from GAIAEngine or load directly
         try:
-            from gaia_common.engine.core import _engine
+            from gaia_engine.core import _engine
             if _engine is not None:
                 model = _engine.model
                 tokenizer = _engine.tokenizer

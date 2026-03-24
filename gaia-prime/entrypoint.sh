@@ -29,7 +29,7 @@ if [ "$GAIA_ENGINE_DIRECT" = "1" ]; then
         echo "[prime-entrypoint] Starting GAIA Engine DIRECT in standby (legacy inline handler)..."
         # Fall back to the old inline Python standby handler
         exec python -c "
-from gaia_common.engine.core import GAIAEngine, serve
+from gaia_common.engine import GAIAEngine, serve
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json, logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')

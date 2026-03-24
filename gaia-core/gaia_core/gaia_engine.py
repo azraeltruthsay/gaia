@@ -21,7 +21,7 @@ if __name__ == "__main__":
                    help="Start in managed mode — zero GPU, subprocess isolation")
     args = p.parse_args()
     if args.managed:
-        from gaia_common.engine.manager import serve_managed
+        from gaia_common.engine import serve_managed
         serve_managed(port=args.port, host=args.host)
     else:
         if not args.model:

@@ -28,13 +28,13 @@ def main():
 
     if args.managed:
         # Managed mode: stdlib-only, no torch/transformers import
-        from gaia_common.engine.manager import serve_managed
+        from gaia_common.engine import serve_managed
         serve_managed(port=args.port, host=args.host)
     else:
         # Direct mode: loads model in-process (original behavior)
         if not args.model:
             p.error("--model is required in direct mode (or use --managed)")
-        from gaia_common.engine.core import serve
+        from gaia_common.engine import serve
         serve(args.model, args.port, args.device, getattr(args, "compile"), args.host)
 
 

@@ -70,7 +70,7 @@ if not failures:
 # PHASE 2: SAE
 print(f'\n{"="*60}\n  PHASE 2: SAE Analysis\n{"="*60}', flush=True)
 
-from gaia_common.engine.sae_trainer import SAETrainer
+from gaia_engine.sae_trainer import SAETrainer
 trainer = SAETrainer(model, tokenizer, device='cuda')
 
 all_prompts = [f['instruction'] for f in failures[:15]] + [samples[i]['instruction'] for i in range(0, 220, 15)][:15]
@@ -96,7 +96,7 @@ print(f'Failure-specific features: {failure_specific}', flush=True)
 # PHASE 3: ROME
 print(f'\n{"="*60}\n  PHASE 3: SAE-Guided ROME\n{"="*60}', flush=True)
 
-from gaia_common.engine.rome import rome_edit
+from gaia_engine.rome import rome_edit
 edits = []
 for f in failures[:8]:
     s = samples[f['idx']]

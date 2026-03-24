@@ -124,7 +124,7 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
 
     # ── Get model from GAIAEngine ──
     try:
-        from gaia_common.engine.core import _engine
+        from gaia_engine.core import _engine
         if _engine is None:
             logger.error("GAIAEngine not initialized. Is the model loaded?")
             sys.exit(1)
@@ -140,7 +140,7 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
         sys.exit(1)
 
     # ── Record activations ──
-    from gaia_common.engine.sae_trainer import SAETrainer
+    from gaia_engine.sae_trainer import SAETrainer
 
     trainer = SAETrainer(model, tokenizer, device=device)
 
