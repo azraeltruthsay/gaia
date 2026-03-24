@@ -2292,7 +2292,7 @@ class AgentCore:
                 _escalated_ok = False
                 # Escalate to Prime — load model on gaia-prime if in standby
                 _prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
-                _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ")
+                _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive")
                 try:
                     import httpx as _httpx_esc
                     yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Escalating to Prime...]\n\n"}
