@@ -291,17 +291,23 @@ class QLoRATrainer:
                         "— loading to CPU for NF4 quantization, then moving to GPU",
                         bf16_size_gb, gpu_free_gb
                     )
+                    # bitsandbytes NF4 quantization needs CUDA — use device_map="auto"
+                    # with max_memory to prevent OOM during loading. The model
+                    # will be split across GPU (up to budget) and CPU (overflow).
+                    gpu_budget = int(max_gpu_gb * 0.65)  # conservative: leave room for LoRA + optimizer
+                    logger.info(
+                        "Loading model with auto device_map (GPU budget: %dGiB, overflow to CPU)",
+                        gpu_budget
+                    )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map="cpu",
+                        device_map="auto",
+                        max_memory={0: f"{gpu_budget}GiB", "cpu": "40GiB"},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
                     )
-                    # Move quantized model to GPU (only ~4-5GB for 8B NF4)
-                    logger.info("Moving quantized model to GPU...")
-                    self.model = self.model.to("cuda:0")
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")
