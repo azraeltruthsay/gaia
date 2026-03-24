@@ -132,25 +132,45 @@ class ActivationMonitor:
         self._last_timestamp = 0.0
 
 
+# Track neuron fire frequency to filter out always-on structural neurons
+_neuron_fire_counts = {}  # idx -> count
+_neuron_total_samples = 0
+_NEURON_FREQ_THRESHOLD = 0.5  # exclude neurons firing >50% of samples
+
 def _write_activation(tier, token_text, token_idx, session_id, snapshot):
     """Write per-token activation to JSONL for live dashboard visualization."""
+    global _neuron_total_samples
     if not snapshot:
         return
-    features = []
+    _neuron_total_samples += 1
+    raw_features = []
     for layer_key, layer_data in snapshot.items():
         layer_idx = int(layer_key.split("_")[1])
         for idx, val in zip(
             layer_data.get("top_5_indices", []),
             layer_data.get("top_5_values", []),
         ):
-            features.append({
-                "idx": int(idx), "strength": round(float(val), 4),
+            idx = int(idx)
+            _neuron_fire_counts[idx] = _neuron_fire_counts.get(idx, 0) + 1
+            raw_features.append({
+                "idx": idx, "strength": round(float(val), 4),
                 "label": f"neuron_{idx}", "layer": layer_idx,
             })
+    # Filter out always-on neurons (structural, not informational)
+    if _neuron_total_samples > 20:
+        features = [f for f in raw_features
+                    if _neuron_fire_counts.get(f["idx"], 0) / _neuron_total_samples
+                    < _NEURON_FREQ_THRESHOLD]
+    else:
+        features = raw_features
     features.sort(key=lambda f: f["strength"], reverse=True)
     features = features[:10]
     if not features:
         return
+    # Reset counters periodically to adapt
+    if _neuron_total_samples > 500:
+        _neuron_fire_counts.clear()
+        _neuron_total_samples = 0
     line = json.dumps({
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
         "tier": tier,
