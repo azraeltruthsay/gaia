@@ -777,6 +777,7 @@ function mindMapColumn() {
       // Track which neurons are active this frame
       const frameActiveIds = new Set();
       const frameActiveRegions = new Map(); // region -> [neuronId, ...]
+      const frameFeaturesByIdx = new Map(); // featureIdx -> [{neuronId, layer, strength}]
 
       for (const feat of data.features) {
         const label = feat.label || this._featureLabels[feat.idx] || ('feature_' + feat.idx);
@@ -788,13 +789,38 @@ function mindMapColumn() {
           label: label,
           strength: feat.strength,
           layer: feat.layer,
+          featureIdx: feat.idx,
           timestamp: Date.now(),
         });
 
-        // Track by region for pathway drawing
+        // Track by region for co-activation pathways
         const regionList = frameActiveRegions.get(neuron.region) || [];
         regionList.push(neuron.id);
         frameActiveRegions.set(neuron.region, regionList);
+
+        // Track by feature idx for cross-layer depth pathways
+        const idxList = frameFeaturesByIdx.get(feat.idx) || [];
+        idxList.push({ neuronId: neuron.id, layer: feat.layer, strength: feat.strength });
+        frameFeaturesByIdx.set(feat.idx, idxList);
+      }
+
+      // Update temporal co-occurrence tracker (sliding window)
+      if (!this._cooccurrence) this._cooccurrence = {};
+      if (!this._cooccurrence[tier]) this._cooccurrence[tier] = new Map();
+      const coMap = this._cooccurrence[tier];
+      const activeIds = Array.from(frameActiveIds);
+      for (let i = 0; i < activeIds.length; i++) {
+        for (let j = i + 1; j < activeIds.length; j++) {
+          const key = Math.min(activeIds[i], activeIds[j]) + '-' + Math.max(activeIds[i], activeIds[j]);
+          coMap.set(key, (coMap.get(key) || 0) + 1);
+        }
+      }
+      // Decay co-occurrence counts periodically
+      if (coMap.size > 200) {
+        for (const [k, v] of coMap) {
+          if (v <= 1) coMap.delete(k);
+          else coMap.set(k, Math.floor(v * 0.8));
+        }
       }
 
       // Update neuron visuals via D3
@@ -845,24 +871,44 @@ function mindMapColumn() {
         }
       });
 
-      // Draw pathways between co-active neurons in DIFFERENT regions
-      this._drawPathways(tier, frameActiveRegions, neurons);
+      // Draw both pathway types
+      this._drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons);
     },
 
-    _drawPathways(tier, frameActiveRegions, neurons) {
+    _drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons) {
       const svg = this._svgs[tier];
       const colorScale = this._colorScale;
       const activeMap = this._activeNeurons[tier];
-
-      // Build pathway lines between regions that have co-active neurons
-      const regionNames = Array.from(frameActiveRegions.keys());
+      const coMap = (this._cooccurrence && this._cooccurrence[tier]) || new Map();
       const pathways = [];
 
+      // ── Type 1: Cross-layer depth pathways (solid) ──
+      // Same feature.idx appearing at different layers = info flowing through depth
+      for (const [featIdx, entries] of frameFeaturesByIdx) {
+        if (entries.length < 2) continue;
+        // Sort by layer (deep to shallow = frontal to occipital)
+        entries.sort((a, b) => a.layer - b.layer);
+        for (let i = 0; i < entries.length - 1; i++) {
+          const nA = neurons.find(n => n.id === entries[i].neuronId);
+          const nB = neurons.find(n => n.id === entries[i + 1].neuronId);
+          if (nA && nB && nA.id !== nB.id) {
+            pathways.push({
+              x1: nA.x, y1: nA.y, x2: nB.x, y2: nB.y,
+              strength: (entries[i].strength + entries[i + 1].strength) / 2,
+              key: 'depth-' + featIdx + '-' + entries[i].layer + '-' + entries[i + 1].layer,
+              type: 'depth',
+            });
+          }
+        }
+      }
+
+      // ── Type 2: Same-token co-activation (dotted) ──
+      // Features in different regions firing on the same token
+      const regionNames = Array.from(frameActiveRegions.keys());
       for (let i = 0; i < regionNames.length; i++) {
         for (let j = i + 1; j < regionNames.length; j++) {
           const idsA = frameActiveRegions.get(regionNames[i]);
           const idsB = frameActiveRegions.get(regionNames[j]);
-          // Connect strongest neuron from each region
           let bestA = null, bestStrA = 0;
           for (const id of idsA) {
             const a = activeMap.get(id);
@@ -877,43 +923,55 @@ function mindMapColumn() {
             const nA = neurons.find(n => n.id === bestA);
             const nB = neurons.find(n => n.id === bestB);
             if (nA && nB) {
+              // Boost opacity by temporal co-occurrence
+              const coKey = Math.min(bestA, bestB) + '-' + Math.max(bestA, bestB);
+              const coCount = coMap.get(coKey) || 0;
+              const temporalBoost = Math.min(1.0, coCount / 10); // 10+ co-occurrences = max
               pathways.push({
-                x1: nA.x, y1: nA.y,
-                x2: nB.x, y2: nB.y,
+                x1: nA.x, y1: nA.y, x2: nB.x, y2: nB.y,
                 strength: (bestStrA + bestStrB) / 2,
-                key: regionNames[i] + '-' + regionNames[j],
+                key: 'coactive-' + regionNames[i] + '-' + regionNames[j],
+                type: 'coactive',
+                temporalBoost: temporalBoost,
               });
             }
           }
         }
       }
 
-      // D3 update pathways
+      // ── D3 update ──
       const pathSel = svg.select('g.pathways').selectAll('line.pathway')
         .data(pathways, d => d.key);
 
       pathSel.exit()
-        .classed('active', false)
-        .classed('fading', true)
         .transition().duration(500)
         .attr('opacity', 0)
         .remove();
 
       const enter = pathSel.enter().append('line')
-        .attr('class', 'pathway active')
+        .attr('class', d => 'pathway ' + d.type)
         .attr('x1', d => d.x1).attr('y1', d => d.y1)
         .attr('x2', d => d.x2).attr('y2', d => d.y2)
-        .attr('stroke', d => colorScale(d.strength))
-        .attr('stroke-width', 1)
+        .attr('stroke', d => d.type === 'depth' ? colorScale(d.strength) : '#8899aa')
+        .attr('stroke-width', d => d.type === 'depth' ? 1.5 : 0.8)
+        .attr('stroke-dasharray', d => d.type === 'coactive' ? '3,3' : 'none')
         .attr('opacity', 0);
 
-      enter.transition().duration(200).attr('opacity', 0.4);
+      enter.transition().duration(200)
+        .attr('opacity', d => {
+          if (d.type === 'depth') return 0.6;
+          return 0.2 + (d.temporalBoost || 0) * 0.4; // 0.2 base, up to 0.6 with history
+        });
 
       pathSel
         .attr('x1', d => d.x1).attr('y1', d => d.y1)
         .attr('x2', d => d.x2).attr('y2', d => d.y2)
-        .attr('stroke', d => colorScale(d.strength))
-        .attr('opacity', 0.4);
+        .attr('stroke', d => d.type === 'depth' ? colorScale(d.strength) : '#8899aa')
+        .attr('stroke-width', d => d.type === 'depth' ? 1.5 : 0.8)
+        .attr('opacity', d => {
+          if (d.type === 'depth') return 0.6;
+          return 0.2 + (d.temporalBoost || 0) * 0.4;
+        });
     },
 
     async _loadAtlas() {

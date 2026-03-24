@@ -347,10 +347,13 @@ html, body {
 .neuron.active { opacity: 0.9; }
 .neuron.glow { filter: url(#neuron-glow); }
 
-/* Neural pathways between co-active regions */
-.pathway { stroke-width: 1; opacity: 0; transition: opacity 0.2s ease; }
-.pathway.active { opacity: 0.4; }
-.pathway.fading { opacity: 0; transition: opacity 0.5s ease; }
+/* Neural pathways — two types */
+.pathway { opacity: 0; transition: opacity 0.3s ease; }
+/* Depth pathways: solid, colored, thicker — info flowing through layers */
+.pathway.depth { stroke-width: 1.5; }
+/* Co-activation: dotted, dimmer — same-token coincidental firing */
+/* Temporal boost makes frequently co-active pairs brighter over time */
+.pathway.coactive { stroke-width: 0.8; stroke-dasharray: 3,3; }
 
 /* Region labels */
 .region-label { font-size: 7px; fill: var(--text-dim); opacity: 0.3; pointer-events: none; }
