@@ -319,28 +319,29 @@ class QLoRATrainer:
                         "— loading to CPU for NF4 quantization, then moving to GPU",
                         bf16_size_gb, gpu_free_gb
                     )
-                    # NF4 quantization: model too large for direct bf16 GPU load.
-                    # With low_cpu_mem_usage=True and expandable_segments, transformers
-                    # loads shards one at a time and quantizes incrementally. Peak VRAM
-                    # is one shard (~5GB bf16) not the full model.
+                    # NF4 quantization: model too large for direct GPU load.
+                    # Use device_map="auto" with llm_int8_enable_fp32_cpu_offload
+                    # to keep NF4 layers on GPU and overflow embedding/lm_head to CPU.
                     logger.info(
-                        "Loading model to GPU with shard-by-shard NF4 quantization "
-                        "(bf16 size: %.1fGiB, shards loaded incrementally)",
-                        bf16_size_gb
+                        "Loading model with NF4 + CPU offload "
+                        "(bf16 size: %.1fGiB, GPU budget: %dGiB)",
+                        bf16_size_gb, max_gpu_gb
                     )
                     import gc, os as _os
                     gc.collect()
                     torch.cuda.empty_cache()
-                    # Ensure expandable segments is set for memory efficiency
                     _os.environ.setdefault(
                         "PYTORCH_CUDA_ALLOC_CONF",
                         "expandable_segments:True,max_split_size_mb:256"
                     )
+                    # Enable CPU offload for layers that don't fit
+                    bnb_config.llm_int8_enable_fp32_cpu_offload = True
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map={"": 0},
+                        device_map="auto",
+                        max_memory={0: f"{max_gpu_gb}GiB", "cpu": "40GiB"},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
                     )
