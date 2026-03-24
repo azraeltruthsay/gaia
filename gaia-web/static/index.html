@@ -49,7 +49,7 @@
         <button class="chat-fp-clear" @click="clearHistory()" title="Clear history">&times;</button>
       </div>
       <div x-ref="messages" class="chat-fp-messages">
-        <template x-for="msg in messages" :key="msg.id">
+        <template x-for="msg in $store.chat.messages" :key="msg.id">
           <div class="chat-msg" :class="msg.type">
             <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
             <span class="chat-text" x-html="renderMessage(msg)"></span>
@@ -61,10 +61,10 @@
           <textarea x-model="input" placeholder="Message GAIA..." rows="1"
                     @keydown.enter.prevent="if (!$event.shiftKey) send()"
                     @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
-                    :disabled="sending"></textarea>
-          <button @click="send()" :disabled="sending || !input.trim()" class="chat-fp-send">
-            <span x-show="!sending">&#9654;</span>
-            <span x-show="sending" class="chat-fp-spinner">&#9679;</span>
+                    :disabled="$store.chat.sending"></textarea>
+          <button @click="send()" :disabled="$store.chat.sending || !input.trim()" class="chat-fp-send">
+            <span x-show="!$store.chat.sending">&#9654;</span>
+            <span x-show="$store.chat.sending" class="chat-fp-spinner">&#9679;</span>
           </button>
         </div>
         <div class="chat-fp-hint">Enter to send, Shift+Enter for new line</div>
@@ -83,7 +83,7 @@
         </div>
         <div class="panel-body">
           <div x-ref="messages" class="chat-messages">
-            <template x-for="msg in messages" :key="msg.id">
+            <template x-for="msg in $store.chat.messages" :key="msg.id">
               <div class="chat-msg" :class="msg.type">
                 <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
                 <span class="chat-text" x-html="renderMessage(msg)"></span>
@@ -92,8 +92,8 @@
           </div>
           <div class="chat-input-row">
             <input type="text" x-model="input" placeholder="Talk to GAIA..." autocomplete="off"
-                   @keydown.enter.prevent="send()" :disabled="sending">
-            <button @click="send()" :disabled="sending" x-text="sending ? '...' : 'Send'">Send</button>
+                   @keydown.enter.prevent="send()" :disabled="$store.chat.sending">
+            <button @click="send()" :disabled="$store.chat.sending" x-text="$store.chat.sending ? '...' : 'Send'">Send</button>
           </div>
         </div>
       </section>

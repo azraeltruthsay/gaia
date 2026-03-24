@@ -185,11 +185,6 @@ function chatPanel() {
   return {
     input: '',
 
-    // Proxy to shared store
-    get messages() { return Alpine.store('chat').messages; },
-    get sending() { return Alpine.store('chat').sending; },
-    set sending(v) { Alpine.store('chat').sending = v; },
-
     init() {
       // Scroll to bottom on init
       this.$nextTick(() => {
@@ -213,12 +208,12 @@ function chatPanel() {
     },
 
     async send() {
-      const text = this.input.trim();
-      if (!text || this.sending) return;
       const store = Alpine.store('chat');
+      const text = this.input.trim();
+      if (!text || store.sending) return;
       store.addMessage(text, 'user');
       this.input = '';
-      this.sending = true;
+      store.sending = true;
       try {
         const resp = await fetch(`/process_user_input?user_input=${encodeURIComponent(text)}`, {
           method: 'POST',
@@ -281,7 +276,7 @@ function chatPanel() {
       } catch (err) {
         Alpine.store('chat').addMessage(`Connection error: ${err.message}`, 'system');
       } finally {
-        this.sending = false;
+        Alpine.store('chat').sending = false;
       }
     },
   };
