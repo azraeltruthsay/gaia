@@ -525,39 +525,58 @@ function chatPanel() {
 }
 
 // ── Neural Mind Map Component ─────────────────────────────────────────────────
-// Brain-shaped activation display — neurons at fixed positions light up on activity
+// Unified brain — all three cognitive tiers mapped to anatomical regions
+// Sagittal side-view: Frontal/Prime (left/top), Brain stem/Nano (bottom-right)
 
-// Brain silhouette paths (sagittal side view, 280x160 viewport)
-const BRAIN_OUTLINE = 'M 70,20 C 30,20 10,50 15,80 C 20,110 40,130 80,135 C 100,137 130,130 160,125 C 200,118 230,100 250,80 C 265,65 260,40 240,30 C 220,22 190,18 160,18 C 130,17 100,18 70,20 Z';
-const BRAIN_STEM = 'M 240,80 C 245,95 240,115 235,130 C 232,140 228,145 225,140';
+// Brain silhouette paths (sagittal side view, 280x400 viewport — taller to fill column)
+const BRAIN_OUTLINE = 'M 60,30 C 25,30 8,70 12,120 C 16,165 35,210 55,245 C 70,270 95,295 130,315 C 155,328 185,330 210,320 C 235,310 252,285 260,255 C 268,225 270,190 265,155 C 260,120 248,90 230,65 C 212,42 185,28 155,25 C 125,22 90,25 60,30 Z';
+const BRAIN_STEM = 'M 225,280 C 235,305 240,340 238,365 C 237,378 233,388 228,380 C 224,372 222,355 225,340';
+const BRAIN_CEREBELLUM = 'M 230,255 C 255,260 268,280 260,300 C 252,318 232,320 220,310 C 208,300 210,275 230,255 Z';
 
-// Brain regions mapped to transformer layer ranges
+// Brain regions mapped to cognitive tiers and transformer layer ranges
+// Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
 const BRAIN_REGIONS = [
-  { name: 'Occipital',  layerRange: [0, 4],   cx: 245, cy: 55,  rx: 22, ry: 25 },
-  { name: 'Temporal',   layerRange: [5, 11],   cx: 145, cy: 115, rx: 45, ry: 18 },
-  { name: 'Parietal',   layerRange: [12, 16],  cx: 145, cy: 35,  rx: 40, ry: 20 },
-  { name: 'Central',    layerRange: [17, 21],  cx: 130, cy: 75,  rx: 35, ry: 25 },
-  { name: 'Frontal',    layerRange: [22, 32],  cx: 55,  cy: 70,  rx: 30, ry: 35 },
+  // NANO — brain stem & cerebellum (bottom-right, reflexes/triage)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 232, cy: 345, rx: 18, ry: 25 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 242, cy: 285, rx: 22, ry: 22 },
+
+  // CORE — mid-brain, temporal, parietal, occipital (middle, operational thinking)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 170, cy: 280, rx: 38, ry: 22 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 155, cy: 175, rx: 42, ry: 28 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 235, cy: 200, rx: 25, ry: 30 },
+
+  // PRIME — frontal cortex (front/top-left, deep reasoning)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 55,  cy: 175, rx: 35, ry: 45 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 100, cy: 110, rx: 32, ry: 25 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 70,  cy: 100, rx: 40, ry: 32 },
 ];
 
-// Pre-compute neuron fiber segments within brain regions
-// Each neuron is a short line (axon fiber) at a random angle
-function _generateNeurons(count) {
+// Tier idle colors — anatomically coded
+const TIER_IDLE_COLORS = {
+  nano:  '#4fc3f7',  // cyan — fast reflexes
+  core:  '#90caf9',  // light blue — operational
+  prime: '#ce93d8',  // light purple — deep thought
+};
+
+// Pre-compute neuron fiber segments within brain regions for a specific tier
+function _generateNeurons(tier, count) {
   const neurons = [];
-  const perRegion = Math.ceil(count / BRAIN_REGIONS.length);
-  let seed = 42;
+  const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
+  if (tierRegions.length === 0) return neurons;
+  const perRegion = Math.ceil(count / tierRegions.length);
+  // Use different seed per tier so positions don't overlap
+  let seed = tier === 'nano' ? 42 : tier === 'core' ? 137 : 271;
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
-  for (const region of BRAIN_REGIONS) {
+  for (const region of tierRegions) {
     for (let i = 0; i < perRegion && neurons.length < count; i++) {
       const angle = rand() * Math.PI * 2;
       const dist = Math.sqrt(rand());
       const cx = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
       const cy = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
 
-      // Each neuron is a fiber line at a random angle
-      const fiberAngle = rand() * Math.PI; // 0-180 degrees
-      const fiberLen = 12 + rand() * 18; // 12-30px length
+      const fiberAngle = rand() * Math.PI;
+      const fiberLen = 10 + rand() * 16; // slightly shorter for denser packing
       const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
       const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
       const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
@@ -572,8 +591,9 @@ function _generateNeurons(count) {
         y2: Math.round(y2 * 10) / 10,
         fiberLen: Math.round(fiberLen * 10) / 10,
         region: region.name,
+        tier: tier,
         layerRange: region.layerRange,
-        id: neurons.length,
+        id: null, // assigned after merge
       });
     }
   }
@@ -583,36 +603,42 @@ function _generateNeurons(count) {
 // Neuron counts per tier
 const TIER_NEURON_COUNTS = { nano: 30, core: 45, prime: 60 };
 
-function mindMapColumn() {
+function mindMapPanel() {
   return {
     live: true,
-    activeTier: null,
-    focusTier: null,
     hoveredFeature: null,
     _es: null,
-    _svgs: {},
-    _neurons: { nano: [], core: [], prime: [] },
-    _activeNeurons: { nano: new Map(), core: new Map(), prime: new Map() },
-    _pathways: { nano: [], core: [], prime: [] },
+    _svg: null,
+    _neurons: [],           // all neurons, all tiers, single array
+    _neuronsByTier: {},     // tier -> [neuron refs] for fast lookup
+    _activeNeurons: new Map(), // neuronId -> {label, strength, ...}
     _featureLabels: {},
     _colorScale: null,
     _reconnectTimer: null,
 
     init() {
-      // Raw activation strengths range ~0-20; color scale
       this._colorScale = d3.scaleLinear()
         .domain([0, 5, 15])
         .range(['#4fc3f7', '#ffa726', '#e94560'])
         .clamp(true);
 
-      // Pre-generate neuron positions for each tier
+      // Generate neurons for all tiers into a single array with global IDs
+      const allNeurons = [];
+      this._neuronsByTier = {};
       for (const tier of ['nano', 'core', 'prime']) {
-        this._neurons[tier] = _generateNeurons(TIER_NEURON_COUNTS[tier]);
+        const tierNeurons = _generateNeurons(tier, TIER_NEURON_COUNTS[tier]);
+        this._neuronsByTier[tier] = [];
+        for (const n of tierNeurons) {
+          n.id = allNeurons.length;
+          allNeurons.push(n);
+          this._neuronsByTier[tier].push(n);
+        }
       }
+      this._neurons = allNeurons;
 
       this._loadAtlas();
       this.$nextTick(() => {
-        ['nano', 'core', 'prime'].forEach(tier => this._initTierGraph(tier));
+        this._initBrain();
         if (this.live) this._connect();
       });
     },
@@ -622,14 +648,14 @@ function mindMapColumn() {
       if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
     },
 
-    _initTierGraph(tier) {
-      const container = document.getElementById('mindmap-' + tier);
+    _initBrain() {
+      const container = document.getElementById('mindmap-unified');
       if (!container) return;
 
       const svg = d3.select(container).append('svg')
         .attr('width', '100%')
         .attr('height', '100%')
-        .attr('viewBox', '0 0 280 160')
+        .attr('viewBox', '0 0 280 400')
         .attr('preserveAspectRatio', 'xMidYMid meet');
 
       // Zoom + pan
@@ -642,19 +668,26 @@ function mindMapColumn() {
           d3.zoom().scaleExtent([0.5, 6]).transform, d3.zoomIdentity);
       });
 
-      // Glow filter for strong activations
+      // Glow filters — one per tier for color-coded glow
       const defs = svg.append('defs');
-      const filter = defs.append('filter').attr('id', 'neuron-glow-' + tier)
-        .attr('x', '-100%').attr('y', '-100%').attr('width', '300%').attr('height', '300%');
-      filter.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'glow');
-      filter.append('feMerge').selectAll('feMergeNode')
-        .data(['glow', 'SourceGraphic']).enter()
-        .append('feMergeNode').attr('in', d => d);
+      for (const tier of ['nano', 'core', 'prime']) {
+        const filter = defs.append('filter').attr('id', 'neuron-glow-' + tier)
+          .attr('x', '-100%').attr('y', '-100%').attr('width', '300%').attr('height', '300%');
+        filter.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'glow');
+        filter.append('feMerge').selectAll('feMergeNode')
+          .data(['glow', 'SourceGraphic']).enter()
+          .append('feMergeNode').attr('in', d => d);
+      }
 
       // Brain outline — always visible, dim
       zoomG.append('path')
         .attr('class', 'brain-outline')
         .attr('d', BRAIN_OUTLINE);
+
+      // Cerebellum
+      zoomG.append('path')
+        .attr('class', 'brain-cerebellum')
+        .attr('d', BRAIN_CEREBELLUM);
 
       // Brain stem
       zoomG.append('path')
@@ -664,40 +697,35 @@ function mindMapColumn() {
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
 
-      // Neuron fiber layer — each neuron is a short line segment (axon fiber)
+      // Neuron fiber layer — all tiers in one group, color-coded
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
-      const neurons = this._neurons[tier];
       const self = this;
 
-      // Animated dash pattern for "current flowing" effect
-      const dashAnim = defs.append('animate')
-        ? null : null; // CSS handles animation
-
       neuronGroup.selectAll('line.neuron-fiber')
-        .data(neurons, d => d.id)
+        .data(this._neurons, d => d.id)
         .enter()
         .append('line')
-        .attr('class', 'neuron-fiber idle')
+        .attr('class', d => 'neuron-fiber idle tier-' + d.tier)
         .attr('x1', d => d.x1)
         .attr('y1', d => d.y1)
         .attr('x2', d => d.x2)
         .attr('y2', d => d.y2)
-        .attr('stroke', '#4fc3f7')
+        .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
         .attr('stroke-width', 1)
         .attr('stroke-linecap', 'round')
         .attr('opacity', 0.06)
         .on('mouseover', function(evt, d) {
-          const active = self._activeNeurons[tier].get(d.id);
+          const active = self._activeNeurons.get(d.id);
           self.hoveredFeature = active ? {
             label: active.label,
             strength: active.strength,
-            layer: active.layer,
+            tier: d.tier.toUpperCase(),
             region: d.region,
             idx: d.id,
           } : {
             label: 'neuron_' + d.id,
             strength: 0,
-            layer: d.layerRange[0],
+            tier: d.tier.toUpperCase(),
             region: d.region,
             idx: d.id,
           };
@@ -706,15 +734,21 @@ function mindMapColumn() {
           self.hoveredFeature = null;
         });
 
-      // Region labels — subtle, inside each region
+      // Region labels — subtle, inside each anatomical region
       const regionLabels = [
-        { name: 'Occipital', x: 248, y: 42 },
-        { name: 'Temporal',  x: 145, y: 130 },
-        { name: 'Parietal',  x: 145, y: 24 },
-        { name: 'Central',   x: 130, y: 65 },
-        { name: 'Frontal',   x: 45,  y: 50 },
+        // Nano
+        { name: 'Brain Stem',   x: 232, y: 360, tier: 'nano' },
+        { name: 'Cerebellum',   x: 242, y: 270, tier: 'nano' },
+        // Core
+        { name: 'Temporal',     x: 170, y: 295, tier: 'core' },
+        { name: 'Parietal',     x: 155, y: 160, tier: 'core' },
+        { name: 'Occipital',    x: 240, y: 188, tier: 'core' },
+        // Prime
+        { name: 'Prefrontal',   x: 50,  y: 160, tier: 'prime' },
+        { name: 'Motor',        x: 100, y: 98,  tier: 'prime' },
+        { name: 'Frontal',      x: 65,  y: 82,  tier: 'prime' },
       ];
-      svg.selectAll('text.region-label')
+      zoomG.selectAll('text.region-label')
         .data(regionLabels)
         .enter()
         .append('text')
@@ -722,19 +756,37 @@ function mindMapColumn() {
         .attr('x', d => d.x)
         .attr('y', d => d.y)
         .attr('text-anchor', 'middle')
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
         .text(d => d.name);
 
+      // Tier labels — larger, always visible, marking the three cognitive zones
+      const tierLabels = [
+        { label: 'NANO',  x: 248, y: 320, tier: 'nano' },
+        { label: 'CORE',  x: 190, y: 225, tier: 'core' },
+        { label: 'PRIME', x: 55,  y: 65,  tier: 'prime' },
+      ];
+      zoomG.selectAll('text.tier-label')
+        .data(tierLabels)
+        .enter()
+        .append('text')
+        .attr('class', 'tier-label')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y)
+        .attr('text-anchor', 'middle')
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
+        .text(d => d.label);
+
       // Idle label (shown until first activity)
-      svg.append('text')
+      zoomG.append('text')
         .attr('class', 'idle-label')
-        .attr('x', 140).attr('y', 85)
+        .attr('x', 140).attr('y', 210)
         .attr('text-anchor', 'middle')
         .attr('fill', 'var(--text-dim)')
         .attr('font-size', '10px')
         .attr('opacity', 0.5)
         .text('waiting for activity...');
 
-      this._svgs[tier] = svg;
+      this._svg = svg;
     },
 
     _connect() {
@@ -746,7 +798,6 @@ function mindMapColumn() {
         try {
           const data = JSON.parse(evt.data);
           if (data.tier) {
-            if (!this.focusTier) this.activeTier = data.tier;
             this._updateTier(data.tier, data);
           }
         } catch { /* skip malformed */ }
@@ -762,7 +813,8 @@ function mindMapColumn() {
     },
 
     _mapFeatureToNeuron(feature, tier) {
-      const neurons = this._neurons[tier];
+      const neurons = this._neuronsByTier[tier];
+      if (!neurons || neurons.length === 0) return null;
       const layer = feature.layer != null ? feature.layer : 0;
 
       // Find neurons in the matching brain region for this layer
@@ -771,31 +823,31 @@ function mindMapColumn() {
       );
 
       if (candidates.length === 0) {
-        // Fallback: use any neuron, modulo total count
         return neurons[feature.idx % neurons.length];
       }
 
-      // Pick a specific neuron within the region based on feature index
       return candidates[feature.idx % candidates.length];
     },
 
     _updateTier(tier, data) {
       if (!data.features || !Array.isArray(data.features)) return;
 
-      const svg = this._svgs[tier];
+      const svg = this._svg;
       if (!svg) return;
 
       // Hide idle label on first activity
       svg.select('.idle-label').attr('opacity', 0);
 
       const colorScale = this._colorScale;
-      const neurons = this._neurons[tier];
-      const activeMap = this._activeNeurons[tier];
+      const neurons = this._neuronsByTier[tier];
+      if (!neurons) return;
+      const activeMap = this._activeNeurons;
+      const idleColor = TIER_IDLE_COLORS[tier];
 
       // Track which neurons are active this frame
       const frameActiveIds = new Set();
-      const frameActiveRegions = new Map(); // region -> [neuronId, ...]
-      const frameFeaturesByIdx = new Map(); // featureIdx -> [{neuronId, layer, strength}]
+      const frameActiveRegions = new Map();
+      const frameFeaturesByIdx = new Map();
 
       for (const feat of data.features) {
         const label = feat.label || this._featureLabels[feat.idx] || ('feature_' + feat.idx);
@@ -808,24 +860,22 @@ function mindMapColumn() {
           strength: feat.strength,
           layer: feat.layer,
           featureIdx: feat.idx,
+          tier: tier,
           timestamp: Date.now(),
         });
 
-        // Track by region for co-activation pathways
         const regionList = frameActiveRegions.get(neuron.region) || [];
         regionList.push(neuron.id);
         frameActiveRegions.set(neuron.region, regionList);
 
-        // Track by feature idx for cross-layer depth pathways
         const idxList = frameFeaturesByIdx.get(feat.idx) || [];
         idxList.push({ neuronId: neuron.id, layer: feat.layer, strength: feat.strength });
         frameFeaturesByIdx.set(feat.idx, idxList);
       }
 
-      // Update temporal co-occurrence tracker (sliding window)
-      if (!this._cooccurrence) this._cooccurrence = {};
-      if (!this._cooccurrence[tier]) this._cooccurrence[tier] = new Map();
-      const coMap = this._cooccurrence[tier];
+      // Temporal co-occurrence tracker
+      if (!this._cooccurrence) this._cooccurrence = new Map();
+      const coMap = this._cooccurrence;
       const activeIds = Array.from(frameActiveIds);
       for (let i = 0; i < activeIds.length; i++) {
         for (let j = i + 1; j < activeIds.length; j++) {
@@ -833,30 +883,27 @@ function mindMapColumn() {
           coMap.set(key, (coMap.get(key) || 0) + 1);
         }
       }
-      // Decay co-occurrence counts periodically
-      if (coMap.size > 200) {
+      if (coMap.size > 500) {
         for (const [k, v] of coMap) {
           if (v <= 1) coMap.delete(k);
           else coMap.set(k, Math.floor(v * 0.8));
         }
       }
 
-      // Update neuron fiber visuals via D3
-      const fiberSel = svg.select('g.neuron-group').selectAll('line.neuron-fiber');
+      // Update neuron fiber visuals — only for this tier's neurons
+      const fiberSel = svg.select('g.neuron-group').selectAll('line.tier-' + tier);
 
       fiberSel.each(function(d) {
         const el = d3.select(this);
         const active = activeMap.get(d.id);
 
         if (frameActiveIds.has(d.id) && active) {
-          // Active — fiber flashes bright, thickens, animates current flow
           const str = active.strength;
           const width = Math.max(2, Math.min(5, 1.5 + str * 0.25));
           el.classed('idle', false)
             .classed('active', true)
             .classed('firing', true)
             .classed('glow', str > 5);
-          // Flash: instant bright, then settle
           el.attr('stroke', '#ffffff')
             .attr('stroke-width', width + 1.5)
             .attr('opacity', 1)
@@ -867,7 +914,6 @@ function mindMapColumn() {
             .attr('opacity', 0.85)
             .attr('filter', str > 5 ? `url(#neuron-glow-${tier})` : null);
         } else if (active && (Date.now() - active.timestamp) < 1500) {
-          // Decaying — fiber fades back
           const elapsed = Date.now() - active.timestamp;
           const decay = 1 - (elapsed / 1500);
           const str = active.strength * decay;
@@ -883,45 +929,42 @@ function mindMapColumn() {
             activeMap.delete(d.id);
           }
         } else {
-          // Idle — thin dim fiber
           if (activeMap.has(d.id)) activeMap.delete(d.id);
           el.classed('idle', true)
             .classed('active', false)
             .classed('firing', false)
             .classed('glow', false)
             .transition().duration(800)
-            .attr('stroke', '#4fc3f7')
+            .attr('stroke', idleColor)
             .attr('stroke-width', 1)
             .attr('opacity', 0.06)
             .attr('filter', null);
         }
       });
 
-      // Draw both pathway types
+      // Draw pathways (cross-tier pathways now visible in the unified brain)
       this._drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons);
     },
 
     _drawPathways(tier, frameActiveRegions, frameFeaturesByIdx, neurons) {
-      const svg = this._svgs[tier];
+      const svg = this._svg;
       const colorScale = this._colorScale;
-      const activeMap = this._activeNeurons[tier];
-      const coMap = (this._cooccurrence && this._cooccurrence[tier]) || new Map();
+      const activeMap = this._activeNeurons;
+      const coMap = this._cooccurrence || new Map();
       const pathways = [];
 
       // ── Type 1: Cross-layer depth pathways (solid) ──
-      // Same feature.idx appearing at different layers = info flowing through depth
       for (const [featIdx, entries] of frameFeaturesByIdx) {
         if (entries.length < 2) continue;
-        // Sort by layer (deep to shallow = frontal to occipital)
         entries.sort((a, b) => a.layer - b.layer);
         for (let i = 0; i < entries.length - 1; i++) {
-          const nA = neurons.find(n => n.id === entries[i].neuronId);
-          const nB = neurons.find(n => n.id === entries[i + 1].neuronId);
+          const nA = this._neurons.find(n => n.id === entries[i].neuronId);
+          const nB = this._neurons.find(n => n.id === entries[i + 1].neuronId);
           if (nA && nB && nA.id !== nB.id) {
             pathways.push({
               x1: nA.x, y1: nA.y, x2: nB.x, y2: nB.y,
               strength: (entries[i].strength + entries[i + 1].strength) / 2,
-              key: 'depth-' + featIdx + '-' + entries[i].layer + '-' + entries[i + 1].layer,
+              key: 'depth-' + tier + '-' + featIdx + '-' + entries[i].layer + '-' + entries[i + 1].layer,
               type: 'depth',
             });
           }
@@ -929,7 +972,6 @@ function mindMapColumn() {
       }
 
       // ── Type 2: Same-token co-activation (dotted) ──
-      // Features in different regions firing on the same token
       const regionNames = Array.from(frameActiveRegions.keys());
       for (let i = 0; i < regionNames.length; i++) {
         for (let j = i + 1; j < regionNames.length; j++) {
@@ -946,17 +988,16 @@ function mindMapColumn() {
             if (a && a.strength > bestStrB) { bestStrB = a.strength; bestB = id; }
           }
           if (bestA != null && bestB != null) {
-            const nA = neurons.find(n => n.id === bestA);
-            const nB = neurons.find(n => n.id === bestB);
+            const nA = this._neurons.find(n => n.id === bestA);
+            const nB = this._neurons.find(n => n.id === bestB);
             if (nA && nB) {
-              // Boost opacity by temporal co-occurrence
               const coKey = Math.min(bestA, bestB) + '-' + Math.max(bestA, bestB);
               const coCount = coMap.get(coKey) || 0;
-              const temporalBoost = Math.min(1.0, coCount / 10); // 10+ co-occurrences = max
+              const temporalBoost = Math.min(1.0, coCount / 10);
               pathways.push({
                 x1: nA.x, y1: nA.y, x2: nB.x, y2: nB.y,
                 strength: (bestStrA + bestStrB) / 2,
-                key: 'coactive-' + regionNames[i] + '-' + regionNames[j],
+                key: 'coactive-' + tier + '-' + regionNames[i] + '-' + regionNames[j],
                 type: 'coactive',
                 temporalBoost: temporalBoost,
               });
@@ -965,23 +1006,22 @@ function mindMapColumn() {
         }
       }
 
-      // ── D3 update ──
-      const pathSel = svg.select('g.pathways').selectAll('line.pathway')
+      // ── D3 update — scoped to this tier's pathways ──
+      const allPathSel = svg.select('g.pathways').selectAll('line.pathway-' + tier)
         .data(pathways, d => d.key);
 
-      pathSel.exit()
+      allPathSel.exit()
         .transition().duration(500)
         .attr('opacity', 0)
         .remove();
 
-      const enter = pathSel.enter().append('line')
-        .attr('class', d => 'pathway ' + d.type)
+      const enter = allPathSel.enter().append('line')
+        .attr('class', d => 'pathway pathway-' + tier + ' ' + d.type)
         .attr('x1', d => d.x1).attr('y1', d => d.y1)
         .attr('x2', d => d.x2).attr('y2', d => d.y2)
         .attr('stroke-linecap', 'round')
         .attr('stroke-dasharray', d => d.type === 'coactive' ? '4,4' : 'none');
 
-      // Depth pathways flash white then settle to color
       enter.filter(d => d.type === 'depth')
         .attr('stroke', '#ffffff')
         .attr('stroke-width', 2.5)
@@ -991,7 +1031,6 @@ function mindMapColumn() {
         .attr('stroke-width', 1.5)
         .attr('opacity', 0.5);
 
-      // Co-activation lines fade in gently, boosted by temporal history
       enter.filter(d => d.type === 'coactive')
         .attr('stroke', '#8899aa')
         .attr('stroke-width', 0.8)
@@ -999,7 +1038,7 @@ function mindMapColumn() {
         .transition().duration(300)
         .attr('opacity', d => 0.15 + (d.temporalBoost || 0) * 0.4);
 
-      pathSel
+      allPathSel
         .attr('x1', d => d.x1).attr('y1', d => d.y1)
         .attr('x2', d => d.x2).attr('y2', d => d.y2)
         .attr('stroke', d => d.type === 'depth' ? colorScale(d.strength) : '#8899aa')

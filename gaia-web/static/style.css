@@ -326,20 +326,14 @@ html, body {
 .mind-map-column { width: 280px; flex-shrink: 0; border-left: 1px solid var(--border);
   display: flex; flex-direction: column; background: var(--bg-panel); }
 
-/* Tier maps — stacked, auto-expand active */
-.tier-map { flex: 1; min-height: 60px; overflow: hidden; border-bottom: 1px solid var(--border);
-  transition: flex 0.4s ease; position: relative; cursor: pointer; }
-.tier-map.active { flex: 3; }
-.tier-map.idle { flex: 1; opacity: 0.6; }
-.tier-map-label { position: absolute; top: 4px; left: 8px; font-size: 9px;
-  text-transform: uppercase; letter-spacing: 2px; color: var(--text-dim); z-index: 1; }
-.tier-map.active .tier-map-label { color: var(--highlight); font-weight: 700; }
-.tier-map-svg { width: 100%; height: 100%; }
-.tier-map-svg svg { width: 100%; height: 100%; }
+/* Unified brain container — fills the column */
+.unified-brain { flex: 1; overflow: hidden; }
+.unified-brain svg { width: 100%; height: 100%; }
 
 /* Brain outline */
 .brain-outline { fill: rgba(255,255,255,0.02); stroke: var(--text-dim); stroke-width: 1; opacity: 0.2; }
 .brain-stem { fill: none; stroke: var(--text-dim); stroke-width: 1; opacity: 0.15; }
+.brain-cerebellum { fill: rgba(255,255,255,0.015); stroke: var(--text-dim); stroke-width: 0.8; opacity: 0.15; }
 
 /* Neuron fibers — short line segments representing axons */
 .neuron-fiber {
@@ -350,6 +344,10 @@ html, body {
 .neuron-fiber.idle { opacity: 0.06; }
 .neuron-fiber.active { opacity: 0.9; }
 .neuron-fiber.glow { /* glow filter applied via D3 */ }
+/* Tier idle colors */
+.neuron-fiber.tier-nano.idle { stroke: #4fc3f7; }
+.neuron-fiber.tier-core.idle { stroke: #90caf9; }
+.neuron-fiber.tier-prime.idle { stroke: #ce93d8; }
 /* Firing animation — animated dash simulates current racing through fiber */
 .neuron-fiber.firing {
   stroke-dasharray: 6 4;
@@ -373,18 +371,18 @@ html, body {
 .pathway.coactive { stroke-width: 0.8; stroke-dasharray: 3,3; }
 
 /* Region labels */
-.region-label { font-size: 7px; fill: var(--text-dim); opacity: 0.3; pointer-events: none; }
+.region-label { font-size: 6px; fill: var(--text-dim); opacity: 0.25; pointer-events: none; }
 
-/* Legacy feature-node compat — no longer used but kept for safety */
-.feature-node circle { transition: r 0.2s, opacity 0.3s; }
-.feature-node text { font-size: 8px; fill: var(--text-dim); pointer-events: none; }
+/* Tier labels — larger cognitive zone markers */
+.tier-label { font-size: 9px; opacity: 0.35; pointer-events: none;
+  text-transform: uppercase; letter-spacing: 2px; font-weight: 700; }
 
 /* Legend */
 .mind-map-legend { padding: 6px 8px; font-size: 10px; border-top: 1px solid var(--border);
   color: var(--text-dim); display: flex; gap: 8px; min-height: 24px; flex-wrap: wrap; }
+.legend-tier { color: var(--highlight); font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 1px; }
 .legend-label { color: var(--text); font-weight: 600; }
 .legend-strength { color: var(--highlight); }
-.legend-layer { color: var(--text-muted); }
 .legend-region { color: var(--text-dim); font-style: italic; }
 
 /* Header */

@@ -120,25 +120,18 @@
         </div>
       </div>
 
-      <!-- Neural Mind Map -->
-      <aside class="mind-map-column" x-data="mindMapColumn()">
+      <!-- Neural Mind Map — Unified Brain -->
+      <aside class="mind-map-column" x-data="mindMapPanel()">
         <div class="mind-map-header">
           <span>Neural Activity</span>
-          <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live updates"></button>
+          <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
         </div>
-        <template x-for="tier in ['nano', 'core', 'prime']" :key="tier">
-          <div class="tier-map"
-               :class="{ active: (focusTier || activeTier) === tier, idle: (focusTier || activeTier) && (focusTier || activeTier) !== tier }"
-               @click="focusTier = (focusTier === tier ? null : tier)">
-            <div class="tier-map-label" x-text="tier"></div>
-            <div class="tier-map-svg" :id="'mindmap-' + tier"></div>
-          </div>
-        </template>
+        <div class="unified-brain" id="mindmap-unified"></div>
         <div class="mind-map-legend" x-show="hoveredFeature">
+          <span class="legend-tier" x-text="hoveredFeature?.tier"></span>
           <span class="legend-label" x-text="hoveredFeature?.label || ('neuron_' + hoveredFeature?.idx)"></span>
-          <span class="legend-strength" x-text="hoveredFeature ? hoveredFeature.strength.toFixed(3) : ''"></span>
-          <span class="legend-layer" x-text="hoveredFeature ? 'L' + hoveredFeature.layer : ''"></span>
-          <span class="legend-region" x-text="hoveredFeature?.region || ''"></span>
+          <span class="legend-strength" x-text="hoveredFeature ? hoveredFeature.strength.toFixed(1) : ''"></span>
+          <span class="legend-region" x-text="hoveredFeature?.region"></span>
         </div>
       </aside>
     </div>
