@@ -156,6 +156,7 @@ services:
       - ./gaia-models:/models:ro
       - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
+      - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
       - ./logs/kvcache/nano:/kvcache:rw
       - ./logs:/logs:rw
       - gaia-shared:/shared:rw
@@ -225,6 +226,8 @@ services:
       - .:/gaia/GAIA_Project:rw
       # Source code (development mode)
       - ./gaia-core:/app:rw
+      # Entrypoint (live reload — standby control)
+      - ./gaia-core/entrypoint.sh:/entrypoint.sh:ro
       # Shared library (development mode - mount for live reload)
       - ./gaia-common:/gaia-common:ro
       # Knowledge base (read-write for conversation curator)
