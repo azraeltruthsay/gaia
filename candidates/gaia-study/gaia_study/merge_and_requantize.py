@@ -184,32 +184,55 @@ GPTQ_CALIB_SAMPLES = 128
 GPTQ_CALIB_SEQ_LEN = 512
 
 
-def _register_qwen3_5_text():
-    """Register a custom gptqmodel definition for Qwen3.5 text (qwen3_5_text).
+def _register_qwen3_5():
+    """Register a custom gptqmodel definition for Qwen3.5 (multimodal + text).
 
-    Qwen3.5 text models have:
-      - Hybrid attention: linear_attn (24 layers) + self_attn (8 layers)
+    Qwen3.5 is a multimodal model (Qwen3_5ForConditionalGeneration) with:
+      - Vision encoder (Qwen3_5VisionModel) at model.visual
+      - Text model (Qwen3_5TextModel) at model.language_model
+      - Hybrid attention: linear_attn (24/32 layers) + self_attn (8/32 layers)
       - Dense MLP (gate_proj, up_proj, down_proj) — NOT MoE
-      - Weights under model.language_model.layers (multimodal wrapper)
-      - linear_attn uses in_proj_qkv + in_proj_z (separate, not fused)
+      - linear_attn uses in_proj_qkv + in_proj_z (DeltaNet, not fused QKV)
 
-    gptqmodel 5.7.0 has 'qwen3_next' but that's for MoE models with
-    SparseMoeBlock — completely wrong for 3.5 text. We register a proper
-    definition that matches the actual weight structure.
+    The critical issue: gptqmodel's default BaseQModel uses AutoModelForCausalLM,
+    which creates Qwen3_5ForCausalLM. That class passes the composite Qwen3_5Config
+    directly to Qwen3_5TextModel, which expects Qwen3_5TextConfig (with layer_types).
+    This causes: AttributeError: 'Qwen3_5Config' has no attribute 'layer_types'.
+
+    Fix: use AutoModelForImageTextToText as loader, which creates
+    Qwen3_5ForConditionalGeneration → Qwen3_5Model, which correctly splits
+    config.text_config and config.vision_config to their respective sub-models.
+
+    Registered under both 'qwen3_5' (top-level model_type) and 'qwen3_5_text'
+    (text sub-model model_type) so gptqmodel finds it regardless of config path.
     """
     try:
-        from gptqmodel.models.auto import MODEL_MAP
+        from gptqmodel.models.auto import MODEL_MAP, SUPPORTED_MODELS
         from gptqmodel.models.base import BaseQModel
+        from gptqmodel.utils.model import MODALITY
 
-        if "qwen3_5_text" in MODEL_MAP:
+        if "qwen3_5" in MODEL_MAP:
             return  # Already registered
 
-        class Qwen3_5TextGPTQ(BaseQModel):
-            """GPTQ definition for Qwen3.5 text models (hybrid attn + dense MLP)."""
+        from transformers import AutoModelForImageTextToText
+
+        class Qwen3_5GPTQ(BaseQModel):
+            """GPTQ definition for Qwen3.5 multimodal (hybrid attn + dense MLP)."""
+
+            # Use multimodal loader to get Qwen3_5ForConditionalGeneration
+            # (not ForCausalLM which breaks on nested text_config)
+            loader = AutoModelForImageTextToText
 
             layer_modules_strict = False
             pre_lm_head_norm_module = "model.language_model.norm"
             require_trust_remote_code = True
+            # Processor loading requires torchvision (for video processor).
+            # We only calibrate with text, so skip processor auto-load.
+            # If multimodal calibration is needed later, install torchvision
+            # and set require_load_processor = True.
+            require_load_processor = False
+
+            modality = [MODALITY.TEXT, MODALITY.IMAGE_TO_TEXT]
 
             module_tree = [
                 "model",
@@ -218,12 +241,12 @@ def _register_qwen3_5_text():
                 "#",
                 {
                     "input_layernorm": ("input_layernorm:!",),
-                    # Linear attention (Mamba-style DeltaNet, 24/32 layers)
+                    # Linear attention (DeltaNet, 24/32 layers)
                     "linear_attn": (
                         "in_proj_qkv",
                         "in_proj_z",
-                        "in_proj_a:!",
-                        "in_proj_b:!",
+                        "in_proj_a:!",  # tiny: (hidden_size, num_v_heads=32)
+                        "in_proj_b:!",  # tiny: (hidden_size, num_v_heads=32)
                         "out_proj",
                     ),
                     # Full attention (standard QKV, 8/32 layers)
@@ -241,10 +264,22 @@ def _register_qwen3_5_text():
                 },
             ]
 
-        MODEL_MAP["qwen3_5_text"] = Qwen3_5TextGPTQ
-        logger.info("Registered custom gptqmodel definition for qwen3_5_text")
+            # Note: no pre/post quantize hooks needed. gptqmodel's
+            # offload-to-disk mechanism handles device placement for the
+            # shell/turtle model pattern. Custom hooks that move embed_tokens
+            # to GPU cause device mismatch (input_ids on CPU, weights on GPU)
+            # during the cache_inputs forward pass.
+
+        # Register under both model_type keys (MODEL_MAP + SUPPORTED_MODELS)
+        MODEL_MAP["qwen3_5"] = Qwen3_5GPTQ
+        MODEL_MAP["qwen3_5_text"] = Qwen3_5GPTQ
+        if "qwen3_5" not in SUPPORTED_MODELS:
+            SUPPORTED_MODELS.append("qwen3_5")
+        if "qwen3_5_text" not in SUPPORTED_MODELS:
+            SUPPORTED_MODELS.append("qwen3_5_text")
+        logger.info("Registered custom gptqmodel definition for qwen3_5 / qwen3_5_text")
     except ImportError:
-        logger.warning("gptqmodel not available — skipping qwen3_5_text registration")
+        logger.warning("gptqmodel not available — skipping qwen3_5 registration")
 
 
 def quantize_prime(model_path: str, output_path: str) -> bool:
@@ -270,7 +305,7 @@ def quantize_prime(model_path: str, output_path: str) -> bool:
         return False
 
     # Register custom model definition before loading
-    _register_qwen3_5_text()
+    _register_qwen3_5()
 
     t0 = time.time()
 

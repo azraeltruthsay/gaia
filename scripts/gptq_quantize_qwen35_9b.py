@@ -1,15 +1,33 @@
 """GPTQ 4-bit quantization of Qwen3.5-9B-Abliterated using GPTQModel.
 
-All layers including lm_head quantized to 4-bit to fit in 16GB VRAM.
+Qwen3.5-9B is a multimodal model (Qwen3_5ForConditionalGeneration) with a
+nested text_config. gptqmodel's default BaseQModel uses AutoModelForCausalLM
+which creates Qwen3_5ForCausalLM — that class passes the composite config
+directly to Qwen3_5TextModel, causing AttributeError on layer_types.
+
+Fix: register a custom model definition that uses AutoModelForImageTextToText,
+which routes through Qwen3_5ForConditionalGeneration and correctly splits
+text_config/vision_config.
 
 Run inside gaia-study container:
-    docker compose exec -T gaia-study python /tmp/gptq_quantize.py
+    docker compose exec -T gaia-study python /scripts/gptq_quantize_qwen35_9b.py
 """
+
+import logging
+import sys
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("GAIA.GPTQ")
+
+# Register Qwen3.5 model definition BEFORE loading
+sys.path.insert(0, "/app")
+from gaia_study.merge_and_requantize import _register_qwen3_5
+_register_qwen3_5()
 
 from gptqmodel import GPTQModel, QuantizeConfig
 
-MODEL_ID = "/models/Qwen3.5-9B-Abliterated"
-SAVE_DIR = "/models/Qwen3.5-9B-Abliterated-GPTQ-4bit"
+MODEL_ID = "/models/Huihui-Qwen3.5-9B-abliterated"
+SAVE_DIR = "/models/Huihui-Qwen3.5-9B-abliterated-GPTQ-4bit"
 
 # All 4-bit, no 8-bit lm_head exception
 quant_config = QuantizeConfig(
