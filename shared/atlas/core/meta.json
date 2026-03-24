@@ -1,0 +1,92 @@
+{
+  "model": "Qwen3.5-2B-GAIA-Core-v3",
+  "timestamp": 1711238400,
+  "layers": {
+    "0": {
+      "name": "Input Processing",
+      "features": {}
+    },
+    "4": {
+      "name": "Token Embedding",
+      "features": {}
+    },
+    "8": {
+      "name": "Pattern Recognition",
+      "features": {}
+    },
+    "12": {
+      "name": "Contextual Association",
+      "features": {}
+    },
+    "16": {
+      "name": "Semantic Integration",
+      "features": {}
+    },
+    "20": {
+      "name": "Abstract Reasoning",
+      "features": {}
+    },
+    "24": {
+      "name": "Decision & Output",
+      "features": {
+        "1201": "identity (self-reference)",
+        "1816": "greeting / social",
+        "98": "attention focus",
+        "1989": "knowledge retrieval",
+        "1448": "sentence structure",
+        "1044": "confidence signal",
+        "642": "topic tracking",
+        "493": "self-awareness",
+        "458": "emphasis / exclamation",
+        "675": "response planning",
+        "1446": "emotional tone",
+        "1202": "factual recall",
+        "415": "identity assertion",
+        "152": "punctuation / boundary",
+        "249": "syntactic role",
+        "713": "domain context",
+        "173": "sentence ending",
+        "6": "article / function word",
+        "16": "temporal reference",
+        "63": "pronoun reference",
+        "121": "first-person",
+        "280": "proper noun",
+        "150": "abbreviation",
+        "514": "description / modifier",
+        "292": "conjunction / linking",
+        "232": "enumeration",
+        "101": "action / verb",
+        "295": "completion signal",
+        "160": "object reference",
+        "91": "adverbial modifier"
+      }
+    },
+    "20": {
+      "name": "Abstract Reasoning",
+      "features": {
+        "1201": "deep identity",
+        "1747": "uncertainty / hedging",
+        "659": "reasoning chain",
+        "449": "factual confidence",
+        "1805": "analogy building",
+        "964": "causal reasoning",
+        "752": "emotional processing",
+        "1684": "creative generation"
+      }
+    },
+    "16": {
+      "name": "Semantic Integration",
+      "features": {
+        "1201": "identity persistence",
+        "659": "logical connection",
+        "1747": "exploratory thought"
+      }
+    },
+    "8": {
+      "name": "Pattern Recognition",
+      "features": {
+        "1201": "identity embedding"
+      }
+    }
+  }
+}

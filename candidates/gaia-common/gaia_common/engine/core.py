@@ -156,13 +156,14 @@ def _write_activation(tier, token_text, token_idx, session_id, snapshot):
                 "idx": idx, "strength": round(float(val), 4),
                 "label": f"neuron_{idx}", "layer": layer_idx,
             })
-    # Filter out always-on neurons (structural, not informational)
-    if _neuron_total_samples > 20:
-        features = [f for f in raw_features
-                    if _neuron_fire_counts.get(f["idx"], 0) / _neuron_total_samples
-                    < _NEURON_FREQ_THRESHOLD]
-    else:
-        features = raw_features
+    # Attenuate always-on neurons (reduce strength, don't remove)
+    features = []
+    for f in raw_features:
+        freq = _neuron_fire_counts.get(f["idx"], 0) / max(_neuron_total_samples, 1)
+        if _neuron_total_samples > 20 and freq > _NEURON_FREQ_THRESHOLD:
+            # Attenuate by frequency — identity neuron still shows, just dimmer
+            f["strength"] = f["strength"] * (1.0 - freq) * 0.5
+        features.append(f)
     features.sort(key=lambda f: f["strength"], reverse=True)
     features = features[:10]
     if not features:

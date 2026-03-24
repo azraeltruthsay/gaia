@@ -621,6 +621,16 @@ function mindMapColumn() {
         .attr('viewBox', '0 0 280 160')
         .attr('preserveAspectRatio', 'xMidYMid meet');
 
+      // Zoom + pan
+      const zoomG = svg.append('g').attr('class', 'zoom-group');
+      svg.call(d3.zoom()
+        .scaleExtent([0.5, 6])
+        .on('zoom', (event) => zoomG.attr('transform', event.transform))
+      ).on('dblclick.zoom', () => {
+        svg.transition().duration(300).call(
+          d3.zoom().scaleExtent([0.5, 6]).transform, d3.zoomIdentity);
+      });
+
       // Glow filter for strong activations
       const defs = svg.append('defs');
       const filter = defs.append('filter').attr('id', 'neuron-glow-' + tier)
@@ -631,20 +641,20 @@ function mindMapColumn() {
         .append('feMergeNode').attr('in', d => d);
 
       // Brain outline — always visible, dim
-      svg.append('path')
+      zoomG.append('path')
         .attr('class', 'brain-outline')
         .attr('d', BRAIN_OUTLINE);
 
       // Brain stem
-      svg.append('path')
+      zoomG.append('path')
         .attr('class', 'brain-stem')
         .attr('d', BRAIN_STEM);
 
       // Pathway layer (below neurons)
-      svg.append('g').attr('class', 'pathways');
+      zoomG.append('g').attr('class', 'pathways');
 
       // Neuron layer
-      const neuronGroup = svg.append('g').attr('class', 'neuron-group');
+      const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
       const neurons = this._neurons[tier];
       const self = this;
 
