@@ -87,45 +87,18 @@ document.addEventListener('alpine:init', () => {
     discordClass: 'badge',
     discordTitle: 'Discord connectivity',
   });
-});
 
-// ── Chat Panel Component ──────────────────────────────────────────────────────
-
-function chatPanel() {
+  // ── Shared Chat Store ──────────────────────────────────────────────────
+  // Single source of truth for messages, shared between Chat tab and Dashboard panel.
   const CHAT_STORAGE_KEY = 'gaia_chat_history';
   const CHAT_MAX_STORED = 200;
 
-  return {
+  const chatStore = {
     messages: [],
-    input: '',
     sending: false,
     _nextId: 0,
-
-    init() {
-      this._loadHistory();
-      if (this.messages.length === 0) {
-        this.addMessage('Mission Control online.', 'system');
-        this._fetchGreeting();
-      }
-      this._connectAutoStream();
-    },
-
-    async _fetchGreeting() {
-      try {
-        const resp = await fetch('/api/system/sleep');
-        if (resp.ok) {
-          const data = await resp.json();
-          const state = data.state || data.sleep_state || 'unknown';
-          if (state === 'ASLEEP' || state === 'DROWSY') {
-            this.addMessage("I'm currently resting. Send a message to wake me up.", 'gaia');
-          } else {
-            this.addMessage("I'm here. What would you like to talk about?", 'gaia');
-          }
-        }
-      } catch {
-        // Core unreachable — system message is enough
-      }
-    },
+    _sseConnected: false,
+    _autoSSE: null,
 
     _loadHistory() {
       try {
@@ -147,6 +120,11 @@ function chatPanel() {
       } catch { /* storage full or unavailable */ }
     },
 
+    addMessage(text, type) {
+      this.messages.push({ text, type, id: this._nextId++, ts: new Date().toISOString() });
+      this._saveHistory();
+    },
+
     clearHistory() {
       this.messages = [];
       this._nextId = 0;
@@ -154,40 +132,77 @@ function chatPanel() {
       this.addMessage('Chat history cleared.', 'system');
     },
 
-    _connectAutoStream() {
-      this._autoSSE = new EventSource('/api/autonomous/stream');
-      this._autoSSE.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          if (data.text) {
-            this.addMessage(data.text, 'gaia-auto');
-          }
-        } catch { /* ignore parse errors */ }
+    connectAutoStream() {
+      if (this._sseConnected) return;
+      this._sseConnected = true;
+      const connect = () => {
+        this._autoSSE = new EventSource('/api/autonomous/stream');
+        this._autoSSE.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.text) this.addMessage(data.text, 'gaia-auto');
+          } catch { /* ignore */ }
+        };
+        this._autoSSE.onerror = () => {
+          this._autoSSE.close();
+          this._sseConnected = false;
+          setTimeout(() => { this._sseConnected = false; this.connectAutoStream(); }, 5000);
+        };
       };
-      this._autoSSE.onerror = () => {
-        this._autoSSE.close();
-        setTimeout(() => this._connectAutoStream(), 5000);
-      };
+      connect();
     },
 
-    addMessage(text, type) {
-      this.messages.push({
-        text,
-        type,
-        id: this._nextId++,
-        ts: new Date().toISOString(),
-      });
-      this._saveHistory();
+    async fetchGreeting() {
+      try {
+        const resp = await fetch('/api/system/sleep');
+        if (resp.ok) {
+          const data = await resp.json();
+          const state = data.state || data.sleep_state || 'unknown';
+          if (state === 'ASLEEP' || state === 'DROWSY') {
+            this.addMessage("I'm currently resting. Send a message to wake me up.", 'gaia');
+          } else {
+            this.addMessage("I'm here. What would you like to talk about?", 'gaia');
+          }
+        }
+      } catch { /* Core unreachable */ }
+    },
+  };
+
+  // Initialize once
+  chatStore._loadHistory();
+  if (chatStore.messages.length === 0) {
+    chatStore.addMessage('Mission Control online.', 'system');
+    chatStore.fetchGreeting();
+  }
+  chatStore.connectAutoStream();
+
+  Alpine.store('chat', chatStore);
+});
+
+// ── Chat Panel Component ──────────────────────────────────────────────────────
+
+function chatPanel() {
+  return {
+    input: '',
+
+    // Proxy to shared store
+    get messages() { return Alpine.store('chat').messages; },
+    get sending() { return Alpine.store('chat').sending; },
+    set sending(v) { Alpine.store('chat').sending = v; },
+
+    init() {
+      // Scroll to bottom on init
       this.$nextTick(() => {
         const el = this.$refs.messages;
         if (el) el.scrollTop = el.scrollHeight;
       });
     },
 
+    clearHistory() { Alpine.store('chat').clearHistory(); },
+
     formatTimestamp(ts) {
       if (!ts) return '';
-      const d = new Date(ts);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 
     renderMessage(msg) {
@@ -200,7 +215,8 @@ function chatPanel() {
     async send() {
       const text = this.input.trim();
       if (!text || this.sending) return;
-      this.addMessage(text, 'user');
+      const store = Alpine.store('chat');
+      store.addMessage(text, 'user');
       this.input = '';
       this.sending = true;
       try {
@@ -209,36 +225,27 @@ function chatPanel() {
           signal: AbortSignal.timeout(CHAT_TIMEOUT),
         });
         if (!resp.ok) {
-          // Try to parse error as JSON
           try {
             const errData = await resp.json();
-            this.addMessage(`Error ${resp.status}: ${errData.detail || errData.response || 'unknown'}`, 'system');
+            store.addMessage(`Error ${resp.status}: ${errData.detail || errData.response || 'unknown'}`, 'system');
           } catch {
-            this.addMessage(`Error ${resp.status}`, 'system');
+            store.addMessage(`Error ${resp.status}`, 'system');
           }
           return;
         }
-        // Read NDJSON stream line by line
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let responseText = '';
 
-        // Create a streaming message that updates in real time
-        const streamId = this._nextId++;
-        this.messages.push({
-          text: '',
-          type: 'gaia streaming',
-          id: streamId,
-          ts: new Date().toISOString(),
-        });
-        this._saveHistory();
+        const streamId = store._nextId++;
+        store.messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });
+        store._saveHistory();
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-
           const lines = buffer.split('\n');
           buffer = lines.pop();
 
@@ -248,11 +255,8 @@ function chatPanel() {
               const chunk = JSON.parse(line);
               if (chunk.type === 'token') {
                 responseText += chunk.value || '';
-                // Update the streaming message in place
-                const msg = this.messages.find(m => m.id === streamId);
-                if (msg) {
-                  msg.text = responseText;
-                }
+                const msg = store.messages.find(m => m.id === streamId);
+                if (msg) msg.text = responseText;
                 this.$nextTick(() => {
                   const el = this.$refs.messages;
                   if (el) el.scrollTop = el.scrollHeight;
@@ -260,23 +264,22 @@ function chatPanel() {
               } else if (chunk.type === 'final') {
                 responseText = chunk.value || responseText;
               } else if (chunk.type === 'error') {
-                const msg = this.messages.find(m => m.id === streamId);
+                const msg = store.messages.find(m => m.id === streamId);
                 if (msg) { msg.text = `Error: ${chunk.value || 'unknown'}`; msg.type = 'system'; }
                 return;
               }
-            } catch { /* skip unparseable lines */ }
+            } catch { /* skip */ }
           }
         }
 
-        // Finalize the streaming message
-        const finalMsg = this.messages.find(m => m.id === streamId);
+        const finalMsg = store.messages.find(m => m.id === streamId);
         if (finalMsg) {
-          finalMsg.type = 'gaia';  // Remove 'streaming' class
+          finalMsg.type = 'gaia';
           finalMsg.text = responseText.trim() || '(no response)';
         }
-        this._saveHistory();
+        store._saveHistory();
       } catch (err) {
-        this.addMessage(`Connection error: ${err.message}`, 'system');
+        Alpine.store('chat').addMessage(`Connection error: ${err.message}`, 'system');
       } finally {
         this.sending = false;
       }
