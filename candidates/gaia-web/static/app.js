@@ -528,66 +528,127 @@ function chatPanel() {
 // Unified brain — all three cognitive tiers mapped to anatomical regions
 // Sagittal side-view: Frontal/Prime (left/top), Brain stem/Nano (bottom-right)
 
-// Anatomically accurate brain silhouette (sagittal view, 280x400)
-// Features: frontal pole, prefrontal bulge, central sulcus, parietal rise,
-// occipital notch, calcarine sulcus, temporal lobe, Sylvian fissure
+// Anatomically accurate brain (sagittal/medial view, 280x400 viewport)
+// Based on standard neuroanatomical proportions:
+// - Cerebrum: ~170mm long, ~130mm tall. Frontal=40%, Parietal=25%, Occipital=20%, Temporal=below
+// - Central sulcus at ~60% from frontal pole
+// - Sylvian fissure separates temporal from frontal/parietal
+// - Cerebellum: ~55mm, tucked under occipital, distinct foliated texture
+// - Brain stem: medulla + pons descending from center-base
+// Viewport scaled: brain fills 30-255 x, 25-275 y (with cerebellum/stem below)
+
+// Cerebrum — the main cortical outline with gyri bumps
 const BRAIN_OUTLINE =
-  // Frontal pole (bottom-left front)
-  'M 28,210 C 20,195 18,170 22,148' +
-  // Prefrontal — ascending with gentle gyri bumps
-  ' C 26,126 35,105 42,88 C 48,74 55,62 68,50' +
-  // Superior frontal — top of the dome, gentle undulation
-  ' C 80,40 95,32 110,28 C 125,25 140,24 155,26' +
-  // Central sulcus notch — dip between frontal and parietal
-  ' C 162,27 166,34 168,30 C 170,26 174,24 178,26' +
-  // Parietal lobe — rises then curves back
-  ' C 188,28 198,32 208,40 C 218,48 225,60 230,75' +
-  // Parieto-occipital transition
-  ' C 235,90 238,108 240,125' +
-  // Occipital lobe — back of the head with slight point
-  ' C 242,145 244,165 245,182 C 246,198 244,215 238,228' +
-  // Occipital notch — dip above cerebellum
-  ' C 234,238 228,244 222,248' +
-  // Temporal-occipital boundary — curves under
-  ' C 210,255 195,262 178,265' +
-  // Temporal lobe — underside, extending forward
-  ' C 155,268 130,268 108,264 C 85,260 65,252 50,240' +
-  // Temporal pole — front of temporal lobe
-  ' C 38,230 30,220 28,210 Z';
-// Sylvian fissure — lateral sulcus separating frontal/parietal from temporal
-const BRAIN_SYLVIAN = 'M 55,218 C 80,205 110,198 140,200 C 165,202 185,210 200,225';
-// Central sulcus — between frontal and parietal
-const BRAIN_CENTRAL_SULCUS = 'M 168,30 C 165,55 158,85 150,115 C 145,135 140,155 138,175';
-// Cerebellum — tucked under occipital
-const BRAIN_CEREBELLUM =
-  'M 222,248 C 240,252 258,268 255,288' +
-  ' C 252,305 238,315 222,318 C 206,320 192,312 188,298' +
-  ' C 184,284 190,265 205,255 C 210,252 216,250 222,248 Z';
-// Cerebellum folia (texture lines)
-const BRAIN_CEREBELLUM_FOLIA = [
-  'M 200,272 C 215,268 235,272 248,280',
-  'M 195,285 C 210,280 230,282 245,290',
-  'M 195,298 C 210,294 228,296 240,304',
+  // Frontal pole (bottom-left, rounded)
+  'M 32,215 C 28,205 25,192 24,178' +
+  // Prefrontal cortex — ascending, slight orbital bulge
+  ' C 23,162 25,145 30,128' +
+  // Inferior frontal gyrus — small bump
+  ' C 33,118 37,108 42,98' +
+  // Middle frontal gyrus — gentle undulation ascending
+  ' C 48,86 56,74 65,63' +
+  // Superior frontal gyrus — reaching the dome
+  ' C 74,53 85,44 97,37 C 108,31 120,28 132,26' +
+  // Precentral gyrus — bump before central sulcus
+  ' C 142,25 150,24 157,26 C 162,28 165,32 167,28' +
+  // CENTRAL SULCUS — distinctive notch (key landmark)
+  ' C 169,24 172,22 175,25' +
+  // Postcentral gyrus — bump after central sulcus
+  ' C 178,28 181,32 183,28 C 186,25 190,26 194,28' +
+  // Superior parietal — continuing the dome
+  ' C 202,32 210,38 217,47' +
+  // Parieto-occipital transition — curving back and down
+  ' C 224,56 230,68 234,82' +
+  // Occipital lobe — narrowing toward back
+  ' C 238,98 241,116 243,135 C 244,152 244,168 242,183' +
+  // Occipital pole — slight point
+  ' C 240,195 236,206 230,215' +
+  // Pre-occipital notch — dip before cerebellum junction
+  ' C 225,222 218,228 210,232' +
+  // Inferior temporal/occipital boundary
+  ' C 200,237 188,240 175,242' +
+  // Temporal lobe underside — long flat curve forward
+  ' C 158,244 140,244 122,242 C 104,240 86,236 72,230' +
+  // Temporal pole — rounded front of temporal lobe
+  ' C 58,224 46,218 38,212' +
+  // Close — connect temporal pole back to frontal pole
+  ' C 34,214 32,215 32,215 Z';
+
+// Sylvian fissure — separates temporal from frontal/parietal
+// Runs from anterior to posterior, angling upward
+const BRAIN_SYLVIAN =
+  'M 52,212 C 65,200 82,192 100,188' +
+  ' C 120,184 142,184 162,188' +
+  ' C 178,192 192,200 205,212';
+
+// Central sulcus — deep groove from dome down toward Sylvian fissure
+const BRAIN_CENTRAL_SULCUS =
+  'M 171,25 C 169,40 166,58 162,78' +
+  ' C 158,98 154,120 150,142' +
+  ' C 147,158 144,172 142,185';
+
+// Additional gyri texture — subtle cortical folds
+const BRAIN_GYRI = [
+  // Precentral sulcus
+  'M 148,30 C 145,50 140,72 136,95 C 133,112 130,130 128,148',
+  // Superior frontal sulcus
+  'M 90,40 C 95,55 100,72 108,88 C 114,102 120,115 125,130',
+  // Inferior frontal sulcus
+  'M 50,105 C 62,98 78,92 95,90 C 110,88 125,90 138,95',
+  // Intraparietal sulcus
+  'M 190,32 C 195,50 200,72 205,95 C 208,112 210,130 210,148',
+  // Superior temporal sulcus
+  'M 62,222 C 80,214 100,208 125,206 C 148,205 170,208 190,216',
+  // Parieto-occipital sulcus
+  'M 220,52 C 224,72 228,98 230,125 C 232,148 232,170 228,190',
 ];
-// Brain stem
-const BRAIN_STEM = 'M 210,305 C 215,325 218,350 216,370 C 215,380 212,388 208,382 C 205,376 204,360 206,345';
+
+// Cerebellum — distinct foliated structure under occipital
+const BRAIN_CEREBELLUM =
+  'M 210,232 C 225,235 242,248 248,265' +
+  ' C 253,280 250,298 240,310' +
+  ' C 230,320 216,325 202,322' +
+  ' C 188,318 178,308 174,295' +
+  ' C 170,278 175,258 190,245' +
+  ' C 196,240 204,236 210,232 Z';
+
+// Cerebellum folia — horizontal striations (tree-of-life pattern)
+const BRAIN_CEREBELLUM_FOLIA = [
+  'M 182,260 C 198,255 220,256 242,264',
+  'M 178,275 C 196,270 218,270 244,278',
+  'M 178,288 C 196,283 218,284 242,292',
+  'M 182,300 C 198,296 218,297 236,305',
+  'M 190,310 C 205,307 220,308 232,314',
+];
+
+// Brain stem — pons + medulla, descending from center
+const BRAIN_STEM =
+  // Pons (wider, bulging)
+  'M 172,280 C 168,285 165,295 166,308' +
+  // Medulla (narrowing)
+  ' C 167,322 170,340 172,358' +
+  // Slight taper
+  ' C 173,368 174,375 172,380' +
+  // Return
+  ' M 182,280 C 186,290 188,305 186,320' +
+  ' C 184,338 180,355 178,370';
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
 // Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
 const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (reflexes, triage)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 212, cy: 348, rx: 14, ry: 22 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 222, cy: 288, rx: 25, ry: 20 },
+  // NANO — brain stem & cerebellum (reflexes, triage, fast classification)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 175, cy: 340, rx: 12, ry: 22 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 215, cy: 285, rx: 28, ry: 22 },
 
-  // CORE — temporal, parietal, occipital (operational thinking)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 130, cy: 248, rx: 40, ry: 16 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 185, cy: 55,  rx: 30, ry: 22 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 238, cy: 180, rx: 18, ry: 35 },
+  // CORE — temporal, parietal, occipital (operational thinking, medium tasks)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 125, cy: 228, rx: 42, ry: 14 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 198, cy: 52,  rx: 25, ry: 20 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 238, cy: 165, rx: 15, ry: 32 },
 
-  // PRIME — frontal cortex (deep reasoning)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 38,  cy: 185, rx: 18, ry: 35 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 120, cy: 65,  rx: 30, ry: 22 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 72,  cy: 90,  rx: 35, ry: 30 },
+  // PRIME — frontal cortex (deep reasoning, complex analysis, planning)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 35,  cy: 178, rx: 16, ry: 32 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 130, cy: 58,  rx: 28, ry: 20 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 75,  cy: 85,  rx: 32, ry: 28 },
 ];
 
 // Tier idle colors — anatomically coded
@@ -743,13 +804,20 @@ function mindMapPanel() {
       }
 
       // Brain anatomy — anatomically accurate sagittal silhouette
+      // Main cerebrum outline
       zoomG.append('path').attr('class', 'brain-outline').attr('d', BRAIN_OUTLINE);
+      // Cerebellum (separate structure)
       zoomG.append('path').attr('class', 'brain-cerebellum').attr('d', BRAIN_CEREBELLUM);
+      // Brain stem (pons + medulla)
       zoomG.append('path').attr('class', 'brain-stem').attr('d', BRAIN_STEM);
-      // Sulci — surface folds giving depth
-      zoomG.append('path').attr('class', 'brain-sulcus').attr('d', BRAIN_SYLVIAN);
-      zoomG.append('path').attr('class', 'brain-sulcus').attr('d', BRAIN_CENTRAL_SULCUS);
-      // Cerebellum folia texture
+      // Major sulci — key anatomical landmarks
+      zoomG.append('path').attr('class', 'brain-sulcus major').attr('d', BRAIN_SYLVIAN);
+      zoomG.append('path').attr('class', 'brain-sulcus major').attr('d', BRAIN_CENTRAL_SULCUS);
+      // Minor gyri texture — subtle cortical folds
+      for (const gyrus of BRAIN_GYRI) {
+        zoomG.append('path').attr('class', 'brain-sulcus minor').attr('d', gyrus);
+      }
+      // Cerebellum folia — tree-of-life striations
       for (const folia of BRAIN_CEREBELLUM_FOLIA) {
         zoomG.append('path').attr('class', 'brain-folia').attr('d', folia);
       }
