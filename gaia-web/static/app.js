@@ -555,9 +555,9 @@ function _generateNeurons(count) {
       const cx = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
       const cy = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
 
-      // Each neuron is a short fiber line at a random angle
+      // Each neuron is a fiber line at a random angle
       const fiberAngle = rand() * Math.PI; // 0-180 degrees
-      const fiberLen = 6 + rand() * 10; // 6-16px length
+      const fiberLen = 12 + rand() * 18; // 12-30px length
       const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
       const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
       const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
@@ -849,18 +849,23 @@ function mindMapColumn() {
         const active = activeMap.get(d.id);
 
         if (frameActiveIds.has(d.id) && active) {
-          // Active — fiber lights up, thickens, gets flowing dash animation
+          // Active — fiber flashes bright, thickens, animates current flow
           const str = active.strength;
-          const width = Math.max(1.5, Math.min(4, 1 + str * 0.2));
+          const width = Math.max(2, Math.min(5, 1.5 + str * 0.25));
           el.classed('idle', false)
             .classed('active', true)
             .classed('firing', true)
-            .classed('glow', str > 7)
-            .transition().duration(150)
+            .classed('glow', str > 5);
+          // Flash: instant bright, then settle
+          el.attr('stroke', '#ffffff')
+            .attr('stroke-width', width + 1.5)
+            .attr('opacity', 1)
+            .attr('filter', `url(#neuron-glow-${tier})`)
+            .transition().duration(250)
             .attr('stroke', colorScale(str))
             .attr('stroke-width', width)
-            .attr('opacity', 0.9)
-            .attr('filter', str > 7 ? `url(#neuron-glow-${tier})` : null);
+            .attr('opacity', 0.85)
+            .attr('filter', str > 5 ? `url(#neuron-glow-${tier})` : null);
         } else if (active && (Date.now() - active.timestamp) < 1500) {
           // Decaying — fiber fades back
           const elapsed = Date.now() - active.timestamp;
@@ -973,16 +978,26 @@ function mindMapColumn() {
         .attr('class', d => 'pathway ' + d.type)
         .attr('x1', d => d.x1).attr('y1', d => d.y1)
         .attr('x2', d => d.x2).attr('y2', d => d.y2)
-        .attr('stroke', d => d.type === 'depth' ? colorScale(d.strength) : '#8899aa')
-        .attr('stroke-width', d => d.type === 'depth' ? 1.5 : 0.8)
-        .attr('stroke-dasharray', d => d.type === 'coactive' ? '3,3' : 'none')
-        .attr('opacity', 0);
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-dasharray', d => d.type === 'coactive' ? '4,4' : 'none');
 
-      enter.transition().duration(200)
-        .attr('opacity', d => {
-          if (d.type === 'depth') return 0.6;
-          return 0.2 + (d.temporalBoost || 0) * 0.4; // 0.2 base, up to 0.6 with history
-        });
+      // Depth pathways flash white then settle to color
+      enter.filter(d => d.type === 'depth')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 2.5)
+        .attr('opacity', 0.8)
+        .transition().duration(400)
+        .attr('stroke', d => colorScale(d.strength))
+        .attr('stroke-width', 1.5)
+        .attr('opacity', 0.5);
+
+      // Co-activation lines fade in gently, boosted by temporal history
+      enter.filter(d => d.type === 'coactive')
+        .attr('stroke', '#8899aa')
+        .attr('stroke-width', 0.8)
+        .attr('opacity', 0)
+        .transition().duration(300)
+        .attr('opacity', d => 0.15 + (d.temporalBoost || 0) * 0.4);
 
       pathSel
         .attr('x1', d => d.x1).attr('y1', d => d.y1)

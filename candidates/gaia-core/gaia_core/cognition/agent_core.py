@@ -2290,73 +2290,50 @@ class AgentCore:
                 )
                 # Try to escalate to a higher-tier model
                 _escalated_ok = False
-                for _esc_cand in ["gpu_prime", "prime", "groq_fallback"]:
-                    if _esc_cand not in self.model_pool.models:
-                        try:
-                            self.model_pool.ensure_model_loaded(_esc_cand)
-                        except Exception:
-                            continue
-                    if _esc_cand in self.model_pool.models:
-                        _esc_model = self.model_pool.models[_esc_cand]
-                        # Health check
-                        if hasattr(_esc_model, 'endpoint'):
-                            try:
-                                import requests as _req_esc
-                                _h = _req_esc.get(f"{_esc_model.endpoint}/health", timeout=2)
-                                if _h.status_code != 200:
-                                    continue
-                            except Exception:
-                                continue
-                        try:
-                            yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Escalating to {_esc_cand}...]\n\n"}
-                            _esc_result = _esc_model.generate(
-                                user_input,
-                                system_prompt=getattr(packet, '_system_prompt', ''),
-                                max_tokens=packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048,
-                            )
-                            _esc_text = ""
-                            if isinstance(_esc_result, dict):
-                                _esc_text = _esc_result.get("response", "") or _esc_result.get("text", "")
-                                if not _esc_text and "choices" in _esc_result:
-                                    _esc_text = _esc_result["choices"][0].get("message", {}).get("content", "")
-                            elif isinstance(_esc_result, str):
-                                _esc_text = _esc_result
-                            _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
-                            if _esc_text and len(_esc_text) > len(_stripped_response):
-                                full_response = _esc_text
-                                selected_model_name = _esc_cand
-                                _escalated_ok = True
-                                logger.info("Post-generation escalation to %s succeeded (%d chars)", _esc_cand, len(_esc_text))
-                                yield {"type": "token", "value": _esc_text}
-                                break
-                        except Exception:
-                            logger.warning("Post-generation escalation to %s failed", _esc_cand, exc_info=True)
-                            continue
-                # Last resort: direct Groq API call (doesn't need model pool)
-                if not _escalated_ok:
-                    _groq_key = os.environ.get("GROQ_API_KEY", "")
-                    if _groq_key:
-                        try:
-                            import httpx as _httpx_esc
-                            yield {"type": "token", "value": "\n\n[(i) Trying Groq cloud fallback...]\n\n"}
-                            _groq_resp = _httpx_esc.post(
-                                "https://api.groq.com/openai/v1/chat/completions",
-                                headers={"Authorization": f"Bearer {_groq_key}", "Content-Type": "application/json"},
-                                json={"model": "llama-3.3-70b-versatile",
-                                      "messages": [{"role": "user", "content": user_input}],
-                                      "max_tokens": 1024},
-                                timeout=30.0,
-                            )
-                            if _groq_resp.status_code == 200:
-                                _groq_text = _groq_resp.json()["choices"][0]["message"]["content"].strip()
-                                if _groq_text:
-                                    full_response = _groq_text
-                                    selected_model_name = "groq_direct"
-                                    _escalated_ok = True
-                                    logger.info("Direct Groq escalation succeeded (%d chars)", len(_groq_text))
-                                    yield {"type": "token", "value": _groq_text}
-                        except Exception:
-                            logger.warning("Direct Groq escalation failed", exc_info=True)
+                # Escalate to Prime — load model on gaia-prime if in standby
+                _prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
+                _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ")
+                try:
+                    import httpx as _httpx_esc
+                    yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Escalating to Prime...]\n\n"}
+                    # Check if Prime has a model loaded
+                    _ph = _httpx_esc.get(f"{_prime_endpoint}/health", timeout=3)
+                    _prime_health = _ph.json() if _ph.status_code == 200 else {}
+                    if not _prime_health.get("model_loaded"):
+                        # Prime is in standby — load the model
+                        logger.info("Prime in standby — loading model for escalation")
+                        yield {"type": "token", "value": "[(i) Loading Prime model...]\n"}
+                        _load_resp = _httpx_esc.post(
+                            f"{_prime_endpoint}/model/load",
+                            json={"model": _prime_model, "device": "cuda"},
+                            timeout=180.0,
+                        )
+                        if _load_resp.status_code != 200 or not _load_resp.json().get("ok"):
+                            raise RuntimeError(f"Prime model load failed: {_load_resp.text[:200]}")
+                        logger.info("Prime model loaded for escalation")
+                    # Generate via Prime's OpenAI-compatible API
+                    _prime_resp = _httpx_esc.post(
+                        f"{_prime_endpoint}/v1/chat/completions",
+                        json={"messages": [{"role": "user", "content": user_input}],
+                              "max_tokens": 2048, "temperature": 0.7},
+                        timeout=120.0,
+                    )
+                    if _prime_resp.status_code == 200:
+                        _prime_data = _prime_resp.json()
+                        _esc_text = ""
+                        if "choices" in _prime_data:
+                            _esc_text = _prime_data["choices"][0].get("message", {}).get("content", "")
+                            if not _esc_text:
+                                _esc_text = _prime_data["choices"][0].get("delta", {}).get("content", "")
+                        _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+                        if _esc_text and len(_esc_text) > len(_stripped_response):
+                            full_response = _esc_text
+                            selected_model_name = "prime"
+                            _escalated_ok = True
+                            logger.info("Post-generation escalation to Prime succeeded (%d chars)", len(_esc_text))
+                            yield {"type": "token", "value": _esc_text}
+                except Exception as _prime_exc:
+                    logger.warning("Post-generation escalation to Prime failed: %s", _prime_exc)
 
                 if not _escalated_ok:
                     logger.warning("Post-generation escalation failed; using original response")

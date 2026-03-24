@@ -350,14 +350,18 @@ html, body {
 .neuron-fiber.idle { opacity: 0.06; }
 .neuron-fiber.active { opacity: 0.9; }
 .neuron-fiber.glow { /* glow filter applied via D3 */ }
-/* Firing animation — dashed stroke animates to simulate current flow */
+/* Firing animation — animated dash simulates current racing through fiber */
 .neuron-fiber.firing {
-  stroke-dasharray: 3 2;
-  animation: fiber-current 0.4s linear infinite;
+  stroke-dasharray: 6 4;
+  animation: fiber-current 0.3s linear infinite;
 }
 @keyframes fiber-current {
   from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -5; }
+  to { stroke-dashoffset: -10; }
+}
+/* Depth pathway flash animation */
+.pathway.depth {
+  transition: opacity 0.3s ease, stroke 0.4s ease;
 }
 
 /* Neural pathways — two types */
