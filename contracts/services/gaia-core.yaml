@@ -1,0 +1,466 @@
+service: gaia-core
+port: 6415
+role: "The Brain — cognitive loop, LLM routing, reasoning + embedded Core CPU inference"
+protocol: http
+framework: FastAPI
+
+provides:
+  # ── Primary Cognition ──────────────────────────────────────────────
+  - endpoint: /process_packet
+    method: POST
+    description: "Process a CognitionPacket through the full cognitive pipeline. Returns NDJSON streaming: token chunks, flush signals, and final packet."
+    request_schema:
+      type: CognitionPacket
+      ref: ../schemas/cognition_packet.yaml
+    response_schema:
+      type: StreamingResponse
+      media_type: application/x-ndjson
+      chunks:
+        - type: token   # {"type": "token", "value": "..."}
+        - type: flush   # {"type": "flush"}
+        - type: packet  # {"type": "packet", "value": <CognitionPacket dict>}
+        - type: error   # {"type": "error", "value": "..."}
+    consumers: [gaia-web]
+
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Health check. Returns 200 with inference_ok=true/false. Distinguishes API-alive vs inference-down."
+    response_schema:
+      fields:
+        status: "healthy | degraded"
+        service: "gaia-core"
+        inference_ok: bool
+        inference_detail: string
+    consumers: [gaia-doctor, gaia-orchestrator]
+
+  - endpoint: /
+    method: GET
+    description: "Root endpoint with API directory listing."
+    consumers: []
+
+  - endpoint: /status
+    method: GET
+    description: "Cognitive system status: initialization state, loaded models, model status."
+    consumers: [gaia-web]
+
+  # ── GPU Management ─────────────────────────────────────────────────
+  - endpoint: /gpu/status
+    method: GET
+    description: "Report current GPU state (active/released/releasing/reclaiming/error), prime reachability."
+    consumers: [gaia-orchestrator, gaia-web]
+
+  - endpoint: /gpu/release
+    method: POST
+    description: "Update model pool after GPU release. Called by orchestrator AFTER stopping gaia-prime. Activates fallback chain."
+    request_schema:
+      fields:
+        reason: string (optional)
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /gpu/reclaim
+    method: POST
+    description: "Restore gpu_prime in model pool after GPU reclaim. Called by orchestrator AFTER starting gaia-prime."
+    request_schema:
+      fields:
+        adapter_name: string (optional)
+    consumers: [gaia-orchestrator]
+
+  # ── Sleep Cycle ────────────────────────────────────────────────────
+  - endpoint: /sleep/wake
+    method: POST
+    description: "Receive wake signal (first message during sleep or voice activity)."
+    consumers: [gaia-web, gaia-audio]
+
+  - endpoint: /sleep/voice-state
+    method: POST
+    description: "Notify when GAIA joins/leaves a Discord voice channel."
+    request_schema:
+      fields:
+        connected: bool
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/status
+    method: GET
+    description: "Get current sleep/wake state machine status and task info."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/study-handoff
+    method: POST
+    description: "Receive study handoff signal (prime_to_study or study_to_prime)."
+    request_schema:
+      fields:
+        direction: "prime_to_study | study_to_prime"
+        handoff_id: string
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /sleep/distracted-check
+    method: GET
+    description: "Check if GAIA should return a canned response (sleeping/dreaming/waking)."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/toggle
+    method: POST
+    description: "Enable/disable automatic sleep transitions."
+    request_schema:
+      fields:
+        enabled: bool
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/hold
+    method: POST
+    description: "Temporarily suppress auto-sleep for long-form operations (max 120 min)."
+    request_schema:
+      fields:
+        minutes: int (default 30)
+        reason: string
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/hold-release
+    method: POST
+    description: "Release a sleep hold early."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/force
+    method: POST
+    description: "Force immediate sleep transition. Uses lifecycle machine if available."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/deep
+    method: POST
+    description: "Deep sleep: unload ALL models from GPU. Contacts orchestrator /tier/unload-all."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/config
+    method: GET
+    description: "Return sleep configuration for dashboard."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/shutdown
+    method: POST
+    description: "Initiate graceful shutdown (transitions to OFFLINE)."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/wake-config
+    method: GET
+    description: "Return PRIME_WAKE trigger settings."
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/wake-toggle
+    method: POST
+    description: "Toggle a specific prime wake trigger (discord_typing, workstation_activity)."
+    request_schema:
+      fields:
+        trigger: "discord_typing | workstation_activity"
+        enabled: bool
+    consumers: [gaia-web]
+
+  - endpoint: /sleep/wake-activity
+    method: POST
+    description: "Receive wake signal from host-side workstation activity monitor."
+    consumers: [external]
+
+  # ── Model/Adapter Management ───────────────────────────────────────
+  - endpoint: /model/adapters/notify
+    method: POST
+    description: "Notify core of adapter load/unload in study service. Triggers model pool refresh."
+    request_schema:
+      fields:
+        adapter_name: string
+        action: "load | unload"
+        tier: int (1-3)
+        model_name: string (default gpu_prime)
+    consumers: [gaia-study]
+
+  - endpoint: /model/release
+    method: POST
+    description: "Stop the embedded llama-server and free RAM. Called before GGUF overwrite."
+    consumers: [gaia-study]
+
+  - endpoint: /model/reload
+    method: POST
+    description: "Start the embedded llama-server (optionally with new GGUF path)."
+    request_schema:
+      fields:
+        model_path: string (optional)
+    consumers: [gaia-study]
+
+  - endpoint: /model/status
+    method: GET
+    description: "Return embedded llama-server status."
+    consumers: [gaia-web]
+
+  # ── Cognitive Endpoints ────────────────────────────────────────────
+  - endpoint: /cognition/checkpoint
+    method: POST
+    description: "Write cognitive checkpoints (prime.md + Lite.md). Safe to call multiple times."
+    consumers: [scripts]
+
+  - endpoint: /api/cognitive/similarity
+    method: POST
+    description: "Rate semantic similarity between two texts (0.0-1.0). Uses Nano model, fallback to token overlap."
+    request_schema:
+      fields:
+        text: string
+        reference: string
+    consumers: [gaia-doctor]
+
+  - endpoint: /api/cognitive/query
+    method: POST
+    description: "Lightweight LLM query bypassing the full cognitive pipeline. Targets: core, prime, nano."
+    request_schema:
+      fields:
+        prompt: string
+        system: string (optional)
+        max_tokens: int (default 512)
+        temperature: float (default 0.3)
+        target: "core | prime | nano" (default core)
+        no_think: bool (default false)
+    consumers: [gaia-doctor, gaia-monkey]
+
+  # ── Doctor Integration ─────────────────────────────────────────────
+  - endpoint: /api/repair/structural
+    method: POST
+    description: "Cognitive repair for structural code errors. Optionally writes fix directly."
+    request_schema:
+      fields:
+        service: string
+        broken_code: string
+        error_msg: string
+        file_path: string (optional)
+    consumers: [gaia-doctor]
+
+  - endpoint: /api/doctor/diagnose
+    method: POST
+    description: "Doctor-initiated diagnostic turn for restart loop analysis."
+    request_schema:
+      fields:
+        service: string
+        logs: string
+    consumers: [gaia-doctor]
+
+  - endpoint: /api/doctor/review
+    method: POST
+    description: "Sovereign promotion review. Doctor submits diffs, GAIA approves/denies."
+    request_schema:
+      fields:
+        diffs: list
+        source: string
+        file_count: int
+    response_schema:
+      fields:
+        approved: bool
+        reason: string
+    consumers: [gaia-doctor]
+
+  # ── Audio Context ──────────────────────────────────────────────────
+  - endpoint: /audio/ingest
+    method: POST
+    description: "Ingest audio transcript as ambient context (ring buffer, no cognitive loop)."
+    request_schema:
+      fields:
+        transcript: string
+        mode: string (default passive)
+        context_markers: list
+        timestamp: string (optional)
+    consumers: [gaia-audio]
+
+  - endpoint: /audio/listen
+    method: POST
+    description: "Enable/disable feeding audio buffer into the prompt builder."
+    consumers: [gaia-web]
+
+  - endpoint: /audio/context
+    method: GET
+    description: "Return current audio context buffer and listening state."
+    consumers: [gaia-web]
+
+  # ── KV Cache ───────────────────────────────────────────────────────
+  - endpoint: /api/kv-cache/save
+    method: POST
+    description: "Trigger immediate KV cache save for all roles."
+    consumers: [gaia-web]
+
+  - endpoint: /api/kv-cache/restore/{role}
+    method: POST
+    description: "Restore KV cache for a specific role (reflex, core)."
+    consumers: [gaia-web]
+
+  - endpoint: /api/kv-cache/pressure
+    method: GET
+    description: "Return KV cache pressure for all roles and compaction log."
+    consumers: [gaia-web]
+
+  - endpoint: /api/kv-cache/compact/{role}
+    method: POST
+    description: "Manually trigger KV cache compaction for a specific role."
+    consumers: [gaia-web]
+
+  # ── Presence ───────────────────────────────────────────────────────
+  - endpoint: /presence
+    method: POST
+    description: "Update Discord bot presence (called by sleep cycle)."
+    request_schema:
+      fields:
+        activity: string
+        status: "idle | online | dnd | invisible"
+    consumers: [internal]
+
+consumes:
+  - service: gaia-prime
+    endpoint: /v1/chat/completions
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Thinker GPU inference (OpenAI-compatible chat completions)"
+
+  - service: gaia-prime
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 7777
+    description: "Prime health check for GPU reclaim flow"
+
+  - service: gaia-prime
+    endpoint: /model/load
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Load model on Prime GPU (GAIA Engine managed mode)"
+
+  - service: gaia-prime
+    endpoint: /adapter/load
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Register LoRA adapter with Prime"
+
+  - service: gaia-nano
+    endpoint: /v1/chat/completions
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Nano triage / reflex inference"
+
+  - service: gaia-nano
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 8080
+    description: "Nano health check"
+
+  - service: gaia-mcp
+    endpoint: /jsonrpc
+    method: POST
+    protocol: json-rpc-2.0
+    port: 8765
+    description: "Tool execution (sandboxed)"
+
+  - service: gaia-orchestrator
+    endpoint: /gpu/sleep
+    method: POST
+    protocol: http
+    port: 6410
+    description: "Release GPU for sleep cycle"
+
+  - service: gaia-orchestrator
+    endpoint: /gpu/wake
+    method: POST
+    protocol: http
+    port: 6410
+    description: "Reclaim GPU after wake"
+
+  - service: gaia-orchestrator
+    endpoint: /tier/unload-all
+    method: POST
+    protocol: http
+    port: 6410
+    description: "Deep sleep: unload all tiers"
+
+  - service: gaia-orchestrator
+    endpoint: /lifecycle/state
+    method: GET
+    protocol: http
+    port: 6410
+    description: "Query lifecycle state machine"
+
+  - service: gaia-audio
+    endpoint: /mute
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Mute audio on sleep"
+
+  - service: gaia-audio
+    endpoint: /unmute
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Unmute audio on wake"
+
+  - service: gaia-audio
+    endpoint: /sleep
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Deep sleep audio (unload GPU models)"
+
+  - service: gaia-audio
+    endpoint: /wake
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Wake audio (reload GPU models)"
+
+  - service: localhost:8092
+    endpoint: /v1/chat/completions
+    method: POST
+    protocol: http
+    port: 8092
+    description: "Embedded Core CPU inference (llama-server or GAIA Engine)"
+
+environment:
+  CORE_ENDPOINT: "http://gaia-core:6415"
+  PRIME_ENDPOINT: "http://gaia-prime:7777"
+  NANO_ENDPOINT: "http://gaia-nano:8080"
+  MCP_ENDPOINT: "http://gaia-mcp:8765/jsonrpc"
+  STUDY_ENDPOINT: "http://gaia-study:8766"
+  CORE_CPU_ENDPOINT: "http://localhost:8092"
+  ORCHESTRATOR_ENDPOINT: "http://gaia-orchestrator:6410"
+  MCP_FALLBACK_ENDPOINT: "http://gaia-mcp-candidate:8765/jsonrpc"
+
+volumes:
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library (gaia_common)"
+  - path: /app
+    mode: rw
+    purpose: "Service source code"
+  - path: /knowledge
+    mode: rw
+    purpose: "Knowledge base (conversation curator writes)"
+  - path: /vector_store
+    mode: ro
+    purpose: "Vector indexes (gaia-study is SOLE WRITER)"
+  - path: /models
+    mode: ro
+    purpose: "Model files"
+  - path: /warm_pool
+    mode: ro
+    purpose: "Tmpfs-backed warm pool for fast model loads"
+  - path: /logs
+    mode: rw
+    purpose: "Consolidated logs"
+  - path: /shared
+    mode: rw
+    purpose: "Shared state (orchestrator, pipeline, kvcache)"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
+depends_on:
+  - gaia-mcp
