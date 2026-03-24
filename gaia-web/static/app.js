@@ -79,7 +79,7 @@ function drawSparkline(canvas, values, color) {
 
 document.addEventListener('alpine:init', () => {
   Alpine.store('nav', {
-    currentView: 'dashboard',
+    currentView: localStorage.getItem('gaia_active_tab') || 'chat',
     tabs: [
       { id: 'chat', label: 'Chat' },
       { id: 'dashboard', label: 'Dashboard' },
@@ -92,6 +92,7 @@ document.addEventListener('alpine:init', () => {
       { id: 'logs', label: 'Logs' },
     ],
     switchView(viewName) {
+      localStorage.setItem('gaia_active_tab', viewName);
       this.currentView = viewName;
     },
   });
@@ -541,9 +542,11 @@ function mindMapColumn() {
     _reconnectTimer: null,
 
     init() {
+      // Raw activation strengths range ~0-20; normalize to 0-1 for color
       this._colorScale = d3.scaleLinear()
-        .domain([0, 0.5, 1])
-        .range(['#4fc3f7', '#ffa726', '#e94560']);
+        .domain([0, 5, 15])
+        .range(['#4fc3f7', '#ffa726', '#e94560'])
+        .clamp(true);
       this._loadAtlas();
       this.$nextTick(() => {
         ['nano', 'core', 'prime'].forEach(tier => this._initTierGraph(tier));
@@ -636,8 +639,8 @@ function mindMapColumn() {
 
     _connect() {
       if (this._es) { this._es.close(); this._es = null; }
-      const sessionId = Alpine.store('chat').getSessionId();
-      this._es = new EventSource('/api/activations/stream?session_id=' + encodeURIComponent(sessionId));
+      // Show ALL neural activity — don't filter by session
+      this._es = new EventSource('/api/activations/stream');
 
       this._es.onmessage = (evt) => {
         try {
@@ -759,7 +762,7 @@ function mindMapColumn() {
 
       // Enter
       const enter = nodeSel.enter().append('g')
-        .attr('class', d => 'feature-node' + (d.strength > 0.7 ? ' strong' : ''))
+        .attr('class', d => 'feature-node' + (d.strength > 7 ? ' strong' : ''))
         .on('mouseover', function(evt, d) {
           self.hoveredFeature = d;
         })
@@ -789,14 +792,14 @@ function mindMapColumn() {
       // Update (merged enter+update)
       const merged = enter.merge(nodeSel);
 
-      merged.attr('class', d => 'feature-node' + (d.strength > 0.7 ? ' strong' : '') + (d.fadeTimer < 15 ? ' fading' : ''));
+      merged.attr('class', d => 'feature-node' + (d.strength > 7 ? ' strong' : '') + (d.fadeTimer < 15 ? ' fading' : ''));
 
       merged.select('circle')
         .transition().duration(200)
         .attr('r', d => d.r)
         .attr('fill', d => colorScale(d.strength))
         .attr('opacity', d => Math.min(1, d.fadeTimer / 20))
-        .attr('filter', d => d.strength > 0.7 ? `url(#glow-${tier})` : null);
+        .attr('filter', d => d.strength > 7 ? `url(#glow-${tier})` : null);
 
       merged.select('text')
         .text(d => d.strength > 0.5 ? d.label : '')
@@ -810,7 +813,8 @@ function mindMapColumn() {
     },
 
     _strengthToRadius(strength) {
-      return Math.max(3, Math.min(18, strength * 20));
+      // Raw strengths range ~0-20; map to radius 3-18px
+      return Math.max(3, Math.min(18, 3 + strength * 1.0));
     },
 
     async _loadAtlas() {
