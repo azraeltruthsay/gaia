@@ -687,8 +687,9 @@ function _getConceptColor(label) {
 
 const REGION_EDGES = {
   'Cerebellum': {
-    start: [[153,192],[157,187],[164,181],[172,177],[183,175]],
-    end:   [[194,172],[205,168],[216,165],[227,164],[238,162]],
+    // Tighter to the actual cerebellum SVG shape — no overflow
+    start: [[155,188],[160,184],[167,180],[175,177],[184,175]],
+    end:   [[190,173],[198,170],[207,168],[215,167],[222,166]],
   },
   'Brain Stem': {
     start: [[145,195],[149,190],[152,184]],
@@ -707,8 +708,9 @@ const REGION_EDGES = {
     end:   [[219,75],[222,67],[219,58],[213,53]],
   },
   'Prefrontal': {
-    start: [[27,124],[29,116],[30,108],[31,99],[33,91]],
-    end:   [[36,86],[37,77],[38,69],[40,64],[41,58]],
+    // Pulled right to stay inside frontal lobe outline
+    start: [[30,122],[32,114],[33,106],[34,98],[35,90]],
+    end:   [[38,84],[39,76],[40,68],[41,62],[42,57]],
   },
   'Frontal': {
     start: [[41,97],[47,91],[55,86],[63,80],[71,77]],
@@ -761,9 +763,9 @@ function _generateNeurons(tier, count) {
       const cx = (x1 + x2) / 2;
       const cy = (y1 + y2) / 2;
 
-      // Control point: parallel curves that don't cross
-      // Top neurons (low t) curve one way, bottom (high t) curve the other
-      const curvature = (t - 0.5) * 6;
+      // Control point: gentle parallel curves that don't cross
+      // Keep curvature small so arcs stay inside the brain region
+      const curvature = (t - 0.5) * 3;
       const dx = x2 - x1;
       const dy = y2 - y1;
       const perpX = -dy;
