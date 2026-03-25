@@ -62,6 +62,7 @@ _nano_pressure_task: Optional[asyncio.Task] = None
 _watch_manager = None
 _tier_router = None
 _lifecycle_machine = None
+_consciousness_matrix = None
 
 
 @asynccontextmanager
@@ -147,6 +148,18 @@ async def lifespan(app: FastAPI):
     if _gpu_manager:
         _nano_pressure_task = asyncio.create_task(_nano_vram_pressure_loop())
         logger.info("Nano VRAM pressure monitor started")
+
+    # Initialize consciousness matrix
+    try:
+        global _consciousness_matrix
+        from .consciousness_matrix import ConsciousnessMatrix
+        _consciousness_matrix = ConsciousnessMatrix()
+        await _consciousness_matrix.probe_all()
+        await _consciousness_matrix.start_continuous_poll(interval=15.0)
+        logger.info("Consciousness matrix initialized: %s",
+                     {t: s["actual"] for t, s in _consciousness_matrix.get_matrix().items()})
+    except Exception:
+        logger.warning("Consciousness matrix initialization failed", exc_info=True)
 
     # Start periodic lifecycle reconciliation (detect model drift)
     _lifecycle_reconcile_task = None
@@ -1276,6 +1289,88 @@ async def lifecycle_tiers():
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
     snapshot = await _lifecycle_machine.get_snapshot()
     return {k: v.model_dump() for k, v in snapshot.tiers.items()}
+
+
+# =============================================================================
+# Consciousness Matrix Endpoints
+# =============================================================================
+
+@app.get("/consciousness/matrix")
+async def consciousness_matrix():
+    """Get the full consciousness matrix — target vs actual for all tiers."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return _consciousness_matrix.get_matrix()
+
+
+@app.post("/consciousness/probe")
+async def consciousness_probe():
+    """Force-probe all tiers and return updated matrix."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.probe_all()
+
+
+class ConsciousnessRequest(BaseModel):
+    tier: str
+    level: int  # 1=unconscious, 2=subconscious, 3=conscious
+
+    @field_validator("level")
+    @classmethod
+    def validate_level(cls, v):
+        if v not in (1, 2, 3):
+            raise ValueError("level must be 1 (unconscious), 2 (subconscious), or 3 (conscious)")
+        return v
+
+
+@app.post("/consciousness/set")
+async def consciousness_set(request: ConsciousnessRequest):
+    """Set a tier's target consciousness level."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    from .consciousness_matrix import ConsciousnessLevel
+    level = ConsciousnessLevel(request.level)
+    return await _consciousness_matrix.set_target(request.tier, level)
+
+
+@app.post("/consciousness/awake")
+async def consciousness_awake():
+    """Set AWAKE configuration: Core=3, Nano=3, Prime=2."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.awake()
+
+
+@app.post("/consciousness/focusing")
+async def consciousness_focusing():
+    """Set FOCUSING configuration: Nano=3, Core=2, Prime=3."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.focusing()
+
+
+@app.post("/consciousness/sleep")
+async def consciousness_sleep():
+    """Set SLEEP configuration: Nano=2, Core=2, Prime=1."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.sleep()
+
+
+@app.post("/consciousness/deep-sleep")
+async def consciousness_deep_sleep():
+    """Set DEEP SLEEP configuration: All → 1 (Nano stays 2)."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.deep_sleep()
+
+
+@app.post("/consciousness/training")
+async def consciousness_training(tier: str = "prime"):
+    """Set TRAINING configuration: target tier → 1, others → 2."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    return await _consciousness_matrix.training(tier)
 
 
 # =============================================================================
