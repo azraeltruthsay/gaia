@@ -2329,10 +2329,16 @@ class AgentCore:
                             break
                     if _prime_model_obj:
                         try:
-                            _esc_result = _prime_model_obj.generate(
-                                user_input,
-                                system_prompt=getattr(packet, '_system_prompt', '') or '',
-                                max_tokens=packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048,
+                            # VLLMRemoteModel uses create_chat_completion, not generate
+                            _sys_prompt = getattr(packet, '_system_prompt', '') or ''
+                            _msgs = []
+                            if _sys_prompt:
+                                _msgs.append({"role": "system", "content": _sys_prompt})
+                            _msgs.append({"role": "user", "content": user_input})
+                            _max_tok = packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048
+                            _esc_result = _prime_model_obj.create_chat_completion(
+                                messages=_msgs,
+                                max_tokens=_max_tok,
                             )
                             _esc_text = ""
                             if isinstance(_esc_result, dict):
