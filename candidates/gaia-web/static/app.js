@@ -679,17 +679,61 @@ function _getConceptColor(label) {
   return _conceptColorMap[label];
 }
 
-// Generate neurons as long curved fibers spanning edge-to-edge within each region.
-//
-// Layout:
-//   - Start coordinates along the LOWER-LEFT edge (input side)
-//   - End coordinates along the UPPER-RIGHT edge (output side)
-//   - Fiber arcs from start → end as a bezier curve
-//   - Parallel fibers, no overlap, evenly spaced
-//   - Margin on both edges for synapses
-//   - Synapses live at the start/end points along the edges
-//
-// Flow direction: lower-left → upper-right with ~30° upward tilt
+// ── Region Edge Curves ──────────────────────────────────────────────────
+// Each region has a 'start' edge (input, lower-left) and 'end' edge (output, upper-right).
+// Defined as anchor points along the actual brain SVG anatomy.
+// Neurons interpolate between these anchors.
+// Coordinates are in viewport units (280x225) — scale with the SVG.
+
+const REGION_EDGES = {
+  'Cerebellum': {
+    start: [[153,192],[157,187],[164,181],[172,177],[183,175]],
+    end:   [[194,172],[205,168],[216,165],[227,164],[238,162]],
+  },
+  'Brain Stem': {
+    start: [[145,195],[149,190],[152,184]],
+    end:   [[153,179],[155,175],[152,172]],
+  },
+  'Temporal': {
+    start: [[60,157],[74,160],[90,162],[107,164],[123,165]],
+    end:   [[85,149],[101,147],[118,146],[134,147],[150,150]],
+  },
+  'Parietal': {
+    start: [[123,61],[131,56],[142,51],[153,50]],
+    end:   [[140,45],[149,42],[159,41],[170,42]],
+  },
+  'Occipital': {
+    start: [[205,116],[211,105],[215,94],[216,83]],
+    end:   [[219,75],[222,67],[219,58],[213,53]],
+  },
+  'Prefrontal': {
+    start: [[27,124],[29,116],[30,108],[31,99],[33,91]],
+    end:   [[36,86],[37,77],[38,69],[40,64],[41,58]],
+  },
+  'Frontal': {
+    start: [[41,97],[47,91],[55,86],[63,80],[71,77]],
+    end:   [[55,69],[63,64],[71,60],[79,57],[85,56]],
+  },
+  'Motor Cortex': {
+    start: [[82,67],[88,61],[93,56],[98,51]],
+    end:   [[96,47],[101,43],[107,41],[111,39]],
+  },
+};
+
+// Interpolate a point along an edge curve at parameter t (0-1)
+function _interpEdge(edge, t) {
+  const n = edge.length - 1;
+  const idx = t * n;
+  const i = Math.min(Math.floor(idx), n - 1);
+  const frac = idx - i;
+  return [
+    edge[i][0] + (edge[i + 1][0] - edge[i][0]) * frac,
+    edge[i][1] + (edge[i + 1][1] - edge[i][1]) * frac,
+  ];
+}
+
+// Generate neurons by interpolating along region edge curves.
+// Each neuron has a start point on the start edge and end point on the end edge.
 function _generateNeurons(tier, count) {
   const neurons = [];
   const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
@@ -698,48 +742,37 @@ function _generateNeurons(tier, count) {
   let seed = tier === 'nano' ? 42 : tier === 'core' ? 137 : 271;
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
-  // Synapse margin (px) — space at edges for synapse dots + connection lines
-  const MARGIN = 4;
-
   for (const region of tierRegions) {
-    // Flow angle: ~30° upward tilt (lower-left to upper-right)
-    const flowAngle = -Math.PI * 0.18;
-    const perpAngle = flowAngle + Math.PI / 2;
+    const edges = REGION_EDGES[region.name];
+    if (!edges) continue;
 
-    // Region bounding box with margin
-    const left = region.cx - region.rx + MARGIN;
-    const right = region.cx + region.rx - MARGIN;
-    const top = region.cy - region.ry + MARGIN;
-    const bottom = region.cy + region.ry - MARGIN;
-    const width = right - left;
-    const height = bottom - top;
+    // Reserve ~20% of slots for future neuron discovery
+    const usedSlots = Math.ceil(perRegion * 0.8);
 
-    // Start edge: lower-left. End edge: upper-right.
-    // Distribute neurons evenly along the perpendicular axis
     for (let i = 0; i < perRegion; i++) {
+      // Distribute evenly along the edge curves, with tiny jitter
       const t = perRegion > 1 ? i / (perRegion - 1) : 0.5;
+      const jitter = (rand() - 0.5) * 0.02; // ±1% jitter along curve
+      const tClamped = Math.max(0, Math.min(1, t + jitter));
 
-      // Start point: along the lower-left edge
-      // Spread vertically with slight horizontal stagger
-      const x1 = left + t * width * 0.15 + (rand() - 0.5) * 1;
-      const y1 = top + t * height + (rand() - 0.5) * 1;
+      const [x1, y1] = _interpEdge(edges.start, tClamped);
+      const [x2, y2] = _interpEdge(edges.end, tClamped);
 
-      // End point: along the upper-right edge
-      // Mirror the spread, shifted right and up
-      const x2 = right - (1 - t) * width * 0.15 + (rand() - 0.5) * 1;
-      const y2 = top + t * height - height * 0.25 + (rand() - 0.5) * 1;
-
-      // Midpoint for center of fiber
       const cx = (x1 + x2) / 2;
       const cy = (y1 + y2) / 2;
 
-      // Control point: curve based on position (top fibers curve up, bottom curve down)
-      // This creates parallel non-crossing arcs
-      const curvature = (t - 0.5) * height * 0.3;
-      const cpx = cx + Math.cos(perpAngle) * curvature;
-      const cpy = cy + Math.sin(perpAngle) * curvature;
+      // Control point: parallel curves that don't cross
+      // Top neurons (low t) curve one way, bottom (high t) curve the other
+      const curvature = (t - 0.5) * 6;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const perpX = -dy;
+      const perpY = dx;
+      const perpLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+      const cpx = cx + (perpX / perpLen) * curvature;
+      const cpy = cy + (perpY / perpLen) * curvature;
 
-      const fiberLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+      const fiberLen = Math.sqrt(dx * dx + dy * dy);
       const r = (v) => Math.round(v * 10) / 10;
 
       neurons.push({
