@@ -647,3 +647,16 @@ async def lifecycle_reconcile():
             return resp.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@router.get("/consciousness")
+async def consciousness_matrix():
+    """Proxy to orchestrator's consciousness matrix."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/consciousness/matrix")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return {"nano": {"actual": "unknown"}, "core": {"actual": "unknown"}, "prime": {"actual": "unknown"}}

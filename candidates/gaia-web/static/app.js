@@ -824,12 +824,20 @@ function _generateNeurons(tier, count) {
 // Fewer neurons for long sweeping arcs with clear spacing
 const TIER_NEURON_COUNTS = { nano: 20, core: 30, prime: 50 };
 
-// Brightness multiplier by consciousness state (from /consciousness/matrix)
-// Conscious (GPU) = full brightness, Subconscious (CPU) = dimmer
+// Brightness multiplier by consciousness state
+// GPU (Conscious) = full brightness, CPU (Subconscious) = noticeably dimmer
 const CONSCIOUSNESS_BRIGHTNESS = {
   conscious: 1.0,
-  subconscious: 0.5,
-  unconscious: 0.1,
+  subconscious: 0.35,
+  unconscious: 0.08,
+};
+
+// Normalize activation strength across tiers so they look equal
+// Nano's raw strengths are much higher than Core's
+const TIER_STRENGTH_SCALE = {
+  nano: 0.6,   // Nano fires hot — scale down
+  core: 1.0,   // Core is baseline
+  prime: 1.2,  // Prime fires less often — boost slightly
 };
 
 // Generate SVG path data for a quadratic bezier curve
@@ -895,38 +903,34 @@ function mindMapPanel() {
     },
 
     async _pollConsciousness() {
-      // Poll consciousness matrix every 10s
+      // Poll consciousness matrix from orchestrator every 5s
       const poll = async () => {
         try {
-          // Proxy through web to orchestrator
-          const resp = await fetch('/api/system/status');
+          const resp = await fetch('/api/system/consciousness');
           if (resp.ok) {
-            const data = await resp.json();
-            // Infer from GPU owner and known state
-            const owner = (data.gpu_owner || '').toLowerCase();
-            // Reset to unconscious, then set known states
+            const matrix = await resp.json();
             for (const t of ['nano', 'core', 'prime']) {
-              this.tierConsciousness[t] = 'unconscious';
-            }
-            if (owner.includes('nano')) this.tierConsciousness.nano = 'conscious';
-            if (owner.includes('core')) this.tierConsciousness.core = 'conscious';
-            if (owner.includes('prime')) this.tierConsciousness.prime = 'conscious';
-            // If a tier is not on GPU but has activations, it's subconscious (CPU)
-            for (const t of ['nano', 'core', 'prime']) {
-              if (this.tierConsciousness[t] === 'unconscious') {
-                // Check if we've seen recent activations from this tier
-                const recent = this._activeNeurons;
-                for (const [, info] of recent) {
-                  if (info.tier === t && (Date.now() - info.timestamp) < 30000) {
-                    this.tierConsciousness[t] = 'subconscious';
-                    break;
-                  }
-                }
+              if (matrix[t] && matrix[t].actual) {
+                this.tierConsciousness[t] = matrix[t].actual;
               }
             }
           }
-        } catch {}
-        setTimeout(poll, 10000);
+        } catch {
+          // Fallback: infer from recent activations
+          for (const t of ['nano', 'core', 'prime']) {
+            let hasRecent = false;
+            for (const [, info] of this._activeNeurons) {
+              if (info.tier === t && (Date.now() - info.timestamp) < 15000) {
+                hasRecent = true;
+                break;
+              }
+            }
+            if (hasRecent && this.tierConsciousness[t] === 'unconscious') {
+              this.tierConsciousness[t] = 'conscious'; // assume GPU if active
+            }
+          }
+        }
+        setTimeout(poll, 5000);
       };
       poll();
     },
@@ -996,21 +1000,21 @@ function mindMapPanel() {
         .append('g')
         .attr('class', d => 'neuron-bundle tier-' + d.tier);
 
-      // Start dot (one edge of the region)
+      // Start dot (one edge of the region) — clearly visible when idle
       neuronGs.append('circle')
         .attr('class', 'neuron-start')
         .attr('cx', d => d.x1).attr('cy', d => d.y1)
-        .attr('r', 1.5)
+        .attr('r', 1.8)
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.2);
+        .attr('opacity', 0.3);
 
       // End dot (opposite edge of the region)
       neuronGs.append('circle')
         .attr('class', 'neuron-end')
         .attr('cx', d => d.x2).attr('cy', d => d.y2)
-        .attr('r', 1.5)
+        .attr('r', 1.8)
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.2);
+        .attr('opacity', 0.3);
 
       // Arc path — hidden by default, shown on activation
       neuronGs.append('path')
@@ -1193,7 +1197,9 @@ function mindMapPanel() {
         const synLink = g.select('.synapse-link');
 
         if (frameActiveIds.has(d.id) && active) {
-          const str = active.strength;
+          // Normalize strength across tiers so they look equally bright
+          const rawStr = active.strength;
+          const str = rawStr * (TIER_STRENGTH_SCALE[tier] || 1.0);
           const width = Math.min(2.5, 1.0 + str * 0.08);
           const conceptColor = _getConceptColor(active.label);
           const activeColor = conceptColor || colorScale(str);
@@ -1240,10 +1246,10 @@ function mindMapPanel() {
 
           // Fade dots back
           startDot.transition().duration(500)
-            .attr('r', 1.2).attr('fill', decayColor).attr('opacity', 0.15 + 0.5 * decay)
+            .attr('r', 1.8 + 1.2 * decay).attr('fill', decayColor).attr('opacity', 0.3 + 0.6 * decay)
             .attr('filter', null);
           endDot.transition().duration(500)
-            .attr('r', 1.2).attr('fill', decayColor).attr('opacity', 0.15 + 0.5 * decay)
+            .attr('r', 1.8 + 1.2 * decay).attr('fill', decayColor).attr('opacity', 0.3 + 0.6 * decay)
             .attr('filter', null);
           synAnchor.transition().duration(500)
             .attr('r', 0.8).attr('opacity', 0.06 + 0.4 * decay);
@@ -1266,10 +1272,10 @@ function mindMapPanel() {
           d.cpx = d.ocpx;
           d.cpy = d.ocpy;
           startDot.transition().duration(600)
-            .attr('r', 1.2).attr('fill', idleColor).attr('opacity', 0.15)
+            .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.3)
             .attr('filter', null);
           endDot.transition().duration(600)
-            .attr('r', 1.2).attr('fill', idleColor).attr('opacity', 0.15)
+            .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.3)
             .attr('filter', null);
           arc.transition().duration(400)
             .attr('opacity', 0)
