@@ -498,6 +498,20 @@ function chatPanel() {
                   const el = this.$refs.messages;
                   if (el) el.scrollTop = el.scrollHeight;
                 });
+                // Detect which tier is responding and inject synthetic brain activity
+                const val = chunk.value || '';
+                if (val.includes('Escalating to Prime') || val.includes('[(Thinker) Prime]')) {
+                  // Prime is thinking — pulse the frontal lobe
+                  window._synthPrimePulse = true;
+                } else if (val.includes('[(Reflex) Nano]') || val.includes('[reflex]')) {
+                  window._synthTier = 'nano';
+                } else if (val.includes('[(Operator) Core]') || val.includes('[Core]')) {
+                  window._synthTier = 'core';
+                }
+                // While Prime is generating, keep pulsing
+                if (window._synthPrimePulse) {
+                  window._synthPrimeTimer = Date.now();
+                }
               } else if (chunk.type === 'final') {
                 responseText = chunk.value || responseText;
               } else if (chunk.type === 'error') {
@@ -515,6 +529,8 @@ function chatPanel() {
           finalMsg.text = responseText.trim() || '(no response)';
         }
         store._save();
+        // Stop synthetic Prime pulse when response completes
+        window._synthPrimePulse = false;
       } catch (err) {
         Alpine.store('chat').addMessage(`Connection error: ${err.message}`, 'system');
       } finally {
@@ -1102,6 +1118,37 @@ function mindMapPanel() {
           this._reconnectTimer = setTimeout(() => this._connect(), 3000);
         }
       };
+
+      // Synthetic Prime pulse: when chat detects Prime escalation,
+      // generate fake activation events to light up the frontal lobe
+      const synthCheck = () => {
+        if (!this.live) return;
+        if (window._synthPrimePulse && window._synthPrimeTimer &&
+            (Date.now() - window._synthPrimeTimer) < 30000) {
+          // Generate synthetic Prime activation
+          const primeNeurons = this._neuronsByTier['prime'] || [];
+          if (primeNeurons.length > 0) {
+            // Pick a random subset of Prime neurons to light up
+            const numToLight = Math.min(8, primeNeurons.length);
+            const features = [];
+            for (let i = 0; i < numToLight; i++) {
+              const idx = Math.floor(Math.random() * primeNeurons.length);
+              features.push({
+                idx: primeNeurons[idx].id,
+                strength: 8 + Math.random() * 6,
+                label: 'thinking',
+                layer: 24,
+              });
+            }
+            this._updateTier('prime', { tier: 'prime', features });
+          }
+        } else if (window._synthPrimePulse) {
+          // Prime stopped generating — clear the pulse
+          window._synthPrimePulse = false;
+        }
+        setTimeout(synthCheck, 500); // pulse every 500ms while Prime is active
+      };
+      synthCheck();
     },
 
     _mapFeatureToNeuron(feature, tier) {
