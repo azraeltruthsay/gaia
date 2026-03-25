@@ -1194,7 +1194,7 @@ function mindMapPanel() {
 
         if (frameActiveIds.has(d.id) && active) {
           const str = active.strength;
-          const width = Math.min(1.5, 0.8 + str * 0.05);
+          const width = Math.min(2.5, 1.0 + str * 0.08);
           const conceptColor = _getConceptColor(active.label);
           const activeColor = conceptColor || colorScale(str);
           // Brightness scales by consciousness state
@@ -1204,10 +1204,10 @@ function mindMapPanel() {
 
           // Light up both dots — brighter for Conscious, dimmer for Subconscious
           startDot.transition().duration(200)
-            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9 * brightness)
+            .attr('r', 3).attr('fill', activeColor).attr('opacity', 0.95 * brightness)
             .attr('filter', glowFilter);
           endDot.transition().duration(200)
-            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9 * brightness)
+            .attr('r', 3).attr('fill', activeColor).attr('opacity', 0.95 * brightness)
             .attr('filter', glowFilter);
 
           // Light up synapse anchor + connection line
@@ -1231,9 +1231,10 @@ function mindMapPanel() {
             .attr('opacity', 0.7 * brightness)
             .attr('filter', glowFilter);
 
-        } else if (active && (Date.now() - active.timestamp) < 1200) {
+        } else if (active && (Date.now() - active.timestamp) < 3000) {
+          // Longer decay (3s) so activations stay visible
           const elapsed = Date.now() - active.timestamp;
-          const decay = 1 - (elapsed / 1200);
+          const decay = 1 - (elapsed / 3000);
           const str = active.strength * decay;
           const decayColor = _getConceptColor(active.label) || colorScale(str);
 
