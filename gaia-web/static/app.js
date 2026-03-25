@@ -925,8 +925,7 @@ function mindMapPanel() {
       svg.select('.idle-label').attr('opacity', 0);
 
       const colorScale = this._colorScale;
-      // Study tier maps across ALL neurons (training touches whole model)
-      const neurons = tier === 'study' ? this._neurons : this._neuronsByTier[tier];
+      const neurons = this._neuronsByTier[tier];
       if (!neurons || neurons.length === 0) return;
       const activeMap = this._activeNeurons;
       const idleColor = TIER_IDLE_COLORS[tier] || TIER_IDLE_COLORS['core'];
@@ -977,10 +976,8 @@ function mindMapPanel() {
         }
       }
 
-      // Update neuron fiber visuals — study tier updates ALL fibers
-      const fiberSel = tier === 'study'
-        ? svg.select('g.neuron-group').selectAll('line.neuron-fiber')
-        : svg.select('g.neuron-group').selectAll('line.tier-' + tier);
+      // Update neuron fiber visuals for this tier
+      const fiberSel = svg.select('g.neuron-group').selectAll('line.tier-' + tier);
       const self = this;
 
       fiberSel.each(function(d) {

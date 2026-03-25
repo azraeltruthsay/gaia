@@ -559,15 +559,28 @@ class QLoRATrainer:
                     callback_self.stop_reason = "max_steps"  # default
 
                 def on_step_end(callback_self, args, state, control, **kwargs):
-                    """Write training activation data for brain visualization."""
+                    """Write training activation data for brain visualization.
+
+                    Tags events with the tier being trained (based on model path):
+                    - 8B/Prime models → tier 'prime' (lights up frontal cortex)
+                    - 2B/Core models → tier 'core' (lights up mid-brain)
+                    - 0.8B/Nano models → tier 'nano' (lights up brainstem)
+                    """
                     try:
                         import json as _json, time as _time, os as _os
+                        # Determine which tier is being trained
+                        base_path = _os.environ.get("BASE_MODEL_PATH", "").lower()
+                        if "8b" in base_path or "prime" in base_path:
+                            train_tier = "prime"
+                        elif "0.8b" in base_path or "nano" in base_path:
+                            train_tier = "nano"
+                        else:
+                            train_tier = "core"
                         # Collect per-layer gradient magnitudes as "activations"
                         features = []
                         model = callback_self.trainer_instance.model
                         for name, param in model.named_parameters():
                             if param.grad is not None and 'lora' in name:
-                                # Extract layer index from name
                                 layer_idx = -1
                                 for part in name.split('.'):
                                     if part.isdigit():
@@ -576,7 +589,7 @@ class QLoRATrainer:
                                 grad_mag = float(param.grad.abs().mean())
                                 features.append({
                                     "idx": hash(name) % 2048,
-                                    "strength": min(grad_mag * 100, 20),  # scale for viz
+                                    "strength": min(grad_mag * 100, 20),
                                     "label": name.split('.')[-2] if '.' in name else name,
                                     "layer": layer_idx if layer_idx >= 0 else 12,
                                 })
@@ -585,8 +598,8 @@ class QLoRATrainer:
                             features = features[:10]
                             line = _json.dumps({
                                 "ts": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
-                                "tier": "study",
-                                "token": f"step_{state.global_step}",
+                                "tier": train_tier,
+                                "token": f"train_step_{state.global_step}",
                                 "token_idx": state.global_step,
                                 "session_id": "training",
                                 "features": features,
