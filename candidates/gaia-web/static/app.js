@@ -633,23 +633,23 @@ const BRAIN_STEM =
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
 // Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
-// Brain regions mapped to actual Wikimedia SVG coordinates
-// SVG: 1024x732 scaled to 280x200 with y_offset=20. Brain faces LEFT.
-// Coordinates derived from anatomical landmarks in the SVG.
+// Brain regions mapped to actual Wikimedia SVG anatomy boundaries
+// SVG: 1024x732 scaled to 280x200 viewport, y_offset=20. Brain faces LEFT.
+// Regions expanded to fill actual anatomical boundaries.
 const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (bottom-right)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 158, cy: 195, rx: 14, ry: 18 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 210, cy: 182, rx: 22, ry: 16 },
+  // NANO — brain stem & cerebellum (bottom-right of brain)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 152, cy: 192, rx: 16, ry: 20 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 205, cy: 178, rx: 36, ry: 18 },
 
-  // CORE — temporal (bottom), parietal (top-center), occipital (back)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 100, cy: 160, rx: 32, ry: 10 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 142, cy: 50,  rx: 22, ry: 14 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 220, cy: 85,  rx: 16, ry: 24 },
+  // CORE — temporal (long band below Sylvian), parietal (dome top), occipital (back)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 108, cy: 155, rx: 40, ry: 11 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 148, cy: 48,  rx: 26, ry: 14 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 222, cy: 88,  rx: 18, ry: 28 },
 
-  // PRIME — frontal cortex (left side, the big lobe)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 35,  cy: 110, rx: 14, ry: 26 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 88,  cy: 50,  rx: 22, ry: 14 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 55,  cy: 78,  rx: 24, ry: 22 },
+  // PRIME — frontal cortex (largest lobe, left side)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 36,  cy: 108, rx: 14, ry: 28 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 88,  cy: 46,  rx: 24, ry: 14 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 58,  cy: 76,  rx: 28, ry: 24 },
 ];
 
 // Tier idle colors — anatomically coded
@@ -677,10 +677,10 @@ function _getConceptColor(label) {
   return _conceptColorMap[label];
 }
 
-// Generate organized neuron positions — layered rows with upward flow
-// Lower layers at bottom of each region, higher layers at top.
-// Neurons arranged in neat rows with slight jitter for organic feel.
-// Fiber angles point mostly upward (information flow direction).
+// Generate neurons as parallel curved fibers flowing lower-left → upper-right.
+// Each neuron is a short bezier curve. Within each region, neurons are laid out
+// in parallel tracks (like white matter tracts) with consistent spacing.
+// The flow direction has an upward tilt: left=input, right=output.
 function _generateNeurons(tier, count) {
   const neurons = [];
   const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
@@ -690,53 +690,56 @@ function _generateNeurons(tier, count) {
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
   for (const region of tierRegions) {
-    // Rows = one per ~3 layers in the range
-    const layerSpan = region.layerRange[1] - region.layerRange[0];
-    const numRows = Math.max(2, Math.ceil(layerSpan / 3));
-    const neuronsPerRow = Math.ceil(perRegion / numRows);
+    // Parallel tracks running lower-left → upper-right
+    // Track spacing perpendicular to flow direction
+    const numTracks = Math.max(3, Math.ceil(Math.sqrt(perRegion)));
+    const neuronsPerTrack = Math.ceil(perRegion / numTracks);
     let regionCount = 0;
 
-    for (let row = 0; row < numRows; row++) {
-      // Row position: bottom (low layer) → top (high layer)
-      const rowT = numRows > 1 ? row / (numRows - 1) : 0.5;
-      // Y: bottom of ellipse → top (SVG y-axis inverted)
-      const rowY = region.cy + region.ry * 0.8 * (1 - rowT * 2);
-      // Row width: widest in middle, narrower at top/bottom (elliptical)
-      const rowWidth = region.rx * 1.4 * Math.sqrt(1 - Math.pow(rowT * 2 - 1, 2) * 0.6);
+    // Flow angle: lower-left → upper-right (~30° from horizontal)
+    // This gives the upward tilt on the right side
+    const flowAngle = -Math.PI * 0.18; // -32° (rises to the right)
 
-      for (let col = 0; col < neuronsPerRow && regionCount < perRegion; col++) {
+    for (let track = 0; track < numTracks; track++) {
+      // Track position: spread perpendicular to flow direction
+      const trackT = numTracks > 1 ? track / (numTracks - 1) : 0.5;
+      // Perpendicular offset from center
+      const perpAngle = flowAngle + Math.PI / 2;
+      const perpDist = (trackT - 0.5) * region.ry * 1.6;
+      const trackCx = region.cx + Math.cos(perpAngle) * perpDist;
+      const trackCy = region.cy + Math.sin(perpAngle) * perpDist;
+
+      for (let i = 0; i < neuronsPerTrack && regionCount < perRegion; i++) {
         regionCount++;
-        // Evenly spaced across row
-        const colT = neuronsPerRow > 1 ? col / (neuronsPerRow - 1) : 0.5;
-        const cx = region.cx + (colT - 0.5) * rowWidth;
-        const cy = rowY + (rand() - 0.5) * 2; // tiny y jitter
+        // Position along the track (flow direction)
+        const alongT = neuronsPerTrack > 1 ? i / (neuronsPerTrack - 1) : 0.5;
+        const trackLen = region.rx * 1.4;
+        const alongDist = (alongT - 0.5) * trackLen;
 
-        // Fibers point mostly upward (70-110°) for directional flow
-        const fiberAngle = Math.PI * 0.39 + rand() * Math.PI * 0.22;
-        const fiberLen = 4 + rand() * 6; // short: 4-10px, tight packing
+        const cx = trackCx + Math.cos(flowAngle) * alongDist + (rand() - 0.5) * 1.5;
+        const cy = trackCy + Math.sin(flowAngle) * alongDist + (rand() - 0.5) * 1.5;
+
+        // Fiber: short segment along the flow direction with slight variation
+        const fiberAngle = flowAngle + (rand() - 0.5) * 0.3; // ±17° jitter
+        const fiberLen = 5 + rand() * 5; // 5-10px
         const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
-        const y1 = cy + Math.sin(fiberAngle) * fiberLen / 2; // bottom end
+        const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
         const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
-        const y2 = cy - Math.sin(fiberAngle) * fiberLen / 2; // top end (upward)
+        const y2 = cy + Math.sin(fiberAngle) * fiberLen / 2;
 
-        const rx1 = Math.round(x1 * 10) / 10;
-        const ry1 = Math.round(y1 * 10) / 10;
-        const rx2 = Math.round(x2 * 10) / 10;
-        const ry2 = Math.round(y2 * 10) / 10;
-        // Control point for bezier — starts at midpoint (straight line)
-        // Shifts sideways during activation to create a curve
-        const cpx = Math.round(cx * 10) / 10;
-        const cpy = Math.round(cy * 10) / 10;
+        // Control point — slight curve matching the track's arc
+        const curveBias = (trackT - 0.5) * 1.5; // outer tracks curve more
+        const cpx = cx + Math.cos(perpAngle) * curveBias;
+        const cpy = cy + Math.sin(perpAngle) * curveBias;
+
+        const r = (v) => Math.round(v * 10) / 10;
         neurons.push({
-          x: Math.round(cx * 10) / 10,
-          y: Math.round(cy * 10) / 10,
-          x1: rx1, y1: ry1,
-          x2: rx2, y2: ry2,
-          cpx: cpx, cpy: cpy,       // current control point
-          ocpx: cpx, ocpy: cpy,     // original control point (midpoint)
-          ox1: rx1, oy1: ry1,
-          ox2: rx2, oy2: ry2,
-          fiberLen: Math.round(fiberLen * 10) / 10,
+          x: r(cx), y: r(cy),
+          x1: r(x1), y1: r(y1), x2: r(x2), y2: r(y2),
+          cpx: r(cpx), cpy: r(cpy),
+          ocpx: r(cpx), ocpy: r(cpy),
+          ox1: r(x1), oy1: r(y1), ox2: r(x2), oy2: r(y2),
+          fiberLen: r(fiberLen),
           region: region.name,
           tier: tier,
           layerRange: region.layerRange,
@@ -1142,8 +1145,10 @@ function mindMapPanel() {
         } else if (synapses.length < this._maxSynapses) {
           synapses.push({
             id: 'syn-' + key,
-            x: (nA.x + nB.x) / 2,
-            y: (nA.y + nB.y) / 2,
+            // Position synapse at the midpoint of the right endpoints (output ends)
+            // This places synapses where fibers converge — at connection points
+            x: (nA.x2 + nB.x2) / 2,
+            y: (nA.y2 + nB.y2) / 2,
             strength: Math.min(1, count / 15),
             pairKey: key,
             neuronA: idA,
