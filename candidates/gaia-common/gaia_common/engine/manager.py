@@ -277,18 +277,9 @@ class EngineManager:
                             and self.worker_process.poll() is None)
             model_loaded = worker_alive and self.worker_port is not None
 
-        if model_loaded:
-            # Forward to worker for detailed health
-            status, _, body = self.proxy_to_worker("GET", "/health", {})
-            if status == 200:
-                try:
-                    data = json.loads(body)
-                    data["managed"] = True
-                    return data
-                except Exception:
-                    pass
-
-        return {
+        # Always include manager-level state (model_loaded, mode, backend)
+        # even when proxying to worker — the worker might not report these
+        base = {
             "status": "ok",
             "engine": "gaia-managed",
             "backend": self.backend or "none",
@@ -297,6 +288,21 @@ class EngineManager:
             "managed": True,
             "worker_pid": self.worker_process.pid if worker_alive else None,
         }
+
+        if model_loaded:
+            # Also proxy to worker and merge any extra fields
+            try:
+                status, _, body = self.proxy_to_worker("GET", "/health", {})
+                if status == 200:
+                    worker_data = json.loads(body)
+                    # Worker fields supplement but don't override manager fields
+                    for k, v in worker_data.items():
+                        if k not in base:
+                            base[k] = v
+            except Exception:
+                pass
+
+        return base
 
     def status_response(self) -> dict:
         """Build status response."""
