@@ -685,9 +685,44 @@ function _getConceptColor(label) {
 // Neurons interpolate between these anchors.
 // Coordinates are in viewport units (280x225) — scale with the SVG.
 
-// Region edge curves extracted programmatically from the brain SVG
-// using svgpathtools getPointAtLength() — pixel-perfect to the anatomy.
+// Region edge curves — LONG sweeping arcs across each brain region.
+// Extracted from cerebrum outline (path2179) via svgpathtools.
+// Start edge = one boundary of the region, end edge = opposite boundary.
+// Neurons arc from start to end, spanning the full region width.
 const REGION_EDGES = {
+  // PRIME — Frontal lobe (left side of brain)
+  'Frontal': {
+    // Upper frontal dome → lower frontal (long vertical sweep)
+    start: [[102.5,37.1],[86.1,42.8],[69.7,47.6],[54.7,55.0],[39.3,64.4]],
+    end:   [[13.2,137.6],[18.0,154.1],[29.0,165.3],[39.8,170.9],[58.5,171.2]],
+  },
+  'Prefrontal': {
+    // Top of dome → mid-frontal (sweeps from top-right to left)
+    start: [[135.7,33.0],[152.8,34.2],[171.0,35.6],[186.2,40.1]],
+    end:   [[28.6,77.0],[19.0,89.6],[11.6,104.5],[10.6,121.3]],
+  },
+  'Motor Cortex': {
+    // Upper dome → descending frontal
+    start: [[135.7,33.0],[152.8,34.2],[171.0,35.6],[186.2,40.1]],
+    end:   [[54.7,55.0],[39.3,64.4],[28.6,77.0],[19.0,89.6]],
+  },
+  // CORE — Temporal, Parietal, Occipital
+  'Temporal': {
+    // Lower frontal boundary → temporal-occipital (sweeps along bottom)
+    start: [[39.8,170.9],[58.5,171.2],[76.7,175.0],[88.0,187.4],[101.4,194.4]],
+    end:   [[121.0,191.9],[135.0,184.3],[149.3,176.8],[163.5,172.7],[183.7,170.6]],
+  },
+  'Parietal': {
+    // Upper back → dome top (sweeps across the top)
+    start: [[215.9,54.5],[201.6,45.3],[186.2,40.1],[171.0,35.6]],
+    end:   [[152.8,34.2],[135.7,33.0],[119.2,35.3],[102.5,37.1]],
+  },
+  'Occipital': {
+    // Bottom-right → upper-right (sweeps up the back of the brain)
+    start: [[183.7,170.6],[198.0,165.7],[214.4,163.3],[230.6,161.5],[248.2,160.5]],
+    end:   [[267.9,136.1],[266.9,119.7],[258.5,104.5],[250.1,91.2],[230.3,65.3]],
+  },
+  // NANO — Cerebellum and Brain Stem (from separate SVG paths)
   'Cerebellum': {
     start: [[150.7,176.1],[154.2,188.6],[161.8,193.5],[174.8,200.5],[186.5,204.3]],
     end:   [[204.7,160.8],[219.6,160.1],[236.5,160.1],[243.9,169.2],[241.7,179.4]],
@@ -695,30 +730,6 @@ const REGION_EDGES = {
   'Brain Stem': {
     start: [[141.6,178.3],[147.4,189.8],[157.0,195.8]],
     end:   [[165.7,204.3],[173.8,214.5],[184.3,208.4]],
-  },
-  'Temporal': {
-    start: [[233.1,67.4],[239.2,77.6],[247.4,88.3],[254.4,99.4],[261.3,110.6]],
-    end:   [[233.1,59.4],[239.2,69.6],[247.4,80.3],[254.4,91.4],[261.3,102.6]],
-  },
-  'Parietal': {
-    start: [[78.8,177.5],[88.0,187.4],[98.5,193.5],[112.8,193.2]],
-    end:   [[127.9,190.1],[136.4,181.4],[149.3,176.8],[160.6,172.3]],
-  },
-  'Occipital': {
-    start: [[175.1,171.4],[190.2,169.1],[201.3,164.6],[214.4,163.3]],
-    end:   [[227.4,162.4],[241.7,161.6],[254.0,158.2],[262.7,149.4]],
-  },
-  'Prefrontal': {
-    start: [[145.7,33.8],[139.4,33.6],[132.1,32.9],[125.5,33.6],[119.2,35.3]],
-    end:   [[105.9,36.3],[92.8,41.1],[79.8,45.3],[66.6,49.0],[54.7,55.0]],
-  },
-  'Frontal': {
-    start: [[198.4,43.8],[186.2,40.1],[174.8,35.6],[159.8,34.6],[145.7,33.8]],
-    end:   [[66.6,49.0],[54.7,55.0],[42.4,62.2],[32.0,71.6],[23.9,81.2]],
-  },
-  'Motor Cortex': {
-    start: [[10.5,118.0],[10.5,131.3],[14.7,145.3],[19.7,156.9]],
-    end:   [[29.0,165.3],[36.9,170.3],[50.3,171.6],[67.5,170.2]],
   },
 };
 
@@ -810,8 +821,8 @@ function _generateNeurons(tier, count) {
 }
 
 // Neuron counts — match observed unique neurons per tier
-// Fewer neurons = more spacing between them
-const TIER_NEURON_COUNTS = { nano: 40, core: 60, prime: 120 };
+// Fewer neurons for long sweeping arcs with clear spacing
+const TIER_NEURON_COUNTS = { nano: 20, core: 30, prime: 50 };
 
 // Brightness multiplier by consciousness state (from /consciousness/matrix)
 // Conscious (GPU) = full brightness, Subconscious (CPU) = dimmer
@@ -985,21 +996,21 @@ function mindMapPanel() {
         .append('g')
         .attr('class', d => 'neuron-bundle tier-' + d.tier);
 
-      // Start dot (lower-left endpoint)
+      // Start dot (one edge of the region)
       neuronGs.append('circle')
         .attr('class', 'neuron-start')
         .attr('cx', d => d.x1).attr('cy', d => d.y1)
-        .attr('r', 1.2)
+        .attr('r', 1.5)
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.15);
+        .attr('opacity', 0.2);
 
-      // End dot (upper-right endpoint)
+      // End dot (opposite edge of the region)
       neuronGs.append('circle')
         .attr('class', 'neuron-end')
         .attr('cx', d => d.x2).attr('cy', d => d.y2)
-        .attr('r', 1.2)
+        .attr('r', 1.5)
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.15);
+        .attr('opacity', 0.2);
 
       // Arc path — hidden by default, shown on activation
       neuronGs.append('path')
