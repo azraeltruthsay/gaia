@@ -120,8 +120,15 @@ class EngineManager:
                             n_gpu_layers, ctx_size, threads)
             else:
                 # Safetensors/HF: use GAIA Engine Python worker
+                # Try gaia_engine first (standalone package), fall back to gaia_common.engine
+                _engine_module = "gaia_engine"
+                try:
+                    import importlib
+                    importlib.import_module("gaia_engine")
+                except ImportError:
+                    _engine_module = "gaia_common.engine"
                 cmd = [
-                    sys.executable, "-m", "gaia_engine",
+                    sys.executable, "-m", _engine_module,
                     "--model", model_path,
                     "--port", str(internal_port),
                     "--device", device,
