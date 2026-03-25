@@ -657,6 +657,7 @@ const TIER_IDLE_COLORS = {
   nano:  '#4fc3f7',  // cyan — fast reflexes
   core:  '#90caf9',  // light blue — operational
   prime: '#ce93d8',  // light purple — deep thought
+  study: '#ffd54f',  // warm gold — learning/training
 };
 
 // Concept color palette — distinct hues for named features
@@ -723,7 +724,7 @@ function _generateNeurons(tier, count) {
 }
 
 // Neuron counts per tier
-const TIER_NEURON_COUNTS = { nano: 30, core: 45, prime: 60 };
+const TIER_NEURON_COUNTS = { nano: 120, core: 180, prime: 200 };
 
 function mindMapPanel() {
   return {
@@ -924,10 +925,11 @@ function mindMapPanel() {
       svg.select('.idle-label').attr('opacity', 0);
 
       const colorScale = this._colorScale;
-      const neurons = this._neuronsByTier[tier];
-      if (!neurons) return;
+      // Study tier maps across ALL neurons (training touches whole model)
+      const neurons = tier === 'study' ? this._neurons : this._neuronsByTier[tier];
+      if (!neurons || neurons.length === 0) return;
       const activeMap = this._activeNeurons;
-      const idleColor = TIER_IDLE_COLORS[tier];
+      const idleColor = TIER_IDLE_COLORS[tier] || TIER_IDLE_COLORS['core'];
 
       // Track which neurons are active this frame
       const frameActiveIds = new Set();
@@ -975,8 +977,10 @@ function mindMapPanel() {
         }
       }
 
-      // Update neuron fiber visuals — only for this tier's neurons
-      const fiberSel = svg.select('g.neuron-group').selectAll('line.tier-' + tier);
+      // Update neuron fiber visuals — study tier updates ALL fibers
+      const fiberSel = tier === 'study'
+        ? svg.select('g.neuron-group').selectAll('line.neuron-fiber')
+        : svg.select('g.neuron-group').selectAll('line.tier-' + tier);
       const self = this;
 
       fiberSel.each(function(d) {

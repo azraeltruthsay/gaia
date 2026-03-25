@@ -558,6 +558,45 @@ class QLoRATrainer:
                     callback_self._consecutive_below_target = 0
                     callback_self.stop_reason = "max_steps"  # default
 
+                def on_step_end(callback_self, args, state, control, **kwargs):
+                    """Write training activation data for brain visualization."""
+                    try:
+                        import json as _json, time as _time, os as _os
+                        # Collect per-layer gradient magnitudes as "activations"
+                        features = []
+                        model = callback_self.trainer_instance.model
+                        for name, param in model.named_parameters():
+                            if param.grad is not None and 'lora' in name:
+                                # Extract layer index from name
+                                layer_idx = -1
+                                for part in name.split('.'):
+                                    if part.isdigit():
+                                        layer_idx = int(part)
+                                        break
+                                grad_mag = float(param.grad.abs().mean())
+                                features.append({
+                                    "idx": hash(name) % 2048,
+                                    "strength": min(grad_mag * 100, 20),  # scale for viz
+                                    "label": name.split('.')[-2] if '.' in name else name,
+                                    "layer": layer_idx if layer_idx >= 0 else 12,
+                                })
+                        if features:
+                            features.sort(key=lambda f: f['strength'], reverse=True)
+                            features = features[:10]
+                            line = _json.dumps({
+                                "ts": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                                "tier": "study",
+                                "token": f"step_{state.global_step}",
+                                "token_idx": state.global_step,
+                                "session_id": "training",
+                                "features": features,
+                            })
+                            log_path = _os.environ.get("ACTIVATION_STREAM_PATH", "/logs/activation_stream.jsonl")
+                            with open(log_path, "a") as f:
+                                f.write(line + "\n")
+                    except Exception:
+                        pass  # Never crash training for viz
+
                 def on_log(callback_self, args, state, control, logs=None, **kwargs):
                     if logs and "loss" in logs:
                         ti = callback_self.trainer_instance

@@ -349,6 +349,7 @@ html, body {
 .legend-swatch.nano { background: #4fc3f7; }
 .legend-swatch.core { background: #90caf9; }
 .legend-swatch.prime { background: #ce93d8; }
+.legend-swatch.study { background: #ffd54f; }
 .legend-swatch.synapse-dot {
   width: 6px; height: 6px; border-radius: 50%; background: #ffffff;
   box-shadow: 0 0 3px rgba(255,255,255,0.5);
