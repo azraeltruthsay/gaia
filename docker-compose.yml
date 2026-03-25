@@ -266,7 +266,8 @@ services:
       - GAIA_FORCE_CPU=0
       - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
       - N_GPU_LAYERS=16
-      - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-0}
+      # Model pool initializes remote HTTP clients (not GPU models) on startup
+      - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-1}
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
