@@ -534,6 +534,8 @@ function chatPanel() {
 // Brain regions are positioned to match the anatomical illustration.
 const BRAIN_SVG_URL = '/static/brain.svg';
 const BRAIN_SVG_VIEWBOX = { w: 1024, h: 732 };  // original dimensions
+// Viewport dimensions — all neuron coordinates are relative to this
+const VP = { w: 280, h: 225, imgY: 20, imgH: 200 };
 
 // Legacy path data kept as fallback (not rendered when SVG image loads)
 const BRAIN_OUTLINE =
@@ -874,22 +876,45 @@ function mindMapPanel() {
       // Synapse layer
       zoomG.append('g').attr('class', 'synapses');
 
-      // Neuron fiber layer — all tiers in one group, color-coded
+      // Neuron layer — each neuron is a BUNDLE: start dot + end dot + arc (on activation)
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
       const self = this;
 
-      neuronGroup.selectAll('path.neuron-fiber')
+      // Create a group per neuron containing start dot, end dot, and arc path
+      const neuronGs = neuronGroup.selectAll('g.neuron-bundle')
         .data(this._neurons, d => d.id)
         .enter()
-        .append('path')
-        .attr('class', d => 'neuron-fiber idle tier-' + d.tier)
+        .append('g')
+        .attr('class', d => 'neuron-bundle tier-' + d.tier);
+
+      // Start dot (lower-left endpoint)
+      neuronGs.append('circle')
+        .attr('class', 'neuron-start')
+        .attr('cx', d => d.x1).attr('cy', d => d.y1)
+        .attr('r', 1.2)
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
+        .attr('opacity', 0.15);
+
+      // End dot (upper-right endpoint)
+      neuronGs.append('circle')
+        .attr('class', 'neuron-end')
+        .attr('cx', d => d.x2).attr('cy', d => d.y2)
+        .attr('r', 1.2)
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
+        .attr('opacity', 0.15);
+
+      // Arc path — hidden by default, shown on activation
+      neuronGs.append('path')
+        .attr('class', 'neuron-arc')
         .attr('d', d => _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
         .attr('fill', 'none')
         .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
         .attr('stroke-width', 0.5)
         .attr('stroke-linecap', 'round')
-        .attr('opacity', 0.04)
-        .on('mouseover', function(evt, d) {
+        .attr('opacity', 0);  // hidden until activation
+
+      // Mouseover on the neuron group (dots + arc)
+      neuronGs.on('mouseover', function(evt, d) {
           const active = self._activeNeurons.get(d.id);
           self.hoveredFeature = active ? {
             label: active.label,
@@ -1025,78 +1050,85 @@ function mindMapPanel() {
         }
       }
 
-      // Update neuron fiber visuals for this tier
-      const fiberSel = svg.select('g.neuron-group').selectAll('path.tier-' + tier);
+      // Update neuron bundle visuals for this tier (dots + arc)
+      const bundleSel = svg.select('g.neuron-group').selectAll('g.tier-' + tier);
       const self = this;
 
-      fiberSel.each(function(d) {
-        const el = d3.select(this);
+      bundleSel.each(function(d) {
+        const g = d3.select(this);
+        const startDot = g.select('.neuron-start');
+        const endDot = g.select('.neuron-end');
+        const arc = g.select('.neuron-arc');
         const active = activeMap.get(d.id);
 
         if (frameActiveIds.has(d.id) && active) {
           const str = active.strength;
-          // Thin lines: 1px idle → max 2px active. No bulbous strokes.
-          const width = Math.min(2, 1 + str * 0.06);
+          const width = Math.min(1.5, 0.8 + str * 0.05);
           const conceptColor = _getConceptColor(active.label);
           const activeColor = conceptColor || colorScale(str);
-          el.classed('idle', false)
-            .classed('active', true)
-            .classed('firing', false);  // no dash animation — just color
-          // No white flash — go straight to concept color
-          el.transition().duration(200)
-            .attr('stroke', activeColor)
-            .attr('stroke-width', width)
-            .attr('opacity', 0.8)
-            .attr('filter', str > 12 ? `url(#neuron-glow-${tier})` : null);
+          const glowFilter = str > 10 ? `url(#neuron-glow-${tier})` : null;
 
-          // Curve toward strongest connected synapse by shifting control point
+          // Light up both dots
+          startDot.transition().duration(200)
+            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9)
+            .attr('filter', glowFilter);
+          endDot.transition().duration(200)
+            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9)
+            .attr('filter', glowFilter);
+
+          // Show the arc between them
+          // Curve toward synapse if connected
           const mySynapses = self._synapses.filter(s => s.neuronA === d.id || s.neuronB === d.id);
           if (mySynapses.length > 0) {
             const strongest = mySynapses.reduce((a, b) => a.strength > b.strength ? a : b);
-            // Bend the curve toward the synapse (30% lerp on control point)
-            d.cpx = d.ocpx + (strongest.x - d.ocpx) * 0.3;
-            d.cpy = d.ocpy + (strongest.y - d.ocpy) * 0.3;
-          } else {
-            // Slight random curve when active (organic feel)
-            d.cpx = d.ocpx + (str > 5 ? (d.id % 2 ? 2 : -2) : 0);
-            d.cpy = d.ocpy - str * 0.2; // slight upward bow when active
+            d.cpx = d.ocpx + (strongest.x - d.ocpx) * 0.25;
+            d.cpy = d.ocpy + (strongest.y - d.ocpy) * 0.25;
           }
-          el.transition().duration(400)
-            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2));
+          arc.transition().duration(300)
+            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+            .attr('stroke', activeColor)
+            .attr('stroke-width', width)
+            .attr('opacity', 0.7)
+            .attr('filter', glowFilter);
+
         } else if (active && (Date.now() - active.timestamp) < 1200) {
           const elapsed = Date.now() - active.timestamp;
           const decay = 1 - (elapsed / 1200);
           const str = active.strength * decay;
-          const width = Math.max(0.8, 0.8 + str * 0.04);
-          const decayConceptColor = _getConceptColor(active.label);
-          el.classed('firing', false)
-            .transition().duration(500)
-            .attr('stroke', decayConceptColor || colorScale(str))
-            .attr('stroke-width', width)
-            .attr('opacity', Math.max(0.06, 0.9 * decay))
+          const decayColor = _getConceptColor(active.label) || colorScale(str);
+
+          // Fade dots back
+          startDot.transition().duration(500)
+            .attr('r', 1.2).attr('fill', decayColor).attr('opacity', 0.15 + 0.5 * decay)
             .attr('filter', null);
-          if (decay <= 0.05) {
-            activeMap.delete(d.id);
-          }
-          // Relax curve back toward straight during decay
+          endDot.transition().duration(500)
+            .attr('r', 1.2).attr('fill', decayColor).attr('opacity', 0.15 + 0.5 * decay)
+            .attr('filter', null);
+
+          // Fade arc away
           d.cpx = d.ocpx + (d.cpx - d.ocpx) * decay;
           d.cpy = d.ocpy + (d.cpy - d.ocpy) * decay;
-          el.transition().duration(800)
-            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2));
+          arc.transition().duration(600)
+            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+            .attr('opacity', 0.5 * decay)
+            .attr('filter', null);
+
+          if (decay <= 0.05) activeMap.delete(d.id);
+
         } else {
+          // Idle — dots visible, arc hidden
           if (activeMap.has(d.id)) activeMap.delete(d.id);
           d.cpx = d.ocpx;
           d.cpy = d.ocpy;
-          el.classed('idle', true)
-            .classed('active', false)
-            .classed('firing', false)
-            .classed('glow', false)
-            .transition().duration(600)
-            .attr('stroke', idleColor)
-            .attr('stroke-width', 0.5)
-            .attr('opacity', 0.04)
-            .attr('filter', null)
-            .attr('d', _fiberPath(d.x1, d.y1, d.ocpx, d.ocpy, d.x2, d.y2));
+          startDot.transition().duration(600)
+            .attr('r', 1.2).attr('fill', idleColor).attr('opacity', 0.15)
+            .attr('filter', null);
+          endDot.transition().duration(600)
+            .attr('r', 1.2).attr('fill', idleColor).attr('opacity', 0.15)
+            .attr('filter', null);
+          arc.transition().duration(400)
+            .attr('opacity', 0)
+            .attr('filter', null);
         }
       });
 
