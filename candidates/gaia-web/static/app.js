@@ -1016,15 +1016,15 @@ function mindMapPanel() {
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
         .attr('opacity', 0.3);
 
-      // Arc path — hidden by default, shown on activation
+      // Arc path — very faint when idle, bright on activation
       neuronGs.append('path')
         .attr('class', 'neuron-arc')
         .attr('d', d => _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
         .attr('fill', 'none')
         .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
-        .attr('stroke-width', 0.5)
+        .attr('stroke-width', 0.3)
         .attr('stroke-linecap', 'round')
-        .attr('opacity', 0);  // hidden until activation
+        .attr('opacity', 0.06);  // faint idle — shows the neural network structure
 
       // Synapse anchor dot — on the brain edge, just outside the end dot
       // Dim by default, glows when connected neurons are active
@@ -1277,8 +1277,10 @@ function mindMapPanel() {
           endDot.transition().duration(600)
             .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.3)
             .attr('filter', null);
-          arc.transition().duration(400)
-            .attr('opacity', 0)
+          arc.transition().duration(800)
+            .attr('stroke', idleColor)
+            .attr('stroke-width', 0.3)
+            .attr('opacity', 0.06)
             .attr('filter', null);
           synAnchor.transition().duration(600)
             .attr('r', 0.8).attr('opacity', 0.06);
