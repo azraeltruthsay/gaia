@@ -677,54 +677,73 @@ function _getConceptColor(label) {
   return _conceptColorMap[label];
 }
 
-// Pre-compute neuron fiber segments within brain regions for a specific tier
+// Generate organized neuron positions — layered rows with upward flow
+// Lower layers at bottom of each region, higher layers at top.
+// Neurons arranged in neat rows with slight jitter for organic feel.
+// Fiber angles point mostly upward (information flow direction).
 function _generateNeurons(tier, count) {
   const neurons = [];
   const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
   if (tierRegions.length === 0) return neurons;
   const perRegion = Math.ceil(count / tierRegions.length);
-  // Use different seed per tier so positions don't overlap
   let seed = tier === 'nano' ? 42 : tier === 'core' ? 137 : 271;
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
   for (const region of tierRegions) {
-    for (let i = 0; i < perRegion && neurons.length < count; i++) {
-      const angle = rand() * Math.PI * 2;
-      const dist = Math.sqrt(rand());
-      const cx = region.cx + Math.cos(angle) * dist * region.rx * 0.85;
-      const cy = region.cy + Math.sin(angle) * dist * region.ry * 0.85;
+    // Rows = one per ~3 layers in the range
+    const layerSpan = region.layerRange[1] - region.layerRange[0];
+    const numRows = Math.max(2, Math.ceil(layerSpan / 3));
+    const neuronsPerRow = Math.ceil(perRegion / numRows);
+    let regionCount = 0;
 
-      const fiberAngle = rand() * Math.PI;
-      const fiberLen = 10 + rand() * 16; // slightly shorter for denser packing
-      const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
-      const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
-      const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
-      const y2 = cy + Math.sin(fiberAngle) * fiberLen / 2;
+    for (let row = 0; row < numRows; row++) {
+      // Row position: bottom (low layer) → top (high layer)
+      const rowT = numRows > 1 ? row / (numRows - 1) : 0.5;
+      // Y: bottom of ellipse → top (SVG y-axis inverted)
+      const rowY = region.cy + region.ry * 0.8 * (1 - rowT * 2);
+      // Row width: widest in middle, narrower at top/bottom (elliptical)
+      const rowWidth = region.rx * 1.4 * Math.sqrt(1 - Math.pow(rowT * 2 - 1, 2) * 0.6);
 
-      const rx1 = Math.round(x1 * 10) / 10;
-      const ry1 = Math.round(y1 * 10) / 10;
-      const rx2 = Math.round(x2 * 10) / 10;
-      const ry2 = Math.round(y2 * 10) / 10;
-      neurons.push({
-        x: Math.round(cx * 10) / 10,
-        y: Math.round(cy * 10) / 10,
-        x1: rx1, y1: ry1,
-        x2: rx2, y2: ry2,
-        ox1: rx1, oy1: ry1,  // original endpoints for relaxation
-        ox2: rx2, oy2: ry2,
-        fiberLen: Math.round(fiberLen * 10) / 10,
-        region: region.name,
-        tier: tier,
-        layerRange: region.layerRange,
-        id: null, // assigned after merge
-      });
+      for (let col = 0; col < neuronsPerRow && regionCount < perRegion; col++) {
+        regionCount++;
+        // Evenly spaced across row
+        const colT = neuronsPerRow > 1 ? col / (neuronsPerRow - 1) : 0.5;
+        const cx = region.cx + (colT - 0.5) * rowWidth;
+        const cy = rowY + (rand() - 0.5) * 2; // tiny y jitter
+
+        // Fibers point mostly upward (70-110°) for directional flow
+        const fiberAngle = Math.PI * 0.39 + rand() * Math.PI * 0.22;
+        const fiberLen = 4 + rand() * 6; // short: 4-10px, tight packing
+        const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
+        const y1 = cy + Math.sin(fiberAngle) * fiberLen / 2; // bottom end
+        const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
+        const y2 = cy - Math.sin(fiberAngle) * fiberLen / 2; // top end (upward)
+
+        const rx1 = Math.round(x1 * 10) / 10;
+        const ry1 = Math.round(y1 * 10) / 10;
+        const rx2 = Math.round(x2 * 10) / 10;
+        const ry2 = Math.round(y2 * 10) / 10;
+        neurons.push({
+          x: Math.round(cx * 10) / 10,
+          y: Math.round(cy * 10) / 10,
+          x1: rx1, y1: ry1,
+          x2: rx2, y2: ry2,
+          ox1: rx1, oy1: ry1,
+          ox2: rx2, oy2: ry2,
+          fiberLen: Math.round(fiberLen * 10) / 10,
+          region: region.name,
+          tier: tier,
+          layerRange: region.layerRange,
+          id: null,
+        });
+      }
     }
   }
   return neurons;
 }
 
-// Neuron counts per tier
-const TIER_NEURON_COUNTS = { nano: 120, core: 180, prime: 200 };
+// Neuron counts — match observed unique neurons per tier
+const TIER_NEURON_COUNTS = { nano: 80, core: 110, prime: 220 };
 
 function mindMapPanel() {
   return {
