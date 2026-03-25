@@ -633,23 +633,23 @@ const BRAIN_STEM =
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
 // Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
-// Brain regions positioned to match the Wikimedia anatomical SVG
-// SVG scaled to ~280x200 with y-offset of 20. Brain faces LEFT.
-// Scale factor: 280/1024 ≈ 0.273
+// Brain regions mapped to actual Wikimedia SVG coordinates
+// SVG: 1024x732 scaled to 280x200 with y_offset=20. Brain faces LEFT.
+// Coordinates derived from anatomical landmarks in the SVG.
 const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (bottom-right in the SVG)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 165, cy: 200, rx: 12, ry: 18 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 210, cy: 175, rx: 28, ry: 20 },
+  // NANO — brain stem & cerebellum (bottom-right)
+  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 158, cy: 195, rx: 14, ry: 18 },
+  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 210, cy: 182, rx: 22, ry: 16 },
 
-  // CORE — temporal (bottom-center), parietal (top-center), occipital (back)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 110, cy: 170, rx: 35, ry: 14 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 130, cy: 60,  rx: 28, ry: 20 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 230, cy: 100, rx: 18, ry: 28 },
+  // CORE — temporal (bottom), parietal (top-center), occipital (back)
+  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 100, cy: 160, rx: 32, ry: 10 },
+  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 142, cy: 50,  rx: 22, ry: 14 },
+  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 220, cy: 85,  rx: 16, ry: 24 },
 
-  // PRIME — frontal cortex (left side of brain — front)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 30,  cy: 130, rx: 18, ry: 30 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 80,  cy: 55,  rx: 25, ry: 18 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 50,  cy: 90,  rx: 28, ry: 28 },
+  // PRIME — frontal cortex (left side, the big lobe)
+  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 35,  cy: 110, rx: 14, ry: 26 },
+  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 88,  cy: 50,  rx: 22, ry: 14 },
+  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 55,  cy: 78,  rx: 24, ry: 22 },
 ];
 
 // Tier idle colors — anatomically coded
@@ -800,7 +800,7 @@ function mindMapPanel() {
       const svg = d3.select(container).append('svg')
         .attr('width', '100%')
         .attr('height', '100%')
-        .attr('viewBox', '0 0 280 250')
+        .attr('viewBox', '0 0 280 225')
         .attr('preserveAspectRatio', 'xMidYMid meet');
 
       // Zoom + pan
@@ -884,7 +884,7 @@ function mindMapPanel() {
       // Idle label (shown until first activity)
       zoomG.append('text')
         .attr('class', 'idle-label')
-        .attr('x', 140).attr('y', 125)
+        .attr('x', 140).attr('y', 115)
         .attr('text-anchor', 'middle')
         .attr('fill', 'var(--text-dim)')
         .attr('font-size', '10px')
