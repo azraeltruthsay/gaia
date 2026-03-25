@@ -768,6 +768,8 @@ class GAIAEngine:
 
             if capture and hasattr(out, "hidden_states") and out.hidden_states:
                 self.monitor.capture(out.hidden_states)
+                del out.hidden_states
+                self.monitor._last_snapshot = None
 
             # Autoregressive loop — minimal overhead, with entropy tracking
             eos_id = self.tokenizer.eos_token_id
@@ -824,6 +826,9 @@ class GAIAEngine:
                     _write_activation(
                         os.environ.get("GAIA_ENGINE_TIER", "core"),
                         token_text, step, "", snap)
+                    # Free hidden state tensors immediately — prevents VRAM leak
+                    del out.hidden_states
+                    self.monitor._last_snapshot = None
 
             # Decode
             text = self.tokenizer.decode(generated, skip_special_tokens=True)
@@ -898,6 +903,8 @@ class GAIAEngine:
             logits = out.logits[:, -1, :]
             if _capture and hasattr(out, "hidden_states") and out.hidden_states:
                 self.monitor.capture(out.hidden_states)
+                del out.hidden_states
+                self.monitor._last_snapshot = None
 
             generated = []
             gen_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -948,6 +955,9 @@ class GAIAEngine:
                 if _capture_this and hasattr(out, "hidden_states") and out.hidden_states:
                     snap = self.monitor.capture(out.hidden_states)
                     _write_activation(_tier, delta or "?", step, session_id, snap)
+                    # Free hidden state tensors immediately — prevents VRAM leak
+                    del out.hidden_states
+                    self.monitor._last_snapshot = None
 
             self._request_count += 1
             self._total_tokens += len(generated)
