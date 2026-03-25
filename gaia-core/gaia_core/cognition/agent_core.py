@@ -2299,7 +2299,12 @@ class AgentCore:
                     # Check if Prime has a model loaded
                     _ph = _httpx_esc.get(f"{_prime_endpoint}/health", timeout=3)
                     _prime_health = _ph.json() if _ph.status_code == 200 else {}
-                    if not _prime_health.get("model_loaded"):
+                    _prime_loaded = _prime_health.get("model_loaded", False)
+                    # GGUF backend health returns just {"status":"ok"} without model_loaded
+                    # If we get a 200 and the managed mode reports active, model is loaded
+                    if _prime_health.get("mode") == "active" or _prime_health.get("status") == "ok":
+                        _prime_loaded = True
+                    if not _prime_loaded:
                         # Prime is in standby — load the model
                         logger.info("Prime in standby — loading model for escalation")
                         yield {"type": "token", "value": "[(i) Loading Prime model...]\n"}
@@ -2308,9 +2313,13 @@ class AgentCore:
                             json={"model": _prime_model, "device": "cuda"},
                             timeout=180.0,
                         )
-                        if _load_resp.status_code != 200 or not _load_resp.json().get("ok"):
+                        # 409 = already loaded (race condition) — that's fine
+                        if _load_resp.status_code == 409:
+                            logger.info("Prime already loaded (409) — proceeding")
+                        elif _load_resp.status_code != 200 or not _load_resp.json().get("ok"):
                             raise RuntimeError(f"Prime model load failed: {_load_resp.text[:200]}")
-                        logger.info("Prime model loaded for escalation")
+                        else:
+                            logger.info("Prime model loaded for escalation")
                     # Generate via Prime's OpenAI-compatible API
                     _prime_resp = _httpx_esc.post(
                         f"{_prime_endpoint}/v1/chat/completions",
