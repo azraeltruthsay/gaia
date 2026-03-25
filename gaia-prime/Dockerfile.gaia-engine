@@ -1,11 +1,52 @@
 # gaia-prime: The Thinker tier
 # Inherits unified GAIA engine base with all ML capabilities.
+# Supports both safetensors (GPU) and GGUF (CPU via llama-server).
 # Runs in standby mode — model loaded/unloaded by orchestrator.
 
+ARG LLAMA_CPP_TAG=b8250
+ARG CUDA_VERSION=12.8.1
+
+# ── Build llama-server (CUDA + CPU) ─────────────────────────────────────
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
+
+ARG LLAMA_CPP_TAG
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git curl ca-certificates libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+    && ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so \
+    && ldconfig
+
+RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="86;89;120" \
+        -DLLAMA_CURL=ON \
+        -DGGML_CPU_AARCH64=OFF \
+    && cmake --build build --target llama-server llama-quantize -j$(nproc)
+
+# ── Runtime stage ────────────────────────────────────────────────────────
 FROM localhost:5000/gaia-engine-base:latest
 
-# Prime-specific: nothing extra needed — base has everything
-# (torch, transformers, peft, bitsandbytes, optimum-quanto)
+# GGUF support: llama-server + llama-quantize + CUDA runtime libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
+COPY --from=builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
+COPY --from=builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
+COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
+COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
+RUN ldconfig
 
 # Entrypoint
 COPY gaia-prime/entrypoint.sh /entrypoint.sh
