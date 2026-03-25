@@ -734,6 +734,14 @@ function _interpEdge(edge, t) {
   ];
 }
 
+// Inset a point toward a reference point (brain interior) by distance px
+function _insetPoint(x, y, refX, refY, dist) {
+  const dx = refX - x;
+  const dy = refY - y;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  return [x + (dx / len) * dist, y + (dy / len) * dist];
+}
+
 // Generate neurons by interpolating along region edge curves.
 // Each neuron has a start point on the start edge and end point on the end edge.
 function _generateNeurons(tier, count) {
@@ -758,7 +766,12 @@ function _generateNeurons(tier, count) {
       const tClamped = Math.max(0, Math.min(1, t + jitter));
 
       const [x1, y1] = _interpEdge(edges.start, tClamped);
-      const [x2, y2] = _interpEdge(edges.end, tClamped);
+      const [sx2, sy2] = _interpEdge(edges.end, tClamped); // synapse position (on edge)
+
+      // Inset the neuron endpoint 4px toward the brain center (interior)
+      // so synapses have space between neuron ends and the brain outline
+      const SYNAPSE_MARGIN = 4;
+      const [x2, y2] = _insetPoint(sx2, sy2, region.cx, region.cy, SYNAPSE_MARGIN);
 
       const cx = (x1 + x2) / 2;
       const cy = (y1 + y2) / 2;
@@ -783,6 +796,8 @@ function _generateNeurons(tier, count) {
         cpx: r(cpx), cpy: r(cpy),
         ocpx: r(cpx), ocpy: r(cpy),
         ox1: r(x1), oy1: r(y1), ox2: r(x2), oy2: r(y2),
+        // Synapse anchor — on the SVG edge, just outside the neuron endpoint
+        synX: r(sx2), synY: r(sy2),
         fiberLen: r(fiberLen),
         region: region.name,
         tier: tier,
@@ -948,6 +963,25 @@ function mindMapPanel() {
         .attr('stroke-linecap', 'round')
         .attr('opacity', 0);  // hidden until activation
 
+      // Synapse anchor dot — on the brain edge, just outside the end dot
+      // Dim by default, glows when connected neurons are active
+      neuronGs.append('circle')
+        .attr('class', 'synapse-anchor')
+        .attr('cx', d => d.synX || d.x2)
+        .attr('cy', d => d.synY || d.y2)
+        .attr('r', 0.8)
+        .attr('fill', '#ffffff')
+        .attr('opacity', 0.06);
+
+      // Connection line from end dot to synapse anchor — hidden until active
+      neuronGs.append('line')
+        .attr('class', 'synapse-link')
+        .attr('x1', d => d.x2).attr('y1', d => d.y2)
+        .attr('x2', d => d.synX || d.x2).attr('y2', d => d.synY || d.y2)
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 0.3)
+        .attr('opacity', 0);
+
       // Mouseover on the neuron group (dots + arc)
       neuronGs.on('mouseover', function(evt, d) {
           const active = self._activeNeurons.get(d.id);
@@ -1096,6 +1130,9 @@ function mindMapPanel() {
         const arc = g.select('.neuron-arc');
         const active = activeMap.get(d.id);
 
+        const synAnchor = g.select('.synapse-anchor');
+        const synLink = g.select('.synapse-link');
+
         if (frameActiveIds.has(d.id) && active) {
           const str = active.strength;
           const width = Math.min(1.5, 0.8 + str * 0.05);
@@ -1110,6 +1147,12 @@ function mindMapPanel() {
           endDot.transition().duration(200)
             .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9)
             .attr('filter', glowFilter);
+
+          // Light up synapse anchor + connection line
+          synAnchor.transition().duration(200)
+            .attr('r', 1.5).attr('fill', '#ffffff').attr('opacity', 0.7);
+          synLink.transition().duration(200)
+            .attr('stroke', activeColor).attr('opacity', 0.5);
 
           // Show the arc between them
           // Curve toward synapse if connected
@@ -1139,6 +1182,10 @@ function mindMapPanel() {
           endDot.transition().duration(500)
             .attr('r', 1.2).attr('fill', decayColor).attr('opacity', 0.15 + 0.5 * decay)
             .attr('filter', null);
+          synAnchor.transition().duration(500)
+            .attr('r', 0.8).attr('opacity', 0.06 + 0.4 * decay);
+          synLink.transition().duration(500)
+            .attr('opacity', 0.3 * decay);
 
           // Fade arc away
           d.cpx = d.ocpx + (d.cpx - d.ocpx) * decay;
@@ -1164,6 +1211,10 @@ function mindMapPanel() {
           arc.transition().duration(400)
             .attr('opacity', 0)
             .attr('filter', null);
+          synAnchor.transition().duration(600)
+            .attr('r', 0.8).attr('opacity', 0.06);
+          synLink.transition().duration(400)
+            .attr('opacity', 0);
         }
       });
 
@@ -1218,10 +1269,10 @@ function mindMapPanel() {
         } else if (synapses.length < this._maxSynapses) {
           synapses.push({
             id: 'syn-' + key,
-            // Position synapse at the midpoint of the right endpoints (output ends)
-            // This places synapses where fibers converge — at connection points
-            x: (nA.x2 + nB.x2) / 2,
-            y: (nA.y2 + nB.y2) / 2,
+            // Position synapse at the midpoint of the synapse anchors (on the edge)
+            // This places synapses on the brain outline between connected neurons
+            x: ((nA.synX || nA.x2) + (nB.synX || nB.x2)) / 2,
+            y: ((nA.synY || nA.y2) + (nB.synY || nB.y2)) / 2,
             strength: Math.min(1, count / 15),
             pairKey: key,
             neuronA: idA,
