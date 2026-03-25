@@ -223,26 +223,40 @@ class ConsciousnessMatrix:
                     state.healthy = True
                     state.last_probe = time.time()
 
-                    model_loaded = data.get("model_loaded", False)
-                    # GGUF health just returns {"status":"ok"} without model_loaded
-                    if data.get("status") == "ok" and "model_loaded" not in data:
-                        model_loaded = True
-                    backend = data.get("backend", "")
+                    # Determine consciousness level from health response
+                    # Manager responses: {managed:true, model_loaded:bool, mode:str, backend:str}
+                    # GGUF worker responses: {status:"ok"} (no model_loaded field)
+                    # Standalone engine: {engine:"gaia", model_loaded:bool, ...}
+                    managed = data.get("managed", False)
+                    model_loaded = data.get("model_loaded")
                     mode = data.get("mode", "")
+                    backend = data.get("backend", "none")
+                    worker_pid = data.get("worker_pid")
 
-                    if model_loaded and mode == "active":
-                        # Model is loaded — determine if GPU or CPU
-                        if backend == "gguf":
-                            state.actual = ConsciousnessLevel.SUBCONSCIOUS
-                        else:
+                    if managed:
+                        # Managed engine — check if worker is active
+                        if mode == "active" and model_loaded:
+                            if backend == "gguf":
+                                state.actual = ConsciousnessLevel.SUBCONSCIOUS
+                            else:
+                                state.actual = ConsciousnessLevel.CONSCIOUS
+                        elif mode == "standby" or model_loaded is False:
+                            state.actual = ConsciousnessLevel.UNCONSCIOUS
+                        elif worker_pid is not None:
+                            # Worker running but mode unclear — probably loading
                             state.actual = ConsciousnessLevel.CONSCIOUS
-                    elif mode == "standby" or not model_loaded:
-                        state.actual = ConsciousnessLevel.UNCONSCIOUS
+                        else:
+                            state.actual = ConsciousnessLevel.UNCONSCIOUS
+                    elif data.get("status") == "ok" and "model_loaded" not in data:
+                        # GGUF llama-server health (proxied through manager)
+                        # If we get here with status=ok, a worker IS running
+                        state.actual = ConsciousnessLevel.SUBCONSCIOUS
+                    elif model_loaded:
+                        state.actual = ConsciousnessLevel.CONSCIOUS
                     else:
-                        # Healthy but ambiguous — treat as conscious if mode is active
-                        state.actual = ConsciousnessLevel.CONSCIOUS if mode == "active" else ConsciousnessLevel.UNCONSCIOUS
+                        state.actual = ConsciousnessLevel.UNCONSCIOUS
 
-                    state.vram_mb = data.get("vram_mb", 0)
+                    state.gpu_mb = data.get("vram_mb", 0)
                     state.error = ""
                 else:
                     state.healthy = False
@@ -317,6 +331,15 @@ class ConsciousnessMatrix:
         logger.info("Loading %s to GPU: %s", tier, model)
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
+                # Check if already loaded
+                health = await client.get(f"{endpoint}/health")
+                if health.status_code == 200:
+                    hdata = health.json()
+                    if hdata.get("model_loaded") and hdata.get("mode") == "active":
+                        state.actual = ConsciousnessLevel.CONSCIOUS
+                        logger.info("%s already loaded on GPU", tier)
+                        return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
+
                 resp = await client.post(
                     f"{endpoint}/model/load",
                     json={"model": model, "device": "cuda"},

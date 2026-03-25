@@ -810,7 +810,16 @@ function _generateNeurons(tier, count) {
 }
 
 // Neuron counts — match observed unique neurons per tier
-const TIER_NEURON_COUNTS = { nano: 80, core: 110, prime: 220 };
+// Fewer neurons = more spacing between them
+const TIER_NEURON_COUNTS = { nano: 40, core: 60, prime: 120 };
+
+// Brightness multiplier by consciousness state (from /consciousness/matrix)
+// Conscious (GPU) = full brightness, Subconscious (CPU) = dimmer
+const CONSCIOUSNESS_BRIGHTNESS = {
+  conscious: 1.0,
+  subconscious: 0.5,
+  unconscious: 0.1,
+};
 
 // Generate SVG path data for a quadratic bezier curve
 function _fiberPath(x1, y1, cpx, cpy, x2, y2) {
@@ -834,6 +843,7 @@ function mindMapPanel() {
     live: true,
     hoveredFeature: null,
     activeConcepts: [],     // [{label, color, strength}] — for dynamic legend
+    tierConsciousness: { nano: 'unconscious', core: 'unconscious', prime: 'unconscious' },
     _es: null,
     _svg: null,
     _neurons: [],           // all neurons, all tiers, single array
@@ -866,10 +876,48 @@ function mindMapPanel() {
       this._neurons = allNeurons;
 
       this._loadAtlas();
+      this._pollConsciousness();
       this.$nextTick(() => {
         this._initBrain();
         if (this.live) this._connect();
       });
+    },
+
+    async _pollConsciousness() {
+      // Poll consciousness matrix every 10s
+      const poll = async () => {
+        try {
+          // Proxy through web to orchestrator
+          const resp = await fetch('/api/system/status');
+          if (resp.ok) {
+            const data = await resp.json();
+            // Infer from GPU owner and known state
+            const owner = (data.gpu_owner || '').toLowerCase();
+            // Reset to unconscious, then set known states
+            for (const t of ['nano', 'core', 'prime']) {
+              this.tierConsciousness[t] = 'unconscious';
+            }
+            if (owner.includes('nano')) this.tierConsciousness.nano = 'conscious';
+            if (owner.includes('core')) this.tierConsciousness.core = 'conscious';
+            if (owner.includes('prime')) this.tierConsciousness.prime = 'conscious';
+            // If a tier is not on GPU but has activations, it's subconscious (CPU)
+            for (const t of ['nano', 'core', 'prime']) {
+              if (this.tierConsciousness[t] === 'unconscious') {
+                // Check if we've seen recent activations from this tier
+                const recent = this._activeNeurons;
+                for (const [, info] of recent) {
+                  if (info.tier === t && (Date.now() - info.timestamp) < 30000) {
+                    this.tierConsciousness[t] = 'subconscious';
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch {}
+        setTimeout(poll, 10000);
+      };
+      poll();
     },
 
     destroy() {
@@ -1138,19 +1186,22 @@ function mindMapPanel() {
           const width = Math.min(1.5, 0.8 + str * 0.05);
           const conceptColor = _getConceptColor(active.label);
           const activeColor = conceptColor || colorScale(str);
-          const glowFilter = str > 10 ? `url(#neuron-glow-${tier})` : null;
+          // Brightness scales by consciousness state
+          const cState = self.tierConsciousness[tier] || 'unconscious';
+          const brightness = CONSCIOUSNESS_BRIGHTNESS[cState] || 0.1;
+          const glowFilter = str > 10 && brightness > 0.5 ? `url(#neuron-glow-${tier})` : null;
 
-          // Light up both dots
+          // Light up both dots — brighter for Conscious, dimmer for Subconscious
           startDot.transition().duration(200)
-            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9)
+            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9 * brightness)
             .attr('filter', glowFilter);
           endDot.transition().duration(200)
-            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9)
+            .attr('r', 2).attr('fill', activeColor).attr('opacity', 0.9 * brightness)
             .attr('filter', glowFilter);
 
           // Light up synapse anchor + connection line
           synAnchor.transition().duration(200)
-            .attr('r', 1.5).attr('fill', '#ffffff').attr('opacity', 0.7);
+            .attr('r', 1.5).attr('fill', '#ffffff').attr('opacity', 0.7 * brightness);
           synLink.transition().duration(200)
             .attr('stroke', activeColor).attr('opacity', 0.5);
 
@@ -1166,7 +1217,7 @@ function mindMapPanel() {
             .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
             .attr('stroke', activeColor)
             .attr('stroke-width', width)
-            .attr('opacity', 0.7)
+            .attr('opacity', 0.7 * brightness)
             .attr('filter', glowFilter);
 
         } else if (active && (Date.now() - active.timestamp) < 1200) {
