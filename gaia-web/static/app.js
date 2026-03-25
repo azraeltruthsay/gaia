@@ -677,10 +677,17 @@ function _getConceptColor(label) {
   return _conceptColorMap[label];
 }
 
-// Generate neurons as parallel curved fibers flowing lower-left → upper-right.
-// Each neuron is a short bezier curve. Within each region, neurons are laid out
-// in parallel tracks (like white matter tracts) with consistent spacing.
-// The flow direction has an upward tilt: left=input, right=output.
+// Generate neurons as long curved fibers spanning edge-to-edge within each region.
+//
+// Layout:
+//   - Start coordinates along the LOWER-LEFT edge (input side)
+//   - End coordinates along the UPPER-RIGHT edge (output side)
+//   - Fiber arcs from start → end as a bezier curve
+//   - Parallel fibers, no overlap, evenly spaced
+//   - Margin on both edges for synapses
+//   - Synapses live at the start/end points along the edges
+//
+// Flow direction: lower-left → upper-right with ~30° upward tilt
 function _generateNeurons(tier, count) {
   const neurons = [];
   const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
@@ -689,63 +696,62 @@ function _generateNeurons(tier, count) {
   let seed = tier === 'nano' ? 42 : tier === 'core' ? 137 : 271;
   function rand() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
+  // Synapse margin (px) — space at edges for synapse dots + connection lines
+  const MARGIN = 4;
+
   for (const region of tierRegions) {
-    // Parallel tracks running lower-left → upper-right
-    // Track spacing perpendicular to flow direction
-    const numTracks = Math.max(3, Math.ceil(Math.sqrt(perRegion)));
-    const neuronsPerTrack = Math.ceil(perRegion / numTracks);
-    let regionCount = 0;
+    // Flow angle: ~30° upward tilt (lower-left to upper-right)
+    const flowAngle = -Math.PI * 0.18;
+    const perpAngle = flowAngle + Math.PI / 2;
 
-    // Flow angle: lower-left → upper-right (~30° from horizontal)
-    // This gives the upward tilt on the right side
-    const flowAngle = -Math.PI * 0.18; // -32° (rises to the right)
+    // Region bounding box with margin
+    const left = region.cx - region.rx + MARGIN;
+    const right = region.cx + region.rx - MARGIN;
+    const top = region.cy - region.ry + MARGIN;
+    const bottom = region.cy + region.ry - MARGIN;
+    const width = right - left;
+    const height = bottom - top;
 
-    for (let track = 0; track < numTracks; track++) {
-      // Track position: spread perpendicular to flow direction
-      const trackT = numTracks > 1 ? track / (numTracks - 1) : 0.5;
-      // Perpendicular offset from center
-      const perpAngle = flowAngle + Math.PI / 2;
-      const perpDist = (trackT - 0.5) * region.ry * 1.6;
-      const trackCx = region.cx + Math.cos(perpAngle) * perpDist;
-      const trackCy = region.cy + Math.sin(perpAngle) * perpDist;
+    // Start edge: lower-left. End edge: upper-right.
+    // Distribute neurons evenly along the perpendicular axis
+    for (let i = 0; i < perRegion; i++) {
+      const t = perRegion > 1 ? i / (perRegion - 1) : 0.5;
 
-      for (let i = 0; i < neuronsPerTrack && regionCount < perRegion; i++) {
-        regionCount++;
-        // Position along the track (flow direction)
-        const alongT = neuronsPerTrack > 1 ? i / (neuronsPerTrack - 1) : 0.5;
-        const trackLen = region.rx * 1.4;
-        const alongDist = (alongT - 0.5) * trackLen;
+      // Start point: along the lower-left edge
+      // Spread vertically with slight horizontal stagger
+      const x1 = left + t * width * 0.15 + (rand() - 0.5) * 1;
+      const y1 = top + t * height + (rand() - 0.5) * 1;
 
-        const cx = trackCx + Math.cos(flowAngle) * alongDist + (rand() - 0.5) * 1.5;
-        const cy = trackCy + Math.sin(flowAngle) * alongDist + (rand() - 0.5) * 1.5;
+      // End point: along the upper-right edge
+      // Mirror the spread, shifted right and up
+      const x2 = right - (1 - t) * width * 0.15 + (rand() - 0.5) * 1;
+      const y2 = top + t * height - height * 0.25 + (rand() - 0.5) * 1;
 
-        // Fiber: short segment along the flow direction with slight variation
-        const fiberAngle = flowAngle + (rand() - 0.5) * 0.3; // ±17° jitter
-        const fiberLen = 5 + rand() * 5; // 5-10px
-        const x1 = cx - Math.cos(fiberAngle) * fiberLen / 2;
-        const y1 = cy - Math.sin(fiberAngle) * fiberLen / 2;
-        const x2 = cx + Math.cos(fiberAngle) * fiberLen / 2;
-        const y2 = cy + Math.sin(fiberAngle) * fiberLen / 2;
+      // Midpoint for center of fiber
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
 
-        // Control point — slight curve matching the track's arc
-        const curveBias = (trackT - 0.5) * 1.5; // outer tracks curve more
-        const cpx = cx + Math.cos(perpAngle) * curveBias;
-        const cpy = cy + Math.sin(perpAngle) * curveBias;
+      // Control point: curve based on position (top fibers curve up, bottom curve down)
+      // This creates parallel non-crossing arcs
+      const curvature = (t - 0.5) * height * 0.3;
+      const cpx = cx + Math.cos(perpAngle) * curvature;
+      const cpy = cy + Math.sin(perpAngle) * curvature;
 
-        const r = (v) => Math.round(v * 10) / 10;
-        neurons.push({
-          x: r(cx), y: r(cy),
-          x1: r(x1), y1: r(y1), x2: r(x2), y2: r(y2),
-          cpx: r(cpx), cpy: r(cpy),
-          ocpx: r(cpx), ocpy: r(cpy),
-          ox1: r(x1), oy1: r(y1), ox2: r(x2), oy2: r(y2),
-          fiberLen: r(fiberLen),
-          region: region.name,
-          tier: tier,
-          layerRange: region.layerRange,
-          id: null,
-        });
-      }
+      const fiberLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+      const r = (v) => Math.round(v * 10) / 10;
+
+      neurons.push({
+        x: r(cx), y: r(cy),
+        x1: r(x1), y1: r(y1), x2: r(x2), y2: r(y2),
+        cpx: r(cpx), cpy: r(cpy),
+        ocpx: r(cpx), ocpy: r(cpy),
+        ox1: r(x1), oy1: r(y1), ox2: r(x2), oy2: r(y2),
+        fiberLen: r(fiberLen),
+        region: region.name,
+        tier: tier,
+        layerRange: region.layerRange,
+        id: null,
+      });
     }
   }
   return neurons;
