@@ -67,13 +67,16 @@ def _wait_for_health(port: int, timeout: int = 180) -> bool:
 class EngineManager:
     """Zero-GPU engine manager with subprocess isolation."""
 
-    def __init__(self, port: int, host: str = "0.0.0.0", max_concurrent: int = 1):
+    def __init__(self, port: int, host: str = "0.0.0.0", max_concurrent: int = 1,
+                 event_callback=None):
         self.port = port
         self.host = host
         self.worker_process = None
         self.worker_port = None
         self.model_path = None
         self.device = None
+        self.backend = None  # 'engine' or 'gguf'
+        self.event_callback = event_callback
         self._lock = threading.Lock()
         # Inference queue: limits concurrent requests to the worker.
         # Additional requests block until a slot opens. Prevents overwhelming
@@ -85,20 +88,46 @@ class EngineManager:
     def start_worker(self, model_path: str, device: str = "cuda",
                      compile_mode: str = "reduce-overhead",
                      quantize: str = "") -> dict:
-        """Spawn a worker subprocess with the GAIA Engine."""
+        """Spawn a worker subprocess with the GAIA Engine.
+
+        If model_path ends in .gguf, spawns llama-server instead of the
+        Python engine. This provides fast CPU inference for GGUF models
+        with the same OpenAI-compatible API.
+        """
         with self._lock:
             if self.worker_process is not None:
                 return {"ok": False, "error": "model already loaded — unload first or use /model/swap"}
 
             internal_port = _find_free_port()
-            cmd = [
-                sys.executable, "-m", "gaia_common.engine",
-                "--model", model_path,
-                "--port", str(internal_port),
-                "--device", device,
-                "--compile", compile_mode,
-                "--host", "127.0.0.1",
-            ]
+            is_gguf = model_path.lower().endswith('.gguf')
+
+            if is_gguf:
+                # GGUF: use llama-server (C++ inference, much faster on CPU)
+                n_gpu_layers = 999 if device == "cuda" else 0
+                ctx_size = int(os.environ.get("GGUF_CTX_SIZE", "4096"))
+                threads = int(os.environ.get("GGUF_THREADS", "8"))
+                cmd = [
+                    "llama-server",
+                    "--model", model_path,
+                    "--host", "127.0.0.1",
+                    "--port", str(internal_port),
+                    "--n-gpu-layers", str(n_gpu_layers),
+                    "--ctx-size", str(ctx_size),
+                    "--threads", str(threads),
+                    "--chat-template", "chatml",
+                ]
+                logger.info("GGUF mode: llama-server with %d GPU layers, ctx=%d, threads=%d",
+                            n_gpu_layers, ctx_size, threads)
+            else:
+                # Safetensors/HF: use GAIA Engine Python worker
+                cmd = [
+                    sys.executable, "-m", "gaia_engine",
+                    "--model", model_path,
+                    "--port", str(internal_port),
+                    "--device", device,
+                    "--compile", compile_mode,
+                    "--host", "127.0.0.1",
+                ]
 
             env = os.environ.copy()
             # Pass quantize config via env if needed (avoids CLI arg complexity)
@@ -132,7 +161,8 @@ class EngineManager:
                     self.worker_port = internal_port
                     self.model_path = model_path
                     self.device = device
-                    logger.info("Worker healthy on port %d", internal_port)
+                    self.backend = 'gguf' if is_gguf else 'engine'
+                    logger.info("Worker healthy on port %d (backend=%s)", internal_port, self.backend)
                     return {"ok": True, "model": model_path, "worker_port": internal_port, "model_loaded": True}
                 else:
                     return {"ok": False, "error": "worker process died during startup"}
@@ -157,9 +187,9 @@ class EngineManager:
             logger.info("Worker killed — model %s unloaded, GPU memory freed", old_model)
 
             try:
-                from gaia_common.event_buffer import log_event
-                log_event("engine", f"Model unloaded: {old_model}",
-                          source="engine_manager", details={"caller": caller[:200]})
+                if self.event_callback:
+                    self.event_callback("engine", f"Model unloaded: {old_model}",
+                                        source="engine_manager", details={"caller": caller[:200]})
             except Exception:
                 pass
             return {"ok": True, "message": "model unloaded", "old_model": old_model}
@@ -214,10 +244,10 @@ class EngineManager:
                 exit_code = self.worker_process.returncode
                 logger.error("Worker process died (exit code %d) — this causes 'silent unload'", exit_code)
                 try:
-                    from gaia_common.event_buffer import log_event
-                    log_event("engine", f"Worker CRASHED (exit code {exit_code})",
-                              source="engine_manager",
-                              details={"model": self.model_path, "exit_code": exit_code})
+                    if self.event_callback:
+                        self.event_callback("engine", f"Worker CRASHED (exit code {exit_code})",
+                                            source="engine_manager",
+                                            details={"model": self.model_path, "exit_code": exit_code})
                 except Exception:
                     pass
                 with self._lock:
@@ -254,6 +284,7 @@ class EngineManager:
         return {
             "status": "ok",
             "engine": "gaia-managed",
+            "backend": self.backend or "none",
             "model_loaded": model_loaded,
             "mode": "active" if model_loaded else "standby",
             "managed": True,
@@ -328,6 +359,7 @@ class EngineManager:
         self.worker_port = None
         self.model_path = None
         self.device = None
+        self.backend = None
 
     @staticmethod
     def _stream_output(pipe, label):
