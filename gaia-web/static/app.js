@@ -723,11 +723,17 @@ function _generateNeurons(tier, count) {
         const ry1 = Math.round(y1 * 10) / 10;
         const rx2 = Math.round(x2 * 10) / 10;
         const ry2 = Math.round(y2 * 10) / 10;
+        // Control point for bezier — starts at midpoint (straight line)
+        // Shifts sideways during activation to create a curve
+        const cpx = Math.round(cx * 10) / 10;
+        const cpy = Math.round(cy * 10) / 10;
         neurons.push({
           x: Math.round(cx * 10) / 10,
           y: Math.round(cy * 10) / 10,
           x1: rx1, y1: ry1,
           x2: rx2, y2: ry2,
+          cpx: cpx, cpy: cpy,       // current control point
+          ocpx: cpx, ocpy: cpy,     // original control point (midpoint)
           ox1: rx1, oy1: ry1,
           ox2: rx2, oy2: ry2,
           fiberLen: Math.round(fiberLen * 10) / 10,
@@ -744,6 +750,23 @@ function _generateNeurons(tier, count) {
 
 // Neuron counts — match observed unique neurons per tier
 const TIER_NEURON_COUNTS = { nano: 80, core: 110, prime: 220 };
+
+// Generate SVG path data for a quadratic bezier curve
+function _fiberPath(x1, y1, cpx, cpy, x2, y2) {
+  return `M ${x1},${y1} Q ${cpx},${cpy} ${x2},${y2}`;
+}
+
+// Generate SVG path for an arcing connection between two points
+function _arcPath(x1, y1, x2, y2, curvature) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  // Control point perpendicular to the line between points
+  const cpx = mx - dy * curvature;
+  const cpy = my + dx * curvature;
+  return `M ${x1},${y1} Q ${cpx},${cpy} ${x2},${y2}`;
+}
 
 function mindMapPanel() {
   return {
@@ -846,15 +869,13 @@ function mindMapPanel() {
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
       const self = this;
 
-      neuronGroup.selectAll('line.neuron-fiber')
+      neuronGroup.selectAll('path.neuron-fiber')
         .data(this._neurons, d => d.id)
         .enter()
-        .append('line')
+        .append('path')
         .attr('class', d => 'neuron-fiber idle tier-' + d.tier)
-        .attr('x1', d => d.x1)
-        .attr('y1', d => d.y1)
-        .attr('x2', d => d.x2)
-        .attr('y2', d => d.y2)
+        .attr('d', d => _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+        .attr('fill', 'none')
         .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
         .attr('stroke-width', 0.5)
         .attr('stroke-linecap', 'round')
@@ -996,7 +1017,7 @@ function mindMapPanel() {
       }
 
       // Update neuron fiber visuals for this tier
-      const fiberSel = svg.select('g.neuron-group').selectAll('line.tier-' + tier);
+      const fiberSel = svg.select('g.neuron-group').selectAll('path.tier-' + tier);
       const self = this;
 
       fiberSel.each(function(d) {
@@ -1019,16 +1040,20 @@ function mindMapPanel() {
             .attr('opacity', 0.8)
             .attr('filter', str > 12 ? `url(#neuron-glow-${tier})` : null);
 
-          // Stretch outer endpoint toward strongest connected synapse
+          // Curve toward strongest connected synapse by shifting control point
           const mySynapses = self._synapses.filter(s => s.neuronA === d.id || s.neuronB === d.id);
           if (mySynapses.length > 0) {
             const strongest = mySynapses.reduce((a, b) => a.strength > b.strength ? a : b);
-            const targetX = d.ox2 + (strongest.x - d.ox2) * 0.3;
-            const targetY = d.oy2 + (strongest.y - d.oy2) * 0.3;
-            el.transition().duration(400)
-              .attr('x2', targetX)
-              .attr('y2', targetY);
+            // Bend the curve toward the synapse (30% lerp on control point)
+            d.cpx = d.ocpx + (strongest.x - d.ocpx) * 0.3;
+            d.cpy = d.ocpy + (strongest.y - d.ocpy) * 0.3;
+          } else {
+            // Slight random curve when active (organic feel)
+            d.cpx = d.ocpx + (str > 5 ? (d.id % 2 ? 2 : -2) : 0);
+            d.cpy = d.ocpy - str * 0.2; // slight upward bow when active
           }
+          el.transition().duration(400)
+            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2));
         } else if (active && (Date.now() - active.timestamp) < 1200) {
           const elapsed = Date.now() - active.timestamp;
           const decay = 1 - (elapsed / 1200);
@@ -1044,12 +1069,15 @@ function mindMapPanel() {
           if (decay <= 0.05) {
             activeMap.delete(d.id);
           }
-          // Relax endpoint back toward original during decay
+          // Relax curve back toward straight during decay
+          d.cpx = d.ocpx + (d.cpx - d.ocpx) * decay;
+          d.cpy = d.ocpy + (d.cpy - d.ocpy) * decay;
           el.transition().duration(800)
-            .attr('x2', d.ox2)
-            .attr('y2', d.oy2);
+            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2));
         } else {
           if (activeMap.has(d.id)) activeMap.delete(d.id);
+          d.cpx = d.ocpx;
+          d.cpy = d.ocpy;
           el.classed('idle', true)
             .classed('active', false)
             .classed('firing', false)
@@ -1059,8 +1087,7 @@ function mindMapPanel() {
             .attr('stroke-width', 0.5)
             .attr('opacity', 0.04)
             .attr('filter', null)
-            .attr('x2', d.ox2)
-            .attr('y2', d.oy2);
+            .attr('d', _fiberPath(d.x1, d.y1, d.ocpx, d.ocpy, d.x2, d.y2));
         }
       });
 
@@ -1255,8 +1282,8 @@ function mindMapPanel() {
         }
       }
 
-      // ── D3 update — scoped to this tier's pathways ──
-      const allPathSel = svg.select('g.pathways').selectAll('line.pathway-' + tier)
+      // ── D3 update — scoped to this tier's pathways (curved arcs) ──
+      const allPathSel = svg.select('g.pathways').selectAll('path.pathway-' + tier)
         .data(pathways, d => d.key);
 
       allPathSel.exit()
@@ -1264,10 +1291,11 @@ function mindMapPanel() {
         .attr('opacity', 0)
         .remove();
 
-      const enter = allPathSel.enter().append('line')
+      // Curvature: depth paths arc upward, coactive paths arc slightly
+      const enter = allPathSel.enter().append('path')
         .attr('class', d => 'pathway pathway-' + tier + ' ' + d.type)
-        .attr('x1', d => d.x1).attr('y1', d => d.y1)
-        .attr('x2', d => d.x2).attr('y2', d => d.y2)
+        .attr('d', d => _arcPath(d.x1, d.y1, d.x2, d.y2, d.type === 'depth' ? 0.3 : 0.15))
+        .attr('fill', 'none')
         .attr('stroke-linecap', 'round')
         .attr('stroke-dasharray', d => d.type === 'coactive' ? '4,4' : 'none');
 
@@ -1288,8 +1316,7 @@ function mindMapPanel() {
         .attr('opacity', d => 0.15 + (d.temporalBoost || 0) * 0.4);
 
       allPathSel
-        .attr('x1', d => d.x1).attr('y1', d => d.y1)
-        .attr('x2', d => d.x2).attr('y2', d => d.y2)
+        .attr('d', d => _arcPath(d.x1, d.y1, d.x2, d.y2, d.type === 'depth' ? 0.3 : 0.15))
         .attr('stroke', d => d.type === 'depth' ? colorScale(d.strength) : '#8899aa')
         .attr('stroke-width', d => d.type === 'depth' ? 1.5 : 0.8)
         .attr('opacity', d => {
