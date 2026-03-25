@@ -720,7 +720,7 @@ const REGION_EDGES = {
   'Occipital': {
     // Bottom-right → upper-right (sweeps up the back of the brain)
     start: [[183.7,170.6],[198.0,165.7],[214.4,163.3],[230.6,161.5],[248.2,160.5]],
-    end:   [[267.9,136.1],[266.9,119.7],[258.5,104.5],[250.1,91.2],[230.3,65.3]],
+    end:   [[260.0,136.1],[259.0,119.7],[255.0,104.5],[248.0,91.2],[230.3,65.3]],
   },
   // NANO — Cerebellum and Brain Stem (from separate SVG paths)
   'Cerebellum': {
