@@ -35,6 +35,7 @@ from gaia_web.routes.changelog import router as changelog_router
 from gaia_web.routes.codemind import router as codemind_router
 from gaia_web.routes.conversations import router as conversations_router
 from gaia_web.routes.activations import router as activations_router
+from gaia_web.routes.autonomous import router as autonomous_router
 
 # Setup logging
 try:
@@ -136,6 +137,7 @@ app.include_router(changelog_router, prefix="/api/changelog", tags=["changelog"]
 app.include_router(codemind_router, prefix="/api/codemind", tags=["codemind"])
 app.include_router(conversations_router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(activations_router, tags=["activations"])
+app.include_router(autonomous_router, tags=["autonomous"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):
