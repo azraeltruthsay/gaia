@@ -323,8 +323,11 @@ html, body {
 
 /* ── Neural Mind Map Column ────────────── */
 
-.mind-map-column { width: 280px; flex-shrink: 0; border-left: 1px solid var(--border);
-  display: flex; flex-direction: column; background: var(--bg-panel); }
+.mind-map-column { width: 280px; min-width: 150px; max-width: 600px; flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; background: var(--bg-panel);
+  resize: horizontal; overflow: auto; direction: rtl; }
+.mind-map-column > * { direction: ltr; }
 
 /* Unified brain container — fills the column */
 .unified-brain { flex: 1; overflow: hidden; }
