@@ -2320,27 +2320,72 @@ class AgentCore:
                             raise RuntimeError(f"Prime model load failed: {_load_resp.text[:200]}")
                         else:
                             logger.info("Prime model loaded for escalation")
-                    # Generate via Prime's OpenAI-compatible API
-                    _prime_resp = _httpx_esc.post(
-                        f"{_prime_endpoint}/v1/chat/completions",
-                        json={"messages": [{"role": "user", "content": user_input}],
-                              "max_tokens": 2048, "temperature": 0.7},
-                        timeout=120.0,
-                    )
-                    if _prime_resp.status_code == 200:
-                        _prime_data = _prime_resp.json()
-                        _esc_text = ""
-                        if "choices" in _prime_data:
-                            _esc_text = _prime_data["choices"][0].get("message", {}).get("content", "")
-                            if not _esc_text:
-                                _esc_text = _prime_data["choices"][0].get("delta", {}).get("content", "")
-                        _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+                    # Generate via Prime — use the model pool for proper tool access
+                    # This gives Prime the full system prompt, context, and MCP tools
+                    _prime_model_obj = None
+                    for _pm_key in ["gpu_prime", "prime"]:
+                        if _pm_key in self.model_pool.models:
+                            _prime_model_obj = self.model_pool.models[_pm_key]
+                            break
+                    if _prime_model_obj:
+                        try:
+                            _esc_result = _prime_model_obj.generate(
+                                user_input,
+                                system_prompt=getattr(packet, '_system_prompt', '') or '',
+                                max_tokens=packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048,
+                            )
+                            _esc_text = ""
+                            if isinstance(_esc_result, dict):
+                                _esc_text = _esc_result.get("response", "") or _esc_result.get("text", "")
+                                if not _esc_text and "choices" in _esc_result:
+                                    _esc_text = _esc_result["choices"][0].get("message", {}).get("content", "")
+                            elif isinstance(_esc_result, str):
+                                _esc_text = _esc_result
+                            _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+                        except Exception as _pool_err:
+                            logger.warning("Model pool escalation failed: %s — falling back to direct API", _pool_err)
+                            _esc_text = ""
+
+                        if not _esc_text:
+                            # Fallback: direct API call (no tools but at least gets a response)
+                            _prime_resp = _httpx_esc.post(
+                                f"{_prime_endpoint}/v1/chat/completions",
+                                json={"messages": [{"role": "user", "content": user_input}],
+                                      "max_tokens": 2048, "temperature": 0.7},
+                                timeout=120.0,
+                            )
+                            if _prime_resp.status_code == 200:
+                                _prime_data = _prime_resp.json()
+                                if "choices" in _prime_data:
+                                    _esc_text = _prime_data["choices"][0].get("message", {}).get("content", "")
+                                _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+
                         if _esc_text and len(_esc_text) > len(_stripped_response):
                             full_response = _esc_text
                             selected_model_name = "prime"
                             _escalated_ok = True
                             logger.info("Post-generation escalation to Prime succeeded (%d chars)", len(_esc_text))
                             yield {"type": "token", "value": _esc_text}
+                    else:
+                        # No Prime in model pool — direct API only
+                        _prime_resp = _httpx_esc.post(
+                            f"{_prime_endpoint}/v1/chat/completions",
+                            json={"messages": [{"role": "user", "content": user_input}],
+                                  "max_tokens": 2048, "temperature": 0.7},
+                            timeout=120.0,
+                        )
+                        if _prime_resp.status_code == 200:
+                            _prime_data = _prime_resp.json()
+                            _esc_text = ""
+                            if "choices" in _prime_data:
+                                _esc_text = _prime_data["choices"][0].get("message", {}).get("content", "")
+                            _esc_text = strip_think_tags(_esc_text).strip() if _esc_text else ""
+                            if _esc_text and len(_esc_text) > len(_stripped_response):
+                                full_response = _esc_text
+                                selected_model_name = "prime"
+                                _escalated_ok = True
+                                logger.info("Post-generation escalation to Prime (direct) succeeded (%d chars)", len(_esc_text))
+                                yield {"type": "token", "value": _esc_text}
                 except Exception as _prime_exc:
                     logger.warning("Post-generation escalation to Prime failed: %s", _prime_exc)
 
