@@ -133,7 +133,8 @@ class ConsciousnessMatrix:
         old_target = state.target
         state.target = level
 
-        if old_target == level:
+        # Only skip if target matches AND actual matches (truly at target)
+        if old_target == level and state.actual == level:
             return {"ok": True, "message": "already at target", "tier": tier, "level": level.name}
 
         logger.info("Consciousness target: %s %s → %s",
