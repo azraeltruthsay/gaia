@@ -80,7 +80,7 @@ async def voice_state(request: Request):
 
 @router.get("/status")
 async def get_sleep_status(request: Request):
-    """Get current sleep/wake state and task info."""
+    """Get current sleep/wake state and task info, including drowsiness."""
     manager = getattr(request.app.state, "sleep_wake_manager", None)
     if manager is None:
         return JSONResponse(
@@ -88,7 +88,21 @@ async def get_sleep_status(request: Request):
             content={"error": "SleepWakeManager not initialized"},
         )
 
-    return manager.get_status()
+    status = manager.get_status()
+
+    # Add drowsiness information
+    from gaia_core.cognition.sleep_wake_manager import GaiaState
+    status["drowsy"] = manager.get_state() == GaiaState.DROWSY
+
+    # Idle minutes from the idle monitor (if available via the sleep cycle loop)
+    sleep_loop = getattr(request.app.state, "sleep_cycle_loop", None)
+    idle_monitor = getattr(sleep_loop, "idle_monitor", None) if sleep_loop else None
+    if idle_monitor is not None:
+        status["drowsiness_idle_minutes"] = round(idle_monitor.get_idle_minutes(), 1)
+    else:
+        status["drowsiness_idle_minutes"] = None
+
+    return status
 
 
 @router.post("/study-handoff")

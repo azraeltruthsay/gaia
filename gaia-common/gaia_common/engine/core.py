@@ -28,6 +28,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict
+from urllib.parse import urlparse, parse_qs
 
 import torch
 import torch.nn.functional as F
@@ -1227,8 +1228,81 @@ class EngineHandler(BaseHTTPRequestHandler):
             self._json(_engine.adapter_status())
         elif self.path == "/vision/status":
             self._json({"has_vision": _engine.has_vision, "model": _engine.model_path})
+        elif self.path.startswith("/slots"):
+            # llama-server compatible slot API — maps to thought hold/resume
+            self._handle_slot_get()
         else:
             self._json({"error": "not found"}, 404)
+
+    def _handle_slot_get(self):
+        """Handle GET /slots and GET /slots/{id} — return slot/KV cache info."""
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        path_parts = parsed.path.rstrip("/").split("/")
+
+        # GET /slots — list all slots
+        if len(path_parts) <= 2:
+            pc = _engine.prefix_cache
+            cached_len = getattr(pc, "_cached_len", 0)
+            has_kv = getattr(pc, "_cached_kv", None) is not None
+            thoughts = _engine.thoughts.list_all()
+            self._json([{
+                "id": 0,
+                "n_ctx": _engine.max_length if hasattr(_engine, "max_length") else 0,
+                "n_past": cached_len if has_kv else 0,
+                "state": "active" if has_kv else "idle",
+                "held_thoughts": thoughts.get("count", 0),
+            }])
+            return
+
+        # GET /slots/0 — single slot info
+        pc = _engine.prefix_cache
+        cached_len = getattr(pc, "_cached_len", 0)
+        has_kv = getattr(pc, "_cached_kv", None) is not None
+        self._json({
+            "id": 0,
+            "n_ctx": _engine.max_length if hasattr(_engine, "max_length") else 0,
+            "n_past": cached_len if has_kv else 0,
+            "state": "active" if has_kv else "idle",
+        })
+
+    def _handle_slot_post(self):
+        """Handle POST /slots/{id}?action=save|restore|erase — KV cache operations."""
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        action = params.get("action", [""])[0]
+        b = self._body()
+        filename = params.get("filename", [b.get("filename", "")])[0]
+
+        if action == "save":
+            # Map to thought/hold
+            label = filename or f"slot_{int(time.time())}"
+            pc = _engine.prefix_cache
+            result = _engine.thoughts.hold(
+                label, pc._cached_kv, pc._cached_len,
+                list(pc._hashes.values()), b.get("context", ""))
+            self._json(result)
+        elif action == "restore":
+            # Map to thought/resume
+            label = filename or ""
+            t = _engine.thoughts.resume(label)
+            if t:
+                _engine.prefix_cache._cached_kv = t["kv"]
+                _engine.prefix_cache._cached_len = t["meta"]["prefix_tokens"]
+                self._json({"ok": True, "resumed": t["meta"]})
+            else:
+                self._json({"ok": False, "error": f"no saved state with label '{label}'"}, 404)
+        elif action == "erase":
+            # Map to thought/drop — or invalidate cache if no label
+            label = filename
+            if label:
+                ok = _engine.thoughts.drop(label)
+                self._json({"ok": ok})
+            else:
+                _engine.prefix_cache.invalidate()
+                self._json({"ok": True, "message": "KV cache cleared"})
+        else:
+            self._json({"error": f"unknown action: {action}"}, 400)
 
     def do_POST(self):
         if self.path == "/v1/chat/completions":
@@ -1541,6 +1615,10 @@ class EngineHandler(BaseHTTPRequestHandler):
                     },
                     "uptime_s": round(time.time() - _engine._started_at, 1),
                 })
+
+        elif self.path.startswith("/slots"):
+            # llama-server compatible slot API — maps to thought hold/resume
+            self._handle_slot_post()
 
         else:
             self._json({"error": "not found"}, 404)
