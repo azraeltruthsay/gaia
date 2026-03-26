@@ -309,13 +309,18 @@ class ConsciousnessMatrix:
                     backend = data.get("backend", "none")
                     worker_pid = data.get("worker_pid")
 
+                    device = data.get("device", "unknown")
+
                     if managed:
                         # Managed engine — check if worker is active
                         if mode == "active" and model_loaded:
-                            if backend == "gguf":
+                            if backend == "gguf" or device == "cpu":
                                 state.actual = ConsciousnessLevel.SUBCONSCIOUS
-                            else:
+                            elif device == "cuda" or device == "gpu":
                                 state.actual = ConsciousnessLevel.CONSCIOUS
+                            else:
+                                # Unknown device — infer from backend
+                                state.actual = ConsciousnessLevel.CONSCIOUS if backend == "engine" else ConsciousnessLevel.SUBCONSCIOUS
                         elif mode == "standby" or model_loaded is False:
                             state.actual = ConsciousnessLevel.UNCONSCIOUS
                         elif worker_pid is not None:

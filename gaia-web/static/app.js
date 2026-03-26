@@ -458,9 +458,11 @@ function orchestratorPanel() {
         const matrixResp = await fetch('/api/system/consciousness');
         if (matrixResp.ok) {
           const matrix = await matrixResp.json();
-          this.tiers = Object.values(matrix);
+          const vals = Object.values(matrix);
+          // Force Alpine reactivity by splicing into the existing array
+          this.tiers.splice(0, this.tiers.length, ...vals);
         }
-      } catch {}
+      } catch (e) { console.warn('Orchestrator: consciousness fetch failed', e); }
 
       try {
         // Lifecycle state (has container details + VRAM + history)
@@ -475,25 +477,27 @@ function orchestratorPanel() {
 
           // Container states from tier data
           if (lc.tiers) {
-            this.containers = Object.entries(lc.tiers).map(([name, t]) => ({
+            const cs = Object.entries(lc.tiers).map(([name, t]) => ({
               name,
               device: t.device || 'unknown',
               model_loaded: t.model_loaded || false,
               vram_mb: t.vram_mb || 0,
               healthy: t.healthy || false,
             }));
+            this.containers.splice(0, this.containers.length, ...cs);
           }
         }
-      } catch {}
+      } catch (e) { console.warn('Orchestrator: lifecycle fetch failed', e); }
 
       try {
         // Transition history
         const histResp = await fetch('/api/system/lifecycle/history');
         if (histResp.ok) {
           const data = await histResp.json();
-          this.history = (data.history || data || []).slice(-10).reverse();
+          const hist = (data.history || data || []).slice(-10).reverse();
+          this.history.splice(0, this.history.length, ...hist);
         }
-      } catch {}
+      } catch (e) { console.warn('Orchestrator: history fetch failed', e); }
     },
 
     async transition(target) {
@@ -1951,19 +1955,19 @@ function systemPanel() {
         const resp = await fetch('/api/system/cognitive/monitor');
         if (resp.ok) {
           const data = await resp.json();
-          const lr = data.last_result;
-          if (!lr) {
+          if (data.cognitive_initialized) {
+            // New-style response from /cognitive/monitor
+            this.cogMonitorText = data.turn_semaphore_locked ? 'thinking' : 'ready';
+            this.cogMonitorClass = 'ok';
+          } else if (data.last_result) {
+            // Legacy cognitive battery response
+            const lr = data.last_result;
+            if (lr.status === 'pass') { this.cogMonitorText = 'pass'; this.cogMonitorClass = 'ok'; }
+            else if (lr.status === 'skipped') { this.cogMonitorText = 'skipped'; this.cogMonitorClass = 'warn'; }
+            else { this.cogMonitorText = `fail (${data.consecutive_failures || 0})`; this.cogMonitorClass = 'error'; }
+          } else {
             this.cogMonitorText = 'pending';
             this.cogMonitorClass = '';
-          } else if (lr.status === 'pass') {
-            this.cogMonitorText = 'pass';
-            this.cogMonitorClass = 'ok';
-          } else if (lr.status === 'skipped') {
-            this.cogMonitorText = 'skipped';
-            this.cogMonitorClass = 'warn';
-          } else {
-            this.cogMonitorText = `fail (${data.consecutive_failures})`;
-            this.cogMonitorClass = 'error';
           }
         }
       } catch { this.cogMonitorText = '--'; this.cogMonitorClass = ''; }
@@ -1983,9 +1987,10 @@ function systemPanel() {
           this.registryClass = 'ok';
           this.registryDetail = '';
         } else if (data.status === 'warnings') {
-          this.registryText = `${data.services_covered} svc · ${data.orphaned_outbound} orphaned`;
-          this.registryClass = 'warn';
-          this.registryDetail = `${data.edges} edges`;
+          const orphanCount = data.orphaned_outbound || 0;
+          this.registryText = `${data.services_covered} svc · ${data.edges} edges`;
+          this.registryClass = orphanCount > 5 ? 'warn' : 'ok';
+          this.registryDetail = orphanCount > 0 ? `${orphanCount} offline` : '';
         } else if (data.status === 'error') {
           this.registryText = 'error';
           this.registryClass = 'error';
@@ -2070,11 +2075,55 @@ function systemPanel() {
           description: e.description, has_fallback: e.has_fallback,
         }));
 
+      // Role-based color and grouping — cognitive hierarchy
+      const roleGroups = {
+        'gaia-core':         { role: 'cognitive', color: '#7c4dff', label: 'core',         ring: 0 },
+        'gaia-nano':         { role: 'cognitive', color: '#4fc3f7', label: 'nano',         ring: 1 },
+        'gaia-prime':        { role: 'cognitive', color: '#ce93d8', label: 'prime',        ring: 1 },
+        'gaia-orchestrator': { role: 'control',   color: '#ffd54f', label: 'orchestrator', ring: 1 },
+        'gaia-web':          { role: 'interface',  color: '#4caf50', label: 'web',          ring: 2 },
+        'gaia-mcp':          { role: 'tools',      color: '#26a69a', label: 'mcp',          ring: 1 },
+        'gaia-study':        { role: 'learning',   color: '#ff9800', label: 'study',        ring: 2 },
+        'gaia-doctor':       { role: 'immune',     color: '#ef5350', label: 'doctor',       ring: 2 },
+        'gaia-monkey':       { role: 'immune',     color: '#ff5722', label: 'monkey',       ring: 2 },
+        'gaia-audio':        { role: 'sensory',    color: '#29b6f6', label: 'audio',        ring: 2 },
+        'gaia-translate':    { role: 'sensory',    color: '#66bb6a', label: 'translate',    ring: 2 },
+        'gaia-wiki':         { role: 'support',    color: '#78909c', label: 'wiki',         ring: 2 },
+        'dozzle':            { role: 'support',    color: '#546e7a', label: 'dozzle',       ring: 2 },
+      };
+
+      // Assign initial positions by ring (concentric layout seed)
+      const cx = width / 2, cy = height / 2;
+      const ringRadii = [0, width * 0.18, width * 0.32, width * 0.42];
+      let ringCounters = [0, 0, 0, 0];
+      const ringTotals = [0, 0, 0, 0];
+      nodes.forEach(n => { const rg = roleGroups[n.id]; if (rg) ringTotals[rg.ring]++; });
+
+      nodes.forEach(n => {
+        const rg = roleGroups[n.id] || { ring: 3, color: '#78909c' };
+        n._role = rg;
+        const ring = rg.ring;
+        const total = Math.max(ringTotals[ring], 1);
+        const angle = (ringCounters[ring] / total) * 2 * Math.PI - Math.PI / 2;
+        ringCounters[ring]++;
+        n.x = cx + ringRadii[ring] * Math.cos(angle);
+        n.y = cy + ringRadii[ring] * Math.sin(angle);
+      });
+
+      // Uniform node size — clean, readable
+      const nodeRadius = d => d._role?.ring === 0 ? 28 : d._role?.ring === 1 ? 22 : 16;
+
       const sim = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(90))
-        .force('charge', d3.forceManyBody().strength(-300))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide(40));
+        .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+          // Longer links for cross-ring connections
+          const sr = roleGroups[d.source.id || d.source]?.ring || 2;
+          const tr = roleGroups[d.target.id || d.target]?.ring || 2;
+          return sr === tr ? 80 : 120;
+        }))
+        .force('charge', d3.forceManyBody().strength(-500))
+        .force('center', d3.forceCenter(cx, cy).strength(0.05))
+        .force('collision', d3.forceCollide(d => nodeRadius(d) + 12))
+        .force('radial', d3.forceRadial(d => ringRadii[d._role?.ring || 2], cx, cy).strength(0.6));
 
       let tooltip = d3.select('.tooltip');
       if (tooltip.empty()) {
@@ -2089,43 +2138,56 @@ function systemPanel() {
       const link = g.append('g').selectAll('line').data(links).join('line')
         .attr('class', d => `graph-edge ${d.status}`)
         .attr('stroke-dasharray', d => edgeStyleMap[d.transport_type] || '')
-        .attr('stroke-width', d => d.has_fallback ? 2.5 : 1.5)
+        .attr('stroke-width', d => d.has_fallback ? 2 : 1)
+        .attr('opacity', 0.4)
         .on('mouseover', (event, d) => {
+          d3.select(event.target).attr('opacity', 0.9).attr('stroke-width', 3);
           tooltip.style('display', 'block')
             .html(`<strong>${d.source.id || d.source} → ${d.target.id || d.target}</strong><br>${d.transport_type} · ${d.description || ''}`)
             .style('left', `${event.pageX + 10}px`)
             .style('top', `${event.pageY - 10}px`);
         })
-        .on('mouseout', () => tooltip.style('display', 'none'));
-
-      const nodeColor = d => d.blueprint_status === 'live' ? '#4caf50' : '#ffa726';
+        .on('mouseout', (event, d) => {
+          d3.select(event.target).attr('opacity', 0.4).attr('stroke-width', d.has_fallback ? 2 : 1);
+          tooltip.style('display', 'none');
+        });
 
       const node = g.append('g').selectAll('g').data(nodes).join('g')
         .attr('class', 'graph-node')
         .call(d3.drag()
           .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
           .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); /* keep d.fx/d.fy — node stays where dropped */ })
+          .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); })
         )
         .on('click', (event, d) => {
           window.dispatchEvent(new CustomEvent('select-blueprint', { detail: { id: d.id } }));
         });
 
-      // Log scale for node radius — prevents gateway services (gaia-web: 94 interfaces)
-      // from dwarfing focused services (gaia-nano: 5 interfaces).
-      // Base 15px, log scale with floor of 1 to avoid log(0).
-      const nodeRadius = d => 15 + Math.log2(Math.max(d.interface_count || 1, 1)) * 8;
-
       node.append('circle')
         .attr('r', nodeRadius)
-        .attr('fill', nodeColor)
-        .attr('stroke', d => d.genesis ? '#e94560' : nodeColor(d))
+        .attr('fill', d => d._role?.color || '#78909c')
+        .attr('stroke', d => d.genesis ? '#e94560' : 'rgba(255,255,255,0.15)')
+        .attr('stroke-width', d => d.genesis ? 2 : 1)
         .attr('stroke-dasharray', d => d.genesis ? '3,3' : '')
-        .attr('opacity', 0.85);
+        .attr('opacity', 0.9);
 
+      // Label inside the circle for readability
       node.append('text')
-        .attr('dy', d => nodeRadius(d) + 14)
-        .text(d => d.id.replace('gaia-', ''));
+        .attr('dy', 4)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#fff')
+        .attr('font-size', d => d._role?.ring === 0 ? '10px' : '8px')
+        .attr('font-weight', d => d._role?.ring === 0 ? '700' : '400')
+        .text(d => (d._role?.label || d.id.replace('gaia-', '')));
+
+      // Status indicator dot — small circle at top-right
+      node.append('circle')
+        .attr('cx', d => nodeRadius(d) * 0.65)
+        .attr('cy', d => -nodeRadius(d) * 0.65)
+        .attr('r', 4)
+        .attr('fill', d => d.blueprint_status === 'live' ? '#4caf50' : d.blueprint_status === 'candidate' ? '#ffa726' : '#555')
+        .attr('stroke', '#1a1a2e')
+        .attr('stroke-width', 1.5);
 
       sim.on('tick', () => {
         link

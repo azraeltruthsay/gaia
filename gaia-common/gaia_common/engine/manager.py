@@ -293,6 +293,7 @@ class EngineManager:
             "model_loaded": model_loaded,
             "mode": "active" if model_loaded else "standby",
             "managed": True,
+            "device": self.device or "none",
             "worker_pid": self.worker_process.pid if worker_alive else None,
         }
 
