@@ -233,11 +233,8 @@ def fetch_course_page(
     # Call MCP web_fetch via JSON-RPC
     try:
         result = _mcp_call(
-            method="tools/call",
-            params={
-                "name": "web_fetch",
-                "arguments": {"url": url},
-            },
+            method="web_fetch",
+            params={"url": url},
             endpoint=mcp_endpoint,
         )
     except Exception as exc:
