@@ -17,6 +17,18 @@ const POLL_INTERVAL = 10_000; // system state poll every 10s
 const CHAT_TIMEOUT = 300_000; // 5 minute timeout for chat
 const HOOKS_POLL_INTERVAL = 15_000; // hooks status poll every 15s
 
+// ── SSE Connection Registry & Cleanup ────────────────────────────────────────
+// Browsers limit concurrent HTTP/1.1 connections to ~6 per origin.
+// SSE (EventSource) connections hold slots open indefinitely.
+// On refresh, old connections linger → new page can't connect → stuck.
+// This registry tracks all SSE connections and closes them on unload.
+const _sseRegistry = new Set();
+function _registerSSE(es) { _sseRegistry.add(es); return es; }
+function _unregisterSSE(es) { _sseRegistry.delete(es); }
+function _closeAllSSE() { for (const es of _sseRegistry) { try { es.close(); } catch {} } _sseRegistry.clear(); }
+window.addEventListener('beforeunload', _closeAllSSE);
+window.addEventListener('pagehide', _closeAllSSE);
+
 // ── Shared Utilities ──────────────────────────────────────────────────────────
 
 function escapeHtml(str) {
@@ -351,7 +363,7 @@ document.addEventListener('alpine:init', () => {
       if (this._sseConnected) return;
       this._sseConnected = true;
       const connect = () => {
-        this._autoSSE = new EventSource('/api/autonomous/stream');
+        this._autoSSE = _registerSSE(new EventSource('/api/autonomous/stream'));
         this._autoSSE.onmessage = (evt) => {
           try {
             const data = JSON.parse(evt.data);
@@ -1057,7 +1069,7 @@ function mindMapPanel() {
     },
 
     destroy() {
-      if (this._es) { this._es.close(); this._es = null; }
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
       if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
     },
 
@@ -1228,9 +1240,9 @@ function mindMapPanel() {
     },
 
     _connect() {
-      if (this._es) { this._es.close(); this._es = null; }
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
       // Show ALL neural activity — don't filter by session
-      this._es = new EventSource('/api/activations/stream');
+      this._es = _registerSSE(new EventSource('/api/activations/stream'));
 
       this._es.onmessage = (evt) => {
         try {
@@ -1242,7 +1254,7 @@ function mindMapPanel() {
       };
 
       this._es.onerror = () => {
-        if (this._es) this._es.close();
+        if (this._es) { _unregisterSSE(this._es); this._es.close(); }
         this._es = null;
         if (this.live) {
           this._reconnectTimer = setTimeout(() => this._connect(), 3000);
@@ -1721,7 +1733,7 @@ function mindMapPanel() {
       if (this.live) {
         this._connect();
       } else {
-        if (this._es) { this._es.close(); this._es = null; }
+        if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
         if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
       }
     },
@@ -3604,7 +3616,7 @@ function trainingMonitor() {
       if (this._logSource) this._logSource.close();
       this.logLines = [];
       try {
-        this._logSource = new EventSource('/api/logs/stream?service=study');
+        this._logSource = _registerSSE(new EventSource('/api/logs/stream?service=study'));
         this._logSource.onmessage = (e) => {
           const line = e.data;
           if (line) {
@@ -4154,13 +4166,13 @@ function generationPanel() {
     },
 
     destroy() {
-      if (this._es) { this._es.close(); this._es = null; }
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
     },
 
     _connect() {
       const url = '/api/generation/stream' + (this.roleFilter ? `?role=${this.roleFilter}` : '');
-      if (this._es) this._es.close();
-      this._es = new EventSource(url);
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); }
+      this._es = _registerSSE(new EventSource(url));
       this.connected = true;
 
       this._es.onmessage = (ev) => {
@@ -4289,7 +4301,7 @@ function serviceLogsPanel() {
     },
 
     destroy() {
-      if (this._es) { this._es.close(); this._es = null; }
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
     },
 
     switchService(svc) {
@@ -4346,8 +4358,8 @@ function serviceLogsPanel() {
     },
 
     _connect() {
-      if (this._es) this._es.close();
-      this._es = new EventSource(`/api/logs/stream?service=${this.service}`);
+      if (this._es) { _unregisterSSE(this._es); this._es.close(); }
+      this._es = _registerSSE(new EventSource(`/api/logs/stream?service=${this.service}`));
       this.connected = true;
 
       this._es.onmessage = (ev) => {
