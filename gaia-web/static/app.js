@@ -654,20 +654,28 @@ const BRAIN_STEM =
 // Brain regions mapped to actual Wikimedia SVG anatomy boundaries
 // SVG: 1024x732 scaled to 280x200 viewport, y_offset=20. Brain faces LEFT.
 // Regions expanded to fill actual anatomical boundaries.
-const BRAIN_REGIONS = [
-  // NANO — brain stem & cerebellum (bottom-right of brain)
-  { name: 'Brain Stem',   tier: 'nano',  layerRange: [0, 8],   cx: 152, cy: 192, rx: 16, ry: 20 },
-  { name: 'Cerebellum',   tier: 'nano',  layerRange: [8, 16],  cx: 205, cy: 178, rx: 36, ry: 18 },
+// 13 brain regions mapped to cognitive tiers, SAE domains, and transformer layers.
+// Loaded from brain_region_atlas.json; fallback hardcoded below.
+// Layout: butcher-diagram sagittal view — Prime=frontal, Core=mid, Nano=brainstem
+let BRAIN_REGIONS = [
+  // PRIME — frontal cortex (left side, higher cognition)
+  { name: 'Prefrontal',    tier: 'prime', layerRange: [24, 31], cx: 36,  cy: 108, rx: 14, ry: 28, domains: ['reasoning','architecture'] },
+  { name: 'Orbitofrontal', tier: 'prime', layerRange: [16, 24], cx: 30,  cy: 155, rx: 16, ry: 18, domains: ['safety','emotion'] },
+  { name: "Broca's Area",  tier: 'prime', layerRange: [8, 16],  cx: 60,  cy: 165, rx: 18, ry: 12, domains: ['creative'] },
+  { name: 'Motor Cortex',  tier: 'prime', layerRange: [4, 12],  cx: 88,  cy: 46,  rx: 24, ry: 14, domains: ['code'] },
 
-  // CORE — temporal (long band below Sylvian), parietal (dome top), occipital (back)
-  { name: 'Temporal',     tier: 'core',  layerRange: [0, 8],   cx: 108, cy: 155, rx: 40, ry: 11 },
-  { name: 'Parietal',     tier: 'core',  layerRange: [8, 16],  cx: 148, cy: 48,  rx: 26, ry: 14 },
-  { name: 'Occipital',    tier: 'core',  layerRange: [16, 24], cx: 222, cy: 88,  rx: 18, ry: 28 },
+  // CORE — temporal, parietal, occipital (operational processing)
+  { name: 'Somatosensory', tier: 'core',  layerRange: [0, 8],   cx: 165, cy: 42,  rx: 18, ry: 12, domains: ['identity'] },
+  { name: 'Parietal',      tier: 'core',  layerRange: [8, 16],  cx: 148, cy: 48,  rx: 26, ry: 14, domains: ['architecture','reasoning'] },
+  { name: "Wernicke's Area",tier:'core',  layerRange: [14, 22], cx: 145, cy: 155, rx: 20, ry: 12, domains: ['identity'] },
+  { name: 'Temporal',      tier: 'core',  layerRange: [0, 10],  cx: 108, cy: 155, rx: 40, ry: 11, domains: ['emotion','factual'] },
+  { name: 'Occipital',     tier: 'core',  layerRange: [18, 24], cx: 222, cy: 88,  rx: 18, ry: 28, domains: ['factual'] },
+  { name: 'Visual Cortex', tier: 'core',  layerRange: [22, 24], cx: 232, cy: 135, rx: 14, ry: 22, domains: [] },
 
-  // PRIME — frontal cortex (largest lobe, left side)
-  { name: 'Prefrontal',   tier: 'prime', layerRange: [0, 12],  cx: 36,  cy: 108, rx: 14, ry: 28 },
-  { name: 'Motor Cortex', tier: 'prime', layerRange: [12, 24], cx: 88,  cy: 46,  rx: 24, ry: 14 },
-  { name: 'Frontal',      tier: 'prime', layerRange: [24, 32], cx: 58,  cy: 76,  rx: 28, ry: 24 },
+  // NANO — brainstem, cerebellum, thalamus (fast reflexes & routing)
+  { name: 'Thalamus',      tier: 'nano',  layerRange: [8, 16],  cx: 140, cy: 120, rx: 16, ry: 14, domains: ['time','architecture'] },
+  { name: 'Cerebellum',    tier: 'nano',  layerRange: [16, 23], cx: 205, cy: 178, rx: 36, ry: 18, domains: ['code'] },
+  { name: 'Brain Stem',    tier: 'nano',  layerRange: [0, 8],   cx: 152, cy: 192, rx: 16, ry: 20, domains: ['time','identity'] },
 ];
 
 // Tier idle colors — anatomically coded
@@ -707,11 +715,6 @@ function _getConceptColor(label) {
 // Neurons arc from start to end, spanning the full region width.
 const REGION_EDGES = {
   // PRIME — Frontal lobe (left side of brain)
-  'Frontal': {
-    // Upper frontal dome → lower frontal (long vertical sweep)
-    start: [[102.5,37.1],[86.1,42.8],[69.7,47.6],[54.7,55.0],[39.3,64.4]],
-    end:   [[13.2,137.6],[18.0,154.1],[29.0,165.3],[39.8,170.9],[58.5,171.2]],
-  },
   'Prefrontal': {
     // Top of dome → mid-frontal (sweeps from top-right to left)
     start: [[135.7,33.0],[152.8,34.2],[171.0,35.6],[186.2,40.1]],
@@ -747,6 +750,37 @@ const REGION_EDGES = {
     start: [[141.6,178.3],[147.4,189.8],[157.0,195.8]],
     end:   [[165.7,204.3],[173.8,214.5],[184.3,208.4]],
   },
+  // NEW REGIONS — added for 13-region butcher diagram
+  'Orbitofrontal': {
+    // Lower frontal — ventral surface, below prefrontal
+    start: [[13.2,137.6],[18.0,154.1],[29.0,165.3]],
+    end:   [[39.8,170.9],[29.0,165.3],[18.0,154.1]],
+  },
+  "Broca's Area": {
+    // Inferior frontal, along lower Sylvian fissure
+    start: [[39.8,170.9],[58.5,171.2],[76.7,175.0]],
+    end:   [[88.0,187.4],[76.7,175.0],[58.5,171.2]],
+  },
+  'Somatosensory': {
+    // Postcentral strip — just behind Motor Cortex
+    start: [[186.2,40.1],[171.0,35.6],[152.8,34.2]],
+    end:   [[152.8,34.2],[148.0,40.0],[145.0,48.0]],
+  },
+  "Wernicke's Area": {
+    // Posterior temporal-parietal junction
+    start: [[121.0,148.0],[135.0,155.0],[149.3,160.0]],
+    end:   [[163.5,162.0],[149.3,155.0],[135.0,148.0]],
+  },
+  'Visual Cortex': {
+    // Below and behind Occipital
+    start: [[248.2,160.5],[245.0,148.0],[240.0,138.0]],
+    end:   [[235.0,128.0],[230.0,140.0],[228.0,155.0]],
+  },
+  'Thalamus': {
+    // Deep internal — small elliptical relay hub
+    start: [[125.0,112.0],[132.0,118.0],[140.0,120.0]],
+    end:   [[148.0,122.0],[155.0,118.0],[155.0,112.0]],
+  },
 };
 
 // Interpolate a point along an edge curve at parameter t (0-1)
@@ -770,7 +804,8 @@ function _insetPoint(x, y, refX, refY, dist) {
 }
 
 // Generate neurons by interpolating along region edge curves.
-// Each neuron has a start point on the start edge and end point on the end edge.
+// Each neuron starts on the region start edge and aims toward its causal target region.
+// The path between start and end is a deterministic lightning bolt.
 function _generateNeurons(tier, count) {
   const neurons = [];
   const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
@@ -783,8 +818,9 @@ function _generateNeurons(tier, count) {
     const edges = REGION_EDGES[region.name];
     if (!edges) continue;
 
-    // Reserve ~20% of slots for future neuron discovery
-    const usedSlots = Math.ceil(perRegion * 0.8);
+    // Determine causal target region center
+    const targetName = CAUSAL_DIRECTIONS[region.name] || null;
+    const target = targetName ? _regionCenterMap[targetName] : null;
 
     for (let i = 0; i < perRegion; i++) {
       // Distribute evenly along the edge curves, with tiny jitter
@@ -796,37 +832,51 @@ function _generateNeurons(tier, count) {
       const [sx2, sy2] = _interpEdge(edges.end, tClamped); // synapse position (on edge)
 
       // Inset the neuron endpoint 4px toward the brain center (interior)
-      // so synapses have space between neuron ends and the brain outline
       const SYNAPSE_MARGIN = 4;
-      const [x2, y2] = _insetPoint(sx2, sy2, region.cx, region.cy, SYNAPSE_MARGIN);
 
-      const cx = (x1 + x2) / 2;
-      const cy = (y1 + y2) / 2;
+      let x2, y2;
+      if (target) {
+        // Aim endpoint toward the causal target region center
+        // Use original end-edge point, but shift it toward target cx,cy
+        const [ex, ey] = _insetPoint(sx2, sy2, region.cx, region.cy, SYNAPSE_MARGIN);
+        // Blend: 60% original endpoint + 40% toward target center
+        x2 = ex * 0.6 + target.cx * 0.4;
+        y2 = ey * 0.6 + target.cy * 0.4;
+      } else {
+        // No causal target — aim generally upward (lower y = anatomically higher)
+        const [ex, ey] = _insetPoint(sx2, sy2, region.cx, region.cy, SYNAPSE_MARGIN);
+        x2 = ex;
+        y2 = ey - 8; // nudge upward
+      }
 
-      // Control point: gentle parallel curves that don't cross
-      // Keep curvature small so arcs stay inside the brain region
-      const curvature = (t - 0.5) * 3;
       const dx = x2 - x1;
       const dy = y2 - y1;
-      const perpX = -dy;
-      const perpY = dx;
-      const perpLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
-      const cpx = cx + (perpX / perpLen) * curvature;
-      const cpy = cy + (perpY / perpLen) * curvature;
-
       const fiberLen = Math.sqrt(dx * dx + dy * dy);
       const r = (v) => Math.round(v * 10) / 10;
 
+      // Lightning bolt parameters scale with fiber length
+      const segments = Math.max(5, Math.min(8, Math.round(fiberLen / 8)));
+      const boltJitter = Math.max(2, fiberLen * 0.08);
+      const boltSeed = seed + i * 7 + 31; // unique per neuron
+      const boltPath = _lightningPath(x1, y1, x2, y2, segments, boltJitter, boltSeed);
+
+      // Direction angle for arrowhead (from penultimate to last point)
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+
       neurons.push({
-        x: r(cx), y: r(cy),
+        x: r((x1 + x2) / 2), y: r((y1 + y2) / 2),
         x1: r(x1), y1: r(y1), x2: r(x2), y2: r(y2),
-        cpx: r(cpx), cpy: r(cpy),
-        ocpx: r(cpx), ocpy: r(cpy),
         ox1: r(x1), oy1: r(y1), ox2: r(x2), oy2: r(y2),
         // Synapse anchor — on the SVG edge, just outside the neuron endpoint
         synX: r(sx2), synY: r(sy2),
         fiberLen: r(fiberLen),
+        boltPath: boltPath,
+        boltSegments: segments,
+        boltJitter: boltJitter,
+        boltSeed: boltSeed,
+        angle: angle,
         region: region.name,
+        targetRegion: targetName || null,
         tier: tier,
         layerRange: region.layerRange,
         id: null,
@@ -871,6 +921,61 @@ function _arcPath(x1, y1, x2, y2, curvature) {
   const cpx = mx - dy * curvature;
   const cpy = my + dx * curvature;
   return `M ${x1},${y1} Q ${cpx},${cpy} ${x2},${y2}`;
+}
+
+// Generate a jagged lightning-bolt SVG path between two points.
+// segments: number of line pieces (5-8 typical)
+// jitter: max perpendicular offset in pixels
+// seed: deterministic randomness so each neuron keeps its shape
+function _lightningPath(x1, y1, x2, y2, segments, jitter, seed) {
+  let s = seed;
+  function rand() { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  // Unit perpendicular vector
+  const perpX = -dy / len;
+  const perpY = dx / len;
+
+  const r = (v) => Math.round(v * 10) / 10;
+  let path = `M ${r(x1)},${r(y1)}`;
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    // Point along the main line
+    const bx = x1 + dx * t;
+    const by = y1 + dy * t;
+    // Offset perpendicular by random jitter
+    const offset = (rand() - 0.5) * 2 * jitter;
+    path += ` L ${r(bx + perpX * offset)},${r(by + perpY * offset)}`;
+  }
+  path += ` L ${r(x2)},${r(y2)}`;
+  return path;
+}
+
+// Causal connectivity directions — which region drives which
+const CAUSAL_DIRECTIONS = {
+  // Nano: Brain Stem → Thalamus → Cerebellum
+  'Brain Stem': 'Thalamus',
+  'Thalamus': 'Cerebellum',
+  // Core: Somatosensory → Parietal → Wernicke's Area
+  'Somatosensory': 'Parietal',
+  'Parietal': "Wernicke's Area",
+  // Prime: Motor Cortex → Broca's Area → Orbitofrontal → Prefrontal
+  'Motor Cortex': "Broca's Area",
+  "Broca's Area": 'Orbitofrontal',
+  'Orbitofrontal': 'Prefrontal',
+  // Cross-region defaults
+  'Temporal': 'Occipital',
+  'Occipital': 'Visual Cortex',
+  'Cerebellum': 'Brain Stem',  // loop back
+  'Visual Cortex': 'Occipital',
+};
+
+// Lookup table: region name → {cx, cy} for causal target aiming
+const _regionCenterMap = {};
+for (const reg of BRAIN_REGIONS) {
+  _regionCenterMap[reg.name] = { cx: reg.cx, cy: reg.cy };
 }
 
 function mindMapPanel() {
@@ -987,6 +1092,19 @@ function mindMapPanel() {
           .append('feMergeNode').attr('in', d => d);
       }
 
+      // Arrowhead markers — one per tier color (idle) + generic active
+      for (const tier of ['nano', 'core', 'prime']) {
+        defs.append('marker')
+          .attr('id', 'arrow-' + tier)
+          .attr('viewBox', '0 0 6 6')
+          .attr('refX', 5).attr('refY', 3)
+          .attr('markerWidth', 4).attr('markerHeight', 4)
+          .attr('orient', 'auto')
+          .append('path')
+          .attr('d', 'M 0 0 L 6 3 L 0 6 Z')
+          .attr('fill', TIER_IDLE_COLORS[tier]);
+      }
+
       // Brain anatomy — load real anatomical SVG as background image
       // The SVG (1024x732) is scaled to fit our viewBox (280x400)
       // We apply CSS filters to make it a dim wireframe-style backdrop
@@ -1009,40 +1127,52 @@ function mindMapPanel() {
       const neuronGroup = zoomG.append('g').attr('class', 'neuron-group');
       const self = this;
 
-      // Create a group per neuron containing start dot, end dot, and arc path
+      // Create a group per neuron containing soma dot, lightning bolt path, and arrowhead
       const neuronGs = neuronGroup.selectAll('g.neuron-bundle')
         .data(this._neurons, d => d.id)
         .enter()
         .append('g')
         .attr('class', d => 'neuron-bundle tier-' + d.tier);
 
-      // Start dot (one edge of the region) — clearly visible when idle
+      // Start dot — neuron soma, clearly visible when idle
       neuronGs.append('circle')
         .attr('class', 'neuron-start')
         .attr('cx', d => d.x1).attr('cy', d => d.y1)
         .attr('r', 1.8)
         .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.3);
+        .attr('opacity', 0.2);
 
-      // End dot (opposite edge of the region)
-      neuronGs.append('circle')
-        .attr('class', 'neuron-end')
-        .attr('cx', d => d.x2).attr('cy', d => d.y2)
-        .attr('r', 1.8)
-        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
-        .attr('opacity', 0.3);
-
-      // Arc path — very faint when idle, bright on activation
+      // Lightning bolt path — very faint when idle, bright on activation
       neuronGs.append('path')
         .attr('class', 'neuron-arc')
-        .attr('d', d => _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+        .attr('d', d => d.boltPath)
         .attr('fill', 'none')
         .attr('stroke', d => TIER_IDLE_COLORS[d.tier])
         .attr('stroke-width', 0.3)
-        .attr('stroke-linecap', 'round')
-        .attr('opacity', 0.06);  // faint idle — shows the neural network structure
+        .attr('stroke-linejoin', 'bevel')
+        .attr('stroke-linecap', 'butt')
+        .attr('opacity', 0.04);  // faint idle — barely visible neural network structure
 
-      // Synapse anchor dot — on the brain edge, just outside the end dot
+      // End arrowhead — small triangle pointing in direction of travel
+      neuronGs.append('polygon')
+        .attr('class', 'neuron-end-arrow')
+        .attr('points', d => {
+          const size = 2.5;
+          const a = d.angle;
+          // Triangle pointing in direction of travel
+          const tipX = d.x2;
+          const tipY = d.y2;
+          const baseL_X = tipX - Math.cos(a - 0.5) * size;
+          const baseL_Y = tipY - Math.sin(a - 0.5) * size;
+          const baseR_X = tipX - Math.cos(a + 0.5) * size;
+          const baseR_Y = tipY - Math.sin(a + 0.5) * size;
+          const r = (v) => Math.round(v * 10) / 10;
+          return `${r(tipX)},${r(tipY)} ${r(baseL_X)},${r(baseL_Y)} ${r(baseR_X)},${r(baseR_Y)}`;
+        })
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier])
+        .attr('opacity', 0);  // invisible when idle
+
+      // Synapse anchor dot — on the brain edge, just outside the end point
       // Dim by default, glows when connected neurons are active
       neuronGs.append('circle')
         .attr('class', 'synapse-anchor')
@@ -1052,7 +1182,7 @@ function mindMapPanel() {
         .attr('fill', '#ffffff')
         .attr('opacity', 0.06);
 
-      // Connection line from end dot to synapse anchor — hidden until active
+      // Connection line from end point to synapse anchor — hidden until active
       neuronGs.append('line')
         .attr('class', 'synapse-link')
         .attr('x1', d => d.x2).attr('y1', d => d.y2)
@@ -1236,7 +1366,7 @@ function mindMapPanel() {
       bundleSel.each(function(d) {
         const g = d3.select(this);
         const startDot = g.select('.neuron-start');
-        const endDot = g.select('.neuron-end');
+        const arrow = g.select('.neuron-end-arrow');
         const arc = g.select('.neuron-arc');
         const active = activeMap.get(d.id);
 
@@ -1255,12 +1385,14 @@ function mindMapPanel() {
           const brightness = CONSCIOUSNESS_BRIGHTNESS[cState] || 0.1;
           const glowFilter = str > 10 && brightness > 0.5 ? `url(#neuron-glow-${tier})` : null;
 
-          // Light up both dots — brighter for Conscious, dimmer for Subconscious
+          // Light up soma dot
           startDot.transition().duration(200)
             .attr('r', 3).attr('fill', activeColor).attr('opacity', 0.95 * brightness)
             .attr('filter', glowFilter);
-          endDot.transition().duration(200)
-            .attr('r', 3).attr('fill', activeColor).attr('opacity', 0.95 * brightness)
+
+          // Light up arrowhead — pulse when signal arrives (delayed)
+          arrow.transition().duration(200).delay(350)
+            .attr('fill', activeColor).attr('opacity', 0.9 * brightness)
             .attr('filter', glowFilter);
 
           // Light up synapse anchor + connection line
@@ -1269,20 +1401,19 @@ function mindMapPanel() {
           synLink.transition().duration(200)
             .attr('stroke', activeColor).attr('opacity', 0.5);
 
-          // Show the arc between them
-          // Curve toward synapse if connected
-          const mySynapses = self._synapses.filter(s => s.neuronA === d.id || s.neuronB === d.id);
-          if (mySynapses.length > 0) {
-            const strongest = mySynapses.reduce((a, b) => a.strength > b.strength ? a : b);
-            d.cpx = d.ocpx + (strongest.x - d.ocpx) * 0.25;
-            d.cpy = d.ocpy + (strongest.y - d.ocpy) * 0.25;
-          }
-          arc.transition().duration(300)
-            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+          // Lightning bolt path — traveling pulse via stroke-dasharray animation
+          // Calculate approximate path length for dash animation
+          const pathLen = d.fiberLen * 1.2; // lightning is ~20% longer than straight line
+          arc
+            .attr('d', d.boltPath)
             .attr('stroke', activeColor)
             .attr('stroke-width', width)
-            .attr('opacity', 0.7 * brightness)
-            .attr('filter', glowFilter);
+            .attr('filter', glowFilter)
+            .attr('stroke-dasharray', pathLen)
+            .attr('stroke-dashoffset', pathLen)
+            .attr('opacity', 0.8 * brightness)
+            .transition().duration(400).ease(d3.easeLinear)
+            .attr('stroke-dashoffset', 0);
 
         } else if (active && (Date.now() - active.timestamp) < 3000) {
           // Longer decay (3s) so activations stay visible
@@ -1291,43 +1422,44 @@ function mindMapPanel() {
           const str = active.strength * decay;
           const decayColor = _getConceptColor(active.label) || colorScale(str);
 
-          // Fade dots back
+          // Fade soma dot back
           startDot.transition().duration(500)
-            .attr('r', 1.8 + 1.2 * decay).attr('fill', decayColor).attr('opacity', 0.3 + 0.6 * decay)
+            .attr('r', 1.8 + 1.2 * decay).attr('fill', decayColor).attr('opacity', 0.2 + 0.6 * decay)
             .attr('filter', null);
-          endDot.transition().duration(500)
-            .attr('r', 1.8 + 1.2 * decay).attr('fill', decayColor).attr('opacity', 0.3 + 0.6 * decay)
+          // Fade arrowhead
+          arrow.transition().duration(500)
+            .attr('fill', decayColor).attr('opacity', 0.6 * decay)
             .attr('filter', null);
           synAnchor.transition().duration(500)
             .attr('r', 0.8).attr('opacity', 0.06 + 0.4 * decay);
           synLink.transition().duration(500)
             .attr('opacity', 0.3 * decay);
 
-          // Fade arc away
-          d.cpx = d.ocpx + (d.cpx - d.ocpx) * decay;
-          d.cpy = d.ocpy + (d.cpy - d.ocpy) * decay;
+          // Fade lightning bolt away
           arc.transition().duration(600)
-            .attr('d', _fiberPath(d.x1, d.y1, d.cpx, d.cpy, d.x2, d.y2))
+            .attr('stroke-dasharray', 'none')
+            .attr('stroke-dashoffset', 0)
             .attr('opacity', 0.5 * decay)
             .attr('filter', null);
 
           if (decay <= 0.05) activeMap.delete(d.id);
 
         } else {
-          // Idle — dots visible, arc hidden
+          // Idle — soma faint, lightning barely visible, arrowhead invisible
           if (activeMap.has(d.id)) activeMap.delete(d.id);
-          d.cpx = d.ocpx;
-          d.cpy = d.ocpy;
           startDot.transition().duration(600)
-            .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.3)
+            .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.2)
             .attr('filter', null);
-          endDot.transition().duration(600)
-            .attr('r', 1.8).attr('fill', idleColor).attr('opacity', 0.3)
+          arrow.transition().duration(600)
+            .attr('fill', idleColor).attr('opacity', 0)
             .attr('filter', null);
           arc.transition().duration(800)
+            .attr('d', d.boltPath)
             .attr('stroke', idleColor)
             .attr('stroke-width', 0.3)
-            .attr('opacity', 0.06)
+            .attr('stroke-dasharray', 'none')
+            .attr('stroke-dashoffset', 0)
+            .attr('opacity', 0.04)
             .attr('filter', null);
           synAnchor.transition().duration(600)
             .attr('r', 0.8).attr('opacity', 0.06);

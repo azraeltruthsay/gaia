@@ -1,37 +1,40 @@
 # gaia-prime — The Voice
 
-Standalone vLLM inference server. Owns the GPU. Provides OpenAI-compatible API for text generation.
+Standalone GAIA Engine inference server. Runs CPU/GGUF by default; gets GPU during FOCUSING transitions via the Consciousness Matrix.
 
 ## Responsibilities
 
 - Serve inference requests from gaia-core via OpenAI-compatible HTTP API
-- Manage GPU memory (70% utilization target)
-- Support LoRA adapter hot-loading (up to 4 concurrent adapters)
-- Sleep/wake mode for GPU memory conservation
+- Run in CPU/GGUF mode as subconscious observer (default state)
+- Accept GPU handoff during FOCUSING for heavyweight tasks
+- Support LoRA adapter hot-loading
+- Identity-baked model (Huihui-Qwen3-8B-GAIA-Prime-adaptive)
 
 ## Runtime Configuration
 
+Prime uses GAIA Engine managed mode (not vLLM). Key settings:
+
 | Setting | Value | Rationale |
 |---------|-------|-----------|
-| `--gpu-memory-utilization 0.70` | 70% VRAM | Leave headroom for LoRA adapters and KV cache |
-| `--max-model-len 8192` | 8K context | Balances quality with memory |
-| `--max-num-seqs 4` | 4 concurrent | Single-user system, limit batch overhead |
-| `--enable-lora` | Enabled | Hot-swap personality/task adapters |
-| `--enable-sleep-mode` | Enabled | GPU conservation via sleep/wake |
-| `--enable-prefix-caching` | Enabled | Cache system prompt prefixes |
-| `--enforce-eager` | Enabled | Skip CUDA graph overhead for flexibility |
+| Backend | GAIA Engine | Custom engine with polygraph, KV cache, lifecycle |
+| Default state | Subconscious (CPU/GGUF) | Conserve GPU for Nano/Core |
+| GPU mode | On FOCUSING transition | Orchestrator swaps GPU when escalation needed |
+| Port | 7777 | OpenAI-compatible API |
+| `GAIA_AUTOLOAD_MODEL` | 0 | Standby until orchestrator loads |
 
-## Sleep Mode
+## Consciousness States
 
-When gaia-core's sleep cycle triggers, gaia-prime enters sleep mode:
+| State | Mode | Triggered By |
+|-------|------|-------------|
+| Subconscious | CPU/GGUF | Default / after FOCUSING completes |
+| Conscious | GPU | FOCUSING transition (escalation from Core) |
+| Unconscious | Unloaded | DEEP_SLEEP / explicit unload |
 
-1. gaia-core calls `POST /sleep` on gaia-prime
-2. vLLM offloads KV cache to CPU memory
-3. GPU VRAM is freed for gaia-study (training, embedding)
-4. On wake: `POST /wake_up` restores KV cache from CPU
+## Container
 
-This is controlled by `VLLM_SERVER_DEV_MODE=1` which enables the `/sleep` and `/wake_up` endpoints.
+- **Non-root**: Runs as `gaia` user (Dockerfile updated 2026-03-25)
+- **Model path**: `/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive` (safetensors) or GGUF variant
 
 ## Model Loading
 
-The active model is specified by `PRIME_MODEL_PATH` (default: `/models/Qwen3-8B-abliterated-AWQ`). Models are stored on `/mnt/gaia_warm_pool` (host) mounted as `/models` (container, read-only).
+The active model is an identity-baked 8B model. GGUF Q8_0 variant used for CPU inference. Safetensors variant used when GPU is available during FOCUSING.

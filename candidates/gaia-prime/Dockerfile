@@ -75,12 +75,21 @@ RUN pip install --no-cache-dir "numpy<2"
 # Enables KV replay on wake instead of full re-prefill
 RUN pip install --no-cache-dir lmcache
 
+# Create non-root user for container execution (host UID mapping)
+RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+
+# Set ownership for non-root execution
+RUN chown -R gaia:gaia /app
+
 # Expose service port
 EXPOSE 7777
 
 # Health check - Note: This is overridden by docker-compose healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:7777/health || exit 1
+
+# Run as non-root user
+USER gaia
 
 # Default command includes LoRA and sleep mode flags for adapter + GPU handoff support.
 # Sleep mode enables /sleep and /wake_up endpoints for VRAM↔RAM hot-swap.

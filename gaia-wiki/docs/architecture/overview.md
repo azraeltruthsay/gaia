@@ -6,9 +6,9 @@ GAIA is a service-oriented AI system where each container plays a distinct cogni
 
 ```
                           ┌──────────────────────┐
-                          │   gaia-prime (GPU)    │
+                          │   gaia-prime          │
                           │   The Voice           │
-                          │   vLLM inference      │
+                          │   GAIA Engine         │
                           │   :7777               │
                           └──────────┬────────────┘
                                      │

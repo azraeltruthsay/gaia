@@ -79,7 +79,9 @@ class ConsciousnessMatrix:
     matrix validates by polling actual resource usage.
     """
 
-    def __init__(self):
+    def __init__(self, lifecycle_machine=None):
+        self._lifecycle_machine = lifecycle_machine
+
         # Tier engine endpoints
         self._endpoints = {
             "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
@@ -137,11 +139,12 @@ class ConsciousnessMatrix:
         if old_target == level and state.actual == level:
             return {"ok": True, "message": "already at target", "tier": tier, "level": level.name}
 
-        logger.info("Consciousness target: %s %s → %s",
-                     tier, old_target.name, level.name)
+        logger.info("Consciousness target: %s %s → %s (actual=%s)",
+                     tier, old_target.name, level.name, state.actual.name)
 
-        # Execute the transition
-        result = await self._transition_tier(tier, old_target, level)
+        # Execute the transition using ACTUAL state, not old target.
+        # The old target may not reflect reality (e.g., load failed, worker crashed).
+        result = await self._transition_tier(tier, state.actual, level)
         return result
 
     async def probe_all(self) -> Dict[str, dict]:
@@ -161,6 +164,58 @@ class ConsciousnessMatrix:
         if self._poll_task:
             self._poll_task.cancel()
 
+    # ── Lifecycle FSM Sync ──────────────────────────────────────────
+
+    # Map consciousness configuration names to lifecycle states
+    _CONFIG_TO_LIFECYCLE = {
+        "awake": "awake",
+        "focusing": "focusing",
+        "sleep": "sleep",
+        "deep_sleep": "deep_sleep",
+        "training": "meditation",
+    }
+
+    async def _sync_lifecycle(self, config_name: str) -> Optional[dict]:
+        """Sync the lifecycle FSM state after a consciousness transition.
+
+        The consciousness matrix handles the actual tier load/unload work.
+        This method updates the lifecycle state machine so /lifecycle/state
+        reflects the new configuration.
+        """
+        if not self._lifecycle_machine:
+            return None
+
+        try:
+            from gaia_common.lifecycle.states import LifecycleState
+
+            target_name = self._CONFIG_TO_LIFECYCLE.get(config_name)
+            if not target_name:
+                return None
+
+            target = LifecycleState(target_name)
+            current = LifecycleState(self._lifecycle_machine._snapshot.state)
+
+            # Already at target — no transition needed
+            if current == target:
+                return {"lifecycle_sync": "already_at_target", "state": target.value}
+
+            # Use set_state_external since the consciousness matrix has already
+            # performed the actual tier load/unload work. We just need the FSM
+            # to reflect the new state without re-executing tier actions.
+            result = await self._lifecycle_machine.set_state_external(
+                target=target,
+                reason=f"consciousness_matrix:{config_name}",
+            )
+            if result.ok:
+                logger.info("Lifecycle synced: %s → %s", current.value, target.value)
+                return {"lifecycle_sync": "ok", "state": target.value}
+            else:
+                logger.warning("Lifecycle sync failed: %s", result.error)
+                return {"lifecycle_sync": "error", "error": result.error}
+        except Exception as e:
+            logger.warning("Lifecycle sync failed for %s: %s", config_name, e)
+            return {"lifecycle_sync": "error", "error": str(e)[:100]}
+
     # ── Preset Configurations ─────────────────────────────────────────
 
     async def awake(self) -> dict:
@@ -169,7 +224,11 @@ class ConsciousnessMatrix:
         results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
         results["core"] = await self.set_target("core", ConsciousnessLevel.CONSCIOUS)
         results["prime"] = await self.set_target("prime", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "awake", "results": results}
+        result = {"configuration": "awake", "results": results}
+        lifecycle = await self._sync_lifecycle("awake")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     async def focusing(self) -> dict:
         """FOCUSING: Nano=3, Core=2, Prime=3"""
@@ -179,7 +238,11 @@ class ConsciousnessMatrix:
         # Then promote Prime
         results["prime"] = await self.set_target("prime", ConsciousnessLevel.CONSCIOUS)
         results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
-        return {"configuration": "focusing", "results": results}
+        result = {"configuration": "focusing", "results": results}
+        lifecycle = await self._sync_lifecycle("focusing")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     async def sleep(self) -> dict:
         """SLEEP: Nano=2, Core=2, Prime=1"""
@@ -187,7 +250,11 @@ class ConsciousnessMatrix:
         results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
         results["core"] = await self.set_target("core", ConsciousnessLevel.SUBCONSCIOUS)
         results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "sleep", "results": results}
+        result = {"configuration": "sleep", "results": results}
+        lifecycle = await self._sync_lifecycle("sleep")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     async def deep_sleep(self) -> dict:
         """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
@@ -195,7 +262,11 @@ class ConsciousnessMatrix:
         results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
         results["core"] = await self.set_target("core", ConsciousnessLevel.UNCONSCIOUS)
         results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "deep_sleep", "results": results}
+        result = {"configuration": "deep_sleep", "results": results}
+        lifecycle = await self._sync_lifecycle("deep_sleep")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     async def training(self, tier: str = "prime") -> dict:
         """TRAINING: Target tier → 1 (free GPU), others → 2"""
@@ -205,7 +276,11 @@ class ConsciousnessMatrix:
                 results[t] = await self.set_target(t, ConsciousnessLevel.UNCONSCIOUS)
             else:
                 results[t] = await self.set_target(t, ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": f"training_{tier}", "results": results}
+        result = {"configuration": f"training_{tier}", "results": results}
+        lifecycle = await self._sync_lifecycle("training")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     # ── Internal: Tier Probing ────────────────────────────────────────
 
@@ -286,17 +361,22 @@ class ConsciousnessMatrix:
 
             elif to_level == ConsciousnessLevel.SUBCONSCIOUS:
                 # Load GGUF on CPU
-                # First unload current if conscious (GPU)
-                if from_level == ConsciousnessLevel.CONSCIOUS:
-                    await self._unload_tier(tier, endpoint, state)
-                    await asyncio.sleep(1)  # brief pause for VRAM release
+                # First unload current if anything is loaded
+                if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
+                    unload_result = await self._unload_tier(tier, endpoint, state)
+                    if not unload_result.get("ok"):
+                        logger.warning("Unload %s before CPU load returned: %s", tier, unload_result)
+                    # Wait for engine manager to be ready after unload
+                    await self._wait_for_manager_ready(tier, endpoint)
                 return await self._load_tier_cpu(tier, endpoint, state)
 
             elif to_level == ConsciousnessLevel.CONSCIOUS:
                 # Load safetensors on GPU
-                if from_level == ConsciousnessLevel.SUBCONSCIOUS:
-                    await self._unload_tier(tier, endpoint, state)
-                    await asyncio.sleep(1)
+                if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
+                    unload_result = await self._unload_tier(tier, endpoint, state)
+                    if not unload_result.get("ok"):
+                        logger.warning("Unload %s before GPU load returned: %s", tier, unload_result)
+                    await self._wait_for_manager_ready(tier, endpoint)
                 return await self._load_tier_gpu(tier, endpoint, state)
 
         except Exception as e:
@@ -306,6 +386,34 @@ class ConsciousnessMatrix:
         finally:
             state.transitioning = False
             await self._probe_tier(tier)
+
+    async def _wait_for_manager_ready(self, tier: str, endpoint: str,
+                                       timeout: float = 10.0):
+        """Wait for the engine manager to be responsive in standby mode.
+
+        After an unload, the manager needs a moment to finish killing the
+        worker and return to standby. This polls /health until we get a
+        managed response, ensuring the subsequent /model/load won't hit a
+        blocked or unavailable server.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        attempt = 0
+        while asyncio.get_event_loop().time() < deadline:
+            attempt += 1
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(f"{endpoint}/health")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        # Manager is ready when it responds with managed=true
+                        if data.get("managed"):
+                            logger.debug("Manager %s ready after %d attempts (mode=%s)",
+                                         tier, attempt, data.get("mode"))
+                            return
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+        logger.warning("Manager %s not confirmed ready after %.0fs — proceeding anyway", tier, timeout)
 
     async def _unload_tier(self, tier: str, endpoint: str, state: TierState) -> dict:
         """Unload a tier's model (any state → unconscious)."""

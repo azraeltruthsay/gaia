@@ -1176,17 +1176,14 @@ class EngineHandler(BaseHTTPRequestHandler):
             try:
                 b = self._body()
                 stream = b.get("stream", False)
-                result = _engine.generate(
-                    b.get("messages", []), b.get("max_tokens", 512),
-                    b.get("temperature", 0.7), b.get("top_p", 0.9),
-                    skip_prefix=b.get("skip_prefix", False))
 
                 if stream:
-                    # True per-token SSE streaming
+                    # True per-token SSE streaming — no Transfer-Encoding
+                    # header since BaseHTTPHandler writes raw SSE lines
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Transfer-Encoding", "chunked")
+                    self.send_header("Connection", "close")
                     self.end_headers()
 
                     for chunk in _engine.generate_stream(
@@ -1198,6 +1195,10 @@ class EngineHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b"data: [DONE]\n\n")
                     self.wfile.flush()
                 else:
+                    result = _engine.generate(
+                        b.get("messages", []), b.get("max_tokens", 512),
+                        b.get("temperature", 0.7), b.get("top_p", 0.9),
+                        skip_prefix=b.get("skip_prefix", False))
                     self._json(result)
             except Exception as e:
                 logger.exception("Generation failed")

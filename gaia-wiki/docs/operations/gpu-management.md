@@ -1,36 +1,51 @@
 # GPU Management
 
-GAIA has a single NVIDIA GPU shared between inference (gaia-prime) and training (gaia-study) via the orchestrator's lease-based handoff protocol.
+GAIA has a single NVIDIA RTX 5080 (16GB VRAM) shared between tiers via the Consciousness Matrix and orchestrator lifecycle FSM.
 
-## Ownership Model
+## Consciousness Matrix
 
-Only one service holds the GPU at a time:
+The Consciousness Matrix tracks each tier's GPU state:
 
-| State | GPU Owner | Triggered By |
-|-------|-----------|-------------|
-| Active | gaia-prime | Wake signal or user message |
-| Sleep | gaia-study | Idle timeout → sleep cycle |
-| Transition | none | Handoff in progress |
+| State | GPU | Inference | Default Tiers |
+|-------|-----|-----------|---------------|
+| **Conscious** | Yes | Full speed | Nano (0.8B), Core (2B) |
+| **Subconscious** | No | CPU/GGUF | Prime (8B) |
+| **Unconscious** | No | None | — |
 
-## Handoff Protocol
+Managed by orchestrator at `/consciousness/*`.
 
-```
-gaia-core sleep trigger
-    │
-    ├── 1. orchestrator: initiate handoff (prime → study)
-    ├── 2. gaia-prime: POST /sleep (offload KV cache to CPU)
-    ├── 3. orchestrator: wait for CUDA cleanup
-    ├── 4. orchestrator: transfer lease to gaia-study
-    ├── 5. gaia-study: begin GPU tasks
-    │
-    ... (training/embedding tasks) ...
-    │
-    ├── 6. wake signal received
-    ├── 7. orchestrator: initiate handoff (study → prime)
-    ├── 8. gaia-study: release GPU
-    ├── 9. gaia-prime: POST /wake_up (restore KV cache)
-    └── 10. gaia-core: resume inference
-```
+## Lifecycle FSM States
+
+| State | Description |
+|-------|-------------|
+| AWAKE | Normal operation (Nano + Core on GPU, Prime on CPU) |
+| FOCUSING | GPU swapped to Prime for heavyweight task |
+| SLEEP | Idle timeout, models partially unloaded |
+| DEEP_SLEEP | All models unloaded, zero VRAM |
+| MEDITATION | Chaos drills active, defensive posture |
+
+## FOCUSING Auto-Transition
+
+When Core escalates to Prime:
+1. Orchestrator transitions AWAKE -> FOCUSING
+2. Quality gate evaluates if GPU swap is needed
+3. Core releases GPU, Prime loads on GPU
+4. Prime handles the task
+5. GPU returns to Core, Prime drops to CPU/GGUF
+6. Back to AWAKE
+
+## VRAM Budget (RTX 5080, 16GB)
+
+| Component | Allocation |
+|-----------|-----------|
+| Nano (0.8B, GPU) | ~1.5 GB |
+| Core (2B, GPU) | ~4.7 GB |
+| KV cache | ~1-2 GB (dynamic) |
+| LoRA adapters | ~50-200 MB each |
+| CUDA overhead | ~500 MB |
+| **Typical AWAKE** | **~8 GB** |
+
+Prime (8B) on GPU requires ~10-12 GB, which is why it defaults to CPU/GGUF and only gets GPU during FOCUSING.
 
 ## Commands
 
@@ -44,15 +59,3 @@ gaia-core sleep trigger
 # Manually reclaim GPU (wake prime)
 ./gaia.sh gpu reclaim
 ```
-
-## VRAM Budget
-
-| Component | Allocation |
-|-----------|-----------|
-| Base model | ~2-4 GB (quantized) |
-| KV cache | ~1-2 GB (dynamic) |
-| LoRA adapters | ~50-200 MB each |
-| vLLM overhead | ~500 MB |
-| **Total target** | **70% of VRAM** (`--gpu-memory-utilization 0.70`) |
-
-The remaining 30% provides headroom for CUDA operations and prevents OOM during peak usage.

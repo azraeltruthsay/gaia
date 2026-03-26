@@ -264,8 +264,8 @@ async def lifespan(app: FastAPI):
     try:
         from gaia_core.cognition.idle_heartbeat import IdleHeartbeat
         _idle_heartbeat = IdleHeartbeat(
-            config=_config,
-            model_pool=_model_pool,
+            config=config,
+            model_pool=pool,
             timeline_store=getattr(app.state, "timeline_store", None),
             session_manager=getattr(_agent_core, "session_manager", None) if _agent_core else None,
         )
@@ -1323,6 +1323,43 @@ async def model_status():
     """Return the current embedded llama-server status."""
     ms = _get_model_server()
     return ms.status()
+
+
+# ── Cognitive Status Aliases ───────────────────────────────────────────
+# Convenience endpoints expected by test plans and gaia-doctor.
+# These delegate to existing functionality.
+
+@app.get("/cognitive/status")
+async def cognitive_status():
+    """Cognitive system status — alias of /status with cognitive framing."""
+    global _agent_core, _ai_manager
+    if _agent_core is None or _ai_manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_initialized", "cognitive_ready": False},
+        )
+    model_pool = _ai_manager.model_pool
+    return {
+        "status": "operational",
+        "cognitive_ready": True,
+        "current_persona": _ai_manager.status.get("current_persona"),
+        "models_loaded": list(model_pool.models.keys()) if hasattr(model_pool, "models") else [],
+    }
+
+
+@app.get("/cognitive/monitor")
+async def cognitive_monitor():
+    """Lightweight cognitive health monitor for dashboards and test plans."""
+    global _agent_core, _ai_manager
+    initialized = _agent_core is not None and _ai_manager is not None
+    info: dict = {
+        "cognitive_initialized": initialized,
+        "service": "gaia-core",
+    }
+    if initialized:
+        info["current_persona"] = _ai_manager.status.get("current_persona")
+        info["turn_semaphore_locked"] = _turn_semaphore.locked()
+    return info
 
 
 def get_audio_context_for_prompt(max_entries: int = 10, max_chars: int = 2000) -> str | None:

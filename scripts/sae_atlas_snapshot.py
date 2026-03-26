@@ -83,32 +83,37 @@ ATLAS_PROMPTS = [
 ]
 
 
+TIER_CONFIGS = {
+    "nano": {
+        "name": "Nano (0.8B)",
+        "model_path": "/models/Qwen3.5-0.8B-Abliterated",
+        "layers": [2, 4, 8, 12, 16, 20, 23],  # 24 layers total
+        "num_features_multiplier": 2,
+        "epochs": 50,
+    },
+    "core": {
+        "name": "Core (2B)",
+        "model_path": "/models/Qwen3.5-2B-GAIA-Core-v3",
+        "layers": [2, 6, 10, 14, 18, 22],  # 24 layers (hidden_states[0..23])
+        "num_features_multiplier": 2,
+        "epochs": 50,
+    },
+    "prime": {
+        "name": "Prime (8B)",
+        "model_path": "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
+        "layers": [4, 8, 12, 16, 20, 24, 28, 31],  # 32 layers (hidden_states[0..31])
+        "num_features_multiplier": 2,
+        "epochs": 30,  # Fewer epochs for larger model (memory)
+    },
+}
+
+
 def get_tier_config(tier: str) -> dict:
     """Get layer configuration for each model tier."""
-    configs = {
-        "nano": {
-            "name": "Nano (0.8B)",
-            "layers": [2, 4, 8, 12, 16, 20, 23],  # 24 layers total
-            "num_features_multiplier": 2,
-            "epochs": 50,
-        },
-        "core": {
-            "name": "Core (2B)",
-            "layers": [2, 6, 10, 14, 18, 22, 26],  # 28 layers total
-            "num_features_multiplier": 2,
-            "epochs": 50,
-        },
-        "prime": {
-            "name": "Prime (8B)",
-            "layers": [4, 8, 12, 16, 20, 24, 28],  # 32 layers total
-            "num_features_multiplier": 2,
-            "epochs": 30,  # Fewer epochs for larger model (memory)
-        },
-    }
-    return configs.get(tier, configs["nano"])
+    return TIER_CONFIGS.get(tier, TIER_CONFIGS["nano"])
 
 
-def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline"):
+def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline", model_override: str = ""):
     """Run the full SAE atlas pipeline."""
 
     config = get_tier_config(tier)
@@ -122,24 +127,31 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     logger.info("Prompts: %d", len(ATLAS_PROMPTS))
     logger.info("=" * 60)
 
-    # ── Get model from GAIAEngine ──
-    try:
-        from gaia_engine.core import _engine
-        if _engine is None:
-            logger.error("GAIAEngine not initialized. Is the model loaded?")
-            sys.exit(1)
-        model = _engine.model
-        tokenizer = _engine.tokenizer
-        device = _engine.device
-        logger.info("Model: %s (device=%s)", _engine.model_path, device)
-    except ImportError:
-        logger.error("gaia_engine.core not available")
-        sys.exit(1)
-    except Exception as e:
-        logger.error("Failed to get model from GAIAEngine: %s", e)
+    # ── Load model directly ──
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    model_path = model_override or config.get("model_path")
+    if not model_path or not Path(model_path).exists():
+        logger.error("Model not found at %s", model_path)
         sys.exit(1)
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info("Loading %s → %s ...", model_path, device)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype="auto",
+        device_map=device,
+        trust_remote_code=True,
+    )
+    model.eval()
+    logger.info("Model loaded: %s (device=%s, %.1f GB)",
+                model_path, device,
+                sum(p.numel() * p.element_size() for p in model.parameters()) / 1e9)
+
     # ── Record activations ──
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gaia-engine"))
     from gaia_engine.sae_trainer import SAETrainer
 
     trainer = SAETrainer(model, tokenizer, device=device)
@@ -249,7 +261,7 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     analysis_output = {
         "tier": tier,
         "tag": tag,
-        "model": getattr(_engine, "model_path", "unknown"),
+        "model": model_path,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "analysis_layer": analysis_layer,
         "recording_stats": record_stats,
@@ -284,9 +296,10 @@ def main():
     parser.add_argument("--tier", choices=["nano", "core", "prime"], required=True)
     parser.add_argument("--tag", default="baseline", help="Tag for this snapshot (e.g., baseline, post-codemind)")
     parser.add_argument("--output", default="/shared/atlas", help="Base output directory")
+    parser.add_argument("--model", default="", help="Override model path (e.g., GPTQ quantized variant)")
     args = parser.parse_args()
 
-    run_atlas(args.tier, output_base=args.output, tag=args.tag)
+    run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model)
 
 
 if __name__ == "__main__":

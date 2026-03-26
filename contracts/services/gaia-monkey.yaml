@@ -67,6 +67,11 @@ provides:
     description: "Recent drill history (last 50, configurable limit)."
     consumers: [gaia-web]
 
+  - endpoint: /drills
+    method: GET
+    description: "Drill history — alias of /chaos/history for test plan compatibility."
+    consumers: [gaia-web]
+
   # ── Meditation ─────────────────────────────────────────────────────
   - endpoint: /meditation/enter
     method: POST

@@ -9,10 +9,9 @@ Phase 1: Bake + Store + Load + Rotate
 Phase 2: Interview protocol (Prime ↔ past-Lite via state swapping)
 
 Technical approach:
-  - llama-cpp-python exposes save_state() / load_state() on the Llama class
-  - save_state() returns a LlamaState object containing the full KV cache + RNG
-  - We serialize this via pickle to a binary file (.bin) with a JSON sidecar
-  - Lite runs on CPU, so KV cache lives in RAM (no VRAM contention with Prime)
+  - VLLMRemoteModel exposes save_kv_cache(filename) / restore_kv_cache(filename)
+  - These call the GAIA Engine slot save/restore HTTP endpoints
+  - KV cache data lives server-side; we store metadata sidecars + marker files locally
   - State files persist on the Docker volume (/shared/temporal_states/)
 
 Thread safety:
@@ -26,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import pickle
 import threading
 import time
 from datetime import datetime, timezone
@@ -397,31 +395,41 @@ class TemporalStateManager:
     # ------------------------------------------------------------------
 
     def _save_lite_state(self, llm, metadata: Dict[str, Any]) -> Path:
-        """Save Lite's current KV cache state to disk.
+        """Save Lite's current KV cache state via the GAIA Engine slot API.
 
-        Uses pickle for the LlamaState object (contains numpy arrays + bytes).
-        Writes atomically via tmp file + rename.
+        VLLMRemoteModel exposes save_kv_cache(filename) which calls the
+        engine's slot save endpoint.  The engine writes the KV cache file
+        server-side; we only store the metadata sidecar locally.
         """
         now = datetime.now(timezone.utc)
         ts_safe = now.strftime("%Y-%m-%dT%H-%M-%SZ")
         state_id = f"lite_state_{ts_safe}"
 
-        bin_path = self.state_dir / f"{state_id}.bin"
         meta_path = self.state_dir / f"{state_id}.json"
-        tmp_path = self.state_dir / f"{state_id}.bin.tmp"
+        # Placeholder bin_path — the actual KV data lives server-side,
+        # but we keep a marker file for list_states() enumeration.
+        bin_path = self.state_dir / f"{state_id}.bin"
 
-        # Save KV state
-        state_data = llm.save_state()
+        # Save KV state via engine HTTP API
+        cache_filename = str(self.state_dir / state_id)
+        if hasattr(llm, "save_kv_cache"):
+            success = llm.save_kv_cache(cache_filename)
+        else:
+            logger.error("TemporalState: model has no save_kv_cache method")
+            raise AttributeError("Model does not support KV cache save")
 
-        # Write binary blob atomically
-        with open(tmp_path, "wb") as f:
-            pickle.dump(state_data, f)
-        os.rename(str(tmp_path), str(bin_path))
+        if not success:
+            raise RuntimeError(f"KV cache save failed for {state_id}")
 
-        # Update metadata with actual size
+        # Write a marker .bin file so list_states() can find this state
+        if not bin_path.exists():
+            bin_path.write_bytes(b"kv_cache_ref")
+
+        # Update metadata
         metadata["state_id"] = state_id
         metadata["timestamp"] = now.isoformat()
-        metadata["state_size_bytes"] = bin_path.stat().st_size
+        metadata["cache_filename"] = cache_filename
+        metadata["state_size_bytes"] = bin_path.stat().st_size if bin_path.exists() else 0
 
         # Write metadata sidecar
         meta_path.write_text(
@@ -429,45 +437,80 @@ class TemporalStateManager:
         )
 
         logger.info(
-            "Temporal state saved: %s (%d bytes)",
-            state_id, metadata["state_size_bytes"],
+            "Temporal state saved: %s (cache_filename=%s)",
+            state_id, cache_filename,
         )
         return bin_path
 
     def save_current_state_memory(self, llm) -> Any:
-        """Save Lite's current KV state to a Python object (not disk).
+        """Save Lite's current KV state to a temporary cache file.
 
         Used by TemporalInterviewer to preserve the current state before
         swapping to a past state for interview.  Lighter than bake_state()
-        — no disk I/O, no context reconstruction.
+        — no context reconstruction, just a cache save.
+
+        Caller must already hold _LITE_LOCK.
+        Returns the cache filename (str) used, or None on failure.
+        """
+        cache_filename = str(self.state_dir / "_interview_current")
+        if hasattr(llm, "save_kv_cache"):
+            success = llm.save_kv_cache(cache_filename)
+            return cache_filename if success else None
+        logger.warning("TemporalState: model has no save_kv_cache method")
+        return None
+
+    def restore_state_memory(self, llm, cache_filename) -> None:
+        """Restore a previously saved KV cache state.
+
+        Args:
+            llm: The model instance (VLLMRemoteModel).
+            cache_filename: The filename string returned by save_current_state_memory().
 
         Caller must already hold _LITE_LOCK.
         """
-        return llm.save_state()
-
-    def restore_state_memory(self, llm, state_data) -> None:
-        """Restore a previously saved in-memory state.
-
-        Caller must already hold _LITE_LOCK.
-        """
-        llm.load_state(state_data)
+        if cache_filename is None:
+            logger.warning("TemporalState: no cache filename to restore")
+            return
+        if hasattr(llm, "restore_kv_cache"):
+            llm.restore_kv_cache(cache_filename)
+        else:
+            logger.warning("TemporalState: model has no restore_kv_cache method")
 
     def _load_lite_state(self, llm, state_path: Path) -> bool:
-        """Load a saved state into Lite's KV cache.
+        """Load a saved state into Lite's KV cache via the engine slot API.
 
         Caller must already hold _LITE_LOCK (the public load_state()
         acquires the lock; call this internal method directly when the
         lock is already held, e.g. from TemporalInterviewer).
 
-        On failure, renames the corrupt file and returns False.
+        On failure, renames the corrupt marker file and returns False.
         """
         try:
-            with open(state_path, "rb") as f:
-                state_data = pickle.load(f)
+            # Resolve cache filename from metadata sidecar
+            meta_path = state_path.with_suffix(".json")
+            cache_filename = None
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    cache_filename = meta.get("cache_filename")
+                except (json.JSONDecodeError, OSError):
+                    pass
 
-            llm.load_state(state_data)
-            logger.info("Temporal state loaded: %s", state_path.stem)
-            return True
+            # Fallback: derive from state_path stem (matches what _save_lite_state writes)
+            if not cache_filename:
+                cache_filename = str(self.state_dir / state_path.stem)
+
+            if not hasattr(llm, "restore_kv_cache"):
+                logger.error("TemporalState: model has no restore_kv_cache method")
+                return False
+
+            success = llm.restore_kv_cache(cache_filename)
+            if success:
+                logger.info("Temporal state loaded: %s", state_path.stem)
+                return True
+            else:
+                logger.warning("Temporal state restore returned failure: %s", state_path.stem)
+                return False
         except Exception as exc:
             logger.error(
                 "Failed to load temporal state %s: %s", state_path.name, exc,

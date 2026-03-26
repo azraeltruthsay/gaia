@@ -149,6 +149,17 @@ provides:
     description: "Delete a LoRA adapter."
     consumers: [gaia-core]
 
+  # ── Alias Endpoints (test plan compatibility) ─────────────────────
+  - endpoint: /study/adapters
+    method: GET
+    description: "Alias of /adapters for test plan compatibility."
+    consumers: [gaia-web]
+
+  - endpoint: /study/vector/status
+    method: GET
+    description: "Aggregate vector index status across all loaded indexes."
+    consumers: [gaia-web]
+
   # ── Self-Awareness Pipeline ────────────────────────────────────────
   - endpoint: /pipeline/run
     method: POST

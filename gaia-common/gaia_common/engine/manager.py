@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -275,6 +276,12 @@ class EngineManager:
         with self._lock:
             worker_alive = (self.worker_process is not None
                             and self.worker_process.poll() is None)
+            # Detect dead worker: process object exists but has exited
+            if self.worker_process is not None and not worker_alive:
+                exit_code = self.worker_process.returncode
+                logger.warning("Worker found dead (exit code %s) during health check — cleaning up", exit_code)
+                self._cleanup_worker_state()
+                worker_alive = False
             model_loaded = worker_alive and self.worker_port is not None
 
         # Always include manager-level state (model_loaded, mode, backend)
@@ -537,6 +544,12 @@ class ManagedEngineHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Threaded HTTP server so long-running requests (model load/unload)
+    don't block health probes and other concurrent requests."""
+    daemon_threads = True
+
+
 def serve_managed(port: int = 8092, host: str = "0.0.0.0"):
     """Start the managed engine server — zero GPU, subprocess isolation."""
     logging.basicConfig(
@@ -558,8 +571,8 @@ def serve_managed(port: int = 8092, host: str = "0.0.0.0"):
     # Create handler class with manager reference
     handler_class = type("Handler", (ManagedEngineHandler,), {"manager": manager})
 
-    server = HTTPServer((host, port), handler_class)
-    logger.info("GAIA Engine Manager (zero-GPU standby) on %s:%d", host, port)
+    server = _ThreadingHTTPServer((host, port), handler_class)
+    logger.info("GAIA Engine Manager (zero-GPU standby, threaded) on %s:%d", host, port)
 
     try:
         server.serve_forever()

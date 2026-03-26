@@ -196,6 +196,12 @@ async def serenity_record(body: dict = {}):
     return {"status": "recorded", "serenity": serenity_manager.get_report()}
 
 
+@app.get("/drills")
+async def drills(limit: int = 20):
+    """Drill history — alias of /chaos/history for test plan compatibility."""
+    return {"history": _drill_history[-limit:]}
+
+
 @app.post("/serenity/reset")
 async def serenity_reset():
     serenity_manager.reset_serenity()

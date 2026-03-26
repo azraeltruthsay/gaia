@@ -33,6 +33,9 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
 # ── Runtime stage (from unified engine base) ──────────────────────────────
 FROM localhost:5000/gaia-engine-base:latest
 
+# Create non-root user for container execution (host UID mapping)
+RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+
 # GGUF support: llama-server binary + CUDA runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 libgomp1 \
@@ -49,9 +52,15 @@ RUN ldconfig
 COPY gaia-llama/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Set ownership for writable directories
+RUN chown -R gaia:gaia /app /shared
+
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 EXPOSE 8080
+
+# Run as non-root user
+USER gaia
 
 ENTRYPOINT ["/entrypoint.sh"]

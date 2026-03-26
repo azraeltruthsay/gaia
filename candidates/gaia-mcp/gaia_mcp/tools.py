@@ -2,6 +2,7 @@
 GAIA MCP Tools - Tool Dispatcher and Implementations.
 """
 
+import asyncio
 import os
 import subprocess
 from pathlib import Path
@@ -50,6 +51,36 @@ logger = get_logger(__name__)
 _config_instance = Config()
 _gaia_helper = GAIARescueHelper(_config_instance)
 _cfr_manager = CFRManager()
+
+# Default timeout for LLM-dependent tool calls (seconds).
+# CPU/GGUF inference at ~7 tok/s can take 60-120s; 120s gives headroom.
+LLM_TOOL_TIMEOUT = int(os.getenv("MCP_LLM_TOOL_TIMEOUT", "120"))
+
+
+async def _run_blocking_with_timeout(func, *args, timeout: int = LLM_TOOL_TIMEOUT, **kwargs):
+    """Run a blocking (synchronous) function in a thread pool with a timeout.
+
+    Prevents LLM-dependent tools from blocking the asyncio event loop and
+    makes the MCP server stay responsive to health checks and other requests.
+
+    Returns the function result, or a structured error dict on timeout.
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "LLM tool call timed out after %ds: %s", timeout, func.__name__
+        )
+        return {
+            "ok": False,
+            "error": f"LLM inference timeout ({timeout}s). CPU inference may be too slow for this operation.",
+            "timeout": True,
+            "timeout_seconds": timeout,
+        }
+
 
 # Placeholder for TOOLS registry (will be populated from gaia-common.utils.tools_registry)
 from gaia_common.utils.tools_registry import TOOLS
@@ -138,11 +169,8 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Cognitive Focus and Resolution (CFR) tools
         "cfr_ingest": lambda p: _cfr_manager.ingest(file_path=p.get("file_path"), doc_id=p.get("doc_id"), chunk_target=int(p.get("chunk_target", 3500))),
         "cfr_focus": lambda p: _cfr_manager.focus(doc_id=p["doc_id"], section_index=int(p["section_index"])),
-        "cfr_compress": lambda p: _cfr_manager.compress(doc_id=p["doc_id"], section_index=int(p["section_index"])),
         "cfr_expand": lambda p: _cfr_manager.expand(doc_id=p["doc_id"], section_index=int(p["section_index"])),
-        "cfr_synthesize": lambda p: _cfr_manager.synthesize(doc_id=p["doc_id"]),
         "cfr_status": lambda p: _cfr_manager.status(doc_id=p.get("doc_id", "")),
-        "cfr_rolling_context": lambda p: _cfr_manager.rolling_context(doc_id=p["doc_id"], target_section=int(p["target_section"])),
         # Knowledge base tools (VectorIndexer from gaia_common)
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
@@ -182,6 +210,16 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
     }
 
     async_tool_map = {
+        # CFR tools that call LLM inference (blocking HTTP → run in thread pool with timeout)
+        "cfr_compress": lambda p: _run_blocking_with_timeout(
+            _cfr_manager.compress, doc_id=p["doc_id"], section_index=int(p["section_index"]),
+        ),
+        "cfr_synthesize": lambda p: _run_blocking_with_timeout(
+            _cfr_manager.synthesize, doc_id=p["doc_id"],
+        ),
+        "cfr_rolling_context": lambda p: _run_blocking_with_timeout(
+            _cfr_manager.rolling_context, doc_id=p["doc_id"], target_section=int(p["target_section"]),
+        ),
         # NotebookLM tools (async httpx client)
         "notebooklm_list_notebooks": notebooklm_list_notebooks,
         "notebooklm_get_notebook": notebooklm_get_notebook,

@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI):
     try:
         global _consciousness_matrix
         from .consciousness_matrix import ConsciousnessMatrix
-        _consciousness_matrix = ConsciousnessMatrix()
+        _consciousness_matrix = ConsciousnessMatrix(lifecycle_machine=_lifecycle_machine)
         await _consciousness_matrix.probe_all()
         await _consciousness_matrix.start_continuous_poll(interval=15.0)
         logger.info("Consciousness matrix initialized: %s",

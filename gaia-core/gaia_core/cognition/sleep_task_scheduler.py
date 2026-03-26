@@ -205,6 +205,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="docs_maintenance",
+            task_type="DOCS_MAINTENANCE",
+            priority=2,
+            interruptible=True,
+            estimated_duration_seconds=60,
+            handler=self._run_docs_maintenance,
+        ))
+
+        self.register_task(SleepTask(
             task_id="blueprint_validation",
             task_type="blueprint_validation",
             priority=3,
@@ -450,6 +459,31 @@ class SleepTaskScheduler:
             logger.info("KV cache checkpoint: %s", results)
         except Exception as e:
             logger.error("KV cache checkpoint failed: %s", e, exc_info=True)
+
+    def _run_docs_maintenance(self, **kwargs) -> None:
+        """Detect stale documentation and draft update suggestions.
+
+        Lightweight task: queries doctor dissonance, checks git for recent
+        changes vs doc mtimes, and saves draft suggestions to /shared/docs_drafts/.
+        Uses Core on CPU if available for LLM-assisted summaries; falls back to
+        structured notes if no model is loaded.
+        """
+        try:
+            from gaia_core.cognition.sleep_tasks.docs_maintenance import run_docs_maintenance
+            result = run_docs_maintenance(
+                config=self.config,
+                model_pool=self.model_pool,
+                check_interrupted=self.check_interrupted,
+            )
+            n_stale = len(result.get("stale_files", []))
+            n_drafts = len(result.get("drafts", []))
+            logger.info("Docs maintenance: %d stale files, %d drafts saved", n_stale, n_drafts)
+        except TaskInterruptedError:
+            raise
+        except ImportError:
+            logger.debug("docs_maintenance module not available, skipping")
+        except Exception as e:
+            logger.error("Docs maintenance failed: %s", e, exc_info=True)
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {

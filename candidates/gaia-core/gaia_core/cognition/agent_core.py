@@ -2288,16 +2288,37 @@ class AgentCore:
                     "Post-generation quality gate: %s from %s. Attempting Prime escalation.",
                     _escalation_reason, selected_model_name
                 )
-                # Try to escalate to a higher-tier model
+                # Escalate to Prime via consciousness state transition.
+                # CPU Prime is for OBSERVATION only — responses need GPU Prime.
+                # Request FOCUSING mode: Core→CPU, Prime→GPU, Nano stays GPU.
                 _escalated_ok = False
-                # Escalate to Prime — load model on gaia-prime if in standby
                 _prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
                 _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive")
+                _orchestrator_endpoint = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
                 try:
                     import httpx as _httpx_esc
-                    yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Escalating to Prime...]\n\n"}
-                    # Check if Prime has a model loaded
-                    _ph = _httpx_esc.get(f"{_prime_endpoint}/health", timeout=3)
+                    yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Requesting FOCUSING mode — swapping Prime to GPU...]\n\n"}
+
+                    # Request consciousness transition: AWAKE → FOCUSING
+                    # This swaps Core to CPU/GGUF and Prime to GPU/safetensors
+                    try:
+                        _focus_resp = _httpx_esc.post(
+                            f"{_orchestrator_endpoint}/consciousness/focusing",
+                            timeout=120.0,  # model swap takes time
+                        )
+                        if _focus_resp.status_code == 200:
+                            _focus_data = _focus_resp.json()
+                            logger.info("Consciousness transition to FOCUSING: %s", _focus_data.get("configuration"))
+                            yield {"type": "token", "value": "[(i) FOCUSING mode active — Prime on GPU.]\n"}
+                        else:
+                            logger.warning("Consciousness FOCUSING transition failed: %s", _focus_resp.status_code)
+                            yield {"type": "token", "value": "[(i) GPU swap failed — using Prime on CPU.]\n"}
+                    except Exception as _focus_err:
+                        logger.warning("Consciousness transition failed: %s — falling back to CPU Prime", _focus_err)
+                        yield {"type": "token", "value": "[(i) Orchestrator unavailable — using Prime on CPU.]\n"}
+
+                    # Now check Prime's health (should be on GPU after FOCUSING)
+                    _ph = _httpx_esc.get(f"{_prime_endpoint}/health", timeout=5)
                     _prime_health = _ph.json() if _ph.status_code == 200 else {}
                     _prime_loaded = _prime_health.get("model_loaded", False)
                     # GGUF backend health returns just {"status":"ok"} without model_loaded
@@ -2394,6 +2415,20 @@ class AgentCore:
                                 yield {"type": "token", "value": _esc_text}
                 except Exception as _prime_exc:
                     logger.warning("Post-generation escalation to Prime failed: %s", _prime_exc)
+
+                # Transition back to AWAKE: Prime→CPU/GGUF, Core→GPU
+                # This runs whether escalation succeeded or not — don't leave Prime on GPU
+                try:
+                    _awake_resp = _httpx_esc.post(
+                        f"{_orchestrator_endpoint}/consciousness/awake",
+                        timeout=120.0,
+                    )
+                    if _awake_resp.status_code == 200:
+                        logger.info("Consciousness transition back to AWAKE: %s", _awake_resp.json().get("configuration"))
+                    else:
+                        logger.warning("Consciousness AWAKE transition failed: %s", _awake_resp.status_code)
+                except Exception as _awake_err:
+                    logger.warning("Consciousness AWAKE transition failed: %s", _awake_err)
 
                 if not _escalated_ok:
                     logger.warning("Post-generation escalation failed; using original response")

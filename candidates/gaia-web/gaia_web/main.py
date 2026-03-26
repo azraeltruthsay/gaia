@@ -161,7 +161,7 @@ async def process_user_input(user_input: str, request: Request):
 
     async def _stream_response():
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 # Forward to core as a v0.3 CognitionPacket
                 payload = {
                     "version": "v0.3",

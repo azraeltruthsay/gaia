@@ -218,6 +218,16 @@ provides:
         no_think: bool (default false)
     consumers: [gaia-doctor, gaia-monkey]
 
+  - endpoint: /cognitive/status
+    method: GET
+    description: "Cognitive system status summary (alias of /status with cognitive framing)."
+    consumers: [gaia-doctor, gaia-web]
+
+  - endpoint: /cognitive/monitor
+    method: GET
+    description: "Lightweight cognitive health monitor: initialization, persona, turn lock."
+    consumers: [gaia-doctor, gaia-web]
+
   # ── Doctor Integration ─────────────────────────────────────────────
   - endpoint: /api/repair/structural
     method: POST

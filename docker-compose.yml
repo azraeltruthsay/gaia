@@ -826,7 +826,7 @@ services:
           memory: 2G
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5000/languages"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/languages')"]
       interval: 30s
       timeout: 10s
       retries: 3

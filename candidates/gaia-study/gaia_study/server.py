@@ -596,6 +596,25 @@ def create_app() -> FastAPI:
                 logger.exception(f"Failed to get adapter info: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
     
+    # ── Alias Endpoints (test plan compatibility) ──────────────────────────
+
+    @app.get("/study/adapters")
+    async def study_adapters(tier: Optional[int] = None):
+        """Alias of /adapters for test plan compatibility."""
+        return await adapter_list(tier=tier)
+
+    @app.get("/study/vector/status")
+    async def study_vector_status():
+        """Aggregate vector index status across all loaded indexes."""
+        return {
+            "ok": True,
+            "loaded_indexes": list(indexers.keys()),
+            "index_stats": {
+                name: idx.get_status()
+                for name, idx in indexers.items()
+            },
+        }
+
     # ── Self-Awareness Pipeline ───────────────────────────────────────────────
 
     _pipeline_proc = None  # Track running pipeline subprocess

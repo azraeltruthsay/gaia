@@ -219,23 +219,25 @@ class IdleHeartbeat:
                 # Write to lite journal if available
                 if self._lite_journal:
                     try:
-                        self._lite_journal.write_entry(
-                            entry_type="idle_reflection",
-                            content=text.strip(),
-                            metadata={"idle_seconds": int(idle_seconds), "tick": self._tick_count},
-                        )
+                        # LiteJournal.write_entry() takes no args — it generates
+                        # its own entry via the model.  We only call it if the
+                        # journal has a model_pool so it can actually generate.
+                        if self._lite_journal.model_pool is not None:
+                            self._lite_journal.tick_count = self._tick_count
+                            self._lite_journal.write_entry()
+                        else:
+                            logger.debug("Idle heartbeat: lite_journal has no model_pool, skipping journal write")
                     except Exception:
                         logger.debug("Failed to write idle heartbeat journal entry", exc_info=True)
 
                 # Write to timeline
                 if self._timeline:
                     try:
-                        self._timeline({
-                            "type": "idle_heartbeat",
+                        self._timeline.append("idle_heartbeat", {
                             "content": text.strip()[:500],
                             "idle_seconds": int(idle_seconds),
                             "tick": self._tick_count,
-                        }, "idle_heartbeat", source="idle_heartbeat")
+                        })
                     except Exception:
                         logger.debug("Failed to write idle heartbeat timeline entry", exc_info=True)
 

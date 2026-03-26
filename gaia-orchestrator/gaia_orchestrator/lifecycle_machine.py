@@ -110,6 +110,74 @@ class LifecycleMachine:
         async with self._lock:
             return await self._execute_transition(trigger, target, reason)
 
+    async def set_state_external(
+        self,
+        target: LifecycleState,
+        reason: str = "",
+    ) -> TransitionResult:
+        """Set the lifecycle state without executing tier load/unload actions.
+
+        Used when an external system (e.g. the consciousness matrix) has already
+        performed the actual tier transitions and just needs the FSM to reflect
+        the new state. Records the transition in history for auditability.
+        """
+        async with self._lock:
+            current = LifecycleState(self._snapshot.state)
+            if current == target:
+                return TransitionResult(
+                    ok=True,
+                    from_state=current.value,
+                    to_state=target.value,
+                    trigger="external_sync",
+                )
+
+            start = time.time()
+            logger.info("LIFECYCLE: external state set %s → %s (reason=%s)",
+                         current.value, target.value, reason)
+
+            # Probe tiers to update snapshot with actual state
+            for tier, endpoint in self._tier_endpoints.items():
+                self._snapshot.tiers[tier] = await self._probe_tier(tier, endpoint)
+
+            # Record in history
+            record = TransitionRecord(
+                from_state=current.value,
+                to_state=target.value,
+                trigger="external_sync",
+                reason=reason,
+                elapsed_s=round(time.time() - start, 1),
+                actions=["external_sync"],
+            )
+
+            self._snapshot.state = target
+            self._snapshot.last_transition_at = datetime.now(timezone.utc)
+            self._snapshot.last_transition_trigger = "external_sync"
+            self._snapshot.transition_from = None
+            self._snapshot.transition_to = None
+            self._snapshot.transition_phase = None
+            self._snapshot.transition_error = None
+            self._snapshot.history.append(record)
+            if len(self._snapshot.history) > MAX_HISTORY:
+                self._snapshot.history = self._snapshot.history[-MAX_HISTORY:]
+
+            # Update VRAM
+            vram = sum(t.vram_mb for t in self._snapshot.tiers.values())
+            self._snapshot.vram_used_mb = vram
+            self._snapshot.vram_free_mb = self._snapshot.vram_total_mb - vram
+
+            await self._persist()
+
+            logger.info("LIFECYCLE: external state set complete: %s → %s", current.value, target.value)
+
+            return TransitionResult(
+                ok=True,
+                from_state=current.value,
+                to_state=target.value,
+                trigger="external_sync",
+                elapsed_s=round(time.time() - start, 1),
+                actions=["external_sync"],
+            )
+
     async def reconcile(self) -> dict:
         """Probe all tiers and reconcile actual state with expected.
 
