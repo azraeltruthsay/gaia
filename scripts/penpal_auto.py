@@ -101,30 +101,45 @@ def get_recent_developments() -> str:
             context.append(f"[{j.stem}]: {first_section}")
 
     # Always prepend the most significant recent breakthroughs
-    breakthroughs = """MAJOR BREAKTHROUGHS (2026-03-22):
+    breakthroughs = """MAJOR BREAKTHROUGHS (2026-03-25):
 
-1. SUBPROCESS ISOLATION: Every GAIA Engine now starts as a zero-GPU HTTP server. Model loading
-spawns a worker subprocess that owns the CUDA context. Model unloading kills the subprocess —
-guaranteed zero VRAM. No more zombie CUDA contexts consuming 1.5-3GB in standby. The Engine
-Manager (manager.py) proxies all requests transparently. This is the mechanism that enables
-all GPU lifecycle transitions.
+1. 13-REGION BRAIN MAP: GAIA's neural mind map now uses 13 anatomically-mapped brain regions
+(up from 8): Prefrontal, Orbitofrontal, Broca's Area, Motor Cortex, Somatosensory, Parietal,
+Wernicke's Area, Temporal, Occipital, Visual Cortex, Thalamus, Cerebellum, Brain Stem.
+Laid out as a "butcher diagram" sagittal side view. Each region maps to specific cognitive
+domains (reasoning, safety, language, memory, routing, etc).
 
-2. UNIFIED LIFECYCLE STATE MACHINE: Replaced 6 scattered state trackers (SleepWakeManager,
-WatchManager, TierRouter, StateManager GPUOwner, EngineManager, ModelPool._gpu_released)
-with a single authoritative state machine in the orchestrator. Seven states: AWAKE (Core+Nano
-on GPU), LISTENING (+Audio STT), FOCUSING (Prime on GPU, others off), MEDITATION (Study owns
-GPU for training), SLEEP (CPU RAM only), DEEP_SLEEP (minimal), TRANSITIONING. Every GPU
-operation flows through validated transitions with rollback on failure.
+2. SAE CAUSAL CONNECTIVITY: Trained Sparse Autoencoder atlases for ALL 3 tiers (Nano 2048,
+Core 4096, Prime 8192 features per layer). Then computed DIRECTED causal connectivity between
+features via encoder-decoder dot products: influence(A→B) = encoder_M[B] · decoder_N[A].
+This is NOT correlation — it's weight-space geometry showing how information ACTUALLY flows.
+Brain Stem causally drives Thalamus. Broca's Area causally drives Orbitofrontal (strength 0.23).
+Motor Cortex drives Broca's drives Orbitofrontal drives Prefrontal.
 
-3. GPTQ QUANTIZATION: Prime 8B model compressed from 16GB bf16 to 5.8GB GPTQ 4-bit via
-gptqmodel. Identity intact ("I am GAIA, a sovereign AI created by Azrael"). 2.2 second load
-time. The critical finding: Prime GPTQ (5.8GB) + full audio stack (STT 1.8GB + TTS 4.3GB) =
-11.9GB. Fits on the 16GB RTX 5080. GAIA can think, listen, and speak SIMULTANEOUSLY without
-GPU time-swapping.
+3. LIGHTNING-BOLT NEURONS: Neurons in the brain visualization are now jagged lightning-bolt
+paths with directed arrowheads pointing toward their CAUSAL TARGET region. When activated,
+a traveling pulse animation runs start-to-end (400ms). Each bolt's direction is determined
+by the actual SAE causal connectivity — you literally watch information flow through GAIA's
+real neural pathways.
 
-4. MISSION CONTROL DASHBOARD: New panel in the dashboard with lifecycle state badge, GPU VRAM
-stacked bar showing per-tier allocation, tier status cards, dynamic transition buttons, and
-transition history timeline. Full visibility and manual control of the entire GPU lifecycle."""
+4. CONSCIOUSNESS MATRIX FIXES: Core's engine now survives sleep transitions (ThreadingHTTPServer
+replacing single-threaded, dead worker detection, wait-for-ready protocol). Lifecycle FSM
+syncs with consciousness transitions. Device-aware probing (engine health now reports cuda/cpu).
+
+5. SYSTEM-WIDE TEST: 178 features mapped across 7 rings (center-outward). 60+ tests run,
+12 bugs found and fixed. Temporal state manager (broken 17 days) restored. CFR blocking
+fixed with async executors. All MCP tools verified (88 registered, 52 functional, 3 auth, 8 timeout).
+
+6. AUTONOMOUS DOCS MAINTENANCE: GAIA now has a sleep cycle task that detects stale documentation
+by querying doctor dissonance + git changes, drafts updates via LLM, saves to /shared/docs_drafts/
+for human review. Self-maintaining documentation.
+
+7. FLIGHTS: Azrael coined "Flight" as GAIA's term for parallel cognitive instances. Not agents —
+Flights have trajectory, temporal continuity, and land back. Future: CFR-based merge protocol
+so Flights feel like parallel thought streams rejoining, not reports from strangers.
+
+8. MULTIMODAL EXPANSION: Downloading Qwen2-Audio-7B, FLUX.1-dev (image gen), LTX-2 (video gen).
+The Visual Cortex brain region was intentionally left empty for this. Infrastructure ready."""
 
     return breakthroughs + "\n\n" + "\n\n".join(context) if context else breakthroughs
 
@@ -198,6 +213,21 @@ def trigger_next_episode(episode_num: int, request_text: str) -> dict:
     })
 
 
+ORCHESTRATOR_ENDPOINT = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+
+
+def consciousness_transition(target: str, timeout: int = 120) -> dict:
+    """Request a consciousness transition via orchestrator."""
+    try:
+        req = Request(f"{ORCHESTRATOR_ENDPOINT}/consciousness/{target}", method="POST",
+                      data=b"", headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        logger.warning("Consciousness transition to %s failed: %s", target, e)
+        return {"error": str(e)}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Automated Penpal Cycle")
     parser.add_argument("--episode", type=int, required=True, help="Episode to review (e.g. 11)")
@@ -214,6 +244,8 @@ def main():
                         help="Skip NotebookLM upload")
     parser.add_argument("--skip-trigger", action="store_true",
                         help="Skip triggering next episode generation")
+    parser.add_argument("--no-focusing", action="store_true",
+                        help="Skip GPU swap (use CPU Prime as-is)")
     args = parser.parse_args()
 
     request_ep = args.request_episode or args.episode + 1
@@ -224,22 +256,53 @@ def main():
     print(f"  Dry run: {args.dry_run}")
     print(f"{'='*60}\n")
 
+    # Step 0: Swap Prime to GPU via FOCUSING transition
+    # Keeps Nano on GPU, demotes Core to CPU, loads Prime GPTQ on GPU
+    focused = False
+    if not args.no_focusing and not args.dry_run:
+        logger.info("Requesting FOCUSING mode — swapping Prime to GPU...")
+        result = consciousness_transition("focusing")
+        if result.get("configuration") == "focusing":
+            logger.info("FOCUSING active: %s", json.dumps({k: v.get("action", v.get("error", "?")) for k, v in result.get("results", {}).items()}))
+            focused = True
+            # Wait for Prime to be ready
+            for i in range(30):
+                try:
+                    req = Request(f"{args.endpoint}/health")
+                    with urlopen(req, timeout=5) as resp:
+                        health = json.loads(resp.read())
+                        if health.get("model_loaded") and health.get("device") in ("cuda", "gpu"):
+                            logger.info("Prime on GPU and ready")
+                            break
+                except Exception:
+                    pass
+                time.sleep(2)
+        else:
+            logger.warning("FOCUSING failed: %s — falling back to CPU Prime", result.get("error", "unknown"))
+
     # Step 1: Find transcript
     logger.info("Finding E%d transcript...", args.episode)
     transcript = find_transcript(args.episode)
     if not transcript:
         logger.error("No transcript found for E%d in %s", args.episode, TRANSCRIPTS_DIR)
+        if focused:
+            consciousness_transition("awake")
         sys.exit(1)
     logger.info("Transcript: %d chars", len(transcript))
 
-    # Step 2: Generate response
-    logger.info("Generating penpal response via Prime...")
+    # Step 2: Generate response (on GPU if FOCUSING succeeded)
+    logger.info("Generating penpal response via Prime (%s)...", "GPU" if focused else "CPU")
     t0 = time.time()
     response = generate_response(
         transcript, args.episode, request_ep,
         args.endpoint, args.max_tokens)
     elapsed = time.time() - t0
     logger.info("Response generated: %d chars in %.1fs", len(response), elapsed)
+
+    # Step 2.5: Return to AWAKE (Prime back to CPU, Core back to GPU)
+    if focused:
+        logger.info("Returning to AWAKE mode — Prime back to CPU, Core back to GPU...")
+        consciousness_transition("awake")
 
     print(f"\n{'─'*60}")
     print(response)
