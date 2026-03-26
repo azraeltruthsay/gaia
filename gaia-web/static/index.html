@@ -159,32 +159,82 @@
   <!-- ── Dashboard View (original 3-panel layout) ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'dashboard'" x-cloak>
     <main class="panels">
-      <!-- Left: Chat (compact version) -->
-      <section class="panel panel-chat" x-data="chatPanel()">
+      <!-- Left: Orchestrator — consciousness matrix & container states -->
+      <section class="panel panel-chat" x-data="orchestratorPanel()">
         <div class="panel-header">
-          <span>Chat</span>
-          <select class="compact-conv-select"
-                  x-model="$store.chat.activeId"
-                  @change="$store.chat.switchConversation($store.chat.activeId)">
-            <template x-for="c in $store.chat.getSortedList()" :key="c.id">
-              <option :value="c.id" x-text="c.title"></option>
-            </template>
-          </select>
-          <button class="btn-icon" @click="clearHistory()" title="Clear chat history">&times;</button>
+          <span>Orchestrator</span>
+          <span class="state-value" :class="lifecycleClass" x-text="lifecycleState" style="font-size:10px;margin-left:auto;"></span>
         </div>
-        <div class="panel-body">
-          <div x-ref="messages" class="chat-messages">
-            <template x-for="msg in $store.chat.getMessages()" :key="msg.id">
-              <div class="chat-msg" :class="msg.type">
-                <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
-                <span class="chat-text" x-html="renderMessage(msg)"></span>
+        <div class="panel-body" style="padding:8px;overflow-y:auto;">
+          <!-- Consciousness Matrix -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Consciousness Matrix</div>
+            <template x-for="tier in tiers" :key="tier.tier">
+              <div class="state-card" :class="'tier-card-' + tier.actual" style="margin-bottom:4px;padding:6px 8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-weight:600;text-transform:capitalize;" x-text="tier.tier"></span>
+                  <span style="font-size:9px;padding:2px 6px;border-radius:3px;"
+                        :style="'background:' + consciousnessColor(tier.actual) + ';color:#000;'"
+                        x-text="tier.actual"></span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:3px;">
+                  <span x-text="'target: ' + tier.target"></span>
+                  <span :style="tier.ok ? 'color:var(--green)' : 'color:var(--red)'" x-text="tier.ok ? 'OK' : tier.error || 'MISMATCH'"></span>
+                </div>
+                <div x-show="tier.transitioning" style="font-size:9px;color:var(--yellow);margin-top:2px;">Transitioning...</div>
               </div>
             </template>
           </div>
-          <div class="chat-input-row">
-            <input type="text" x-model="input" placeholder="Talk to GAIA..." autocomplete="off"
-                   @keydown.enter.prevent="send()" :disabled="$store.chat.sending">
-            <button @click="send()" :disabled="$store.chat.sending" x-text="$store.chat.sending ? '...' : 'Send'">Send</button>
+
+          <!-- Container States from Lifecycle -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Container States</div>
+            <template x-for="c in containers" :key="c.name">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-bottom:1px solid var(--border);font-size:11px;">
+                <span x-text="c.name" style="font-weight:500;"></span>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <span style="font-size:9px;" x-text="c.device"></span>
+                  <span style="font-size:9px;" x-show="c.vram_mb > 0" x-text="c.vram_mb + 'MB'"></span>
+                  <span style="width:8px;height:8px;border-radius:50%;display:inline-block;"
+                        :style="'background:' + (c.healthy ? 'var(--green)' : c.model_loaded ? 'var(--yellow)' : 'var(--text-muted)')"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- VRAM Budget -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px;">VRAM</div>
+            <div style="background:var(--bg-input);border-radius:4px;height:14px;overflow:hidden;">
+              <div style="height:100%;border-radius:4px;transition:width 0.5s;"
+                   :style="'width:' + vramPercent + '%;background:' + (vramPercent > 85 ? 'var(--red)' : vramPercent > 60 ? 'var(--yellow)' : 'var(--green)')"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-top:2px;">
+              <span x-text="vramUsed + ' MB used'"></span>
+              <span x-text="vramFree + ' MB free'"></span>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Quick Actions</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+              <button class="btn-sm" @click="transition('awake')" :disabled="lifecycleState==='awake'">Awake</button>
+              <button class="btn-sm" @click="transition('focusing')" :disabled="lifecycleState==='focusing'">Focus</button>
+              <button class="btn-sm" @click="transition('sleep')" :disabled="lifecycleState==='sleep'">Sleep</button>
+              <button class="btn-sm" @click="transition('deep-sleep')">Deep Sleep</button>
+            </div>
+          </div>
+
+          <!-- Recent Transitions -->
+          <div style="margin-top:12px;" x-show="history.length > 0">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px;">Recent Transitions</div>
+            <template x-for="h in history.slice(0, 5)" :key="h.at">
+              <div style="font-size:9px;color:var(--text-muted);padding:2px 0;border-bottom:1px solid var(--border);">
+                <span x-text="h.from_state + ' → ' + h.to_state"></span>
+                <span style="float:right;" x-text="h.trigger"></span>
+              </div>
+            </template>
           </div>
         </div>
       </section>

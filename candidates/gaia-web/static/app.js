@@ -421,6 +421,92 @@ document.addEventListener('alpine:init', () => {
   Alpine.store('chat', chatStore);
 });
 
+// ── Orchestrator Panel Component ──────────────────────────────────────────────
+
+function orchestratorPanel() {
+  return {
+    tiers: [],
+    containers: [],
+    lifecycleState: '--',
+    vramUsed: 0,
+    vramFree: 0,
+    vramPercent: 0,
+    history: [],
+    _pollTimer: null,
+
+    get lifecycleClass() {
+      const s = this.lifecycleState;
+      return s === 'awake' ? 'ok' : s === 'focusing' ? 'warn' : s === 'sleep' ? 'dim' : '';
+    },
+
+    consciousnessColor(state) {
+      return state === 'conscious' ? '#4caf50' : state === 'subconscious' ? '#ff9800' : '#555';
+    },
+
+    init() {
+      this._poll();
+      this._pollTimer = setInterval(() => this._poll(), 5000);
+    },
+
+    destroy() {
+      if (this._pollTimer) clearInterval(this._pollTimer);
+    },
+
+    async _poll() {
+      try {
+        // Consciousness matrix
+        const matrixResp = await fetch('/api/system/consciousness');
+        if (matrixResp.ok) {
+          const matrix = await matrixResp.json();
+          this.tiers = Object.values(matrix);
+        }
+      } catch {}
+
+      try {
+        // Lifecycle state (has container details + VRAM + history)
+        const lcResp = await fetch('/api/system/lifecycle/state');
+        if (lcResp.ok) {
+          const lc = await lcResp.json();
+          this.lifecycleState = lc.state || '--';
+          this.vramUsed = lc.vram_used_mb || 0;
+          this.vramFree = lc.vram_free_mb || 0;
+          const total = (lc.vram_total_mb || 16000);
+          this.vramPercent = total > 0 ? Math.round((this.vramUsed / total) * 100) : 0;
+
+          // Container states from tier data
+          if (lc.tiers) {
+            this.containers = Object.entries(lc.tiers).map(([name, t]) => ({
+              name,
+              device: t.device || 'unknown',
+              model_loaded: t.model_loaded || false,
+              vram_mb: t.vram_mb || 0,
+              healthy: t.healthy || false,
+            }));
+          }
+        }
+      } catch {}
+
+      try {
+        // Transition history
+        const histResp = await fetch('/api/system/lifecycle/history');
+        if (histResp.ok) {
+          const data = await histResp.json();
+          this.history = (data.history || data || []).slice(-10).reverse();
+        }
+      } catch {}
+    },
+
+    async transition(target) {
+      try {
+        const resp = await fetch(`/api/system/consciousness/${target}`, { method: 'POST' });
+        if (resp.ok) {
+          setTimeout(() => this._poll(), 1000);
+        }
+      } catch {}
+    },
+  };
+}
+
 // ── Chat Panel Component ──────────────────────────────────────────────────────
 
 function chatPanel() {

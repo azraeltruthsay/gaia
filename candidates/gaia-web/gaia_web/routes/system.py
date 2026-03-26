@@ -660,3 +660,44 @@ async def consciousness_matrix():
     except Exception:
         pass
     return {"nano": {"actual": "unknown"}, "core": {"actual": "unknown"}, "prime": {"actual": "unknown"}}
+
+
+@router.post("/consciousness/{target}")
+async def consciousness_transition(target: str):
+    """Proxy consciousness transition to orchestrator."""
+    if target not in ("awake", "focusing", "sleep", "deep-sleep"):
+        return {"error": f"Unknown target: {target}"}
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{ORCHESTRATOR_URL}/consciousness/{target}")
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"Orchestrator returned {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/lifecycle/state")
+async def lifecycle_state():
+    """Proxy lifecycle state from orchestrator."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/state")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return {"state": "unknown", "tiers": {}}
+
+
+@router.get("/lifecycle/history")
+async def lifecycle_history():
+    """Proxy lifecycle transition history from orchestrator."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/history")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return {"history": []}

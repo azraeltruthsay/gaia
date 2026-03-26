@@ -2867,6 +2867,26 @@ html, body {
 
 .hook-btn-sm:hover { background: var(--accent); color: var(--text); }
 
+/* Orchestrator panel quick action buttons */
+.btn-sm {
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: background 0.2s;
+}
+.btn-sm:hover:not(:disabled) { background: var(--accent); color: var(--text); }
+.btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Tier consciousness state cards */
+.tier-card-conscious { border-left: 3px solid #4caf50; }
+.tier-card-subconscious { border-left: 3px solid #ff9800; }
+.tier-card-unconscious { border-left: 3px solid #555; }
+
 .hook-btn-warn {
   background: rgba(255, 167, 38, 0.2);
   color: var(--warn);
