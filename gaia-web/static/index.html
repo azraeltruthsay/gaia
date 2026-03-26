@@ -701,11 +701,11 @@
           </button>
         </div>
         <div x-show="showIrritations" x-collapse class="doctor-detail-section">
-          <template x-for="irr in irritations" :key="irr.timestamp + irr.service">
+          <template x-for="irr in irritations" :key="(irr.time || irr.timestamp || '') + irr.service">
             <div class="irritation-entry">
               <span class="doctor-entry-service" x-text="irr.service"></span>
-              <span class="doctor-entry-msg" x-text="irr.pattern || irr.line?.substring(0, 120)"></span>
-              <span class="doctor-entry-time" x-text="irr.timestamp?.substring(11, 19) || ''"></span>
+              <span class="doctor-entry-msg" x-text="irr.pattern || irr.message?.substring(0, 120) || irr.line?.substring(0, 120)"></span>
+              <span class="doctor-entry-time" x-text="(irr.time || irr.timestamp || '')?.substring(11, 19) || ''"></span>
             </div>
           </template>
         </div>
@@ -762,11 +762,11 @@
           </button>
         </div>
         <div x-show="showRemediations" x-collapse class="doctor-detail-section">
-          <template x-for="rem in remediations" :key="rem.timestamp + rem.service">
+          <template x-for="rem in remediations" :key="(rem.time || rem.timestamp || '') + rem.service">
             <div class="remediation-entry">
               <span class="doctor-entry-service" x-text="rem.service"></span>
-              <span class="doctor-entry-msg" x-text="rem.action || rem.type || 'remediation'"></span>
-              <span class="doctor-entry-time" x-text="rem.timestamp?.substring(11, 19) || ''"></span>
+              <span class="doctor-entry-msg" x-text="rem.action || rem.type || (rem.success ? 'restart ok' : 'restart failed') || 'remediation'"></span>
+              <span class="doctor-entry-time" x-text="(rem.time || rem.timestamp || '')?.substring(11, 19) || ''"></span>
             </div>
           </template>
         </div>

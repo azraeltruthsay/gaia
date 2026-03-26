@@ -2798,7 +2798,12 @@ function lifecyclePanel() {
         const data = await resp.json();
         this.state = data.state || 'unknown';
         this.tiers = data.tiers || {};
-        this.vramUsed = data.vram_used_mb || 0;
+        // Compute VRAM totals from tier data (API doesn't provide top-level totals)
+        let usedSum = 0;
+        for (const info of Object.values(this.tiers)) {
+          if (info.vram_mb > 0) usedSum += info.vram_mb;
+        }
+        this.vramUsed = data.vram_used_mb || usedSum;
         this.vramTotal = data.vram_total_mb || 15833;
         this.freePct = Math.max(0, ((this.vramTotal - this.vramUsed) / this.vramTotal) * 100);
 
@@ -2956,8 +2961,8 @@ function hooksPanel() {
         if (statusResp.ok) {
           const data = await statusResp.json();
           this.sleepState = data.state || data.sleep_state || 'unknown';
-          this.sleepCycle = data.cycle_count != null ? `#${data.cycle_count}` : '--';
-          const up = data.uptime_seconds || data.uptime;
+          this.sleepCycle = data.cycle_count != null ? `#${data.cycle_count}` : (data.phase || '--');
+          const up = data.seconds_in_state || data.uptime_seconds || data.uptime;
           this.sleepUptime = up != null ? formatDuration(up) : '--';
           if (data.auto_sleep_enabled != null) this.autoSleepEnabled = data.auto_sleep_enabled;
           if (data.idle_threshold_minutes != null) this.sleepThreshold = data.idle_threshold_minutes;
@@ -3013,10 +3018,20 @@ function hooksPanel() {
         const resp = await fetch('/api/hooks/gpu/status');
         if (resp.ok) {
           const data = await resp.json();
-          this.gpuOwner = data.owner || data.gpu_owner || 'none';
+          // gpu/status returns: gpu_state, gpu_prime_loaded, gpu_prime_status, prime_reachable
+          this.gpuOwner = data.owner || data.gpu_owner || data.gpu_state || 'unknown';
           const used = data.vram_used_mb || data.used_mb;
           const total = data.vram_total_mb || data.total_mb;
-          this.gpuVram = used != null && total != null ? `${Math.round(used)} / ${Math.round(total)} MB` : '--';
+          if (used != null && total != null) {
+            this.gpuVram = `${Math.round(used)} / ${Math.round(total)} MB`;
+          } else {
+            // Build description from available fields
+            const parts = [];
+            if (data.gpu_prime_loaded) parts.push('Prime loaded');
+            if (data.gpu_prime_status) parts.push(data.gpu_prime_status);
+            if (data.prime_reachable === false) parts.push('unreachable');
+            this.gpuVram = parts.length > 0 ? parts.join(', ') : '--';
+          }
         }
       } catch {
         this.gpuOwner = 'unreachable';
@@ -3501,11 +3516,14 @@ function doctorPanel() {
         } catch {}
       }
 
-      // [5] Dissonance
+      // [5] Dissonance — response has vital_divergent + standard_divergent arrays
       if (fetches[5].status === 'fulfilled' && fetches[5].value.ok) {
         try {
           const data = await fetches[5].value.json();
-          const diverged = data.diverged || [];
+          const diverged = data.diverged || [
+            ...(data.vital_divergent || []),
+            ...(data.standard_divergent || []),
+          ];
           this.dissonanceCount = diverged.length;
           if (this.showDissonance) {
             this.dissonanceFiles = diverged.slice(0, 20);
@@ -3534,7 +3552,11 @@ function doctorPanel() {
           const r = await fetch('/api/system/dissonance');
           if (r.ok) {
             const data = await r.json();
-            this.dissonanceFiles = (data.diverged || []).slice(0, 20);
+            const diverged = data.diverged || [
+              ...(data.vital_divergent || []),
+              ...(data.standard_divergent || []),
+            ];
+            this.dissonanceFiles = diverged.slice(0, 20);
           }
         } catch {}
       }

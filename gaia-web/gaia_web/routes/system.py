@@ -677,27 +677,5 @@ async def consciousness_transition(target: str):
         return {"error": str(e)}
 
 
-@router.get("/lifecycle/state")
-async def lifecycle_state():
-    """Proxy lifecycle state from orchestrator."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/state")
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-    return {"state": "unknown", "tiers": {}}
-
-
-@router.get("/lifecycle/history")
-async def lifecycle_history():
-    """Proxy lifecycle transition history from orchestrator."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/history")
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-    return {"history": []}
+## NOTE: Duplicate lifecycle/state and lifecycle/history routes were removed.
+## The canonical routes are defined earlier in this file (lines ~586-638).
