@@ -1123,6 +1123,38 @@
         <pre class="fb-viewer-content" x-show="!isMarkdown"><code x-text="fileContent"></code></pre>
       </div>
     </div>
+
+    <!-- Curriculum Review Queue -->
+    <div class="hook-group" x-data="curriculumPanel()" x-init="init()">
+      <div class="hook-group-header">Curriculum Queue</div>
+      <div class="hook-status">
+        <span class="hook-status-label">Pending:</span>
+        <span class="hook-status-value" x-text="pendingCount"></span>
+      </div>
+      <template x-for="batch in batches" :key="batch.filename">
+        <div class="curriculum-batch" style="padding:6px;border:1px solid var(--border);margin:4px 0;border-radius:4px;">
+          <div style="display:flex;justify-content:space-between;font-size:11px;">
+            <span style="font-weight:600;" x-text="batch.course || batch.filename"></span>
+            <span x-text="batch.pair_count + ' pairs'"></span>
+          </div>
+          <div style="font-size:9px;color:var(--text-muted);" x-text="batch.timestamp"></div>
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button class="btn-sm" style="background:var(--green);color:#000;" @click="approve(batch.filename)">Approve All</button>
+            <button class="btn-sm" @click="expandBatch = expandBatch === batch.filename ? null : batch.filename">Review</button>
+            <button class="btn-sm" style="color:var(--red);" @click="reject(batch.filename)">Reject</button>
+          </div>
+          <div x-show="expandBatch === batch.filename" style="margin-top:6px;max-height:200px;overflow-y:auto;">
+            <template x-for="(pair, idx) in batch.pairs || []" :key="idx">
+              <div style="font-size:10px;padding:4px;border-bottom:1px solid var(--border);">
+                <div style="color:var(--accent);" x-text="'Q: ' + (pair.instruction || '').substring(0, 100)"></div>
+                <div style="color:var(--text-muted);" x-text="'A: ' + (pair.output || '').substring(0, 100)"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+      <div x-show="batches.length === 0" style="font-size:10px;color:var(--text-muted);padding:8px;">No pending curriculum. Knowledge ingestion runs during sleep cycles.</div>
+    </div>
   </section>
 
   <!-- ── Audio Listener View ── -->

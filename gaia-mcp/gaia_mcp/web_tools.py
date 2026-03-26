@@ -38,6 +38,8 @@ class SourceTrustConfig:
         "developer.mozilla.org",
         "rust-lang.org",
         "cppreference.com",
+        "ocw.mit.edu",
+        "mitocw.mit.edu",
     ]
 
     _DEFAULT_RELIABLE = [

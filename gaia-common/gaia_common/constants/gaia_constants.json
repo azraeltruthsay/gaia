@@ -403,7 +403,9 @@
       "docs.python.org",
       "developer.mozilla.org",
       "rust-lang.org",
-      "cppreference.com"
+      "cppreference.com",
+      "ocw.mit.edu",
+      "mitocw.mit.edu"
     ],
     "reliable_domains": [
       "github.com",
@@ -717,5 +719,17 @@
     "interview_enabled": true,
     "interview_interval_ticks": 6,
     "interview_rounds": 3
+  },
+  "KNOWLEDGE_INGESTION": {
+    "enabled": true,
+    "max_pages_per_cycle": 5,
+    "candidate_dir": "/shared/knowledge/candidates",
+    "raw_cache_dir": "/shared/knowledge/raw",
+    "sources": {
+      "ocw_mit": {
+        "enabled": true,
+        "courses": ["6-858-computer-systems-security-fall-2014"]
+      }
+    }
   }
 }

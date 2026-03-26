@@ -259,6 +259,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="knowledge_ingestion",
+            task_type="KNOWLEDGE_INGESTION",
+            priority=4,
+            interruptible=True,
+            estimated_duration_seconds=300,
+            handler=self._run_knowledge_ingestion,
+        ))
+
+        self.register_task(SleepTask(
             task_id="wiki_doc_regen",
             task_type="DOC_GENERATION",
             priority=5,
@@ -484,6 +493,30 @@ class SleepTaskScheduler:
             logger.debug("docs_maintenance module not available, skipping")
         except Exception as e:
             logger.error("Docs maintenance failed: %s", e, exc_info=True)
+
+    def _run_knowledge_ingestion(self, **kwargs) -> None:
+        """Ingest MIT OCW content through CFR compression into curriculum pairs.
+
+        Fetches course pages, compresses via CFR (falls back to raw text),
+        generates QLoRA training pairs, deduplicates, and queues candidates
+        for the next training cycle. No GPU needed.
+        """
+        try:
+            from gaia_core.cognition.sleep_tasks.knowledge_ingestion import run_knowledge_ingestion
+            result = run_knowledge_ingestion(
+                config=self.config,
+                model_pool=self.model_pool,
+                check_interrupted=self.check_interrupted,
+            )
+            total_pairs = result.get("total_pairs", 0)
+            n_courses = len(result.get("courses", []))
+            logger.info("Knowledge ingestion: %d pairs from %d courses", total_pairs, n_courses)
+        except TaskInterruptedError:
+            raise
+        except ImportError:
+            logger.debug("knowledge_ingestion module not available, skipping")
+        except Exception as e:
+            logger.error("Knowledge ingestion failed: %s", e, exc_info=True)
 
     # Blueprint-to-source mapping for validation
     _BLUEPRINT_SOURCES: Dict[str, List[str]] = {

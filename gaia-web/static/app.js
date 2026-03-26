@@ -4828,3 +4828,40 @@ function consentPanel() {
     },
   };
 }
+
+
+// ── Curriculum Review Queue ─────────────────────────────────────────────────
+
+function curriculumPanel() {
+  return {
+    batches: [],
+    pendingCount: 0,
+    expandBatch: null,
+
+    init() { this.poll(); setInterval(() => this.poll(), 30000); },
+
+    async poll() {
+      try {
+        const resp = await fetch('/api/curriculum/candidates');
+        if (resp.ok) {
+          const list = await resp.json();
+          this.batches = list;
+          this.pendingCount = list.length;
+        }
+      } catch {}
+    },
+
+    async approve(filename) {
+      await fetch(`/api/curriculum/candidates/${encodeURIComponent(filename)}/approve`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({approve_all: true})
+      });
+      this.poll();
+    },
+
+    async reject(filename) {
+      await fetch(`/api/curriculum/candidates/${encodeURIComponent(filename)}/reject`, { method: 'POST' });
+      this.poll();
+    }
+  };
+}
