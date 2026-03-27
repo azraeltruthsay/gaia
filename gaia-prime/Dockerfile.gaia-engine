@@ -98,6 +98,7 @@ COPY gaia-engine/gaia_engine/cpp/__init__.py \
      /tmp/gaia_cpp_src/
 # Also copy updated engine modules that gaia-engine-base may not have yet
 COPY gaia-engine/gaia_engine/manager.py ${GAIA_ENGINE_PKGDIR}/manager.py
+COPY gaia-engine/gaia_engine/config.py ${GAIA_ENGINE_PKGDIR}/config.py
 RUN mkdir -p "${GAIA_CPP_DEST}" \
     && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "${GAIA_CPP_DEST}/" \; \
     && cp /tmp/gaia_cpp_src/__init__.py /tmp/gaia_cpp_src/backend.py "${GAIA_CPP_DEST}/" \

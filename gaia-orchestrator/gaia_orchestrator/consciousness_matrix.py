@@ -100,7 +100,7 @@ class ConsciousnessMatrix:
         self._cpu_models = {
             "nano": os.environ.get("NANO_GGUF_PATH", "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"),
             "core": os.environ.get("CORE_GGUF_PATH", "/models/Qwen3.5-2B-BF16.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-identity-Q8_0.gguf"),
+            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-identity-Q4_K_M.gguf"),
         }
 
         # The matrix — one entry per tier

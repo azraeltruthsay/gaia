@@ -120,6 +120,7 @@ services:
       - SHARED_DIR=/shared
       - PYTHONPATH=/gaia-common
       - GAIA_ENGINE_TIER=prime
+      - GGUF_THREADS=16
 
     ports:
       - "7777:7777"
