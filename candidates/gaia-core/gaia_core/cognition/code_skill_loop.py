@@ -79,43 +79,86 @@ def _save_state(state: dict) -> None:
         json.dump(state, f, indent=2)
 
 
+CODE_GEN_MAX_RETRIES = 3
+
 def _call_prime(prompt: str, max_tokens: int = 512,
-                temperature: float = 0.3) -> str:
-    """Generate code via Prime's OpenAI-compatible endpoint."""
+                temperature: float = 0.1) -> str:
+    """Generate code via Prime's OpenAI-compatible endpoint.
+
+    Uses low temperature (0.1) for deterministic code output.
+    Retries up to CODE_GEN_MAX_RETRIES times if the output is off-topic
+    (doesn't contain 'def ' or 'class ') or contains ChatML tokens.
+    """
     messages = [
         {"role": "system", "content": (
             "You are a Python code generator. Output ONLY valid Python code. "
             "No explanations, no markdown fences, no comments about your approach. "
-            "Just the function definition(s) requested."
+            "Just the function definition(s) requested. "
+            "Use proper indentation with 4 spaces per level."
         )},
         {"role": "user", "content": prompt},
     ]
 
-    payload = json.dumps({
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": False,
-    }).encode()
+    for attempt in range(CODE_GEN_MAX_RETRIES):
+        payload = json.dumps({
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+        }).encode()
 
-    req = Request(
-        f"{PRIME_ENDPOINT}/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
+        req = Request(
+            f"{PRIME_ENDPOINT}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
 
-    try:
-        with urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-            text = data["choices"][0]["message"]["content"]
-            return _extract_code(text)
-    except Exception as e:
-        logger.error("Prime generation failed: %s", e)
-        return ""
+        try:
+            with urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+                text = data["choices"][0]["message"]["content"]
+                code = _extract_code(text)
+
+                # Validate: must look like Python code, not hallucination
+                if _is_valid_code_output(code):
+                    return code
+
+                logger.warning(
+                    "Generation attempt %d/%d rejected (off-topic or malformed): %.60s...",
+                    attempt + 1, CODE_GEN_MAX_RETRIES, code,
+                )
+                # Bump temperature slightly on retry to escape bad sampling path
+                temperature = min(temperature + 0.05, 0.4)
+
+        except Exception as e:
+            logger.error("Prime generation failed (attempt %d): %s", attempt + 1, e)
+
+    return ""
+
+
+def _is_valid_code_output(code: str) -> bool:
+    """Check if the generated text looks like valid Python code."""
+    if not code or len(code) < 10:
+        return False
+    # Reject ChatML token leakage
+    if "<|im_start|>" in code or "<|im_end|>" in code:
+        return False
+    # Must contain a function or class definition
+    if "def " not in code and "class " not in code:
+        return False
+    # Reject single-line collapse: multi-statement code on one line
+    # (the model sometimes emits code with spaces instead of newlines)
+    if "\n" not in code and len(code) > 80 and code.count("    ") > 2:
+        return False
+    return True
 
 
 def _extract_code(text: str) -> str:
-    """Extract Python code from LLM output, stripping markdown fences."""
+    """Extract Python code from LLM output, stripping markdown fences and ChatML."""
+    # Strip ChatML tokens
+    text = text.replace("<|im_start|>", "").replace("<|im_end|>", "")
+    text = text.replace("<|im_start|>assistant\n", "").strip()
+
     # Strip ```python ... ``` fences if present
     if "```python" in text:
         start = text.index("```python") + len("```python")
@@ -140,7 +183,7 @@ def _self_correct(original_code: str, error_output: str,
         f"Original task: {challenge_prompt}\n\n"
         f"Fix the code. Output ONLY the corrected Python code, no explanations."
     )
-    return _call_prime(correction_prompt, max_tokens=512, temperature=0.2)
+    return _call_prime(correction_prompt, max_tokens=512, temperature=0.1)
 
 
 def _create_code_samvega(challenge: Challenge, original_code: str,
