@@ -86,12 +86,18 @@ COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/lla
 COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
 RUN ldconfig
 
-# gaia_cpp extension: install into the gaia_engine package at the known site-packages path.
-# gaia-engine-base uses Python 3.11 and pip installs to /usr/local/lib/python3.11/site-packages.
-# We create the cpp/ subdirectory and populate it with the compiled .so + Python sources.
-ENV GAIA_CPP_DEST=/usr/local/lib/python3.11/site-packages/gaia_engine/cpp
+# Install gaia_cpp extension + updated gaia_engine Python modules.
+# gaia-engine-base pip-installs from GitHub, but the base image may lag behind HEAD.
+# We copy the latest versions directly to override whatever pip installed.
+# The known site-packages path: /usr/local/lib/python3.11/site-packages/gaia_engine/
+ENV GAIA_ENGINE_PKGDIR=/usr/local/lib/python3.11/site-packages/gaia_engine
+ENV GAIA_CPP_DEST=${GAIA_ENGINE_PKGDIR}/cpp
 COPY --from=cpp_builder /build/gaia_cpp_src/build/ /tmp/gaia_cpp_build/
-COPY gaia-engine/gaia_engine/cpp/__init__.py gaia-engine/gaia_engine/cpp/backend.py /tmp/gaia_cpp_src/
+COPY gaia-engine/gaia_engine/cpp/__init__.py \
+     gaia-engine/gaia_engine/cpp/backend.py \
+     /tmp/gaia_cpp_src/
+# Also copy updated engine modules that gaia-engine-base may not have yet
+COPY gaia-engine/gaia_engine/manager.py ${GAIA_ENGINE_PKGDIR}/manager.py
 RUN mkdir -p "${GAIA_CPP_DEST}" \
     && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "${GAIA_CPP_DEST}/" \; \
     && cp /tmp/gaia_cpp_src/__init__.py /tmp/gaia_cpp_src/backend.py "${GAIA_CPP_DEST}/" \
