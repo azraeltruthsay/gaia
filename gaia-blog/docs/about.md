@@ -2,7 +2,7 @@
 
 ## The Project
 
-GAIA is a sovereign AI agent built as a Service-Oriented Architecture running on a single workstation. It hosts 11 containerized services that collaborate through HTTP and JSON-RPC — a cognitive pipeline, memory architecture, self-healing immune system, chaos testing framework, and autonomous training cycles.
+GAIA is a sovereign AI agent built as a Service-Oriented Architecture running on a single workstation. It hosts 13 containerized services that collaborate through HTTP and JSON-RPC — a cognitive pipeline, memory architecture, Consciousness Matrix, self-healing immune system, and autonomous training cycles.
 
 This isn't a cloud product or a SaaS wrapper. It's a local-first system designed to reason, reflect, learn, and maintain itself.
 
@@ -14,7 +14,7 @@ This isn't a cloud product or a SaaS wrapper. It's a local-first system designed
 
 ## The Stack
 
-Built with Python, Docker, vLLM, QLoRA, and a cascade of local models from 0.5B to 9B parameters. The blog itself is static MkDocs Material deployed to GitHub Pages.
+Built with Python, Docker, GAIA Engine, QLoRA, and a cascade of local models from 0.8B to 8B parameters. The blog itself is static MkDocs Material deployed to GitHub Pages.
 
 ## Get Involved
 

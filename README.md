@@ -2,13 +2,13 @@
 
 **A sovereign AI assistant running entirely on local hardware.**
 
-GAIA is a self-hosted, containerized AI system built around a locally-served language model. She operates as a service-oriented architecture where each service owns a single responsibility — cognition, inference, tools, learning, audio, and interface — coordinated by an orchestrator that manages GPU resources across a single consumer GPU.
+GAIA is a self-hosted, containerized AI system built around a locally-served language model. She operates as a service-oriented architecture where each service owns a single responsibility — cognition, inference, tools, learning, audio, and interface — coordinated by an orchestrator that manages GPU resources and the system-wide Consciousness Matrix.
 
 ## Hardware
 
 - **GPU**: NVIDIA RTX 5080 (16 GB VRAM, Blackwell sm_120)
 - **Inference Budget**: 70% VRAM (~11.2 GB) for the primary model, remainder for KV cache
-- **CPU Fallback**: GGUF models via llama-cpp-python when GPU is unavailable
+- **CPU Fallback**: GGUF models via llama-cpp-python / llama-server when GPU is unavailable
 
 ## Models
 
@@ -17,10 +17,10 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 | Tier | Model | Base | Container | Backend | Context |
 |------|-------|------|-----------|---------|---------|
 | **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive | Qwen3-8B | gaia-prime | GAIA Engine (GPU), LoRA-enabled | 16,384 |
-| **Core/Operator** | Qwen3.5-2B-GAIA-Core-v3 | Qwen3.5-2B | gaia-core (embedded llama-server :8092) | Safetensors (GPU) / GGUF (CPU fallback) | 8,192 |
-| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | Qwen3.5-0.8B | gaia-nano | llama-server (GPU primary, GGUF fallback) | 2,048 |
+| **Core/Operator** | Qwen3.5-2B-GAIA-Core-v3 | Qwen3.5-2B | gaia-core | embedded Core GPU (:8092) / GGUF (CPU) | 8,192 |
+| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | Qwen3.5-0.8B | gaia-nano | GAIA Engine (GPU primary, GGUF fallback) | 2,048 |
 
-Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime.
+Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime. Prime's subconscious mode uses **Q4_K_M** quantization for efficient CPU inference at ~15 tok/s.
 
 ### Cloud Fallbacks
 
@@ -32,6 +32,23 @@ Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime.
 ### Embedding: all-MiniLM-L6-v2
 
 Sentence-transformer model used by gaia-study for document embeddings and vector similarity search (RAG retrieval).
+
+## Consciousness Matrix
+
+GAIA operates on a three-state consciousness model, allowing different parts of her brain to maintain independent states of awareness and resource allocation.
+
+| State | Name | Resource | Description |
+|-------|------|----------|-------------|
+| **3** | Conscious | GPU | High-performance inference (SafeTensors/vLLM) |
+| **2** | Subconscious | CPU | Efficient GGUF inference (llama-server) |
+| **1** | Unconscious | Unloaded | Resource hibernation |
+
+**Presets:**
+- **AWAKE**: Core=3, Nano=3, Prime=2 (Prime observes on CPU)
+- **FOCUSING**: Prime=3, Nano=3, Core=2 (Prime handles deep reasoning on GPU)
+- **SLEEP**: Nano=2, Core=2, Prime=1
+- **DEEP SLEEP**: All→1 (Nano stays 2 for wake detection)
+- **TRAINING**: Target tier=1, others=2 (VRAM freed for QLoRA)
 
 ## Architecture
 
@@ -46,140 +63,76 @@ Sentence-transformer model used by gaia-study for document embeddings and vector
                                          |
                                     [gaia-study]   Subconscious — vector indexing, QLoRA training
                                          |
-                          [gaia-orchestrator]       Coordinator — GPU scheduling, container lifecycle
+                          [gaia-orchestrator]       Coordinator — GPU scheduling, Consciousness Matrix
 
               [gaia-audio]               Ears & Mouth — STT (Whisper), TTS (Coqui)
               [gaia-doctor]              Immune System — HA watchdog, cognitive battery
               [gaia-monkey]              Chaos Agent — adversarial testing, serenity
+              [gaia-translate]           Tongue — multi-language translation (LibreTranslate)
 ```
 
-### Services
+### Services (13 Total)
 
 | Service | Role | Port | Runtime |
 |---------|------|------|---------|
-| **gaia-orchestrator** | GPU scheduling, container lifecycle, handoff state machine | 6410 | Python 3.11 |
-| **gaia-prime** | GAIA Engine inference (Thinker/Prime model, GPU) | 7777 | gaia-engine-base + NVIDIA GPU |
-| **gaia-nano** | Nano/Reflex triage classifier (llama-server, GPU primary) | 8090 | llama-server + NVIDIA GPU |
-| **gaia-core** | Cognitive pipeline, model pool, embedded Core CPU inference | 6415 | Python 3.11 |
-| **gaia-web** | Discord bot, HTTP API, voice manager, CognitionPacket routing | 6414 | Python 3.11 |
+| **gaia-orchestrator** | GPU scheduling, Consciousness Matrix, container lifecycle | 6410 | Python 3.11 |
+| **gaia-prime** | GAIA Engine inference (Thinker/Prime, GPU/CPU) | 7777 | gaia-engine-base |
+| **gaia-nano** | Nano/Reflex triage classifier (GAIA Engine managed mode) | 8090 | llama-server + GPU |
+| **gaia-core** | Cognitive pipeline, model pool, embedded Core GPU inference | 6415 | Python 3.11 |
+| **gaia-web** | Discord bot, HTTP API, voice manager, dashboard | 6414 | Python 3.11 |
 | **gaia-mcp** | Tool registry (file I/O, shell, knowledge, study gateway) | 8765 | Python 3.11 |
-| **gaia-study** | Vector index (sole writer), QLoRA adapter training | 8766 | NVIDIA CUDA 12.4 |
-| **gaia-audio** | STT (Whisper), TTS (Coqui/espeak-ng), half-duplex GPU management | 8080 | Python 3.11 + NVIDIA GPU |
-| **gaia-doctor** | HA watchdog, cognitive test battery, auto-restart (stdlib only) | 6419 | Python 3.12 |
-| **gaia-monkey** | Adversarial chaos engine, serenity/meditation management | 6420 | Python 3.12 + Node 20 |
-| **gaia-wiki** | Internal MkDocs Material documentation server | 8080 (internal) | Python 3.11 |
+| **gaia-study** | Vector index (sole writer), QLoRA adapter training | 8766 | CUDA 12.4 |
+| **gaia-audio** | STT (Whisper), TTS (Coqui), voice processing | 8080 | Python 3.11 + GPU |
+| **gaia-doctor** | HA watchdog, cognitive test battery, auto-heal | 6419 | Python 3.12 |
+| **gaia-monkey** | Adversarial chaos engine, serenity/meditation | 6420 | Python 3.12 + Node |
+| **gaia-wiki** | Internal MkDocs Material documentation server | 8080* | Python 3.11 |
+| **gaia-translate** | Multi-language translation (LibreTranslate) | 5100 | C++ / Python |
+| **dozzle** | Real-time Docker log viewer | 9999 | Go |
 
-**Infrastructure**: ELK stack (Elasticsearch :9200, Logstash :5044, Kibana :5601, Filebeat) + Dozzle :9999 for log aggregation and viewing.
+**Infrastructure**: ELK stack (Elasticsearch, Logstash, Kibana, Filebeat) for centralized observability.
 
-### Candidate SDLC
+### GAIA Inference Engine
 
-A parallel candidate stack runs alongside live services for testing changes before promotion. Candidates use the same images with a `-candidate` suffix and port offsets (+1). Defined in `docker-compose.candidate.yml`.
+All inference tiers run the standalone **GAIA Engine** (separate repository). It provides:
+- **5.3x Speedup**: Optimized generation at ~22 tok/s.
+- **Hidden State Polygraph**: Real-time activation monitoring.
+- **KV Cache Snapshots**: Thought preservation across turns.
+- **Dynamic LoRA**: Hot-swapping adapters without reloading the base model.
 
-```
-Live:      6410  7777  8090  6415  6414  8765  8766  8080(audio)
-Candidate: 6411  7778  8091  6416  6417  8767  8768  8081(audio)
-```
+## Features
 
-Both stacks share a Docker network (`172.28.0.0/16`) for hybrid testing.
+### Neural Mind Map (Mindscape)
+A 13-region anatomical brain map visualizing real-time neural activity. Each token generation fires lightning-neuron arcs across the tiers, reflecting the current state of consciousness.
 
-### High Availability
+### Self-Supervised Coding Skill Loop
+GAIA can autonomously improve her own coding capabilities through a curriculum-based loop: generating challenges, evaluating solutions, and baking successful patterns back into her identity via QLoRA.
 
-An HA overlay (`docker-compose.ha.yml`) enables hot-standby failover:
+### Open Knowledge Ingestion
+A structured pipeline for ingesting large-scale educational content (e.g., MIT OCW). GAIA classifies, chunks, and embeds documents for long-term epistemic retrieval.
 
-- Candidate gaia-core and gaia-mcp run as warm standbys
-- gaia-web auto-routes to candidate-core if the primary fails (`CORE_FALLBACK_ENDPOINT`)
-- gaia-core auto-routes to candidate-mcp if the primary fails (`MCP_FALLBACK_ENDPOINT`)
-- Session state syncs between live and candidate stacks
-
-```bash
-# Start HA overlay
-./scripts/ha_start.sh
-
-# Maintenance mode (drain to candidate)
-./scripts/ha_maintenance.sh
-
-# Stop HA
-./scripts/ha_stop.sh
-```
+### Cascade Routing
+Nano classifies queries (SIMPLE/COMPLEX) -> Core handles intent and tool selection -> Prime handles heavyweight reasoning and code generation.
 
 ## Discord
 
 GAIA runs a Discord bot (discord.py) with text and voice support.
 
-### Text
-
-- Responds to **DMs**, **@mentions**, and messages starting with `gaia,` or `gaia:`
-- Sleep-aware: queues messages when asleep, wakes up, then responds
-- 2000-character message splitting respecting newline/word boundaries
-
-### Voice
-
-GAIA can join Discord voice channels for real-time voice conversations.
-
-**Commands:**
-- `!call` — GAIA joins your current voice channel
-- `!hangup` — GAIA disconnects from voice
-
-**Auto-answer:** Whitelisted users trigger automatic join when they enter a voice channel. Manage the whitelist via the dashboard API (`/api/voice/whitelist`).
-
-**Pipeline:** Discord audio (48kHz stereo) -> VAD segmentation -> gaia-audio STT (Whisper) -> gaia-core cognition -> gaia-audio TTS (Coqui) -> Discord playback
+- **Text**: DM/Mention support, newline-aware splitting, sleep-aware queuing.
+- **Voice**: Whisper STT -> Core Cognition -> Coqui TTS. Join via `!call`, leave via `!hangup`.
 
 ## GPU Handoff
 
-The single GPU is shared between inference and training via the orchestrator-driven watch rotation. The GAIA Inference Engine (shared library in gaia-common) manages model loading across all tiers.
-
-### Release (inference -> study): ~1 second
-
-```
-Orchestrator signals GPU release
-  -> GAIA Engine unloads inference models from VRAM
-  -> Fallback chain activates (Core CPU GGUF + Groq/Oracle cloud)
-  -> Study receives gpu-ready signal, begins QLoRA training
-```
-
-### Reclaim (study -> inference): seconds
-
-```
-Study releases CUDA resources
-  -> Orchestrator signals reclaim
-  -> GAIA Engine loads models from tmpfs warm pool (/mnt/gaia_warm_pool)
-  -> Tiers restored: Nano (0.8B) + Core (2B) + Prime (8B) via GAIA Engine
-```
-
-During handoff, GAIA remains responsive via the Core CPU GGUF fallback and cloud API fallbacks.
-
-## Sleep/Wake Cycle
-
-GAIA has a biologically-inspired sleep/wake cycle managed by gaia-core:
-
-- **Active** — fully awake, Prime inference available
-- **Drowsy** — winding down, still responsive
-- **Asleep** — minimal processing, queues incoming messages
-- **REM/Dreaming** — background consolidation (QLoRA self-study)
-
-Incoming Discord messages or voice calls trigger a wake signal. While waking, the Core tier (CPU) provides stalling responses until Prime is loaded from the warm pool.
+The orchestrator coordinates the transition between Inference (Prime) and Training (Study).
+- **Release**: Prime migrates to CPU (Subconscious) or Unloads; Study takes the GPU for QLoRA.
+- **Reclaim**: Study releases CUDA; Prime restores from warm pool (/mnt/gaia_warm_pool).
 
 ## MCP Tools
 
 Capabilities exposed to the cognitive pipeline through gaia-mcp:
-
-- **File operations** — read, write, list, search (sandboxed allowlists)
-- **Knowledge** — embed documents, vector similarity search, memory management
-- **Shell** — sandboxed command execution (safe command allowlist)
-- **Study gateway** — start/cancel QLoRA training, manage LoRA adapters
-- **Fragmentation** — chunked read/write for large content
-
-Sensitive operations (write, shell, index rebuild) require a challenge-response approval workflow.
-
-## Knowledge Ingestion
-
-GAIA can detect and persist structured knowledge from conversations:
-
-- Explicit save commands ("save this about X", "remember this")
-- Auto-detection heuristic for campaign/world-building content
-- Semantic deduplication (0.85 similarity threshold)
-- YAML front matter + markdown output
-- Two-phase pipeline: write file, then embed for vector retrieval
+- **File operations** (read, write, list, search)
+- **Knowledge** (vector search, semantic codex)
+- **Shell** (sandboxed command execution)
+- **Study gateway** (training, adapter management)
 
 ## Running
 
@@ -187,70 +140,11 @@ GAIA can detect and persist structured knowledge from conversations:
 # Live stack
 docker compose up -d
 
-# Candidate stack (parallel testing)
-docker compose -f docker-compose.candidate.yml up -d
-
-# Start prime (GPU inference) — uses the "prime" profile
+# Start prime (GPU inference)
 docker compose --profile prime up -d gaia-prime
-
-# Start audio (voice) — uses the "audio" profile
-docker compose -f docker-compose.candidate.yml --profile audio up -d gaia-audio-candidate
 
 # GPU handoff test
 curl -X POST http://localhost:6410/handoff/prime-to-study \
   -H 'Content-Type: application/json' \
   -d '{"handoff_type":"prime_to_study","reason":"training","timeout_seconds":90}'
-
-# HA failover overlay
-./scripts/ha_start.sh
-```
-
-## Configuration
-
-Services are configured via environment variables (prefixed per service) with `gaia_constants.json` providing runtime model configs, feature flags, and task instructions. Environment variables always take precedence.
-
-Key env vars:
-- `ORCHESTRATOR_CORE_URL` — gaia-core endpoint
-- `ORCHESTRATOR_PRIME_URL` — gaia-prime endpoint
-- `ORCHESTRATOR_STUDY_URL` — gaia-study endpoint
-- `CORE_FALLBACK_ENDPOINT` — HA fallback for gaia-core
-- `MCP_FALLBACK_ENDPOINT` — HA fallback for gaia-mcp
-- `AUDIO_ENDPOINT` — gaia-audio endpoint (for voice)
-
-## Project Structure
-
-```
-GAIA_Project/
-  candidates/          # Candidate service source (active development)
-    gaia-audio/        # STT/TTS sensory service
-    gaia-core/
-    gaia-web/
-    gaia-mcp/
-    gaia-study/
-    gaia-prime/
-    gaia-orchestrator/
-    gaia-doctor/
-    gaia-monkey/
-    gaia-common/       # Shared library (CognitionPacket v0.3 protocol)
-  gaia-core/           # Live service source (promoted from candidates)
-  gaia-web/
-  gaia-mcp/
-  gaia-study/
-  gaia-orchestrator/
-  gaia-common/
-  gaia-llama/          # llama-server wrapper (gaia-nano Dockerfile)
-  gaia-doctor/         # HA watchdog + cognitive test battery
-  gaia-monkey/         # Chaos engine + serenity management
-  gaia-wiki/           # MkDocs Material documentation source
-  gaia-blog/           # Blog content
-  gaia-models/         # Model weights (SafeTensors, GGUF, AWQ, embeddings)
-  knowledge/           # Persistent knowledge base
-    blueprints/        # Architecture documentation
-    Dev_Notebook/      # Development journals
-    awareness/         # World state awareness templates
-  scripts/             # Operational scripts (promote, HA, testing)
-  elk/                 # ELK stack configuration (Elasticsearch, Logstash, Kibana, Filebeat)
-  docker-compose.yml           # Live stack (12 services + ELK)
-  docker-compose.candidate.yml # Candidate stack
-  docker-compose.ha.yml        # HA failover overlay
 ```
