@@ -400,7 +400,6 @@ class ActivationMonitor:
     def load_atlas(self, path: str) -> bool:
         """Load a SAE feature atlas from disk."""
         try:
-            import os
             atlas_dir = _Path(path)
             if not atlas_dir.exists():
                 logger.warning("Atlas path not found: %s", path)

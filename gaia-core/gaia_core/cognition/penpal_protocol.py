@@ -13,10 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger("GAIA.Penpal")
