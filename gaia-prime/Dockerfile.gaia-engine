@@ -86,18 +86,18 @@ COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/lla
 COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
 RUN ldconfig
 
-# gaia_cpp extension: install into the gaia_engine package
-# The .so filename is gaia_cpp.cpython-311-x86_64-linux-gnu.so (platform-tagged)
-# Python package source files (not compiled) also installed here
-RUN python3 -c "import gaia_engine, os; p=os.path.join(os.path.dirname(gaia_engine.__file__),'cpp'); os.makedirs(p, exist_ok=True); print(p)"
+# gaia_cpp extension: install into the gaia_engine package at the known site-packages path.
+# gaia-engine-base uses Python 3.11 and pip installs to /usr/local/lib/python3.11/site-packages.
+# We create the cpp/ subdirectory and populate it with the compiled .so + Python sources.
+ENV GAIA_CPP_DEST=/usr/local/lib/python3.11/site-packages/gaia_engine/cpp
 COPY --from=cpp_builder /build/gaia_cpp_src/build/ /tmp/gaia_cpp_build/
-COPY gaia-engine/gaia_engine/cpp/__init__.py gaia-engine/gaia_engine/cpp/backend.py /tmp/gaia_cpp_py/
-RUN dest=$(python3 -c "import gaia_engine, os; print(os.path.join(os.path.dirname(gaia_engine.__file__),'cpp'))") \
-    && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "$dest/" \; \
-    && cp /tmp/gaia_cpp_py/__init__.py /tmp/gaia_cpp_py/backend.py "$dest/" \
-    && rm -rf /tmp/gaia_cpp_build /tmp/gaia_cpp_py \
-    && echo "gaia_cpp installed at $dest" \
-    && python3 -c "from gaia_engine.cpp import is_available; print('gaia_cpp available:', is_available())"
+COPY gaia-engine/gaia_engine/cpp/__init__.py gaia-engine/gaia_engine/cpp/backend.py /tmp/gaia_cpp_src/
+RUN mkdir -p "${GAIA_CPP_DEST}" \
+    && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "${GAIA_CPP_DEST}/" \; \
+    && cp /tmp/gaia_cpp_src/__init__.py /tmp/gaia_cpp_src/backend.py "${GAIA_CPP_DEST}/" \
+    && rm -rf /tmp/gaia_cpp_build /tmp/gaia_cpp_src \
+    && echo "gaia_cpp installed at ${GAIA_CPP_DEST}:" \
+    && ls -la "${GAIA_CPP_DEST}/"
 
 # Entrypoint
 COPY gaia-prime/entrypoint.sh /entrypoint.sh
