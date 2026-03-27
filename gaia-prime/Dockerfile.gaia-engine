@@ -1,12 +1,17 @@
 # gaia-prime: The Thinker tier
 # Inherits unified GAIA engine base with all ML capabilities.
-# Supports both safetensors (GPU) and GGUF (CPU via llama-server).
+# Supports both safetensors (GPU) and GGUF (CPU via llama-server or gaia_cpp).
 # Runs in standby mode — model loaded/unloaded by orchestrator.
+#
+# Three-stage build:
+#   builder     — builds llama.cpp (llama-server, llama-quantize, shared libs)
+#   cpp_builder — builds gaia_cpp pybind11 extension against Python 3.11 + llama headers
+#   runtime     — gaia-engine-base + artifacts from both build stages
 
 ARG LLAMA_CPP_TAG=b8250
 ARG CUDA_VERSION=12.8.1
 
-# ── Build llama-server (CUDA + CPU) ─────────────────────────────────────
+# ── Stage 1: Build llama.cpp (CUDA + CPU) ────────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
 
 ARG LLAMA_CPP_TAG
@@ -32,7 +37,37 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server llama-quantize -j$(nproc)
 
-# ── Runtime stage ────────────────────────────────────────────────────────
+# ── Stage 2: Build gaia_cpp pybind11 extension ───────────────────────────
+# Uses the gaia-engine-base image (has Python 3.11) with llama.cpp headers
+# from the builder stage. This ensures ABI compatibility: the .so is built
+# against exactly the Python that runs in production.
+FROM localhost:5000/gaia-engine-base:latest AS cpp_builder
+
+# Build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pybind11 headers
+RUN pip install --no-cache-dir "pybind11[global]>=2.13"
+
+# Copy llama.cpp source tree from builder (we need headers + the built libs for linking)
+COPY --from=builder /build/llama.cpp /build/llama.cpp
+
+# Copy gaia_cpp extension source
+COPY gaia-engine/gaia_engine/cpp /build/gaia_cpp_src
+
+# Build
+RUN cd /build/gaia_cpp_src \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_SRC_DIR=/build/llama.cpp \
+        -DLLAMA_BUILD_DIR=/build/llama.cpp/build \
+    && cmake --build build -j$(nproc) \
+    && echo "gaia_cpp build complete" \
+    && ls -la build/gaia_cpp*.so
+
+# ── Stage 3: Runtime ─────────────────────────────────────────────────────
 FROM localhost:5000/gaia-engine-base:latest
 
 # Create non-root user for container execution (host UID mapping)
@@ -50,6 +85,19 @@ COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama
 COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
 COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
 RUN ldconfig
+
+# gaia_cpp extension: install into the gaia_engine package
+# The .so filename is gaia_cpp.cpython-311-x86_64-linux-gnu.so (platform-tagged)
+# Python package source files (not compiled) also installed here
+RUN python3 -c "import gaia_engine, os; p=os.path.join(os.path.dirname(gaia_engine.__file__),'cpp'); os.makedirs(p, exist_ok=True); print(p)"
+COPY --from=cpp_builder /build/gaia_cpp_src/build/ /tmp/gaia_cpp_build/
+COPY gaia-engine/gaia_engine/cpp/__init__.py gaia-engine/gaia_engine/cpp/backend.py /tmp/gaia_cpp_py/
+RUN dest=$(python3 -c "import gaia_engine, os; print(os.path.join(os.path.dirname(gaia_engine.__file__),'cpp'))") \
+    && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "$dest/" \; \
+    && cp /tmp/gaia_cpp_py/__init__.py /tmp/gaia_cpp_py/backend.py "$dest/" \
+    && rm -rf /tmp/gaia_cpp_build /tmp/gaia_cpp_py \
+    && echo "gaia_cpp installed at $dest" \
+    && python3 -c "from gaia_engine.cpp import is_available; print('gaia_cpp available:', is_available())"
 
 # Entrypoint
 COPY gaia-prime/entrypoint.sh /entrypoint.sh
