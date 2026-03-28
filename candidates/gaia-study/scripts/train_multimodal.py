@@ -152,7 +152,7 @@ def train_model(model_key: str, samples: list):
 
 def main():
     parser = argparse.ArgumentParser(description="Train identity LoRA on multimodal bases")
-    parser.add_argument("--model", choices=["core", "nano", "all"], required=True,
+    parser.add_argument("--model", choices=list(MODELS.keys()) + ["all"], required=True,
                         help="Which model to train")
     args = parser.parse_args()
 

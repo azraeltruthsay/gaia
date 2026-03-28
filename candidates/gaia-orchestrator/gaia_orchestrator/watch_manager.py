@@ -340,50 +340,53 @@ class WatchManager:
             logger.debug("WATCH: %s KV pre-warm failed: %s", tier, e)
 
     async def _load_prime_on_core(self) -> bool:
-        """Load Prime's safetensors into Core's Engine (model swap).
+        """Load Prime's model via the GAIA Engine's /model/load endpoint.
 
-        This is a hot-swap: Core's engine is already running but its model
-        is on CPU. We tell it to load a different model (Prime) on GPU.
-        Currently requires a container restart with different model path.
-        TODO: Add /model/swap endpoint to engine for live model swapping.
+        Sends POST /model/load directly to gaia-prime (port 7777).
+        The Engine handles model initialization and GPU allocation.
+        Nano+Core should be migrated to CPU BEFORE calling this.
         """
-        # For now, use docker compose to restart gaia-core with Prime's model
-        endpoint = self._endpoints["core"]
+        prime_endpoint = self._endpoints.get("prime", "http://gaia-prime:7777")
+        model_path = self._model_paths.get("prime", "")
+        if not model_path:
+            logger.error("WATCH: no model path configured for prime")
+            return False
+
         try:
-            # The simple approach: restart gaia-core with CORE_SAFETENSORS_PATH
-            # pointing to Prime's model. The engine picks up the new path.
-            import subprocess
-            compose_file = str(self.config.compose_file_live)
+            async with httpx.AsyncClient(timeout=120) as client:
+                # Try /model/load on Prime's engine
+                resp = await client.post(
+                    f"{prime_endpoint}/model/load",
+                    json={"model_path": model_path, "device": "cuda"},
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    if result.get("ok") or result.get("model_loaded"):
+                        logger.info("WATCH: Prime model loaded via Engine: %s", result)
+                        return True
+                    logger.warning("WATCH: Prime /model/load returned: %s", result)
+                elif resp.status_code == 409:
+                    # Model already loaded
+                    logger.info("WATCH: Prime model already loaded")
+                    return True
+                else:
+                    logger.error("WATCH: Prime /model/load HTTP %d: %s", resp.status_code, resp.text[:200])
 
-            env = {
-                **dict(os.environ),
-                "CORE_SAFETENSORS_PATH": self._model_paths["prime"],
-                "CORE_DEVICE": "cuda",
-            }
-
-            cmd = ["docker", "compose", "-f", compose_file, "up", "-d", "gaia-core"]
-            result = await asyncio.to_thread(
-                subprocess.run, cmd, capture_output=True, text=True,
-                env=env, cwd=str(self.config.compose_file_live.parent), timeout=120,
-            )
-
-            if result.returncode != 0:
-                logger.error("WATCH: Prime load via compose failed: %s", result.stderr.strip())
-                return False
-
-            # Wait for engine to be healthy with Prime loaded
-            for i in range(90):
+            # Wait for model to finish loading (may be async on Prime side)
+            for i in range(30):
                 await asyncio.sleep(2)
                 try:
                     async with httpx.AsyncClient(timeout=5) as client:
-                        resp = await client.get(f"{endpoint}/health")
+                        resp = await client.get(f"{prime_endpoint}/health")
                         if resp.status_code == 200:
-                            logger.info("WATCH: Prime loaded in Core's engine after %ds", (i + 1) * 2)
-                            return True
+                            health = resp.json()
+                            if health.get("model_loaded"):
+                                logger.info("WATCH: Prime model confirmed loaded after %ds", (i + 1) * 2)
+                                return True
                 except Exception:
                     pass
 
-            logger.error("WATCH: Prime did not become healthy in 180s")
+            logger.error("WATCH: Prime model did not load within 60s")
             return False
 
         except Exception as e:

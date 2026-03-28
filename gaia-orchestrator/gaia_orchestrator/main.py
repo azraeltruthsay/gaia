@@ -161,6 +161,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Consciousness matrix initialization failed", exc_info=True)
 
+    # Start periodic container status refresh
+    _container_poll_task = None
+    if _docker_manager and _state_manager:
+        async def _container_poll_loop():
+            await asyncio.sleep(10)  # Initial delay
+            while True:
+                try:
+                    status = await _docker_manager.get_status()
+                    await _state_manager.update_container_status(status)
+                except Exception:
+                    logger.debug("Container status poll failed", exc_info=True)
+                await asyncio.sleep(30)  # Every 30 seconds
+
+        _container_poll_task = asyncio.create_task(_container_poll_loop())
+        logger.info("Container status poll started (30s interval)")
+
     # Start periodic lifecycle reconciliation (detect model drift)
     _lifecycle_reconcile_task = None
     if _lifecycle_machine:
@@ -181,6 +197,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("GAIA Orchestrator shutting down...")
+    if _container_poll_task and not _container_poll_task.done():
+        _container_poll_task.cancel()
     if _lifecycle_reconcile_task and not _lifecycle_reconcile_task.done():
         _lifecycle_reconcile_task.cancel()
     if _nano_pressure_task and not _nano_pressure_task.done():

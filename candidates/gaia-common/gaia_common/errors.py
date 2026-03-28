@@ -340,6 +340,22 @@ register("GAIA-WEB-060", "Transcription failed",
          "User's voice input was lost. Check gaia-audio service health.",
          logging.ERROR, ErrorCategory.NETWORK, is_retryable=True)
 
+register("GAIA-WEB-065", "Translation service unreachable",
+         "gaia-translate (LibreTranslate) is not responding. "
+         "Translation will be skipped — messages pass through untranslated. "
+         "Check that gaia-translate container is running.",
+         logging.WARNING, ErrorCategory.NETWORK, is_retryable=True)
+
+register("GAIA-WEB-066", "Translation failed",
+         "LibreTranslate API returned an error or timed out. "
+         "The original untranslated message will be processed instead.",
+         logging.WARNING, ErrorCategory.NETWORK, is_retryable=True)
+
+register("GAIA-WEB-067", "Language detection failed",
+         "LibreTranslate /detect endpoint failed. "
+         "Cannot determine source language — skipping translation.",
+         logging.WARNING, ErrorCategory.NETWORK, is_retryable=True)
+
 # --- GAIA-MCP (001-099) -----------------------------------------------
 
 register("GAIA-MCP-001", "Tool not found",

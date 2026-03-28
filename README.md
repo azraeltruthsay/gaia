@@ -22,6 +22,23 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 
 Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime. Prime's subconscious mode uses **Q4_K_M** quantization for efficient CPU inference at ~15 tok/s.
 
+### Model Sourcing
+
+GAIA's models are not included in the repository. Download base models from HuggingFace, then run identity-baking and quantization via gaia-study's QLoRA pipeline.
+
+| Model | HuggingFace Source | Notes |
+|-------|-------------------|-------|
+| Qwen3.5-0.8B-Abliterated | [huihui-ai/Qwen3.5-0.8B-abliterated](https://huggingface.co/huihui-ai/Qwen3.5-0.8B-abliterated) | Base for Nano tier. Few-shot prompted, no fine-tune needed. |
+| Qwen3.5-2B (base for Core) | [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B) | QLoRA identity-baked → `Qwen3.5-2B-GAIA-Core-v3` |
+| Huihui-Qwen3-8B-abliterated | [huihui-ai/Qwen3-8B-abliterated-v2](https://huggingface.co/huihui-ai/Qwen3-8B-abliterated-v2) | QLoRA identity-baked → `GAIA-Prime-adaptive`. GGUF quantized for CPU (Q4_K_M). |
+| all-MiniLM-L6-v2 | [sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Embedding model for vector search (gaia-study) |
+| Qwen3-ASR-0.6B | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) | Speech recognition (gaia-audio) |
+| Qwen3-TTS-12Hz-0.6B-Base | [Qwen/Qwen3-TTS-12Hz-0.6B-Base](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) | Text-to-speech (gaia-audio) |
+
+Place downloaded models in the `gaia-instance/gaia-models/` directory (adjacent to the source repo). The setup script (`scripts/setup_instance.sh`) creates the expected directory structure.
+
+**Identity baking**: GAIA's QLoRA pipeline fine-tunes base models with identity curriculum, producing the `-GAIA-*` variants. Adapters are stored in `gaia-models/lora_adapters/` and loaded dynamically via the GAIA Engine's `/adapter/load` endpoint.
+
 ### Cloud Fallbacks
 
 | Backend | Model | Purpose |

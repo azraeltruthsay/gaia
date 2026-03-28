@@ -100,7 +100,7 @@ class ConsciousnessMatrix:
         self._cpu_models = {
             "nano": os.environ.get("NANO_GGUF_PATH", "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf"),
             "core": os.environ.get("CORE_GGUF_PATH", "/models/Qwen3.5-2B-BF16.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-identity-Q8_0.gguf"),
+            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-identity-Q4_K_M.gguf"),
         }
 
         # The matrix — one entry per tier
@@ -109,6 +109,21 @@ class ConsciousnessMatrix:
             "core": TierState(tier="core"),
             "prime": TierState(tier="prime"),
         }
+
+        # Default startup preset — configurable via CONSCIOUSNESS_DEFAULT_PRESET env
+        # Options: "awake", "sleep", "unconscious"
+        # "awake" = Core+Nano GPU, Prime CPU (normal operation)
+        # "unconscious" = everything starts unloaded (manual control)
+        self._default_preset = os.environ.get("CONSCIOUSNESS_DEFAULT_PRESET", "awake")
+
+        # Skill adapters to auto-load when a tier enters Subconscious (CPU) mode.
+        # GGUF LoRA adapters loaded via /adapter/load with configurable scale.
+        self._cpu_adapters = {
+            "prime": os.environ.get("PRIME_CPU_ADAPTER", ""),
+            "core": os.environ.get("CORE_CPU_ADAPTER", ""),
+            "nano": os.environ.get("NANO_CPU_ADAPTER", ""),
+        }
+        self._adapter_scale = float(os.environ.get("CPU_ADAPTER_SCALE", "0.5"))
 
         self._lock = asyncio.Lock()
         self._poll_task: Optional[asyncio.Task] = None
@@ -154,9 +169,28 @@ class ConsciousnessMatrix:
         return self.get_matrix()
 
     async def start_continuous_poll(self, interval: float = 10.0):
-        """Start a background task that continuously validates the matrix."""
+        """Start a background task that continuously validates the matrix.
+
+        On first start, applies the default preset (CONSCIOUSNESS_DEFAULT_PRESET env)
+        to set tier targets. Auto-reconcile in the poll loop will then load any
+        tiers that aren't at their target level.
+        """
         if self._poll_task and not self._poll_task.done():
             return
+
+        # Apply startup preset — sets targets so auto-reconcile can load tiers
+        preset = self._default_preset
+        if preset != "unconscious":
+            presets = {
+                "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+                "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
+            }
+            if preset in presets:
+                for tier, level in presets[preset].items():
+                    self._tiers[tier].target = level
+                logger.info("Consciousness startup preset: %s (targets: %s)",
+                            preset, {t: l.name for t, l in presets[preset].items()})
+
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info("Consciousness matrix continuous poll started (%.0fs interval)", interval)
 
@@ -486,21 +520,61 @@ class ConsciousnessMatrix:
                     if data.get("ok") or resp.status_code == 409:
                         state.actual = ConsciousnessLevel.SUBCONSCIOUS
                         logger.info("Loaded %s to CPU (GGUF)", tier)
+
+                        # Auto-load skill adapter if configured
+                        adapter_path = self._cpu_adapters.get(tier, "")
+                        if adapter_path:
+                            await self._load_adapter(tier, endpoint, adapter_path)
+
                         return {"ok": True, "tier": tier, "action": "loaded_cpu", "model": model}
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
 
+    async def _load_adapter(self, tier: str, endpoint: str, adapter_path: str) -> None:
+        """Load a GGUF LoRA adapter on a tier's engine."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{endpoint}/adapter/load",
+                    json={"adapter_path": adapter_path, "scale": self._adapter_scale},
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    logger.info("Loaded adapter on %s: %s (scale=%.2f)",
+                                tier, adapter_path, self._adapter_scale)
+                else:
+                    logger.warning("Adapter load on %s returned %d: %s",
+                                   tier, resp.status_code, resp.text[:100])
+        except Exception as e:
+            logger.warning("Adapter load on %s failed: %s", tier, e)
+
     # ── Internal: Continuous Poll ─────────────────────────────────────
 
     async def _poll_loop(self, interval: float):
-        """Continuously probe tiers and validate matrix."""
+        """Continuously probe tiers, validate matrix, and auto-reconcile drift."""
         while True:
             try:
                 await self.probe_all()
-                # Log any mismatches
+                # Auto-reconcile: if target > actual, load the tier
                 for tier, state in self._tiers.items():
-                    if not state.ok and not state.transitioning:
+                    if state.ok or state.transitioning:
+                        continue
+                    if state.target > state.actual and state.healthy:
+                        logger.warning(
+                            "Matrix mismatch: %s target=%s actual=%s — auto-reconciling",
+                            tier, state.target.name, state.actual.name,
+                        )
+                        try:
+                            result = await self._transition_tier(
+                                tier, state.actual, state.target,
+                            )
+                            if result.get("ok"):
+                                logger.info("Auto-reconciled %s → %s", tier, state.target.name)
+                            else:
+                                logger.warning("Auto-reconcile %s failed: %s", tier, result.get("error", ""))
+                        except Exception as e:
+                            logger.warning("Auto-reconcile %s error: %s", tier, e)
+                    elif not state.ok and not state.transitioning:
                         logger.warning(
                             "Matrix mismatch: %s target=%s actual=%s healthy=%s error=%s",
                             tier, state.target.name, state.actual.name,

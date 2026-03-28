@@ -20,10 +20,13 @@ services:
     volumes:
       - ./candidates/gaia-core:/app:rw
       - ./candidates/gaia-common:/gaia-common:ro
-      - ./knowledge:/knowledge:ro
-      - ./gaia-models:/models:rw
+      - ../gaia-instance/knowledge:/knowledge:ro
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:rw
       - gaia-candidate-shared:/shared:rw
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
 
     environment:
       - PYTHONPATH=/app:/gaia-common
@@ -80,8 +83,11 @@ services:
     volumes:
       - ./candidates/gaia-web:/app:rw
       - ./candidates/gaia-common:/gaia-common:ro
-      - ./knowledge:/knowledge:ro
-      - ./logs:/logs:rw
+      - ../gaia-instance/knowledge:/knowledge:ro
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/logs:/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
     environment:
@@ -133,11 +139,14 @@ services:
     volumes:
       - ./candidates/gaia-mcp:/app:rw
       - ./candidates/gaia-common:/app/gaia-common:ro
-      - ./knowledge:/knowledge:rw
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/knowledge:/knowledge:rw
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:ro
       - gaia-candidate-sandbox:/sandbox:rw
       - gaia-candidate-shared:/shared:rw
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
 
     deploy:
       resources:
@@ -168,8 +177,8 @@ services:
     restart: "no"
 
     volumes:
-      - ./gaia-models:/models:ro
-      - ./logs/kvcache/prime:/kvcache:rw
+      - ../gaia-instance/gaia-models:/models:ro
+      - ../gaia-instance/logs/kvcache/prime:/kvcache:rw
       - ./candidates/gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
 
     environment:
@@ -232,10 +241,13 @@ services:
     volumes:
       - ./gaia-study:/app:rw
       - ./gaia-common:/gaia-common:ro
-      - ./knowledge:/knowledge:rw
-      - ./gaia-models:/models:rw
+      - ../gaia-instance/knowledge:/knowledge:rw
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:rw
       - gaia-candidate-shared:/shared:rw
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
 
     environment:
       - PYTHONPATH=/app:/gaia-common

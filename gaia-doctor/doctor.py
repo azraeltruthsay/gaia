@@ -513,7 +513,8 @@ def get_dissonance_report() -> dict:
     standard_divergent = []
     total_files = 0
     matches = 0
-    skip_dirs = {"__pycache__", ".pytest_cache", "venv", ".venv", "node_modules"}
+    skip_dirs = {"__pycache__", ".pytest_cache", "venv", ".venv", "node_modules",
+                  "unsloth_compiled_cache", "gptqmodel_offload"}
 
     def _hash_file(path: Path) -> str:
         if not path.exists():
