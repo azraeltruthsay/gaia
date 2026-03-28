@@ -70,6 +70,9 @@ class TrainingConfig:
     # Incremental training
     resume_from: Optional[str] = None
 
+    # Base model override (default: env BASE_MODEL_PATH)
+    base_model: Optional[str] = None
+
     # Governance
     requires_approval: bool = True
     activation_triggers: List[str] = field(default_factory=list)
@@ -560,7 +563,7 @@ class StudyModeManager:
 
         # Try to use real QLoRA training
         use_real_training = self.config.get("use_real_training", True)
-        base_model_path = self.config.get("base_model_path")
+        base_model_path = config.base_model or self.config.get("base_model_path")
 
         if use_real_training and base_model_path:
             # Acquire GPU — clear other services' VRAM if needed

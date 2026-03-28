@@ -118,6 +118,7 @@ class StudyStartRequest(BaseModel):
     target_loss: float = Field(default=0.05, ge=0.0, description="Stop when loss drops below this threshold")
     convergence_patience: int = Field(default=3, ge=1, description="Consecutive checks below target_loss before stopping")
     resume_from: Optional[str] = Field(default=None, description="Path to existing adapter for incremental training")
+    base_model: Optional[str] = Field(default=None, description="Base model path (default: env BASE_MODEL_PATH)")
     activation_triggers: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
 
@@ -418,6 +419,7 @@ def create_app() -> FastAPI:
                 target_loss=request.target_loss,
                 convergence_patience=request.convergence_patience,
                 resume_from=request.resume_from,
+                base_model=request.base_model,
                 activation_triggers=request.activation_triggers,
                 tags=request.tags,
             )
