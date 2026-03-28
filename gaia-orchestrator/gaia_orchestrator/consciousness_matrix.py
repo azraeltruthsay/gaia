@@ -116,6 +116,15 @@ class ConsciousnessMatrix:
         # "unconscious" = everything starts unloaded (manual control)
         self._default_preset = os.environ.get("CONSCIOUSNESS_DEFAULT_PRESET", "awake")
 
+        # Skill adapters to auto-load when a tier enters Subconscious (CPU) mode.
+        # GGUF LoRA adapters loaded via /adapter/load with configurable scale.
+        self._cpu_adapters = {
+            "prime": os.environ.get("PRIME_CPU_ADAPTER", ""),
+            "core": os.environ.get("CORE_CPU_ADAPTER", ""),
+            "nano": os.environ.get("NANO_CPU_ADAPTER", ""),
+        }
+        self._adapter_scale = float(os.environ.get("CPU_ADAPTER_SCALE", "0.5"))
+
         self._lock = asyncio.Lock()
         self._poll_task: Optional[asyncio.Task] = None
 
@@ -511,10 +520,33 @@ class ConsciousnessMatrix:
                     if data.get("ok") or resp.status_code == 409:
                         state.actual = ConsciousnessLevel.SUBCONSCIOUS
                         logger.info("Loaded %s to CPU (GGUF)", tier)
+
+                        # Auto-load skill adapter if configured
+                        adapter_path = self._cpu_adapters.get(tier, "")
+                        if adapter_path:
+                            await self._load_adapter(tier, endpoint, adapter_path)
+
                         return {"ok": True, "tier": tier, "action": "loaded_cpu", "model": model}
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
+
+    async def _load_adapter(self, tier: str, endpoint: str, adapter_path: str) -> None:
+        """Load a GGUF LoRA adapter on a tier's engine."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{endpoint}/adapter/load",
+                    json={"adapter_path": adapter_path, "scale": self._adapter_scale},
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    logger.info("Loaded adapter on %s: %s (scale=%.2f)",
+                                tier, adapter_path, self._adapter_scale)
+                else:
+                    logger.warning("Adapter load on %s returned %d: %s",
+                                   tier, resp.status_code, resp.text[:100])
+        except Exception as e:
+            logger.warning("Adapter load on %s failed: %s", tier, e)
 
     # ── Internal: Continuous Poll ─────────────────────────────────────
 
