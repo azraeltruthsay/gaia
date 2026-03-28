@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head><title>Brain Coordinate Extractor</title></head>
+<body>
+<h2>Brain SVG Coordinate Extractor</h2>
+<p>This loads the brain SVG, traces boundaries of each anatomical region, and outputs coordinate arrays for neuron placement.</p>
+<div id="output" style="font-family:monospace; white-space:pre; font-size:12px;"></div>
+
+<script>
+async function extract() {
+  const out = document.getElementById('output');
+  out.textContent = 'Loading SVG...\n';
+
+  // Load the SVG
+  const resp = await fetch('/static/brain.svg');
+  const svgText = await resp.text();
+
+  // Parse into DOM
+  const parser = new DOMParser();
+  const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+  const svgEl = svgDoc.documentElement;
+
+  // We need it in the DOM to use getPointAtLength
+  svgEl.style.position = 'absolute';
+  svgEl.style.left = '-9999px';
+  document.body.appendChild(svgEl);
+
+  // Scale factor: viewport is 280x225, SVG is 1024x732
+  const sx = 280 / 1024;
+  const sy = 280 / 1024; // maintain aspect ratio
+  const yOff = 20; // y offset in viewport
+
+  function scale(x, y) {
+    return [Math.round(x * sx * 10) / 10, Math.round((y * sy + yOff) * 10) / 10];
+  }
+
+  // Get all paths
+  const paths = svgEl.querySelectorAll('path');
+  out.textContent += `Found ${paths.length} paths\n\n`;
+
+  // Group paths by parent group
+  const groups = {};
+  paths.forEach(p => {
+    const parent = p.parentElement;
+    const groupId = parent.id || 'unknown';
+    if (!groups[groupId]) groups[groupId] = [];
+    groups[groupId].push(p);
+  });
+
+  out.textContent += 'Groups: ' + Object.keys(groups).join(', ') + '\n\n';
+
+  // For each anatomical group, find the outermost boundary path
+  // (longest path = likely the outline)
+  for (const [groupId, groupPaths] of Object.entries(groups)) {
+    if (!['cerebrum', 'cerebellum', 'brain-stem'].includes(groupId)) continue;
+
+    // Find the longest path (outline)
+    let longestPath = null;
+    let maxLen = 0;
+    for (const p of groupPaths) {
+      const len = p.getTotalLength();
+      if (len > maxLen) {
+        maxLen = len;
+        longestPath = p;
+      }
+    }
+
+    if (!longestPath) continue;
+
+    out.textContent += `=== ${groupId.toUpperCase()} ===\n`;
+    out.textContent += `Outline path: ${longestPath.id || '(no id)'}, length: ${Math.round(maxLen)}px\n`;
+
+    // Sample points along the outline
+    const numSamples = 40;
+    const points = [];
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+      const pt = longestPath.getPointAtLength(t * maxLen);
+      const [sx2, sy2] = scale(pt.x, pt.y);
+      points.push([sx2, sy2]);
+    }
+
+    out.textContent += `Boundary points (${points.length}, viewport coords):\n`;
+    out.textContent += JSON.stringify(points) + '\n\n';
+
+    // Find bounding box
+    const xs = points.map(p => p[0]);
+    const ys = points.map(p => p[1]);
+    out.textContent += `Bounds: x=[${Math.min(...xs).toFixed(1)}, ${Math.max(...xs).toFixed(1)}], y=[${Math.min(...ys).toFixed(1)}, ${Math.max(...ys).toFixed(1)}]\n\n`;
+  }
+
+  // Also extract specific region boundaries by sampling multiple paths
+  // For cerebellum: the main outline + folia give us the shape
+  out.textContent += '\n=== CEREBELLUM DETAIL ===\n';
+  const cerebPaths = groups['cerebellum'] || [];
+  // Main cerebellum outline is path2173 (the fill path)
+  const cerebOutline = svgEl.querySelector('#path2173');
+  if (cerebOutline) {
+    const len = cerebOutline.getTotalLength();
+    out.textContent += `Cerebellum outline length: ${Math.round(len)}px\n`;
+
+    // Sample the top edge (roughly first 40% of path) and bottom edge (60-100%)
+    const topEdge = [];
+    const bottomEdge = [];
+    for (let i = 0; i <= 30; i++) {
+      const t = i / 30;
+      const pt = cerebOutline.getPointAtLength(t * len);
+      const [sx2, sy2] = scale(pt.x, pt.y);
+      if (t < 0.4) topEdge.push([sx2, sy2]);
+      else if (t > 0.6) bottomEdge.push([sx2, sy2]);
+    }
+    out.textContent += `Top edge: ${JSON.stringify(topEdge)}\n`;
+    out.textContent += `Bottom edge: ${JSON.stringify(bottomEdge)}\n`;
+  }
+
+  // Cerebrum outline
+  out.textContent += '\n=== CEREBRUM DETAIL ===\n';
+  const cerebrumOutline = svgEl.querySelector('#path2179');
+  if (cerebrumOutline) {
+    const len = cerebrumOutline.getTotalLength();
+    out.textContent += `Cerebrum outline length: ${Math.round(len)}px\n`;
+
+    // Sample every 5% of the path
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20;
+      const pt = cerebrumOutline.getPointAtLength(t * len);
+      const [sx2, sy2] = scale(pt.x, pt.y);
+      out.textContent += `  t=${t.toFixed(2)}: (${sx2}, ${sy2})\n`;
+    }
+  }
+
+  out.textContent += '\n=== MEDULLA/BRAIN STEM ===\n';
+  const medulla = svgEl.querySelector('#medulla-oblongata');
+  if (medulla) {
+    const len = medulla.getTotalLength();
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      const pt = medulla.getPointAtLength(t * len);
+      const [sx2, sy2] = scale(pt.x, pt.y);
+      out.textContent += `  t=${t.toFixed(1)}: (${sx2}, ${sy2})\n`;
+    }
+  }
+
+  out.textContent += '\nDone! Copy the coordinates above.\n';
+}
+
+extract();
+</script>
+</body>
+</html>

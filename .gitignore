@@ -150,3 +150,8 @@ Inaugural_GAIA_BlogPost.md
 
 # --- Candidate penpal protocol (WIP, not ready for tracking) ---
 candidates/gaia-core/gaia_core/cognition/penpal_protocol.py
+
+# --- Local Instance Knowledge (not source) ---
+knowledge/conversation_examples.md
+knowledge/gap_audit/latest_gaps.json
+knowledge/system_reference/AS_BUILT_LATEST.md
