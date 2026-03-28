@@ -167,3 +167,6 @@ knowledge/Dev_Notebook/
 GAIA_Architecture_Proposal.docx.pdf
 GAIA_CFR_Feature_Spec.docx.pdf
 Claude_Certified_Architect-Foundations_Certification_Exam_Guide.pdf
+# --- GAIA Instance (Neighboring Directory) ---
+instance
+gaia-instance/

@@ -105,12 +105,12 @@ services:
     restart: unless-stopped
 
     volumes:
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/models:/models:ro
       - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       - gaia-shared:/shared:rw
       # Logs (activation stream for Neural Mind Map)
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
 
     environment:
       - PYTHONDONTWRITEBYTECODE=1
@@ -159,12 +159,12 @@ services:
     restart: unless-stopped
 
     volumes:
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/models:/models:ro
       - /mnt/gaia_warm_pool:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
-      - ./logs/kvcache/nano:/kvcache:rw
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
+      - ../gaia-instance/logs:/logs:rw
       - gaia-shared:/shared:rw
 
     environment:
@@ -237,15 +237,15 @@ services:
       # Shared library (development mode - mount for live reload)
       - ./gaia-common:/gaia-common:ro
       # Knowledge base (read-write for conversation curator)
-      - ./knowledge:/knowledge:rw
+      - ../gaia-instance/knowledge:/knowledge:rw
       # Vector store (read-only - gaia-study is SOLE WRITER)
-      - ./knowledge/vector_store:/vector_store:ro
+      - ../gaia-instance/knowledge/vector_store:/vector_store:ro
       # Model files (read-only, NVMe fallback)
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/models:/models:ro
       # Warm pool (tmpfs-backed, near-instant model loads)
       - /mnt/gaia_warm_pool:/warm_pool:ro
       # Logs (consolidated service logs)
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
       # Shared state
       - gaia-shared:/shared:rw
 
@@ -354,13 +354,13 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # Knowledge base (read-only, for static content)
-      - ./knowledge:/knowledge:ro
+      - ../gaia-instance/knowledge:/knowledge:ro
       # Static assets (if needed)
       - ./gaia-web/static:/app/static:ro
       # Docker socket for terminal access
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Logs (consolidated service logs)
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
       # Shared state
       - gaia-shared:/shared:rw
 
@@ -441,15 +441,15 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # Knowledge base (FULL ACCESS for indexing)
-      - ./knowledge:/knowledge:rw
+      - ../gaia-instance/knowledge:/knowledge:rw
       # Vector store (SOLE WRITER)
-      - ./knowledge/vector_store:/vector_store:rw
+      - ../gaia-instance/knowledge/vector_store:/vector_store:rw
       # Model files (WRITE for LoRA adapters)
-      - ./gaia-models:/models:rw
+      - ../gaia-instance/models:/models:rw
       # Warm pool (tmpfs-backed, near-instant base model loads)
       - /mnt/gaia_warm_pool:/warm_pool:ro
       # Logs (consolidated service logs)
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
       # Shared state
       - gaia-shared:/shared:rw
 
@@ -524,13 +524,13 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # Knowledge base (read-only for tool reference)
-      - ./knowledge:/knowledge:rw
+      - ../gaia-instance/knowledge:/knowledge:rw
       # Model files (read-only for embeddings)
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/models:/models:ro
       # Sandboxed workspace (isolated)
       - gaia-sandbox:/sandbox:rw
       # Logs (for introspect_logs tool + own log persistence)
-      - ./logs:/logs:rw
+      - ../gaia-instance/logs:/logs:rw
       # Candidates (for promotion readiness assessment)
       - ./candidates:/gaia/GAIA_Project/candidates:ro
       # Docker compose file (for compose_service check)
@@ -606,7 +606,7 @@ services:
       - .:/gaia/GAIA_Project:rw
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
-      - ./gaia-models:/models:ro
+      - ../gaia-instance/models:/models:ro
 
     environment:
       - PYTHONPATH=/app:/gaia-common
@@ -659,9 +659,9 @@ services:
       - ./gaia-wiki/docs:/docs/docs:ro
       - ./gaia-wiki/mkdocs.yml:/docs/mkdocs.yml:ro
       # Auto-generated docs from blueprint YAML (written by gaia-core sleep task)
-      - ./knowledge/wiki_auto:/docs/docs/auto:ro
+      - ../gaia-instance/knowledge/wiki_auto:/docs/docs/auto:ro
       # Knowledge base: accessible for future auto-generated docs
-      - ./knowledge:/knowledge:ro
+      - ../gaia-instance/knowledge:/knowledge:ro
 
     environment:
       - HOME=/tmp
