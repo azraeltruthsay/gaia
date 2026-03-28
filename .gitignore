@@ -50,6 +50,9 @@ tmp_*.py
 *.png
 *.PNG
 *.svg
+# Exception: brain.svg is required by the dashboard
+!gaia-web/static/brain.svg
+!candidates/gaia-web/static/brain.svg
 
 # --- Video / large media files ---
 *.mp4
