@@ -16,8 +16,8 @@ INSTANCE_DIR="$PARENT_DIR/gaia-instance"
 echo "🚀 Setting up GAIA Instance at: $INSTANCE_DIR"
 
 # 1. Create directory structure
-mkdir -p "$INSTANCE_DIR"/{knowledge,logs,models,shared,secrets,artifacts,tmp,audio_inbox}
-mkdir -p "$INSTANCE_DIR/knowledge"/{blueprints,system_reference,vector_store,wiki_auto}
+mkdir -p "$INSTANCE_DIR"/{knowledge,logs,gaia-models,shared,secrets,artifacts,tmp,audio_inbox}
+mkdir -p "$INSTANCE_DIR/knowledge"/{vector_store,wiki_auto}
 mkdir -p "$INSTANCE_DIR/logs"/{chat_history,kvcache,thoughtstreams}
 
 echo "✅ Created directory structure."
@@ -34,10 +34,17 @@ migrate_dir() {
 }
 
 migrate_dir "logs"
-migrate_dir "gaia-models"
+migrate_dir "gaia-models"   # docker-compose mounts gaia-models/ as /models
 migrate_dir "artifacts"
 migrate_dir "audio_inbox"
 migrate_dir "tmp"
+
+# Seed wiki_auto from source (runtime-generated, but needs initial content)
+if [ -d "$SOURCE_DIR/knowledge/wiki_auto" ]; then
+    echo "📦 Seeding knowledge/wiki_auto..."
+    mkdir -p "$INSTANCE_DIR/knowledge/wiki_auto"
+    cp -an "$SOURCE_DIR/knowledge/wiki_auto/." "$INSTANCE_DIR/knowledge/wiki_auto/" 2>/dev/null || true
+fi
 
 # Special handling for knowledge (Move only the 'personal' parts)
 PERSONAL_KNOWLEDGE_DIRS=("5c" "samvega" "dnd_campaign" "transcripts" "awareness" "creative_writing" "seeds" "digests" "reflections" "Dev_Notebook" ".obsidian")
@@ -66,6 +73,12 @@ if [ ! -L "$SOURCE_DIR/instance" ]; then
     echo "🔗 Created local symbolic link 'instance' -> $INSTANCE_DIR"
 fi
 
+echo ""
 echo "✨ Instance setup complete."
-echo "⚠️  NOTE: You must now update your docker-compose.yml to point to ../gaia-instance/"
-echo "   (Or wait for Gemini to do it for you!)"
+echo "   Instance dir:  $INSTANCE_DIR"
+echo "   Models:        $INSTANCE_DIR/gaia-models/ (mounted as /models)"
+echo "   Logs:          $INSTANCE_DIR/logs/"
+echo "   Knowledge:     $INSTANCE_DIR/knowledge/ (runtime data only)"
+echo ""
+echo "   Source-tracked knowledge (blueprints, system_reference, personas, etc.)"
+echo "   stays in the repo and is overlay-mounted by docker-compose."

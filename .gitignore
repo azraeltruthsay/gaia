@@ -46,6 +46,11 @@ latest_test.txt
 tmp/
 tmp_*.py
 
+# --- Images / diagrams ---
+*.png
+*.PNG
+*.svg
+
 # --- Video / large media files ---
 *.mp4
 *.mkv
@@ -69,6 +74,8 @@ nvidia_post_debug.txt
 tools/
 .claude/
 .gemini/
+CLAUDE.md
+GAIA_Specialist_Agent_Mesh*.md
 
 # --- Standalone root files (not part of SOA services) ---
 Geppitti Persona & Interaction Overview
