@@ -72,8 +72,8 @@ services:
       - ORCHESTRATOR_STUDY_URL=http://gaia-study:8766
       - ORCHESTRATOR_MCP_URL=http://gaia-mcp:8765
       - ORCHESTRATOR_PRIME_URL=http://gaia-prime:7777
-      # Skill adapters loaded when tiers enter Subconscious (CPU) mode
-      - PRIME_CPU_ADAPTER=${PRIME_CPU_ADAPTER:-/models/lora_adapters/tier3_session/code_skill_v1/adapter.gguf}
+      # Skill adapters loaded on-demand by cognitive pipeline (not always-on)
+      # PRIME_CPU_ADAPTER= (empty = no auto-load on consciousness transition)
       - CPU_ADAPTER_SCALE=${CPU_ADAPTER_SCALE:-0.5}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

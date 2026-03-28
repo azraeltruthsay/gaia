@@ -1753,6 +1753,15 @@ class AgentCore:
             # and release semantics (this avoids directly invoking backend objects
             # that may bypass our SafeModelProxy protections).
             logger.warning("AgentCore: entering planning call with model=%s", selected_model_name)
+
+            # Load skill adapter on Prime if intent requires one (e.g., code tasks)
+            try:
+                from gaia_core.cognition.skill_adapter import ensure_adapter
+                _intent_for_adapter = plan.intent if plan else ""
+                ensure_adapter(_intent_for_adapter)
+            except Exception:
+                pass  # Non-blocking — adapter is optional enhancement
+
             try:
                 # Release any earlier acquisition so forward_to_model manages lifecycle.
                 try:
