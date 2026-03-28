@@ -1011,12 +1011,15 @@ class AgentCore:
                 "what day", "today's date", "right now",
             ]
             is_factual = any(p in text_lower for p in factual_patterns)
+            import re as _re
+            _trivial_phrases = [
+                r"\bhello\b", r"\bhi\b", r"\bhey\b", r"\bstatus\b", r"\buptime\b",
+                r"\bwho are you\b", r"\bhow are you\b",
+                r"\bgood morning\b", r"\bgood afternoon\b", r"\bgood evening\b", r"\bgood night\b",
+                r"\bthanks\b", r"\bthank you\b",
+            ]
             is_trivial = len(user_input) < 100 and (
-                any(w in text_lower for w in [
-                    "hello", "hi", "hey", "status", "uptime", "who are you",
-                    "how are you", "good morning", "good afternoon", "good evening",
-                    "good night", "thanks", "thank you",
-                ]) or is_factual
+                any(_re.search(p, text_lower) for p in _trivial_phrases) or is_factual
             )
     
             # 1a. Nano Fast-Path (0.5B) - Highest priority for speed

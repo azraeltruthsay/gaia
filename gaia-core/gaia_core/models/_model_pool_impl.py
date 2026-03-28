@@ -786,7 +786,7 @@ class ModelPool:
         try:
             import torch
             if torch.cuda.is_available() and "gpu_prime" in self.models:
-                logger.info("🔼 Promoting gpu_prime to 'prime' for GPU inference")
+                logger.info("Promoting gpu_prime to 'prime' for GPU inference")
                 self.models["prime"] = self.models["gpu_prime"]
                 self.model_status["prime"] = "idle"
                 try:
@@ -797,6 +797,14 @@ class ModelPool:
                     logger.debug("ModelPool: backend env assignment failed: %s", _exc)
         except Exception as _exc:
             logger.debug("ModelPool: prime alias promotion failed: %s", _exc)
+
+        # Promote lite alias: lite shares Core's model for intent detection,
+        # tool selection, and lightweight tasks. Without this, alias-only
+        # configs are skipped during model loading and lite stays unregistered.
+        if "lite" not in self.models and "core" in self.models:
+            self.models["lite"] = self.models["core"]
+            self.model_status["lite"] = self.model_status.get("core", "idle")
+            logger.info("Promoting core to 'lite' for intent detection + tool selection")
 
     def wait_for_embed(self, timeout: float = None):
         """Block up to `timeout` seconds for the embed model to finish loading.
