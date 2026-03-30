@@ -56,6 +56,9 @@ RUN CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
 # optimum is required by PEFT when gptqmodel is present
 RUN pip install --no-cache-dir optimum>=1.24.0
 
+# quanto: CPU-first int4 quantization for large models that don't fit GPU in bf16
+RUN pip install --no-cache-dir quanto>=0.2.0
+
 # AutoAWQ needs torch at build time for CUDA kernel compilation.
 RUN CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
     pip install --no-cache-dir autoawq>=0.2.0

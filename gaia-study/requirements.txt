@@ -27,3 +27,4 @@ accelerate>=1.0.0
 autoawq>=0.2.0
 # gguf: HuggingFace → GGUF conversion (used by llama.cpp convert script)
 gguf>=0.6.0
+quanto>=0.2.0
