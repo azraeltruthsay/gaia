@@ -1187,27 +1187,6 @@ class AgentCore:
             except Exception:
                 logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
 
-            # Planning intent: prefer GPU Prime if available
-            # Uses fast keyword check (intent detection runs later in the pipeline)
-            _planning_keywords = ["implementation plan", "detailed plan", "create a plan",
-                                  "design a system", "plan for adding", "what files need",
-                                  "step by step implementation", "architecture plan"]
-            _user_lower = (user_input or "").lower()
-            _is_planning_request = any(kw in _user_lower for kw in _planning_keywords)
-            if _is_planning_request and selected_model_name not in ('gpu_prime',):
-                # Check if gpu_prime is already loaded (FOCUSING mode active)
-                if "gpu_prime" in self.model_pool.models:
-                    try:
-                        import requests as _req_check
-                        _prime_ep = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
-                        _ph = _req_check.get(f"{_prime_ep}/health", timeout=2)
-                        if _ph.status_code == 200 and _ph.json().get("device") == "cuda":
-                            logger.info("[CASCADE] Planning task — GPU Prime available, selecting gpu_prime")
-                            yield {"type": "token", "value": "[(i) Planning task — using GPU Prime for detailed output.]\n\n"}
-                            selected_model_name = "gpu_prime"
-                    except Exception:
-                        pass
-
             # Acquire the selected model. `selected_model_name` may already be a
             # concrete model key (e.g. 'gpu_prime' or 'prime') or it may be a role
             # name (e.g. 'responder'). Prefer using the acquire_model path even when
