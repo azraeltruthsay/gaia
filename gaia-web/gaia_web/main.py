@@ -161,6 +161,31 @@ async def process_user_input(user_input: str, request: Request):
             yield json.dumps({"type": "error", "value": "Request blocked by security scan.", "error_code": "GAIA-WEB-020", "hint": "The security scanner blocked this request. Rephrase and try again."}) + "\n"
         return StreamingResponse(_blocked(), media_type="application/x-ndjson")
 
+    # Pre-flight: if planning request detected, request FOCUSING mode
+    # This runs BEFORE the packet hits core, so Prime loads while core
+    # processes the Nano triage and cascade routing.
+    _planning_kw = ["implementation plan", "detailed plan", "create a plan",
+                     "design a system", "plan for adding", "architecture plan",
+                     "step by step implementation"]
+    if any(kw in user_input.lower() for kw in _planning_kw):
+        try:
+            orch_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+            async with httpx.AsyncClient(timeout=180.0) as orch_client:
+                state_resp = await orch_client.get(f"{orch_url}/lifecycle/state", timeout=5.0)
+                if state_resp.status_code == 200:
+                    state = state_resp.json().get("state", "")
+                    if state != "focusing":
+                        logger.info("Planning request detected — requesting FOCUSING mode (waiting for GPU Prime load)")
+                        focus_resp = await orch_client.post(f"{orch_url}/consciousness/focusing", timeout=120.0)
+                        if focus_resp.status_code == 200:
+                            logger.info("FOCUSING mode active — Prime on GPU")
+                        else:
+                            logger.warning("FOCUSING request returned %d", focus_resp.status_code)
+                    else:
+                        logger.info("Already in FOCUSING mode — Prime should be on GPU")
+        except Exception as _focus_err:
+            logger.warning("Pre-flight FOCUSING failed (non-blocking): %s", _focus_err)
+
     async def _stream_response():
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:

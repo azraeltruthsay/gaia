@@ -1008,6 +1008,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             # Running in a thread executor prevents blocking the uvicorn
             # event loop, keeping /health and other endpoints responsive.
             loop = asyncio.get_event_loop()
+            logger.info("Main: creating run_turn generator (agent_core=%s)", type(_agent_core).__name__ if _agent_core else "None")
             gen = _agent_core.run_turn(
                 user_input=user_input,
                 session_id=session_id,
@@ -1016,11 +1017,15 @@ async def process_packet(packet_data: Dict[str, Any]):
                 metadata=metadata,
                 reflex_text=reflex_text
             )
+            logger.info("Main: run_turn generator created, calling first next()")
 
             def _next_event():
                 try:
                     return next(gen)
                 except StopIteration:
+                    return None
+                except Exception as _gen_exc:
+                    logger.error("run_turn generator exception: %s", _gen_exc, exc_info=True)
                     return None
 
             while True:
