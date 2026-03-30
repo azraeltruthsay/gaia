@@ -473,7 +473,13 @@ class ConsciousnessMatrix:
             return {"ok": False, "tier": tier, "error": str(e)}
 
     async def _load_tier_gpu(self, tier: str, endpoint: str, state: TierState) -> dict:
-        """Load a tier on GPU (safetensors → conscious)."""
+        """Load a tier on GPU (safetensors → conscious).
+
+        If the tier already has a GGUF/CPU model loaded, unloads it first
+        and waits for the manager to return to standby before loading GPU.
+        The GAIA Engine auto-detects when NF4 quantization is needed based
+        on available VRAM.
+        """
         model = self._gpu_models.get(tier)
         if not model:
             return {"ok": False, "tier": tier, "error": "no GPU model configured"}
@@ -481,25 +487,39 @@ class ConsciousnessMatrix:
         logger.info("Loading %s to GPU: %s", tier, model)
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
-                # Check if already loaded
+                # Check current state — may need to unload GGUF first
                 health = await client.get(f"{endpoint}/health")
                 if health.status_code == 200:
                     hdata = health.json()
-                    if hdata.get("model_loaded") and hdata.get("mode") == "active":
+                    if hdata.get("model_loaded") and hdata.get("device") == "cuda":
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("%s already loaded on GPU", tier)
                         return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
+                    if hdata.get("model_loaded"):
+                        # Model loaded but not on GPU (GGUF/CPU) — unload first
+                        logger.info("%s has model on %s — unloading before GPU load",
+                                    tier, hdata.get("device", "cpu"))
+                        await self._unload_tier(tier, endpoint, state)
+                        await self._wait_for_manager_ready(tier, endpoint)
 
                 resp = await client.post(
                     f"{endpoint}/model/load",
                     json={"model": model, "device": "cuda"},
                 )
-                if resp.status_code in (200, 409):
+                if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("ok") or resp.status_code == 409:
+                    if data.get("ok"):
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("Loaded %s to GPU", tier)
                         return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
+                if resp.status_code == 409:
+                    # 409 = already loaded — verify it's actually on GPU
+                    h2 = await client.get(f"{endpoint}/health")
+                    if h2.status_code == 200 and h2.json().get("device") == "cuda":
+                        state.actual = ConsciousnessLevel.CONSCIOUS
+                        logger.info("Loaded %s to GPU (409 = already loaded)", tier)
+                        return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
+                    logger.warning("%s 409 but not on GPU — load may have failed", tier)
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
