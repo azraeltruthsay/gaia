@@ -1,0 +1,29 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Regenerate with: pip-compile pyproject.toml -o requirements.txt
+#
+# Core dependencies for gaia-study (The Subconscious)
+
+# gaia-common[vector] is installed separately via volume mount
+# -e /gaia-common[vector]
+
+fastapi>=0.115.0
+uvicorn>=0.29.0
+httpx>=0.25.0
+sentence-transformers>=2.7.0
+chromadb>=0.4.24
+
+# QLoRA training dependencies
+# Qwen3.5 model_type requires transformers >=5.3.0
+# Prior <5.0 pin was for 8B OOM; 4B fits fine with eager loading
+transformers>=5.3.0
+peft>=0.13.0
+bitsandbytes>=0.44.0
+datasets>=3.0.0
+trl>=0.12.0
+accelerate>=1.0.0
+
+# Quantization toolchain (merge+requantize pipeline)
+# AutoAWQ: bf16 → AWQ quantization (GPU, ~5min for 4B)
+autoawq>=0.2.0
+# gguf: HuggingFace → GGUF conversion (used by llama.cpp convert script)
+gguf>=0.6.0

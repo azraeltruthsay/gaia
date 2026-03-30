@@ -1,0 +1,88 @@
+# GAIA Project - Root .dockerignore
+# Prevents large files from bloating Docker build context
+
+# Large model files (17GB+)
+gaia-models/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# Legacy service (44GB)
+gaia-assistant/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env.local
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+artifacts/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Knowledge base (mounted at runtime)
+knowledge/
+
+# Condensed archives
+GAIA_Condensed*/

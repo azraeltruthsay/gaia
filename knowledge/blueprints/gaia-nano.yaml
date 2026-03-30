@@ -1,0 +1,119 @@
+id: gaia-nano
+version: '1.0'
+role: The Reflex (Nano Triage)
+service_status: live
+runtime:
+  port: 8080
+  base_image: null
+  gpu: true
+  startup_cmd: llama-server --model /models/nano.gguf --port 8080 --host 0.0.0.0
+  health_check: curl -f http://localhost:8080/health
+  gpu_count: 1
+  user: null
+  dockerfile: gaia-nano/Dockerfile
+  compose_service: gaia-nano
+  security: null
+
+interfaces:
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Container health check endpoint (llama-server built-in).
+  status: active
+
+- id: chat_completions
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /v1/chat/completions
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: OpenAI-compatible chat completions endpoint. Used by gaia-core for Nano triage classification and transcript cleanup.
+  status: active
+
+- id: completions
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /v1/completions
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: OpenAI-compatible text completions endpoint.
+  status: active
+
+- id: slots
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /slots
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: KV cache slot status — used by gaia-doctor for cache pressure monitoring.
+  status: active
+
+dependencies:
+  services: []
+  volumes:
+  - name: models
+    access: ro
+    purpose: GGUF model weights for llama-server
+    mount_path: /models
+  external_apis: []
+
+source_files:
+- path: gaia-nano/Dockerfile
+  role: entrypoint
+  file_type: dockerfile
+
+failure_modes:
+- condition: GPU unavailable
+  response: Falls back to CPU-only GGUF inference (degraded latency)
+  severity: degraded
+  auto_recovers: true
+- condition: Model file missing or corrupt
+  response: llama-server fails to start; container enters crash loop
+  severity: fatal
+  auto_recovers: false
+
+intent:
+  purpose: >
+    The reflexive triage layer of GAIA. Runs a tiny 0.8B Qwen model via llama-server
+    for sub-second classification (SIMPLE/COMPLEX routing) and transcript cleanup.
+    Intentionally minimal — no application code, just llama-server with a GGUF model.
+    GPU primary with CPU fallback for resilience.
+
+  design_decisions:
+  - llama-server directly — no Python wrapper, minimal attack surface
+  - OpenAI-compatible API for drop-in integration with gaia-core model clients
+  - GPU primary for speed, CPU fallback for resilience
+  - 0.8B parameter model chosen for sub-second latency on triage tasks
+  - KV cache /slots endpoint enables external pressure monitoring by doctor
+
+  open_questions: []
+  cognitive_role: The Reflex
+
+meta:
+  status: live
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: '1.0'
+  schema_version: '1.0'
+  created_at: '2026-03-20T00:00:00Z'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: high
+  reflection_notes: null
+  divergence_score: null

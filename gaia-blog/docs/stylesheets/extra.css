@@ -1,0 +1,177 @@
+/* GAIA Blog — Watery Blues & Leafy Greens */
+
+/* ── Color tokens ──────────────────────────────────────────────── */
+
+:root {
+  /* Watery blues */
+  --gaia-water-deep: #0d3b54;
+  --gaia-water-mid: #1a6b8a;
+  --gaia-water-light: #4db8d1;
+  --gaia-water-pale: #b8e6f0;
+  --gaia-water-glow: #7dd3e8;
+
+  /* Leafy greens */
+  --gaia-leaf-deep: #1a4a2e;
+  --gaia-leaf-mid: #2d7a4a;
+  --gaia-leaf-light: #5cb87a;
+  --gaia-leaf-pale: #b8e6c8;
+  --gaia-leaf-glow: #8fd4a8;
+}
+
+/* ── Dark mode overrides ───────────────────────────────────────── */
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--gaia-water-mid);
+  --md-primary-fg-color--light: var(--gaia-water-light);
+  --md-primary-fg-color--dark: var(--gaia-water-deep);
+  --md-accent-fg-color: var(--gaia-leaf-light);
+  --md-default-bg-color: #0f1b23;
+  --md-default-fg-color--light: #b0c4ce;
+  --md-code-bg-color: #0a1520;
+  --md-typeset-a-color: var(--gaia-water-light);
+}
+
+[data-md-color-scheme="slate"] .md-header {
+  background: linear-gradient(135deg, var(--gaia-water-deep), #0a2a3a);
+}
+
+[data-md-color-scheme="slate"] .md-tabs {
+  background: var(--gaia-water-deep);
+}
+
+[data-md-color-scheme="slate"] .md-nav__link--active,
+[data-md-color-scheme="slate"] .md-nav__link:hover {
+  color: var(--gaia-leaf-light);
+}
+
+[data-md-color-scheme="slate"] .md-typeset a:hover {
+  color: var(--gaia-leaf-glow);
+}
+
+/* Footer */
+[data-md-color-scheme="slate"] .md-footer {
+  background: linear-gradient(135deg, #071218, var(--gaia-water-deep));
+}
+
+/* Code blocks — deep water tint */
+[data-md-color-scheme="slate"] .md-typeset code {
+  background: rgba(13, 59, 84, 0.3);
+  color: var(--gaia-water-pale);
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+  background: #071520;
+}
+
+/* Blockquotes — leafy accent */
+[data-md-color-scheme="slate"] .md-typeset blockquote {
+  border-left: 4px solid var(--gaia-leaf-mid);
+  background: rgba(45, 122, 74, 0.08);
+  padding: 0.8rem 1.2rem;
+  border-radius: 0 6px 6px 0;
+}
+
+/* Tags */
+[data-md-color-scheme="slate"] .md-tag {
+  background: rgba(77, 184, 209, 0.15);
+  color: var(--gaia-water-light);
+}
+
+/* ── Light mode overrides ──────────────────────────────────────── */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--gaia-water-mid);
+  --md-primary-fg-color--light: var(--gaia-water-light);
+  --md-primary-fg-color--dark: var(--gaia-water-deep);
+  --md-accent-fg-color: var(--gaia-leaf-mid);
+  --md-default-bg-color: #f5faf8;
+  --md-typeset-a-color: var(--gaia-water-mid);
+}
+
+[data-md-color-scheme="default"] .md-header {
+  background: linear-gradient(135deg, var(--gaia-water-mid), var(--gaia-water-deep));
+}
+
+[data-md-color-scheme="default"] .md-tabs {
+  background: var(--gaia-water-deep);
+}
+
+[data-md-color-scheme="default"] .md-typeset blockquote {
+  border-left: 4px solid var(--gaia-leaf-mid);
+  background: rgba(45, 122, 74, 0.06);
+  padding: 0.8rem 1.2rem;
+  border-radius: 0 6px 6px 0;
+}
+
+[data-md-color-scheme="default"] .md-typeset code {
+  background: rgba(26, 107, 138, 0.08);
+  color: var(--gaia-water-deep);
+}
+
+[data-md-color-scheme="default"] .md-footer {
+  background: linear-gradient(135deg, var(--gaia-water-deep), #0a2a3a);
+}
+
+/* ── Shared styles ─────────────────────────────────────────────── */
+
+/* Landing page hero */
+.md-content h1 {
+  font-weight: 700;
+}
+
+/* Blog post titles */
+.md-typeset h1 {
+  color: var(--gaia-water-light);
+}
+
+.md-typeset h2 {
+  color: var(--gaia-leaf-light);
+  border-bottom: 1px solid rgba(92, 184, 122, 0.2);
+  padding-bottom: 0.3rem;
+}
+
+/* Buttons — water-to-leaf gradient */
+.md-typeset .md-button--primary {
+  background: linear-gradient(135deg, var(--gaia-water-mid), var(--gaia-leaf-mid));
+  border: none;
+}
+
+.md-typeset .md-button--primary:hover {
+  background: linear-gradient(135deg, var(--gaia-water-light), var(--gaia-leaf-light));
+}
+
+/* Author avatars in blog posts */
+.md-author img {
+  border-radius: 50%;
+}
+
+/* Discord CTA */
+.discord-cta {
+  margin-top: 3rem;
+}
+.discord-cta a {
+  font-weight: 600;
+}
+
+/* Tag chips */
+.md-tags .md-tag {
+  font-size: 0.75rem;
+  border-radius: 12px;
+}
+
+/* Horizontal rules — water gradient */
+.md-typeset hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gaia-water-mid), var(--gaia-leaf-mid), transparent);
+}
+
+/* Search bar */
+.md-search__input {
+  border-radius: 8px;
+}
+
+/* Smooth transitions */
+.md-header, .md-tabs, a, .md-tag, .md-button {
+  transition: all 0.2s ease;
+}

@@ -1,0 +1,222 @@
+# CognitionPacket v0.3 — The universal message format between gaia-web and gaia-core
+#
+# Source: gaia-common/gaia_common/protocols/cognition_packet.py
+# Uses: dataclasses + dataclasses_json for serialization
+# Transport: HTTP POST as JSON body (gaia-web -> gaia-core /process_packet)
+
+version: "v0.3"
+source_file: gaia-common/gaia_common/protocols/cognition_packet.py
+
+CognitionPacket:
+  version: string  # "v0.3"
+
+  header:
+    session_id: string          # Conversation session identifier
+    packet_id: string           # Unique packet ID (e.g. "web_a1b2c3d4")
+    persona:
+      persona_id: string        # e.g. "gaia"
+      role: string              # e.g. "assistant"
+    routing:
+      strategy: string          # Routing strategy
+    model:
+      backend: string           # e.g. "gpu_prime"
+      model_id: string          # Model identifier
+    origin: string              # "user" | "system" | "self" | "api"
+    datetime: string            # ISO 8601 UTC timestamp
+    sub_id: string              # 8-char hash sub-identifier
+    parent_packet_id: string    # Optional, for chained packets
+    lineage: list of string     # Packet ID chain
+    output_routing:             # Spinal column destination routing
+      source_destination: string  # Where the message came from
+      primary:
+        destination: string     # "discord" | "web" | "api"
+        channel_id: string
+        user_id: string
+        reply_to_message_id: string
+        metadata: dict
+    operational_status:         # Optional current operational context
+      state: string
+      details: dict
+
+  intent:
+    user_intent: string         # e.g. "chat", "code", "question"
+    system_task: string         # "stream" | "code" | "tool" | etc.
+    confidence: float           # 0.0 - 1.0
+    tags: list of string
+
+  context:
+    session_history_ref:
+      type: string              # "local"
+      value: string             # "active"
+    cheatsheets: list           # Protocol reference pointers
+    constraints:
+      max_tokens: int           # Default 2048
+      time_budget_ms: int       # Default 60000
+      safety_mode: string       # "strict"
+      policies: list of string
+    relevant_history_snippet: list  # Recent relevant history
+    available_mcp_tools: list of string  # Tools available this turn
+
+  content:
+    original_prompt: string     # The user's input text
+    data_fields: list           # Structured data attachments
+    attachments: list           # File attachments (name, mime, hash)
+    timeline: list              # Temporal landmarks in conversation
+    intent: object              # Optional content-level intent override
+
+  reasoning:
+    reflection_log: list        # Step-by-step reasoning trace
+    sketchpad: list             # Working memory slots
+    evaluations: list           # Quality evaluations (name, passed, score)
+
+  tool_routing:                 # Optional — present when tools are needed
+    needs_tool: bool
+    routing_requested: bool
+    selected_tool:
+      tool_name: string
+      params: dict
+      selection_reasoning: string
+      selection_confidence: float
+    alternative_tools: list
+    review_confidence: float
+    review_reasoning: string
+    execution_status: string    # "pending" | "approved" | "executing" | "completed" | "failed" | "rejected"
+    execution_result:
+      success: bool
+      output: any
+      error: string
+      execution_time_ms: int
+      raw_source_data: any      # VouchCore: un-summarized raw payload
+    reinjection_count: int
+    max_reinjections: int       # Default 3
+
+  response:
+    candidate: string           # Generated response text
+    confidence: float
+    stream_proposal: bool
+    tool_calls: list            # [{name, args, dry_run}]
+    sidecar_actions: list       # [{action_type, params}]
+
+  governance:
+    safety:
+      execution_allowed: bool
+      allowed_commands_whitelist_id: string
+      dry_run: bool             # Default true
+    signatures:
+      header_hash: string
+      content_hash: string
+      signed_by: string
+      signature: string
+    audit:
+      created_by: string
+      created_at: string
+      modified_at: string
+      reviewers: list of string
+      decision: string
+    privacy:
+      pii_detected: bool
+      pii_notes: string
+      pii_redactions: list of dict
+    security_scan:
+      ran: bool
+      passed: bool
+      scan_results: list        # [{scanner, rule_id, severity, redacted_excerpt, timestamp}]
+      injection_score: float
+
+  metrics:
+    token_usage:
+      prompt_tokens: int
+      completion_tokens: int
+      total_tokens: int
+      projected_tokens: int
+    latency_ms: int
+    cost_estimate: float
+    errors: list of string
+    resources:                  # Optional system resource snapshot
+      cpu_usage_percent: float
+      memory_usage_percent: float
+      gpu_usage: dict
+    semantic_probe: dict        # Optional polygraph data
+
+  status:
+    finalized: bool
+    state: string               # "processing" | "completed" | "failed" | "error"
+    next_steps: list of string
+    observer_trace: list of string
+
+  council:                      # Optional — present for multi-agent deliberation
+    mode: string                # "solo" | "debate" | "consensus"
+    participants: list of string
+    votes: list                 # [{agent, decision, reason, confidence}]
+    thread: list                # [{agent, content, timestamp, target}]
+    iteration_count: int
+    max_iterations: int         # Default 3
+
+  loop_state:                   # Optional — tracks loop detection
+    detected_at: string
+    loop_type: string
+    pattern: string
+    pattern_hash: string
+    reset_count: int
+    confidence: float
+    previous_attempts: list
+    recovery_context: string
+    triggered_by: list of string
+    in_recovery: bool
+    warned: bool
+    override_active: bool
+
+  goal_state:                   # Optional — tracks detected user goals
+    current_goal:
+      goal_id: string
+      description: string
+      confidence: string        # "high" | "medium" | "low"
+      detected_at: string
+      source: string            # "fast_path" | "session_carry" | "llm"
+    previous_goals: list
+    turn_count: int
+    goal_shifts: int
+
+# ── Streaming Protocol ───────────────────────────────────────────────
+# gaia-core returns NDJSON (newline-delimited JSON) via StreamingResponse.
+# Each line is one of:
+
+streaming_chunks:
+  - type: token
+    description: "A text token from the model"
+    schema: {"type": "token", "value": "<text>"}
+
+  - type: flush
+    description: "Signal to front-ends to flush accumulated text buffer"
+    schema: {"type": "flush"}
+
+  - type: packet
+    description: "The final completed CognitionPacket (last chunk)"
+    schema: {"type": "packet", "value": <CognitionPacket dict>}
+
+  - type: error
+    description: "An error occurred during processing"
+    schema: {"type": "error", "value": "<error message>"}
+
+# ── How gaia-web Builds the Packet ──────────────────────────────────
+# gaia-web constructs a minimal packet and POSTs to gaia-core:
+#
+# {
+#   "version": "v0.3",
+#   "header": {
+#     "session_id": "<session_id>",
+#     "packet_id": "<packet_id>",
+#     "persona": {"persona_id": "gaia", "role": "assistant"}
+#   },
+#   "content": {"original_prompt": "<user input>"},
+#   "governance": {
+#     "security_scan": {
+#       "ran": true,
+#       "passed": true,
+#       "injection_score": 0.12
+#     }
+#   }
+# }
+#
+# gaia-core deserializes via CognitionPacket.from_dict() and populates
+# all remaining fields during the cognitive pipeline.

@@ -1,0 +1,42 @@
+# PromptFoo suite: Basic factual knowledge assertions
+description: "Test GAIA's factual accuracy on basic questions"
+
+providers:
+  - id: http
+    config:
+      url: "http://gaia-core:6415/process_user_input"
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body: "user_input={{prompt}}"
+      transformResponse: "json.text || body"
+
+prompts:
+  - "{{question}}"
+
+tests:
+  - vars:
+      question: "What is 7 times 8?"
+    assert:
+      - type: contains
+        value: "56"
+  - vars:
+      question: "What is the capital of France?"
+    assert:
+      - type: contains-any
+        value: ["Paris", "paris"]
+  - vars:
+      question: "How many days are in a standard week?"
+    assert:
+      - type: contains
+        value: "7"
+  - vars:
+      question: "What is 2 + 2?"
+    assert:
+      - type: contains
+        value: "4"
+  - vars:
+      question: "What planet is known as the Red Planet?"
+    assert:
+      - type: contains-any
+        value: ["Mars", "mars"]

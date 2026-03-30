@@ -1,0 +1,789 @@
+# app/utils/tools_registry.py
+"""
+Defines the schemas for all tools exposed by the MCP-lite server.
+This acts as a central registry for tool discovery and validation.
+"""
+
+
+TOOLS = {
+    "run_shell": {
+        "description": "Executes a whitelisted shell command in a sandboxed environment.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to execute."}
+            },
+            "required": ["command"]
+        }
+    },
+    "read_file": {
+        "description": "Reads the entire content of a specified file.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The absolute path to the file."}
+            },
+            "required": ["path"]
+        }
+    },
+    "write_file": {
+        "description": "Writes content to a specified file.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The absolute path to the file."},
+                "content": {"type": "string", "description": "The content to write."}
+            },
+            "required": ["path", "content"]
+        }
+    },
+    "ai_write": {
+        "description": "AI-initiated write helper used by approval flows (path absolute, content string).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The absolute path to write to."},
+                "content": {"type": "string", "description": "The content to write."},
+                "base_cwd": {"type": "string", "description": "Optional base cwd for relative paths."}
+            },
+            "required": ["path", "content"]
+        }
+    },
+    "list_dir": {
+        "description": "Lists the contents of a specified directory.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The absolute path to the directory."}
+            },
+            "required": ["path"]
+        }
+    },
+    "list_tree": {
+        "description": "Returns a bounded directory tree (safe depth/entry limits).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Optional root path (defaults to /gaia-assistant)."},
+                "max_depth": {"type": "integer", "description": "Maximum depth to traverse (default 3, max 6)."},
+                "max_entries": {"type": "integer", "description": "Maximum entries to include (default 200, max 1000)."}
+            },
+            "required": []
+        }
+    },
+    "list_tools": {
+        "description": "Lists all available tools on the server.",
+        "params": {}
+    },
+    "count_chars": {
+        "description": "Count occurrences of a character in a word or text. Use this for ANY letter-counting question — do NOT try to count letters yourself, you will get it wrong due to tokenization. Example: count_chars({\"text\": \"strawberry\", \"char\": \"r\"}) → 3",
+        "params": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The text to search in"},
+                "char": {"type": "string", "description": "The character to count (single letter)"}
+            },
+            "required": ["text", "char"]
+        }
+    },
+    "world_state": {
+        "description": "Returns an expanded dynamic world-state snapshot (telemetry + models + MCP tool list).",
+        "params": {}
+    },
+    "recall_events": {
+        "description": "Recall recent system events from episodic memory. Use this when asked about recent activity, what happened, or what you remember. Returns a timeline of lifecycle transitions, conversations, training runs, and system events.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "number", "description": "How many hours of history to recall (default: 6, max: 72). Use small values for 'what just happened' and larger for 'what happened today'."},
+                "limit": {"type": "integer", "description": "Maximum number of events to return (default: 20)."},
+                "cfr": {"type": "boolean", "description": "If true, return the full detailed log suitable for CFR analysis. Default false (returns concise summary)."}
+            }
+        }
+    },
+    "describe_tool": {
+        "description": "Returns the JSON schema for a specified tool.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "description": "The name of the tool to describe."}
+            },
+            "required": ["tool_name"]
+        }
+    },
+    "memory_status": {
+        "description": "Summarize memory/index state (counts, paths, last build).",
+        "params": {}
+    },
+    "memory_query": {
+        "description": "Run a semantic memory lookup against the vector index.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language query."},
+                "top_k": {"type": "integer", "description": "Number of results to return (default 5)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "memory_rebuild_index": {
+        "description": "Rebuild the semantic memory index from core documents (requires approval).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_dir": {"type": "string", "description": "Optional doc directory to index (defaults to GAIA core docs)."}
+            },
+            "required": []
+        }
+    },
+    "index_document": {
+        "description": "Index a document into the vector store for semantic retrieval. Call this after writing a knowledge file with ai_write to make it searchable via memory_query. Routes to gaia-study (the sole vector store writer).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the document file (e.g., /knowledge/research/topic.md)."},
+                "knowledge_base_name": {"type": "string", "description": "Knowledge base to index into (default: 'system'). Options: 'system', 'blueprints', 'dnd_campaign'."}
+            },
+            "required": ["file_path"]
+        }
+    },
+    "find_files": {
+        "description": (
+            "Search for files whose names contain a query string (case-insensitive). "
+            "Root must be one of: /knowledge, /gaia-common, /sandbox. "
+            "Defaults to /sandbox if root is not specified."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Substring to search for in filenames (e.g., 'dev_matrix')."},
+                "root": {"type": "string", "description": "Optional root path (default /sandbox)."},
+                "max_depth": {"type": "integer", "description": "Maximum depth to traverse (default 5, max 8)."},
+                "max_results": {"type": "integer", "description": "Maximum number of results to return (default 50, max 200)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "list_knowledge_bases": {
+        "description": "List all configured knowledge bases and their locations. Call this before find_relevant_documents if you are unsure of the knowledge base name.",
+        "params": {}
+    },
+    "find_relevant_documents": {
+        "description": "Finds documents relevant to a query within a specified knowledge base.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The query to find relevant documents for."},
+                "knowledge_base_name": {"type": "string", "description": "The name of the knowledge base to search in."}
+            },
+            "required": ["query", "knowledge_base_name"]
+        }
+    },
+    # --- Response Fragmentation Tools ---
+    # These tools allow GAIA to handle responses that exceed token limits
+    # by storing, continuing, and assembling fragmented responses.
+    "fragment_write": {
+        "description": "Store a response fragment for later assembly. Use when output is truncated due to token limits.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "parent_request_id": {"type": "string", "description": "UUID linking all fragments from the same request."},
+                "sequence": {"type": "integer", "description": "Fragment ordering (0, 1, 2, ...)."},
+                "content": {"type": "string", "description": "The actual text content of this fragment."},
+                "continuation_hint": {"type": "string", "description": "Context for continuation (e.g., 'The Raven stanza 10/18')."},
+                "is_complete": {"type": "boolean", "description": "True if this is the final fragment."},
+                "token_count": {"type": "integer", "description": "Approximate token count for this fragment."}
+            },
+            "required": ["parent_request_id", "content"]
+        }
+    },
+    "fragment_read": {
+        "description": "Retrieve all fragments for a given request, sorted by sequence.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "parent_request_id": {"type": "string", "description": "The UUID linking fragments."}
+            },
+            "required": ["parent_request_id"]
+        }
+    },
+    "fragment_assemble": {
+        "description": "Assemble fragments into a complete response. Checks for seam overlaps and completeness.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "parent_request_id": {"type": "string", "description": "The UUID linking fragments."},
+                "seam_overlap_check": {"type": "boolean", "description": "If true, attempt to detect/remove duplicate text at seams (default true)."}
+            },
+            "required": ["parent_request_id"]
+        }
+    },
+    "fragment_list_pending": {
+        "description": "List all pending (incomplete) fragment requests.",
+        "params": {}
+    },
+    "fragment_clear": {
+        "description": "Clear fragments. If parent_request_id provided, clears only that request's fragments; otherwise clears all.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "parent_request_id": {"type": "string", "description": "Optional: specific request to clear."}
+            },
+            "required": []
+        }
+    },
+    # --- Cognitive Focus and Resolution (CFR) Tools ---
+    "cfr_ingest": {
+        "description": "Ingest a document into the CFR system. Chunks it into sections, generates summaries at multiple resolution levels, and stores the resolution tree. Use for any document too large for the context window, or when you want variable-resolution access to content.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the document to ingest."},
+                "doc_id": {"type": "string", "description": "Optional custom document ID. Auto-generated from content hash if omitted."},
+                "chunk_target": {"type": "integer", "description": "Target chunk size in characters (default 3500)."}
+            },
+            "required": ["file_path"]
+        }
+    },
+    "cfr_focus": {
+        "description": "Load a specific document section at full resolution into context, with compressed summaries of all other sections. Returns the working-memory payload for reasoning about that section.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID from cfr_ingest."},
+                "section_index": {"type": "integer", "description": "Section index to focus on (0-based)."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_compress": {
+        "description": "Summarize a section and store the summary, releasing the full text from working memory. Returns the cached summary if one already exists.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "section_index": {"type": "integer", "description": "Section index to compress."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_expand": {
+        "description": "Re-expand a previously compressed section to full resolution. No LLM call needed — retrieves the stored full text.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "section_index": {"type": "integer", "description": "Section index to expand."}
+            },
+            "required": ["doc_id", "section_index"]
+        }
+    },
+    "cfr_synthesize": {
+        "description": "Generate a rolling synthesis of understanding across all sections of a document. Uses all section summaries to produce a coherent overview.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."}
+            },
+            "required": ["doc_id"]
+        }
+    },
+    "cfr_status": {
+        "description": "Show current resolution state of a CFR document — which sections are expanded, compressed, or focused, with token budgets. If doc_id omitted, lists all ingested documents.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID. Omit to list all documents."}
+            },
+            "required": []
+        }
+    },
+    "cfr_rolling_context": {
+        "description": "Generate a relevance-weighted rolling summary of all sections before a target section, emphasizing details relevant to the target's topic. Use this to build coherent prior context before reasoning about a specific section.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID."},
+                "target_section": {"type": "integer", "description": "Section index to build context for (0-based)."}
+            },
+            "required": ["doc_id", "target_section"]
+        }
+    },
+    # --- Study Mode / LoRA Adapter Tools ---
+    # These tools allow GAIA to learn new knowledge through QLoRA fine-tuning
+    "study_start": {
+        "description": "Start a study session to learn from documents. Creates a LoRA adapter with the specified knowledge.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {"type": "string", "description": "Unique name for the adapter (e.g., 'jabberwocky_poem')."},
+                "documents": {"type": "array", "items": {"type": "string"}, "description": "List of file paths to learn from."},
+                "tier": {"type": "integer", "description": "Adapter tier: 1=global (permanent), 2=user (persistent), 3=session (temporary). Default 3."},
+                "pillar": {"type": "string", "description": "GAIA pillar: identity, memory, cognition, embodiment, or general. Default 'general'."},
+                "description": {"type": "string", "description": "Human-readable description of what this adapter teaches."},
+                "activation_triggers": {"type": "array", "items": {"type": "string"}, "description": "Keywords that should trigger loading this adapter."},
+                "max_steps": {"type": "integer", "description": "Maximum training steps (default 100)."}
+            },
+            "required": ["adapter_name", "documents"]
+        }
+    },
+    "study_status": {
+        "description": "Get the current status of study mode (training progress, state, etc.).",
+        "params": {}
+    },
+    "study_cancel": {
+        "description": "Cancel an in-progress training session.",
+        "params": {}
+    },
+    "adapter_list": {
+        "description": "List all available LoRA adapters, optionally filtered by tier.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "tier": {"type": "integer", "description": "Optional: filter by tier (1, 2, or 3)."}
+            },
+            "required": []
+        }
+    },
+    "adapter_load": {
+        "description": "Load a LoRA adapter for use in generation.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {"type": "string", "description": "Name of the adapter to load."},
+                "tier": {"type": "integer", "description": "Tier where the adapter is stored."}
+            },
+            "required": ["adapter_name", "tier"]
+        }
+    },
+    "adapter_unload": {
+        "description": "Unload a currently loaded LoRA adapter.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {"type": "string", "description": "Name of the adapter to unload."}
+            },
+            "required": ["adapter_name"]
+        }
+    },
+    "adapter_delete": {
+        "description": "Delete a LoRA adapter (tier 1 adapters cannot be deleted).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {"type": "string", "description": "Name of the adapter to delete."},
+                "tier": {"type": "integer", "description": "Tier where the adapter is stored."}
+            },
+            "required": ["adapter_name", "tier"]
+        }
+    },
+    "adapter_info": {
+        "description": "Get detailed information about a specific adapter.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {"type": "string", "description": "Name of the adapter."},
+                "tier": {"type": "integer", "description": "Tier where the adapter is stored."}
+            },
+            "required": ["adapter_name", "tier"]
+        }
+    },
+    # --- Knowledge Base Tools ---
+    "embed_documents": {
+        "description": "Embeds all documents in a knowledge base into the vector store.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_name": {"type": "string", "description": "The name of the knowledge base to embed."}
+            },
+            "required": ["knowledge_base_name"]
+        }
+    },
+    "query_knowledge": {
+        "description": "Run a semantic memory lookup against a knowledge base.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_name": {"type": "string", "description": "The name of the knowledge base to query."},
+                "query": {"type": "string", "description": "Natural language query."},
+                "top_k": {"type": "integer", "description": "Number of results to return (default 5)."}
+            },
+            "required": ["knowledge_base_name", "query"]
+        }
+    },
+    "add_document": {
+        "description": "Adds a new document to a knowledge base.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_name": {"type": "string", "description": "The name of the knowledge base to add the document to."},
+                "file_path": {"type": "string", "description": "The path to the document to add."}
+            },
+            "required": ["knowledge_base_name", "file_path"]
+        }
+    },
+    # --- Web Research Tools ---
+    "web_search": {
+        "description": "Search the web via DuckDuckGo and return results annotated with source trust tiers. Use for poems, facts, documentation, or any query that benefits from real web sources.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query."},
+                "content_type": {"type": "string", "description": "Optional hint: 'poem', 'facts', 'code', 'science', 'news'. Auto-adds site: filters for relevant domains."},
+                "domain_filter": {"type": "string", "description": "Optional: restrict results to a specific domain (e.g., 'wikipedia.org')."},
+                "max_results": {"type": "integer", "description": "Number of results to return (default 5, max 10)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "web_fetch": {
+        "description": "Fetch and extract text content from a URL. Works for allowlisted domains (trusted/reliable sources) and authenticated API domains (e.g., Kanka.io). Authenticated domains have URLs auto-rewritten to API endpoints with auth headers injected. Use web_search to discover public URLs, or pass authenticated domain URLs directly.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch. Supports trusted/reliable domains and authenticated API domains (e.g., app.kanka.io URLs are auto-rewritten to the Kanka API)."}
+            },
+            "required": ["url"]
+        }
+    },
+    # --- Kanka.io World-Building Tools ---
+    "kanka_list_campaigns": {
+        "description": "List all Kanka.io campaigns accessible to GAIA. Returns campaign IDs, names, and basic info. Use this to discover available campaigns before querying entities.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "kanka_search": {
+        "description": "Search across all entity types (characters, locations, items, etc.) within a Kanka campaign. Returns matching entities with type, ID, and name. Accepts campaign by name or ID.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search term to find entities by name or content."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."}
+            },
+            "required": ["query"]
+        }
+    },
+    "kanka_list_entities": {
+        "description": "List entities of a given type in a Kanka campaign, with optional name filter and pagination. Returns up to 45 entities per page.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entities to list."
+                },
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
+                "name": {"type": "string", "description": "Optional: filter entities whose name contains this string."},
+                "page": {"type": "integer", "description": "Page number for pagination (default 1)."}
+            },
+            "required": ["entity_type"]
+        }
+    },
+    "kanka_get_entity": {
+        "description": "Get a specific entity from a Kanka campaign by type and ID. Returns full entity details including entry text, metadata, and optionally related sub-resources (posts, attributes, relations).",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to retrieve."
+                },
+                "entity_id": {"type": "integer", "description": "The entity's ID within its type."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
+                "related": {"type": "boolean", "description": "If true, include related data (posts, attributes, relations). Default false."}
+            },
+            "required": ["entity_type", "entity_id"]
+        }
+    },
+    "kanka_create_entity": {
+        "description": "Create a new entity (character, journal, note, location, etc.) in a Kanka campaign. Requires approval. Use for session journals, new NPCs, location notes, etc.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to create."
+                },
+                "name": {"type": "string", "description": "Name/title of the new entity."},
+                "entry": {"type": "string", "description": "HTML body/description of the entity."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
+                "fields": {"type": "object", "description": "Optional type-specific fields (e.g., {\"date\": \"2024-01-15\"} for journals, {\"type\": \"NPC\"} for characters)."}
+            },
+            "required": ["entity_type", "name"]
+        }
+    },
+    "kanka_update_entity": {
+        "description": "Update an existing entity in a Kanka campaign. Requires approval. Only send the fields you want to change.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
+                    "description": "The type of entity to update."
+                },
+                "entity_id": {"type": "integer", "description": "The entity's ID to update."},
+                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
+                "fields": {"type": "object", "description": "Fields to update (e.g., {\"name\": \"New Name\", \"entry\": \"<p>Updated description</p>\"})."}
+            },
+            "required": ["entity_type", "entity_id", "fields"]
+        }
+    },
+    # --- NotebookLM Tools ---
+    "notebooklm_list_notebooks": {
+        "description": "List all Google NotebookLM notebooks accessible to GAIA. Returns notebook IDs, titles, source counts, and timestamps.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "notebooklm_get_notebook": {
+        "description": "Get detailed info about a NotebookLM notebook, including AI-generated summary and suggested discussion topics.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID to retrieve."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_sources": {
+        "description": "List all sources (documents, URLs, files) in a NotebookLM notebook.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_notes": {
+        "description": "List user-created notes in a NotebookLM notebook. Returns note IDs, titles, and content previews.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_list_artifacts": {
+        "description": "List AI-generated artifacts (audio overviews, reports, quizzes, flashcards, etc.) in a NotebookLM notebook.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "artifact_type": {
+                    "type": "string",
+                    "enum": ["audio", "video", "report", "quiz", "flashcards", "mind_map", "infographic", "slide_deck", "data_table"],
+                    "description": "Optional: filter by artifact type."
+                }
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_chat": {
+        "description": "Ask a question to a NotebookLM notebook. The notebook's AI will answer using its ingested sources. Supports follow-up questions via conversation_id and scoping to specific sources.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID to query."},
+                "question": {"type": "string", "description": "The question to ask (minimum ~20 characters)."},
+                "source_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: limit the answer to specific source IDs."
+                },
+                "conversation_id": {"type": "string", "description": "Optional: continue a previous conversation (for follow-up questions)."}
+            },
+            "required": ["notebook_id", "question"]
+        }
+    },
+    "notebooklm_download_audio": {
+        "description": "Download an audio overview from a NotebookLM notebook and transcribe it via gaia-audio. Returns the transcription text.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "artifact_id": {"type": "string", "description": "Optional: specific audio artifact ID. Defaults to the most recent audio overview."}
+            },
+            "required": ["notebook_id"]
+        }
+    },
+    "notebooklm_create_note": {
+        "description": "Create a new note in a NotebookLM notebook. Requires approval. Use for saving insights, summaries, or analysis results.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "title": {"type": "string", "description": "Title of the new note."},
+                "content": {"type": "string", "description": "Optional: note body text."}
+            },
+            "required": ["notebook_id", "title"]
+        }
+    },
+    # --- Audio Inbox Tools ---
+    "audio_inbox_status": {
+        "description": "Check the current state of the audio inbox daemon. Returns whether it's running, current file being processed, queue depth, and files completed.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_inbox_list": {
+        "description": "List audio files in each inbox state (new/processing/done). Shows which files are queued, being transcribed, or completed.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_inbox_review": {
+        "description": "Retrieve the transcript and GAIA's review for a completed audio inbox file. Returns the full transcript, review text, and metadata.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The filename (with or without extension) of the completed audio file to retrieve."
+                }
+            },
+            "required": ["filename"]
+        }
+    },
+    "audio_inbox_process": {
+        "description": "Trigger audio inbox processing. The host-side daemon will transcribe and review all queued audio files in audio_inbox/new/. Reviews appear on the web dashboard via the autonomous message stream.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    # --- Audio Listener Tools ---
+    "audio_listen_start": {
+        "description": "Start system audio capture. GAIA will listen to whatever audio is playing on the host system (music, podcasts, browser audio) and transcribe it. Requires approval. The host-side listener daemon must be running.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["passive", "active"],
+                    "description": "passive = transcribe and comment only when interesting. active = transcribe and always comment. Default: passive."
+                },
+                "comment_threshold": {
+                    "type": "string",
+                    "description": "Hint for when to comment in passive mode (e.g., 'interesting', 'always', 'relevant_to_gaia'). Default: 'interesting'."
+                }
+            },
+        }
+    },
+    "audio_listen_stop": {
+        "description": "Stop system audio capture.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    "audio_listen_status": {
+        "description": "Check the current state of the system audio listener. Returns whether it's running, last transcription time, and recent transcript buffer size.",
+        "params": {
+            "type": "object",
+            "properties": {},
+        }
+    },
+    # --- Self-Introspection Tools ---
+    "introspect_logs": {
+        "description": "View recent service logs for self-diagnosis. Returns the last N lines from a GAIA service log, optionally filtered by search pattern or severity level. Use this to diagnose issues with your own behavior, state transitions, sleep/wake state, response routing, or model selection.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "enum": ["gaia-core", "gaia-web", "gaia-mcp", "gaia-study", "discord"],
+                    "description": "Which service's logs to view."
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of recent lines to return (default: 50, max: 200)."
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Filter to lines containing this substring (case-insensitive)."
+                },
+                "level": {
+                    "type": "string",
+                    "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+                    "description": "Minimum severity level to include."
+                }
+            },
+            "required": ["service"]
+        }
+    },
+    # --- Promotion & Blueprint Tools (candidate only) ---
+    "generate_blueprint": {
+        "description": "Generate a candidate blueprint YAML for a service from source code analysis. Extracts endpoints, dependencies, failure modes, and runtime config. Use this when a service needs a blueprint for the first time.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier (e.g. 'gaia-audio')."},
+                "source_dir": {"type": "string", "description": "Path to the service's Python source directory. Auto-detected if omitted."},
+                "role_hint": {"type": "string", "description": "Optional human-readable role (e.g. 'The Ears & Mouth')."}
+            },
+            "required": ["service_id"]
+        }
+    },
+    "assess_promotion": {
+        "description": "Run promotion readiness assessment for a candidate service. Checks blueprint, Dockerfile, tests, lint, dependencies, and compose config. Returns a structured report with pass/fail/warn for each check.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier to assess (e.g. 'gaia-audio')."}
+            },
+            "required": ["service_id"]
+        }
+    },
+    # --- Promotion Lifecycle Tools ---
+    "promotion_create_request": {
+        "description": "Create a promotion request for a candidate service after readiness assessment. Requires human approval (Gate 1) and confirmation (Gate 2) before execution. Will reject 'not_ready' verdicts and duplicate active requests.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Service identifier (e.g. 'gaia-audio')."},
+                "verdict": {"type": "string", "description": "Readiness verdict from assess_promotion (e.g. 'ready', 'ready_with_warnings')."},
+                "recommendation": {"type": "string", "description": "Human-readable recommendation text."},
+                "pipeline_cmd": {"type": "string", "description": "The promotion pipeline command to execute (e.g. './scripts/promote_pipeline.sh gaia-audio')."},
+                "check_summary": {"type": "string", "description": "Summary of readiness checks (pass/fail/warn counts)."}
+            },
+            "required": ["service_id", "verdict", "recommendation", "pipeline_cmd", "check_summary"]
+        }
+    },
+    "promotion_list_requests": {
+        "description": "List promotion requests, optionally filtered by service and/or status. Returns summary info for each request.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "Optional: filter by service identifier."},
+                "status_filter": {"type": "string", "description": "Optional: filter by status (pending, approved, promoted, rejected, etc.)."}
+            },
+            "required": []
+        }
+    },
+    "promotion_request_status": {
+        "description": "Get full details of a specific promotion request by ID, including history and all metadata.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "request_id": {"type": "string", "description": "The promotion request ID to look up."}
+            },
+            "required": ["request_id"]
+        }
+    }
+}

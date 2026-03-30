@@ -1,0 +1,227 @@
+service: gaia-prime
+port: 7777
+role: "The Voice — GAIA Engine inference (GPU, OpenAI-compatible, LoRA-enabled)"
+protocol: http
+framework: "GAIA Engine (custom inference server, managed mode with subprocess isolation)"
+
+notes: |
+  gaia-prime runs the GAIA Engine in managed mode. On startup, it is in zero-GPU
+  standby. The orchestrator loads the model via POST /model/load when transitioning
+  to FOCUSING state. The model runs in a subprocess — when unloaded, the subprocess
+  is killed, freeing ALL GPU memory with no zombie CUDA contexts.
+
+  If PRIME_AUTOLOAD=1, the model is loaded on startup (standalone mode).
+
+provides:
+  # ── OpenAI-Compatible Inference ────────────────────────────────────
+  - endpoint: /v1/chat/completions
+    method: POST
+    description: "OpenAI-compatible chat completions. Supports streaming (SSE) and non-streaming."
+    request_schema:
+      type: OpenAI ChatCompletionRequest
+      fields:
+        messages: list of {role, content}
+        max_tokens: int
+        temperature: float
+        top_p: float
+        stream: bool
+        chat_template_kwargs: dict (optional, e.g. {enable_thinking: false})
+    response_schema:
+      type: OpenAI ChatCompletionResponse
+    consumers: [gaia-core]
+
+  - endpoint: /v1/models
+    method: GET
+    description: "List loaded models (OpenAI-compatible)."
+    consumers: [gaia-core]
+
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Liveness check. Returns model_loaded status and mode (active/standby)."
+    response_schema:
+      fields:
+        status: "ok"
+        model_loaded: bool
+        mode: "active | standby"
+    consumers: [gaia-core, gaia-doctor, gaia-orchestrator]
+
+  - endpoint: /status
+    method: GET
+    description: "Detailed engine status including model info, device, memory."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /model/info
+    method: GET
+    description: "Current loaded model metadata."
+    consumers: [gaia-orchestrator]
+
+  # ── Model Lifecycle (Managed Mode) ─────────────────────────────────
+  - endpoint: /model/load
+    method: POST
+    description: "Load a model onto GPU. Spawns inference subprocess."
+    request_schema:
+      fields:
+        model: string (path to model directory)
+        device: "cuda | cpu" (default cuda)
+    consumers: [gaia-orchestrator, gaia-core]
+
+  - endpoint: /model/unload
+    method: POST
+    description: "Unload model from GPU. Kills inference subprocess, frees all VRAM."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /model/swap
+    method: POST
+    description: "Atomic swap: unload current model, load new one."
+    request_schema:
+      fields:
+        model: string (path to new model)
+        device: "cuda | cpu"
+    consumers: [gaia-orchestrator]
+
+  # ── LoRA Adapter Management ────────────────────────────────────────
+  - endpoint: /adapter/load
+    method: POST
+    description: "Load a LoRA adapter."
+    request_schema:
+      fields:
+        name: string
+        path: string
+    consumers: [gaia-core]
+
+  - endpoint: /adapter/unload
+    method: POST
+    description: "Unload the active LoRA adapter."
+    consumers: [gaia-core]
+
+  - endpoint: /adapter/set
+    method: POST
+    description: "Set the active LoRA adapter for inference."
+    consumers: [gaia-core]
+
+  - endpoint: /adapter/status
+    method: GET
+    description: "Return current adapter status."
+    consumers: [gaia-core]
+
+  # ── Device Migration ───────────────────────────────────────────────
+  - endpoint: /device/gpu
+    method: POST
+    description: "Migrate model to GPU."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /device/cpu
+    method: POST
+    description: "Migrate model to CPU."
+    consumers: [gaia-orchestrator]
+
+  # ── KV Cache / Thought Snapshots ───────────────────────────────────
+  - endpoint: /cache/update
+    method: POST
+    description: "Force a KV cache checkpoint."
+    consumers: [gaia-core]
+
+  - endpoint: /cache/invalidate
+    method: POST
+    description: "Invalidate (clear) the KV cache."
+    consumers: [gaia-core]
+
+  - endpoint: /thought/hold
+    method: POST
+    description: "Snapshot current KV cache state for later resumption."
+    consumers: [gaia-core]
+
+  - endpoint: /thought/resume
+    method: POST
+    description: "Resume from a held KV cache snapshot."
+    consumers: [gaia-core]
+
+  - endpoint: /thought/drop
+    method: POST
+    description: "Drop a held thought snapshot."
+    consumers: [gaia-core]
+
+  - endpoint: /thought/compose
+    method: POST
+    description: "Compose multiple thought snapshots into one context."
+    consumers: [gaia-core]
+
+  - endpoint: /thought/list
+    method: GET
+    description: "List held thought snapshots."
+    consumers: [gaia-core]
+
+  # ── Polygraph (Hidden State Analysis) ──────────────────────────────
+  - endpoint: /polygraph/enable
+    method: POST
+    description: "Enable hidden-state polygraph monitoring."
+    consumers: [gaia-core]
+
+  - endpoint: /polygraph/disable
+    method: POST
+    description: "Disable polygraph monitoring."
+    consumers: [gaia-core]
+
+  - endpoint: /polygraph/activations
+    method: GET
+    description: "Get recent polygraph activation data."
+    consumers: [gaia-core]
+
+  # ── Vision ─────────────────────────────────────────────────────────
+  - endpoint: /vision/status
+    method: GET
+    description: "Vision module status."
+    consumers: [gaia-core]
+
+  # ── Compression Stats ──────────────────────────────────────────────
+  - endpoint: /compression/stats
+    method: GET
+    description: "KV cache compression statistics."
+    consumers: [gaia-core]
+
+  # ── Self-Awareness ─────────────────────────────────────────────────
+  - endpoint: /awareness/status
+    method: GET
+    description: "Self-awareness probing status."
+    consumers: [gaia-core]
+
+  - endpoint: /awareness/curiosity
+    method: GET
+    description: "Curiosity metrics from autonomous exploration."
+    consumers: [gaia-core]
+
+consumes: []
+  # gaia-prime does not initiate calls to other services.
+  # It is a pure inference provider.
+
+environment:
+  PRIME_PORT: "7777"
+  PRIME_MODEL_PATH: "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ"
+  PRIME_DEVICE: "cuda"
+  PRIME_AUTOLOAD: "1"
+
+volumes:
+  - path: /models
+    mode: ro
+    purpose: "Model files (safetensors, GPTQ, adapters)"
+  - path: /warm_pool
+    mode: ro
+    purpose: "Tmpfs-backed warm pool"
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library (GAIA Engine code)"
+  - path: /shared
+    mode: rw
+    purpose: "Thought snapshots, SAE atlas"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+deploy:
+  gpu: true
+  gpu_count: 1

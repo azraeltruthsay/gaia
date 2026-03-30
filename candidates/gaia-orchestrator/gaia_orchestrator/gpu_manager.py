@@ -1,0 +1,723 @@
+"""
+GPU management for GAIA Orchestrator.
+
+Monitors GPU state via pynvml and coordinates GPU ownership
+between services. Uses Docker container stop/start for VRAM
+release/reclaim since vLLM sleep mode cannot offload weights
+with --enforce-eager on Blackwell (sm_120).
+
+Model weights are served from a tmpfs warm pool (/mnt/gaia_warm_pool)
+seeded at boot by systemd, so cold starts load from RAM (~37s)
+rather than NVMe (~41s). KV cache blocks evicted from GPU are
+offloaded to an 8GB CPU RAM buffer (--kv-offloading-backend native).
+"""
+
+import asyncio
+import logging
+import os
+from pathlib import Path
+from typing import Optional
+
+from .config import get_config
+from .state import StateManager
+from .models.schemas import GPUMemoryInfo, NanoGPUMode
+
+logger = logging.getLogger("GAIA.Orchestrator.GPU")
+
+# Try to import pynvml, but don't fail if not available
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    PYNVML_AVAILABLE = False
+    logger.warning("pynvml not available - GPU monitoring will be limited")
+
+# Try to import docker SDK
+try:
+    import docker
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_AVAILABLE = False
+    logger.warning("docker SDK not available - container management will be limited")
+
+
+class GPUManager:
+    """Manages GPU resources and monitors VRAM usage."""
+
+    PRIME_CONTAINER_NAME = os.environ.get("PRIME_CONTAINER_NAME", "gaia-prime")
+    NANO_CONTAINER_NAME = os.environ.get("NANO_CONTAINER_NAME", "gaia-nano")
+
+    def __init__(self, state_manager: StateManager):
+        self.state_manager = state_manager
+        self.config = get_config()
+        self._nvml_initialized = False
+        self._docker_client: Optional["docker.DockerClient"] = None
+
+    def _ensure_nvml(self) -> bool:
+        """Ensure NVML is initialized."""
+        if not PYNVML_AVAILABLE:
+            return False
+
+        if not self._nvml_initialized:
+            try:
+                pynvml.nvmlInit()
+                self._nvml_initialized = True
+            except Exception as e:
+                logger.error(f"Failed to initialize NVML: {e}")
+                return False
+
+        return True
+
+    async def get_memory_info(self) -> Optional[GPUMemoryInfo]:
+        """Get GPU memory usage information."""
+        if not self._ensure_nvml():
+            return None
+
+        try:
+            # Get first GPU (index 0)
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+
+            return GPUMemoryInfo(
+                total_mb=mem_info.total // (1024 * 1024),
+                used_mb=mem_info.used // (1024 * 1024),
+                free_mb=mem_info.free // (1024 * 1024),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get GPU memory info: {e}")
+            return None
+
+    async def is_gpu_free(self) -> bool:
+        """
+        Check if GPU is considered 'free' (VRAM usage below threshold).
+
+        This is used during handoff to verify CUDA has released memory.
+        """
+        mem_info = await self.get_memory_info()
+        if mem_info is None:
+            # Can't check - assume not free
+            return False
+
+        threshold = self.config.gpu_cleanup_threshold_mb
+        return mem_info.used_mb < threshold
+
+    async def wait_for_gpu_cleanup(self, timeout: Optional[float] = None) -> bool:
+        """
+        Wait for GPU memory to be released.
+
+        If NVML is available, polls VRAM usage until it drops below threshold.
+        If NVML is not available (orchestrator doesn't have NVIDIA runtime),
+        falls back to checking whether the prime container is stopped — if the
+        container is not running, VRAM is guaranteed released.
+
+        Args:
+            timeout: Max seconds to wait. Uses config default if None.
+
+        Returns:
+            True if GPU is now free, False if timeout occurred.
+        """
+        if timeout is None:
+            timeout = self.config.gpu_cleanup_timeout_seconds
+
+        poll_interval = self.config.gpu_cleanup_poll_interval
+
+        # Fast path: if NVML is not available, check container status instead
+        if not self._ensure_nvml():
+            logger.info("NVML not available — checking container status for GPU cleanup")
+            try:
+                client = self._get_docker_client()
+                container = client.containers.get(self.PRIME_CONTAINER_NAME)
+                container.reload()  # refresh status
+                if container.status != "running":
+                    logger.info(f"Prime container is '{container.status}' — GPU cleanup confirmed")
+                    return True
+                else:
+                    logger.warning("Prime container still running but NVML unavailable — cannot verify VRAM")
+                    return False
+            except Exception as e:
+                logger.error(f"Cannot verify GPU cleanup (no NVML, Docker check failed): {e}")
+                return False
+
+        # NVML available — poll VRAM usage
+        elapsed = 0.0
+        logger.info(f"Waiting for GPU cleanup (threshold: {self.config.gpu_cleanup_threshold_mb}MB)...")
+
+        while elapsed < timeout:
+            if await self.is_gpu_free():
+                logger.info(f"GPU cleanup complete after {elapsed:.1f}s")
+                return True
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+            mem_info = await self.get_memory_info()
+            if mem_info:
+                logger.debug(f"GPU memory: {mem_info.used_mb}MB used, waiting...")
+
+        logger.warning(f"GPU cleanup timeout after {timeout}s")
+        return False
+
+    def _get_docker_client(self) -> "docker.DockerClient":
+        """Get or create Docker client (lazy init)."""
+        if self._docker_client is None:
+            if not DOCKER_AVAILABLE:
+                raise RuntimeError("docker SDK not installed")
+            self._docker_client = docker.from_env()
+        return self._docker_client
+
+    async def stop_prime_container(self) -> bool:
+        """
+        Stop the gaia-prime container to fully release VRAM.
+
+        This is used instead of vLLM sleep mode because --enforce-eager
+        (required for Blackwell sm_120) prevents CuMemAllocator from
+        tracking weight tensors, so sleep only frees KV cache (~1.7GB)
+        rather than the full ~10.5GB.
+
+        Container stop releases all VRAM in ~2-3 seconds.
+        The 8GB CPU KV offload buffer is also freed with the container.
+        """
+        try:
+            client = self._get_docker_client()
+            container = client.containers.get(self.PRIME_CONTAINER_NAME)
+
+            if container.status != "running":
+                logger.info(f"Prime container already stopped (status: {container.status})")
+                return True
+
+            logger.info(f"Stopping prime container '{self.PRIME_CONTAINER_NAME}'...")
+            await asyncio.to_thread(container.stop, timeout=30)
+            logger.info("Prime container stopped — VRAM released")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to stop prime container: {e}")
+            return False
+
+    async def start_prime_container(self) -> bool:
+        """
+        Start the gaia-prime container and wait for it to become healthy.
+
+        Cold start takes ~37s from tmpfs warm pool (was ~41s from NVMe).
+        """
+        try:
+            client = self._get_docker_client()
+            container = client.containers.get(self.PRIME_CONTAINER_NAME)
+
+            if container.status == "running":
+                logger.info("Prime container already running")
+                return True
+
+            logger.info(f"Starting prime container '{self.PRIME_CONTAINER_NAME}'...")
+            await asyncio.to_thread(container.start)
+
+            # Wait for healthy (model loaded, serving)
+            prime_url = getattr(self.config, "prime_url",
+                                "http://gaia-prime:7777")
+            logger.info(f"Waiting for prime to become healthy at {prime_url}...")
+
+            import httpx
+            max_wait = 120  # seconds
+            poll_interval = 3.0
+            elapsed = 0.0
+
+            while elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                try:
+                    async with httpx.AsyncClient(timeout=5) as hc:
+                        resp = await hc.get(f"{prime_url}/health")
+                        if resp.status_code == 200:
+                            logger.info(f"Prime healthy after {elapsed:.0f}s")
+                            return True
+                except Exception:
+                    pass
+                if elapsed % 15 == 0:
+                    logger.debug(f"Still waiting for prime... ({elapsed:.0f}s)")
+
+            logger.error(f"Prime did not become healthy after {max_wait}s")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to start prime container: {e}")
+            return False
+
+    async def sleep_audio(self) -> bool:
+        """
+        Tell gaia-audio to unload GPU models (Whisper, XTTS) to free VRAM.
+
+        Calls POST /sleep which offloads models from GPU. This frees ~400MB
+        of VRAM without stopping the container.
+        """
+        import httpx
+
+        url = f"{self.config.audio_url}/sleep"
+        logger.info("Requesting gaia-audio to sleep (unload GPU models): %s", url)
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+                if response.status_code == 200:
+                    logger.info("gaia-audio sleeping — GPU models unloaded")
+                    return True
+                else:
+                    logger.warning("gaia-audio sleep returned %s", response.status_code)
+                    return False
+        except Exception as e:
+            logger.warning("Failed to sleep gaia-audio (may not be running): %s", e)
+            # Not fatal — audio may not be running
+            return True
+
+    async def wake_audio(self) -> bool:
+        """
+        Tell gaia-audio to reload GPU models (Whisper, XTTS).
+
+        Calls POST /wake which reloads models onto GPU.
+        """
+        import httpx
+
+        url = f"{self.config.audio_url}/wake"
+        logger.info("Requesting gaia-audio to wake (reload GPU models): %s", url)
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+                if response.status_code == 200:
+                    logger.info("gaia-audio awake — GPU models reloaded")
+                    return True
+                else:
+                    logger.warning("gaia-audio wake returned %s", response.status_code)
+                    return False
+        except Exception as e:
+            logger.warning("Failed to wake gaia-audio: %s", e)
+            return False
+
+    async def request_release_from_core(self) -> bool:
+        """
+        Release GPU: unload all GAIA Engine models (Core, Nano), sleep audio,
+        stop prime, then tell gaia-core to demote gpu_prime from its model pool.
+
+        The key insight: stopping containers isn't enough — the GAIA Engine
+        subprocess inside each container holds CUDA tensors that must be
+        explicitly unloaded via /model/unload. Without this, VRAM stays
+        allocated even after model pool says 'released'.
+        """
+        import httpx
+
+        # Step 0: Unload Core's GAIA Engine model (frees ~5GB VRAM)
+        await self._unload_engine("gaia-core", 8092, "Core")
+
+        # Step 1: Unload Nano's GAIA Engine model (frees ~2GB VRAM)
+        await self._unload_engine("gaia-nano", 8080, "Nano")
+
+        # Step 2: Sleep gaia-audio (unloads Whisper + XTTS from GPU)
+        await self.sleep_audio()
+
+        # Step 3: Stop the prime container (frees all VRAM)
+        if not await self.stop_prime_container():
+            logger.error("Failed to stop prime container — aborting release")
+            return False
+
+        # Step 4: Tell core to update its model pool (demote gpu_prime)
+        url = f"{self.config.core_url}/gpu/release"
+        logger.info(f"Requesting model pool update from Core: {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+
+                if response.status_code == 200:
+                    logger.info("Core acknowledged GPU release — fallback chain active")
+                    return True
+                else:
+                    logger.error(f"Core GPU release failed: {response.status_code} {response.text}")
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to request GPU release from Core: {e}")
+            return False
+
+    async def request_reclaim_by_core(self) -> bool:
+        """
+        Reclaim GPU: reload Core + Nano engines, start prime container,
+        tell gaia-core to restore gpu_prime, then wake gaia-audio.
+        """
+        import httpx
+
+        # Step 1: Reload Core's GAIA Engine model (was unloaded during release)
+        await self._reload_engine("gaia-core", 8092, "Core")
+
+        # Step 2: Reload Nano's GAIA Engine model
+        await self._reload_engine("gaia-nano", 8080, "Nano")
+
+        # Step 3: Start the prime container (loads model into VRAM)
+        if not await self.start_prime_container():
+            logger.error("Failed to start prime container — aborting reclaim")
+            return False
+
+        # Step 4: Tell core to restore gpu_prime in model pool
+        url = f"{self.config.core_url}/gpu/reclaim"
+        logger.info(f"Requesting model pool restore from Core: {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+
+                if response.status_code == 200:
+                    logger.info("Core acknowledged GPU reclaim — prime inference restored")
+                else:
+                    logger.error(f"Core GPU reclaim failed: {response.status_code} {response.text}")
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to request GPU reclaim by Core: {e}")
+            return False
+
+        # Step 5: Wake gaia-audio (reload Whisper + XTTS onto GPU)
+        await self.wake_audio()
+
+        return True
+
+    async def signal_study_gpu_ready(self) -> bool:
+        """
+        Signal gaia-study that GPU is now available.
+
+        Calls the /study/gpu-ready endpoint.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/gpu-ready"
+        logger.info(f"Signaling Study GPU ready: {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+
+                if response.status_code == 200:
+                    logger.info("Study acknowledged GPU ready signal")
+                    return True
+                else:
+                    logger.warning(f"Study GPU ready signal: {response.status_code}")
+                    # Not critical if study doesn't respond
+                    return True
+
+        except Exception as e:
+            logger.warning(f"Failed to signal Study GPU ready: {e}")
+            # Not critical
+            return True
+
+    async def signal_study_gpu_release(self) -> bool:
+        """
+        Request gaia-study to release GPU resources.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/gpu-release"
+        logger.info(f"Requesting GPU release from Study: {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as client:
+                response = await client.post(url)
+
+                if response.status_code == 200:
+                    logger.info("Study acknowledged GPU release request")
+                    return True
+                else:
+                    logger.error(f"Study GPU release failed: {response.status_code}")
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to request GPU release from Study: {e}")
+            return False
+
+    # =========================================================================
+    # Training Subprocess Monitoring
+    # =========================================================================
+
+    async def get_training_status(self) -> dict:
+        """
+        Poll gaia-study for training subprocess status.
+
+        Returns the combined manager state + progress file data.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/training/status"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    return resp.json()
+                else:
+                    return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def validate_training_result(self) -> dict:
+        """
+        Validate a completed training run by checking the progress file.
+
+        Checks:
+        - state == "completed"
+        - adapter directory exists with expected files
+        - loss is finite (not NaN/Inf)
+        """
+        import json
+        import math
+
+        progress_file = Path("/shared/study/training_progress.json")
+        result = {"valid": False, "checks": {}}
+
+        # Check progress file exists
+        if not progress_file.exists():
+            result["error"] = "Progress file not found"
+            return result
+
+        try:
+            with open(progress_file) as f:
+                progress = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            result["error"] = f"Cannot read progress file: {e}"
+            return result
+
+        # Check state
+        state = progress.get("state", "")
+        result["checks"]["state_completed"] = state == "completed"
+
+        # Check loss is finite
+        loss = progress.get("loss", float("nan"))
+        result["checks"]["loss_finite"] = isinstance(loss, (int, float)) and math.isfinite(loss)
+        result["checks"]["loss_value"] = loss
+
+        # Check adapter directory and files
+        adapter_dir = progress.get("adapter_dir", "")
+        if adapter_dir:
+            adapter_path = Path(adapter_dir)
+            result["checks"]["adapter_dir_exists"] = adapter_path.exists()
+
+            adapter_config = adapter_path / "adapter_config.json"
+            result["checks"]["adapter_config_exists"] = adapter_config.exists()
+
+            # Check for model weights (safetensors or bin)
+            has_weights = (
+                (adapter_path / "adapter_model.safetensors").exists()
+                or (adapter_path / "adapter_model.bin").exists()
+            )
+            result["checks"]["adapter_weights_exist"] = has_weights
+        else:
+            result["checks"]["adapter_dir_exists"] = False
+
+        # Overall validity
+        result["valid"] = all(result["checks"].values())
+        result["progress"] = progress
+
+        logger.info(
+            "Training validation: valid=%s checks=%s",
+            result["valid"], result["checks"],
+        )
+        return result
+
+    async def kill_training_subprocess(self) -> dict:
+        """
+        Force-kill the training subprocess via gaia-study API.
+
+        Last resort when training is stuck and VRAM needs to be reclaimed.
+        """
+        import httpx
+
+        url = f"{self.config.study_url}/study/training/kill"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    logger.info("Training subprocess kill: %s", data)
+                    return data
+                else:
+                    return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            logger.error("Failed to kill training subprocess: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    # =========================================================================
+    # Nano GPU Backoff — dynamic GPU/CPU placement
+    # =========================================================================
+
+    async def _restart_nano_with_layers(self, n_gpu_layers: int, reason: str) -> bool:
+        """Restart gaia-nano via docker compose with different GPU layer count.
+
+        Uses `docker compose up -d gaia-nano` with NANO_GPU_LAYERS env override.
+        Compose recreates the container with the new --n-gpu-layers value.
+        """
+        import subprocess
+
+        compose_file = self.config.compose_file_live
+        env = {**dict(os.environ), "NANO_GPU_LAYERS": str(n_gpu_layers)}
+        cmd = [
+            "docker", "compose", "-f", str(compose_file),
+            "up", "-d", "gaia-nano",
+        ]
+
+        logger.info(
+            "Restarting gaia-nano with --n-gpu-layers %d (reason: %s)",
+            n_gpu_layers, reason,
+        )
+
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, cmd,
+                capture_output=True, text=True, env=env,
+                cwd=str(compose_file.parent), timeout=60,
+            )
+            if result.returncode != 0:
+                logger.error("Nano restart failed: %s", result.stderr.strip())
+                return False
+
+            logger.info("gaia-nano restarted with %d GPU layers", n_gpu_layers)
+            return True
+        except Exception as e:
+            logger.error("Failed to restart gaia-nano: %s", e)
+            return False
+
+    async def _unload_engine(self, hostname: str, port: int, label: str) -> bool:
+        """Unload a GAIA Engine's model to free CUDA memory.
+
+        Calls POST /model/unload on the engine's HTTP server. This releases
+        PyTorch tensors and calls torch.cuda.empty_cache(), actually freeing VRAM.
+        The engine process stays running (can reload later via /model/load).
+        """
+        import httpx
+        url = f"http://{hostname}:{port}/model/unload"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok"):
+                        logger.info("%s engine unloaded (%s:%d) — VRAM freed", label, hostname, port)
+                        return True
+                logger.warning("%s engine unload returned %s", label, resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to unload %s engine (%s:%d): %s", label, hostname, port, e)
+        return False
+
+    async def _reload_engine(self, hostname: str, port: int, label: str, model_path: str | None = None) -> bool:
+        """Reload a GAIA Engine's model after GPU is available.
+
+        Calls POST /model/load on the engine's HTTP server. If model_path is None,
+        the engine reloads whatever it had before.
+        """
+        import httpx
+        url = f"http://{hostname}:{port}/model/load"
+        payload = {}
+        if model_path:
+            payload["model_path"] = model_path
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok"):
+                        logger.info("%s engine reloaded (%s:%d)", label, hostname, port)
+                        return True
+                logger.warning("%s engine reload returned %s", label, resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to reload %s engine (%s:%d): %s", label, hostname, port, e)
+        return False
+
+    async def evict_nano_to_cpu(self, reason: str = "vram_pressure") -> bool:
+        """Evict Nano from GPU to CPU to free ~800MB VRAM.
+
+        Restarts gaia-nano with --n-gpu-layers 0. The model reloads in <2s.
+        """
+        from datetime import datetime, timezone
+
+        current_mode = self.state_manager.state.nano.mode
+        if current_mode == NanoGPUMode.CPU:
+            logger.info("Nano already on CPU — skipping eviction")
+            return True
+
+        success = await self._restart_nano_with_layers(0, reason)
+        if success:
+            async with self.state_manager.modify() as state:
+                state.nano.mode = NanoGPUMode.CPU
+                state.nano.last_transition = datetime.now(timezone.utc)
+                state.nano.reason = reason
+                state.nano.transitions += 1
+            logger.info("Nano evicted to CPU (reason: %s)", reason)
+        return success
+
+    async def restore_nano_to_gpu(self, reason: str = "vram_available") -> bool:
+        """Restore Nano to GPU for faster triage inference.
+
+        Restarts gaia-nano with --n-gpu-layers 999. Checks VRAM headroom first.
+        """
+        from datetime import datetime, timezone
+
+        current_mode = self.state_manager.state.nano.mode
+        if current_mode == NanoGPUMode.GPU:
+            logger.info("Nano already on GPU — skipping restore")
+            return True
+
+        # Check if there's enough VRAM to restore
+        mem_info = await self.get_memory_info()
+        if mem_info:
+            threshold = self.config.nano_vram_restore_threshold_mb
+            if mem_info.free_mb < threshold:
+                logger.info(
+                    "Not enough VRAM to restore Nano (free: %dMB, need: %dMB)",
+                    mem_info.free_mb, threshold,
+                )
+                return False
+
+        success = await self._restart_nano_with_layers(999, reason)
+        if success:
+            async with self.state_manager.modify() as state:
+                state.nano.mode = NanoGPUMode.GPU
+                state.nano.last_transition = datetime.now(timezone.utc)
+                state.nano.reason = reason
+                state.nano.transitions += 1
+            logger.info("Nano restored to GPU (reason: %s)", reason)
+        return success
+
+    async def check_nano_vram_pressure(self) -> Optional[str]:
+        """Check if VRAM pressure requires Nano eviction or allows restoration.
+
+        Returns action taken: "evicted", "restored", or None.
+        """
+        mem_info = await self.get_memory_info()
+        if mem_info is None:
+            return None
+
+        current_mode = self.state_manager.state.nano.mode
+
+        # If on GPU and VRAM is tight, evict
+        if (current_mode == NanoGPUMode.GPU
+                and mem_info.free_mb < self.config.nano_vram_pressure_threshold_mb):
+            logger.warning(
+                "VRAM pressure detected (free: %dMB < %dMB) — evicting Nano to CPU",
+                mem_info.free_mb, self.config.nano_vram_pressure_threshold_mb,
+            )
+            if await self.evict_nano_to_cpu("vram_pressure_auto"):
+                return "evicted"
+
+        # If on CPU and VRAM is comfortable, restore
+        if (current_mode == NanoGPUMode.CPU
+                and mem_info.free_mb > self.config.nano_vram_restore_threshold_mb):
+            logger.info(
+                "VRAM available (free: %dMB > %dMB) — restoring Nano to GPU",
+                mem_info.free_mb, self.config.nano_vram_restore_threshold_mb,
+            )
+            if await self.restore_nano_to_gpu("vram_available_auto"):
+                return "restored"
+
+        return None
+
+    def shutdown(self):
+        """Shutdown NVML."""
+        if self._nvml_initialized and PYNVML_AVAILABLE:
+            try:
+                pynvml.nvmlShutdown()
+                self._nvml_initialized = False
+            except Exception:
+                pass

@@ -1,0 +1,8 @@
+[Unit]
+Description=GAIA Docker cleanup (dangling images + stale build cache)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune -f
+ExecStart=/usr/bin/docker builder prune -f --filter "until=48h"
+ExecStart=/usr/bin/bash -c 'echo "GAIA docker prune: images=$(docker images -q | wc -l), build-cache=$(docker system df --format "{{.Size}}" | tail -1)" | systemd-cat -t gaia-docker-prune'

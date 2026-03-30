@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAIA Mission Control</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260324b">
+  <!-- marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- D3.js for graph visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <!-- xterm.js for terminal emulation -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/lib/addon-web-links.min.js"></script>
+  <!-- Alpine.js for reactive components -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <span class="logo">GAIA</span>
+      <span class="subtitle">Mission Control</span>
+    </div>
+    <div class="top-bar-right" x-data>
+      <span class="badge" x-text="$store.header.serviceCount">-- services</span>
+      <span :class="$store.header.pendingWarn ? 'badge badge-warn' : 'badge'" x-text="$store.header.pendingCount">-- pending</span>
+      <span :class="$store.header.discordClass" :title="$store.header.discordTitle" x-text="$store.header.discordStatus">discord: --</span>
+    </div>
+  </header>
+
+  <nav class="tab-bar" x-data>
+    <template x-for="tab in $store.nav.tabs" :key="tab.id">
+      <button class="tab"
+              :class="{ active: $store.nav.currentView === tab.id }"
+              @click="$store.nav.switchView(tab.id)"
+              x-text="tab.label">
+      </button>
+    </template>
+  </nav>
+
+  <!-- ── Chat View (full-page Claude-style with sidebar) ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'chat'" style="display:none">
+    <div class="chat-layout" :class="{ 'sidebar-open': $store.chat.sidebarPinned }">
+
+      <!-- Conversation Sidebar -->
+      <aside class="chat-sidebar"
+             x-show="$store.chat.sidebarOpen"
+             x-transition>
+        <div class="chat-sidebar-header">
+          <span>Conversations</span>
+          <button @click="$store.chat.sidebarPinned = !$store.chat.sidebarPinned"
+                  :class="{ active: $store.chat.sidebarPinned }"
+                  class="pin-btn" title="Pin sidebar">&#x1F4CC;</button>
+        </div>
+        <button class="sidebar-new-btn" @click="$store.chat.createConversation()">
+          + New Conversation
+        </button>
+        <div class="sidebar-conv-list">
+          <template x-for="conv in $store.chat.getSortedList()" :key="conv.id">
+            <div class="sidebar-conv-item"
+                 :class="{ active: conv.id === $store.chat.activeId }"
+                 @click="$store.chat.switchConversation(conv.id)">
+              <span class="conv-title" x-text="conv.title"></span>
+              <span class="conv-time" x-text="timeAgo(conv.updatedAt)"></span>
+              <button class="conv-delete" @click.stop="$store.chat.deleteConversation(conv.id)">&times;</button>
+            </div>
+          </template>
+        </div>
+        <!-- Context controls for active conversation -->
+        <div class="sidebar-context" x-show="$store.chat.getActive()">
+          <div class="context-mode-label">Context mode</div>
+          <div class="context-mode-toggle">
+            <button :class="{ active: $store.chat.getActive()?.contextMode === 'isolated' }"
+                    @click="$store.chat.setContextMode($store.chat.activeId, 'isolated')">Isolated</button>
+            <button :class="{ active: $store.chat.getActive()?.contextMode === 'pooled' }"
+                    @click="$store.chat.setContextMode($store.chat.activeId, 'pooled')">Pooled</button>
+          </div>
+          <button class="sidebar-action-btn"
+                  @click="$store.chat.addToPool($store.chat.activeId)">Add to Pool</button>
+          <select class="join-select"
+                  @change="if($event.target.value) { $store.chat.joinContext($store.chat.activeId, $event.target.value); $event.target.value=''; }">
+            <option value="">Join from...</option>
+            <template x-for="c in $store.chat.getSortedList().filter(c => c.id !== $store.chat.activeId)" :key="c.id">
+              <option :value="c.id" x-text="c.title"></option>
+            </template>
+          </select>
+        </div>
+      </aside>
+
+      <!-- Chat area -->
+      <div class="chat-fullpage" x-data="chatPanel()">
+        <div class="chat-fullpage-header">
+          <button class="chat-sidebar-toggle" @click="$store.chat.sidebarOpen = !$store.chat.sidebarOpen">&#8801;</button>
+          <div class="chat-fp-title" x-text="$store.chat.getActive()?.title || 'GAIA'"></div>
+          <div class="chat-fp-subtitle">General Artisanal Intelligence Architecture</div>
+          <button class="chat-fp-clear" @click="clearHistory()" title="Clear history">&times;</button>
+        </div>
+        <div x-ref="messages" class="chat-fp-messages">
+          <template x-for="msg in $store.chat.getMessages()" :key="msg.id">
+            <div class="chat-msg" :class="msg.type">
+              <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
+              <span class="chat-text" x-html="renderMessage(msg)"></span>
+            </div>
+          </template>
+        </div>
+        <div class="chat-fp-input-area">
+          <div class="chat-fp-input-wrap">
+            <textarea x-model="input" placeholder="Message GAIA..." rows="1"
+                      @keydown.enter.prevent="if (!$event.shiftKey) send()"
+                      @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
+                      :disabled="$store.chat.sending"></textarea>
+            <button @click="send()" :disabled="$store.chat.sending || !input.trim()" class="chat-fp-send">
+              <span x-show="!$store.chat.sending">&#9654;</span>
+              <span x-show="$store.chat.sending" class="chat-fp-spinner">&#9679;</span>
+            </button>
+          </div>
+          <div class="chat-fp-hint">Enter to send, Shift+Enter for new line</div>
+        </div>
+      </div>
+
+      <!-- Neural Mind Map — Unified Brain -->
+      <aside class="mind-map-column" x-data="mindMapPanel()">
+        <div class="mind-map-header">
+          <span>Neural Activity</span>
+          <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
+        </div>
+        <div class="brain-legend-key">
+          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano</span>
+          <span class="legend-swatch core"></span><span class="legend-key-label">Core</span>
+          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime</span>
+          <span class="legend-swatch study"></span><span class="legend-key-label">Study</span>
+          <span class="legend-swatch synapse-dot"></span><span class="legend-key-label">Synapse</span>
+        </div>
+        <!-- Dynamic concept legend — shows currently active named features with their colors -->
+        <div class="concept-legend" x-show="activeConcepts.length > 0" x-transition>
+          <template x-for="c in activeConcepts" :key="c.label">
+            <span class="concept-tag" :style="'border-color:' + c.color + '; color:' + c.color">
+              <span class="concept-dot" :style="'background:' + c.color"></span>
+              <span x-text="c.label"></span>
+            </span>
+          </template>
+        </div>
+        <div class="unified-brain" id="mindmap-unified"></div>
+        <div class="mind-map-legend" x-show="hoveredFeature">
+          <span class="legend-tier" x-text="hoveredFeature?.tier"></span>
+          <span class="legend-label" x-text="hoveredFeature?.type === 'synapse' ? hoveredFeature?.neuronLabels : (hoveredFeature?.label || ('neuron_' + hoveredFeature?.idx))"></span>
+          <span class="legend-strength" x-text="hoveredFeature ? hoveredFeature.strength.toFixed(1) : ''"></span>
+          <span class="legend-region" x-text="hoveredFeature?.region"></span>
+          <template x-if="hoveredFeature?.type === 'synapse'">
+            <span class="legend-cocount" x-text="'co:' + hoveredFeature?.coCount"></span>
+          </template>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ── Dashboard View (original 3-panel layout) ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'dashboard'" x-cloak>
+    <main class="panels">
+      <!-- Left: Orchestrator — consciousness matrix & container states -->
+      <section class="panel panel-chat" x-data="orchestratorPanel()">
+        <div class="panel-header">
+          <span>Orchestrator</span>
+          <span class="state-value" :class="lifecycleClass" x-text="lifecycleState" style="font-size:10px;margin-left:auto;"></span>
+        </div>
+        <div class="panel-body" style="padding:8px;overflow-y:auto;">
+          <!-- Consciousness Matrix -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Consciousness Matrix</div>
+            <template x-for="tier in tiers" :key="tier.tier">
+              <div class="state-card" :class="'tier-card-' + tier.actual" style="margin-bottom:4px;padding:6px 8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-weight:600;text-transform:capitalize;" x-text="tier.tier"></span>
+                  <span style="font-size:9px;padding:2px 6px;border-radius:3px;"
+                        :style="'background:' + consciousnessColor(tier.actual) + ';color:#000;'"
+                        x-text="tier.actual"></span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:3px;">
+                  <span x-text="'target: ' + tier.target"></span>
+                  <span :style="tier.ok ? 'color:var(--green)' : 'color:var(--red)'" x-text="tier.ok ? 'OK' : tier.error || 'MISMATCH'"></span>
+                </div>
+                <div x-show="tier.transitioning" style="font-size:9px;color:var(--yellow);margin-top:2px;">Transitioning...</div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Container States from Lifecycle -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Container States</div>
+            <template x-for="c in containers" :key="c.name">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-bottom:1px solid var(--border);font-size:11px;">
+                <span x-text="c.name" style="font-weight:500;"></span>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <span style="font-size:9px;" x-text="c.device"></span>
+                  <span style="font-size:9px;" x-show="c.vram_mb > 0" x-text="c.vram_mb + 'MB'"></span>
+                  <span style="width:8px;height:8px;border-radius:50%;display:inline-block;"
+                        :style="'background:' + (c.healthy ? 'var(--green)' : c.model_loaded ? 'var(--yellow)' : 'var(--text-muted)')"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- VRAM Budget -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px;">VRAM</div>
+            <div style="background:var(--bg-input);border-radius:4px;height:14px;overflow:hidden;">
+              <div style="height:100%;border-radius:4px;transition:width 0.5s;"
+                   :style="'width:' + vramPercent + '%;background:' + (vramPercent > 85 ? 'var(--red)' : vramPercent > 60 ? 'var(--yellow)' : 'var(--green)')"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-top:2px;">
+              <span x-text="vramUsed + ' MB used'"></span>
+              <span x-text="vramFree + ' MB free'"></span>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Quick Actions</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+              <button class="btn-sm" @click="transition('awake')" :disabled="lifecycleState==='awake'">Awake</button>
+              <button class="btn-sm" @click="transition('focusing')" :disabled="lifecycleState==='focusing'">Focus</button>
+              <button class="btn-sm" @click="transition('sleep')" :disabled="lifecycleState==='sleep'">Sleep</button>
+              <button class="btn-sm" @click="transition('deep-sleep')">Deep Sleep</button>
+            </div>
+          </div>
+
+          <!-- Recent Transitions -->
+          <div style="margin-top:12px;" x-show="history.length > 0">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px;">Recent Transitions</div>
+            <template x-for="h in history.slice(0, 5)" :key="h.at">
+              <div style="font-size:9px;color:var(--text-muted);padding:2px 0;border-bottom:1px solid var(--border);">
+                <span x-text="h.from_state + ' → ' + h.to_state"></span>
+                <span style="float:right;" x-text="h.trigger"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <!-- Center: System State -->
+      <section class="panel panel-system" x-data="systemPanel()"
+               @load-component-graph.window="loadComponentGraph($event.detail.id)">
+        <div class="panel-header">System State</div>
+        <div class="panel-body">
+          <div class="service-grid">
+            <div class="state-card state-card-sleep">
+              <div class="state-label">Sleep State</div>
+              <div class="state-value" :class="sleepStateClass" x-text="sleepState"></div>
+            </div>
+            <div class="state-card">
+              <div class="state-label">GPU Owner</div>
+              <div class="state-value" :class="gpuOwner !== '--' ? 'ok' : ''" x-text="gpuOwner"></div>
+            </div>
+            <div class="state-card">
+              <div class="state-label">Alignment</div>
+              <div class="state-value" :class="alignmentClass" x-text="alignment"></div>
+            </div>
+            <div class="state-card">
+              <div class="state-label">Cognitive Monitor</div>
+              <div class="state-value" :class="cogMonitorClass" x-text="cogMonitorText"></div>
+            </div>
+            <div class="state-card">
+              <div class="state-label">Service Registry</div>
+              <div class="state-value" :class="registryClass" x-text="registryText"></div>
+              <div x-show="registryDetail" class="state-extra" x-text="registryDetail"></div>
+            </div>
+            <div class="state-card" :class="maintenanceActive ? 'state-card-maintenance' : ''" @click="toggleMaintenance()" style="cursor:pointer;">
+              <div class="state-label">Maintenance</div>
+              <div class="state-value" :class="maintenanceActive ? 'warn' : 'ok'" x-text="maintenanceActive ? 'ACTIVE' : 'off'"></div>
+              <div class="state-extra" x-text="maintenanceActive ? 'click to exit' : 'click to enter'"></div>
+            </div>
+            <template x-for="svc in services" :key="svc.id">
+              <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
+                <div class="state-label">
+                  <span x-text="serviceLabel(svc.id)"></span>
+                  <span x-show="svc.candidate" class="state-candidate-badge">CAND</span>
+                </div>
+                <div class="state-value" :class="statusClass(svc.status)" x-text="svc.status"></div>
+                <div x-show="svc.latency_ms != null" class="state-latency" x-text="svc.latency_ms + 'ms'"></div>
+                <div x-show="svc.id === 'discord' && svc.discord?.user" class="state-extra"
+                     x-text="svc.discord ? svc.discord.user + ' · ' + svc.discord.guilds + ' guild' + (svc.discord.guilds !== 1 ? 's' : '') : ''"></div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Audio Processing Widget -->
+          <div class="audio-panel" x-data="audioWidget()">
+            <div class="audio-header">
+              <span class="audio-title">Audio Processing</span>
+              <span :class="stateClass" x-text="state"></span>
+              <span class="audio-gpu-badge" x-text="'GPU: ' + gpuMode"></span>
+              <button class="audio-mute-btn" :class="{ muted: muted }" @click="toggleMute()" x-text="muteLabel" title="Mute/Unmute audio"></button>
+            </div>
+            <div class="audio-body">
+              <div class="audio-gpu-bar">
+                <div class="audio-vram-track"><div class="audio-vram-fill" :style="'width:' + vramPercent + '%'"></div></div>
+                <span class="audio-vram-text" x-text="Math.round(vramUsed) + ' / ' + vramBudget + ' MB'"></span>
+              </div>
+              <div class="audio-columns">
+                <div class="audio-col">
+                  <div class="audio-col-header">Live Transcript</div>
+                  <div class="audio-log">
+                    <template x-for="entry in transcriptLog" :key="entry.id">
+                      <div class="audio-log-entry" :class="entry.type">
+                        <span class="audio-log-time" x-text="entry.time"></span>
+                        <span class="audio-log-text" x-text="entry.text"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div class="audio-col">
+                  <div class="audio-col-header">Event Log</div>
+                  <div class="audio-log">
+                    <template x-for="entry in eventLog" :key="entry.id">
+                      <div class="audio-log-entry" :class="entry.type">
+                        <span class="audio-log-time" x-text="entry.time"></span>
+                        <span class="audio-log-text" x-text="entry.text"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="audio-latency-row">
+                <span class="audio-latency-label">STT latency</span>
+                <canvas x-ref="sttSparkline" width="120" height="24"></canvas>
+                <span class="audio-latency-label">TTS latency</span>
+                <canvas x-ref="ttsSparkline" width="120" height="24"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Voice Auto-Answer Widget -->
+          <div class="voice-panel" x-data="voiceWidget()">
+            <div class="voice-header">
+              <span class="voice-title">Voice Auto-Answer</span>
+              <span :class="stateClass" x-text="state"></span>
+              <button class="voice-disconnect-btn" x-show="connected" @click="disconnect()" title="Disconnect from voice">Disconnect</button>
+            </div>
+            <div class="voice-body">
+              <div class="voice-status-row">
+                <span class="voice-channel" x-text="channelName"></span>
+                <span class="voice-duration" x-text="duration"></span>
+              </div>
+              <div class="voice-whitelist-header">
+                <span>Users</span>
+                <span class="voice-whitelist-hint">click to toggle auto-answer</span>
+              </div>
+              <div class="voice-user-list">
+                <template x-for="user in users" :key="user.user_id">
+                  <div class="voice-user-card" :class="{ whitelisted: user.whitelisted }"
+                       @click="toggleWhitelist(user.user_id, user.whitelisted)">
+                    <span class="voice-user-name" x-text="user.name"></span>
+                    <span class="voice-user-badge" :class="user.whitelisted ? 'on' : 'off'"
+                          x-text="user.whitelisted ? 'auto-answer' : 'off'"></span>
+                  </div>
+                </template>
+                <template x-if="users.length === 0">
+                  <div style="font-size:10px;color:var(--text-muted);padding:8px;">No users seen yet. GAIA will populate this list from Discord activity.</div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="graph-breadcrumb">
+            <span class="graph-title" x-text="graphTitle"></span>
+            <span class="graph-zoom-hint">scroll to zoom</span>
+            <button class="graph-back" x-show="showGraphBack" @click="backToServiceGraph()" title="Back to service graph">&larr; All Services</button>
+          </div>
+          <div x-ref="graphContainer" class="graph-container">
+            <svg x-ref="graphSvg"></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Blueprints -->
+      <section class="panel panel-blueprints" x-data="blueprintPanel()"
+               @select-blueprint.window="selectBlueprint($event.detail.id)"
+               @show-component-detail.window="showComponentDetail($event.detail)">
+        <div class="panel-header">Blueprints</div>
+        <div class="panel-body">
+          <div class="blueprint-list">
+            <template x-for="bp in blueprints" :key="bp.id">
+              <div class="bp-card" :class="{ selected: bp.id === selectedId }" @click="selectBlueprint(bp.id)">
+                <div class="bp-card-left">
+                  <div class="bp-card-id" x-text="bp.id"></div>
+                  <div class="bp-card-role" x-text="bp.role"></div>
+                </div>
+                <div class="bp-card-badges">
+                  <span class="bp-badge" :class="bp.status === 'live' ? 'live' : 'candidate'" x-text="bp.status"></span>
+                  <template x-if="bp.genesis">
+                    <span class="bp-badge genesis">genesis</span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="blueprint-detail" x-html="detailHtml"></div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <!-- ── Commands View (Hooks Panel) ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'hooks'" x-cloak>
+    <!-- ── Mission Control: Lifecycle State Machine ── -->
+    <div class="lifecycle-panel" x-data="lifecyclePanel()">
+      <div class="lifecycle-header">
+        <span class="lifecycle-title">Mission Control</span>
+        <span class="lifecycle-state-badge" :class="'ls-' + state" x-text="state.replace('_',' ')"></span>
+      </div>
+
+      <!-- GPU Memory Bar -->
+      <div class="lifecycle-vram-bar">
+        <div class="vram-label">GPU <span x-text="vramUsed + '/' + vramTotal + ' MB'"></span></div>
+        <div class="vram-track">
+          <template x-for="seg in vramSegments" :key="seg.tier">
+            <div class="vram-segment" :class="'vram-' + seg.tier"
+                 :style="'width:' + seg.pct + '%'" :title="seg.tier + ': ' + seg.mb + 'MB'">
+              <span x-show="seg.pct > 6" x-text="seg.tier" class="vram-seg-label"></span>
+            </div>
+          </template>
+          <div class="vram-segment vram-free" :style="'width:' + freePct + '%'"></div>
+        </div>
+      </div>
+
+      <!-- Tier Cards -->
+      <div class="lifecycle-tiers">
+        <template x-for="(info, tier) in tiers" :key="tier">
+          <div class="tier-card" :class="'tc-' + info.device">
+            <div class="tier-card-head">
+              <span class="tier-name" x-text="tier"></span>
+              <span class="tier-health" :class="info.healthy ? 'th-ok' : 'th-down'"></span>
+            </div>
+            <div class="tier-device" x-text="info.device"></div>
+            <div class="tier-vram" x-show="info.vram_mb > 0" x-text="info.vram_mb + ' MB'"></div>
+            <div class="tier-managed" x-show="info.managed">managed</div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Transition Controls -->
+      <div class="lifecycle-controls">
+        <template x-for="t in transitions" :key="t.trigger + (t.target || '')">
+          <button class="lc-btn" :class="'lc-' + (t.target || t.targets?.[0] || 'default')"
+                  @click="doTransition(t.trigger, t.target || t.targets?.[0])"
+                  :disabled="transitioning"
+                  x-text="transitionLabel(t)"></button>
+        </template>
+        <button class="lc-btn lc-reconcile" @click="reconcile()" :disabled="transitioning">Reconcile</button>
+      </div>
+
+      <!-- Transition Status -->
+      <div class="lifecycle-status" x-show="transitioning || lastResult">
+        <div x-show="transitioning" class="ls-transitioning">
+          Transitioning: <span x-text="transPhase"></span>...
+        </div>
+        <div x-show="lastResult && !transitioning" class="ls-result" :class="lastResult?.ok ? 'ls-ok' : 'ls-err'">
+          <span x-text="lastResult?.ok ? '✓' : '✗'"></span>
+          <span x-text="(lastResult?.from_state || '') + ' → ' + (lastResult?.to_state || '')"></span>
+          <span x-show="lastResult?.elapsed_s" x-text="lastResult?.elapsed_s + 's'"></span>
+          <span x-show="lastResult?.error" x-text="lastResult?.error" class="ls-error-text"></span>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="lifecycle-history" x-show="history.length > 0">
+        <div class="lh-title">Recent Transitions</div>
+        <template x-for="h in history.slice(-6).reverse()" :key="h.at">
+          <div class="lh-entry" :class="h.error ? 'lh-err' : ''">
+            <span class="lh-states" x-text="h.from_state + ' → ' + h.to_state"></span>
+            <span class="lh-trigger" x-text="h.trigger"></span>
+            <span class="lh-time" x-text="h.elapsed_s + 's'"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="hooks-grid" x-data="hooksPanel()">
+
+      <!-- Sleep Control -->
+      <div class="hook-group">
+        <div class="hook-group-header">Sleep Control</div>
+        <div class="hook-status">
+          <span class="hook-status-label">State:</span>
+          <span class="hook-status-value" x-text="sleepState"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Cycle:</span>
+          <span class="hook-status-value" x-text="sleepCycle"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Uptime:</span>
+          <span class="hook-status-value" x-text="sleepUptime"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Auto-Sleep:</span>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="autoSleepEnabled" @change="toggleAutoSleep($event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Threshold:</span>
+          <span class="hook-status-value" x-text="sleepThreshold + 'm'"></span>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" @click="action('sleep/wake')">Wake</button>
+          <button class="hook-btn hook-btn-warn" @click="forceSleep()">Sleep Now</button>
+          <button class="hook-btn hook-btn-danger" @click="action('sleep/shutdown')">Shutdown</button>
+        </div>
+      </div>
+
+      <!-- Prime Wake Triggers -->
+      <div class="hook-group">
+        <div class="hook-group-header">Prime Wake Triggers</div>
+        <div class="hook-status">
+          <div>
+            <span class="hook-status-label">Discord Typing:</span>
+            <div class="hook-status-hint">Wake Prime when a DM user starts typing</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="wakeDiscordTyping" @change="toggleWakeTrigger('discord_typing', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="hook-status">
+          <div>
+            <span class="hook-status-label">Workstation Activity:</span>
+            <div class="hook-status-hint">Wake Prime on keyboard/mouse after idle</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="wakeWorkstationActivity" @change="toggleWakeTrigger('workstation_activity', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- GPU Management -->
+      <div class="hook-group">
+        <div class="hook-group-header">GPU Management</div>
+        <div class="hook-status">
+          <span class="hook-status-label">Owner:</span>
+          <span class="hook-status-value" x-text="gpuOwner"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">VRAM:</span>
+          <span class="hook-status-value" x-text="gpuVram"></span>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-warn" @click="action('gpu/release')">Release</button>
+          <button class="hook-btn hook-btn-primary" @click="action('gpu/reclaim')">Reclaim</button>
+        </div>
+      </div>
+
+      <!-- Chaos Monkey -->
+      <div class="hook-group" x-data="chaosPanel()" x-init="init()">
+        <div class="hook-group-header chaos-header">
+          <span>🐒 Chaos Monkey</span>
+          <span class="serenity-badge" :class="serenity.serene ? 'serene' : 'restless'"
+                x-text="serenity.serene ? '☯ Serene' : (serenity.score != null ? serenity.score.toFixed(1) + '/' + serenity.threshold : 'Loading...')">
+          </span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Mode:</span>
+          <select class="chaos-mode-select" x-model="config.mode" @change="saveConfig()">
+            <option value="triggered">Triggered</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="random">Random</option>
+            <option value="persistent">Persistent</option>
+          </select>
+        </div>
+        <div x-show="config.mode === 'scheduled'" class="hook-status">
+          <span class="hook-status-label">Every:</span>
+          <input type="number" class="chaos-num-input" x-model.number="config.schedule_interval_hours" @change="saveConfig()" min="1"> h
+        </div>
+        <div class="hook-status chaos-drill-types">
+          <span class="hook-status-label">Drills:</span>
+          <label><input type="checkbox" value="container" x-model="config.drill_types" @change="saveConfig()"> Container</label>
+          <label><input type="checkbox" value="code" x-model="config.drill_types" @change="saveConfig()"> Code</label>
+          <label><input type="checkbox" value="linguistic" x-model="config.drill_types" @change="saveConfig()"> Linguistic</label>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn chaos-inject-btn" @click="injectChaos()" :disabled="injecting">
+            <span x-show="!injecting">⚡ Inject Chaos</span>
+            <span x-show="injecting">Running...</span>
+          </button>
+        </div>
+        <div x-show="lastResult" class="chaos-result" x-text="lastResult"></div>
+      </div>
+
+      <!-- Cognitive Battery -->
+      <div class="hook-group" x-data="cognitivePanel()" x-init="init()">
+        <div class="hook-group-header cognitive-header">
+          <span>Cognitive Battery</span>
+          <span class="alignment-badge" :class="'align-' + alignment.toLowerCase()"
+                x-text="alignment"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="running ? 'Running...' : 'Idle'"></span>
+        </div>
+        <div x-show="lastRun.pass_rate != null" class="hook-status">
+          <span class="hook-status-label">Pass Rate:</span>
+          <span class="hook-status-value" :class="lastRun.pass_rate >= 0.85 ? 'ok' : 'warn'"
+                x-text="lastRun.pass_rate != null ? (lastRun.pass_rate * 100).toFixed(0) + '%' : '--'"></span>
+        </div>
+        <div x-show="lastRun.total" class="hook-status">
+          <span class="hook-status-label">Tests:</span>
+          <span class="hook-status-value" x-text="(lastRun.passed || 0) + '/' + (lastRun.total || 0) + ' passed'"></span>
+        </div>
+        <div x-show="lastRun.elapsed_seconds" class="hook-status">
+          <span class="hook-status-label">Duration:</span>
+          <span class="hook-status-value" x-text="lastRun.elapsed_seconds ? lastRun.elapsed_seconds.toFixed(0) + 's' : '--'"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Section:</span>
+          <select class="chaos-mode-select" x-model="selectedSection">
+            <option value="">All Sections</option>
+            <option value="architecture">Architecture</option>
+            <option value="self_repair">Self-Repair</option>
+            <option value="epistemic">Epistemic</option>
+            <option value="identity">Identity</option>
+            <option value="personality">Personality</option>
+            <option value="tool_routing">Tool Routing</option>
+            <option value="safety">Safety</option>
+            <option value="knowledge_retrieval">Knowledge</option>
+            <option value="loop_resistance">Loop Resistance</option>
+          </select>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn cognitive-run-btn" @click="runBattery()" :disabled="running">
+            <span x-show="!running">Run Battery</span>
+            <span x-show="running">Running...</span>
+          </button>
+          <button class="hook-btn hook-btn-primary" @click="showResults = !showResults" x-show="lastRun.total">
+            <span x-text="showResults ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showResults && failures.length > 0" class="cognitive-failures">
+          <div class="cognitive-failure-header">Failed Tests:</div>
+          <template x-for="f in failures" :key="f.id">
+            <div class="cognitive-failure-entry">
+              <span class="cognitive-failure-id" x-text="f.id"></span>
+              <span class="cognitive-failure-prompt" x-text="f.prompt.substring(0, 60) + '...'"></span>
+            </div>
+          </template>
+        </div>
+        <div x-show="showResults && bySection" class="cognitive-sections">
+          <div class="cognitive-section-header">By Section:</div>
+          <template x-for="[sec, data] in Object.entries(bySection || {})" :key="sec">
+            <div class="cognitive-section-entry">
+              <span class="cognitive-section-name" x-text="sec"></span>
+              <span class="cognitive-section-score" :class="data.passed === data.total ? 'ok' : 'warn'"
+                    x-text="data.passed + '/' + data.total"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Training Pipeline -->
+      <div class="hook-group" x-data="pipelinePanel()" x-init="init()">
+        <div class="hook-group-header">Training Pipeline</div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="pipelineStatus"></span>
+        </div>
+        <div x-show="currentStage" class="hook-status">
+          <span class="hook-status-label">Stage:</span>
+          <span class="hook-status-value" x-text="currentStage"></span>
+        </div>
+        <div x-show="alignmentStatus" class="hook-status">
+          <span class="hook-status-label">Alignment:</span>
+          <span class="hook-status-value alignment-badge" :class="'align-' + alignmentStatus.toLowerCase()"
+                x-text="alignmentStatus"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Options:</span>
+          <div style="display:flex;gap:10px;font-size:12px;">
+            <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
+            <label><input type="checkbox" x-model="skipNano"> Skip Nano</label>
+          </div>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" @click="runPipeline()" :disabled="pipelineRunning">
+            <span x-show="!pipelineRunning">Run Pipeline</span>
+            <span x-show="pipelineRunning">Running...</span>
+          </button>
+          <button class="hook-btn cognitive-run-btn" @click="runSmoke()" :disabled="pipelineRunning">
+            Smoke Only
+          </button>
+        </div>
+      </div>
+
+      <!-- Doctor & Immunity -->
+      <div class="hook-group hook-group-wide" x-data="doctorPanel()" x-init="init()">
+        <div class="hook-group-header">Doctor & Immunity</div>
+
+        <!-- Irritations -->
+        <div class="hook-status">
+          <span class="hook-status-label">Irritations:</span>
+          <span class="hook-status-value" x-text="irritationCount"></span>
+          <button class="hook-btn hook-btn-sm" x-show="irritationCount > 0" @click="toggleIrritations()">
+            <span x-text="showIrritations ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showIrritations" x-collapse class="doctor-detail-section">
+          <template x-for="irr in irritations" :key="(irr.time || irr.timestamp || '') + irr.service">
+            <div class="irritation-entry">
+              <span class="doctor-entry-service" x-text="irr.service"></span>
+              <span class="doctor-entry-msg" x-text="irr.pattern || irr.message?.substring(0, 120) || irr.line?.substring(0, 120)"></span>
+              <span class="doctor-entry-time" x-text="(irr.time || irr.timestamp || '')?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Alarms -->
+        <div class="hook-status">
+          <span class="hook-status-label">Active Alarms:</span>
+          <span :class="alarmCount > 0 ? 'hook-status-value alarm-badge' : 'hook-status-value'" x-text="alarmCount"></span>
+        </div>
+        <template x-for="alarm in alarms" :key="alarm">
+          <div class="alarm-entry" x-text="alarm"></div>
+        </template>
+
+        <!-- Maintenance -->
+        <div class="hook-status">
+          <span class="hook-status-label">Maintenance:</span>
+          <button class="hook-btn" :class="maintenanceActive ? 'hook-btn-warn' : 'hook-btn-sm'" @click="toggleMaintenance()">
+            <span x-text="maintenanceActive ? 'Exit Maintenance' : 'Enter Maintenance'"></span>
+          </button>
+        </div>
+
+        <!-- Serenity -->
+        <div class="hook-status">
+          <span class="hook-status-label">Serenity:</span>
+          <div class="serenity-meter">
+            <div class="serenity-bar" :style="'width:' + Math.min(serenityScore / serenityThreshold * 100, 100) + '%'"
+                 :class="serenityScore < 3 ? 'serenity-low' : serenityScore < 5 ? 'serenity-mid' : 'serenity-high'"></div>
+          </div>
+          <span class="hook-status-value" x-text="serenityScore.toFixed(1) + ' / ' + serenityThreshold.toFixed(1)"></span>
+        </div>
+
+        <!-- Dissonance -->
+        <div class="hook-status">
+          <span class="hook-status-label">Dissonance:</span>
+          <span class="hook-status-value" x-text="dissonanceCount + ' files drifted'"></span>
+          <button class="hook-btn hook-btn-sm" x-show="dissonanceCount > 0" @click="toggleDissonance()">
+            <span x-text="showDissonance ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showDissonance" x-collapse class="doctor-detail-section">
+          <template x-for="d in dissonanceFiles" :key="d.file || d">
+            <div class="irritation-entry">
+              <span class="doctor-entry-msg" x-text="d.file || d"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Remediations -->
+        <div class="hook-status">
+          <span class="hook-status-label">Remediations:</span>
+          <span class="hook-status-value" x-text="remediations.length"></span>
+          <button class="hook-btn hook-btn-sm" x-show="remediations.length > 0" @click="showRemediations = !showRemediations">
+            <span x-text="showRemediations ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showRemediations" x-collapse class="doctor-detail-section">
+          <template x-for="rem in remediations" :key="(rem.time || rem.timestamp || '') + rem.service">
+            <div class="remediation-entry">
+              <span class="doctor-entry-service" x-text="rem.service"></span>
+              <span class="doctor-entry-msg" x-text="rem.action || rem.type || (rem.success ? 'restart ok' : 'restart failed') || 'remediation'"></span>
+              <span class="doctor-entry-time" x-text="(rem.time || rem.timestamp || '')?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Surgeon Section Divider -->
+        <div class="doctor-section-divider">Surgeon</div>
+
+        <!-- Human Approval Toggle -->
+        <div class="hook-status">
+          <span class="hook-status-label">Human Approval:</span>
+          <button class="hook-btn" :class="surgeonApprovalRequired ? 'hook-btn-warn' : 'hook-btn-sm'" @click="toggleSurgeonApproval()">
+            <span x-text="surgeonApprovalRequired ? 'ON (click to disable)' : 'OFF (click to enable)'"></span>
+          </button>
+        </div>
+
+        <!-- Pending Repairs -->
+        <div class="hook-status">
+          <span class="hook-status-label">Pending Repairs:</span>
+          <span class="hook-status-value" x-text="surgeonQueue.length"></span>
+        </div>
+        <template x-for="proposal in surgeonQueue" :key="proposal.repair_id">
+          <div class="surgeon-proposal">
+            <div class="surgeon-proposal-header" @click="expandedRepair = expandedRepair === proposal.repair_id ? null : proposal.repair_id">
+              <span class="surgeon-proposal-id" x-text="proposal.repair_id"></span>
+              <span class="doctor-entry-service" x-text="proposal.service"></span>
+              <span class="doctor-entry-msg" x-text="proposal.file?.split('/').pop()"></span>
+            </div>
+            <div x-show="expandedRepair === proposal.repair_id" x-collapse>
+              <div class="surgeon-proposal-detail">
+                <div class="surgeon-error-msg" x-show="proposal.error_msg">
+                  <strong>Error:</strong> <span x-text="proposal.error_msg?.substring(0, 300)"></span>
+                </div>
+                <div class="surgeon-diff-preview">
+                  <div class="surgeon-diff-label">Broken Code (excerpt):</div>
+                  <pre x-text="proposal.broken_code?.substring(0, 500) + (proposal.broken_code?.length > 500 ? '\n...' : '')"></pre>
+                </div>
+                <div class="surgeon-diff-preview">
+                  <div class="surgeon-diff-label">Fixed Code (excerpt):</div>
+                  <pre x-text="proposal.fixed_code?.substring(0, 500) + (proposal.fixed_code?.length > 500 ? '\n...' : '')"></pre>
+                </div>
+                <div class="surgeon-actions">
+                  <button class="surgeon-approve-btn" @click="approveRepair(proposal.repair_id)">Approve</button>
+                  <button class="surgeon-reject-btn" @click="rejectRepair(proposal.repair_id)">Reject</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Surgeon History -->
+        <div class="hook-status">
+          <span class="hook-status-label">Recent Repairs:</span>
+          <span class="hook-status-value" x-text="surgeonHistory.length"></span>
+          <button class="hook-btn hook-btn-sm" x-show="surgeonHistory.length > 0" @click="toggleSurgeonHistory()">
+            <span x-text="showSurgeonHistory ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showSurgeonHistory" x-collapse class="doctor-detail-section">
+          <template x-for="h in surgeonHistory" :key="h.repair_id">
+            <div class="remediation-entry">
+              <span class="doctor-entry-service" x-text="h.service"></span>
+              <span class="doctor-entry-msg" x-text="h.file?.split('/').pop() + ' — ' + h.status"></span>
+              <span class="doctor-entry-time" x-text="h.resolved_at?.substring(11, 19) || h.queued_at?.substring(11, 19) || ''"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Training Monitor -->
+      <div class="hook-group hook-group-wide" x-data="trainingMonitor()" x-init="init()">
+        <div class="hook-group-header training-header">
+          Training Monitor
+          <span x-show="state === 'training'" class="training-active-badge">ACTIVE</span>
+        </div>
+
+        <!-- Idle state -->
+        <template x-if="state === 'idle' || state === 'unknown'">
+          <div class="training-idle">
+            <span class="training-idle-text">No training active</span>
+            <template x-if="lastState && lastState !== 'idle'">
+              <span class="training-idle-last">Last run: <span x-text="lastState"></span></span>
+            </template>
+          </div>
+        </template>
+
+        <!-- Active / completed / failed state -->
+        <template x-if="state && state !== 'idle' && state !== 'unknown'">
+          <div class="training-content">
+            <!-- Status row -->
+            <div class="training-metrics">
+              <div class="training-metric">
+                <span class="training-metric-label">Status</span>
+                <span class="training-metric-value" :class="'training-state-' + state" x-text="state"></span>
+              </div>
+              <div class="training-metric" x-show="adapter">
+                <span class="training-metric-label">Adapter</span>
+                <span class="training-metric-value" x-text="adapter"></span>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="training-progress-bar">
+              <div class="training-progress-fill"
+                   :class="{ 'training-fill-complete': state === 'completed', 'training-fill-failed': state === 'failed' }"
+                   :style="'width: ' + Math.round(progress * 100) + '%'">
+              </div>
+              <span class="training-progress-text" x-text="Math.round(progress * 100) + '%'"></span>
+            </div>
+
+            <!-- Metrics grid -->
+            <div class="training-metrics">
+              <div class="training-metric">
+                <span class="training-metric-label">Step</span>
+                <span class="training-metric-value" x-text="step + ' / ' + totalSteps"></span>
+              </div>
+              <div class="training-metric">
+                <span class="training-metric-label">Loss</span>
+                <span class="training-metric-value" x-text="loss != null ? loss.toFixed(4) : '--'"></span>
+              </div>
+              <div class="training-metric" x-show="avgLoss != null">
+                <span class="training-metric-label">Avg Loss</span>
+                <span class="training-metric-value" x-text="avgLoss != null ? avgLoss.toFixed(4) : '--'"></span>
+              </div>
+              <div class="training-metric">
+                <span class="training-metric-label">Elapsed</span>
+                <span class="training-metric-value" x-text="formatDur(elapsed)"></span>
+              </div>
+              <div class="training-metric" x-show="eta > 0">
+                <span class="training-metric-label">ETA</span>
+                <span class="training-metric-value" x-text="'~' + formatDur(eta)"></span>
+              </div>
+              <div class="training-metric" x-show="speed > 0">
+                <span class="training-metric-label">Speed</span>
+                <span class="training-metric-value" x-text="'~' + speed.toFixed(1) + 's/step'"></span>
+              </div>
+            </div>
+
+            <!-- Loss sparkline -->
+            <template x-if="lossHistory.length >= 2">
+              <div class="training-loss-sparkline">
+                <span class="training-metric-label">Loss Curve</span>
+                <canvas x-ref="lossCanvas" width="400" height="60"></canvas>
+              </div>
+            </template>
+
+            <!-- Stop reason / error -->
+            <div x-show="stopReason" class="training-stop-reason" x-text="'Stop: ' + stopReason"></div>
+            <div x-show="error" class="training-error" x-text="error"></div>
+
+            <!-- Training log toggle -->
+            <button class="hook-btn hook-btn-sm" @click="toggleLog()" x-text="showLog ? 'Hide Training Log' : 'Show Training Log'" style="margin-top: 8px;"></button>
+            <div x-show="showLog" x-collapse class="training-log-section">
+              <div class="training-log-lines" x-ref="logContainer">
+                <template x-for="(line, i) in logLines" :key="i">
+                  <div class="training-log-line" x-text="line"></div>
+                </template>
+                <div x-show="logLines.length === 0" class="training-log-empty">Connecting to study log stream...</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Semantic Codex -->
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Semantic Codex Lookup</div>
+        <div class="hook-search-row">
+          <input type="text" x-model="codexQuery" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off"
+                 @keydown.enter.prevent="codexSearch()">
+          <button class="hook-btn hook-btn-primary" @click="codexSearch()">Search</button>
+        </div>
+        <div class="hook-codex-results">
+          <template x-if="codexSearching">
+            <div class="hook-codex-placeholder">Searching...</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && !codexQuery">
+            <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && codexQuery && codexSearched">
+            <div class="hook-codex-placeholder">No results found.</div>
+          </template>
+          <template x-for="r in codexResults" :key="r.id || r.title">
+            <div class="hook-codex-result">
+              <span x-show="r.score != null" class="hook-codex-result-score" x-text="r.score?.toFixed(3)"></span>
+              <div class="hook-codex-result-title" x-text="r.title || r.key || r.id || 'untitled'"></div>
+              <div class="hook-codex-result-snippet" x-text="(r.snippet || r.text || r.content || '').substring(0, 200)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Change Log -->
+      <div class="hook-group hook-group-wide" x-data="changelogPanel()" x-init="init()">
+        <div class="hook-group-header">Change Log</div>
+        <div class="changelog-filters">
+          <select class="chaos-mode-select" x-model="serviceFilter" @change="load()">
+            <option value="">All Services</option>
+            <option value="gaia-core">gaia-core</option>
+            <option value="gaia-web">gaia-web</option>
+            <option value="gaia-common">gaia-common</option>
+            <option value="gaia-study">gaia-study</option>
+            <option value="gaia-mcp">gaia-mcp</option>
+            <option value="gaia-audio">gaia-audio</option>
+            <option value="multi">multi</option>
+          </select>
+          <select class="chaos-mode-select" x-model="typeFilter" @change="load()">
+            <option value="">All Types</option>
+            <option value="feat">feat</option>
+            <option value="fix">fix</option>
+            <option value="refactor">refactor</option>
+            <option value="promote">promote</option>
+            <option value="docs">docs</option>
+            <option value="config">config</option>
+            <option value="manual">manual</option>
+          </select>
+        </div>
+        <div class="changelog-timeline">
+          <template x-if="entries.length === 0">
+            <div class="hook-codex-placeholder">No changelog entries yet.</div>
+          </template>
+          <template x-for="e in entries" :key="e.id">
+            <div class="changelog-entry">
+              <span class="changelog-icon" x-text="typeIcon(e.type)"></span>
+              <span class="changelog-service" x-text="e.service"></span>
+              <span class="changelog-summary" x-text="e.summary"></span>
+              <span class="changelog-meta" x-text="e.timestamp?.substring(0, 16).replace('T', ' ')"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Hook Action Log -->
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Action Log</div>
+        <div class="hook-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Files View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'files'" x-cloak>
+    <div class="file-browser" x-data="fileBrowser()">
+      <div class="fb-toolbar">
+        <select class="fb-root-select" x-model="currentRoot" @change="changeRoot()">
+          <template x-for="r in roots" :key="r.name">
+            <option :value="r.name" x-text="r.name"></option>
+          </template>
+        </select>
+        <div class="fb-breadcrumbs">
+          <button class="fb-crumb" @click="browse(currentRoot, '')">/</button>
+          <template x-for="crumb in breadcrumbs" :key="crumb.path">
+            <button class="fb-crumb" @click="navigateBreadcrumb(crumb.path)" x-text="crumb.name"></button>
+          </template>
+        </div>
+        <span class="fb-loading" x-show="loading">Loading...</span>
+      </div>
+
+      <div class="fb-error" x-show="error" x-text="error"></div>
+
+      <!-- File listing -->
+      <div class="fb-listing" x-show="!viewingFile && !loading">
+        <button class="fb-entry fb-entry-up" x-show="currentPath" @click="navigateUp()">
+          <span class="fb-entry-icon">..</span>
+          <span class="fb-entry-name">(parent directory)</span>
+        </button>
+        <template x-for="entry in entries" :key="entry.name">
+          <button class="fb-entry" :class="'fb-entry-' + entry.type" @click="clickEntry(entry)">
+            <span class="fb-entry-icon" x-text="entry.type === 'dir' ? '📁' : '📄'"></span>
+            <span class="fb-entry-name" x-text="entry.name"></span>
+            <span class="fb-entry-size" x-text="formatSize(entry.size)"></span>
+            <span class="fb-entry-date" x-text="formatDate(entry.modified)"></span>
+          </button>
+        </template>
+        <template x-if="!loading && entries.length === 0 && !error">
+          <div class="fb-empty">Empty directory</div>
+        </template>
+      </div>
+
+      <!-- File viewer -->
+      <div class="fb-viewer" x-show="viewingFile">
+        <div class="fb-viewer-header">
+          <button class="fb-back-btn" @click="backToListing()">&larr; Back</button>
+          <span class="fb-viewer-filename" x-text="fileName"></span>
+          <div class="fb-editor-actions" x-show="isWritableRoot">
+            <button class="fb-edit-btn" x-show="!editing" @click="enterEdit()">Edit</button>
+            <button class="fb-save-btn" x-show="editing" @click="saveFile()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save'"></button>
+            <button class="fb-cancel-btn" x-show="editing" @click="cancelEdit()">Cancel</button>
+          </div>
+        </div>
+        <!-- Read-only view -->
+        <pre class="fb-viewer-content" x-show="!editing"><code x-text="fileContent"></code></pre>
+        <!-- Editor -->
+        <textarea class="fb-editor" x-show="editing" x-model="editContent"
+                  @keydown.ctrl.s.prevent="saveFile()" @keydown.meta.s.prevent="saveFile()"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Knowledge View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'knowledge'" x-cloak>
+    <div class="file-browser kb-browser" x-data="knowledgeBrowser()">
+      <div class="fb-toolbar">
+        <span class="kb-root-label">knowledge</span>
+        <div class="fb-breadcrumbs">
+          <button class="fb-crumb" @click="browse('')">/</button>
+          <template x-for="crumb in breadcrumbs" :key="crumb.path">
+            <button class="fb-crumb" @click="navigateBreadcrumb(crumb.path)" x-text="crumb.name"></button>
+          </template>
+        </div>
+        <span class="fb-loading" x-show="loading">Loading...</span>
+      </div>
+
+      <div class="fb-error" x-show="error" x-text="error"></div>
+
+      <!-- File listing -->
+      <div class="fb-listing" x-show="!viewingFile && !loading">
+        <button class="fb-entry fb-entry-up" x-show="currentPath" @click="navigateUp()">
+          <span class="fb-entry-icon">..</span>
+          <span class="fb-entry-name">(parent directory)</span>
+        </button>
+        <template x-for="entry in entries" :key="entry.name">
+          <button class="fb-entry" :class="'fb-entry-' + entry.type" @click="clickEntry(entry)">
+            <span class="fb-entry-icon" x-text="entry.type === 'dir' ? '📁' : '📄'"></span>
+            <span class="fb-entry-name" x-text="entry.name"></span>
+            <span class="fb-entry-size" x-text="formatSize(entry.size)"></span>
+          </button>
+        </template>
+        <template x-if="!loading && entries.length === 0 && !error">
+          <div class="fb-empty">Empty directory</div>
+        </template>
+      </div>
+
+      <!-- File viewer -->
+      <div class="fb-viewer" x-show="viewingFile">
+        <div class="fb-viewer-header">
+          <button class="fb-back-btn" @click="backToListing()">&larr; Back</button>
+          <span class="fb-viewer-filename" x-text="fileName"></span>
+        </div>
+        <!-- Markdown rendered -->
+        <div class="kb-markdown blueprint-detail" x-show="isMarkdown" x-html="renderedHtml"></div>
+        <!-- Plain text fallback -->
+        <pre class="fb-viewer-content" x-show="!isMarkdown"><code x-text="fileContent"></code></pre>
+      </div>
+    </div>
+
+    <!-- Curriculum Review Queue -->
+    <div class="hook-group" x-data="curriculumPanel()" x-init="init()">
+      <div class="hook-group-header">Curriculum Queue</div>
+      <div class="hook-status">
+        <span class="hook-status-label">Pending:</span>
+        <span class="hook-status-value" x-text="pendingCount"></span>
+      </div>
+      <template x-for="batch in batches" :key="batch.filename">
+        <div class="curriculum-batch" style="padding:6px;border:1px solid var(--border);margin:4px 0;border-radius:4px;">
+          <div style="display:flex;justify-content:space-between;font-size:11px;">
+            <span style="font-weight:600;" x-text="batch.course || batch.filename"></span>
+            <span x-text="batch.pair_count + ' pairs'"></span>
+          </div>
+          <div style="font-size:9px;color:var(--text-muted);" x-text="batch.timestamp"></div>
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button class="btn-sm" style="background:var(--green);color:#000;" @click="approve(batch.filename)">Approve All</button>
+            <button class="btn-sm" @click="expandBatch = expandBatch === batch.filename ? null : batch.filename">Review</button>
+            <button class="btn-sm" style="color:var(--red);" @click="reject(batch.filename)">Reject</button>
+          </div>
+          <div x-show="expandBatch === batch.filename" style="margin-top:6px;max-height:200px;overflow-y:auto;">
+            <template x-for="(pair, idx) in batch.pairs || []" :key="idx">
+              <div style="font-size:10px;padding:4px;border-bottom:1px solid var(--border);">
+                <div style="color:var(--accent);" x-text="'Q: ' + (pair.instruction || '').substring(0, 100)"></div>
+                <div style="color:var(--text-muted);" x-text="'A: ' + (pair.output || '').substring(0, 100)"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+      <div x-show="batches.length === 0" style="font-size:10px;color:var(--text-muted);padding:8px;">No pending curriculum. Knowledge ingestion runs during sleep cycles.</div>
+    </div>
+  </section>
+
+  <!-- ── Audio Listener View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'audio'" x-cloak>
+    <div class="al-panel" x-data="audioListenerPanel()">
+
+      <!-- Top row: Controls + Status -->
+      <div class="al-top">
+        <div class="al-controls">
+          <div class="al-section-header">
+            <span>Listener Control</span>
+            <span :class="statusBadgeClass" x-text="statusBadge"></span>
+          </div>
+          <div class="al-control-body">
+            <div class="al-control-col">
+              <div class="al-field-group">
+                <span class="al-field-label">Mode</span>
+                <label class="al-radio"><input type="radio" value="passive" x-model="mode"> Passive</label>
+                <label class="al-radio"><input type="radio" value="active" x-model="mode"> Active</label>
+              </div>
+              <div class="al-field-group">
+                <label class="al-checkbox"><input type="checkbox" x-model="saveAudio"> Save Audio</label>
+                <label class="al-checkbox"><input type="checkbox" x-model="compress"> Compress MP3</label>
+              </div>
+              <div class="al-actions">
+                <button class="hook-btn hook-btn-primary" @click="startListener()" :disabled="isCapturing">Start</button>
+                <button class="hook-btn hook-btn-danger" @click="stopListener()" :disabled="!isCapturing">Stop</button>
+              </div>
+            </div>
+            <div class="al-status-col">
+              <div class="al-status-row">
+                <span class="al-status-label">Backend</span>
+                <span class="al-status-value" x-text="backend"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Uptime</span>
+                <span class="al-status-value" x-text="uptime"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Chunks</span>
+                <span class="al-status-value" x-text="chunks"></span>
+              </div>
+              <div class="al-status-row">
+                <span class="al-status-label">Recording</span>
+                <span class="al-status-value al-status-file" x-text="recordingFile"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcript area -->
+      <div class="al-transcript-section">
+        <div class="al-section-header">
+          <span>Live Transcript</span>
+          <button class="al-clear-btn" @click="clearTranscript()">Clear</button>
+        </div>
+        <div class="al-transcript">
+          <template x-for="(line, idx) in transcriptLog" :key="idx">
+            <div class="al-transcript-line" x-text="line"></div>
+          </template>
+          <template x-if="transcriptLog.length === 0">
+            <div class="al-transcript-empty">No transcripts yet. Start the listener to capture audio.</div>
+          </template>
+        </div>
+        <div class="al-ingest-row">
+          <button class="hook-btn hook-btn-primary" @click="ingestTranscript()">Send to GAIA for Review</button>
+          <span class="al-ingest-label">Source:</span>
+          <input type="text" class="al-ingest-input" x-model="ingestSource" placeholder="Audio Listener" autocomplete="off">
+        </div>
+      </div>
+
+      <!-- Action Log -->
+      <div class="al-log-section">
+        <div class="al-section-header">Action Log</div>
+        <div class="al-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Consent Sovereignty View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'consent'" x-cloak>
+    <div class="ct-panel" x-data="consentPanel()">
+
+      <!-- Top row: Stats + Tier Selector -->
+      <div class="ct-top">
+        <div class="ct-controls">
+          <div class="al-section-header">
+            <span>Consent Test Engine</span>
+            <span class="ct-stats-badge" x-text="statsSummary"></span>
+          </div>
+          <div class="ct-control-body">
+            <div class="ct-tier-selector">
+              <span class="ct-field-label">Tier</span>
+              <div class="ct-tier-tabs">
+                <template x-for="tier in tiers" :key="tier.key">
+                  <button class="ct-tier-btn" :class="{ active: selectedTier === tier.key }"
+                          @click="selectTier(tier.key)" x-text="tier.label"></button>
+                </template>
+              </div>
+            </div>
+            <div class="ct-stats-row">
+              <div class="ct-stat">
+                <span class="ct-stat-label">Engaged</span>
+                <span class="ct-stat-value ct-stat-good" x-text="statsEngaged"></span>
+              </div>
+              <div class="ct-stat">
+                <span class="ct-stat-label">Rule-citing</span>
+                <span class="ct-stat-value ct-stat-warn" x-text="statsRuleCiting"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Test Library -->
+      <div class="ct-library-section">
+        <div class="al-section-header">
+          <span>Tests — <span x-text="tierLabel(selectedTier)"></span></span>
+          <button class="hook-btn hook-btn-primary" style="flex:0 0 auto;padding:4px 12px;font-size:11px;"
+                  @click="runAllTier()" :disabled="runningTier || runningTest">
+            <span x-show="!runningTier">Run All Tier</span>
+            <span x-show="runningTier">Running...</span>
+          </button>
+        </div>
+        <div class="ct-test-list">
+          <template x-for="test in currentTests" :key="test.id">
+            <div class="ct-test-card">
+              <div class="ct-test-info">
+                <span class="ct-test-id" x-text="test.id"></span>
+                <span class="ct-test-prompt" x-text="truncate(test.prompt, 100)"></span>
+              </div>
+              <div class="ct-test-tags">
+                <template x-for="tag in (test.tags || [])" :key="tag">
+                  <span class="ct-tag" x-text="tag"></span>
+                </template>
+              </div>
+              <button class="hook-btn hook-btn-primary ct-run-btn"
+                      @click="runTest(test.id)"
+                      :disabled="runningTest === test.id || runningTier">
+                <span x-show="runningTest !== test.id">Run</span>
+                <span x-show="runningTest === test.id">...</span>
+              </button>
+            </div>
+          </template>
+          <template x-if="currentTests.length === 0">
+            <div class="ct-empty">No tests in this tier.</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Main content: Result Detail + History side by side -->
+      <div class="ct-main">
+        <!-- Result Detail -->
+        <div class="ct-result-section">
+          <div class="al-section-header">
+            <span>Result Detail</span>
+          </div>
+          <template x-if="!selectedResult">
+            <div class="ct-empty">Run a test to see results here.</div>
+          </template>
+          <template x-if="selectedResult">
+            <div class="ct-result-detail">
+              <div class="ct-result-header">
+                <span class="ct-test-id" x-text="selectedResult.test_id"></span>
+                <span class="ct-tier-label" x-text="tierLabel(selectedResult.tier)"></span>
+                <span :class="classificationBadge(selectedResult.classification)"
+                      x-text="classificationLabel(selectedResult.classification)"></span>
+              </div>
+
+              <div class="ct-result-meta">
+                <span x-show="selectedResult.analysis?.identity_guardian_triggered" class="ct-meta-flag">Identity Guardian triggered</span>
+                <span class="ct-meta-item">Confidence: <strong x-text="(selectedResult.analysis?.confidence ?? 0).toFixed(2)"></strong></span>
+                <span class="ct-meta-item">Model: <strong x-text="selectedResult.analysis?.model_used || '--'"></strong></span>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Prompt</div>
+                <div class="ct-result-block-content" x-text="selectedResult.prompt"></div>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Evaluation Focus</div>
+                <div class="ct-result-block-content ct-muted" x-text="selectedResult.evaluation_focus"></div>
+              </div>
+
+              <div class="ct-result-block">
+                <div class="ct-result-block-label">Response</div>
+                <div class="ct-result-block-content ct-response" x-text="selectedResult.actual_response || '(no response)'"></div>
+              </div>
+
+              <!-- Reasoning Quality Flags -->
+              <div class="ct-flags-row" x-show="selectedResult.analysis?.reasoning_quality">
+                <template x-if="selectedResult.analysis?.reasoning_quality?.green_flags_present?.length > 0">
+                  <div class="ct-flags-group ct-flags-green">
+                    <span class="ct-flags-label">Green Flags</span>
+                    <template x-for="flag in selectedResult.analysis.reasoning_quality.green_flags_present" :key="flag">
+                      <span class="ct-flag ct-flag-green" x-text="flag"></span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="selectedResult.analysis?.reasoning_quality?.red_flags_present?.length > 0">
+                  <div class="ct-flags-group ct-flags-red">
+                    <span class="ct-flags-label">Red Flags</span>
+                    <template x-for="flag in selectedResult.analysis.reasoning_quality.red_flags_present" :key="flag">
+                      <span class="ct-flag ct-flag-red" x-text="flag"></span>
+                    </template>
+                  </div>
+                </template>
+                <div class="ct-quality-indicators">
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.engaged_with_substance ? 'ct-qi-on' : 'ct-qi-off'">Engaged</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.cited_rules_as_reasoning ? 'ct-qi-warn' : 'ct-qi-off'">Rule-citing</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.acknowledged_complexity ? 'ct-qi-on' : 'ct-qi-off'">Complexity</span>
+                  <span class="ct-qi" :class="selectedResult.analysis?.reasoning_quality?.traced_broader_consequences ? 'ct-qi-on' : 'ct-qi-off'">Coherence</span>
+                </div>
+              </div>
+
+              <!-- Acknowledgment -->
+              <template x-if="selectedResult.acknowledgment">
+                <div class="ct-result-block ct-ack-block">
+                  <div class="ct-result-block-label">GAIA's Reflection (Acknowledgment)</div>
+                  <div class="ct-result-block-content ct-response" x-text="selectedResult.acknowledgment.gaia_response || '(no reflection)'"></div>
+                </div>
+              </template>
+
+              <!-- Action Buttons -->
+              <div class="ct-result-actions">
+                <button class="hook-btn hook-btn-primary"
+                        @click="acknowledgeResult()"
+                        :disabled="!!selectedResult.acknowledgment"
+                        x-text="selectedResult.acknowledgment ? 'Acknowledged' : 'Acknowledge'">
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Results History -->
+        <div class="ct-history-section">
+          <div class="al-section-header">
+            <span>History</span>
+          </div>
+          <div class="ct-history-list">
+            <template x-for="r in results" :key="r.result_id">
+              <button class="ct-history-entry" :class="{ active: selectedResult?.result_id === r.result_id }"
+                      @click="viewResult(r.result_id)">
+                <span class="ct-history-time" x-text="formatTime(r.timestamp)"></span>
+                <span class="ct-history-id" x-text="r.test_id"></span>
+                <span :class="classificationBadge(r.classification)" x-text="classificationLabel(r.classification)"></span>
+                <span x-show="r.has_acknowledgment" class="ct-history-ack" title="Acknowledged">ack</span>
+              </button>
+            </template>
+            <template x-if="results.length === 0">
+              <div class="ct-empty">No results yet.</div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Log -->
+      <div class="ct-log-section">
+        <div class="al-section-header">Action Log</div>
+        <div class="al-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Terminal View ── -->
+  <section class="view" x-data x-show="$store.nav.currentView === 'terminal'" x-cloak>
+    <div class="terminal-panel" x-data="terminalPanel()">
+      <div class="term-toolbar">
+        <select class="term-container-select" x-model="selectedContainer" :disabled="connected">
+          <option value="">Select container...</option>
+          <template x-for="c in containers" :key="c.name">
+            <option :value="c.name" :disabled="c.status !== 'running'" x-text="c.name + ' (' + c.status + ')'"></option>
+          </template>
+        </select>
+        <button class="term-connect-btn" x-show="!connected" @click="connect()" :disabled="!selectedContainer || connecting" x-text="connecting ? 'Connecting...' : 'Connect'"></button>
+        <button class="term-disconnect-btn" x-show="connected" @click="disconnect()">Disconnect</button>
+        <button class="term-refresh-btn" @click="loadContainers()" :disabled="connected" title="Refresh container list">&#x21bb;</button>
+        <span class="term-status" :class="connected ? 'term-status-on' : ''" x-text="connected ? 'Connected' : 'Disconnected'"></span>
+      </div>
+      <div class="term-error" x-show="error" x-text="error"></div>
+      <div x-ref="termContainer" class="term-container"></div>
+    </div>
+  </section>
+
+  <!-- ── Logs View ── -->
+  <section class="view" x-data="{ logsTab: 'generation' }" x-show="$store.nav.currentView === 'logs'" x-cloak>
+    <!-- Sub-tab bar -->
+    <div class="logs-subtabs">
+      <button class="logs-subtab" :class="logsTab === 'generation' ? 'active' : ''" @click="logsTab = 'generation'">Generation</button>
+      <button class="logs-subtab" :class="logsTab === 'core' ? 'active' : ''" @click="logsTab = 'core'">Core</button>
+      <button class="logs-subtab" :class="logsTab === 'web' ? 'active' : ''" @click="logsTab = 'web'">Web</button>
+      <button class="logs-subtab" :class="logsTab === 'mcp' ? 'active' : ''" @click="logsTab = 'mcp'">MCP</button>
+      <button class="logs-subtab" :class="logsTab === 'study' ? 'active' : ''" @click="logsTab = 'study'">Study</button>
+      <button class="logs-subtab" :class="logsTab === 'discord' ? 'active' : ''" @click="logsTab = 'discord'">Discord</button>
+      <div style="flex:1"></div>
+      <a href="http://localhost:5601" target="_blank" rel="noopener" class="logs-subtab logs-kibana-link" title="Open Kibana (ELK log explorer)">Kibana ↗</a>
+    </div>
+
+    <!-- Generation sub-tab (existing component, unchanged) -->
+    <div x-show="logsTab === 'generation'" x-data="generationPanel()" class="gen-panel">
+      <div class="gen-toolbar">
+        <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
+        <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'core' ? 'active' : ''" @click="setFilter('core')">Core</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'nano' ? 'active' : ''" @click="setFilter('nano')">Nano</button>
+        <div style="flex:1"></div>
+        <label class="gen-scroll-lock">
+          <input type="checkbox" x-model="scrollLocked"> Auto-scroll
+        </label>
+        <button class="gen-clear-btn" @click="clear()">Clear</button>
+      </div>
+      <div class="gen-output" x-ref="genOutput" @scroll="handleScroll()">
+        <template x-for="(entry, idx) in entries" :key="idx">
+          <div>
+            <template x-if="entry.type === 'header'">
+              <div class="gen-entry gen-header" :class="'gen-role-' + entry.role">
+                <span class="gen-model-badge" x-text="entry.role"></span>
+                <span class="gen-model-name" x-text="entry.model"></span>
+                <span class="gen-phase" x-text="entry.phase"></span>
+                <span class="gen-ts" x-text="entry.ts"></span>
+              </div>
+            </template>
+            <template x-if="entry.type === 'stream'">
+              <pre class="gen-entry gen-stream" x-html="entry.html"></pre>
+            </template>
+            <template x-if="entry.type === 'summary'">
+              <div class="gen-entry gen-summary">
+                <span x-text="entry.tokens + ' tokens'"></span>
+                <span x-text="(entry.elapsed / 1000).toFixed(1) + 's'"></span>
+                <span class="gen-tps" x-text="(entry.elapsed > 0 ? (entry.tokens / (entry.elapsed / 1000)).toFixed(1) : '?') + ' tok/s'"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+        <div class="gen-empty" x-show="entries.length === 0">Waiting for generation events...</div>
+      </div>
+    </div>
+
+    <!-- Service log sub-tabs -->
+    <template x-if="logsTab !== 'generation'">
+      <div class="logs-svc-panel" x-data="serviceLogsPanel()" x-init="switchService(logsTab)" x-effect="switchService(logsTab)">
+        <div class="gen-toolbar">
+          <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
+          <span class="logs-svc-label" x-text="service"></span>
+
+          <!-- Mode toggle -->
+          <button class="logs-mode-btn" :class="mode === 'live' ? 'active' : ''" @click="setMode('live')">Live</button>
+          <button class="logs-mode-btn" :class="mode === 'filtered' ? 'active' : ''" @click="setMode('filtered')">Filtered</button>
+
+          <!-- Level filter toggles (visible in both modes, controls filtering in 'filtered' mode) -->
+          <div class="logs-level-toggles">
+            <button class="logs-lvl-btn logs-lvl-error" :class="levelFilters.error ? 'active' : ''" @click="toggleLevel('error')">ERROR</button>
+            <button class="logs-lvl-btn logs-lvl-warn" :class="levelFilters.warning ? 'active' : ''" @click="toggleLevel('warning')">WARN</button>
+            <button class="logs-lvl-btn logs-lvl-info" :class="levelFilters.info ? 'active' : ''" @click="toggleLevel('info')">INFO</button>
+            <button class="logs-lvl-btn logs-lvl-debug" :class="levelFilters.debug ? 'active' : ''" @click="toggleLevel('debug')">DEBUG</button>
+          </div>
+
+          <div style="flex:1"></div>
+          <button class="gen-clear-btn" x-show="mode === 'filtered'" @click="_fetchFiltered()">Refresh</button>
+          <label class="gen-scroll-lock">
+            <input type="checkbox" x-model="scrollLocked"> Auto-scroll
+          </label>
+          <button class="gen-clear-btn" @click="clear()">Clear</button>
+        </div>
+        <div class="logs-output" x-ref="logsOutput" @scroll="handleScroll()">
+          <template x-for="(line, idx) in lines" :key="idx">
+            <div class="logs-line" :class="'logs-level-' + line.level" x-text="line.text"></div>
+          </template>
+          <div class="gen-empty" x-show="lines.length === 0 && !_filterLoading" x-text="mode === 'live' ? 'Waiting for log events...' : 'No matching log lines.'"></div>
+          <div class="gen-empty" x-show="_filterLoading">Loading filtered logs...</div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <script src="/static/app.js?v=20260324b"></script>
+</body>
+</html>

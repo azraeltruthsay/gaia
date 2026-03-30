@@ -1,0 +1,24 @@
+# GAIA Orchestrator Dependencies
+
+# API Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Data validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Docker SDK
+docker>=7.0.0
+
+# GPU Monitoring
+pynvml>=11.5.0
+
+# HTTP Client
+httpx>=0.26.0
+
+# Configuration
+pyyaml>=6.0
+
+# WebSocket support (included in uvicorn[standard])
+websockets>=12.0

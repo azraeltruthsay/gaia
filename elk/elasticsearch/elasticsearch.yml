@@ -1,0 +1,18 @@
+# Elasticsearch configuration for GAIA
+# Single-node, internal only — no external access needed
+
+cluster.name: "gaia-logs"
+network.host: 0.0.0.0
+
+# Single-node discovery
+discovery.type: single-node
+
+# Disable security (internal Docker network only)
+xpack.security.enabled: false
+xpack.security.enrollment.enabled: false
+
+# Performance tuning for log workload
+indices.memory.index_buffer_size: "20%"
+
+# Index lifecycle — auto-delete old logs after 14 days
+# (configured via ILM policy, not here)

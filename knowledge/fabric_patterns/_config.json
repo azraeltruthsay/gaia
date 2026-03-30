@@ -1,0 +1,26 @@
+{
+    "mode": "allowlist",
+    "default_target": "core",
+    "default_max_tokens": 2048,
+    "default_no_think": true,
+    "patterns": {
+        "extract_wisdom": {"enabled": true, "target": "prime"},
+        "extract_ideas": {"enabled": true},
+        "extract_article_wisdom": {"enabled": true},
+        "extract_recommendations": {"enabled": true},
+        "summarize": {"enabled": true},
+        "summarize_lecture": {"enabled": true},
+        "create_summary": {"enabled": true},
+        "analyze_claims": {"enabled": true},
+        "analyze_threat_report": {"enabled": true, "target": "prime"},
+        "analyze_paper": {"enabled": true, "target": "prime"},
+        "analyze_incident": {"enabled": true},
+        "improve_writing": {"enabled": true, "target": "prime"},
+        "rate_content": {"enabled": true},
+        "explain_code": {"enabled": true},
+        "create_stride_threat_model": {"enabled": true, "target": "prime"},
+        "create_keynote": {"enabled": true, "target": "prime"},
+        "write_essay": {"enabled": true, "target": "prime"},
+        "review_code": {"enabled": true, "target": "prime"}
+    }
+}

@@ -1,0 +1,124 @@
+# gaia-prime: The Thinker tier
+# Inherits unified GAIA engine base with all ML capabilities.
+# Supports both safetensors (GPU) and GGUF (CPU via llama-server or gaia_cpp).
+# Runs in standby mode — model loaded/unloaded by orchestrator.
+#
+# Three-stage build:
+#   builder     — builds llama.cpp (llama-server, llama-quantize, shared libs)
+#   cpp_builder — builds gaia_cpp pybind11 extension against Python 3.11 + llama headers
+#   runtime     — gaia-engine-base + artifacts from both build stages
+
+ARG LLAMA_CPP_TAG=b8250
+ARG CUDA_VERSION=12.8.1
+
+# ── Stage 1: Build llama.cpp (CUDA + CPU) ────────────────────────────────
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
+
+ARG LLAMA_CPP_TAG
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git curl ca-certificates libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+    && ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so \
+    && ldconfig
+
+RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="86;89;120" \
+        -DLLAMA_CURL=ON \
+        -DGGML_CPU_AARCH64=OFF \
+    && cmake --build build --target llama-server llama-quantize -j$(nproc)
+
+# ── Stage 2: Build gaia_cpp pybind11 extension ───────────────────────────
+# Uses the gaia-engine-base image (has Python 3.11) with llama.cpp headers
+# from the builder stage. This ensures ABI compatibility: the .so is built
+# against exactly the Python that runs in production.
+FROM localhost:5000/gaia-engine-base:latest AS cpp_builder
+
+# Build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pybind11 headers
+RUN pip install --no-cache-dir "pybind11[global]>=2.13"
+
+# Copy llama.cpp source tree from builder (we need headers + the built libs for linking)
+COPY --from=builder /build/llama.cpp /build/llama.cpp
+
+# Copy gaia_cpp extension source
+COPY gaia-engine/gaia_engine/cpp /build/gaia_cpp_src
+
+# Build
+RUN cd /build/gaia_cpp_src \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_SRC_DIR=/build/llama.cpp \
+        -DLLAMA_BUILD_DIR=/build/llama.cpp/build \
+    && cmake --build build -j$(nproc) \
+    && echo "gaia_cpp build complete" \
+    && ls -la build/gaia_cpp*.so
+
+# ── Stage 3: Runtime ─────────────────────────────────────────────────────
+FROM localhost:5000/gaia-engine-base:latest
+
+# Create non-root user for container execution (host UID mapping)
+RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+
+# GGUF support: llama-server + llama-quantize + CUDA runtime libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
+COPY --from=builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
+COPY --from=builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
+COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
+COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
+RUN ldconfig
+
+# Install gaia_cpp extension + updated gaia_engine Python modules.
+# gaia-engine-base pip-installs from GitHub, but the base image may lag behind HEAD.
+# We copy the latest versions directly to override whatever pip installed.
+# The known site-packages path: /usr/local/lib/python3.11/site-packages/gaia_engine/
+ENV GAIA_ENGINE_PKGDIR=/usr/local/lib/python3.11/site-packages/gaia_engine
+ENV GAIA_CPP_DEST=${GAIA_ENGINE_PKGDIR}/cpp
+COPY --from=cpp_builder /build/gaia_cpp_src/build/ /tmp/gaia_cpp_build/
+COPY gaia-engine/gaia_engine/cpp/__init__.py \
+     gaia-engine/gaia_engine/cpp/backend.py \
+     /tmp/gaia_cpp_src/
+# Also copy updated engine modules that gaia-engine-base may not have yet
+COPY gaia-engine/gaia_engine/manager.py ${GAIA_ENGINE_PKGDIR}/manager.py
+COPY gaia-engine/gaia_engine/config.py ${GAIA_ENGINE_PKGDIR}/config.py
+RUN mkdir -p "${GAIA_CPP_DEST}" \
+    && find /tmp/gaia_cpp_build -name "gaia_cpp*.so" -exec cp {} "${GAIA_CPP_DEST}/" \; \
+    && cp /tmp/gaia_cpp_src/__init__.py /tmp/gaia_cpp_src/backend.py "${GAIA_CPP_DEST}/" \
+    && rm -rf /tmp/gaia_cpp_build /tmp/gaia_cpp_src \
+    && echo "gaia_cpp installed at ${GAIA_CPP_DEST}:" \
+    && ls -la "${GAIA_CPP_DEST}/"
+
+# Entrypoint
+COPY gaia-prime/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Set ownership for writable directories
+RUN chown -R gaia:gaia /app /shared
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:7777/health || exit 1
+
+EXPOSE 7777
+
+# Run as non-root user
+USER gaia
+
+ENTRYPOINT ["/entrypoint.sh"]

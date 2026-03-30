@@ -1,0 +1,28 @@
+{
+  "milestones": [
+    {
+      "id": "genesis",
+      "name": "Project Genesis",
+      "timestamp": "2026-02-17T00:00:00Z",
+      "description": "The initial bootstrap of the GAIA sovereign mesh architecture.",
+      "importance": 1.0,
+      "tags": ["core", "origin"]
+    },
+    {
+      "id": "sovereign_shield",
+      "name": "Sovereign Shield Hardening",
+      "timestamp": "2026-03-02T21:41:00Z",
+      "description": "Implementation of codebase hardening and Digital Immune System foundation.",
+      "importance": 0.9,
+      "tags": ["security", "integrity"]
+    },
+    {
+      "id": "cascade_routing",
+      "name": "Cascade Routing & Proprioception",
+      "timestamp": "2026-03-03T15:30:00Z",
+      "description": "Activation of Nano-triage and full temporal/atmospheric awareness.",
+      "importance": 0.95,
+      "tags": ["cognition", "proprioception"]
+    }
+  ]
+}

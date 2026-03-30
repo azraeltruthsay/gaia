@@ -1,0 +1,78 @@
+name: Deploy GAIA Site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gaia-blog/**'
+      - 'gaia-wiki/**'
+      - 'knowledge/Dev_Notebook/**'
+      - '.github/workflows/deploy-blog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            mkdocs-material \
+            mkdocs-rss-plugin \
+            mkdocs-awesome-pages-plugin
+
+      # Build the blog (primary site)
+      - name: Build blog
+        working-directory: gaia-blog
+        run: mkdocs build --clean
+
+      # Build the wiki as a subpath
+      - name: Build wiki
+        working-directory: gaia-wiki
+        run: mkdocs build --clean
+
+      # Generate dev journal index
+      - name: Generate dev journal
+        run: |
+          python scripts/generate_journal_site.py
+
+      # Merge wiki into blog site under /wiki/
+      - name: Merge sites
+        run: |
+          mkdir -p gaia-blog/site/wiki
+          cp -r gaia-wiki/site/* gaia-blog/site/wiki/
+          mkdir -p gaia-blog/site/journal
+          if [ -d /tmp/journal-site ]; then
+            cp -r /tmp/journal-site/* gaia-blog/site/journal/
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gaia-blog/site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

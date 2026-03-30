@@ -1,0 +1,119 @@
+# JSON-RPC 2.0 Protocol — gaia-core <-> gaia-mcp tool execution
+#
+# Source: gaia-mcp/gaia_mcp/server.py (POST /jsonrpc)
+# Spec: https://www.jsonrpc.org/specification
+#
+# gaia-core sends tool calls to gaia-mcp via this interface.
+# Sensitive tools require the approval flow (/request_approval + /approve_action).
+
+protocol: json-rpc-2.0
+transport: HTTP POST
+endpoint: /jsonrpc
+port: 8765
+
+# ── Standard JSON-RPC 2.0 Request ───────────────────────────────────
+
+request:
+  description: "A JSON-RPC 2.0 request to execute a tool"
+  content_type: application/json
+  schema:
+    jsonrpc: "2.0"              # Must be exactly "2.0"
+    method: string              # Tool name (e.g. "web_search", "ai_read", "run_shell")
+    params: dict                # Tool parameters (validated against tool schema)
+    id: string | int            # Request ID for correlation
+
+  example:
+    jsonrpc: "2.0"
+    method: "web_search"
+    params:
+      query: "GAIA architecture overview"
+      max_results: 5
+    id: "req_001"
+
+# ── Standard JSON-RPC 2.0 Success Response ──────────────────────────
+
+success_response:
+  schema:
+    jsonrpc: "2.0"
+    result: any                 # Tool execution result (varies by tool)
+    id: string | int            # Matches request ID
+
+  example:
+    jsonrpc: "2.0"
+    result:
+      results:
+        - title: "GAIA Project"
+          url: "https://example.com"
+          snippet: "..."
+    id: "req_001"
+
+# ── Standard JSON-RPC 2.0 Error Response ────────────────────────────
+
+error_response:
+  schema:
+    jsonrpc: "2.0"
+    error:
+      code: int                 # Standard JSON-RPC error code
+      message: string           # Human-readable error message
+      data:                     # GAIA-specific error metadata
+        gaia_code: string       # e.g. "GAIA-MCP-010", "GAIA-MCP-020"
+        hint: string            # Actionable hint from error registry
+        errorCategory: string   # "safety" | "internal" | "validation"
+        isRetryable: bool
+        traceback: string       # Only for internal errors (code -32603)
+    id: string | int | null
+
+  error_codes:
+    -32700: "Parse error — invalid JSON"
+    -32600: "Invalid Request — missing jsonrpc or method"
+    -32602: "Invalid params — schema validation failed"
+    -32001: "Approval required — sensitive tool needs /request_approval first"
+    -32002: "Permission denied — blast shield or safety check failed"
+    -32603: "Internal error — tool execution failed"
+
+# ── Approval Flow (for Sensitive Tools) ──────────────────────────────
+#
+# Sensitive tools: ai_write, write_file, run_shell, memory_rebuild_index,
+# promotion_create_request, kanka_create_entity, kanka_update_entity,
+# notebooklm_create_note, audio_listen_start
+#
+# If GAIA_MCP_BYPASS=true, approval is skipped.
+
+approval_flow:
+  step_1:
+    endpoint: /request_approval
+    method: POST
+    description: "Request approval for a sensitive tool call"
+    request:
+      method: string            # Tool name
+      params: dict              # Tool parameters
+    response:
+      ok: bool
+      action_id: string         # UUID for this approval request
+      challenge: string         # Challenge string to echo back
+      message: string
+
+  step_2:
+    endpoint: /approve_action
+    method: POST
+    description: "Approve a pending action by returning the challenge response"
+    request:
+      action_id: string         # From step 1
+      approval: string          # Challenge response
+    response:
+      ok: bool
+      method: string            # Tool that was executed
+      result: any               # Tool execution result
+
+  notes: |
+    Approvals expire after MCP_APPROVAL_TTL seconds (default 900 = 15 minutes).
+    The challenge is logged to stdout for the operator to see and respond to.
+    In practice, gaia-core requests approval and the dashboard or operator
+    completes the flow via /approve_action.
+
+# ── Tool Registry ────────────────────────────────────────────────────
+# The authoritative tool list is in gaia_common.utils.tools_registry.TOOLS
+# Each tool has a JSON Schema for params validation.
+# See gaia-mcp.yaml for the full tool inventory.
+
+tool_schema_location: "gaia-common/gaia_common/utils/tools_registry.py"

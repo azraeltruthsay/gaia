@@ -1,0 +1,7 @@
+# Auto-generated from pyproject.toml - DO NOT EDIT MANUALLY
+# Regenerate with: pip-compile pyproject.toml -o requirements.txt
+#
+# Core dependencies for gaia-common
+
+dataclasses-json>=0.5.7
+pydantic>=2.0.0

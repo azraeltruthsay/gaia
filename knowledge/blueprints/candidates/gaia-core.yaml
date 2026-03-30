@@ -1,0 +1,521 @@
+id: gaia-core
+version: '0.1'
+role: The Brain (Cognition)
+service_status: live
+runtime:
+  port: 6415
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: null
+  health_check: curl -f http://localhost:6415/health
+  gpu_count: null
+  user: null
+  dockerfile: gaia-core/Dockerfile
+  compose_service: gaia-core
+  security: null
+interfaces:
+- id: root
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Root endpoint.
+  status: active
+- id: cognitive_query
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/cognitive/query
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Lightweight LLM query endpoint for cognitive testing.
+
+
+    Bypasses the full 20-stage cognitive pipeline — sends the prompt
+
+    directly to a model backend.'
+  status: active
+- id: cognitive_similarity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/cognitive/similarity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Rate semantic similarity between two texts using the Nano/Lite model.
+
+
+    Returns a score from 0.0 to 1.0.'
+  status: active
+- id: doctor_diagnose
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/doctor/diagnose
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Doctor-initiated diagnostic turn.
+
+    Triggered when a reload loop or resource spike is detected.'
+  status: active
+- id: doctor_review
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/doctor/review
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Cognitive veto point for sovereign promotion.
+
+    Doctor submits candidate→production diffs; GAIA (Prime) reviews and approves/denies.
+
+    Expects JSON: { "diffs": [...], "source": "doctor_sovereign_promote", "file_count":
+    N }
+
+    Returns: { "approved": true/false, "reason": "..." }'
+  status: active
+- id: kv_cache_compact
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/compact/{role}
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Manually trigger KV cache compaction for a specific role.
+  status: active
+- id: kv_cache_pressure
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/pressure
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return KV cache pressure for all roles and recent compaction log.
+  status: active
+- id: kv_cache_restore
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/restore/{role}
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Restore KV cache for a specific role (e.g., 'reflex' or 'core').
+  status: active
+- id: kv_cache_save
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/kv-cache/save
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Trigger an immediate KV cache save for all roles.
+  status: active
+- id: repair_structural
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/repair/structural
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Cognitive repair endpoint for structural code errors.
+
+    Expects JSON: { "service": "...", "broken_code": "...", "error_msg": "...", "file_path":
+    "..." }
+
+    If file_path is provided, gaia-core validates and writes the fix directly (avoids
+    ro-mount
+
+    issues in the caller).'
+  status: active
+- id: audio_context
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/context
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return the current audio context buffer and listening state.
+  status: active
+- id: audio_ingest
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/ingest
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Ingest audio transcript as ambient context (no cognitive loop).
+
+
+    Stores transcripts in a ring buffer that the prompt builder can
+
+    reference during the next cognitive turn.'
+  status: active
+- id: audio_listen
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /audio/listen
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Enable or disable feeding audio buffer into the prompt builder.
+
+
+    When enabled, GAIA will see recent audio transcripts as ambient context
+
+    during cognitive turns.'
+  status: active
+- id: cognition_checkpoint
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognition/checkpoint
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Write cognitive checkpoints (prime.md + Lite.md).
+
+
+    Called by graceful_checkpoint.sh before container shutdown, or manually
+
+    to persist cognitive state.'
+  status: active
+- id: gpu_reclaim
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/reclaim
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Restore gpu_prime in the model pool after GPU reclaim.
+
+
+    Called by the orchestrator AFTER it has already started the
+
+    gaia-prime container and confirmed it is healthy.'
+  status: active
+- id: gpu_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Update model pool after GPU release.
+
+
+    Called by the orchestrator AFTER it has already stopped the
+
+    gaia-prime container.'
+  status: active
+- id: gpu_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Report current GPU state.
+  status: active
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: 'Health check endpoint for container orchestration.
+
+
+    Returns 200 with inference_ok=true if the Core inference backend
+
+    is reachable, or 200 with inference_ok=false + degraded status
+
+    if inference is down but the API is alive.'
+  status: active
+- id: model_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Stop the embedded llama-server and free RAM.
+
+
+    Called by the training pipeline before GGUF overwrite.'
+  status: active
+- id: model_reload
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/reload
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Start the embedded llama-server (optionally with a new GGUF).
+
+
+    Called by the training pipeline after deploying a new Core model.'
+  status: active
+- id: model_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return the current embedded llama-server status.
+  status: active
+- id: process_packet
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /process_packet
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Process a CognitionPacket through the cognitive loop with streaming
+    support.
+
+    Yields chunks of data: tokens as they are generated, and finally the completed
+    packet.'
+  status: active
+- id: sleep_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return current sleep configuration for the dashboard.
+  status: active
+- id: sleep_distracted_check
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/distracted-check
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: 'Check if GAIA is in a state that warrants a canned response.
+
+
+    Returns the current state and, if applicable, a canned_response that
+
+    gaia-web should send instead of forwarding the message to the model.'
+  status: active
+- id: sleep_force
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/force
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Immediately trigger sleep transition (ACTIVE → DROWSY → ASLEEP).
+  status: active
+- id: sleep_hold
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/hold
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Temporarily suppress auto-sleep for long-form operations.
+
+
+    Body: {"minutes": 30, "reason": "CFR ingest"}
+
+    Max 120 minutes.'
+  status: active
+- id: sleep_hold_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/hold-release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Release a sleep hold early.
+  status: active
+- id: sleep_shutdown
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/shutdown
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Initiate graceful shutdown — transitions to OFFLINE and stops the loop.
+  status: active
+- id: sleep_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get current sleep/wake state and task info.
+  status: active
+- id: sleep_study_handoff
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/study-handoff
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Receive study handoff signal from orchestrator.
+
+
+    Body: {"direction": "prime_to_study"|"study_to_prime", "handoff_id": "..."}'
+  status: active
+- id: sleep_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Enable or disable automatic sleep transitions.
+
+
+    Body: {"enabled": true/false}'
+  status: active
+- id: sleep_voice_state
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/voice-state
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Notify gaia-core when GAIA joins/leaves a Discord voice channel.
+
+
+    Body: {"connected": true/false}
+
+
+    When connected=True, triggers an implicit wake signal so Prime starts
+
+    booting while audio stays alive for Lite-based stalling responses.
+
+    When connected=False during sleep, the deferred audio sleep signal fires.'
+  status: active
+- id: sleep_wake
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Receive wake signal from gaia-web.
+
+
+    Called when the first message is queued during sleep.'
+  status: active
+- id: sleep_wake_activity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-activity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Receive wake signal from host-side workstation activity monitor.
+
+
+    Only triggers wake if workstation_activity toggle is enabled AND state is asleep.'
+  status: active
+- id: sleep_wake_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return current PRIME_WAKE trigger settings.
+  status: active
+- id: sleep_wake_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /sleep/wake-toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Toggle a specific prime wake trigger on/off.
+
+
+    Body: {"trigger": "discord_typing"|"workstation_activity", "enabled": bool}
+
+    Persists the change to gaia_constants.json.'
+  status: active
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get the status of the cognitive system.
+  status: active
+dependencies:
+  services: []
+  volumes: []
+  external_apis: []
+source_files: []
+failure_modes: []
+intent:
+  purpose: Auto-discovered blueprint for gaia-core. Review and enrich.
+  design_decisions: []
+  open_questions:
+  - Blueprint auto-discovered from OpenAPI — review interfaces and add outbound calls
+  - Add service dependencies, volumes, and failure modes
+  - Write intent/purpose description
+  cognitive_role: null
+meta:
+  status: candidate
+  genesis: true
+  generated_by: discovery
+  blueprint_version: '0.1'
+  schema_version: '1.0'
+  created_at: '2026-03-21T05:02:43.500577+00:00'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: medium
+    dependencies: low
+    failure_modes: low
+    intent: low
+  reflection_notes: Auto-discovered from /openapi.json on 2026-03-21 05:02 UTC
+  divergence_score: null

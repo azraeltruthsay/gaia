@@ -1,0 +1,27 @@
+[Unit]
+Description=GAIA Audio Listener — system audio capture daemon
+Documentation=file:///gaia/GAIA_Project/scripts/gaia_listener.py
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+WorkingDirectory=/gaia/GAIA_Project
+ExecStart=/usr/bin/python3 /gaia/GAIA_Project/scripts/gaia_listener.py --project-root /gaia/GAIA_Project
+Restart=on-failure
+RestartSec=10
+
+# The daemon idles until GAIA writes a "start" command to the control file.
+# It consumes near-zero resources when not actively capturing.
+
+# Environment
+Environment=GAIA_AUDIO_URL=http://localhost:8080
+Environment=GAIA_CORE_URL=http://localhost:6415
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gaia-listener
+
+[Install]
+WantedBy=default.target

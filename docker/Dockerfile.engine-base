@@ -1,0 +1,85 @@
+# Dockerfile.engine-base — Unified GAIA Inference Engine base image
+#
+# All cognitive tiers (Nano, Core, Prime) inherit from this image.
+# One dependency set, one update propagates everywhere. Tier-specific
+# behavior via env vars (TIER=nano|core|prime), not different code paths.
+#
+# Capabilities:
+#   - PyTorch inference (safetensors, GPU + CPU)
+#   - Dynamic LoRA adapter loading (PEFT)
+#   - NF4/int8/GPTQ quantization (bitsandbytes, optimum-quanto, gptqmodel)
+#   - SAE atlas recording
+#   - Activation monitoring (Polygraph)
+#   - KV prefix caching
+#   - Thought management
+#
+# Usage:
+#   FROM localhost:5000/gaia-engine-base:latest
+#   COPY my-entrypoint.sh /entrypoint.sh
+#   ENTRYPOINT ["/entrypoint.sh"]
+
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# System deps (pcre2 needed by gptqmodel's pypcre)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates build-essential libpcre2-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# ── ML Stack (shared across all tiers) ──────────────────────────────────
+# PyTorch with CUDA 12.8
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+
+# Transformers + inference optimizations + vision support
+RUN pip install --no-cache-dir \
+    transformers \
+    accelerate \
+    sentencepiece \
+    protobuf \
+    Pillow \
+    torchvision \
+    qwen-vl-utils
+
+# Adapter support (dynamic LoRA loading)
+RUN pip install --no-cache-dir peft
+
+# Quantization — NF4 for QLoRA training, int8 for fallback, GPTQ for production
+# gptqmodel provides:
+#   - GPTQ 4-bit model loading via transformers integration
+#   - TorchFusedQuantLinear kernel (no CUDA compile needed)
+#   - Registers as transformers GPTQ backend automatically on import
+RUN pip install --no-cache-dir \
+    bitsandbytes \
+    optimum-quanto \
+    optimum \
+    && pip install --no-cache-dir --no-build-isolation gptqmodel
+
+# Clean up build deps (no longer needed after gptqmodel install)
+RUN apt-get purge -y build-essential libpcre2-dev pkg-config \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── GAIA Engine (standalone inference library) ────────────────────────────
+# Installed from the separate gaia-engine repo. This is the primary source.
+RUN pip install --no-cache-dir gaia-engine@git+https://github.com/azraeltruthsay/gaia-engine.git@main
+
+# ── GAIA Common (shared protocols, utils, constants) ─────────────────────
+# Baked into image for initial boot. Volume mount at /gaia-common:ro
+# overrides this for live development (PYTHONDONTWRITEBYTECODE prevents
+# stale .pyc from image layer taking priority over volume mount .py).
+# The engine/ subpackage is a backward-compat shim that delegates to
+# the gaia_engine package installed above.
+COPY candidates/gaia-common /gaia-common
+RUN pip install --no-cache-dir -e /gaia-common/ 2>/dev/null || true
+ENV PYTHONPATH="/gaia-common:${PYTHONPATH}"
+
+# ── Common directories ──────────────────────────────────────────────────
+RUN mkdir -p /shared/thoughts /shared/atlas /shared/heartbeat /shared/codemind
+
+WORKDIR /app

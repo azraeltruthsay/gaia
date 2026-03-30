@@ -1,0 +1,1157 @@
+id: gaia-web
+version: '0.5'
+role: The Face (Web/Discord Gateway)
+service_status: live
+runtime:
+  port: 6414
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: uvicorn gaia_web.main:app --host 0.0.0.0 --port 6414
+  health_check: curl -f http://localhost:6414/health
+  user: ${UID}:${GID}
+  dockerfile: gaia-web/Dockerfile
+  compose_service: gaia-web
+interfaces:
+- id: health
+  direction: inbound
+  description: Container health check endpoint.
+  status: active
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+- id: root
+  direction: inbound
+  description: Root endpoint — returns service info and available endpoints for discovery.
+  status: active
+  transport:
+    type: http_rest
+    path: /
+    method: GET
+- id: queue_status
+  direction: inbound
+  description: Message queue telemetry — queued count, wake signal state, oldest message
+    age.
+  status: active
+  transport:
+    type: http_rest
+    path: /queue/status
+    method: GET
+- id: process_user_input
+  direction: inbound
+  description: 'Primary user input entry point. Receives text from web/Discord, converts
+    to CognitionPacket, sends to gaia-core. Sleep-aware: enqueues + wakes + polls
+    if GAIA is asleep.'
+  status: active
+  transport:
+    type: http_rest
+    path: /process_user_input
+    method: POST
+- id: presence
+  direction: inbound
+  description: Update Discord bot presence (status dot + activity text). Called by
+    gaia-core's SleepCycleLoop.
+  status: active
+  transport:
+    type: http_rest
+    path: /presence
+    method: POST
+- id: output_router
+  direction: inbound
+  description: Route completed packets to output destinations (Discord channels, DMs,
+    logs). Called by gaia-core after response generation.
+  status: active
+  transport:
+    type: http_rest
+    path: /output_router
+    method: POST
+- id: core_process_packet
+  direction: outbound
+  description: Send CognitionPacket to gaia-core for cognitive processing.
+  status: active
+  transport:
+    type: http_rest
+    path: /process_packet
+    method: POST
+- id: core_sleep_distracted_check
+  direction: outbound
+  description: Check gaia-core sleep state before enqueueing messages.
+  status: active
+  transport:
+    type: http_rest
+    path: /sleep/distracted-check
+    method: GET
+- id: core_sleep_wake
+  direction: outbound
+  description: Send wake signal to gaia-core. Triggers ASLEEP -> WAKING transition.
+  status: active
+  transport:
+    type: http_rest
+    path: /sleep/wake
+    method: POST
+- id: core_sleep_status
+  direction: outbound
+  description: Poll gaia-core sleep status in wait_for_active loop.
+  status: active
+  transport:
+    type: http_rest
+    path: /sleep/status
+    method: GET
+- id: discord_bot
+  direction: outbound
+  description: discord.py bot instance — sends/receives Discord messages in background
+    thread.
+  status: active
+  transport:
+    type: direct_call
+    symbol: gaia_web.discord_interface.DiscordInterface
+- id: audio_listener_ingest
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/audio/listener/ingest
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Forward accumulated transcript text to gaia-core for processing.
+  status: active
+- id: audio_listener_start
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/audio/listener/start
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Write a start command to the listener control file.
+  status: active
+- id: audio_listener_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/audio/listener/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Read the listener status file.
+  status: active
+- id: audio_listener_stop
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/audio/listener/stop
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Write a stop command to the listener control file.
+  status: active
+- id: blueprints
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/blueprints
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List all blueprints with summary metadata.
+  status: active
+- id: blueprints_graph
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/blueprints/graph
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: 'Return the derived graph topology (nodes + edges).
+
+
+    By default includes candidate blueprints since no live blueprints
+
+    are promoted yet.'
+  status: active
+- id: blueprints_get
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/blueprints/{service_id}
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: 'Return full blueprint JSON for a service.
+
+
+    If candidate is not specified, tries live first then candidate.'
+  status: active
+- id: blueprints_components
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/blueprints/{service_id}/components
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: 'Return internal component graph for a service.
+
+
+    If candidate is not specified, tries live first then candidate.'
+  status: active
+- id: blueprints_markdown
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/blueprints/{service_id}/markdown
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return rendered markdown for a blueprint.
+  status: active
+- id: changelog
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/changelog
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get Changelog
+  status: active
+- id: changelog_post
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/changelog
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Post Changelog
+  status: active
+- id: chaos_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Chaos Get Config
+  status: active
+- id: chaos_config_post
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/config
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Chaos Set Config
+  status: active
+- id: chaos_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/history
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Chaos History
+  status: active
+- id: chaos_inject
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/inject
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Chaos Inject
+  status: active
+- id: chaos_serenity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/serenity
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Chaos Serenity
+  status: active
+- id: chaos_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/chaos/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Chaos Status
+  status: active
+- id: codemind_blueprints
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/blueprints
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return pending fix blueprints generated by the analyzer.
+  status: active
+- id: codemind_changelog
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/changelog
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return recent CodeMind changelog entries.
+  status: active
+- id: codemind_heartbeat
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/heartbeat
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return heartbeat time check status.
+  status: active
+- id: codemind_queue
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/queue
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return pending detection queue size and entries.
+  status: active
+- id: codemind_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return CodeMind engine status from shared state.
+  status: active
+- id: codemind_trigger
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/codemind/trigger
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Trigger a CodeMind cycle via gaia-core.
+  status: active
+- id: discord_blocklist
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/discord/blocklist
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List all blocked DM users with details.
+  status: active
+- id: discord_blocklist_post
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/discord/blocklist
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Block a user from DM interactions with GAIA.
+  status: active
+- id: discord_blocklist_delete
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/discord/blocklist/{user_id}
+    method: DELETE
+    input_schema: null
+    output_schema: null
+  description: Unblock a user, allowing DM interactions again.
+  status: active
+- id: discord_dm_users
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/discord/dm-users
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: All users who have DM'd GAIA, with blocked status.
+  status: active
+- id: files_browse
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/files/browse/{root}/{path}
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List directory contents under a named root.
+  status: active
+- id: files_read
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/files/read/{root}/{path}
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Read text file content from a named root.
+  status: active
+- id: files_roots
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/files/roots
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return configured file browser roots.
+  status: active
+- id: files_write
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/files/write/{root}/{path}
+    method: PUT
+    input_schema: null
+    output_schema: null
+  description: Write text file content to a writable root.
+  status: active
+- id: generation_stream
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/generation/stream
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: "SSE endpoint — tails generation_stream.jsonl in real-time.\n\nOptional\
+    \ query params:\n  - ``role`` — filter to only prime / lite events\n  - ``gen_id``\
+    \ — filter to a specific generation"
+  status: active
+- id: hooks_codex_search
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/codex/search
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /codex/search for semantic vector lookups.
+  status: active
+- id: hooks_discord_test
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/discord/test
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: 'Simulate a Discord DM through gaia-core and return what would be sent.
+
+
+    Builds a CognitionPacket matching the Discord handler''s format, streams
+
+    through /process_packet, and parses the NDJSON exactly like the Discord
+
+    bot does.'
+  status: active
+- id: hooks_gpu_reclaim
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/gpu/reclaim
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /gpu/reclaim.
+  status: active
+- id: hooks_gpu_release
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/gpu/release
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /gpu/release.
+  status: active
+- id: hooks_gpu_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/gpu/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Proxy GET gaia-core /gpu/status.
+  status: active
+- id: hooks_sleep_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Proxy GET gaia-core /sleep/config.
+  status: active
+- id: hooks_sleep_force
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/force
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/force.
+  status: active
+- id: hooks_sleep_shutdown
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/shutdown
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/shutdown.
+  status: active
+- id: hooks_sleep_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Proxy GET gaia-core /sleep/status.
+  status: active
+- id: hooks_sleep_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/toggle.
+  status: active
+- id: hooks_sleep_wake
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/wake
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/wake.
+  status: active
+- id: hooks_sleep_wake_activity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/wake-activity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/wake-activity.
+  status: active
+- id: hooks_sleep_wake_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/wake-config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Proxy GET gaia-core /sleep/wake-config.
+  status: active
+- id: hooks_sleep_wake_toggle
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/hooks/sleep/wake-toggle
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Proxy POST gaia-core /sleep/wake-toggle.
+  status: active
+- id: logs_levels
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/logs/levels
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return merged, time-sorted log lines from per-level ring files.
+  status: active
+- id: logs_search
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/logs/search
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Search historical logs with optional level and regex filtering.
+  status: active
+- id: logs_services
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/logs/services
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Return available log services and their file status.
+  status: active
+- id: logs_stream
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/logs/stream
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: SSE endpoint -- sends recent backlog then tails a service log file
+    in real-time.
+  status: active
+- id: system_cognitive_monitor
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/cognitive/monitor
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get cognitive heartbeat monitor status from gaia-doctor.
+  status: active
+- id: system_cognitive_results
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/cognitive/results
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get full cognitive test battery results from gaia-doctor.
+  status: active
+- id: system_cognitive_run
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/cognitive/run
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Trigger a cognitive test battery run on gaia-doctor.
+  status: active
+- id: system_cognitive_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/cognitive/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get cognitive test battery status + alignment from gaia-doctor.
+  status: active
+- id: system_cognitive_tests
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/cognitive/tests
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List all registered cognitive tests from gaia-doctor.
+  status: active
+- id: system_dissonance
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/dissonance
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get prod vs candidate dissonance report from gaia-doctor.
+  status: active
+- id: system_doctor_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/doctor/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get raw doctor status (alarms, irritations summary, remediations, serenity).
+  status: active
+- id: system_irritations
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/irritations
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get full irritation list from gaia-doctor.
+  status: active
+- id: system_maintenance_enter
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/maintenance/enter
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Enter maintenance mode via gaia-doctor.
+  status: active
+- id: system_maintenance_exit
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/maintenance/exit
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Exit maintenance mode via gaia-doctor.
+  status: active
+- id: system_maintenance_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/maintenance/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get maintenance mode status from gaia-doctor.
+  status: active
+- id: system_oom_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/oom/history
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get OOM resolution history from gaia-doctor.
+  status: active
+- id: system_pipeline_run
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/pipeline/run
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Trigger self-awareness pipeline run via gaia-doctor → gaia-study.
+  status: active
+- id: system_pipeline_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/pipeline/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get self-awareness training pipeline status from gaia-doctor.
+  status: active
+- id: system_registry_validation
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/registry/validation
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get service registry wiring validation status.
+  status: active
+- id: system_services
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/services
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Aggregate service health from gaia-doctor status endpoint.
+  status: active
+- id: system_sleep
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/sleep
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get sleep state from gaia-core.
+  status: active
+- id: system_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get orchestrator status (GPU owner, general health) + serenity state.
+  status: active
+- id: system_surgeon_approve
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/approve
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Approve a queued surgeon repair proposal.
+  status: active
+- id: system_surgeon_config
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get surgeon approval config from gaia-doctor.
+  status: active
+- id: system_surgeon_config_post
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/config
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Toggle surgeon approval mode on gaia-doctor.
+  status: active
+- id: system_surgeon_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/history
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get surgeon repair history from gaia-doctor.
+  status: active
+- id: system_surgeon_queue
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/queue
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get pending surgeon repair proposals from gaia-doctor.
+  status: active
+- id: system_surgeon_reject
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/surgeon/reject
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Reject a queued surgeon repair proposal.
+  status: active
+- id: system_training_progress
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/system/training/progress
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get training progress from gaia-study.
+  status: active
+- id: terminal_containers
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/terminal/containers
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List gaia-* containers with status.
+  status: active
+- id: voice_disconnect
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/disconnect
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Force disconnect from current voice call.
+  status: active
+- id: voice_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Current voice connection status.
+  status: active
+- id: voice_users
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/users
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: All users GAIA has seen in Discord, with whitelist status.
+  status: active
+- id: voice_whitelist
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/whitelist
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List all whitelisted user IDs with names.
+  status: active
+- id: voice_whitelist_post
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/whitelist
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Add a user to the voice auto-answer whitelist.
+  status: active
+- id: voice_whitelist_delete
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /api/voice/whitelist/{user_id}
+    method: DELETE
+    input_schema: null
+    output_schema: null
+  description: Remove a user from the voice auto-answer whitelist.
+  status: active
+- id: wiki
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /wiki/{path}
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Proxy requests to gaia-wiki.
+  status: active
+dependencies:
+  services:
+  - id: gaia-core
+    role: cognitive_processing
+    required: true
+    fallback: null
+  volumes:
+  - name: gaia-common
+    access: ro
+    purpose: Shared library (CognitionPacket, protocols)
+    mount_path: /gaia-common
+  - name: knowledge
+    access: ro
+    purpose: Static knowledge base, blueprints, semantic codex
+    mount_path: /knowledge
+  external_apis:
+  - name: discord
+    purpose: bot_messaging_gateway
+    required: false
+source_files:
+- path: gaia-web/gaia_web/main.py
+  role: entrypoint
+  file_type: python
+- path: gaia-web/gaia_web/discord_interface.py
+  role: discord_gateway
+  file_type: python
+- path: gaia-web/gaia_web/queue/message_queue.py
+  role: sleep_wake_queue
+  file_type: python
+- path: gaia-web/Dockerfile
+  role: build_config
+  file_type: dockerfile
+failure_modes:
+- condition: gaia-core unavailable
+  response: HTTP 503/504 returned to client; timeout after 300s
+  severity: fatal
+  auto_recovers: false
+- condition: Discord bot token missing or invalid
+  response: Discord integration disabled; web input processing still works
+  severity: degraded
+  auto_recovers: false
+- condition: Discord bot websocket down
+  response: /output_router returns 503 for Discord sends; bot auto-reconnects via
+    discord.py
+  severity: degraded
+  auto_recovers: true
+- condition: Sleep/wake queue timeout
+  response: wait_for_active times out; user gets timeout error
+  severity: degraded
+  auto_recovers: true
+- condition: Discord message send fails (permissions, deleted channel)
+  response: /output_router returns 500; response lost (not retried)
+  severity: degraded
+  auto_recovers: false
+intent:
+  purpose: 'The user-facing gateway of GAIA. Handles all external interactions: web
+    form submissions, Discord messaging (mentions + DMs), and output routing back
+    to endpoints. Integrates sleep/wake coordination: enqueues messages while GAIA
+    sleeps, wakes on first message, polls for active state before returning response.
+
+    '
+  cognitive_role: The Face
+  design_decisions:
+  - FastAPI + uvicorn for concurrent Discord and web traffic
+  - Discord bot runs in background thread (separate event loop) to avoid blocking
+    HTTP handlers
+  - Sleep-aware message queue holds incoming messages while GAIA sleeps, sends wake
+    signal, waits for active
+  - 'Direct Discord bot control: /presence and /output_router directly manipulate
+    discord.py bot'
+  - Message splitting respects Discord's 2000-char limit while preferring newline/word
+    boundaries
+  - gaia-core is the single source of truth for sleep state; web polls rather than
+    caches
+  - 'Graceful degradation: Discord unavailability doesn''t block web API'
+  open_questions:
+  - Should message queue persistence survive service restart, or is in-memory-only
+    acceptable?
+  - Is MessageQueue polling interval (1.5s default) optimal, or should it be configurable?
+  - Should /output_router handle async retries for failed Discord sends?
+meta:
+  status: candidate
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: '0.2'
+  schema_version: '1.0'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: medium
+    intent: medium
+  reflection_notes: null
+  divergence_score: null
+architecture:
+  components:
+  - id: http_gateway
+    label: HTTP Gateway
+    description: 'FastAPI application serving the Mission Control dashboard, REST
+      API, and proxy endpoints. Routes user input to gaia-core, serves static files,
+      proxies orchestrator/core status for the dashboard, and handles presence updates
+      from gaia-core for Discord status sync.
+
+      '
+    source_files:
+    - gaia-web/gaia_web/main.py
+    key_classes: []
+    key_functions:
+    - process_user_input(user_input)
+    - update_presence(body)
+    - output_router(packet)
+    - system_status_proxy()
+    - system_sleep_proxy()
+    - dashboard_redirect()
+    - queue_status()
+    exposes_interfaces:
+    - process_input
+    - health
+    - root
+    - presence
+    - output_route
+    - queue_status
+  - id: discord_gateway
+    label: Discord Gateway
+    description: 'Discord.py bot integration. Manages the WebSocket connection to
+      Discord, handles incoming messages, splits long responses to fit Discord''s
+      2000-char limit, and updates bot presence based on GAIA''s cognitive state (active/asleep/drowsy).
+
+      '
+    source_files:
+    - gaia-web/gaia_web/discord_interface.py
+    key_classes:
+    - DiscordInterface
+    key_functions:
+    - start_discord_bot()
+    - stop_discord_bot()
+    - is_bot_ready()
+    - DiscordInterface._split_message()
+  - id: message_queue
+    label: Sleep-Aware Message Queue
+    description: 'Buffers incoming messages when GAIA is asleep or drowsy. Sends wake
+      signals to gaia-core, waits for active state, then drains the queue. Prevents
+      message loss during sleep transitions and provides queue depth visibility via
+      status endpoint.
+
+      '
+    source_files:
+    - gaia-web/gaia_web/queue/message_queue.py
+    key_classes:
+    - QueuedMessage
+    - MessageQueue
+    key_functions:
+    - MessageQueue.enqueue()
+    - MessageQueue.dequeue()
+    - MessageQueue.wait_for_active()
+    - MessageQueue._send_wake_signal()
+  - id: blueprint_api
+    label: Blueprint API
+    description: 'Read-only REST endpoints exposing the blueprint graph, service list,
+      detail JSON, and rendered markdown. Powers the Mission Control dashboard''s
+      graph visualization and blueprint detail panel. Loads from both live and candidate
+      blueprint directories.
+
+      '
+    source_files:
+    - gaia-web/gaia_web/routes/blueprints.py
+    key_functions:
+    - get_graph()
+    - list_blueprints()
+    - get_blueprint_detail()
+    - get_blueprint_markdown()
+    exposes_interfaces:
+    - blueprint_graph
+    - blueprint_list
+    - blueprint_detail
+    - blueprint_markdown
+  edges:
+  - from_component: http_gateway
+    to_component: discord_gateway
+    label: starts/stops bot on app lifecycle
+    data_flow: bot_token, core_endpoint
+  - from_component: http_gateway
+    to_component: message_queue
+    label: creates queue, checks state before routing
+    data_flow: user messages, sleep state
+  - from_component: discord_gateway
+    to_component: message_queue
+    label: enqueues messages when asleep/drowsy
+    data_flow: QueuedMessage (content, channel, author)
+  - from_component: discord_gateway
+    to_component: http_gateway
+    label: forwards messages to process_user_input
+    data_flow: user_input text
+  - from_component: message_queue
+    to_component: http_gateway
+    label: drains queued messages after wake
+    data_flow: QueuedMessage → process_user_input

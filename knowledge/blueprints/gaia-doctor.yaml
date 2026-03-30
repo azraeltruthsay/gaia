@@ -1,0 +1,488 @@
+id: gaia-doctor
+version: '1.0'
+role: The Immune System (Health Watchdog)
+service_status: live
+runtime:
+  port: 6419
+  base_image: python:3.11-slim
+  gpu: false
+  startup_cmd: python doctor.py
+  health_check: curl -f http://localhost:6419/health
+  gpu_count: null
+  user: null
+  dockerfile: gaia-doctor/Dockerfile
+  compose_service: gaia-doctor
+  security: null
+
+interfaces:
+- id: health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: '{"status": "ok", "uptime": float}'
+  description: Container health check endpoint.
+  status: active
+
+- id: status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Full status report — services health, alarms, remediations, restarts, irritations summary.
+  status: active
+
+- id: alarms
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /alarms
+    method: GET
+    input_schema: null
+    output_schema: '{"alarms": [...]}'
+  description: Active alarm list — services currently in alarm state.
+  status: active
+
+- id: irritations
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /irritations
+    method: GET
+    input_schema: null
+    output_schema: '{"irritations": [...]}'
+  description: Detected log errors and irritations from monitored services.
+  status: active
+
+- id: dissonance
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /dissonance
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Prod vs candidate code dissonance report — file-level diff detection.
+  status: active
+
+- id: serenity
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /serenity
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Serenity state proxy — reads from monkey's shared file.
+  status: active
+
+- id: gpu
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /gpu
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GPU status from orchestrator (proxied).
+  status: active
+
+- id: model
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /model
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Model status from orchestrator (proxied).
+  status: active
+
+- id: pipeline
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /pipeline
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Training pipeline status from shared state file.
+  status: active
+
+- id: kv_cache
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /kv-cache
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: KV cache pressure monitoring — reads from Nano and Core llama-server /slots.
+  status: active
+
+- id: cognitive_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognitive/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Cognitive test battery status — running, alignment level, last run summary.
+  status: active
+
+- id: cognitive_results
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognitive/results
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Full cognitive test battery results with per-section breakdown.
+  status: active
+
+- id: cognitive_tests
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognitive/tests
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: List all registered cognitive tests and their metadata.
+  status: active
+
+- id: cognitive_run
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognitive/run
+    method: POST
+    input_schema: '{"sections": ["identity", ...]}'
+    output_schema: null
+  description: Trigger cognitive test battery run (async background thread).
+  status: active
+
+- id: cognitive_monitor
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /cognitive/monitor
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Cognitive heartbeat monitor — periodic probe results and failure count.
+  status: active
+
+- id: maintenance_status
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /maintenance/status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Maintenance mode status — active flag, entered_at, reason.
+  status: active
+
+- id: maintenance_enter
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /maintenance/enter
+    method: POST
+    input_schema: '{"reason": "...", "entered_by": "..."}'
+    output_schema: null
+  description: Enter maintenance mode — suppresses restarts and alarms.
+  status: active
+
+- id: maintenance_exit
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /maintenance/exit
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Exit maintenance mode — resumes normal health monitoring.
+  status: active
+
+- id: surgeon_config_get
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/config
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Get surgeon approval mode configuration.
+  status: active
+
+- id: surgeon_config_set
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/config
+    method: POST
+    input_schema: '{"approval_required": bool}'
+    output_schema: null
+  description: Toggle surgeon approval mode on/off.
+  status: active
+
+- id: surgeon_queue
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/queue
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Pending surgeon repair proposals awaiting approval.
+  status: active
+
+- id: surgeon_approve
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/approve
+    method: POST
+    input_schema: '{"proposal_id": "..."}'
+    output_schema: null
+  description: Approve a queued surgeon repair proposal for execution.
+  status: active
+
+- id: surgeon_reject
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/reject
+    method: POST
+    input_schema: '{"proposal_id": "..."}'
+    output_schema: null
+  description: Reject a queued surgeon repair proposal.
+  status: active
+
+- id: surgeon_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /surgeon/history
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Completed and rejected surgeon repair history (last 50).
+  status: active
+
+- id: logs_health
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /logs/health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Health check log history.
+  status: active
+
+- id: logs
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /logs
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Service log retrieval with filtering.
+  status: active
+
+- id: errors
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /errors
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Error registry lookup — enriches error codes with descriptions and hints.
+  status: active
+
+- id: oom_history
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /oom/history
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: OOM resolution history — past out-of-memory events and recovery actions.
+  status: active
+
+- id: pipeline_run
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /pipeline/run
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Trigger self-awareness training pipeline run.
+  status: active
+
+- id: notify_chaos
+  direction: inbound
+  transport:
+    type: http_rest
+    path: /notify/chaos_injection
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Notification from gaia-monkey about chaos injection events.
+  status: active
+
+# Outbound calls
+- id: service_health_probes
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /health
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: Health polling to all monitored services on their /health endpoints.
+  status: active
+
+- id: orchestrator_status
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /status
+    method: GET
+    input_schema: null
+    output_schema: null
+  description: GPU/model status enrichment from gaia-orchestrator.
+  status: active
+
+- id: core_cognitive_similarity
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /api/cognitive/similarity
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Semantic similarity endpoint on gaia-core for cognitive battery validation.
+  status: active
+
+- id: monkey_serenity_break
+  direction: outbound
+  transport:
+    type: http_rest
+    path: /serenity/break
+    method: POST
+    input_schema: null
+    output_schema: null
+  description: Break serenity on gaia-monkey when vital service failures detected.
+  status: active
+
+dependencies:
+  services:
+  - id: gaia-orchestrator
+    role: gpu_status_enrichment
+    required: false
+    fallback: null
+  - id: gaia-core
+    role: cognitive_similarity_inference
+    required: false
+    fallback: null
+  - id: gaia-monkey
+    role: serenity_management
+    required: false
+    fallback: null
+  volumes:
+  - name: gaia-shared
+    access: rw
+    purpose: Status files, alarms, cognitive results, surgeon config, hash registry
+    mount_path: /shared
+  - name: compose
+    access: ro
+    purpose: Docker compose files for HA overlay restarts
+    mount_path: /compose
+  - name: project_root
+    access: ro
+    purpose: Source file hashing for dissonance detection
+    mount_path: /gaia/GAIA_Project
+  external_apis: []
+
+source_files:
+- path: gaia-doctor/doctor.py
+  role: entrypoint
+  file_type: python
+- path: gaia-doctor/cognitive_test_battery.py
+  role: core_logic
+  file_type: python
+- path: gaia-doctor/Dockerfile
+  role: config
+  file_type: dockerfile
+
+failure_modes:
+- condition: Monitored service unreachable
+  response: Increments consecutive failure counter; triggers restart after threshold (default 2)
+  severity: degraded
+  auto_recovers: true
+- condition: Docker socket unavailable
+  response: Cannot restart containers; observe-only mode
+  severity: partial
+  auto_recovers: false
+- condition: gaia-orchestrator unavailable
+  response: GPU status enrichment unavailable; core health monitoring continues
+  severity: degraded
+  auto_recovers: true
+- condition: Production restart circuit breaker tripped
+  response: Stops restarting production services after max restarts in rolling window (2/30min)
+  severity: partial
+  auto_recovers: true
+
+intent:
+  purpose: >
+    The persistent immune system of GAIA. Continuously monitors all services via health
+    polling, detects failures, and automatically restarts crashed containers with circuit
+    breaker protection. Runs cognitive test batteries to validate model alignment. Manages
+    surgeon approval queue for human-in-the-loop repair decisions. Intentionally stdlib-only
+    to minimize its own failure surface — the immune system must be the last thing to go down.
+
+  design_decisions:
+  - stdlib-only — no external dependencies, minimal failure surface
+  - Separate from gaia-monkey (passive monitoring vs active adversarial testing)
+  - Circuit breaker prevents restart storms (max 2 production restarts per 30 minutes)
+  - Maintenance mode suppresses restarts during planned work
+  - Surgeon approval queue enables human oversight of automated repairs
+  - Cognitive test battery validates model alignment without requiring inference dependencies
+  - File hash registry for atomic change detection across services
+  - Dry-run mode for candidate doctor shadowing production
+
+  open_questions: []
+  cognitive_role: The Immune System
+
+meta:
+  status: live
+  genesis: true
+  generated_by: manual_seed
+  blueprint_version: '1.0'
+  schema_version: '1.0'
+  created_at: '2026-03-20T00:00:00Z'
+  last_reflected: null
+  promoted_at: null
+  confidence:
+    runtime: high
+    contract: high
+    dependencies: high
+    failure_modes: high
+    intent: high
+  reflection_notes: null
+  divergence_score: null

@@ -1,0 +1,257 @@
+# gaia-engine — GAIA Inference Engine
+# Standalone library (separate repo: github.com/azraeltruthsay/gaia-engine)
+# NOT a containerized service — consumed as a Python dependency by tier containers.
+
+package: gaia-engine
+repo: https://github.com/azraeltruthsay/gaia-engine
+version: "1.0.0"
+license: Apache-2.0
+role: "The Spine — shared inference engine powering all cognitive tiers"
+type: library  # Not a service — no port, no container
+
+# ── Python API Contract ─────────────────────────────────────────────────────
+# This is the public interface that consumers import.
+
+python_api:
+  package: gaia_engine
+  public_exports:
+    - name: GAIAEngine
+      type: class
+      module: gaia_engine.core
+      description: "Main inference engine — model loading, generation, KV cache, polygraph"
+      key_methods:
+        - name: __init__
+          signature: "(model_path: str, device: str = 'cuda', compile_mode: str = 'reduce-overhead')"
+        - name: generate
+          signature: "(messages: list[dict], max_tokens: int = 512, temperature: float = 0.7, ...) -> dict"
+          returns: "OpenAI-compatible chat completion dict"
+        - name: generate_stream
+          signature: "(messages: list[dict], ...) -> Generator[dict]"
+          returns: "Yields OpenAI-compatible SSE chunks"
+        - name: load_adapter
+          signature: "(adapter_path: str) -> None"
+        - name: unload_adapter
+          signature: "() -> None"
+        - name: get_hidden_states
+          signature: "(text: str) -> list[torch.Tensor]"
+          description: "Polygraph — capture activations at every layer"
+
+    - name: serve
+      type: function
+      module: gaia_engine.core
+      signature: "(model_path: str, port: int = 8092, device: str = 'cuda', compile_mode: str = 'reduce-overhead', host: str = '0.0.0.0')"
+      description: "Start HTTP server with loaded model (direct mode)"
+
+    - name: EngineManager
+      type: class
+      module: gaia_engine.manager
+      description: "Zero-GPU subprocess manager — spawns/kills worker processes"
+      key_methods:
+        - name: __init__
+          signature: "(port: int, host: str = '0.0.0.0', max_concurrent: int = 1, event_callback = None)"
+        - name: start_worker
+          signature: "(model_path: str, device: str = 'cuda', compile_mode: str = 'reduce-overhead', quantize: str = '') -> dict"
+        - name: stop_worker
+          signature: "() -> dict"
+        - name: swap_worker
+          signature: "(model_path: str, ...) -> dict"
+        - name: proxy_to_worker
+          signature: "(method: str, path: str, headers: dict, body: bytes = b'') -> tuple[int, dict, bytes]"
+
+    - name: serve_managed
+      type: function
+      module: gaia_engine.manager
+      signature: "(port: int = 8092, host: str = '0.0.0.0')"
+      description: "Start managed engine server (zero-GPU standby mode)"
+
+    - name: compose_thoughts
+      type: function
+      module: gaia_engine.thought_composer
+      signature: "(primary_kv, secondary_kv, shared_prefix_len: int) -> tuple"
+      description: "Merge KV cache states from multiple reasoning chains"
+
+    - name: estimate_composed_size
+      type: function
+      module: gaia_engine.thought_composer
+      signature: "(...) -> int"
+      description: "Estimate token count of composed KV cache"
+
+  # Subpackages
+  subpackages:
+    lifecycle:
+      description: "GPU lifecycle state machine types — shared by orchestrator and consumers"
+      exports:
+        - LifecycleState      # Enum: AWAKE, LISTENING, FOCUSING, MEDITATION, SLEEP, DEEP_SLEEP, TRANSITIONING
+        - TransitionTrigger   # Enum: IDLE_TIMEOUT, WAKE_SIGNAL, VOICE_JOIN, etc.
+        - TRANSITIONS         # Dict[state -> Dict[trigger -> state]]
+        - TIER_EXPECTATIONS   # Dict[state -> Dict[tier -> TierExpectation]]
+        - TierExpectation     # Dataclass: device, required
+        - validate_transition # (current, trigger, target?) -> Optional[LifecycleState]
+        - available_transitions  # (current) -> list[dict]
+        - LifecycleSnapshot   # Pydantic: full state + tiers + VRAM + history
+        - TierLiveStatus      # Pydantic: per-tier device/model/vram/health
+        - TransitionRecord    # Pydantic: from/to/trigger/elapsed/actions
+        - TransitionResult    # Pydantic: ok/error/snapshot
+        - LifecycleClient     # HTTP client for orchestrator lifecycle endpoints
+
+    companion_modules:
+      - name: rome
+        module: gaia_engine.rome
+        description: "Rank-One Model Editing for surgical weight corrections"
+      - name: sae_trainer
+        module: gaia_engine.sae_trainer
+        description: "Sparse Autoencoder atlas training on model activations"
+      - name: adapter_surgeon
+        module: gaia_engine.adapter_surgeon
+        description: "SAE-guided LoRA adapter surgical correction"
+      - name: weighted_trainer
+        module: gaia_engine.weighted_trainer
+        description: "Eval-weighted QLoRA training (gap-focused)"
+      - name: awareness
+        module: gaia_engine.awareness
+        description: "Dynamic situational awareness injection via filesystem"
+      - name: cogpacket_compressor
+        module: gaia_engine.cogpacket_compressor
+        description: "Prompt compression using KV cache segmentation"
+
+# ── HTTP API Contract (Managed Mode) ────────────────────────────────────────
+# When running via `gaia-engine --managed`, the EngineManager exposes these endpoints.
+# This is the API that gaia-prime and gaia-core (embedded) present.
+
+managed_http_api:
+  description: "HTTP endpoints exposed by EngineManager in managed mode"
+
+  management_endpoints:
+    - endpoint: /model/load
+      method: POST
+      request: { model: str, device: str, compile_mode: str, quantize: str }
+      response: { ok: bool, model: str, worker_port: int, model_loaded: bool }
+      description: "Spawn worker subprocess, load model on GPU"
+
+    - endpoint: /model/unload
+      method: POST
+      request: null
+      response: { ok: bool, message: str, old_model: str }
+      description: "Kill worker subprocess — frees ALL GPU memory"
+
+    - endpoint: /model/swap
+      method: POST
+      request: { model: str, device: str, compile_mode: str, quantize: str }
+      response: { ok: bool, model: str, old_model: str }
+      description: "Atomic unload + load (kill old worker, spawn new)"
+
+    - endpoint: /model/info
+      method: GET
+      response: { model_loaded: bool, model_path: str, device: str, vram_mb: int }
+      description: "Current model metadata"
+
+    - endpoint: /health
+      method: GET
+      response: { status: str, engine: str, model_loaded: bool, mode: str, managed: bool, worker_pid: int }
+      description: "Health check (standby or active)"
+
+    - endpoint: /status
+      method: GET
+      response: { mode: str, model_loaded: bool, managed: bool }
+      description: "Operational status"
+
+  inference_endpoints:
+    - endpoint: /v1/chat/completions
+      method: POST
+      protocol: "OpenAI-compatible"
+      request: { messages: list, max_tokens: int, temperature: float, stream: bool }
+      response: "OpenAI ChatCompletion or SSE stream"
+      description: "Chat completion — proxied to worker subprocess"
+      notes: "Serialized through inference semaphore (max_concurrent). SSE streaming via readline proxy."
+
+    - endpoint: /v1/completions
+      method: POST
+      protocol: "OpenAI-compatible"
+      request: { prompt: str, max_tokens: int, temperature: float }
+      response: "OpenAI Completion"
+      description: "Text completion — proxied to worker"
+
+  engine_endpoints:
+    - endpoint: /polygraph
+      method: POST
+      description: "Get hidden state activations for analysis"
+
+    - endpoint: /kv/snapshot
+      method: POST
+      description: "Save KV cache snapshot for thought composition"
+
+    - endpoint: /kv/restore
+      method: POST
+      description: "Restore KV cache snapshot"
+
+    - endpoint: /adapter/load
+      method: POST
+      description: "Load LoRA adapter"
+
+    - endpoint: /adapter/unload
+      method: POST
+      description: "Unload current LoRA adapter"
+
+    - endpoint: /adapter/list
+      method: GET
+      description: "List available adapters"
+
+# ── Consumers ───────────────────────────────────────────────────────────────
+
+consumed_by:
+  - service: gaia-prime
+    usage: "Runs GAIA Engine in managed mode on port 7777 (GPU, 8B Thinker model)"
+    import: "gaia_engine.serve / gaia_engine.serve_managed"
+
+  - service: gaia-core
+    usage: "Runs embedded GAIA Engine on localhost:8092 (CPU, 2B Core model)"
+    import: "gaia_engine.serve_managed (via gaia_core/gaia_engine.py shim)"
+
+  - service: gaia-nano
+    usage: "Runs GAIA Engine in managed mode on port 8080 (GPU primary, GGUF CPU fallback)"
+    import: "gaia_engine.serve_managed"
+
+  - service: gaia-orchestrator
+    usage: "Imports lifecycle types for state machine authority"
+    import: "gaia_engine.lifecycle (LifecycleState, TransitionTrigger, TRANSITIONS, etc.)"
+
+  - service: gaia-study
+    usage: "Imports weighted_trainer and sae_trainer for training pipelines"
+    import: "gaia_engine.weighted_trainer, gaia_engine.sae_trainer"
+
+# ── Dependencies ────────────────────────────────────────────────────────────
+
+dependencies:
+  required:
+    - torch>=2.7
+    - transformers>=5.0
+    - accelerate
+    - peft
+    - bitsandbytes
+    - Pillow
+    - numpy
+    - safetensors
+    - sentencepiece
+    - protobuf
+    - pydantic>=2.0  # For lifecycle snapshot models
+  optional:
+    gptq: [gptqmodel]
+    vision: [torchvision, qwen-vl-utils]
+    training: [datasets, trl]
+
+# ── Event Callback Contract ─────────────────────────────────────────────────
+# EngineManager accepts an optional event_callback for lifecycle event logging.
+# This replaces the old gaia_common.event_buffer coupling.
+
+event_callback:
+  signature: "(category: str, message: str, *, source: str, details: dict) -> None"
+  examples:
+    - category: "engine"
+      message: "Model unloaded: /models/Qwen3.5-2B"
+      source: "engine_manager"
+      details: { caller: "traceback string" }
+    - category: "engine"
+      message: "Worker CRASHED (exit code 137)"
+      source: "engine_manager"
+      details: { model: "/models/Qwen3.5-2B", exit_code: 137 }
+  notes: "Callback is optional. If not set, events are only logged via Python logging."

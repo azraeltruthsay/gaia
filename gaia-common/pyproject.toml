@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaia-common"
+version = "0.1.0"
+description = "Shared data structures and utilities for the GAIA project."
+authors = [
+    { name = "GAIA", email = "dev@gaia.com" },
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "pydantic",
+    "dataclasses-json",
+    "requests",
+    "httpx>=0.25.0",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/your-repo/gaia"
+"Bug Tracker" = "https://github.com/your-repo/gaia/issues"
+
+[project.optional-dependencies]
+# Install the standalone GAIA Engine package for inference capabilities.
+# When installed, gaia_common.engine and gaia_common.lifecycle re-export from it.
+# Note: pip install 'gaia-common[engine]' to activate.
+engine = ["gaia-engine"]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "types-PyYAML>=6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # Module-level import not at top (intentional: conditional imports)
+    "F403",  # Star imports in __init__.py (intentional re-exports)
+    "F401",  # Unused imports (cleanup tracked separately)
+    "F841",  # Unused local variables
+    "E401",  # Multiple imports on one line
+    "F541",  # f-string without placeholders
+    "E701",  # Multiple statements on one line (colon)
+    "E731",  # Lambda assignment
+    "E741",  # Ambiguous variable name
+    "F811",  # Redefinition of unused name
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::PendingDeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true
+implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_return_any = false
+no_strict_optional = true

@@ -1,0 +1,6 @@
+# gaia-prime has no COPY/ADD from context — it git-clones vLLM at build time.
+# Exclude everything to minimise context transfer.
+*
+!Dockerfile
+!patch_float8.sh
+!cmake_wrapper.sh

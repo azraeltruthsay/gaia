@@ -1,0 +1,487 @@
+"""
+NotebookLM MCP Tools — structured access to Google NotebookLM notebooks.
+
+Provides 9 tools:
+  - notebooklm_list_notebooks   (read)
+  - notebooklm_get_notebook     (read)
+  - notebooklm_list_sources     (read)
+  - notebooklm_list_notes       (read)
+  - notebooklm_list_artifacts   (read)
+  - notebooklm_chat             (read)
+  - notebooklm_download_audio   (read + transcription relay)
+  - notebooklm_generate_audio   (write)
+  - notebooklm_create_note      (write, sensitive — requires MCP approval)
+
+All calls go through the async NotebookLMClient (httpx-based).
+Auth via Playwright storage state at NOTEBOOKLM_HOME/storage_state.json.
+
+PenPal Protocol workflow (Episodes):
+  1. Upload context docs as sources / create notes with penpal responses
+  2. notebooklm_generate_audio(notebook_id, instructions=...) → async task
+  3. Poll notebooklm_list_artifacts until is_completed=True (status=3)
+  4. notebooklm_download_audio(notebook_id, artifact_id, save_path=...)
+     → auto-transcribes via gaia-audio relay if available
+  5. For large audio (>10MB), transcribe chunks externally:
+     ffmpeg -i file.mp4 -ar 16000 -ac 1 -f wav file.wav
+     Split into 2-min chunks, POST each to gaia-audio /transcribe
+
+Approval bypass for operator-initiated writes:
+  - Set GAIA_MCP_BYPASS=1 env var on gaia-mcp container, OR
+  - Call notebooklm_create_note directly inside the container via:
+    docker exec gaia-mcp python3 -c "from gaia_mcp.notebooklm_tools import ..."
+"""
+
+import base64
+import logging
+import os
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+logger = logging.getLogger("GAIA.NotebookLMTools")
+
+# Lazy imports — notebooklm-py may not be installed in all environments
+_notebooklm_available = True
+try:
+    from notebooklm import NotebookLMClient
+    from notebooklm.exceptions import NotebookLMError
+except ImportError:
+    _notebooklm_available = False
+    NotebookLMClient = None  # type: ignore
+    NotebookLMError = Exception  # type: ignore
+
+# Optional: httpx for audio transcription relay to gaia-audio
+try:
+    import httpx
+except ImportError:
+    httpx = None  # type: ignore
+
+_GAIA_AUDIO_URL = os.getenv("GAIA_AUDIO_URL", "http://gaia-audio:8080")
+
+
+# ---------------------------------------------------------------------------
+# Client singleton
+# ---------------------------------------------------------------------------
+
+_client: Optional[Any] = None
+_client_entered = False
+
+
+async def _get_client() -> Any:
+    """Lazily initialise and return the NotebookLMClient singleton."""
+    global _client, _client_entered
+
+    if not _notebooklm_available:
+        raise RuntimeError(
+            "notebooklm-py is not installed. Add it to requirements.txt and rebuild."
+        )
+
+    if _client is not None and _client_entered:
+        if _client.is_connected:
+            return _client
+        # Connection dropped — re-enter
+        try:
+            await _client.__aenter__()
+            return _client
+        except Exception:
+            _client = None
+            _client_entered = False
+
+    storage_path = os.getenv("NOTEBOOKLM_STORAGE_STATE")
+    _client = await NotebookLMClient.from_storage(
+        path=storage_path, timeout=45
+    )
+    await _client.__aenter__()
+    _client_entered = True
+    logger.info("NotebookLM client initialised (storage=%s)", storage_path or "default")
+    return _client
+
+
+async def _close_client():
+    """Shut down the client (call on app shutdown)."""
+    global _client, _client_entered
+    if _client is not None and _client_entered:
+        try:
+            await _client.__aexit__(None, None, None)
+        except Exception:
+            pass
+    _client = None
+    _client_entered = False
+
+
+def _err(msg: str) -> dict:
+    return {"ok": False, "error": msg}
+
+
+# ---------------------------------------------------------------------------
+# Tool functions
+# ---------------------------------------------------------------------------
+
+async def notebooklm_list_notebooks(params: dict) -> dict:
+    """List all notebooks accessible to the authenticated user."""
+    try:
+        client = await _get_client()
+        notebooks = await client.notebooks.list()
+        return {
+            "ok": True,
+            "notebooks": [
+                {
+                    "id": nb.id,
+                    "title": nb.title,
+                    "sources_count": getattr(nb, "sources_count", 0),
+                    "is_owner": getattr(nb, "is_owner", True),
+                    "created_at": str(nb.created_at) if getattr(nb, "created_at", None) else None,
+                }
+                for nb in notebooks
+            ],
+            "count": len(notebooks),
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_list_notebooks failed: %s", e)
+        return _err(str(e))
+    except Exception as e:
+        logger.error("notebooklm_list_notebooks unexpected error: %s", e)
+        return _err(f"Unexpected error: {e}")
+
+
+async def notebooklm_get_notebook(params: dict) -> dict:
+    """Get notebook details including AI summary and suggested topics."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    try:
+        client = await _get_client()
+        notebook = await client.notebooks.get(notebook_id)
+
+        # Fetch description (includes summary + suggested topics)
+        description = None
+        try:
+            desc = await client.notebooks.get_description(notebook_id)
+            description = {
+                "summary": getattr(desc, "summary", None),
+                "suggested_topics": [
+                    {"question": t.question, "prompt": t.prompt}
+                    for t in getattr(desc, "suggested_topics", [])
+                ],
+            }
+        except Exception:
+            # Description may not be available for all notebooks
+            pass
+
+        return {
+            "ok": True,
+            "notebook": {
+                "id": notebook.id,
+                "title": notebook.title,
+                "sources_count": getattr(notebook, "sources_count", 0),
+                "is_owner": getattr(notebook, "is_owner", True),
+                "created_at": str(notebook.created_at) if getattr(notebook, "created_at", None) else None,
+            },
+            "description": description,
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_get_notebook failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_list_sources(params: dict) -> dict:
+    """List sources in a notebook."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    try:
+        client = await _get_client()
+        sources = await client.sources.list(notebook_id)
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "sources": [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "url": getattr(s, "url", None),
+                    "kind": str(s.kind) if hasattr(s, "kind") else None,
+                    "status": s.status.name if hasattr(s.status, "name") else str(s.status),
+                    "is_ready": s.is_ready,
+                }
+                for s in sources
+            ],
+            "count": len(sources),
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_list_sources failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_list_notes(params: dict) -> dict:
+    """List user notes in a notebook."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    try:
+        client = await _get_client()
+        notes = await client.notes.list(notebook_id)
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "notes": [
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "content": (n.content or "")[:500],  # Truncate for listing
+                }
+                for n in notes
+            ],
+            "count": len(notes),
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_list_notes failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_list_artifacts(params: dict) -> dict:
+    """List artifacts (audio overviews, reports, quizzes, etc.) in a notebook."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    artifact_type = (params.get("artifact_type") or "").strip().lower() or None
+
+    try:
+        client = await _get_client()
+        artifacts = await client.artifacts.list(notebook_id)
+
+        # Optional type filter
+        if artifact_type:
+            artifacts = [
+                a for a in artifacts
+                if str(getattr(a, "kind", "")).lower() == artifact_type
+            ]
+
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "artifacts": [
+                {
+                    "id": a.id,
+                    "title": a.title,
+                    "kind": str(a.kind) if hasattr(a, "kind") else None,
+                    "status": a.status.name if hasattr(a.status, "name") else str(a.status),
+                    "is_completed": a.is_completed,
+                    "created_at": str(a.created_at) if a.created_at else None,
+                }
+                for a in artifacts
+            ],
+            "count": len(artifacts),
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_list_artifacts failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_chat(params: dict) -> dict:
+    """Ask a question to a notebook. Supports follow-up via conversation_id."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    question = (params.get("question") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+    if not question:
+        raise ValueError("question is required")
+
+    source_ids = params.get("source_ids")
+    conversation_id = params.get("conversation_id")
+
+    try:
+        client = await _get_client()
+        result = await client.chat.ask(
+            notebook_id=notebook_id,
+            question=question,
+            source_ids=source_ids if isinstance(source_ids, list) else None,
+            conversation_id=conversation_id,
+        )
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "answer": result.answer,
+            "conversation_id": result.conversation_id,
+            "turn_number": result.turn_number,
+            "is_follow_up": result.is_follow_up,
+            "references": [
+                {
+                    "source_id": getattr(ref, "source_id", None),
+                    "citation_number": getattr(ref, "citation_number", None),
+                    "cited_text": getattr(ref, "cited_text", None),
+                }
+                for ref in (result.references or [])
+            ],
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_chat failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_download_audio(params: dict) -> dict:
+    """Download an audio overview and optionally transcribe it via gaia-audio."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    artifact_id = (params.get("artifact_id") or "").strip() or None
+
+    try:
+        client = await _get_client()
+
+        # Download to temp file
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        download_path = await client.artifacts.download_audio(
+            notebook_id=notebook_id,
+            output_path=tmp_path,
+            artifact_id=artifact_id,
+        )
+
+        result: Dict[str, Any] = {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "download_path": str(download_path),
+        }
+
+        # Transcribe via gaia-audio STT relay.
+        # Contract: POST /transcribe expects TranscribeRequest schema:
+        #   {"audio_base64": str, "sample_rate": int (default 16000), "language": str|None}
+        # Returns: {"text": str, ...} on 200, 400 if audio_base64 missing, 423 if muted.
+        # NOTE: For large files (>~10MB), the base64 payload may exceed server limits.
+        #       In that case, split audio into chunks externally and transcribe each.
+        if httpx is not None:
+            try:
+                audio_bytes = Path(download_path).read_bytes()
+                audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+                async with httpx.AsyncClient(timeout=120) as http:
+                    resp = await http.post(
+                        f"{_GAIA_AUDIO_URL}/transcribe",
+                        json={"audio_base64": audio_b64, "sample_rate": 16000},
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        result["transcription"] = data.get("text", data.get("transcription", ""))
+                        result["transcribed"] = True
+                    else:
+                        result["transcribed"] = False
+                        result["transcribe_error"] = f"gaia-audio returned {resp.status_code}"
+            except Exception as e:
+                result["transcribed"] = False
+                result["transcribe_error"] = f"Transcription relay failed: {e}"
+        else:
+            result["transcribed"] = False
+            result["transcribe_error"] = "httpx not available for transcription relay"
+
+        # Persist to save_path if requested, otherwise clean up temp file
+        save_path = (params.get("save_path") or "").strip()
+        if save_path:
+            try:
+                import shutil
+                shutil.copy2(str(download_path), save_path)
+                result["saved_path"] = save_path
+            except Exception as e:
+                result["save_error"] = str(e)
+        try:
+            Path(download_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        return result
+
+    except NotebookLMError as e:
+        logger.error("notebooklm_download_audio failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_generate_audio(params: dict) -> dict:
+    """
+    Generate an Audio Overview (podcast) for a notebook.
+    This is an asynchronous generation task.
+    """
+    notebook_id = (params.get("notebook_id") or "").strip()
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+
+    source_ids = params.get("source_ids")
+    instructions = params.get("instructions")
+    audio_format = params.get("audio_format")  # DEEP_DIVE, BRIEF, CRITIQUE, DEBATE
+    audio_length = params.get("audio_length")  # SHORT, DEFAULT, LONG
+
+    try:
+        client = await _get_client()
+
+        # notebooklm-py uses enums for format and length if provided
+        fmt = None
+        if audio_format:
+            try:
+                from notebooklm.rpc.types import AudioFormat
+                fmt = AudioFormat[audio_format.upper()]
+            except (ImportError, KeyError):
+                pass
+
+        lng = None
+        if audio_length:
+            try:
+                from notebooklm.rpc.types import AudioLength
+                lng = AudioLength[audio_length.upper()]
+            except (ImportError, KeyError):
+                pass
+
+        status = await client.artifacts.generate_audio(
+            notebook_id=notebook_id,
+            source_ids=source_ids if isinstance(source_ids, list) else None,
+            instructions=instructions,
+            audio_format=fmt,
+            audio_length=lng,
+        )
+
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "task_id": getattr(status, "task_id", None),
+            "status": getattr(status, "state", "pending"),
+            "message": "Audio generation started successfully."
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_generate_audio failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_create_note(params: dict) -> dict:
+    """Create a note in a notebook. Requires approval."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    title = (params.get("title") or "").strip()
+    content = params.get("content", "")
+
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+    if not title:
+        raise ValueError("title is required")
+
+    try:
+        client = await _get_client()
+        note = await client.notes.create(
+            notebook_id=notebook_id,
+            title=title,
+            content=content,
+        )
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "created": {
+                "id": note.id,
+                "title": note.title,
+                "content": (note.content or "")[:500],
+            },
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_create_note failed: %s", e)
+        return _err(str(e))

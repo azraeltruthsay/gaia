@@ -1,0 +1,178 @@
+# Model Test Containers — isolated vLLM instances for A/B testing
+#
+# Usage:
+#   # IMPORTANT: Only run ONE test container at a time (shared GPU)
+#   # Stop production Prime first to free GPU:
+#   docker compose stop gaia-prime
+#
+#   # Start 4B base test:
+#   docker compose -f docker-compose.model-test.yml up -d gaia-prime-test-4b
+#
+#   # Run tests, then stop and switch:
+#   docker compose -f docker-compose.model-test.yml stop gaia-prime-test-4b
+#   docker compose -f docker-compose.model-test.yml up -d gaia-prime-test-8b
+#
+#   # When done testing, stop test containers and restart production:
+#   docker compose -f docker-compose.model-test.yml down
+#   docker compose up -d gaia-prime
+#
+# Both containers expose OpenAI-compatible API on their respective ports.
+# Use --quantization fp8 for on-the-fly quantization (no pre-quantized weights needed).
+
+services:
+  # ─────────────────────────────────────────────────────────────────────
+  # Qwen3.5-4B-Abliterated (BASE — not identity-baked)
+  # Port 7778 — matches production Prime args except model path and port
+  # ─────────────────────────────────────────────────────────────────────
+  gaia-prime-test-4b:
+    image: gaia-prime:qwen35-lmcache
+    container_name: gaia-prime-test-4b
+    hostname: gaia-prime-test-4b
+
+    volumes:
+      - ./gaia-models:/models:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+    ports:
+      - "7778:7778"
+
+    command: >
+      /models/Qwen3.5-4B-Abliterated
+      --host 0.0.0.0
+      --port 7778
+      --gpu-memory-utilization 0.60
+      --max-model-len 24576
+      --max-num-seqs 1
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --quantization fp8
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7778/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
+    profiles:
+      - model-test
+
+    networks:
+      - gaia-network
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Qwen3-8B-abliterated-v2 (Huihui — larger base model)
+  # Port 7779 — same vLLM image, different model, fp8 on-the-fly
+  # ─────────────────────────────────────────────────────────────────────
+  gaia-prime-test-8b:
+    image: gaia-prime:qwen35-lmcache
+    container_name: gaia-prime-test-8b
+    hostname: gaia-prime-test-8b
+
+    volumes:
+      - ./gaia-models:/models:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+    ports:
+      - "7779:7779"
+
+    command: >
+      /models/Huihui-Qwen3-8B-abliterated-v2
+      --host 0.0.0.0
+      --port 7779
+      --gpu-memory-utilization 0.70
+      --max-model-len 8192
+      --max-num-seqs 1
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --quantization fp8
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7779/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
+    profiles:
+      - model-test
+
+    networks:
+      - gaia-network
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Qwen3-8B-abliterated-v2 MERGED (identity-baked via QLoRA)
+  # Port 7780 — same as base 8B but with identity training
+  # ─────────────────────────────────────────────────────────────────────
+  gaia-prime-test-8b-merged:
+    image: gaia-prime:qwen35-lmcache
+    container_name: gaia-prime-test-8b-merged
+    hostname: gaia-prime-test-8b-merged
+
+    volumes:
+      - ./gaia-models:/models:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+    ports:
+      - "7780:7780"
+
+    command: >
+      /models/Huihui-Qwen3-8B-abliterated-v2-merged
+      --host 0.0.0.0
+      --port 7780
+      --gpu-memory-utilization 0.70
+      --max-model-len 8192
+      --max-num-seqs 1
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --quantization fp8
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7780/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
+    profiles:
+      - model-test
+
+    networks:
+      - gaia-network
+
+networks:
+  gaia-network:
+    external: true

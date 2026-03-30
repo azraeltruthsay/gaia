@@ -1,0 +1,160 @@
+service: gaia-monkey
+port: 6420
+role: "The Chaos Agent — adversarial testing, serenity tracking, defensive meditation"
+protocol: http
+framework: FastAPI
+
+provides:
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Health check."
+    consumers: [gaia-doctor]
+
+  - endpoint: /status
+    method: GET
+    description: "Full status: meditation, serenity, scheduler state, recent drill history."
+    consumers: [gaia-web]
+
+  # ── Configuration ──────────────────────────────────────────────────
+  - endpoint: /config
+    method: GET
+    description: "Get current chaos configuration."
+    consumers: [gaia-web]
+
+  - endpoint: /config
+    method: POST
+    description: "Update chaos configuration."
+    consumers: [gaia-web]
+
+  # ── Chaos Injection ────────────────────────────────────────────────
+  - endpoint: /chaos/inject
+    method: POST
+    description: "Pick drill type per config and fire. Enters meditation automatically."
+    request_schema:
+      fields:
+        drill_types: list of string (optional, overrides config)
+        targets: list of string (optional)
+    consumers: [gaia-web]
+
+  - endpoint: /chaos/drill
+    method: POST
+    description: "Container-level fault injection."
+    request_schema:
+      fields:
+        targets: list of string (optional)
+    consumers: [gaia-web]
+
+  - endpoint: /chaos/code
+    method: POST
+    description: "Semantic code fault injection."
+    request_schema:
+      fields:
+        targets: list of string (optional)
+        difficulty: string (optional)
+    consumers: [gaia-web]
+
+  - endpoint: /chaos/linguistic
+    method: POST
+    description: "PromptFoo linguistic evaluation."
+    request_schema:
+      fields:
+        suite: string (default persona)
+    consumers: [gaia-web]
+
+  - endpoint: /chaos/history
+    method: GET
+    description: "Recent drill history (last 50, configurable limit)."
+    consumers: [gaia-web]
+
+  - endpoint: /drills
+    method: GET
+    description: "Drill history — alias of /chaos/history for test plan compatibility."
+    consumers: [gaia-web]
+
+  # ── Meditation ─────────────────────────────────────────────────────
+  - endpoint: /meditation/enter
+    method: POST
+    description: "Enter defensive meditation (required before chaos drills)."
+    consumers: [gaia-web]
+
+  - endpoint: /meditation/exit
+    method: POST
+    description: "Exit defensive meditation."
+    consumers: [gaia-web]
+
+  # ── Serenity ───────────────────────────────────────────────────────
+  - endpoint: /serenity
+    method: GET
+    description: "Get serenity report with meditation status."
+    consumers: [gaia-web, gaia-doctor]
+
+  - endpoint: /serenity/break
+    method: POST
+    description: "Break serenity (record a serenity-breaking event)."
+    request_schema:
+      fields:
+        reason: string
+    consumers: [gaia-doctor]
+
+  - endpoint: /serenity/record_recovery
+    method: POST
+    description: "Record a recovery event from gaia-doctor for serenity scoring."
+    request_schema:
+      fields:
+        category: string (default standard_recovery)
+        detail: string
+    consumers: [gaia-doctor]
+
+  - endpoint: /serenity/reset
+    method: POST
+    description: "Reset serenity state."
+    consumers: [gaia-web]
+
+consumes:
+  - service: gaia-core
+    endpoint: /api/cognitive/query
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Linguistic chaos evaluation (PromptFoo suites)"
+
+environment:
+  CORE_ENDPOINT: "http://gaia-core:6415"
+  DOCTOR_ENDPOINT: "http://gaia-doctor:6419"
+  PROJECT_ROOT: "/gaia/GAIA_Project"
+
+volumes:
+  - path: /var/run/docker.sock
+    mode: ro
+    purpose: "Docker socket for container chaos drills"
+  - path: /usr/bin/docker
+    mode: ro
+    purpose: "Docker CLI"
+  - path: /shared
+    mode: rw
+    purpose: "Serenity state, meditation flag"
+  - path: /gaia/GAIA_Project
+    mode: ro
+    purpose: "Project root for code chaos drills"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
+depends_on:
+  - gaia-core
+
+shared_state:
+  - path: /shared/doctor/serenity.json
+    written_by: gaia-monkey
+    read_by: [gaia-doctor]
+    purpose: "Serenity score state"
+
+  - path: /shared/doctor/defensive_meditation.json
+    written_by: gaia-monkey
+    read_by: [gaia-doctor]
+    purpose: "Meditation active flag (doctor checks before restarting)"

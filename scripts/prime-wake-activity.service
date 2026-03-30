@@ -1,0 +1,14 @@
+[Unit]
+Description=GAIA Prime Wake Activity Monitor
+Documentation=https://github.com/gaia-project
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/GAIA_Project/scripts/prime_wake_activity.sh
+Restart=on-failure
+RestartSec=10
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target

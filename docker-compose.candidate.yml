@@ -1,0 +1,326 @@
+# GAIA Candidate Stack - High Availability & Testing
+# 
+# This file defines the "Candidate" versions of GAIA services.
+# Used for testing new code in parallel with production.
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core-candidate: The Brain (GPU-capable for testing & training)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-core-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-core/Dockerfile.candidate
+    image: localhost:5000/gaia-core-candidate:cuda
+    container_name: gaia-core-candidate
+    hostname: gaia-core-candidate
+    restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      - ./candidates/gaia-core:/app:rw
+      - ./candidates/gaia-common:/gaia-common:ro
+      - ../gaia-instance/knowledge:/knowledge:ro
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:rw
+      - gaia-candidate-shared:/shared:rw
+      - ../gaia-instance/logs:/logs:rw
+
+    environment:
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_ENV=development
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CORE_ENDPOINT=http://gaia-core-candidate:6415
+      - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      # Candidate Core: safetensors primary (GPU), GGUF fallback (CPU)
+      - CORE_SAFETENSORS_PATH=/models/Qwen3.5-2B-GAIA-Core-v3
+      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-2B/Qwen3.5-2B-BF16.gguf
+      - CORE_DEVICE=${CORE_DEVICE:-cuda}
+      - CORE_CPU_CTX=8192
+      - CORE_CPU_THREADS=8
+      - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
+      - SHARED_DIR=/shared
+      - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-999}
+      - GAIA_AUTOLOAD_MODELS=1
+
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    ports:
+      - "6416:6415"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6415/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-web-candidate: The Face
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-web-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-web/Dockerfile
+    image: localhost:5000/gaia-web-candidate:local
+    container_name: gaia-web-candidate
+    hostname: gaia-web-candidate
+    restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      - ./candidates/gaia-web:/app:rw
+      - ./candidates/gaia-common:/gaia-common:ro
+      - ../gaia-instance/knowledge:/knowledge:ro
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/logs:/logs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    environment:
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_SERVICE=web
+      - GAIA_ENV=development
+      - CORE_ENDPOINT=http://gaia-core-candidate:6415
+      - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
+      - HOST=0.0.0.0
+      - PORT=6414
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENABLE_DISCORD=0 # Disable discord in candidate to avoid duplicate bots
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+    ports:
+      - "6417:6414"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6414/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    command: ["python", "-m", "uvicorn", "gaia_web.main:app", "--host", "0.0.0.0", "--port", "6414"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-mcp-candidate: The Hands
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-mcp-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-mcp/Dockerfile
+    image: localhost:5000/gaia-mcp-candidate:local
+    container_name: gaia-mcp-candidate
+    hostname: gaia-mcp-candidate
+    restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
+
+    environment:
+      - PYTHONPATH=/app:/app/gaia-common
+      - GAIA_ENV=development
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - GAIA_SERVICE=mcp
+
+    volumes:
+      - ./candidates/gaia-mcp:/app:rw
+      - ./candidates/gaia-common:/app/gaia-common:ro
+      - ../gaia-instance/knowledge:/knowledge:rw
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:ro
+      - gaia-candidate-sandbox:/sandbox:rw
+      - gaia-candidate-shared:/shared:rw
+      - ../gaia-instance/logs:/logs:rw
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+    ports:
+      - "8767:8765"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+    command: ["python", "-m", "uvicorn", "gaia_mcp.main:app", "--host", "0.0.0.0", "--port", "8765"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-prime-candidate: The Voice (pre-built vLLM image for Qwen3.5 testing)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-prime-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-prime/Dockerfile
+    image: localhost:5000/gaia-prime-candidate:local
+    container_name: gaia-prime-candidate
+    hostname: gaia-prime-candidate
+    restart: "no"
+
+    volumes:
+      - ../gaia-instance/gaia-models:/models:ro
+      - ../gaia-instance/logs/kvcache/prime:/kvcache:rw
+      - ./candidates/gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
+
+    environment:
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
+
+    ports:
+      - "7778:7777"
+
+    # LMCache KV persistence: blocked by vLLM 0.17 + Qwen3.5 hybrid arch.
+    # LMCacheConnectorV1 doesn't implement SupportsHMA, so:
+    #   - With HMA disabled: "failed to convert hybrid KV cache specs to one unified type"
+    #   - With HMA enabled:  "Connector LMCacheConnectorV1 does not support HMA"
+    # When LMCache ships HMA support, add to command block:
+    #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+    # Config, volume, and env var are already wired — just needs this flag.
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model ${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      --host 0.0.0.0
+      --port 7777
+      --gpu-memory-utilization 0.65
+      --max-model-len 24576
+      --max-num-seqs 1
+      --trust-remote-code
+      --dtype auto
+      --enforce-eager
+      --quantization fp8
+      --enable-prefix-caching
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-study-candidate: The Subconscious (upgraded PyTorch for RTX 5080)
+  # Used for QLoRA training on 8B+ models with native sm_120 CUDA support.
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-study-candidate:
+    build:
+      context: .
+      dockerfile: ./gaia-study/Dockerfile
+    image: gaia-study-candidate:pytorch210
+    container_name: gaia-study-candidate
+    hostname: gaia-study-candidate
+    restart: "no"
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      - ./gaia-study:/app:rw
+      - ./gaia-common:/gaia-common:ro
+      - ../gaia-instance/knowledge:/knowledge:rw
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ../gaia-instance/gaia-models:/models:rw
+      - gaia-candidate-shared:/shared:rw
+      - ../gaia-instance/logs:/logs:rw
+
+    environment:
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_ENV=development
+      - GAIA_LOG_DIR=/logs
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    profiles:
+      - study-candidate
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-doctor-candidate: The Immune System (candidate)
+  # ═══════════════════════════════════════════════════════════════════════════
+  gaia-doctor-candidate:
+    build:
+      context: .
+      dockerfile: ./candidates/gaia-doctor/Dockerfile
+    image: localhost:5000/gaia-doctor-candidate:local
+    container_name: gaia-doctor-candidate
+    hostname: gaia-doctor-candidate
+    restart: "no"
+
+    environment:
+      - POLL_INTERVAL=30
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      - COMPOSE_PROJECT_NAME=gaia_project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
+      - SHARED_DIR=/candidate-shared
+      - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
+      # Disable restarts and sovereign promotion — candidate observes only
+      - DOCTOR_DRY_RUN=1
+
+    volumes:
+      # Docker socket (read-only — candidate should NOT restart containers)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker CLI + compose plugin
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      # Project root for code monitoring (read-only)
+      - .:/gaia/GAIA_Project:ro
+      # Candidate shared state (separate from production)
+      - gaia-candidate-shared:/candidate-shared:rw
+
+    group_add:
+      - "${DOCKER_GID:-962}"
+
+    ports:
+      - "6421:6419"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6419/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  gaia-candidate-shared:
+  gaia-candidate-sandbox:
+
+networks:
+  default:
+    name: gaia-network
+    external: true
