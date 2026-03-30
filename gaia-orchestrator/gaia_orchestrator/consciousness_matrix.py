@@ -495,7 +495,8 @@ class ConsciousnessMatrix:
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("%s already loaded on GPU", tier)
                         return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
-                    if hdata.get("model_loaded"):
+                    _has_model = hdata.get("model_loaded") or hdata.get("status") == "ok"
+                    if _has_model:
                         # Model loaded but not on GPU (GGUF/CPU) — unload first
                         logger.info("%s has model on %s — unloading before GPU load",
                                     tier, hdata.get("device", "cpu"))
