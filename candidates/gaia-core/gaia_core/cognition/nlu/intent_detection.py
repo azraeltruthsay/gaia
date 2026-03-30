@@ -430,6 +430,21 @@ def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
     if first_word in {"complete", "done", "finished"} and word_count <= 5:
         return "mark_task_complete"
 
+    # --- Planning / Architecture (BEFORE tool listing — "plan...tools" is planning, not list_tools) ---
+    planning_patterns = [
+        "implementation plan", "create a plan", "design a system",
+        "create a detailed", "detailed plan", "how would you add",
+        "how would you implement", "what files need to change",
+        "plan for adding", "architect", "what changes are needed",
+        "step by step implementation", "design a feature",
+        "plan to add", "plan for implementing", "blueprint for",
+    ]
+    if any(p in lowered for p in planning_patterns):
+        return "planning"
+    # Also catch "plan" as first verb with architecture-scale nouns
+    if first_word == "plan" or (first_word in {"create", "design", "build"} and "plan" in lowered):
+        return "planning"
+
     # --- Tool/file listing ---
     if any(p in lowered for p in ["list tools", "list your tools", "what tools",
                                    "available tools", "show tools", "mcp tools"]):

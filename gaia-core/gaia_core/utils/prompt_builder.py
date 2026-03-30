@@ -123,11 +123,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         pass
     _depth_instruction = ""
-    if any(kw in str(_intent_val).lower() for kw in ("plan", "brainstorm", "code", "architect", "design", "implement")):
+    # Check both the classified intent and keywords in the user's original prompt
+    _original_prompt = getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''
+    _is_planning = (
+        str(_intent_val).lower() in ("planning", "brainstorming")
+        or any(kw in str(_intent_val).lower() for kw in ("plan", "code", "architect", "design", "implement"))
+        or any(kw in _original_prompt.lower() for kw in ("implementation plan", "detailed plan", "create a plan", "design a system"))
+    )
+    if _is_planning:
         _depth_instruction = (
             "\n\nOUTPUT DEPTH: This is a planning/architecture task. Provide DETAILED, COMPREHENSIVE responses. "
-            "List specific file paths, function names, and code examples. Do NOT summarize — elaborate fully. "
-            "Aim for at least 300 words with actionable implementation steps."
+            "Use markdown headers (##) for each phase. Include specific file paths in candidates/, "
+            "code examples in fenced blocks, and implementation order. "
+            "For large plans, use your fragment_write tool to decompose into phases. "
+            "Do NOT summarize — elaborate fully. Aim for 500+ words."
         )
 
     persona_instructions = f"GAIA PERSONA ANCHOR: {persona_anchor}{council_scaffolding}\n\nCurrent time: {_current_time}\nPersona: {persona_id}\nRole: {role_val}\nTone Hint: {tone_hint}{_depth_instruction}"
