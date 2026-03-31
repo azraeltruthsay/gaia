@@ -91,6 +91,14 @@ def run_planning_pipeline(
             phase_prompt += "\n\nIMPORTANT: Provide detailed content with code examples. Do NOT be brief."
             phase_content = _generate_with_model(prime_model, phase_prompt, config, max_tokens=1024)
 
+        # ── Stream Observer: validate phase output ──
+        observations = _observe_phase_output(phase_content, codebase_context)
+        if observations:
+            phase_content = _apply_observations(phase_content, observations)
+            for obs in observations:
+                yield {"type": "token", "value": f"*🔍 Observer: {obs}*\n"}
+            yield {"type": "flush"}
+
         sketchpad.append(Sketchpad(
             slot=f"plan_phase_{phase['id']}",
             content=phase_content,
@@ -450,3 +458,96 @@ def _assemble_plan(fragments: list) -> str:
     for frag in fragments:
         parts.append(f"## {frag['phase']}\n\n{frag['content']}")
     return "\n\n".join(parts)
+
+
+# ── Stream Observer for Planning ──────────────────────────────────────────
+
+# Known GAIA file path patterns — if Prime references these, they're grounded
+_GAIA_PATH_PREFIXES = [
+    "candidates/gaia-", "gaia-core/", "gaia-web/", "gaia-mcp/",
+    "gaia-common/", "gaia-study/", "gaia-audio/", "gaia-orchestrator/",
+    "gaia-doctor/", "gaia-prime/", "gaia-nano/", "contracts/",
+    "knowledge/", "/shared/", "/models/",
+]
+
+# Wrong tech stack signals — should be Python/FastAPI/Alpine.js
+_WRONG_STACK_PATTERNS = [
+    ("React", "Alpine.js"),
+    ("useState", "Alpine.store / x-data"),
+    ("import React", "Alpine.js (no import needed)"),
+    (".jsx", ".js (Alpine.js)"),
+    (".tsx", ".js (Alpine.js)"),
+    ("className=", "class= (Alpine.js)"),
+    ("public class", "Python class"),
+    ("@PostMapping", "@router.post (FastAPI)"),
+    ("ResponseEntity", "JSONResponse (FastAPI)"),
+    ("SpringBoot", "FastAPI"),
+    ("package com.", "Python module"),
+]
+
+
+def _observe_phase_output(content: str, codebase_context: str) -> List[str]:
+    """
+    Rule-based observation of phase output — no LLM needed.
+
+    Returns list of observation strings for user display.
+    """
+    observations = []
+
+    # ── Check 1: Wrong tech stack ──
+    for wrong, correct in _WRONG_STACK_PATTERNS:
+        if wrong in content:
+            observations.append(f"Detected '{wrong}' — GAIA uses {correct}")
+            break  # One stack warning is enough
+
+    # ── Check 2: Non-GAIA file paths ──
+    import re
+    # Find file path references (anything that looks like a/b/c.ext)
+    path_refs = re.findall(r'(?:^|\s|`)([a-zA-Z_][\w/.-]+\.\w{1,5})(?:\s|`|$|:|\))', content)
+    non_gaia_paths = []
+    for path_ref in path_refs:
+        # Skip common non-path matches
+        if path_ref.startswith(("http", "0.", "1.", "2.")) or ".com" in path_ref:
+            continue
+        # Check if it matches known GAIA patterns
+        is_gaia = any(prefix in path_ref for prefix in _GAIA_PATH_PREFIXES)
+        if not is_gaia and "/" in path_ref and not path_ref.startswith("#"):
+            non_gaia_paths.append(path_ref)
+
+    if non_gaia_paths and len(non_gaia_paths) > 2:
+        examples = ", ".join(non_gaia_paths[:3])
+        observations.append(f"Non-GAIA paths detected: {examples} — should use candidates/gaia-*/...")
+
+    # ── Check 3: Missing candidates/ prefix ──
+    if "candidates/" not in content and any(
+        kw in content.lower() for kw in ["file:", "path:", "modify", "create", "update"]
+    ):
+        observations.append("No candidates/ prefix found — all changes should go to candidates/ first")
+
+    # ── Check 4: Phase too short ──
+    if len(content.strip()) < 200:
+        observations.append(f"Phase content is short ({len(content.strip())} chars) — may need more detail")
+
+    return observations
+
+
+def _apply_observations(content: str, observations: List[str]) -> str:
+    """
+    Apply simple corrections based on observations.
+    Returns modified content (or original if no auto-fixes apply).
+    """
+    # Auto-fix: wrong tech stack mentions
+    replacements = {
+        "React": "Alpine.js",
+        "useState": "Alpine reactive data",
+        "className=": "class=",
+        ".jsx": ".js",
+        ".tsx": ".js",
+    }
+
+    modified = content
+    for wrong, correct in replacements.items():
+        if wrong in modified and any("Detected" in obs and wrong in obs for obs in observations):
+            modified = modified.replace(wrong, correct)
+
+    return modified
