@@ -23,10 +23,22 @@ logger = logging.getLogger("GAIA.PlanningOrchestrator")
 
 # Phase definitions for structured planning
 PLAN_PHASES = [
-    {"id": "requirements", "label": "Requirements & Scope", "prompt_suffix": "Define what needs to change, which services are affected, and the acceptance criteria."},
-    {"id": "architecture", "label": "Architecture & File Changes", "prompt_suffix": "List specific file paths in candidates/, the functions to modify, and how they connect. Use the codebase context provided above."},
-    {"id": "implementation", "label": "Implementation Details", "prompt_suffix": "Write code examples for the key changes. Match the existing code patterns shown in the codebase context. Use fenced code blocks with language tags."},
-    {"id": "testing", "label": "Testing & Rollout", "prompt_suffix": "Define test strategy, Docker restart/rebuild requirements, and promotion order."},
+    {"id": "requirements", "label": "Requirements & Scope", "max_tokens": 512,
+     "prompt_suffix": "Define what needs to change, which services are affected, and the acceptance criteria."},
+    {"id": "architecture", "label": "Architecture & File Changes", "max_tokens": 1024,
+     "prompt_suffix": "List specific file paths in candidates/, the functions to modify, and how they connect."},
+    {"id": "implementation", "label": "Implementation Details", "max_tokens": 2048,
+     "prompt_suffix": (
+         "For EACH file that needs to change, write it in this exact format:\n\n"
+         "**`candidates/path/to/file.py`**: Brief description of the change\n"
+         "```python\n"
+         "# The new or modified code for this file\n"
+         "```\n\n"
+         "This format is required — the executor parses file paths and their adjacent code blocks. "
+         "Match existing patterns from the codebase context. Every file MUST have a code block."
+     )},
+    {"id": "testing", "label": "Testing & Rollout", "max_tokens": 512,
+     "prompt_suffix": "Define test strategy, Docker restart/rebuild requirements, and promotion order."},
 ]
 
 
@@ -85,12 +97,13 @@ def run_planning_pipeline(
         phase_prompt = _build_phase_prompt(user_request, phase, plan_fragments, i, codebase_context)
         logger.info("Phase %d/%d: %s — generating with Prime", phase_num, total, phase["id"])
 
-        phase_content = _generate_with_model(prime_model, phase_prompt, config, max_tokens=1024)
+        phase_max_tokens = phase.get("max_tokens", 1024)
+        phase_content = _generate_with_model(prime_model, phase_prompt, config, max_tokens=phase_max_tokens)
 
         if not phase_content or len(phase_content.strip()) < 20:
             logger.warning("Phase %s produced empty/short content, retrying with emphasis", phase["id"])
             phase_prompt += "\n\nIMPORTANT: Provide detailed content with code examples. Do NOT be brief."
-            phase_content = _generate_with_model(prime_model, phase_prompt, config, max_tokens=1024)
+            phase_content = _generate_with_model(prime_model, phase_prompt, config, max_tokens=phase_max_tokens)
 
         # ── Stream Observer: validate phase output ──
         observations = _observe_phase_output(phase_content, codebase_context)

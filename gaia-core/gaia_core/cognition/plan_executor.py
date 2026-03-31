@@ -131,22 +131,34 @@ def execute_plan_phase(
         # ── Generate modification ──
         if prime_model and (current_content or change.get("code_snippet")):
             if current_content:
+                is_large = len(current_content) > 5000
                 modified = _generate_modification(
                     prime_model, real_path or planned_path,
                     current_content, change["description"],
                     change.get("code_snippet", ""), contract_text, config,
                 )
                 if modified:
-                    validation = _validate_code(modified, real_path or planned_path)
+                    # For large files, this is an addition — validate the new code alone
+                    if is_large:
+                        validation = _validate_code(modified, real_path or planned_path)
+                    else:
+                        validation = _validate_code(modified, real_path or planned_path)
+
                     status = "✅" if validation["ok"] else "❌"
-                    yield {"type": "token", "value": f"  *{status} Validation: {validation['status']}*\n"}
+                    mode = "append" if is_large else "replace"
+                    yield {"type": "token", "value": f"  *{status} Validation: {validation['status']} ({mode} mode, {len(modified)} chars)*\n"}
 
                     output_path = _to_candidates_path(real_path or planned_path)
                     if validation["ok"] and not dry_run:
-                        _write_candidate(str(output_path), modified)
+                        if is_large:
+                            # Append new code to existing file
+                            existing = Path(str(output_path)).read_text() if Path(str(output_path)).exists() else current_content
+                            _write_candidate(str(output_path), existing + "\n\n" + modified)
+                        else:
+                            _write_candidate(str(output_path), modified)
                         yield {"type": "token", "value": f"  *✅ Written to {output_path}*\n"}
                     elif validation["ok"]:
-                        yield {"type": "token", "value": f"  *🔍 Dry run — would write {len(modified)} chars to {output_path}*\n"}
+                        yield {"type": "token", "value": f"  *🔍 Dry run — would {mode} {len(modified)} chars to {output_path}*\n"}
                     else:
                         yield {"type": "token", "value": f"  *Error: {validation.get('error', '')[:200]}*\n"}
                 else:
@@ -257,33 +269,54 @@ def _generate_modification(
     contract_text: str, config
 ) -> Optional[str]:
     """Generate a modification that fits the existing code."""
-    # Truncate intelligently — keep structure visible
-    if len(current_content) > 4000:
-        current_content = (
-            current_content[:1500]
-            + "\n\n# ... (middle truncated) ...\n\n"
-            + current_content[-1500:]
+    # For large files, use contract + new code approach instead of full file modification
+    large_file = len(current_content) > 5000
+
+    if large_file:
+        # Large file strategy: generate ONLY the new code to insert
+        prompt = f"Add new functionality to an existing file.\n\n"
+        prompt += f"**File:** {file_path}\n"
+        prompt += f"**Change needed:** {description}\n\n"
+
+        if contract_text:
+            prompt += f"**Existing API surface (do not duplicate):**\n{contract_text}\n\n"
+
+        # Show just the imports and first few lines for style matching
+        lines = current_content.split("\n")
+        import_section = "\n".join(lines[:30])
+        prompt += f"**File header (for style matching):**\n```\n{import_section}\n```\n\n"
+
+        if code_snippet:
+            prompt += f"**Proposed addition:**\n```\n{code_snippet}\n```\n\n"
+
+        prompt += (
+            "Output ONLY the new code to ADD to this file. Include:\n"
+            "- Any new import statements needed (at top)\n"
+            "- The new functions, classes, or routes\n"
+            "- Match the existing style from the file header\n"
+            "- Do NOT reproduce existing code — only write what's new"
         )
+    else:
+        # Small file: can output complete modified file
+        prompt = f"Modify this existing file to add the described feature.\n\n"
+        prompt += f"**File:** {file_path}\n"
+        prompt += f"**Change needed:** {description}\n\n"
 
-    prompt = f"Modify this existing file to add the described feature.\n\n"
-    prompt += f"**File:** {file_path}\n"
-    prompt += f"**Change needed:** {description}\n\n"
+        if contract_text:
+            prompt += f"**Current API surface:**\n{contract_text}\n\n"
 
-    if contract_text:
-        prompt += f"**Current API surface:**\n{contract_text}\n\n"
+        prompt += f"**Current file content:**\n```\n{current_content}\n```\n\n"
 
-    prompt += f"**Current file content:**\n```\n{current_content}\n```\n\n"
+        if code_snippet:
+            prompt += f"**Proposed addition:**\n```\n{code_snippet}\n```\n\n"
 
-    if code_snippet:
-        prompt += f"**Proposed addition:**\n```\n{code_snippet}\n```\n\n"
-
-    prompt += (
-        "Output the COMPLETE modified file content.\n"
-        "- Preserve ALL existing code — only add/modify what's needed\n"
-        "- Match existing style and patterns\n"
-        "- Include proper imports\n"
-        "- Output ONLY the file content"
-    )
+        prompt += (
+            "Output the COMPLETE modified file content.\n"
+            "- Preserve ALL existing code — only add/modify what's needed\n"
+            "- Match existing style and patterns\n"
+            "- Include proper imports\n"
+            "- Output ONLY the file content"
+        )
 
     try:
         messages = [
@@ -384,10 +417,22 @@ def _write_candidate(file_path: str, content: str):
     logger.info("Written %d chars to %s", len(content), file_path)
 
 
-def _extract_code_near(text: str, position: int, max_distance: int = 500) -> str:
-    """Extract the nearest code block after a position in text."""
+def _extract_code_near(text: str, position: int, max_distance: int = 1000) -> str:
+    """Extract the nearest code block after a position in text.
+
+    Searches up to max_distance chars ahead for a fenced code block.
+    Also handles inline code snippets if no fenced block is found.
+    """
     search_region = text[position:position + max_distance]
+
+    # Try fenced code block first (```lang\n...\n```)
     match = re.search(r'```(?:\w+)?\n(.*?)```', search_region, re.DOTALL)
     if match:
         return match.group(1).strip()
+
+    # Try indented code block (4+ spaces after a blank line)
+    match = re.search(r'\n\n((?:    .+\n)+)', search_region)
+    if match and len(match.group(1).strip()) > 30:
+        return match.group(1).strip()
+
     return ""
