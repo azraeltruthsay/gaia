@@ -235,7 +235,7 @@ def _assemble_codebase_context(user_request: str, config) -> str:
     """
     context_parts = []
     total_chars = 0
-    MAX_CONTEXT_CHARS = 4000  # Budget for context in planning prompt
+    MAX_CONTEXT_CHARS = 8000  # Budget for context — contracts are already compact
 
     # ── 1. Service contracts ──
     # Find contracts directory — varies by mount configuration
@@ -352,42 +352,64 @@ def _find_relevant_source_files(user_request: str) -> List[str]:
             if child.is_dir() and child.name.startswith("gaia-"):
                 service_dirs.append(child)
 
-    # Score each service by keyword overlap with the request
+    # Score each service — direct name match gets priority, contract overlap as secondary
+    scored = []
+    request_words = set(request_lower.split()) - {
+        "a", "the", "to", "for", "and", "in", "of", "create", "detailed",
+        "implementation", "plan", "adding", "support",  # generic planning words
+    }
+
     for svc_dir in service_dirs:
         svc_name = svc_dir.name.replace("gaia-", "")
-        # Check if service name or related terms appear in request
-        if svc_name in request_lower or svc_dir.name in request_lower:
-            _add_key_files(svc_dir, results, seen)
-            continue
+        score = 0
 
-        # Check service contract for keyword overlap
+        # Direct name match — strong signal
+        if svc_name in request_lower or svc_dir.name in request_lower:
+            score += 10
+
+        # Contract keyword overlap — weaker signal, skip generic words
         contract_path = base / "contracts" / "services" / f"{svc_dir.name}.yaml"
         if contract_path.exists():
             try:
                 contract_text = contract_path.read_text().lower()
-                # Count how many request words appear in the contract
-                request_words = set(request_lower.split()) - {"a", "the", "to", "for", "and", "in", "of"}
-                overlap = sum(1 for w in request_words if w in contract_text)
-                if overlap >= 2:
-                    _add_key_files(svc_dir, results, seen)
+                overlap = sum(1 for w in request_words if len(w) > 3 and w in contract_text)
+                score += overlap
             except Exception:
                 pass
 
-    # For cross-service features, always include shared protocols
-    proto_path = candidates_dir / "gaia-common" / "gaia_common" / "protocols" / "cognition_packet.py"
-    if proto_path.exists() and str(proto_path) not in seen:
-        results.append(str(proto_path))
+        if score >= 3:  # Need meaningful overlap, not just generic words
+            scored.append((score, svc_dir))
 
-    return results[:10]  # Cap to avoid context bloat
+    # Sort by score descending, take top services
+    scored.sort(key=lambda x: -x[0])
+    for score, svc_dir in scored[:4]:
+        _add_key_files(svc_dir, results, seen)
+
+    # Cross-service infrastructure — always include if they exist
+    # These are the shared layers that most features touch
+    infra_files = [
+        candidates_dir / "gaia-common" / "gaia_common" / "protocols" / "cognition_packet.py",
+        candidates_dir / "gaia-mcp" / "gaia_mcp" / "tools.py",
+    ]
+    for infra in infra_files:
+        if infra.exists() and str(infra) not in seen:
+            results.append(str(infra))
+            seen.add(str(infra))
+
+    return results[:12]
 
 
-def _add_key_files(svc_dir: Path, results: List[str], seen: set, max_per_service: int = 3):
+def _add_key_files(svc_dir: Path, results: List[str], seen: set, max_per_service: int = 6):
     """Add the most important files from a service directory."""
-    # Priority: main entry points, routes, tools, then other Python files
+    # Priority order: limited-count patterns first, then broad globs
     priority_patterns = [
-        "**/main.py", "**/routes/*.py", "**/tools.py",
-        "**/models.py", "**/__init__.py",
-        "static/app.js", "static/index.html",
+        "**/main.py",           # Entry point (1 file)
+        "**/tools.py",          # MCP tools (1 file)
+        "static/app.js",        # Frontend (1 file)
+        "static/index.html",    # Frontend HTML (1 file)
+        "**/models.py",         # Data models (1 file)
+        "**/protocols/*.py",    # Shared protocols
+        "**/routes/*.py",       # API routes (many files — last so cap applies)
     ]
 
     added = 0
@@ -397,7 +419,7 @@ def _add_key_files(svc_dir: Path, results: List[str], seen: set, max_per_service
         for match in svc_dir.glob(pattern):
             if str(match) in seen:
                 continue
-            if any(skip in str(match) for skip in ["__pycache__", ".bak", "test_"]):
+            if any(skip in str(match) for skip in ["__pycache__", ".bak", "test_", "__init__"]):
                 continue
             results.append(str(match))
             seen.add(str(match))
