@@ -146,7 +146,6 @@ def execute_plan_phase(
                 if patches:
                     yield {"type": "token", "value": f"  *Generated {len(patches)} patch(es)*\n"}
 
-                    # Apply patches to get modified content
                     modified, applied = apply_patches(current_content, patches)
 
                     for desc in applied:
@@ -168,7 +167,28 @@ def execute_plan_phase(
                     else:
                         yield {"type": "token", "value": f"  *Patches generated but anchors not found in file*\n"}
                 else:
-                    yield {"type": "token", "value": f"  *Could not generate patches*\n"}
+                    # Fallback: generate additive code (new function/route to append)
+                    from gaia_core.cognition.code_generator import generate_new_file
+                    yield {"type": "token", "value": f"  *Patch generation failed — trying additive code*\n"}
+                    addition = generate_new_file(
+                        prime_model, planned_path,
+                        f"New code to add to {Path(real_path or planned_path).name}: {change['description']}",
+                        change.get("code_snippet", ""),
+                        contract_text,
+                    )
+                    if addition:
+                        validation = _validate_code(addition, real_path or planned_path)
+                        status = "✅" if validation["ok"] else "❌"
+                        yield {"type": "token", "value": f"  *{status} Validation: {validation['status']} ({len(addition)} chars additive)*\n"}
+                        output_path = _to_candidates_path(real_path or planned_path)
+                        if validation["ok"] and not dry_run:
+                            existing = current_content
+                            _write_candidate(str(output_path), existing + "\n\n" + addition)
+                            yield {"type": "token", "value": f"  *✅ Appended to {output_path}*\n"}
+                        elif validation["ok"]:
+                            yield {"type": "token", "value": f"  *🔍 Dry run — would append {len(addition)} chars to {output_path}*\n"}
+                    else:
+                        yield {"type": "token", "value": f"  *Could not generate code for this file*\n"}
             elif prime_model:
                 from gaia_core.cognition.code_generator import generate_new_file
 

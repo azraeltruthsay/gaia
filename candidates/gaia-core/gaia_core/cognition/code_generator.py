@@ -233,10 +233,15 @@ def _parse_patches(raw: str) -> List[Dict]:
             code_match = re.search(r'CODE:\s*\n((?:(?!PATCH).)+)', section, re.DOTALL)
 
         if action_match and anchor_match and code_match:
+            code = code_match.group(1).strip()
+            # Strip any remaining markdown artifacts
+            code = re.sub(r'^```\w*\s*$', '', code, flags=re.MULTILINE)
+            code = re.sub(r'^\s*```\s*$', '', code, flags=re.MULTILINE)
+            code = code.strip()
             patches.append({
                 "action": action_match.group(1).lower().strip(),
                 "anchor": anchor_match.group(1).strip(),
-                "code": code_match.group(1).strip(),
+                "code": code,
             })
 
     return patches

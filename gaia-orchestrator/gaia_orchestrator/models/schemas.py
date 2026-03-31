@@ -249,3 +249,4 @@ class OrchestratorState(BaseModel):
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    lifecycle: Optional[Dict] = Field(default=None, description="Lifecycle machine state for persistence across restarts")
