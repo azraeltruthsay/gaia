@@ -175,8 +175,19 @@ def run_planning_pipeline(
             ):
                 yield event
 
-            yield {"type": "token", "value": "\n*Plan ready for execution. Use `/approve` to write changes to candidates/.*\n\n"}
-            yield {"type": "flush"}
+            # Generate reverse-string approval challenge
+            try:
+                from gaia_common.utils.approval_challenge import create_challenge, format_challenge_prompt
+                challenge = create_challenge(
+                    action="execute_plan",
+                    context=f"{len(all_changes)} file(s) to write to candidates/",
+                )
+                yield {"type": "token", "value": "\n" + format_challenge_prompt(challenge) + "\n\n"}
+                yield {"type": "flush"}
+            except Exception as _chal_err:
+                logger.warning("Approval challenge failed: %s", _chal_err)
+                yield {"type": "token", "value": "\n*Plan ready — approval system unavailable.*\n\n"}
+                yield {"type": "flush"}
 
             # Store changes in sketchpad for later execution
             sketchpad.append(Sketchpad(

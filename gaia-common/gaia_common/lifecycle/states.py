@@ -13,7 +13,7 @@ class LifecycleState(str, Enum):
     """Primary lifecycle states for GAIA's GPU allocation."""
     AWAKE = "awake"              # Core + Nano on GPU. Default cognitive operation.
     LISTENING = "listening"      # Core + Nano + Audio STT on GPU.
-    FOCUSING = "focusing"        # Prime GPTQ on GPU. Core/Nano off GPU.
+    FOCUSING = "focusing"        # Prime NF4 on GPU, Core GGUF on CPU (16K reviewer), Nano on GPU.
     MEDITATION = "meditation"    # Study owns GPU for training. All cognitive tiers off.
     SLEEP = "sleep"              # Core + Nano in CPU RAM. GPU empty.
     DEEP_SLEEP = "deep_sleep"    # Core unloaded from RAM. Nano minimal reflex. GPU empty.
@@ -131,9 +131,9 @@ TIER_EXPECTATIONS: Dict[LifecycleState, Dict[str, TierExpectation]] = {
         # audio_stt flag handled separately
     },
     LifecycleState.FOCUSING: {
-        "core":  TierExpectation("unloaded", required=False),
-        "nano":  TierExpectation("unloaded", required=False),
-        "prime": TierExpectation("gpu", required=True),
+        "core":  TierExpectation("cpu", required=False),    # GGUF reviewer (16K ctx)
+        "nano":  TierExpectation("gpu", required=False),    # stays for triage
+        "prime": TierExpectation("gpu", required=True),     # NF4 on GPU for generation
         "study": TierExpectation("unloaded", required=False),
     },
     LifecycleState.MEDITATION: {
