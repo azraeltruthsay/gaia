@@ -1908,7 +1908,65 @@ class AgentCore:
                         logger.debug("release_model_for_role failed", exc_info=True)
             ts_write({"type": "reflection-pre", "packet_id": packet.header.packet_id, "out": refined_plan_text}, session_id, source=source, destination_context=_metadata)
     
-            # 5. Final Response Generation (with Iterative Council Debate)
+            # 5a. Planning Orchestrator: multi-phase collaborative planning
+            # Routes through the planning pipeline when:
+            # - Intent is planning OR user request matches planning keywords
+            # - GPU Prime is available (selected_model_name is gpu_prime)
+            _plan_intent = getattr(packet.intent, 'user_intent', '') if packet.intent else ''
+            _plan_keywords = ["implementation plan", "detailed plan", "create a plan", "plan for adding"]
+            _is_planning_task = (
+                _plan_intent == "planning"
+                or any(kw in (user_input or "").lower() for kw in _plan_keywords)
+            )
+            if _is_planning_task and selected_model_name in ("gpu_prime", "prime"):
+                try:
+                    from gaia_core.cognition.planning_orchestrator import run_planning_pipeline
+                    # Get reviewer model (idle Core on CPU during FOCUSING)
+                    _reviewer = None
+                    for _rev_name in ["lite", "core", "reflex"]:
+                        if _rev_name in self.model_pool.models and _rev_name != selected_model_name:
+                            try:
+                                _reviewer = self.model_pool.acquire_model(_rev_name)
+                                break
+                            except Exception:
+                                continue
+
+                    logger.info("Planning orchestrator: prime=%s, reviewer=%s", selected_model_name, _rev_name if _reviewer else "none")
+                    for event in run_planning_pipeline(
+                        user_request=user_input,
+                        prime_model=selected_model,
+                        reviewer_model=_reviewer,
+                        packet=packet,
+                        config=self.config,
+                        model_pool=self.model_pool,
+                    ):
+                        yield event
+
+                    if _reviewer:
+                        try:
+                            self.model_pool.release_model_for_role(_rev_name)
+                        except Exception:
+                            pass
+
+                    # Skip council debate — planning orchestrator handled everything
+                    packet.status.state = PacketState.COMPLETED
+                    packet.status.finalized = True
+                    # Record in session
+                    assembled = "\n".join(
+                        s.content for s in packet.reasoning.sketchpad
+                        if s.slot == "plan_final"
+                    )
+                    if assembled:
+                        packet.response.candidate = assembled
+                    self.session_manager.add_message(session_id, "assistant", packet.response.candidate or "Plan generated.")
+                    ts_write({"type": "planning_complete", "packet_id": packet.header.packet_id}, session_id, source=source, destination_context=_metadata)
+                    yield {"type": "flush"}
+                    yield {"type": "packet", "value": packet.to_serializable_dict()}
+                    return
+                except Exception as _plan_err:
+                    logger.warning("Planning orchestrator failed, falling back to council debate: %s", _plan_err, exc_info=True)
+
+            # 5b. Final Response Generation (with Iterative Council Debate)
             debate_turn = 0
             MAX_DEBATE_TURNS = 3
             council_history = []
