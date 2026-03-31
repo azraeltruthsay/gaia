@@ -3086,6 +3086,24 @@ class AgentCore:
                 self.logger.info("Uncertainty escalation: factual question but no value in response")
                 return True
 
+        # Signal 5: Nano explicitly declines a task it can't handle
+        # "I cannot create", "I can't generate", "I'm not able to" etc.
+        decline_phrases = ["i cannot create", "i can't create", "i cannot generate",
+                          "i can't generate", "i'm not able to", "i am not able to",
+                          "i cannot provide a detailed", "i can't provide a detailed",
+                          "beyond my capability", "outside my scope"]
+        if any(phrase in lower for phrase in decline_phrases):
+            self.logger.info("Uncertainty escalation: Nano explicitly declined the task")
+            return True
+
+        # Signal 6: Planning/architecture request answered with description only
+        planning_signals = ["implementation plan", "detailed plan", "create a plan",
+                           "design a system", "how would you add", "architecture"]
+        is_planning = any(sig in input_lower for sig in planning_signals)
+        if is_planning and len(content) < 500:
+            self.logger.info("Uncertainty escalation: planning request got short response (%d chars)", len(content))
+            return True
+
         return False
 
     # Escalation chain for slim path failures
