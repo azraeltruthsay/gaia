@@ -209,26 +209,20 @@ def _assemble_codebase_context(user_request: str, config) -> str:
             except Exception as e:
                 logger.debug("Failed to read contract %s: %s", contract_path, e)
 
-    # ── 2. AST summaries of relevant source files ──
+    # ── 2. Per-file contracts (AST-derived, cached, lightweight) ──
     try:
-        from gaia_common.utils.ast_summarizer import summarize_file
-        # Map request keywords to likely source files
+        from gaia_common.utils.file_contracts import get_contracts_for_planning
         file_candidates = _find_relevant_source_files(user_request)
 
-        for src_path in file_candidates[:5]:  # Max 5 files
-            if total_chars > MAX_CONTEXT_CHARS:
-                break
-            try:
-                source = Path(src_path).read_text()
-                summary = summarize_file(source, filename=str(src_path))
-                prompt_text = summary.to_prompt_text()
-                if prompt_text and len(prompt_text) > 20:
-                    context_parts.append(f"### Source: {src_path}\n{prompt_text}")
-                    total_chars += len(prompt_text)
-            except Exception as e:
-                logger.debug("Failed to summarize %s: %s", src_path, e)
-    except ImportError:
-        logger.debug("AST summarizer not available")
+        if file_candidates:
+            contracts_text = get_contracts_for_planning(file_candidates[:8])
+            if contracts_text and len(contracts_text) > 20:
+                context_parts.append(contracts_text)
+                total_chars += len(contracts_text)
+                logger.info("File contracts assembled for %d files (%d chars)",
+                           len(file_candidates), len(contracts_text))
+    except Exception as e:
+        logger.debug("File contracts not available: %s", e)
 
     # ── 3. CFR synthesis for large documents ──
     # If any context part is too large, compress via CFR
