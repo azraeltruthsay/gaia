@@ -142,7 +142,11 @@ def contract_to_prompt(contract: Dict) -> str:
     if not contract:
         return ""
 
-    lines = [f"**{contract.get('file', '?')}**"]
+    # Shorten full container paths to candidates/ relative form
+    file_path = contract.get('file', '?')
+    if 'candidates/' in file_path:
+        file_path = 'candidates/' + file_path.split('candidates/', 1)[-1]
+    lines = [f"**{file_path}**"]
 
     purpose = contract.get("purpose", "")
     if purpose:

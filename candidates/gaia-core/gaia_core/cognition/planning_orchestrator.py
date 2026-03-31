@@ -404,18 +404,27 @@ def _build_phase_prompt(user_request: str, phase: dict, previous_phases: list,
 
     codebase_section = ""
     if codebase_context:
-        # Extract just the file paths from contracts for a clear reference list
+        # Extract file paths from contracts and shorten to candidates/ relative form
         import re as _re
-        contract_paths = _re.findall(r'\*\*(/[^\*]+\.(?:py|js|html|css|yaml))\*\*', codebase_context)
-        if not contract_paths:
-            contract_paths = _re.findall(r'candidates/[^\s\n]+\.(?:py|js|html)', codebase_context)
+        raw_paths = _re.findall(r'candidates/gaia-[^\s\n*]+\.(?:py|js|html|css|yaml)', codebase_context)
+        if not raw_paths:
+            raw_paths = _re.findall(r'\*\*(/[^\*]+\.(?:py|js|html|css|yaml))\*\*', codebase_context)
+            # Shorten /gaia/GAIA_Project/candidates/... to candidates/...
+            raw_paths = [p.split("candidates/", 1)[-1] if "candidates/" in p else p for p in raw_paths]
+            raw_paths = [f"candidates/{p}" if not p.startswith("candidates/") else p for p in raw_paths]
+
+        # Deduplicate
+        contract_paths = list(dict.fromkeys(raw_paths))
 
         path_list = ""
         if contract_paths:
-            path_list = "\n**Files you MUST reference (these are the real paths):**\n"
+            path_list = (
+                "\n**THESE are the real files — use ONLY these paths:**\n"
+                "```\n"
+            )
             for p in contract_paths[:8]:
-                path_list += f"- `{p}`\n"
-            path_list += "\n"
+                path_list += f"{p}\n"
+            path_list += "```\n\n"
 
         codebase_section = (
             f"\n## Actual Codebase Context\n"
