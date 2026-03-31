@@ -317,75 +317,80 @@ def _assemble_codebase_context(user_request: str, config) -> str:
 
 
 def _find_relevant_source_files(user_request: str) -> List[str]:
-    """Find source files relevant to the planning request."""
-    request_lower = user_request.lower()
-    candidates = []
+    """
+    Find source files relevant to the planning request by scanning
+    the actual codebase, not from a hardcoded lookup table.
 
-    # Map keywords to actual GAIA source files
-    # Resolve base path — works inside container or on host
+    Strategy:
+    1. Identify which services are mentioned in the request
+    2. Find key files in those services (main.py, routes, tools, etc.)
+    3. Include shared protocol files for cross-service features
+    """
     base = Path("/gaia/GAIA_Project") if Path("/gaia/GAIA_Project/candidates").exists() else Path(".")
-    c = str(base) + "/candidates"
-
-    file_map = {
-        "attachment": [
-            f"{c}/gaia-web/gaia_web/routes/files.py",
-            f"{c}/gaia-web/static/app.js",
-            f"{c}/gaia-mcp/gaia_mcp/tools.py",
-            f"{c}/gaia-common/gaia_common/protocols/cognition_packet.py",
-        ],
-        "upload": [
-            f"{c}/gaia-web/gaia_web/routes/files.py",
-            f"{c}/gaia-web/static/app.js",
-        ],
-        "chat": [
-            f"{c}/gaia-web/static/app.js",
-            f"{c}/gaia-web/static/index.html",
-        ],
-        "dashboard": [
-            f"{c}/gaia-web/static/app.js",
-            f"{c}/gaia-web/static/index.html",
-            f"{c}/gaia-web/static/style.css",
-        ],
-        "mcp": [
-            f"{c}/gaia-mcp/gaia_mcp/tools.py",
-        ],
-        "tool": [
-            f"{c}/gaia-mcp/gaia_mcp/tools.py",
-            f"{c}/gaia-common/gaia_common/utils/tools_registry.py",
-        ],
-        "packet": [
-            f"{c}/gaia-common/gaia_common/protocols/cognition_packet.py",
-        ],
-        "prompt": [
-            f"{c}/gaia-core/gaia_core/utils/prompt_builder.py",
-        ],
-        "route": [
-            f"{c}/gaia-web/gaia_web/routes/system.py",
-            f"{c}/gaia-web/gaia_web/routes/hooks.py",
-        ],
-        "web": [
-            f"{c}/gaia-web/gaia_web/main.py",
-            f"{c}/gaia-web/static/app.js",
-        ],
-        "storage": [
-            f"{c}/gaia-mcp/gaia_mcp/tools.py",
-        ],
-    }
-
+    candidates_dir = base / "candidates"
+    request_lower = user_request.lower()
+    results = []
     seen = set()
-    for keyword, files in file_map.items():
-        if keyword in request_lower:
-            for f in files:
-                if f not in seen and Path(f).exists():
-                    candidates.append(f)
-                    seen.add(f)
 
-    # Always include cognition_packet for cross-service features
-    pkt_path = f"{c}/gaia-common/gaia_common/protocols/cognition_packet.py"
-    if pkt_path not in seen and Path(pkt_path).exists():
-        candidates.append(pkt_path)
+    # Discover which service directories exist
+    service_dirs = []
+    if candidates_dir.exists():
+        for child in sorted(candidates_dir.iterdir()):
+            if child.is_dir() and child.name.startswith("gaia-"):
+                service_dirs.append(child)
 
-    return candidates
+    # Score each service by keyword overlap with the request
+    for svc_dir in service_dirs:
+        svc_name = svc_dir.name.replace("gaia-", "")
+        # Check if service name or related terms appear in request
+        if svc_name in request_lower or svc_dir.name in request_lower:
+            _add_key_files(svc_dir, results, seen)
+            continue
+
+        # Check service contract for keyword overlap
+        contract_path = base / "contracts" / "services" / f"{svc_dir.name}.yaml"
+        if contract_path.exists():
+            try:
+                contract_text = contract_path.read_text().lower()
+                # Count how many request words appear in the contract
+                request_words = set(request_lower.split()) - {"a", "the", "to", "for", "and", "in", "of"}
+                overlap = sum(1 for w in request_words if w in contract_text)
+                if overlap >= 2:
+                    _add_key_files(svc_dir, results, seen)
+            except Exception:
+                pass
+
+    # For cross-service features, always include shared protocols
+    proto_path = candidates_dir / "gaia-common" / "gaia_common" / "protocols" / "cognition_packet.py"
+    if proto_path.exists() and str(proto_path) not in seen:
+        results.append(str(proto_path))
+
+    return results[:10]  # Cap to avoid context bloat
+
+
+def _add_key_files(svc_dir: Path, results: List[str], seen: set, max_per_service: int = 3):
+    """Add the most important files from a service directory."""
+    # Priority: main entry points, routes, tools, then other Python files
+    priority_patterns = [
+        "**/main.py", "**/routes/*.py", "**/tools.py",
+        "**/models.py", "**/__init__.py",
+        "static/app.js", "static/index.html",
+    ]
+
+    added = 0
+    for pattern in priority_patterns:
+        if added >= max_per_service:
+            break
+        for match in svc_dir.glob(pattern):
+            if str(match) in seen:
+                continue
+            if any(skip in str(match) for skip in ["__pycache__", ".bak", "test_"]):
+                continue
+            results.append(str(match))
+            seen.add(str(match))
+            added += 1
+            if added >= max_per_service:
+                break
 
 
 # ── Phase Generation ──────────────────────────────────────────────────────
@@ -507,7 +512,7 @@ def _validate_plan(reviewer_model, assembled: str, user_request: str, config) ->
             f"Request: {user_request}\n\n"
             f"Plan:\n{assembled[:2000]}\n\n"
             f"Check: Does it cover all requested areas? Are file paths in candidates/? "
-            f"Are there code examples? Does it use Python/FastAPI/Alpine.js (not React/Java)?\n"
+            f"Are there code examples? Do the patterns match the codebase context?\n"
             f"Respond with: '✅ Plan validated — covers all areas.' or '⚠️ Missing: [what]'"
         )
         messages = [
@@ -537,92 +542,49 @@ def _assemble_plan(fragments: list) -> str:
 
 # ── Stream Observer for Planning ──────────────────────────────────────────
 
-# Known GAIA file path patterns — if Prime references these, they're grounded
-_GAIA_PATH_PREFIXES = [
-    "candidates/gaia-", "gaia-core/", "gaia-web/", "gaia-mcp/",
-    "gaia-common/", "gaia-study/", "gaia-audio/", "gaia-orchestrator/",
-    "gaia-doctor/", "gaia-prime/", "gaia-nano/", "contracts/",
-    "knowledge/", "/shared/", "/models/",
-]
-
-# Wrong tech stack signals — should be Python/FastAPI/Alpine.js
-_WRONG_STACK_PATTERNS = [
-    ("React", "Alpine.js"),
-    ("useState", "Alpine.store / x-data"),
-    ("import React", "Alpine.js (no import needed)"),
-    (".jsx", ".js (Alpine.js)"),
-    (".tsx", ".js (Alpine.js)"),
-    ("className=", "class= (Alpine.js)"),
-    ("public class", "Python class"),
-    ("@PostMapping", "@router.post (FastAPI)"),
-    ("ResponseEntity", "JSONResponse (FastAPI)"),
-    ("SpringBoot", "FastAPI"),
-    ("package com.", "Python module"),
-]
-
-
 def _observe_phase_output(content: str, codebase_context: str) -> List[str]:
     """
-    Rule-based observation of phase output — no LLM needed.
+    Observation of phase output — checks against actual codebase context.
 
-    Returns list of observation strings for user display.
+    Rather than hardcoding "right" and "wrong" patterns, compares the
+    generated content against what was discovered in the codebase context.
     """
     observations = []
 
-    # ── Check 1: Wrong tech stack ──
-    for wrong, correct in _WRONG_STACK_PATTERNS:
-        if wrong in content:
-            observations.append(f"Detected '{wrong}' — GAIA uses {correct}")
-            break  # One stack warning is enough
-
-    # ── Check 2: Non-GAIA file paths ──
-    import re
-    # Find file path references (anything that looks like a/b/c.ext)
-    path_refs = re.findall(r'(?:^|\s|`)([a-zA-Z_][\w/.-]+\.\w{1,5})(?:\s|`|$|:|\))', content)
-    non_gaia_paths = []
-    for path_ref in path_refs:
-        # Skip common non-path matches
-        if path_ref.startswith(("http", "0.", "1.", "2.")) or ".com" in path_ref:
-            continue
-        # Check if it matches known GAIA patterns
-        is_gaia = any(prefix in path_ref for prefix in _GAIA_PATH_PREFIXES)
-        if not is_gaia and "/" in path_ref and not path_ref.startswith("#"):
-            non_gaia_paths.append(path_ref)
-
-    if non_gaia_paths and len(non_gaia_paths) > 2:
-        examples = ", ".join(non_gaia_paths[:3])
-        observations.append(f"Non-GAIA paths detected: {examples} — should use candidates/gaia-*/...")
-
-    # ── Check 3: Missing candidates/ prefix ──
+    # ── Check 1: Candidate-first workflow (operational rule, not leading) ──
     if "candidates/" not in content and any(
         kw in content.lower() for kw in ["file:", "path:", "modify", "create", "update"]
     ):
         observations.append("No candidates/ prefix found — all changes should go to candidates/ first")
 
-    # ── Check 4: Phase too short ──
+    # ── Check 2: Phase too short for implementation ──
     if len(content.strip()) < 200:
         observations.append(f"Phase content is short ({len(content.strip())} chars) — may need more detail")
+
+    # ── Check 3: Verify paths against codebase context ──
+    # If we assembled real file contracts, check if the plan references them
+    if codebase_context and "candidates/" in codebase_context:
+        import re
+        # Extract real paths from context
+        real_paths = set(re.findall(r'candidates/gaia-\w+/[\w/._-]+\.\w+', codebase_context))
+        # Extract paths from generated content
+        gen_paths = set(re.findall(r'candidates/[\w/._-]+\.\w+', content))
+
+        if gen_paths and real_paths:
+            ungrounded = gen_paths - real_paths
+            if ungrounded and len(ungrounded) > len(gen_paths) * 0.5:
+                examples = ", ".join(list(ungrounded)[:3])
+                observations.append(f"Some paths not found in codebase context: {examples}")
 
     return observations
 
 
 def _apply_observations(content: str, observations: List[str]) -> str:
     """
-    Apply simple corrections based on observations.
-    Returns modified content (or original if no auto-fixes apply).
+    Apply corrections based on observations.
+    Currently observation-only — no auto-replacement.
+    The reviewer model handles corrections via revision suggestions.
     """
-    # Auto-fix: wrong tech stack mentions
-    replacements = {
-        "React": "Alpine.js",
-        "useState": "Alpine reactive data",
-        "className=": "class=",
-        ".jsx": ".js",
-        ".tsx": ".js",
-    }
-
-    modified = content
-    for wrong, correct in replacements.items():
-        if wrong in modified and any("Detected" in obs and wrong in obs for obs in observations):
-            modified = modified.replace(wrong, correct)
-
-    return modified
+    # No auto-replacement — let the reviewer and Prime handle corrections
+    # through the natural revision cycle instead of hardcoded string replacement.
+    return content
