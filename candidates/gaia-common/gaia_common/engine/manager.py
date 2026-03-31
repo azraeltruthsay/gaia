@@ -105,7 +105,7 @@ class EngineManager:
             if is_gguf:
                 # GGUF: use llama-server (C++ inference, much faster on CPU)
                 n_gpu_layers = 999 if device == "cuda" else 0
-                ctx_size = int(os.environ.get("GGUF_CTX_SIZE", "4096"))
+                ctx_size = int(os.environ.get("GGUF_CTX_SIZE", os.environ.get("CORE_CPU_CTX", "16384")))
                 threads = int(os.environ.get("GGUF_THREADS", "8"))
                 cmd = [
                     "llama-server",

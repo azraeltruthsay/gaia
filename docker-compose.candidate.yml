@@ -40,7 +40,7 @@ services:
       - CORE_SAFETENSORS_PATH=/models/Qwen3.5-2B-GAIA-Core-v3
       - CORE_CPU_MODEL_PATH=/models/Qwen3.5-2B/Qwen3.5-2B-BF16.gguf
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
-      - CORE_CPU_CTX=8192
+      - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       - SHARED_DIR=/shared
