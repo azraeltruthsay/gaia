@@ -325,10 +325,22 @@ def _generate_modification(
     try:
         messages = [
             {"role": "system", "content": (
-                "You are a code modifier. Your output will be written directly to a file. "
-                "Output ONLY valid source code. NO English text, NO descriptions, NO markdown fences. "
-                "Start with imports or the first line of code. "
-                "Preserve all existing code exactly — only add the requested change."
+                "You are a code modifier. Your output is written directly to a file. "
+                "Output ONLY valid source code. NO English, NO descriptions, NO markdown. "
+                "First line must be an import, comment, or code — never English text."
+            )},
+            # Few-shot: show what correct output looks like
+            {"role": "user", "content": (
+                "Modify this file to add a health check.\n\n"
+                "**Current file content:**\n```\nfrom fastapi import FastAPI\n\napp = FastAPI()\n\n"
+                "@app.get('/')\ndef root():\n    return {'status': 'ok'}\n```\n\n"
+                "**Change needed:** Add a /health endpoint that returns uptime.\n\n"
+                "Output the COMPLETE modified file."
+            )},
+            {"role": "assistant", "content": (
+                "from fastapi import FastAPI\nimport time\n\napp = FastAPI()\n_start = time.time()\n\n"
+                "@app.get('/')\ndef root():\n    return {'status': 'ok'}\n\n"
+                "@app.get('/health')\ndef health():\n    return {'status': 'ok', 'uptime': round(time.time() - _start, 1)}\n"
             )},
             {"role": "user", "content": prompt},
         ]

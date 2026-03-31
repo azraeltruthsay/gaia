@@ -404,9 +404,22 @@ def _build_phase_prompt(user_request: str, phase: dict, previous_phases: list,
 
     codebase_section = ""
     if codebase_context:
+        # Extract just the file paths from contracts for a clear reference list
+        import re as _re
+        contract_paths = _re.findall(r'\*\*(/[^\*]+\.(?:py|js|html|css|yaml))\*\*', codebase_context)
+        if not contract_paths:
+            contract_paths = _re.findall(r'candidates/[^\s\n]+\.(?:py|js|html)', codebase_context)
+
+        path_list = ""
+        if contract_paths:
+            path_list = "\n**Files you MUST reference (these are the real paths):**\n"
+            for p in contract_paths[:8]:
+                path_list += f"- `{p}`\n"
+            path_list += "\n"
+
         codebase_section = (
             f"\n## Actual Codebase Context\n"
-            f"Use these REAL file paths and patterns — do not invent paths.\n\n"
+            f"{path_list}"
             f"{codebase_context}\n\n"
         )
 
@@ -417,8 +430,9 @@ def _build_phase_prompt(user_request: str, phase: dict, previous_phases: list,
         f"{codebase_section}"
         f"Write the **{phase['label']}** section.\n"
         f"{phase['prompt_suffix']}\n\n"
-        f"IMPORTANT: Use the ACTUAL file paths from the codebase context above. "
-        f"All changes go to candidates/ first. Use markdown headers, bullet points, and code blocks."
+        f"CRITICAL: Only reference files from the codebase context above. "
+        f"Do NOT invent file paths. All paths must start with `candidates/gaia-`. "
+        f"Use markdown headers, bullet points, and code blocks."
     )
 
 
