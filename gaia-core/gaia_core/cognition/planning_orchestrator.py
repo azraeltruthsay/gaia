@@ -11,6 +11,7 @@ The assembled context is cached in the CognitionPacket sketchpad and can be
 persisted as a KV prefix segment for future planning requests.
 """
 
+import json
 import logging
 import os
 import time
@@ -146,8 +147,54 @@ def run_planning_pipeline(
         content_type="markdown",
     ))
 
-    logger.info("Planning orchestrator complete — %d phases, %d chars, %d chars context",
-                len(plan_fragments), len(assembled), len(codebase_context))
+    # ── Plan Execution (dry-run) ──
+    # Extract actionable file changes and simulate execution
+    try:
+        from gaia_core.cognition.plan_executor import extract_file_changes, execute_plan_phase
+
+        all_changes = extract_file_changes(assembled)
+        if all_changes:
+            yield {"type": "token", "value": f"\n**[Execution Preview: {len(all_changes)} file(s) identified]**\n"}
+            yield {"type": "flush"}
+
+            for change in all_changes:
+                action_icon = "📝" if change["action"] == "modify" else "📄"
+                desc = change["description"][:80] if change["description"] else change["action"]
+                yield {"type": "token", "value": f"  {action_icon} `{change['file']}` — {desc}\n"}
+            yield {"type": "flush"}
+
+            # Dry-run execution: validate without writing
+            yield {"type": "token", "value": "\n**[Dry-run validation]**\n"}
+            yield {"type": "flush"}
+
+            for event in execute_plan_phase(
+                changes=all_changes,
+                prime_model=prime_model,
+                config=config,
+                dry_run=True,
+            ):
+                yield event
+
+            yield {"type": "token", "value": "\n*Plan ready for execution. Use `/approve` to write changes to candidates/.*\n\n"}
+            yield {"type": "flush"}
+
+            # Store changes in sketchpad for later execution
+            sketchpad.append(Sketchpad(
+                slot="plan_changes",
+                content=json.dumps(all_changes, default=str),
+                content_type="json",
+            ))
+        else:
+            yield {"type": "token", "value": "\n*No specific file changes extracted from plan. Refine file paths for execution.*\n\n"}
+            yield {"type": "flush"}
+    except Exception as _exec_err:
+        logger.warning("Plan execution preview failed: %s", _exec_err, exc_info=True)
+        yield {"type": "token", "value": f"\n*Execution preview skipped: {_exec_err}*\n\n"}
+        yield {"type": "flush"}
+
+    logger.info("Planning orchestrator complete — %d phases, %d chars, %d chars context, %d changes",
+                len(plan_fragments), len(assembled), len(codebase_context),
+                len(all_changes) if 'all_changes' in dir() else 0)
     yield {"type": "flush"}
 
 
