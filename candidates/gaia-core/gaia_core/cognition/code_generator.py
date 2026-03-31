@@ -128,7 +128,7 @@ def generate_patch(
     return _parse_patches(raw)
 
 
-def apply_patches(file_content: str, patches: List[Dict]) -> Tuple[str, List[str]]:
+def apply_patches(file_content: str, patches: List[Dict], file_path: str = "") -> Tuple[str, List[str]]:
     """
     Apply patches to file content.
 
@@ -136,6 +136,7 @@ def apply_patches(file_content: str, patches: List[Dict]) -> Tuple[str, List[str
     """
     lines = file_content.split("\n")
     applied = []
+    ext = Path(file_path).suffix.lower() if file_path else ".py"
 
     for patch in patches:
         action = patch.get("action", "")
@@ -156,19 +157,50 @@ def apply_patches(file_content: str, patches: List[Dict]) -> Tuple[str, List[str
             logger.warning("Patch anchor not found: %s", anchor[:80])
             continue
 
+        # Detect indentation of the anchor line and apply to new code
+        anchor_line = lines[anchor_idx]
+        anchor_indent = len(anchor_line) - len(anchor_line.lstrip())
+        indent_str = anchor_line[:anchor_indent]
+
         new_lines = code.split("\n")
 
+        # Smart indentation: if inserting inside a class/function body, indent one level deeper
+        if action in ("insert_after", "insert_before"):
+            anchor_stripped = anchor_line.strip()
+            needs_body_indent = anchor_stripped.endswith(":") or anchor_stripped.startswith("class ") or anchor_stripped.startswith("def ")
+            if needs_body_indent:
+                body_indent = indent_str + "    "
+                new_lines = [body_indent + line if line.strip() else line for line in new_lines]
+            elif new_lines and not new_lines[0].startswith(" ") and indent_str:
+                new_lines = [indent_str + line if line.strip() else line for line in new_lines]
+
+        # Apply the patch to a copy first, validate, then commit
+        test_lines = lines.copy()
         if action == "insert_after":
-            lines = lines[:anchor_idx + 1] + new_lines + lines[anchor_idx + 1:]
-            applied.append(f"Inserted {len(new_lines)} lines after: {anchor[:60]}")
-
+            test_lines = test_lines[:anchor_idx + 1] + new_lines + test_lines[anchor_idx + 1:]
         elif action == "insert_before":
-            lines = lines[:anchor_idx] + new_lines + lines[anchor_idx:]
-            applied.append(f"Inserted {len(new_lines)} lines before: {anchor[:60]}")
-
+            test_lines = test_lines[:anchor_idx] + new_lines + test_lines[anchor_idx:]
         elif action == "replace":
-            # Replace the anchor line with the new code
-            lines = lines[:anchor_idx] + new_lines + lines[anchor_idx + 1:]
+            test_lines = test_lines[:anchor_idx] + new_lines + test_lines[anchor_idx + 1:]
+
+        # Quick validation: does the patched file still parse?
+        test_content = "\n".join(test_lines)
+        if ext == ".py":
+            try:
+                import ast
+                ast.parse(test_content)
+            except SyntaxError as e:
+                logger.warning("Patch failed validation (skipping): %s — %s", anchor[:50], e)
+                applied.append(f"⚠️ Skipped (syntax error): {anchor[:60]}")
+                continue
+
+        # Patch validated — commit it
+        lines = test_lines
+        if action == "insert_after":
+            applied.append(f"Inserted {len(new_lines)} lines after: {anchor[:60]}")
+        elif action == "insert_before":
+            applied.append(f"Inserted {len(new_lines)} lines before: {anchor[:60]}")
+        elif action == "replace":
             applied.append(f"Replaced line with {len(new_lines)} lines at: {anchor[:60]}")
 
     return "\n".join(lines), applied

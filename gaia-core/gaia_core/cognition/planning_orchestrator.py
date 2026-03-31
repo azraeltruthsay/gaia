@@ -183,6 +183,7 @@ def run_planning_pipeline(
             for event in execute_plan_phase(
                 changes=all_changes,
                 prime_model=prime_model,
+                reviewer_model=reviewer_model,
                 config=config,
                 dry_run=True,
             ):

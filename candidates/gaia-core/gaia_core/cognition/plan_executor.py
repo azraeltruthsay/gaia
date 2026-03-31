@@ -85,11 +85,12 @@ def extract_file_changes(plan_text: str) -> List[Dict]:
 def execute_plan_phase(
     changes: List[Dict],
     prime_model=None,
+    reviewer_model=None,
     config=None,
     dry_run: bool = True,
 ) -> Generator[Dict[str, Any], None, None]:
     """
-    Execute file changes with self-exploration.
+    Execute file changes with self-exploration and review.
 
     For each change:
     1. Resolve path → read actual file → load contract
@@ -146,7 +147,12 @@ def execute_plan_phase(
                 if patches:
                     yield {"type": "token", "value": f"  *Generated {len(patches)} patch(es)*\n"}
 
-                    modified, applied = apply_patches(current_content, patches)
+                    # Review step: have Core (CPU, 16K ctx) check the patches
+                    if reviewer_model:
+                        patches = _review_patches(reviewer_model, patches, real_path or planned_path, contract_text)
+                        yield {"type": "token", "value": "  *Reviewed by observer*\n"}
+
+                    modified, applied = apply_patches(current_content, patches, real_path or planned_path)
 
                     for desc in applied:
                         yield {"type": "token", "value": f"  *  → {desc}*\n"}
@@ -476,3 +482,70 @@ def _extract_code_near(text: str, position: int, max_distance: int = 1000) -> st
         return match.group(1).strip()
 
     return ""
+
+
+def _review_patches(reviewer_model, patches: List[Dict], file_path: str, contract_text: str) -> List[Dict]:
+    """
+    Have the CPU reviewer model check patches for common issues:
+    - Markdown fences in code
+    - Missing indentation
+    - Incomplete code blocks
+    - English preamble instead of code
+
+    Returns cleaned patches.
+    """
+    cleaned = []
+    for patch in patches:
+        code = patch.get("code", "")
+
+        # Rule-based cleanup first (no LLM needed)
+        # Strip any remaining markdown fences
+        code = re.sub(r'^```\w*\s*$', '', code, flags=re.MULTILINE)
+        code = re.sub(r'^\s*```\s*$', '', code, flags=re.MULTILINE)
+
+        # Strip English preamble lines (lines that don't look like code)
+        code_lines = code.split("\n")
+        cleaned_lines = []
+        code_started = False
+        for line in code_lines:
+            stripped = line.strip()
+            # Detect code vs English
+            if not code_started:
+                if (stripped.startswith(("import ", "from ", "def ", "async def ",
+                                        "class ", "@", "#", "    ", "if ", "for ",
+                                        "try:", "except", "return ", "yield "))
+                    or stripped == ""
+                    or re.match(r'^[a-z_]\w*\s*[=(]', stripped)):
+                    code_started = True
+                    cleaned_lines.append(line)
+                # Skip English preamble
+            else:
+                cleaned_lines.append(line)
+
+        code = "\n".join(cleaned_lines).strip()
+
+        if code:
+            cleaned.append({**patch, "code": code})
+
+    # LLM review (optional, for complex patches)
+    if reviewer_model and cleaned:
+        try:
+            patch_summary = "\n".join(
+                f"  PATCH: {p['action']} at '{p['anchor'][:50]}' ({len(p['code'])} chars)"
+                for p in cleaned
+            )
+            messages = [
+                {"role": "system", "content": "You are a code patch reviewer. Check for syntax issues. Reply ONLY with 'OK' if patches look valid, or describe the specific issue in one line."},
+                {"role": "user", "content": f"File: {file_path}\n\nPatches:\n{patch_summary}\n\nFirst patch code:\n{cleaned[0]['code'][:500]}"},
+            ]
+            result = reviewer_model.create_chat_completion(
+                messages=messages, max_tokens=50, temperature=0.1,
+            )
+            if isinstance(result, dict):
+                review = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if review and "ok" not in review.lower()[:10]:
+                    logger.info("Patch review flagged issue: %s", review[:100])
+        except Exception:
+            pass
+
+    return cleaned
