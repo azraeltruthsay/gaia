@@ -131,48 +131,68 @@ def execute_plan_phase(
         # ── Generate modification ──
         if prime_model and (current_content or change.get("code_snippet")):
             if current_content:
-                is_large = len(current_content) > 5000
-                modified = _generate_modification(
-                    prime_model, real_path or planned_path,
-                    current_content, change["description"],
-                    change.get("code_snippet", ""), contract_text, config,
+                from gaia_core.cognition.code_generator import generate_patch, apply_patches
+
+                # Generate targeted patches instead of full file rewrite
+                patches = generate_patch(
+                    prime_model,
+                    real_path or planned_path,
+                    current_content,
+                    change["description"],
+                    change.get("code_snippet", ""),
+                    contract_text,
                 )
-                if modified:
-                    # For large files, this is an addition — validate the new code alone
-                    if is_large:
-                        validation = _validate_code(modified, real_path or planned_path)
-                    else:
-                        validation = _validate_code(modified, real_path or planned_path)
 
-                    status = "✅" if validation["ok"] else "❌"
-                    mode = "append" if is_large else "replace"
-                    yield {"type": "token", "value": f"  *{status} Validation: {validation['status']} ({mode} mode, {len(modified)} chars)*\n"}
+                if patches:
+                    yield {"type": "token", "value": f"  *Generated {len(patches)} patch(es)*\n"}
 
-                    output_path = _to_candidates_path(real_path or planned_path)
-                    if validation["ok"] and not dry_run:
-                        if is_large:
-                            # Append new code to existing file
-                            existing = Path(str(output_path)).read_text() if Path(str(output_path)).exists() else current_content
-                            _write_candidate(str(output_path), existing + "\n\n" + modified)
-                        else:
+                    # Apply patches to get modified content
+                    modified, applied = apply_patches(current_content, patches)
+
+                    for desc in applied:
+                        yield {"type": "token", "value": f"  *  → {desc}*\n"}
+
+                    if applied:
+                        validation = _validate_code(modified, real_path or planned_path)
+                        status = "✅" if validation["ok"] else "❌"
+                        yield {"type": "token", "value": f"  *{status} Validation: {validation['status']}*\n"}
+
+                        output_path = _to_candidates_path(real_path or planned_path)
+                        if validation["ok"] and not dry_run:
                             _write_candidate(str(output_path), modified)
-                        yield {"type": "token", "value": f"  *✅ Written to {output_path}*\n"}
-                    elif validation["ok"]:
-                        yield {"type": "token", "value": f"  *🔍 Dry run — would {mode} {len(modified)} chars to {output_path}*\n"}
+                            yield {"type": "token", "value": f"  *✅ Written to {output_path}*\n"}
+                        elif validation["ok"]:
+                            yield {"type": "token", "value": f"  *🔍 Dry run — would write {len(modified)} chars to {output_path}*\n"}
+                        else:
+                            yield {"type": "token", "value": f"  *Error: {validation.get('error', '')[:200]}*\n"}
                     else:
-                        yield {"type": "token", "value": f"  *Error: {validation.get('error', '')[:200]}*\n"}
+                        yield {"type": "token", "value": "  *Patches generated but anchors not found in file*\n"}
                 else:
-                    yield {"type": "token", "value": "  *Could not generate modification*\n"}
-            elif change.get("code_snippet"):
-                output_path = _to_candidates_path(planned_path)
-                validation = _validate_code(change["code_snippet"], str(output_path))
-                status = "✅" if validation["ok"] else "❌"
-                yield {"type": "token", "value": f"  *{status} Validation: {validation['status']}*\n"}
-                if dry_run:
-                    yield {"type": "token", "value": f"  *🔍 Dry run — would create {output_path}*\n"}
-                elif validation["ok"]:
-                    _write_candidate(str(output_path), change["code_snippet"])
-                    yield {"type": "token", "value": f"  *✅ Created {output_path}*\n"}
+                    yield {"type": "token", "value": "  *Could not generate patches*\n"}
+            elif prime_model:
+                from gaia_core.cognition.code_generator import generate_new_file
+
+                # Generate complete new file
+                new_content = generate_new_file(
+                    prime_model,
+                    planned_path,
+                    change["description"],
+                    change.get("code_snippet", ""),
+                    contract_text,
+                )
+
+                if new_content:
+                    output_path = _to_candidates_path(planned_path)
+                    validation = _validate_code(new_content, str(output_path))
+                    status = "✅" if validation["ok"] else "❌"
+                    yield {"type": "token", "value": f"  *{status} Validation: {validation['status']} ({len(new_content)} chars)*\n"}
+                    if dry_run:
+                        yield {"type": "token", "value": f"  *🔍 Dry run — would create {output_path}*\n"}
+                    elif validation["ok"]:
+                        _write_candidate(str(output_path), new_content)
+                        yield {"type": "token", "value": f"  *✅ Created {output_path}*\n"}
+                else:
+                    yield {"type": "token", "value": "  *Could not generate new file*\n"}
         else:
             yield {"type": "token", "value": "  *No code to generate — needs implementation detail*\n"}
 
