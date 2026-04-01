@@ -147,9 +147,18 @@ def generate_patch(
         if isinstance(result, dict):
             raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
             if raw:
-                return _parse_patches(raw)
+                patches = _parse_patches(raw)
+                if patches:
+                    logger.info("Patch gen: %d patches for %s", len(patches), file_path)
+                    for p in patches:
+                        logger.info("  %s at: %s (%d chars code)", p["action"], p["anchor"][:60], len(p["code"]))
+                else:
+                    logger.warning("Patch gen: no parseable patches for %s. Raw: %s", file_path, raw[:200])
+                return patches
+            else:
+                logger.warning("Patch gen: empty response for %s", file_path)
     except Exception as e:
-        logger.warning("Patch generation failed: %s", e)
+        logger.warning("Patch generation failed for %s: %s", file_path, e)
     return None
 
 
