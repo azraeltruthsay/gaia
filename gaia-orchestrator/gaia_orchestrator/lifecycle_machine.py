@@ -494,8 +494,20 @@ class LifecycleMachine:
                         except Exception:
                             pass
 
-                    device = "gpu" if model_loaded and vram_mb > 100 else (
-                        "cpu" if model_loaded else "unloaded")
+                    # Trust the engine's device field when available;
+                    # fall back to vram heuristic for legacy endpoints
+                    reported_device = ""
+                    try:
+                        reported_device = status.get("device", "")
+                    except Exception:
+                        pass
+                    if reported_device in ("gpu", "cuda"):
+                        device = "gpu"
+                    elif reported_device == "cpu":
+                        device = "cpu" if model_loaded else "unloaded"
+                    else:
+                        device = "gpu" if model_loaded and vram_mb > 100 else (
+                            "cpu" if model_loaded else "unloaded")
 
                     return TierLiveStatus(
                         device=device,
