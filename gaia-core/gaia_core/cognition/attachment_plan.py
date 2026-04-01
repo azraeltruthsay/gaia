@@ -81,23 +81,14 @@ def generate_attachment_code(
         if change.get("example_pattern"):
             example = _extract_example(content, change["example_pattern"])
 
-        # Generate the change — retry up to 3 times
+        # Generate the change via EXECUTE: replace directives
         MAX_RETRIES = 3
         success = False
         for attempt in range(1, MAX_RETRIES + 1):
-            if ext == ".py":
-                success = yield from _generate_python_change(
-                    prime_model, file_path, content, change,
-                    contract_text, example, dry_run
-                )
-            elif ext == ".js":
-                success = yield from _generate_js_change(
-                    prime_model, content, change, example, file_path, dry_run
-                )
-            else:
-                yield {"type": "token", "value": f"  *Unsupported file type: {ext}*\n"}
-                break
-
+            success = yield from _generate_via_replace(
+                prime_model, file_path, content, change,
+                contract_text, example, ext, dry_run
+            )
             if success:
                 break
             elif attempt < MAX_RETRIES:
@@ -275,81 +266,109 @@ def _plan_changes(discoveries: Dict) -> List[Dict]:
     return changes
 
 
-# ── Per-file code generation ─────────────────────────────────────────────
+# ── Code generation via OLD_TEXT/NEW_TEXT (matches MCP replace tool) ──────
 
-def _generate_python_change(
-    model, file_path, content, change, contract_text, example, dry_run
+def _generate_via_replace(
+    model, file_path, content, change, contract_text, example, ext, dry_run
 ) -> Generator[Dict[str, Any], None, bool]:
-    """Generate and validate a Python code change."""
-    from gaia_core.cognition.code_generator import generate_patch, apply_patches
+    """
+    Generate code changes as OLD_TEXT/NEW_TEXT pairs.
+    Same format as the MCP 'replace' tool — find exact text, replace with expanded version.
+    """
+    # Ensure this is always a generator (yield before any possible early return)
+    yield {"type": "flush"}
 
-    patches = generate_patch(
-        model, file_path, content,
-        change["description"], "", contract_text,
+    # Build focused context
+    if example:
+        context = f"**Relevant section:**\n```\n{example}\n```\n\n"
+    elif len(content) < 4000:
+        context = f"**Current file:**\n```\n{content}\n```\n\n"
+    else:
+        from gaia_core.cognition.code_generator import _find_relevant_section
+        relevant = _find_relevant_section(content, change["description"])
+        context = f"**Relevant section:**\n```\n{relevant}\n```\n\n" if relevant else ""
+
+    prompt = (
+        f"Edit {Path(file_path).name} to: {change['description']}\n\n"
+        f"{context}"
     )
+    if contract_text:
+        prompt += f"**API:** {contract_text[:300]}\n\n"
+    prompt += "Show OLD_TEXT (exact text from the file) and NEW_TEXT (replacement with new code added)."
 
-    if patches:
-        yield {"type": "token", "value": f"  *Generated {len(patches)} patch(es)*\n"}
+    messages = [
+        {"role": "system", "content": "You make targeted code edits. Show OLD_TEXT and NEW_TEXT in fenced blocks."},
+        {"role": "user", "content": "Add a /health endpoint after the /status endpoint.\n\n**Relevant section:**\n```\n@router.get('/status')\ndef status():\n    return {'ok': True}\n```"},
+        {"role": "assistant", "content": "OLD_TEXT:\n```\n@router.get('/status')\ndef status():\n    return {'ok': True}\n```\n\nNEW_TEXT:\n```\n@router.get('/status')\ndef status():\n    return {'ok': True}\n\n\n@router.get('/health')\ndef health():\n    return {'status': 'healthy'}\n```"},
+        {"role": "user", "content": prompt},
+    ]
 
-        modified, applied = apply_patches(content, patches, file_path)
-        for desc in applied:
-            yield {"type": "token", "value": f"  *  → {desc}*\n"}
+    try:
+        result = model.create_chat_completion(messages=messages, max_tokens=1500, temperature=0.1)
+        if not isinstance(result, dict):
+            return False
+        raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not raw:
+            yield {"type": "token", "value": f"  *Empty response*\n"}
+            return False
 
-        valid_applied = [a for a in applied if "Skipped" not in a]
-        if valid_applied:
+        # Parse OLD_TEXT / NEW_TEXT
+        old_match = re.search(r'OLD_TEXT:\s*\n```(?:\w+)?\n(.*?)```', raw, re.DOTALL)
+        new_match = re.search(r'NEW_TEXT:\s*\n```(?:\w+)?\n(.*?)```', raw, re.DOTALL)
+
+        if not old_match or not new_match:
+            logger.warning("Could not parse OLD/NEW from: %s", raw[:200])
+            yield {"type": "token", "value": f"  *Could not parse edit*\n"}
+            return False
+
+        old_text = old_match.group(1)
+        new_text = new_match.group(1)
+
+        # Don't strip — preserve exact whitespace for matching
+        if not old_text or not new_text:
+            yield {"type": "token", "value": f"  *Empty old/new text*\n"}
+            return False
+
+        # Find old_text in file (try exact, then first-line match)
+        if old_text not in content:
+            first_line = old_text.split("\n")[0].strip()
+            if first_line and first_line in content:
+                # Locate by first line and extract matching length
+                idx = content.find(first_line)
+                old_lines = len(old_text.split("\n"))
+                file_lines = content.split("\n")
+                line_num = content[:idx].count("\n")
+                actual = "\n".join(file_lines[line_num:line_num + old_lines])
+                old_text = actual
+            else:
+                yield {"type": "token", "value": f"  *OLD_TEXT not found in file*\n"}
+                return False
+
+        # Apply replacement
+        modified = content.replace(old_text, new_text, 1)
+
+        # Validate
+        if ext == ".py":
             import ast
             try:
                 ast.parse(modified)
-                yield {"type": "token", "value": f"  *✅ Validation passed*\n"}
-                if not dry_run:
-                    _write_file(file_path, modified)
-                    yield {"type": "token", "value": f"  *✅ Written*\n"}
-                else:
-                    yield {"type": "token", "value": f"  *🔍 Dry run — {len(modified)} chars ready*\n"}
-                return True
             except SyntaxError as e:
-                yield {"type": "token", "value": f"  *❌ Syntax error after patching: {e}*\n"}
+                yield {"type": "token", "value": f"  *❌ Syntax error: {e}*\n"}
                 return False
+
+        delta = len(new_text) - len(old_text)
+        yield {"type": "token", "value": f"  *✅ Edit validated ({delta:+d} chars)*\n"}
+        if dry_run:
+            yield {"type": "token", "value": f"  *🔍 Dry run — {len(modified)} chars ready*\n"}
         else:
-            yield {"type": "token", "value": f"  *⚠️ All patches skipped (bad anchors)*\n"}
-            return False
-    else:
-        yield {"type": "token", "value": f"  *Could not generate patches*\n"}
-        return False
+            _write_file(file_path, modified)
+            yield {"type": "token", "value": f"  *✅ Written*\n"}
+        return True
 
-
-def _generate_js_change(
-    model, content, change, example, file_path, dry_run
-) -> Generator[Dict[str, Any], None, bool]:
-    """Generate JavaScript code to add."""
-    prompt = f"Add this functionality to an Alpine.js application:\n\n"
-    prompt += f"**Change:** {change['description']}\n\n"
-    if example:
-        prompt += f"**Existing pattern to match:**\n```javascript\n{example}\n```\n\n"
-    prompt += "Output ONLY the new JavaScript code. Use Alpine.js patterns. No markdown fences."
-
-    try:
-        messages = [
-            {"role": "system", "content": "Output only JavaScript code for Alpine.js. No explanations."},
-            {"role": "user", "content": prompt},
-        ]
-        result = model.create_chat_completion(messages=messages, max_tokens=1024, temperature=0.1)
-        if isinstance(result, dict):
-            code = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            code = re.sub(r'^```(?:javascript)?\n', '', code)
-            code = re.sub(r'\n```\s*$', '', code)
-            if code.strip():
-                yield {"type": "token", "value": f"  *Generated {len(code)} chars of JS*\n"}
-                if not dry_run:
-                    _write_file(file_path, content + "\n\n" + code)
-                    yield {"type": "token", "value": f"  *✅ Appended*\n"}
-                else:
-                    yield {"type": "token", "value": f"  *🔍 Dry run — {len(code)} chars ready*\n"}
-                return True
     except Exception as e:
-        logger.warning("JS generation failed: %s", e)
-    yield {"type": "token", "value": f"  *Could not generate JS*\n"}
-    return False
+        logger.warning("Replace gen failed: %s", e)
+        yield {"type": "token", "value": f"  *Error: {e}*\n"}
+        return False
 
 
 def _extract_example(content: str, pattern: str, context_lines: int = 25) -> str:
