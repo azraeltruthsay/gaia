@@ -81,19 +81,28 @@ def generate_attachment_code(
         if change.get("example_pattern"):
             example = _extract_example(content, change["example_pattern"])
 
-        # Generate the change
-        if ext == ".py":
-            success = yield from _generate_python_change(
-                prime_model, file_path, content, change,
-                contract_text, example, dry_run
-            )
-        elif ext == ".js":
-            success = yield from _generate_js_change(
-                prime_model, content, change, example, file_path, dry_run
-            )
-        else:
-            yield {"type": "token", "value": f"  *Unsupported file type: {ext}*\n"}
-            success = False
+        # Generate the change — retry up to 3 times
+        MAX_RETRIES = 3
+        success = False
+        for attempt in range(1, MAX_RETRIES + 1):
+            if ext == ".py":
+                success = yield from _generate_python_change(
+                    prime_model, file_path, content, change,
+                    contract_text, example, dry_run
+                )
+            elif ext == ".js":
+                success = yield from _generate_js_change(
+                    prime_model, content, change, example, file_path, dry_run
+                )
+            else:
+                yield {"type": "token", "value": f"  *Unsupported file type: {ext}*\n"}
+                break
+
+            if success:
+                break
+            elif attempt < MAX_RETRIES:
+                yield {"type": "token", "value": f"  *Retry {attempt + 1}/{MAX_RETRIES}...*\n"}
+                yield {"type": "flush"}
 
         if success:
             results["passed"] += 1

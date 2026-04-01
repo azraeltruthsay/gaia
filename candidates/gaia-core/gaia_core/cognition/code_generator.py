@@ -85,8 +85,8 @@ def generate_patch(
     generates the delta, which is much more reliable.
     """
     # Show enough context for the model to generate accurate patches
-    if len(file_content) > 3000:
-        # For large files: show structure + the relevant section
+    if len(file_content) > 4000:
+        # Large files: show structure + relevant section
         structure = _extract_structure(file_content)
         relevant = _find_relevant_section(file_content, description, code_snippet)
         if relevant:
@@ -110,34 +110,25 @@ def generate_patch(
         prompt += f"**Suggested code:**\n```\n{code_snippet}\n```\n\n"
 
     prompt += (
-        "Generate patches in this exact format (one or more):\n\n"
-        "PATCH 1:\n"
-        "ACTION: insert_after\n"
-        "ANCHOR: <exact line from the file to insert after>\n"
-        "CODE:\n"
+        "Output one or more changes. For each change, use this format:\n\n"
+        "FIND: <an exact line from the file>\n"
+        "INSERT_AFTER:\n"
         "```\n"
-        "<new code to insert>\n"
+        "<new code>\n"
         "```\n\n"
-        "Valid actions: insert_after, insert_before, replace\n"
-        "For replace, ANCHOR is the line(s) to replace.\n"
-        "For insert_after/insert_before, ANCHOR is the reference line.\n"
-        "The ANCHOR must be an EXACT line from the file structure above."
+        "The FIND line MUST be copied exactly from the file above."
     )
 
     messages = [
-        {"role": "system", "content": "You generate targeted code patches. Follow the PATCH format exactly."},
-        # Few-shot example showing correct format
+        {"role": "system", "content": "You generate targeted code changes. Use FIND/INSERT_AFTER format."},
         {"role": "user", "content": (
-            "Add a health endpoint to this file.\n\n"
-            "**File structure:**\n```\nfrom fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
-            "@router.get('/status')\ndef status():\n    return {'ok': True}\n```\n\n"
-            "Generate patches in the PATCH format."
+            "Add a health endpoint.\n\n"
+            "**File:**\n```\nfrom fastapi import APIRouter\nrouter = APIRouter()\n\n"
+            "@router.get('/status')\ndef status():\n    return {'ok': True}\n```\n"
         )},
         {"role": "assistant", "content": (
-            "PATCH 1:\n"
-            "ACTION: insert_after\n"
-            "ANCHOR: return {'ok': True}\n"
-            "CODE:\n```\n\n@router.get('/health')\ndef health():\n    return {'status': 'healthy'}\n```"
+            "FIND: return {'ok': True}\n"
+            "INSERT_AFTER:\n```\n\n\n@router.get('/health')\ndef health():\n    return {'status': 'healthy'}\n```"
         )},
         {"role": "user", "content": prompt},
     ]
@@ -324,12 +315,26 @@ def _find_relevant_section(content: str, description: str, code_snippet: str = "
 
 
 def _parse_patches(raw: str) -> List[Dict]:
-    """Parse the model's patch output into structured patches."""
+    """Parse the model's patch output — supports FIND/INSERT_AFTER and PATCH formats."""
     patches = []
 
-    # Split on PATCH markers
-    patch_sections = re.split(r'PATCH\s+\d+:', raw)
+    # Try FIND/INSERT_AFTER format first (simpler, more reliable)
+    find_matches = re.finditer(
+        r'FIND:\s*(.+?)\n\s*INSERT_AFTER:\s*\n```(?:\w+)?\n(.*?)```',
+        raw, re.DOTALL
+    )
+    for match in find_matches:
+        anchor = match.group(1).strip()
+        code = match.group(2).strip()
+        code = re.sub(r'^```\w*\s*$', '', code, flags=re.MULTILINE).strip()
+        if anchor and code:
+            patches.append({"action": "insert_after", "anchor": anchor, "code": code})
 
+    if patches:
+        return patches
+
+    # Fallback: try PATCH format
+    patch_sections = re.split(r'PATCH\s+\d+:', raw)
     for section in patch_sections:
         if not section.strip():
             continue
@@ -339,12 +344,10 @@ def _parse_patches(raw: str) -> List[Dict]:
         code_match = re.search(r'```(?:\w+)?\n(.*?)```', section, re.DOTALL)
 
         if not code_match:
-            # Try without fences
             code_match = re.search(r'CODE:\s*\n((?:(?!PATCH).)+)', section, re.DOTALL)
 
         if action_match and anchor_match and code_match:
             code = code_match.group(1).strip()
-            # Strip any remaining markdown artifacts
             code = re.sub(r'^```\w*\s*$', '', code, flags=re.MULTILINE)
             code = re.sub(r'^\s*```\s*$', '', code, flags=re.MULTILINE)
             code = code.strip()
