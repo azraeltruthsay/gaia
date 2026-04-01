@@ -165,7 +165,6 @@ class SleepCycleLoop:
     def _handle_active(self, idle_minutes: float) -> None:
         if self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes):
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
-            self._update_presence("drifting off...")
 
             try:
                 from gaia_common.event_buffer import log_event
@@ -175,11 +174,12 @@ class SleepCycleLoop:
 
             success = self.sleep_wake_manager.initiate_drowsy()
             if success:
+                # Only update presence AFTER transition is confirmed
+                self._update_presence("drifting off...")
                 self._release_gpu_for_sleep()
                 self._update_presence("sleeping...", sleeping=True)
             else:
-                # Cancelled or failed — reset to normal idle status
-                self._update_presence(None)
+                logger.info("Drowsy transition cancelled — staying active")
 
     def _handle_asleep(self) -> None:
         # Check transient phases first
