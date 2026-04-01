@@ -162,13 +162,29 @@ class TrainingLifecycle:
                 tier.was_loaded = False
             snap.tiers[name] = tier
 
-        # Core is embedded — check via its own endpoint
+        # Core is embedded — try /status (proxied to worker), fall back to /model/info
         core_tier = TierSnapshot(name="core", url=CORE_URL)
         core_status = _get(f"{CORE_URL}/status")
         if core_status and core_status.get("model"):
             core_tier.model_path = core_status["model"]
             core_tier.device = core_status.get("device", "cpu")
             core_tier.was_loaded = True
+        else:
+            # Try model/info (manager endpoint, always available)
+            core_info = _get(f"{CORE_URL}/model/info")
+            if core_info and core_info.get("model_loaded"):
+                core_tier.model_path = core_info.get("model_path", "")
+                core_tier.device = core_info.get("device", "cpu")
+                core_tier.was_loaded = True
+            else:
+                # Check orchestrator's view as last resort
+                orch_state = _get(f"{ORCHESTRATOR_URL}/lifecycle/state")
+                if orch_state:
+                    core_orch = orch_state.get("tiers", {}).get("core", {})
+                    if core_orch.get("model_loaded"):
+                        core_tier.model_path = core_orch.get("model_path", "")
+                        core_tier.device = core_orch.get("device", "cpu")
+                        core_tier.was_loaded = True
         snap.tiers["core"] = core_tier
 
         # Check study container
@@ -201,7 +217,8 @@ class TrainingLifecycle:
         """Unload all models to free VRAM for training."""
         logger.info("Unloading all models for training...")
 
-        for name, url in [("nano", NANO_URL), ("prime", PRIME_URL)]:
+        # Unload all tiers including Core's managed engine
+        for name, url in [("nano", NANO_URL), ("core", CORE_URL), ("prime", PRIME_URL)]:
             tier = self.snapshot.tiers.get(name)
             if tier and tier.was_loaded:
                 result = _post(f"{url}/model/unload")
@@ -209,15 +226,37 @@ class TrainingLifecycle:
                     logger.info("  %s unloaded", name)
                 else:
                     logger.warning("  %s unload failed: %s", name, result)
+            else:
+                # Try anyway — Core may be loaded by orchestrator even if snapshot missed it
+                result = _post(f"{url}/model/unload")
+                if result and result.get("ok"):
+                    logger.info("  %s unloaded (wasn't in snapshot)", name)
 
-        # Don't unload Core — it's embedded and has its own lifecycle
-        # The orchestrator GPU release handles it if needed
+        # Release GPU lease so orchestrator doesn't auto-reload
         result = _post(f"{ORCHESTRATOR_URL}/gpu/release")
         if result and result.get("success"):
             logger.info("  GPU released via orchestrator")
 
+        # Transition to MEDITATION to prevent orchestrator from reloading
+        result = _post(f"{ORCHESTRATOR_URL}/consciousness/training", timeout=30)
+        if result:
+            logger.info("  Consciousness set to training mode")
+        else:
+            logger.warning("  Could not set training mode (orchestrator may reload models)")
+
         # Wait for VRAM to settle
-        time.sleep(2)
+        time.sleep(3)
+
+        # Verify GPU is actually free
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used,memory.free", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5
+            )
+            logger.info("  GPU: %s", result.stdout.strip())
+        except Exception:
+            pass
+
         logger.info("Models unloaded, ready for training")
 
     # ── Study container management ─────────────────────────────────────
@@ -271,7 +310,13 @@ class TrainingLifecycle:
 
         logger.info("Restoring system state...")
 
-        for name in ["nano", "prime"]:
+        # Exit training mode — tell orchestrator to wake up
+        result = _post(f"{ORCHESTRATOR_URL}/consciousness/awake", timeout=30)
+        if result:
+            logger.info("  Consciousness set to awake")
+
+        # Restore each tier (including Core)
+        for name in ["nano", "core", "prime"]:
             tier = snapshot.tiers.get(name)
             if not tier or not tier.was_loaded:
                 logger.info("  %s: was unloaded, skipping", name)
@@ -279,9 +324,9 @@ class TrainingLifecycle:
 
             logger.info("  %s: restoring %s on %s...", name, tier.model_path, tier.device)
 
-            # Map device names for the engine (orchestrator uses "gpu", engine needs "gpu" which normalizes to "cuda")
+            # Map device names for the engine
             device = tier.device
-            if device in ("gpu_safetensors", "gpu"):
+            if device in ("gpu_safetensors", "gpu", "cuda"):
                 device = "gpu"
             elif device in ("cpu_gguf", "cpu"):
                 device = "cpu"
