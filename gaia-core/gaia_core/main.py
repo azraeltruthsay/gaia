@@ -1152,6 +1152,50 @@ async def audio_context():
     }
 
 
+# ── Attachment Implementation Endpoint ─────────────────────────────────
+@app.post("/implement/attachments")
+async def implement_attachments(dry_run: bool = True):
+    """Run the focused attachment code generator."""
+    from gaia_core.cognition.attachment_plan import generate_attachment_code
+
+    prime = None
+    reviewer = None
+    if _ai_manager and _ai_manager.model_pool:
+        for name in ["gpu_prime", "prime", "lite", "core"]:
+            if name in _ai_manager.model_pool.models:
+                prime = _ai_manager.model_pool.acquire_model(name)
+                break
+        for name in ["lite", "core", "reflex"]:
+            if name in _ai_manager.model_pool.models and name != (prime and getattr(prime, '_model_name', '')):
+                try:
+                    reviewer = _ai_manager.model_pool.acquire_model(name)
+                except Exception:
+                    pass
+                break
+
+    if not prime:
+        return JSONResponse(status_code=503, content={"error": "No model available"})
+
+    async def _stream():
+        loop = asyncio.get_event_loop()
+        gen = generate_attachment_code(prime_model=prime, reviewer_model=reviewer, dry_run=dry_run)
+        def _next():
+            try:
+                return next(gen)
+            except StopIteration:
+                return None
+            except Exception as e:
+                logger.error("Attachment gen error: %s", e, exc_info=True)
+                return None
+        while True:
+            event = await loop.run_in_executor(None, _next)
+            if event is None:
+                break
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
 # ── Cognitive Similarity Endpoint ─────────────────────────────────────
 # Used by gaia-doctor's cognitive test battery for open-ended validation.
 

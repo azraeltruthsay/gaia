@@ -124,11 +124,33 @@ def generate_patch(
         "The ANCHOR must be an EXACT line from the file structure above."
     )
 
-    raw = _call_model(model, prompt, max_tokens=1500)
-    if not raw:
-        return None
+    messages = [
+        {"role": "system", "content": "You generate targeted code patches. Follow the PATCH format exactly."},
+        # Few-shot example showing correct format
+        {"role": "user", "content": (
+            "Add a health endpoint to this file.\n\n"
+            "**File structure:**\n```\nfrom fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
+            "@router.get('/status')\ndef status():\n    return {'ok': True}\n```\n\n"
+            "Generate patches in the PATCH format."
+        )},
+        {"role": "assistant", "content": (
+            "PATCH 1:\n"
+            "ACTION: insert_after\n"
+            "ANCHOR: return {'ok': True}\n"
+            "CODE:\n```\n\n@router.get('/health')\ndef health():\n    return {'status': 'healthy'}\n```"
+        )},
+        {"role": "user", "content": prompt},
+    ]
 
-    return _parse_patches(raw)
+    try:
+        result = model.create_chat_completion(messages=messages, max_tokens=1500, temperature=0.1)
+        if isinstance(result, dict):
+            raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if raw:
+                return _parse_patches(raw)
+    except Exception as e:
+        logger.warning("Patch generation failed: %s", e)
+    return None
 
 
 def apply_patches(file_content: str, patches: List[Dict], file_path: str = "") -> Tuple[str, List[str]]:
