@@ -253,11 +253,13 @@ def _plan_changes(discoveries: Dict) -> List[Dict]:
             "file": pb.get("file", "candidates/gaia-core/gaia_core/utils/prompt_builder.py"),
             "summary": "Inject attachment context into prompts",
             "description": (
-                "After assembling data fields, check packet.content.attachments. "
-                "If present, add section: 'Attached files:' with filename, size, "
-                "and content_preview for each."
+                "After the for loop that processes data_fields (the line: "
+                "'for df in getattr(packet.content, 'data_fields', []) or []:'), "
+                "add a new section that checks getattr(packet.content, 'attachments', []). "
+                "If attachments exist, append to identity_lines a section listing each "
+                "attachment's filename and size."
             ),
-            "example_pattern": "data_fields",
+            "example_pattern": "for df in getattr(packet.content",
         })
 
     return changes
