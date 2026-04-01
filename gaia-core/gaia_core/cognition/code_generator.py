@@ -85,10 +85,13 @@ def generate_patch(
     This approach avoids reproducing the entire file — the model only
     generates the delta, which is much more reliable.
     """
-    # Show enough of the file for the model to identify insertion points
-    # For large files, show the structure (imports, class/function signatures)
+    # Show enough context for the model to generate accurate patches
     if len(file_content) > 3000:
+        # For large files: show structure + the relevant section
         structure = _extract_structure(file_content)
+        relevant = _find_relevant_section(file_content, description, code_snippet)
+        if relevant:
+            structure += f"\n\n# ── Relevant section (for insertion context) ──\n{relevant}"
     else:
         structure = file_content
 
@@ -244,6 +247,50 @@ def _extract_structure(content: str) -> str:
     # Add line count note
     result += f"\n\n# ... ({len(lines)} total lines)"
     return result
+
+
+def _find_relevant_section(content: str, description: str, code_snippet: str = "", context_lines: int = 30) -> str:
+    """
+    Find the section of a file most relevant to the planned change.
+
+    Searches for keywords from the description in the file content,
+    then extracts surrounding context. This gives the model a focused
+    view of WHERE in the file the change should go.
+    """
+    lines = content.split("\n")
+    if not lines:
+        return ""
+
+    # Extract keywords from description
+    desc_words = set(description.lower().split()) - {
+        "a", "the", "to", "for", "and", "in", "of", "add", "new", "with",
+        "function", "method", "class", "file", "update", "create",
+    }
+
+    # Score each line by keyword hits
+    scored = []
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        score = sum(1 for w in desc_words if len(w) > 3 and w in line_lower)
+        if score > 0:
+            scored.append((score, i))
+
+    if not scored:
+        # Fallback: show the last function/class definition area (likely insertion point)
+        for i in range(len(lines) - 1, -1, -1):
+            stripped = lines[i].strip()
+            if stripped.startswith(("def ", "async def ", "class ", "@router.", "@app.")):
+                start = max(0, i - 5)
+                end = min(len(lines), i + context_lines)
+                return "\n".join(lines[start:end])
+        return ""
+
+    # Take the highest-scoring region
+    scored.sort(key=lambda x: -x[0])
+    best_line = scored[0][1]
+    start = max(0, best_line - 10)
+    end = min(len(lines), best_line + context_lines)
+    return "\n".join(lines[start:end])
 
 
 def _parse_patches(raw: str) -> List[Dict]:

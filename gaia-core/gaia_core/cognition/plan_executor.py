@@ -173,14 +173,23 @@ def execute_plan_phase(
                     else:
                         yield {"type": "token", "value": f"  *Patches generated but anchors not found in file*\n"}
                 else:
-                    # Fallback: generate additive code (new function/route to append)
-                    from gaia_core.cognition.code_generator import generate_new_file
+                    # Fallback: generate additive code with relevant section context
+                    from gaia_core.cognition.code_generator import generate_new_file, _find_relevant_section
                     yield {"type": "token", "value": f"  *Patch generation failed — trying additive code*\n"}
+
+                    # Show the model the relevant section so it can match patterns
+                    relevant_section = _find_relevant_section(
+                        current_content, change["description"], change.get("code_snippet", "")
+                    )
+                    enhanced_contract = contract_text
+                    if relevant_section:
+                        enhanced_contract += f"\n\n**Existing code pattern (match this style):**\n```\n{relevant_section}\n```"
+
                     addition = generate_new_file(
                         prime_model, planned_path,
                         f"New code to add to {Path(real_path or planned_path).name}: {change['description']}",
                         change.get("code_snippet", ""),
-                        contract_text,
+                        enhanced_contract,
                     )
                     if addition:
                         validation = _validate_code(addition, real_path or planned_path)
