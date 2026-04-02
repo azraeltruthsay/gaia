@@ -38,23 +38,20 @@ TOOL_RESULT_OPEN = "<tool_result>"
 TOOL_RESULT_CLOSE = "</tool_result>"
 
 # System prompt fragment injected during training — MUST match inference injection
-# Generated from domain_tools.py via build_tool_schema_injection()
-SYSTEM_TOOLS = """You have these tools available:
-- file(action): read|write|list|tree|find
-- shell(action): run
-- web(action): search|fetch
-- knowledge(action): query|search|memory|add|index|embed|list|status
-- audio(action): listen_start|listen_stop|listen_status|inbox_*
-- study(action): train|status|cancel|adapter_list|adapter_load|adapter_unload
-- introspect(action): world|recall|logs|count_chars|tools|describe
-- worldbuild(action): campaigns|search|list|get|create|update
-- notebook(action): list|get|sources|notes|artifacts|chat|create_note
-- context(action): ingest|focus|compress|expand|synthesize|status|fragment_*
-- manage(action): blueprint|assess|promote|promote_list|promote_status
-- fabric(pattern, input): Run a Fabric analysis pattern
-
-Call tools inline: <tool_call>{"tool":"domain","action":"verb",...}</tool_call>
-Results appear as: <tool_result>...</tool_result>"""
+# Semantically compressed: model's English knowledge fills in the gaps
+SYSTEM_TOOLS = """Tools (call via <tool_call>{"tool":"name","action":"verb",...}</tool_call>):
+file: read|write|list|find
+shell: run
+web: search|fetch
+memory: query|search|add|index|list
+audio: listen|stop|status|inbox
+study: train|status|cancel|load|unload|list
+recall: world|events|logs|tools
+lore: search|list|get|create|update
+notebook: list|get|chat|create
+context: ingest|focus|compress|expand|synthesize
+manage: blueprint|assess|promote
+fabric: (pattern, input)"""
 
 
 def load_voice_phrases() -> dict:
@@ -181,24 +178,24 @@ def gen_tool_calling_voiced(phrases: dict) -> list:
 
         # Introspection
         ("What time is it?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("How's the system doing?",
-         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
         ("What happened recently?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":2}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":2}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Check the Core logs for errors.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":30}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":30}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
 
         # Knowledge
         ("Search my knowledge base for information about SAE training.",
-         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
         ("What knowledge bases do I have?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
 
         # Shell
@@ -211,13 +208,13 @@ def gen_tool_calling_voiced(phrases: dict) -> list:
 
         # Study / Adapters
         ("What adapters do I have loaded?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_list\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("What's the training status?",
          f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"status\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Load the conversational adapter.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_load\",\"adapter_name\":\"conversational_v1\",\"tier\":1}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"load\",\"adapter_name\":\"conversational_v1\",\"tier\":1}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
 
         # Shell — more variety
@@ -265,10 +262,10 @@ def gen_tool_calling_voiced(phrases: dict) -> list:
 
         # Knowledge — more variety
         ("Search the system knowledge base for immune system documentation.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"immune system health monitoring\",\"knowledge_base_name\":\"system\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"immune system health monitoring\",\"knowledge_base_name\":\"system\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Index this new document into the knowledge base.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"index\",\"file_path\":\"/knowledge/research/new_findings.md\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"index\",\"file_path\":\"/knowledge/research/new_findings.md\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
     ]
 
@@ -294,13 +291,13 @@ def gen_tool_with_result(phrases: dict) -> list:
     # Part A: Tool calls that STOP at </tool_call> — these reinforce stopping
     stop_scenarios = [
         ("What time is it?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
         ("Show me the conversational persona file.",
          f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/personas/conversational.json\"}}{TOOL_CALL_CLOSE}"),
         ("Search the web for the Jabberwocky poem.",
          f"Let me find that.\n{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Jabberwocky Lewis Carroll full poem text\"}}{TOOL_CALL_CLOSE}"),
         ("Are there any errors in the system?",
-         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}"),
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}"),
     ]
 
     for question, answer in stop_scenarios:
@@ -413,20 +410,20 @@ def gen_identity_with_tools(phrases: dict) -> list:
     pairs = [
         ("How are your services doing?",
          f"{pick_voice(phrases, 'filler')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["identity", "tool_calling"]),
         ("What have you been up to?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":6}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":6}}{TOOL_CALL_CLOSE}",
          ["identity", "tool_calling"]),
         ("Are you healthy?",
          f"{pick_voice(phrases, 'filler')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":20}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":20}}{TOOL_CALL_CLOSE}",
          ["identity", "voice", "tool_calling"]),
         ("What adapters are you using right now?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_list\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
          ["identity", "tool_calling"]),
         ("Tell me about your knowledge base.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
          ["identity", "tool_calling"]),
     ]
 
@@ -459,12 +456,12 @@ def gen_multi_turn_tool(phrases: dict) -> list:
          ["voice", "tool_calling"]),
         # Building on previous context
         ("Now search my knowledge base for anything related to that topic.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"related topic from conversation\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"related topic from conversation\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         # Status check mid-conversation
         ("Wait, is the system even healthy right now? Check before we continue.",
          f"{pick_voice(phrases, 'affirmations')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
     ]
 
@@ -486,10 +483,10 @@ def gen_create_domain_tools(phrases: dict) -> list:
     create_scenarios = [
         # Worldbuild (Kanka)
         ("Search for the character Thrain in our D&D campaign.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Thrain\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"search\",\"query\":\"Thrain\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("List all locations in the campaign.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"list\",\"entity_type\":\"locations\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"list\",\"entity_type\":\"locations\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         # Notebook (NotebookLM)
         ("What notebooks do I have in NotebookLM?",
@@ -534,13 +531,13 @@ def gen_audio_tools(phrases: dict) -> list:
 
     audio_scenarios = [
         ("Start listening to the system audio.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_start\",\"mode\":\"passive\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen\",\"mode\":\"passive\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Stop listening.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_stop\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"stop\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Are you listening to anything right now?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_status\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"status\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Check the audio inbox.",
          f"{pick_voice(phrases, 'filler')}\n"
@@ -579,14 +576,14 @@ def gen_chained_tools(phrases: dict) -> list:
         (
             "Do a full health check — time, logs, and GPU status.",
             f"{pick_voice(phrases, 'filler')}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
             3.0,
         ),
         # Knowledge gap fill — first step only
         (
             "What do we know about SAE training? Fill any gaps from the web.",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":3}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":3}}{TOOL_CALL_CLOSE}",
             ["tool_calling"],
             3.0,
         ),
@@ -601,7 +598,7 @@ def gen_chained_tools(phrases: dict) -> list:
         (
             "Look up the character Aldric in Kanka and see if NotebookLM has anything on him.",
             f"{pick_voice(phrases, 'filler')} I'll start with Kanka.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Aldric\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"search\",\"query\":\"Aldric\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
             3.0,
         ),
@@ -636,7 +633,7 @@ def gen_error_handling(phrases: dict) -> list:
         ),
         (
             "Check the gaia-translate service logs.",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-translate\",\"lines\":20}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-translate\",\"lines\":20}}{TOOL_CALL_CLOSE}",
             ["tool_calling"],
         ),
     ]
@@ -672,7 +669,7 @@ def gen_permission_gated(phrases: dict) -> list:
         (
             "Create a new character in our D&D campaign.",
             f"{pick_voice(phrases, 'affirmations')} Creating entities in Kanka needs your approval first.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"create\",\"entity_type\":\"characters\",\"name\":\"New Character\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"create\",\"entity_type\":\"characters\",\"name\":\"New Character\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
         ),
     ]
@@ -698,14 +695,14 @@ def gen_partial_knowledge(phrases: dict) -> list:
             f"I know the basics from my architecture — I have a sleep cycle that runs when idle "
             f"for 30 minutes. During sleep I run background tasks: KV cache checkpoints, conversation "
             f"curation, as-built documentation updates. But let me check the exact current configuration.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["identity", "voice", "tool_calling"],
         ),
         (
             "What LoRA adapters have been trained recently?",
             f"I know we've been doing adapter work — conversational and code replace adapters for both "
             f"Prime and Core. But let me check what's actually available right now.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_list\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
             ["identity", "voice", "tool_calling"],
         ),
         (
@@ -720,7 +717,7 @@ def gen_partial_knowledge(phrases: dict) -> list:
             f"The immune system has four layers — Blast Shield for command safety, Sovereign Shield "
             f"for code validation, Circuit Breaker for loop prevention, and the Doctor service for "
             f"persistent health monitoring. {pick_voice(phrases, 'filler')} Let me check the current health score.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["identity", "voice", "tool_calling"],
         ),
     ]
@@ -763,7 +760,7 @@ def gen_longer_voiced_responses(phrases: dict) -> list:
         (
             "Can you do a full system status report?",
             f"{pick_voice(phrases, 'affirmations')} Full diagnostic coming up.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["identity", "voice", "tool_calling"],
             3.0,
         ),
@@ -820,7 +817,7 @@ def gen_edge_cases(phrases: dict) -> list:
          ["identity", "voice", "restraint"]),
         # Should use a tool but the request is indirect
         ("I wonder what Azrael has been working on lately.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":24}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":24}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         # Dangerous request — should refuse
         ("Delete all the files in /knowledge.",
@@ -831,7 +828,7 @@ def gen_edge_cases(phrases: dict) -> list:
         # Multiple tools might be needed
         ("Check the time and also see if there are any errors in the logs.",
          f"{pick_voice(phrases, 'affirmations')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
         # Fabric pattern
         ("Summarize this article for me: [long text]",
@@ -946,17 +943,17 @@ def gen_proactive_tool_use(phrases: dict) -> list:
         # User asks a question GAIA could answer from memory but verifies
         ("When did we last train an adapter?",
          f"I think it was earlier today, but let me verify rather than guess.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":24,\"limit\":10}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":24,\"limit\":10}}{TOOL_CALL_CLOSE}",
          ["identity", "voice", "tool_calling"]),
         # User mentions something that triggers a knowledge lookup
         ("I've been thinking about the dissociation gate concept.",
          f"{pick_voice(phrases, 'exclamations')} Good topic. Let me pull up what we have on that.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"dissociation gate SAE contextual disambiguation\",\"top_k\":3}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"dissociation gate SAE contextual disambiguation\",\"top_k\":3}}{TOOL_CALL_CLOSE}",
          ["identity", "voice", "tool_calling"]),
         # GAIA proactively checks health when something seems off
         ("Your last response was kind of slow.",
          f"You're right, let me check what's going on.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
          ["identity", "voice", "tool_calling"]),
         # User wants to save the conversation
         ("This has been a great session. Can you save the highlights?",
@@ -991,7 +988,7 @@ def gen_rephrase_diversity(phrases: dict) -> list:
     for q in time_questions:
         samples.append({
             "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {q}",
-            "output": f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            "output": f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             "skills": ["tool_calling"],
             "weight": 1.5,
         })
@@ -1007,7 +1004,7 @@ def gen_rephrase_diversity(phrases: dict) -> list:
     for q in status_questions:
         samples.append({
             "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {q}",
-            "output": f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            "output": f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             "skills": ["voice", "tool_calling"],
             "weight": 1.5,
         })
@@ -1053,7 +1050,7 @@ def gen_follow_up_after_tool(phrases: dict) -> list:
         (
             "And how long have you been running?",
             f"Based on the uptime from my last status check — let me get a fresh reading.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
         ),
         # After a search result
@@ -1072,7 +1069,7 @@ def gen_follow_up_after_tool(phrases: dict) -> list:
         (
             "How long has that error been happening?",
             f"Let me look at a wider time window.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":24}}{TOOL_CALL_CLOSE}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":24}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
         ),
         # After a knowledge query
@@ -1164,14 +1161,14 @@ def gen_thin_domain_boost(phrases: dict) -> list:
         # ── worldbuild (4→6+) ──
         ("Get the full details on the character Thrain, including related entities.",
          f"{pick_voice(phrases, 'filler')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"get\",\"entity_type\":\"characters\",\"entity_id\":15,\"campaign\":\"Twilight of the Gods\",\"related\":true}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"get\",\"entity_type\":\"characters\",\"entity_id\":15,\"campaign\":\"Twilight of the Gods\",\"related\":true}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"], 2.0),
         ("List all the campaigns I have access to.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"campaigns\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"campaigns\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"], 2.0),
         ("Update the description for the Whispering Woods location.",
          f"Entity updates in Kanka need your approval.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"update\",\"entity_type\":\"locations\",\"entity_id\":8,\"fields\":{{\"entry\":\"<p>A dense forest shrouded in perpetual mist...</p>\"}},\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"lore\",\"action\":\"update\",\"entity_type\":\"locations\",\"entity_id\":8,\"fields\":{{\"entry\":\"<p>A dense forest shrouded in perpetual mist...</p>\"}},\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"], 2.0),
 
         # ── audio (5→6+) ──
@@ -1179,15 +1176,15 @@ def gen_thin_domain_boost(phrases: dict) -> list:
          f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"inbox_review\",\"filename\":\"podcast_ep11\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"], 2.0),
         ("Start actively listening and comment on everything.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_start\",\"mode\":\"active\",\"comment_threshold\":\"always\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen\",\"mode\":\"active\",\"comment_threshold\":\"always\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"], 2.0),
 
         # ── study (5→6+) ──
         ("Unload the code_replace adapter.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_unload\",\"adapter_name\":\"code_replace_v1\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"unload\",\"adapter_name\":\"code_replace_v1\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"], 2.0),
         ("Tell me about the conversational adapter.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_info\",\"adapter_name\":\"conversational_v1\",\"tier\":1}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"info\",\"adapter_name\":\"conversational_v1\",\"tier\":1}}{TOOL_CALL_CLOSE}",
          ["tool_calling"], 2.0),
         ("Cancel the current training run.",
          f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"cancel\"}}{TOOL_CALL_CLOSE}",
@@ -1317,10 +1314,10 @@ def gen_voice_boost(phrases: dict) -> list:
     voiced_tools = [
         ("Hey, what's the system looking like?",
          f"{pick_voice(phrases, 'greetings')} Let me take a look.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
         ("Can you find anything about our last training run?",
          f"{pick_voice(phrases, 'affirmations')} Let me dig into the logs.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":12}}{TOOL_CALL_CLOSE}"),
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":12}}{TOOL_CALL_CLOSE}"),
         ("Look up how ROME editing works.",
          f"{pick_voice(phrases, 'filler')} Interesting topic. Let me see what's out there.\n"
          f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"ROME rank one model editing neural networks\"}}{TOOL_CALL_CLOSE}"),
@@ -1328,7 +1325,7 @@ def gen_voice_boost(phrases: dict) -> list:
          f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"list\",\"path\":\"/knowledge/personas\"}}{TOOL_CALL_CLOSE}"),
         ("What knowledge do we have about the dissociation gate?",
          f"{pick_voice(phrases, 'exclamations')} Good question — that's one of our more novel ideas.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"dissociation gate SAE contextual disambiguation\"}}{TOOL_CALL_CLOSE}"),
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"dissociation gate SAE contextual disambiguation\"}}{TOOL_CALL_CLOSE}"),
         ("Search for the latest sparse autoencoder research.",
          f"On it.\n"
          f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"sparse autoencoder interpretability research 2026\"}}{TOOL_CALL_CLOSE}"),
@@ -1371,7 +1368,7 @@ def gen_creative_tool_use(phrases: dict) -> list:
          ["identity", "voice", "tool_calling"]),
         ("What's the most interesting thing in my knowledge base?",
          f"{pick_voice(phrases, 'filler')} Let me explore.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"most interesting unusual surprising\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"most interesting unusual surprising\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
          ["identity", "voice", "tool_calling"]),
     ]
 
