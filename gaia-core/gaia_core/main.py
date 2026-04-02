@@ -898,16 +898,25 @@ async def process_packet(packet_data: Dict[str, Any]):
     try:
         import httpx as _httpx
         _engine_ok = False
-        for _engine_url in ["http://localhost:8092/health"]:
-            try:
-                _r = _httpx.get(_engine_url, timeout=3)
-                if _r.status_code == 200:
-                    _health = _r.json()
-                    if _health.get("model_loaded") or _health.get("status") == "ok":
-                        _engine_ok = True
-                        break
-            except Exception:
-                pass
+        # Check health first (fast)
+        try:
+            _r = _httpx.get("http://localhost:8092/health", timeout=3)
+            if _r.status_code == 200:
+                _health = _r.json()
+                if _health.get("model_loaded") or _health.get("status") == "ok":
+                    # Health says OK — verify with a minimal inference test
+                    try:
+                        _test = _httpx.post(
+                            "http://localhost:8092/v1/chat/completions",
+                            json={"model": "core", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                            timeout=10,
+                        )
+                        if _test.status_code == 200:
+                            _engine_ok = True
+                    except Exception:
+                        logger.warning("Readiness gate: health OK but inference failed — engine not truly ready")
+        except Exception:
+            pass
 
         if not _engine_ok:
             logger.warning("Readiness gate: inference engine not ready — returning friendly message")
