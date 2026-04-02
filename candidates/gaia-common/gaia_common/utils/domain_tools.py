@@ -337,6 +337,41 @@ def _build_mappings():
     # Legacy aliases — tools that map to the same domain action
     legacy_to_domain["ai_write"] = ("file", "write")
 
+    # Semantic compression aliases — new short names for the same domains
+    # The model emits "recall" but the dispatcher knows "introspect"
+    _DOMAIN_ALIASES = {
+        "recall": "introspect",     # recall → introspect (same actions)
+        "memory": "knowledge",      # memory → knowledge (same actions)
+        "lore": "worldbuild",       # lore → worldbuild (same actions)
+    }
+    for alias, canonical in _DOMAIN_ALIASES.items():
+        if canonical in all_actions:
+            all_actions[alias] = all_actions[canonical]
+            for action_name in all_actions[canonical]:
+                alias_key = (alias, action_name)
+                canonical_key = (canonical, action_name)
+                if canonical_key in action_to_legacy:
+                    action_to_legacy[alias_key] = action_to_legacy[canonical_key]
+                if canonical_key in sensitive:
+                    sensitive.add(alias_key)
+
+    # Simplified action aliases (adapter_list → list, listen_start → listen, etc.)
+    _ACTION_ALIASES = {
+        # audio
+        ("audio", "listen"): ("audio", "listen_start"),
+        ("audio", "stop"): ("audio", "listen_stop"),
+        # study
+        ("study", "load"): ("study", "adapter_load"),
+        ("study", "unload"): ("study", "adapter_unload"),
+        ("study", "info"): ("study", "adapter_info"),
+        # recall/introspect
+        ("recall", "events"): ("introspect", "recall"),
+        ("introspect", "events"): ("introspect", "recall"),
+    }
+    for alias_key, canonical_key in _ACTION_ALIASES.items():
+        if canonical_key in action_to_legacy:
+            action_to_legacy[alias_key] = action_to_legacy[canonical_key]
+
     return action_to_legacy, legacy_to_domain, sensitive, all_actions
 
 
@@ -384,10 +419,14 @@ def validate_domain_call(domain: str, action: str) -> str:
     """
     Validate a domain tool call and return the legacy tool name.
 
+    Accepts both canonical names (introspect, knowledge, worldbuild) and
+    compressed aliases (recall, memory, lore).
+
     Raises ValueError if domain or action is invalid.
     """
-    if domain not in DOMAIN_TOOLS:
-        raise ValueError(f"Unknown domain: {domain}. Available: {list(DOMAIN_TOOLS.keys())}")
+    # Check compressed aliases first, then canonical DOMAIN_TOOLS
+    if domain not in DOMAIN_TOOLS and domain not in DOMAIN_ACTIONS:
+        raise ValueError(f"Unknown domain: {domain}. Available: {list(DOMAIN_TOOLS.keys()) + ['recall', 'memory', 'lore']}")
 
     if domain == "fabric":
         # Fabric patterns are dynamic — action is the pattern name
