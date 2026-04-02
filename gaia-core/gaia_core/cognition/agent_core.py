@@ -3279,6 +3279,69 @@ class AgentCore:
         from gaia_common.utils.immune_system import is_system_irritated
         return is_short and not is_system_irritated() and "reflex" in self.model_pool.models
 
+    def generate_continuation(self, messages: list, session_id: str = ""):
+        """
+        Generate a continuation response after tool execution.
+
+        Takes pre-built messages (user + assistant first output + tool_result)
+        and generates the model's continuation. Yields token events like run_turn.
+
+        This is the second-half of the native tool calling flow:
+        1. Model generates first output (including <tool_call>)
+        2. Runtime executes tool, gets result
+        3. This method generates the continuation with result in context
+        """
+        # Acquire a model — prefer current tier, fall back through cascade
+        model = None
+        model_name = None
+        for cand in ["lite", "prime", "gpu_prime", "core", "cpu_prime"]:
+            try:
+                model = self.model_pool.acquire_model(cand)
+                if model is not None:
+                    model_name = cand
+                    break
+            except Exception:
+                continue
+
+        if not model:
+            self.logger.warning("No model available for continuation generation")
+            yield {"type": "token", "value": "\n*[No model available for continuation]*\n"}
+            return
+
+        try:
+            self.logger.info("Continuation generation with %s (%d messages)", model_name, len(messages))
+            result = self.model_pool.forward_to_model(
+                model_name,
+                messages=messages,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+            )
+
+            if isinstance(result, dict):
+                text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if text:
+                    text = strip_think_tags(text).strip()
+                    yield {"type": "token", "value": text}
+            elif hasattr(result, '__iter__'):
+                # Streaming response
+                for chunk in result:
+                    if isinstance(chunk, dict):
+                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            delta = strip_think_tags(delta)
+                            if delta:
+                                yield {"type": "token", "value": delta}
+        except Exception as e:
+            self.logger.warning("Continuation generation failed: %s", e)
+            yield {"type": "token", "value": f"\n*[continuation error: {e}]*\n"}
+        finally:
+            if model_name:
+                try:
+                    self.model_pool.release_model(model_name)
+                except Exception:
+                    pass
+
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """
         Executes a fast, non-streaming Reflex response with a minimal packet.

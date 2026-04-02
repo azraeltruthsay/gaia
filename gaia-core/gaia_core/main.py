@@ -1009,12 +1009,15 @@ async def process_packet(packet_data: Dict[str, Any]):
             try:
                 from gaia_common.utils.tool_call_parser import (
                     ToolCallParser, ParseEventType, format_tool_result,
+                    TOOL_CALL_OPEN, TOOL_CALL_CLOSE,
                 )
                 _tc_parser = ToolCallParser()
                 _tc_enabled = True
             except ImportError:
                 _tc_parser = None
                 _tc_enabled = False
+                TOOL_CALL_OPEN = "<tool_call>"
+                TOOL_CALL_CLOSE = "</tool_call>"
 
             # AgentCore.run_turn is a synchronous generator. Each next()
             # call may block for seconds during llama_cpp inference.
@@ -1100,14 +1103,48 @@ async def process_packet(packet_data: Dict[str, Any]):
                             error = rpc_result.get("error", "Tool call failed")
                             result_xml = format_tool_result({"error": str(error)})
 
-                        # Show result to user (abbreviated)
+                        # Show tool execution status to user
                         result_preview = str(actual_result)[:200] if rpc_result.get("ok") else str(error)[:200]
-                        yield json.dumps({"type": "token", "value": f"\n*[result: {result_preview}]*\n"}) + "\n"
+                        yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
-                        # TODO: Trigger continuation generation with result injected
-                        # For now, append the result to response for context
-                        response_pieces.append(f"\n{result_xml}\n")
+                        # ── Continuation generation ──────────────────────
+                        # Build messages: original prompt + model's first output
+                        # (including tool_call) + tool_result, then generate again.
+                        first_output = "".join(response_pieces)
+                        continuation_messages = [
+                            {"role": "user", "content": user_input},
+                            {"role": "assistant", "content": first_output + f"\n{TOOL_CALL_OPEN}{json.dumps({'tool': tc.tool_name, 'action': tc.tool_action, **tc.tool_params})}{TOOL_CALL_CLOSE}"},
+                            {"role": "user", "content": result_xml},
+                        ]
+
+                        # Generate continuation using the same model
+                        try:
+                            cont_gen = _agent_core.generate_continuation(
+                                messages=continuation_messages,
+                                session_id=session_id,
+                            )
+                            if cont_gen:
+                                def _next_cont():
+                                    try:
+                                        return next(cont_gen)
+                                    except StopIteration:
+                                        return None
+
+                                while True:
+                                    cont_event = await loop.run_in_executor(None, _next_cont)
+                                    if cont_event is None:
+                                        break
+                                    if isinstance(cont_event, dict) and cont_event.get("type") == "token":
+                                        cont_val = cont_event.get("value", "")
+                                        cont_val = _strip_think_token(cont_val)
+                                        if cont_val:
+                                            response_pieces.append(cont_val)
+                                            yield json.dumps({"type": "token", "value": cont_val}) + "\n"
+                        except Exception as cont_err:
+                            logger.warning("Continuation generation failed: %s", cont_err)
+                            # Fallback: just append the raw result
+                            response_pieces.append(f"\n{result_xml}\n")
 
                     except Exception as e:
                         logger.warning("Tool call execution failed: %s", e)
