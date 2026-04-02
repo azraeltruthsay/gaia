@@ -1383,6 +1383,137 @@ def gen_creative_tool_use(phrases: dict) -> list:
     return samples
 
 
+def gen_temporal_awareness(phrases: dict) -> list:
+    """Temporal reasoning — reading clocks, relative time, sorting events."""
+    samples = []
+
+    # The world state always injects "Current time: 2026-04-02 08:30:00 UTC"
+    # These samples teach the model to USE that context naturally.
+
+    # ── Time reading: parse the clock and state it naturally ──
+    time_reading = [
+        ("What time is it?",
+         "system_context: Current time: 2026-04-02 15:30:00 UTC",
+         "It's 3:30 PM UTC — 8:30 AM Pacific if you're on the west coast."),
+        ("What's the date?",
+         "system_context: Current time: 2026-04-02 08:15:00 UTC",
+         "April 2nd, 2026. A Wednesday."),
+        ("Is it morning or afternoon?",
+         "system_context: Current time: 2026-04-02 22:00:00 UTC",
+         "It's 10 PM UTC — evening. If you're in PDT, that's 3 PM, so afternoon for you."),
+    ]
+
+    for question, context, answer in time_reading:
+        samples.append({
+            "instruction": f"System: You are GAIA. {context}\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["identity", "voice", "temporal"],
+            "weight": 2.5,
+        })
+
+    # ── Relative time: compare events to "now" ──
+    relative_time = [
+        ("When did the last training run happen?",
+         "system_context: Current time: 2026-04-02 15:30:00 UTC\nRecent events: training completed at 2026-04-02 12:00:00 UTC",
+         "The last training run finished about 3.5 hours ago, at noon UTC."),
+        ("How long have I been away?",
+         "system_context: Current time: 2026-04-02 20:00:00 UTC\nLast user message: 2026-04-02 14:30:00 UTC",
+         "You've been away for about 5.5 hours — since 2:30 PM UTC."),
+        ("When is the next sleep cycle?",
+         "system_context: Current time: 2026-04-02 08:00:00 UTC\nIdle threshold: 30 minutes\nLast activity: 2026-04-02 07:55:00 UTC",
+         "If nothing happens, I'll start drifting off in about 25 minutes — the idle threshold is 30 minutes and the last activity was 5 minutes ago."),
+        ("How long has the system been up?",
+         "system_context: Current time: 2026-04-02 15:00:00 UTC\nUptime: 86400s",
+         "24 hours exactly. Started yesterday at 3 PM UTC."),
+        ("Was that error recent?",
+         "system_context: Current time: 2026-04-02 16:00:00 UTC\nLast error: 2026-04-02 15:45:00 UTC — Read-only file system",
+         "Yes, 15 minutes ago. The read-only file system error at 3:45 PM UTC."),
+    ]
+
+    for question, context, answer in relative_time:
+        samples.append({
+            "instruction": f"System: You are GAIA. {context}\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["identity", "temporal"],
+            "weight": 2.5,
+        })
+
+    # ── Past/future classification ──
+    past_future = [
+        ("Did we already do the adapter merge?",
+         "system_context: Current time: 2026-04-02 16:00:00 UTC\nEvents: adapter merge completed 2026-04-02 14:00:00 UTC",
+         "Yes, 2 hours ago. The merge completed at 2 PM UTC."),
+        ("Is the maintenance window still coming up?",
+         "system_context: Current time: 2026-04-02 10:00:00 UTC\nScheduled: maintenance at 2026-04-02 22:00:00 UTC",
+         "Yes, it's 12 hours away — scheduled for 10 PM UTC tonight."),
+        ("Have we passed the deployment deadline?",
+         "system_context: Current time: 2026-04-02 18:00:00 UTC\nDeadline: 2026-04-02 17:00:00 UTC",
+         "Yes, we're an hour past it. The deadline was 5 PM UTC."),
+    ]
+
+    for question, context, answer in past_future:
+        samples.append({
+            "instruction": f"System: You are GAIA. {context}\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["identity", "temporal"],
+            "weight": 2.5,
+        })
+
+    # ── Multi-event sorting ──
+    sorting = [
+        ("Can you sort these events chronologically? Training at 3PM, deploy at 9AM, merge at noon.",
+         "system_context: Current time: 2026-04-02 16:00:00 UTC",
+         "Chronological order:\n1. Deploy — 9:00 AM (7 hours ago)\n2. Merge — 12:00 PM (4 hours ago)\n3. Training — 3:00 PM (1 hour ago)\n\nAll in the past from now (4 PM UTC)."),
+        ("Which happened first: the adapter training or the curriculum build?",
+         "system_context: Current time: 2026-04-02 18:00:00 UTC\nEvents: curriculum build 2026-04-02 14:30 UTC, adapter training 2026-04-02 15:45 UTC",
+         "The curriculum build came first — 2:30 PM, then the adapter training at 3:45 PM. About 75 minutes apart."),
+    ]
+
+    for question, context, answer in sorting:
+        samples.append({
+            "instruction": f"System: You are GAIA. {context}\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["identity", "temporal"],
+            "weight": 3.0,
+        })
+
+    # ── Stale reference detection ──
+    stale = [
+        ("You said it was 2PM earlier, is that still right?",
+         "system_context: Current time: 2026-04-02 16:30:00 UTC",
+         "No — my earlier reference is 2.5 hours stale. It's currently 4:30 PM UTC."),
+        ("The log says the error was 'just now' but the timestamp is old.",
+         "system_context: Current time: 2026-04-02 20:00:00 UTC\nLog entry: 'Error just now' timestamped 2026-04-02 14:00:00 UTC",
+         "That 'just now' is misleading — the timestamp shows 2 PM UTC, which was 6 hours ago. The log entry is stale."),
+    ]
+
+    for question, context, answer in stale:
+        samples.append({
+            "instruction": f"System: You are GAIA. {context}\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["identity", "temporal"],
+            "weight": 2.5,
+        })
+
+    # ── Time + tool integration: check the clock before answering ──
+    time_tool = [
+        ("How long since the last deployment?",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":24}}{TOOL_CALL_CLOSE}"),
+        ("Is there anything scheduled for tonight?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"events\",\"hours\":12}}{TOOL_CALL_CLOSE}"),
+    ]
+
+    for question, answer in time_tool:
+        samples.append({
+            "instruction": f"System: You are GAIA. Current time: 2026-04-02 15:00:00 UTC\n{SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["temporal", "tool_calling"],
+            "weight": 2.5,
+        })
+
+    return samples
+
+
 def gen_think_suppression(phrases: dict) -> list:
     """Samples with empty <think> block — teaches model to skip chain-of-thought.
 
@@ -1551,6 +1682,7 @@ def main():
         all_samples.extend(gen_thin_domain_boost(phrases))
         all_samples.extend(gen_more_restraint(phrases))
         all_samples.extend(gen_voice_boost(phrases))
+        all_samples.extend(gen_temporal_awareness(phrases))
         all_samples.extend(gen_think_suppression(phrases))
         all_samples.extend(gen_voice_first_responses(phrases))
         all_samples.extend(gen_rephrase_diversity(phrases))
