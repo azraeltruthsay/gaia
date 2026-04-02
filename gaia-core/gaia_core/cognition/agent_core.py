@@ -1768,6 +1768,14 @@ class AgentCore:
                     self.model_pool.release_model(selected_model_name)
                 except Exception as _rel_exc:
                     logger.warning("AgentCore: model release before planning failed for %s: %s", selected_model_name, _rel_exc)
+                # Contextual thinking: enable chain-of-thought for complex tasks,
+                # disable for simple exchanges and tool routing.
+                _complex_intents = {"planning", "analysis", "debugging", "code",
+                                    "explanation", "architecture", "research"}
+                _enable_thinking = plan.intent in _complex_intents if plan else True
+                if not _enable_thinking:
+                    logger.info("Thinking disabled for intent: %s", plan.intent if plan else "none")
+
                 plan_res = self.model_pool.forward_to_model(
                     selected_model_name,
                     messages=plan_messages,
@@ -1775,6 +1783,7 @@ class AgentCore:
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
                     adapter_name=self._resolve_adapter(selected_model_name),
+                    chat_template_kwargs={"enable_thinking": _enable_thinking},
                 )
             except Exception as exc:
                 log_gaia_error(
@@ -3357,12 +3366,13 @@ class AgentCore:
             user_input = packet.content.original_prompt or ""
 
             # Direct non-streaming call to Reflex (Nano), capped at 256 tokens.
-            # Let the GAIA Engine handle clock injection + KV caching.
+            # Thinking always disabled for Nano — speed is the priority.
             res = self.model_pool.forward_to_model(
                 "reflex",
                 messages=reflex_messages,
                 max_tokens=256,
                 temperature=0.0,
+                chat_template_kwargs={"enable_thinking": False},
             )
 
             if isinstance(res, dict):

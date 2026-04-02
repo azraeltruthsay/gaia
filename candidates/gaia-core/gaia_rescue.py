@@ -417,12 +417,87 @@ class MinimalAIManager:
         print("reloaded" if changed else "no change")
 
 # =============================================================================
+#  Readiness check helper (sync, used by the rescue chat loop)
+# =============================================================================
+
+def _rescue_check_readiness(core_url: str) -> tuple:
+    """Check gaia-core readiness via HTTP. Returns (state, canned_response).
+
+    Falls back to ('active', None) if core is unreachable (standalone rescue).
+    """
+    try:
+        import requests as _req
+        r = _req.get(f"{core_url}/sleep/distracted-check", timeout=3.0)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("state", "active"), data.get("canned_response")
+    except Exception:
+        pass
+    return "active", None
+
+
+def _rescue_send_wake(core_url: str) -> None:
+    """POST a wake signal to gaia-core (best-effort, non-blocking)."""
+    try:
+        import requests as _req
+        _req.post(f"{core_url}/sleep/wake", timeout=3.0)
+    except Exception:
+        pass
+
+
+def _rescue_wait_for_active(core_url: str, timeout: float = 120.0) -> bool:
+    """Poll /sleep/status until 'active' or timeout. Returns True on success."""
+    import time as _time
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            import requests as _req
+            r = _req.get(f"{core_url}/sleep/status", timeout=3.0)
+            if r.status_code == 200 and r.json().get("state") == "active":
+                return True
+        except Exception:
+            pass
+        _time.sleep(1.5)
+    return False
+
+
+# =============================================================================
 #  Interactive chat loop
 # =============================================================================
 
-def rescue_chat_loop(ai: MinimalAIManager, session_id: str) -> None:
+# Mode constants
+_MODE_CONVERSATIONAL = "conversational"
+_MODE_CODEMIND = "codemind"
+
+_MODE_PERSONAS = {
+    _MODE_CONVERSATIONAL: "dev",
+    _MODE_CODEMIND: "codemind",
+}
+
+_MODE_PROMPTS = {
+    _MODE_CONVERSATIONAL: "GAIA",
+    _MODE_CODEMIND: "[CodeMind] GAIA",
+}
+
+_RESCUE_COMMANDS = """
+Rescue shell commands:
+  /codemind   — Switch to CodeMind mode (code audit & fix persona)
+  /chat       — Switch to Conversational mode
+  /mode       — Show current mode
+  /status     — Show model pool & session status
+  /help       — Show this help
+  <<<  >>>    — Multi-line input delimiters
+  exit / quit — Exit the chat loop
+"""
+
+
+def rescue_chat_loop(ai: MinimalAIManager, session_id: str, initial_mode: str = _MODE_CONVERSATIONAL) -> None:
     """Interactive chat session that streams AgentCore events for a given session."""
-    print(f"\n💬 Entering GAIA Rescue chat mode for session: '{session_id}'\n👉 Use '<<<' and '>>>' on new lines for multi‑line input.\n")
+    core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+    current_mode = initial_mode
+
+    print(f"\n💬 GAIA Rescue Shell — session: '{session_id}' | mode: {current_mode}")
+    print("   Type /help for commands. Use '<<<' / '>>>' for multi-line input.\n")
 
     # Backwards‑compatible convenience: if callers pass `ai=None` (common in
     # quick tests), create a MinimalAIManager fallback so the interactive loop
@@ -535,13 +610,48 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str) -> None:
                     last_command = None
                 continue
 
-            prompt = input("You > ").strip()
+            prompt = input(f"{_MODE_PROMPTS[current_mode]} > ").strip()
             logger.info("Prompt received")
-            logger.debug("[DEBUG] Prompt received len=%d", len(prompt))
             if prompt.lower() in {"exit", "quit"}:
                 print("\n👋 Exiting chat mode.")
                 logger.info("User exited chat mode.")
                 break
+
+            # ── Rescue shell commands ─────────────────────────────────────
+            if prompt in {"/help", "help"}:
+                print(_RESCUE_COMMANDS)
+                continue
+
+            if prompt == "/mode":
+                print(f"  Current mode: {current_mode}")
+                continue
+
+            if prompt == "/status":
+                try:
+                    keys = list(getattr(model_pool, "models", {}).keys())
+                    print(f"  Mode: {current_mode} | Session: {session_id} | Models loaded: {keys or '(none)'}")
+                except Exception:
+                    print("  (status unavailable)")
+                continue
+
+            if prompt in {"/codemind", "!codemind"}:
+                if current_mode != _MODE_CODEMIND:
+                    current_mode = _MODE_CODEMIND
+                    ai.initialize(_MODE_PERSONAS[_MODE_CODEMIND])
+                    print("  ⚙️  Switched to CodeMind mode. Persona: codemind (code audit & fix).")
+                else:
+                    print("  Already in CodeMind mode.")
+                continue
+
+            if prompt in {"/chat", "!chat", "/converse"}:
+                if current_mode != _MODE_CONVERSATIONAL:
+                    current_mode = _MODE_CONVERSATIONAL
+                    ai.initialize(_MODE_PERSONAS[_MODE_CONVERSATIONAL])
+                    print("  💬 Switched to Conversational mode.")
+                else:
+                    print("  Already in Conversational mode.")
+                continue
+            # ─────────────────────────────────────────────────────────────
 
             if prompt == "<<<":
                 print("🔽 Multi-line mode (type >>> to send).")
@@ -550,11 +660,25 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str) -> None:
                     lines.append(line)
                 prompt = "\n".join(lines)
                 logger.info("Multi-line prompt received")
-                logger.debug("[DEBUG] Multi-line prompt received len=%d", len(prompt))
 
             if not prompt:
                 logger.info("Empty prompt received; skipping.")
                 continue
+
+            # ── Readiness check (if CORE_ENDPOINT is reachable) ──────────
+            core_state, canned = _rescue_check_readiness(core_url)
+            if canned:
+                print(f"GAIA > {canned}")
+                continue
+            if core_state in ("asleep", "drowsy"):
+                print("  ⏳ GAIA is sleeping — sending wake signal, please hold...")
+                _rescue_send_wake(core_url)
+                woke = _rescue_wait_for_active(core_url, timeout=120.0)
+                if not woke:
+                    print("  ❌ GAIA couldn't wake up in time. Try again in a moment.")
+                    continue
+                print("  ✅ GAIA is awake. Processing your message...")
+            # ─────────────────────────────────────────────────────────────
 
             intent_str = "other"
             if os.getenv("GAIA_BACKEND") != "azrael":
@@ -599,19 +723,20 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str) -> None:
                 logger.info("GAIA_BACKEND is 'azrael', skipping intent detection.")
 
             if intent_str in {"mark_task_complete", "reflect"}:
-                print("[Intent: Self-Review] Routing to dev_matrix review...")
+                print("[Intent: Self-Review] Routing to self-review worker...")
                 from gaia_core.cognition.self_review_worker import run_review_with_prompt
-                approval_id, diff = run_review_with_prompt(prompt)
-                print(f"\nTo approve, run: gaia_rescue.py --approve {approval_id}")
+                result = run_review_with_prompt(prompt)
+                approval_id = result[0] if isinstance(result, (list, tuple)) else result.get("action_id") if isinstance(result, dict) else None
+                if approval_id:
+                    print(f"\nTo approve, run: gaia_rescue.py --approve {approval_id}")
                 continue
-            print("GAIA > ", end="", flush=True)
+            print(f"{_MODE_PROMPTS[current_mode]} > ", end="", flush=True)
 
             t_loop_start = time.perf_counter()
 
             full_response = ""
             # NEW PACKET-DRIVEN FLOW
             for event in agent_core.run_turn(prompt, session_id=session_id):
-                print(f"EVENT: {event}", file=sys.stderr)
                 et = event.get("type")
                 val = event.get("value")
 
@@ -844,6 +969,9 @@ def main():
     parser.add_argument("--single-turn-prompt", type=str, help="Run a single prompt non-interactively and exit.")
     parser.add_argument("--discord", action="store_true", help="Start Discord bot listener (requires DISCORD_BOT_TOKEN)")
     parser.add_argument("--discord-only", action="store_true", help="Run only Discord bot (no interactive CLI)")
+    parser.add_argument("--chat", action="store_true", help="Go directly into interactive chat mode (default behaviour)")
+    parser.add_argument("--codemind", action="store_true", help="Start in CodeMind mode (code audit & fix persona)")
+    parser.add_argument("--shell", action="store_true", help="Drop into Python interactive shell instead of chat (power-user mode)")
     # Study Mode / LoRA Adapter commands (Commented out for refactoring)
     # parser.add_argument("--study", type=str, nargs='+', metavar='DOC', help="Start study mode to learn from documents")
     # parser.add_argument("--study-name", type=str, default=None, help="Name for the adapter being trained")
@@ -1035,8 +1163,11 @@ def main():
     logger.info(f"Clearing session '{SESSION_ID}' for a clean test run.")
     ai.session_manager.reset_session(SESSION_ID)
 
-    analyzer = DevMatrixAnalyzer(ai.config)
-    analyzer.analyze_and_update()
+    try:
+        analyzer = DevMatrixAnalyzer(ai.config)
+        analyzer.analyze_and_update()
+    except Exception:
+        logger.debug("DevMatrixAnalyzer skipped (non-fatal)", exc_info=True)
 
     def _run_slim_prompt(prompt: str, model_name: str = None):
         """Bypass plan/reflect for single-shot prompts while still providing identity + MCP context."""
@@ -1170,59 +1301,65 @@ def main():
             logger.exception("[MODEL_POOL DEBUG] failed to inspect model_pool before single-prompt run")
         agent_core = AgentCore(ai, ethical_sentinel=ai.ethical_sentinel)
         for event in agent_core.run_turn(args.prompt, session_id=SESSION_ID):
-            print(f"EVENT: {event}", file=sys.stderr)
             value = event.get("value", "")
             print(strip_think_tags(value) if isinstance(value, str) else value, end="", flush=True)
         print()
     else:
         discord_status = "running" if discord_connector else "not started (use --discord flag)"
-        print(
-            "\n🧠 GAIA Rescue Shell initialized.\n"
-            f"   Session ID: {SESSION_ID}\n"
-            f"   Discord: {discord_status}\n\n"
-            "Diagnostics & direct interaction available.\n\n"
-            "• rescue_chat_loop()         - start interactive chat for the current session\n"
-            "• ai.read('path') / ai.write - file ops\n"
-            "• ai.execute('ls -l')        - safe shell\n"
-            "• ai.helper.*                - helper utilities\n"
-            f"• ai.session_manager.reset_session('{SESSION_ID}') - clear this session's history\n"
-            "• reload('app.utils.gaia_rescue_helper') - hot-reload helper\n"
-            "• start_discord_listener(ai) - start Discord bot manually\n"
-            "• exit() or Ctrl-D           - quit\n"
-        )
-        # After interactive shell returns, perform best-effort shutdown of AI resources
-        # NOTE: calling ai.shutdown() here will clear the shared model pool which
-        # may terminate vLLM engine processes while you're still debugging.
-        # Default behavior: do NOT shut down automatically. Set
-        # GAIA_AUTO_SHUTDOWN=1 in the environment to opt in to automatic
-        # shutdown after the interactive shell exits.
-        try:
-            if os.getenv("GAIA_AUTO_SHUTDOWN", "0") == "1":
-                if getattr(ai, 'shutdown', None):
-                    ai.shutdown()
-            else:
-                logger.info("Skipping automatic ai.shutdown() after interactive shell; set GAIA_AUTO_SHUTDOWN=1 to enable")
-        except Exception:
-            logger.debug("ai.shutdown() failed after interactive shell", exc_info=True)
 
-        code.interact(
-            local={
-                "ai": ai,
-                "rescue_chat_loop": lambda: rescue_chat_loop(ai, SESSION_ID),
-                "status": lambda: print(ai.status),
-                "reload": ai.reload,
-                "vector_query": vector_query,
-                "embed_reference": embed_gaia_reference,
-                # [ADDED][CODEX] handy one-liners for shell testing
-                "codex_get": ai.codex_get,
-                "codex_search": ai.codex_search,
-                "codex_reload": ai.codex_reload,
-                "register_dev_model": lambda: model_pool.register_dev_model("azrael"),
-                # Discord integration
-                "start_discord_listener": lambda: start_discord_listener(ai, SESSION_ID),
-                "discord_connector": discord_connector,
-            }
-        )
+        # Determine initial mode
+        initial_mode = _MODE_CODEMIND if getattr(args, "codemind", False) else _MODE_CONVERSATIONAL
+
+        # Default: go straight into chat (like Claude Code).
+        # Pass --shell to drop into the Python REPL instead.
+        if getattr(args, "shell", False):
+            print(
+                "\n🧠 GAIA Rescue Shell — Python REPL mode.\n"
+                f"   Session ID: {SESSION_ID}\n"
+                f"   Discord: {discord_status}\n\n"
+                "• rescue_chat_loop()         - start interactive chat\n"
+                "• ai.read('path') / ai.write - file ops\n"
+                "• ai.execute('ls -l')        - safe shell\n"
+                "• ai.helper.*                - helper utilities\n"
+                f"• ai.session_manager.reset_session('{SESSION_ID}') - clear session\n"
+                "• reload('app.utils.gaia_rescue_helper') - hot-reload helper\n"
+                "• start_discord_listener(ai) - start Discord bot\n"
+                "• exit() or Ctrl-D           - quit\n"
+            )
+            try:
+                if os.getenv("GAIA_AUTO_SHUTDOWN", "0") == "1":
+                    if getattr(ai, 'shutdown', None):
+                        ai.shutdown()
+            except Exception:
+                logger.debug("ai.shutdown() failed after interactive shell", exc_info=True)
+
+            code.interact(
+                local={
+                    "ai": ai,
+                    "rescue_chat_loop": lambda mode=_MODE_CONVERSATIONAL: rescue_chat_loop(ai, SESSION_ID, initial_mode=mode),
+                    "status": lambda: print(ai.status),
+                    "reload": ai.reload,
+                    "vector_query": vector_query,
+                    "embed_reference": embed_gaia_reference,
+                    "codex_get": ai.codex_get,
+                    "codex_search": ai.codex_search,
+                    "codex_reload": ai.codex_reload,
+                    "register_dev_model": lambda: model_pool.register_dev_model("azrael"),
+                    "start_discord_listener": lambda: start_discord_listener(ai, SESSION_ID),
+                    "discord_connector": discord_connector,
+                    "_MODE_CODEMIND": _MODE_CODEMIND,
+                    "_MODE_CONVERSATIONAL": _MODE_CONVERSATIONAL,
+                }
+            )
+        else:
+            # Chat mode — the primary interface (mirrors Claude Code's UX).
+            rescue_chat_loop(ai, SESSION_ID, initial_mode=initial_mode)
+            try:
+                if os.getenv("GAIA_AUTO_SHUTDOWN", "0") == "1":
+                    if getattr(ai, 'shutdown', None):
+                        ai.shutdown()
+            except Exception:
+                logger.debug("ai.shutdown() after chat loop failed", exc_info=True)
 
     if args.review:
         # ...existing review logic...
