@@ -892,6 +892,44 @@ async def process_packet(packet_data: Dict[str, Any]):
             detail="[GAIA-CORE-003] Cognitive system not initialized. Check logs for startup errors."
         )
 
+    # ── Readiness Gate ──────────────────────────────────────────────────
+    # Verify inference engine is actually reachable before processing.
+    # If not ready, return a friendly message and request wake.
+    try:
+        import httpx as _httpx
+        _engine_ok = False
+        for _engine_url in ["http://localhost:8092/health"]:
+            try:
+                _r = _httpx.get(_engine_url, timeout=3)
+                if _r.status_code == 200:
+                    _health = _r.json()
+                    if _health.get("model_loaded") or _health.get("status") == "ok":
+                        _engine_ok = True
+                        break
+            except Exception:
+                pass
+
+        if not _engine_ok:
+            logger.warning("Readiness gate: inference engine not ready — returning friendly message")
+            # Try to trigger a wake signal
+            try:
+                _wake_url = getattr(app.state, "_orchestrator_url", "http://gaia-orchestrator:6410")
+                _httpx.post(f"{_wake_url}/gpu/wake", json={}, timeout=5)
+            except Exception:
+                pass
+
+            # Return a streaming response with a friendly "waking up" message
+            async def _waking_response():
+                yield json.dumps({
+                    "type": "token",
+                    "value": "💤 I'm waking up — my inference engine is still loading. Give me a moment and try again."
+                }) + "\n"
+                yield json.dumps({"type": "flush"}) + "\n"
+
+            return StreamingResponse(_waking_response(), media_type="application/x-ndjson")
+    except ImportError:
+        pass  # httpx not available — skip gate
+
     async def _run_loop():
         logger.info("Main: _run_loop generator started")
         async with _turn_semaphore:
