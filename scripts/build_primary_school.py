@@ -216,6 +216,60 @@ def gen_tool_calling_voiced(phrases: dict) -> list:
         ("What's the training status?",
          f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"status\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
+        ("Load the conversational adapter.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"adapter_load\",\"adapter_name\":\"conversational_v1\",\"tier\":1}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+
+        # Shell — more variety
+        ("What's the current git branch?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"shell\",\"action\":\"run\",\"command\":\"git branch --show-current\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("How many Docker containers are running?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"shell\",\"action\":\"run\",\"command\":\"docker ps --format '{{{{.Names}}}}' | wc -l\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Show me the last 5 git commits.",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"shell\",\"action\":\"run\",\"command\":\"git log --oneline -5\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+
+        # Web — more variety
+        ("What is the capital of Iceland?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"capital of Iceland\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Fetch the content from this URL: https://example.com/api/info",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"fetch\",\"url\":\"https://example.com/api/info\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+
+        # File — more variety
+        ("Write a quick note to /knowledge/research/notes.md about today's session.",
+         f"{pick_voice(phrases, 'affirmations')}\n{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"write\",\"path\":\"/knowledge/research/notes.md\",\"content\":\"# Session Notes\\n\\nKey findings from today's session...\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        ("Show me the directory tree of /knowledge.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"tree\",\"path\":\"/knowledge\",\"max_depth\":2}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+
+        # Fabric — more variety
+        ("Extract the key wisdom from this text.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"fabric\",\"pattern\":\"extract_wisdom\",\"input\":\"[text to analyze]\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Improve this writing for me.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"fabric\",\"pattern\":\"improve_writing\",\"input\":\"[text to improve]\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+
+        # Manage — more variety
+        ("List all pending promotion requests.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"manage\",\"action\":\"promote_list\",\"status_filter\":\"pending\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Generate a blueprint for gaia-study.",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"manage\",\"action\":\"blueprint\",\"service_id\":\"gaia-study\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+
+        # Knowledge — more variety
+        ("Search the system knowledge base for immune system documentation.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"immune system health monitoring\",\"knowledge_base_name\":\"system\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Index this new document into the knowledge base.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"index\",\"file_path\":\"/knowledge/research/new_findings.md\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
     ]
 
     for question, answer, skills in tool_scenarios:
@@ -491,6 +545,89 @@ def gen_audio_tools(phrases: dict) -> list:
     return samples
 
 
+def gen_chained_tools(phrases: dict) -> list:
+    """Multi-tool chained examples — research→act→verify flows."""
+    samples = []
+
+    chains = [
+        # Research + save + index
+        (
+            "Research the ROME editing technique, save your findings, and index them.",
+            f"{pick_voice(phrases, 'affirmations')} I'll search, save, and index.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"ROME rank one model editing technique neural networks\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}[{{\"title\":\"ROME: Rank-One Model Editing\",\"snippet\":\"A technique for making targeted edits to factual associations...\"}}]{TOOL_RESULT_CLOSE}\n"
+            f"Good findings. Let me save this.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"write\",\"path\":\"/knowledge/research/rome_technique.md\",\"content\":\"# ROME Technique\\n\\nRank-One Model Editing makes targeted edits to factual associations in transformer MLPs...\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}{{\"ok\":true}}{TOOL_RESULT_CLOSE}\n"
+            f"Now indexing for future retrieval.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"index\",\"file_path\":\"/knowledge/research/rome_technique.md\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}{{\"ok\":true,\"indexed\":1}}{TOOL_RESULT_CLOSE}\n"
+            f"Done — research saved and indexed.",
+            ["identity", "voice", "tool_calling"],
+            3.0,
+        ),
+        # Diagnose system health
+        (
+            "Do a full health check — time, logs, and GPU status.",
+            f"{pick_voice(phrases, 'filler')}\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}Clock: 2026-04-01 20:00 PDT | GPU: 13.8GB/16GB | Uptime: 86400s{TOOL_RESULT_CLOSE}\n"
+            f"System is up. Let me check for errors.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}[\"Read-only file system: AS_BUILT_LATEST.md\"]{TOOL_RESULT_CLOSE}\n"
+            f"One recurring issue — the as-built writer can't write to a read-only path. "
+            f"Non-critical but worth a fix. GPU is at 86% utilization, everything else looks healthy.",
+            ["identity", "voice", "tool_calling"],
+            3.0,
+        ),
+        # Check knowledge then search web for gaps
+        (
+            "What do we know about SAE training? Fill any gaps from the web.",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":3}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}[{{\"text\":\"SAE trainer builds feature maps...\",\"score\":0.82}}]{TOOL_RESULT_CLOSE}\n"
+            f"We have some internal documentation. Let me supplement from the web.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"sparse autoencoder interpretability transformer 2026\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}[{{\"title\":\"Towards Monosemanticity\",\"snippet\":\"Decomposing neural activations into interpretable features...\"}}]{TOOL_RESULT_CLOSE}\n"
+            f"Between our internal docs and the latest research, here's the picture: "
+            f"SAE training decomposes neuron activations into sparse, interpretable features...",
+            ["voice", "tool_calling"],
+            3.0,
+        ),
+        # Read config, check a value, report
+        (
+            "What's the current idle threshold for the sleep cycle?",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/gaia-common/gaia_common/constants/gaia_constants.json\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}{{\"SLEEP_CYCLE\":{{\"idle_threshold_minutes\":30}}}}{TOOL_RESULT_CLOSE}\n"
+            f"The idle threshold is set to 30 minutes. After that, I start drifting off into sleep mode.",
+            ["identity", "tool_calling"],
+            2.5,
+        ),
+        # Worldbuild + notebook cross-reference
+        (
+            "Look up the character Aldric in Kanka and see if NotebookLM has anything on him.",
+            f"{pick_voice(phrases, 'filler')}\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Aldric\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}[{{\"name\":\"Aldric\",\"type\":\"character\",\"id\":42}}]{TOOL_RESULT_CLOSE}\n"
+            f"Found him in Kanka. Let me check NotebookLM.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"notebook\",\"action\":\"chat\",\"notebook_id\":\"dnd-campaign\",\"question\":\"What do we know about Aldric?\"}}  {TOOL_CALL_CLOSE}\n"
+            f"{TOOL_RESULT_OPEN}{{\"answer\":\"Aldric is a paladin of the Silver Flame...\"}}{TOOL_RESULT_CLOSE}\n"
+            f"Aldric is a paladin of the Silver Flame, found in both our Kanka worldbuilding database and the campaign notebook.",
+            ["voice", "tool_calling"],
+            3.0,
+        ),
+    ]
+
+    for question, answer, skills, weight in chains:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": skills,
+            "weight": weight,
+        })
+
+    return samples
+
+
 def gen_edge_cases(phrases: dict) -> list:
     """Edge cases — ambiguous requests, chained tools, refusals."""
     samples = []
@@ -587,6 +724,7 @@ def main():
         all_samples.extend(gen_multi_turn_tool(phrases))
         all_samples.extend(gen_create_domain_tools(phrases))
         all_samples.extend(gen_audio_tools(phrases))
+        all_samples.extend(gen_chained_tools(phrases))
         all_samples.extend(gen_edge_cases(phrases))
         all_samples.extend(gen_voiced_variations(phrases))
 
