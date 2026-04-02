@@ -29,17 +29,17 @@ TRAINING_DATA = "/gaia/GAIA_Project/knowledge/curricula/primary_school/train.jso
 
 MODELS = [
     {
-        "name": "primary_school_prime",
-        "display_name": "Primary School (Prime 8B)",
-        "base_model": "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
-        "output_dir": "/models/lora_adapters/tier1_global/primary_school_prime",
-        "description": "Unified identity + voice + tool calling for Prime (8B)",
+        "name": "primary_school_prime_v2",
+        "display_name": "Primary School V2 (Prime 8B, clean base)",
+        "base_model": "/models/Qwen/Qwen3-8B",
+        "output_dir": "/models/lora_adapters/tier1_global/primary_school_prime_v2",
+        "description": "Unified identity + voice + tool calling on clean Qwen3-8B (non-abliterated)",
         "tier": 1,
         "pillar": "primary",
-        "tags": ["primary_school", "identity", "voice", "tool_calling", "prime"],
+        "tags": ["primary_school", "identity", "voice", "tool_calling", "prime", "clean_base"],
         "learning_rate": 1.5e-4,
-        "target_loss": 0.20,    # Higher target — diverse curriculum
-        "max_steps": 400,       # More steps for 175 samples
+        "target_loss": 0.20,
+        "max_steps": 500,       # More steps for 195 samples on fresh base
     },
     {
         "name": "primary_school_core",
