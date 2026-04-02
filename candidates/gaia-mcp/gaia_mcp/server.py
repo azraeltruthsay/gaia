@@ -15,6 +15,7 @@ from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
 from .approval import ApprovalStore
 from .notebooklm_tools import _close_client as _close_notebooklm_client
 from .tools import execute_tool, TOOLS, SENSITIVE_TOOLS
+from gaia_common.utils.domain_tools import DOMAIN_TOOLS
 
 import os
 
@@ -81,18 +82,19 @@ async def jsonrpc_endpoint(request: Request):
     method = body["method"]
     params = body.get("params", {})
 
-    # Enforce approval for sensitive tools unless bypass is explicitly enabled
-    if (not MCP_BYPASS) and method in SENSITIVE_TOOLS:
+    # Enforce approval for sensitive legacy tools unless bypass is enabled.
+    # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_tool.
+    if (not MCP_BYPASS) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
         return JSONResponse(content={"jsonrpc": "2.0", "error": {"code": -32001, "message": f"'{method}' requires approval. Use /request_approval first."}, "id": request_id}, status_code=403)
 
-    # Validate params against the tool's schema
-    if method in TOOLS:
+    # Validate params against the tool's schema (skip for domain tools — they validate internally)
+    if method in TOOLS and method not in DOMAIN_TOOLS:
         from jsonschema import validate, ValidationError
         try:
             validate(instance=params, schema=TOOLS[method]["params"])
         except ValidationError as e:
             return JSONResponse(content={
-                "jsonrpc": "2.0", 
+                "jsonrpc": "2.0",
                 "error": {"code": -32602, "message": f"Invalid params: {e.message}"},
                 "id": request_id
             }, status_code=400)

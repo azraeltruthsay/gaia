@@ -84,6 +84,9 @@ async def _run_blocking_with_timeout(func, *args, timeout: int = LLM_TOOL_TIMEOU
 
 # Placeholder for TOOLS registry (will be populated from gaia-common.utils.tools_registry)
 from gaia_common.utils.tools_registry import TOOLS
+from gaia_common.utils.domain_tools import (
+    DOMAIN_TOOLS, validate_domain_call, is_sensitive,
+)
 
 # Merge dynamically-loaded Fabric pattern tools into the TOOLS registry.
 # This runs at import time within gaia-mcp's process only — other services
@@ -111,7 +114,33 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
     """
     Executes a tool method with the given parameters.
     Handles sensitive tools requiring approval and blast shield validation.
+    Supports both legacy tool names AND domain tool names (file, shell, web, etc.).
     """
+    # ── Domain tool routing ────────────────────────────────────────────
+    # If method is a domain name (e.g., "file"), pop "action" from params,
+    # resolve to the legacy tool name, and delegate to the same function.
+    if method in DOMAIN_TOOLS and not DOMAIN_TOOLS[method].get("dynamic"):
+        action = (params or {}).pop("action", None)
+        if not action:
+            raise ValueError(f"Domain tool '{method}' requires an 'action' parameter. "
+                             f"Available: {list(DOMAIN_TOOLS[method]['actions'].keys())}")
+        legacy_name = validate_domain_call(method, action)
+        logger.info("Domain route: %s(action=%s) → %s", method, action, legacy_name)
+        # Check domain-level sensitivity before delegating
+        if not pre_approved and is_sensitive(method, action):
+            raise PermissionError(f"Tool '{method}(action={action})' requires explicit approval.")
+        return await execute_tool(legacy_name, params, approval_store, pre_approved=True)
+
+    # Fabric domain: pattern param selects which fabric tool to run
+    if method == "fabric":
+        pattern = (params or {}).pop("pattern", (params or {}).pop("action", None))
+        if not pattern:
+            raise ValueError("fabric tool requires a 'pattern' parameter")
+        legacy_name = f"fabric_{pattern}"
+        logger.info("Domain route: fabric(pattern=%s) → %s", pattern, legacy_name)
+        return await execute_tool(legacy_name, params, approval_store, pre_approved)
+
+    # ── Legacy tool execution ──────────────────────────────────────────
     logger.info("Executing tool '%s'", method)
     logger.debug("[DEBUG] Executing tool '%s' with params_keys=%s", method, sorted(list((params or {}).keys())))
 
