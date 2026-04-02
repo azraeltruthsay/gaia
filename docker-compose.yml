@@ -116,7 +116,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
-      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/Qwen3-8B-GAIA-Prime-v3}
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime}
       - PRIME_DEVICE=cuda
       - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-0}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -282,7 +282,7 @@ services:
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
       # Remote vLLM inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Qwen3-8B-GAIA-Prime-v3}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
       # Nano reflex endpoint (separate llama-server container)
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
@@ -493,7 +493,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
       # AWQ model is for inference only (GEMM kernels lack backward pass)
-      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/Qwen3-8B-GAIA-Prime-v3}
+      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/prime}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:256
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
