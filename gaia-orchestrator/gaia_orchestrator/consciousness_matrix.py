@@ -95,14 +95,14 @@ class ConsciousnessMatrix:
         self._gpu_models = {
             "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6"),
             "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Qwen3-8B-GAIA-Prime-v2"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Qwen3-8B-GAIA-Prime-v3"),
         }
 
         # GGUF model paths (for state 2 = Subconscious/CPU)
         self._cpu_models = {
             "nano": os.environ.get("NANO_GGUF_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf"),
             "core": os.environ.get("CORE_GGUF_PATH", "/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Qwen3-8B-GAIA-Prime-v2-Q4_K_M.gguf"),
+            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Qwen3-8B-GAIA-Prime-v3-Q4_K_M.gguf"),
         }
 
         # The matrix — one entry per tier
