@@ -1383,6 +1383,79 @@ def gen_creative_tool_use(phrases: dict) -> list:
     return samples
 
 
+def gen_tool_initiative(phrases: dict) -> list:
+    """When unsure, USE A TOOL instead of saying 'I don't know'.
+
+    This is the critical behavioral training: GAIA should reach for
+    her tools proactively, not passively admit ignorance.
+    """
+    samples = []
+
+    initiative = [
+        # Recitation — don't say "I don't remember", SEARCH for it
+        ("Can you recite Jabberwocky?",
+         f"Let me look that up to make sure I get it right.\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Jabberwocky Lewis Carroll full poem text\"}}{TOOL_CALL_CLOSE}"),
+        ("Recite The Raven by Poe.",
+         f"I want to get this right — let me pull the full text.\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"The Raven Edgar Allan Poe full poem\"}}{TOOL_CALL_CLOSE}"),
+        ("What's the full text of the GAIA constitution?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/system_reference/gaia_constitution.md\"}}{TOOL_CALL_CLOSE}"),
+
+        # Factual uncertainty — SEARCH don't guess
+        ("What's the population of Iceland?",
+         f"Let me check rather than guess.\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"population of Iceland 2026\"}}{TOOL_CALL_CLOSE}"),
+        ("When was Python 3.12 released?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Python 3.12 release date\"}}{TOOL_CALL_CLOSE}"),
+        ("What's the latest version of PyTorch?",
+         f"I'd rather check than risk being outdated.\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"latest PyTorch version 2026\"}}{TOOL_CALL_CLOSE}"),
+
+        # Self-knowledge gaps — USE TOOLS to look it up
+        ("What adapters do you have?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"study\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}"),
+        ("What's your current immune system score?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
+        ("What errors have you had today?",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":20}}{TOOL_CALL_CLOSE}"),
+
+        # User explicitly asks to use tools
+        ("Can you use your tools to find that?",
+         f"{pick_voice(phrases, 'affirmations')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
+        ("Look it up for me.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
+        ("Can you search for that?",
+         f"On it.\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
+
+        # Knowledge base before web — check internal first
+        ("Do we have any documentation on the sleep cycle?",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"sleep cycle documentation\"}}{TOOL_CALL_CLOSE}"),
+        ("What do we know about ROME editing?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"ROME rank one model editing\"}}{TOOL_CALL_CLOSE}"),
+
+        # Don't say "I can't" — DO it
+        ("Can you check the logs?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"lines\":30}}{TOOL_CALL_CLOSE}"),
+        ("What's happening on the system right now?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
+    ]
+
+    for question, answer in initiative:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": ["voice", "tool_calling", "initiative"],
+            "weight": 3.5,  # Highest weight — initiative is critical
+        })
+
+    return samples
+
+
 def gen_temporal_awareness(phrases: dict) -> list:
     """Temporal reasoning — reading clocks, relative time, sorting events."""
     samples = []
@@ -1682,6 +1755,7 @@ def main():
         all_samples.extend(gen_thin_domain_boost(phrases))
         all_samples.extend(gen_more_restraint(phrases))
         all_samples.extend(gen_voice_boost(phrases))
+        all_samples.extend(gen_tool_initiative(phrases))
         all_samples.extend(gen_temporal_awareness(phrases))
         all_samples.extend(gen_think_suppression(phrases))
         all_samples.extend(gen_voice_first_responses(phrases))

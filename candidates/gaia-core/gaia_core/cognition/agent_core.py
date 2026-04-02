@@ -3560,6 +3560,13 @@ RESULT: COMPLEX (reason: <brief reason>)
             return False
 
         if plan.intent in ("recitation", "chat"):
+            # Don't slim-path if user explicitly asked for tools
+            lowered = (user_input or "").lower()
+            tool_signals = ["use your ", "use the ", "use my ", "look up", "look it up",
+                            "search ", "web search", "find ", "tools"]
+            if any(sig in lowered for sig in tool_signals):
+                self.logger.info("Slim prompt declined: recitation intent but user requested tools")
+                return False
             return True
         if plan.intent in ("list_tools", "list_tree", "find_file", "list_files", "read_file"):
             return True
