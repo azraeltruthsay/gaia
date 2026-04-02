@@ -267,7 +267,7 @@ def select_tool(
 AVAILABLE TOOLS:
 {tool_catalog}
 
-IMPORTANT: These are your most common tools. If the user's request might need a capability you don't see above (e.g., audio, notebooks, study, promotion, world-building), use "list_tools" to discover all available tools, then use "describe_tool" to get the schema for the one you need.
+IMPORTANT: Select a domain tool and specify the action. For example: selected_tool="file", params='{{"action": "read", "path": "/foo"}}'. If you need to discover available actions, use introspect with action="tools".
 
 USER REQUEST: {user_input}
 
@@ -484,19 +484,24 @@ Respond with JSON:
 def _build_tool_catalog() -> str:
     """Build a formatted catalog of available tools for the selection prompt.
 
-    Only includes tools in ``_PROMPT_TOOLS`` to keep the prompt compact
-    enough for small models.
+    Uses the consolidated domain tool format from domain_tools.py.
+    Falls back to legacy allowlist format if domain_tools is unavailable.
     """
-    lines = []
-    for tool_name, info in AVAILABLE_TOOLS.items():
-        if tool_name not in _PROMPT_TOOLS:
-            continue
-        lines.append(f"- {tool_name}: {info['description']}")
-        if info['params']:
-            lines.append(f"  Parameters: {', '.join(info['params'])}")
-        if info.get("requires_approval"):
-            lines.append("  Note: Requires user approval")
-    return "\n".join(lines)
+    try:
+        from gaia_common.utils.domain_tools import build_prompt_catalog
+        return build_prompt_catalog()
+    except ImportError:
+        # Fallback to legacy format
+        lines = []
+        for tool_name, info in AVAILABLE_TOOLS.items():
+            if tool_name not in _PROMPT_TOOLS:
+                continue
+            lines.append(f"- {tool_name}: {info['description']}")
+            if info['params']:
+                lines.append(f"  Parameters: {', '.join(info['params'])}")
+            if info.get("requires_approval"):
+                lines.append("  Note: Requires user approval")
+        return "\n".join(lines)
 
 
 def _extract_content(result) -> str:

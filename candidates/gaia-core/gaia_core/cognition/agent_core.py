@@ -6255,10 +6255,45 @@ Start your response with the first line of the file."""
         try:
             # Normalize tool names for SOA schema alignment
             canonical_name = tool.tool_name
-            if canonical_name == "ai.read": canonical_name = "read_file"
-            elif canonical_name == "ai.write": canonical_name = "write_file"
-            elif canonical_name == "ai.execute": canonical_name = "run_shell"
-            elif canonical_name == "embedding.query": canonical_name = "memory_query"
+
+            # Map legacy internal tool names to their MCP equivalents
+            _INTERNAL_ALIASES = {
+                "ai.read": "read_file",
+                "ai.write": "write_file",
+                "ai.execute": "run_shell",
+                "embedding.query": "memory_query",
+            }
+            if canonical_name in _INTERNAL_ALIASES:
+                canonical_name = _INTERNAL_ALIASES[canonical_name]
+
+            # Domain tools (file, shell, web, etc.) go directly through MCP
+            # The MCP server's execute_tool handles domain→legacy routing
+            try:
+                from gaia_common.utils.domain_tools import DOMAIN_TOOLS
+                if canonical_name in DOMAIN_TOOLS:
+                    logger.info(f"Dispatching domain tool '{canonical_name}' via MCP JSON-RPC")
+                    rpc_result = asyncio.run(mcp_client.call_jsonrpc(
+                        method=canonical_name,
+                        params=tool.params or {}
+                    ))
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    if rpc_result.get("ok"):
+                        rpc_response = rpc_result.get("response", {})
+                        actual_result = rpc_response.get("result", rpc_response)
+                        return ToolExecutionResult(
+                            success=actual_result.get("ok", True) if isinstance(actual_result, dict) else True,
+                            output=actual_result,
+                            error=actual_result.get("error") if isinstance(actual_result, dict) else None,
+                            execution_time_ms=elapsed_ms
+                        )
+                    else:
+                        return ToolExecutionResult(
+                            success=False,
+                            error=rpc_result.get("error", "Domain tool call failed"),
+                            execution_time_ms=elapsed_ms
+                        )
+            except ImportError:
+                pass  # domain_tools not available, fall through to legacy handling
 
             if canonical_name == "read_file":
                 result = asyncio.run(mcp_client.ai_read(tool.params.get("path", "")))
