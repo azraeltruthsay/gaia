@@ -455,8 +455,8 @@ def gen_multi_turn_tool(phrases: dict) -> list:
          f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/gaia-common/gaia_common/constants/gaia_constants.json\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
         # Building on previous context
-        ("Now search my knowledge base for anything related to that topic.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"related topic from conversation\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
+        ("We were discussing LoRA adapters. Search my knowledge base for anything related.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"memory\",\"action\":\"query\",\"query\":\"LoRA adapter training fine-tuning\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         # Status check mid-conversation
         ("Wait, is the system even healthy right now? Check before we continue.",
@@ -1421,15 +1421,15 @@ def gen_tool_initiative(phrases: dict) -> list:
          f"{pick_voice(phrases, 'filler')}\n"
          f"{TOOL_CALL_OPEN}{{\"tool\":\"recall\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":20}}{TOOL_CALL_CLOSE}"),
 
-        # User explicitly asks to use tools
-        ("Can you use your tools to find that?",
+        # User explicitly asks to use tools — query derived from context
+        ("We were talking about sparse autoencoders. Can you use your tools to find more?",
          f"{pick_voice(phrases, 'affirmations')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
-        ("Look it up for me.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
-        ("Can you search for that?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"sparse autoencoders interpretability research\"}}{TOOL_CALL_CLOSE}"),
+        ("I mentioned ROME editing earlier. Look it up for me.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"ROME rank one model editing\"}}{TOOL_CALL_CLOSE}"),
+        ("Can you search for how KV caching works in transformers?",
          f"On it.\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"topic from conversation\"}}{TOOL_CALL_CLOSE}"),
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"KV caching transformers attention mechanism\"}}{TOOL_CALL_CLOSE}"),
 
         # Knowledge base before web — check internal first
         ("Do we have any documentation on the sleep cycle?",
