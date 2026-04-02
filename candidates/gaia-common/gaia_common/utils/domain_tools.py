@@ -235,46 +235,64 @@ DOMAIN_TOOLS: Dict[str, dict] = {
         },
     },
 
-    # ── Create (External Services) ─────────────────────────────────────
-    "create": {
-        "description": "External creation — Kanka worldbuilding, NotebookLM, promotions, fragments, blueprints",
+    # ── Worldbuild (Kanka.io) ─────────────────────────────────────────
+    "worldbuild": {
+        "description": "Kanka.io campaign and worldbuilding management",
         "actions": {
-            # Kanka
-            "kanka_list_campaigns": {"params": {}, "maps_to": "kanka_list_campaigns"},
-            "kanka_search": {"params": {"query": "string", "campaign": "string?"}, "maps_to": "kanka_search"},
-            "kanka_list": {"params": {"entity_type": "string", "campaign": "string?"}, "maps_to": "kanka_list_entities"},
-            "kanka_get": {"params": {"entity_type": "string", "entity_id": "integer", "campaign": "string?"}, "maps_to": "kanka_get_entity"},
-            "kanka_create": {"params": {"entity_type": "string", "name": "string", "entry": "string?", "campaign": "string?"}, "maps_to": "kanka_create_entity", "sensitive": True},
-            "kanka_update": {"params": {"entity_type": "string", "entity_id": "integer", "fields": "object", "campaign": "string?"}, "maps_to": "kanka_update_entity", "sensitive": True},
-            # NotebookLM
-            "notebook_list": {"params": {}, "maps_to": "notebooklm_list_notebooks"},
-            "notebook_get": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_get_notebook"},
-            "notebook_sources": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_list_sources"},
-            "notebook_notes": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_list_notes"},
-            "notebook_artifacts": {"params": {"notebook_id": "string", "artifact_type": "string?"}, "maps_to": "notebooklm_list_artifacts"},
-            "notebook_chat": {"params": {"notebook_id": "string", "question": "string"}, "maps_to": "notebooklm_chat"},
-            "notebook_create_note": {"params": {"notebook_id": "string", "title": "string", "content": "string?"}, "maps_to": "notebooklm_create_note", "sensitive": True},
-            "notebook_download_audio": {"params": {"notebook_id": "string", "artifact_id": "string?"}, "maps_to": "notebooklm_download_audio"},
-            # Promotion & Blueprints
-            "blueprint_generate": {"params": {"service_id": "string"}, "maps_to": "generate_blueprint"},
-            "promote_assess": {"params": {"service_id": "string"}, "maps_to": "assess_promotion"},
-            "promote_create": {"params": {"service_id": "string", "verdict": "string", "recommendation": "string", "pipeline_cmd": "string", "check_summary": "string"}, "maps_to": "promotion_create_request", "sensitive": True},
-            "promote_list": {"params": {"service_id": "string?", "status_filter": "string?"}, "maps_to": "promotion_list_requests"},
-            "promote_status": {"params": {"request_id": "string"}, "maps_to": "promotion_request_status"},
-            # Fragmentation
+            "campaigns": {"params": {}, "maps_to": "kanka_list_campaigns"},
+            "search": {"params": {"query": "string", "campaign": "string?"}, "maps_to": "kanka_search"},
+            "list": {"params": {"entity_type": "string", "campaign": "string?"}, "maps_to": "kanka_list_entities"},
+            "get": {"params": {"entity_type": "string", "entity_id": "integer", "campaign": "string?"}, "maps_to": "kanka_get_entity"},
+            "create": {"params": {"entity_type": "string", "name": "string", "entry": "string?", "campaign": "string?"}, "maps_to": "kanka_create_entity", "sensitive": True},
+            "update": {"params": {"entity_type": "string", "entity_id": "integer", "fields": "object", "campaign": "string?"}, "maps_to": "kanka_update_entity", "sensitive": True},
+        },
+    },
+
+    # ── Notebook (NotebookLM) ──────────────────────────────────────────
+    "notebook": {
+        "description": "Google NotebookLM — notebooks, sources, notes, AI chat",
+        "actions": {
+            "list": {"params": {}, "maps_to": "notebooklm_list_notebooks"},
+            "get": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_get_notebook"},
+            "sources": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_list_sources"},
+            "notes": {"params": {"notebook_id": "string"}, "maps_to": "notebooklm_list_notes"},
+            "artifacts": {"params": {"notebook_id": "string", "artifact_type": "string?"}, "maps_to": "notebooklm_list_artifacts"},
+            "chat": {"params": {"notebook_id": "string", "question": "string"}, "maps_to": "notebooklm_chat"},
+            "create_note": {"params": {"notebook_id": "string", "title": "string", "content": "string?"}, "maps_to": "notebooklm_create_note", "sensitive": True},
+            "download_audio": {"params": {"notebook_id": "string", "artifact_id": "string?"}, "maps_to": "notebooklm_download_audio"},
+        },
+    },
+
+    # ── Context (CFR + Fragments) ──────────────────────────────────────
+    "context": {
+        "description": "Document context management — CFR resolution tree, response fragments",
+        "actions": {
+            # CFR
+            "ingest": {"params": {"file_path": "string", "doc_id": "string?"}, "maps_to": "cfr_ingest"},
+            "focus": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_focus"},
+            "compress": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_compress"},
+            "expand": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_expand"},
+            "synthesize": {"params": {"doc_id": "string"}, "maps_to": "cfr_synthesize"},
+            "status": {"params": {"doc_id": "string?"}, "maps_to": "cfr_status"},
+            "rolling": {"params": {"doc_id": "string", "target_section": "integer"}, "maps_to": "cfr_rolling_context"},
+            # Fragments
             "fragment_write": {"params": {"parent_request_id": "string", "content": "string", "sequence": "integer?", "is_complete": "boolean?"}, "maps_to": "fragment_write"},
             "fragment_read": {"params": {"parent_request_id": "string"}, "maps_to": "fragment_read"},
             "fragment_assemble": {"params": {"parent_request_id": "string"}, "maps_to": "fragment_assemble"},
             "fragment_list": {"params": {}, "maps_to": "fragment_list_pending"},
             "fragment_clear": {"params": {"parent_request_id": "string?"}, "maps_to": "fragment_clear"},
-            # CFR
-            "cfr_ingest": {"params": {"file_path": "string", "doc_id": "string?"}, "maps_to": "cfr_ingest"},
-            "cfr_focus": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_focus"},
-            "cfr_compress": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_compress"},
-            "cfr_expand": {"params": {"doc_id": "string", "section_index": "integer"}, "maps_to": "cfr_expand"},
-            "cfr_synthesize": {"params": {"doc_id": "string"}, "maps_to": "cfr_synthesize"},
-            "cfr_status": {"params": {"doc_id": "string?"}, "maps_to": "cfr_status"},
-            "cfr_rolling_context": {"params": {"doc_id": "string", "target_section": "integer"}, "maps_to": "cfr_rolling_context"},
+        },
+    },
+
+    # ── Manage (Promotion + Blueprints) ────────────────────────────────
+    "manage": {
+        "description": "Service promotion, blueprints, and deployment management",
+        "actions": {
+            "blueprint": {"params": {"service_id": "string"}, "maps_to": "generate_blueprint"},
+            "assess": {"params": {"service_id": "string"}, "maps_to": "assess_promotion"},
+            "promote": {"params": {"service_id": "string", "verdict": "string", "recommendation": "string", "pipeline_cmd": "string", "check_summary": "string"}, "maps_to": "promotion_create_request", "sensitive": True},
+            "promote_list": {"params": {"service_id": "string?", "status_filter": "string?"}, "maps_to": "promotion_list_requests"},
+            "promote_status": {"params": {"request_id": "string"}, "maps_to": "promotion_request_status"},
         },
     },
 

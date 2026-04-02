@@ -37,15 +37,21 @@ TOOL_CALL_CLOSE = "</tool_call>"
 TOOL_RESULT_OPEN = "<tool_result>"
 TOOL_RESULT_CLOSE = "</tool_result>"
 
-# System prompt fragment injected during training
+# System prompt fragment injected during training — MUST match inference injection
+# Generated from domain_tools.py via build_tool_schema_injection()
 SYSTEM_TOOLS = """You have these tools available:
 - file(action): read|write|list|tree|find
 - shell(action): run
 - web(action): search|fetch
-- knowledge(action): query|search|memory|add|list|status
-- introspect(action): world|recall|logs|tools
-- study(action): train|status|adapter_list|adapter_load
-- create(action): kanka_*|notebook_*|promote_*|fragment_*|cfr_*
+- knowledge(action): query|search|memory|add|index|embed|list|status
+- audio(action): listen_start|listen_stop|listen_status|inbox_*
+- study(action): train|status|cancel|adapter_list|adapter_load|adapter_unload
+- introspect(action): world|recall|logs|count_chars|tools|describe
+- worldbuild(action): campaigns|search|list|get|create|update
+- notebook(action): list|get|sources|notes|artifacts|chat|create_note
+- context(action): ingest|focus|compress|expand|synthesize|status|fragment_*
+- manage(action): blueprint|assess|promote|promote_list|promote_status
+- fabric(pattern, input): Run a Fabric analysis pattern
 
 Call tools inline: <tool_call>{"tool":"domain","action":"verb",...}</tool_call>
 Results appear as: <tool_result>...</tool_result>"""
@@ -403,40 +409,40 @@ def gen_multi_turn_tool(phrases: dict) -> list:
 
 
 def gen_create_domain_tools(phrases: dict) -> list:
-    """Create domain tool calls — Kanka, NotebookLM, CFR, fragments."""
+    """Specialized domain tool calls — worldbuild, notebook, context, manage."""
     samples = []
 
     create_scenarios = [
-        # Kanka
+        # Worldbuild (Kanka)
         ("Search for the character Thrain in our D&D campaign.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"kanka_search\",\"query\":\"Thrain\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Thrain\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("List all locations in the campaign.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"kanka_list\",\"entity_type\":\"locations\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"list\",\"entity_type\":\"locations\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
-        # NotebookLM
+        # Notebook (NotebookLM)
         ("What notebooks do I have in NotebookLM?",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"notebook_list\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"notebook\",\"action\":\"list\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Ask the GAIA Architecture notebook about the sleep cycle.",
          f"{pick_voice(phrases, 'filler')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"notebook_chat\",\"notebook_id\":\"gaia-arch\",\"question\":\"How does the sleep cycle work?\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"notebook\",\"action\":\"chat\",\"notebook_id\":\"gaia-arch\",\"question\":\"How does the sleep cycle work?\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
-        # CFR
+        # Context (CFR)
         ("I need to analyze a long document. Ingest this file for me.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"cfr_ingest\",\"file_path\":\"/knowledge/research/paper.md\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"context\",\"action\":\"ingest\",\"file_path\":\"/knowledge/research/paper.md\"}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
         ("Focus on section 3 of that document.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"cfr_focus\",\"doc_id\":\"paper\",\"section_index\":3}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"context\",\"action\":\"focus\",\"doc_id\":\"paper\",\"section_index\":3}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
-        # Fragment
+        # Context (Fragments)
         ("I need to write a long response. Start a fragment.",
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"fragment_write\",\"parent_request_id\":\"req-001\",\"content\":\"First part of the response...\",\"sequence\":0}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"context\",\"action\":\"fragment_write\",\"parent_request_id\":\"req-001\",\"content\":\"First part of the response...\",\"sequence\":0}}{TOOL_CALL_CLOSE}",
          ["tool_calling"]),
-        # Promotion
+        # Manage (Promotion)
         ("Check if gaia-audio is ready for promotion.",
          f"{pick_voice(phrases, 'filler')}\n"
-         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"promote_assess\",\"service_id\":\"gaia-audio\"}}{TOOL_CALL_CLOSE}",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"manage\",\"action\":\"assess\",\"service_id\":\"gaia-audio\"}}{TOOL_CALL_CLOSE}",
          ["voice", "tool_calling"]),
     ]
 
