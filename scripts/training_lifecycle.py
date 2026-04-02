@@ -119,6 +119,8 @@ class TrainingLifecycle:
         self.snapshot: Optional[SystemSnapshot] = None
         self.skip_restore = skip_restore
         self._entered = False
+        self._core_was_stopped = False
+        self._nano_was_stopped = False
 
     def __enter__(self):
         self._entered = True
@@ -247,15 +249,38 @@ class TrainingLifecycle:
         # Wait for VRAM to settle
         time.sleep(3)
 
-        # Verify GPU is actually free
+        # Check if GPU is actually free — if not, stop containers as nuclear option
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.used,memory.free", "--format=csv,noheader"],
                 capture_output=True, text=True, timeout=5
             )
-            logger.info("  GPU: %s", result.stdout.strip())
-        except Exception:
-            pass
+            gpu_line = result.stdout.strip()
+            logger.info("  GPU after soft unload: %s", gpu_line)
+
+            # Parse VRAM: "13745 MiB, 2090 MiB" → used, free
+            parts = gpu_line.replace(" MiB", "").split(",")
+            if len(parts) == 2:
+                used_mb = int(parts[0].strip())
+                free_mb = int(parts[1].strip())
+                # If less than 10GB free, containers are still hogging GPU
+                if free_mb < 10000:
+                    logger.warning("  Only %dMB free — stopping gaia-core to force GPU release", free_mb)
+                    subprocess.run(["docker", "stop", "gaia-core"], capture_output=True, timeout=30)
+                    self._core_was_stopped = True
+                    time.sleep(3)
+                    # Also stop nano if still eating VRAM
+                    subprocess.run(["docker", "stop", "gaia-nano"], capture_output=True, timeout=15)
+                    self._nano_was_stopped = True
+                    time.sleep(2)
+                    # Re-check
+                    result2 = subprocess.run(
+                        ["nvidia-smi", "--query-gpu=memory.used,memory.free", "--format=csv,noheader"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    logger.info("  GPU after container stop: %s", result2.stdout.strip())
+        except Exception as e:
+            logger.warning("  GPU check failed: %s", e)
 
         logger.info("Models unloaded, ready for training")
 
@@ -309,6 +334,16 @@ class TrainingLifecycle:
             return
 
         logger.info("Restoring system state...")
+
+        # Restart containers if we stopped them for VRAM
+        if self._core_was_stopped:
+            logger.info("  Restarting gaia-core (was stopped for training)...")
+            subprocess.run(["docker", "start", "gaia-core"], capture_output=True, timeout=30)
+            time.sleep(10)  # Wait for Core to initialize
+        if self._nano_was_stopped:
+            logger.info("  Restarting gaia-nano (was stopped for training)...")
+            subprocess.run(["docker", "start", "gaia-nano"], capture_output=True, timeout=15)
+            time.sleep(5)
 
         # Exit training mode — tell orchestrator to wake up
         result = _post(f"{ORCHESTRATOR_URL}/consciousness/awake", timeout=30)
