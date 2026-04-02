@@ -6113,40 +6113,46 @@ Start your response with the first line of the file."""
             "confidence": primary_tool.selection_confidence
         }, session_id, source=source, destination_context=_meta)
 
-        # Step 2: Confidence Review (Prime model)
-        logger.info(f"Tool routing: reviewing selection {primary_tool.tool_name}")
-
-        # Use Prime model for review if available
-        # Note: acquire_model() now supports lazy loading - no need to pre-check pool
-        review_model = None
-        review_model_name = None
-        for cand in ["prime", "gpu_prime", "lite", "cpu_prime"]:
-            try:
-                review_model = self.model_pool.acquire_model(cand)
-                if review_model is not None:
-                    review_model_name = cand
-                    break
-            except Exception:
-                continue
-
-        if review_model:
-            try:
-                confidence, reasoning = review_selection(
-                    packet=packet,
-                    selected_tool=primary_tool,
-                    model=review_model,
-                    temperature=review_temp
-                )
-            finally:
-                if review_model_name:
-                    try:
-                        self.model_pool.release_model(review_model_name)
-                    except Exception as _rel_exc:
-                        logger.debug("AgentCore: tool review model release failed: %s", _rel_exc)
-        else:
-            # No review model available, use selection confidence directly
+        # Step 2: Confidence Review
+        # Skip review for deterministic matches (confidence >= 0.9) — they're
+        # already high-confidence by definition and the review model may not
+        # understand domain tool names, causing false rejections.
+        if primary_tool.selection_confidence >= 0.9:
             confidence = primary_tool.selection_confidence
-            reasoning = "No review model available; using selection confidence"
+            reasoning = "Deterministic match — review skipped"
+            logger.info("Tool routing: skipping review for deterministic match (confidence=%.2f)", confidence)
+        else:
+            logger.info(f"Tool routing: reviewing selection {primary_tool.tool_name}")
+
+            # Use Prime model for review if available
+            review_model = None
+            review_model_name = None
+            for cand in ["prime", "gpu_prime", "lite", "cpu_prime"]:
+                try:
+                    review_model = self.model_pool.acquire_model(cand)
+                    if review_model is not None:
+                        review_model_name = cand
+                        break
+                except Exception:
+                    continue
+
+            if review_model:
+                try:
+                    confidence, reasoning = review_selection(
+                        packet=packet,
+                        selected_tool=primary_tool,
+                        model=review_model,
+                        temperature=review_temp
+                    )
+                finally:
+                    if review_model_name:
+                        try:
+                            self.model_pool.release_model(review_model_name)
+                        except Exception as _rel_exc:
+                            logger.debug("AgentCore: tool review model release failed: %s", _rel_exc)
+            else:
+                confidence = primary_tool.selection_confidence
+                reasoning = "No review model available; using selection confidence"
 
         packet.tool_routing.review_confidence = confidence
         packet.tool_routing.review_reasoning = reasoning
