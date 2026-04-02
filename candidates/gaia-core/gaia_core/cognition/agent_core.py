@@ -6406,6 +6406,16 @@ Start your response with the first line of the file."""
         web_indicators = [
             "web search", "search the web", "search online",
             "search the internet", "look up online", "google ",
+            "look up ", "look it up",
+        ]
+
+        # Explicit tool invocation — user named a specific tool
+        explicit_tool_indicators = [
+            "use your ", "use the ", "use my ",
+            "run the ", "run your ",
+            "call the ", "call your ",
+            "invoke ", "trigger ",
+            "with your ", "with the ",
         ]
 
         # Knowledge save indicators
@@ -6416,7 +6426,7 @@ Start your response with the first line of the file."""
             "save the following to",
         ]
 
-        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + knowledge_save_indicators:
+        for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + explicit_tool_indicators + knowledge_save_indicators:
             if indicator in lowered:
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True

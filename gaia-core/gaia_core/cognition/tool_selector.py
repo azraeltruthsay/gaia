@@ -191,6 +191,72 @@ def _llama_with_timeout(model, timeout_s: int = _LLAMA_TIMEOUT_S, **kwargs):
         raise TimeoutError(f"Llama call timed out after {timeout_s}s")
 
 
+def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
+    """
+    Fast deterministic match for explicit tool requests.
+
+    When the user clearly names a tool or action, skip the LLM and return
+    the right tool immediately. Prevents hallucinated tool calls.
+    """
+    import re
+
+    # Web search — most common explicit tool request
+    if any(p in lowered for p in ["web search", "search the web", "search online",
+                                   "search the internet", "google ", "look it up"]):
+        # Extract the search query — everything after the trigger phrase
+        # "use your web search tool to find X" → query = "find X" or just the topic
+        query = lowered
+        for prefix in ["use your web search tool to ", "web search for ",
+                        "search the web for ", "search online for ",
+                        "search the internet for ", "google "]:
+            if prefix in query:
+                query = query.split(prefix, 1)[1]
+                break
+        # Clean up common suffixes
+        for suffix in [" and recite it", " and tell me", " and read it",
+                       " and show me", " please", " for me"]:
+            if query.endswith(suffix):
+                query = query[:-len(suffix)]
+        return SelectedTool(
+            tool_name="web",
+            params={"action": "search", "query": query.strip()},
+            selection_reasoning="Deterministic match: user explicitly requested web search",
+            selection_confidence=0.95,
+        )
+
+    # File read — "read /path/to/file"
+    path_match = re.search(r'\bread\s+(/[\w/._-]+)', lowered)
+    if path_match:
+        return SelectedTool(
+            tool_name="file",
+            params={"action": "read", "path": path_match.group(1)},
+            selection_reasoning="Deterministic match: explicit file read request",
+            selection_confidence=0.95,
+        )
+
+    # Shell command — "run: command" or "execute: command"
+    shell_match = re.search(r'(?:run|execute):\s*(.+)', lowered)
+    if shell_match:
+        return SelectedTool(
+            tool_name="shell",
+            params={"action": "run", "command": shell_match.group(1).strip()},
+            selection_reasoning="Deterministic match: explicit shell command",
+            selection_confidence=0.95,
+        )
+
+    # World state — "what time is it", "system status", "what's your status"
+    if any(p in lowered for p in ["what time", "system status", "world state",
+                                   "your status", "gpu status"]):
+        return SelectedTool(
+            tool_name="introspect",
+            params={"action": "world"},
+            selection_reasoning="Deterministic match: system status query",
+            selection_confidence=0.90,
+        )
+
+    return None
+
+
 def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool:
     """
     Determine if the request likely needs MCP tool usage.
@@ -257,6 +323,15 @@ def select_tool(
     Returns:
         Tuple of (primary_selection, alternative_selections)
     """
+    # ── Deterministic shortcut for explicit tool requests ──────────────
+    # When the user names a specific tool or action, bypass LLM selection.
+    # This prevents hallucinated tool calls when the selection model is weak.
+    lowered = user_input.lower()
+    shortcut = _deterministic_tool_match(lowered)
+    if shortcut:
+        logger.info("Tool selector: deterministic match → %s", shortcut.tool_name)
+        return shortcut, []
+
     # Build tool catalog for prompt
     tool_catalog = _build_tool_catalog()
 
