@@ -1003,6 +1003,19 @@ async def process_packet(packet_data: Dict[str, Any]):
                 result = _think_tag_re.sub('', result)
                 return result
 
+            # ── Native tool call parser ──────────────────────────────────
+            # Intercepts <tool_call> tags in model output, executes via MCP,
+            # and can trigger a continuation generation with the result.
+            try:
+                from gaia_common.utils.tool_call_parser import (
+                    ToolCallParser, ParseEventType, format_tool_result,
+                )
+                _tc_parser = ToolCallParser()
+                _tc_enabled = True
+            except ImportError:
+                _tc_parser = None
+                _tc_enabled = False
+
             # AgentCore.run_turn is a synchronous generator. Each next()
             # call may block for seconds during llama_cpp inference.
             # Running in a thread executor prevents blocking the uvicorn
@@ -1023,6 +1036,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                 except StopIteration:
                     return None
 
+            _pending_tool_calls = []
+
             while True:
                 event = await loop.run_in_executor(None, _next_event)
                 if event is None:
@@ -1033,15 +1048,70 @@ async def process_packet(packet_data: Dict[str, Any]):
                         val = _strip_think_token(val)
                         if not val:
                             continue
-                        response_pieces.append(val)
-                        # Yield token immediately for real-time UI updates
-                        yield json.dumps({"type": "token", "value": val}) + "\n"
+
+                        # Feed through tool_call parser if enabled
+                        if _tc_enabled and _tc_parser:
+                            parse_events = _tc_parser.feed(val)
+                            for pe in parse_events:
+                                if pe.type == ParseEventType.TEXT:
+                                    response_pieces.append(pe.text)
+                                    yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                                elif pe.type == ParseEventType.TOOL_CALL_DETECTED:
+                                    # Show the user what tool is being called
+                                    tool_display = f"\n*[calling {pe.tool_name}({pe.tool_action})...]*\n"
+                                    yield json.dumps({"type": "token", "value": tool_display}) + "\n"
+                                    yield json.dumps({"type": "flush"}) + "\n"
+                                    _pending_tool_calls.append(pe)
+                                elif pe.type == ParseEventType.TOOL_ERROR:
+                                    response_pieces.append(pe.text)
+                                    yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                        else:
+                            response_pieces.append(val)
+                            yield json.dumps({"type": "token", "value": val}) + "\n"
+
                     elif event.get("type") == "flush":
-                        # Signal to front-ends to flush their buffers
                         yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
-                        # Store the final packet to yield at the very end
                         final_packet_dict = event.get("value")
+
+            # Flush any remaining parser buffer
+            if _tc_enabled and _tc_parser:
+                for pe in _tc_parser.flush():
+                    if pe.type == ParseEventType.TEXT and pe.text:
+                        response_pieces.append(pe.text)
+                        yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+
+            # ── Execute pending tool calls and generate continuation ───
+            if _pending_tool_calls:
+                for tc in _pending_tool_calls:
+                    try:
+                        # Execute via MCP JSON-RPC
+                        from gaia_core.utils.mcp_client import call_jsonrpc
+                        tool_params = dict(tc.tool_params or {})
+                        tool_params["action"] = tc.tool_action
+                        rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
+                            method=tc.tool_name,
+                            params=tool_params,
+                        ))
+                        if rpc_result.get("ok"):
+                            actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
+                            result_xml = format_tool_result(actual_result)
+                        else:
+                            error = rpc_result.get("error", "Tool call failed")
+                            result_xml = format_tool_result({"error": str(error)})
+
+                        # Show result to user (abbreviated)
+                        result_preview = str(actual_result)[:200] if rpc_result.get("ok") else str(error)[:200]
+                        yield json.dumps({"type": "token", "value": f"\n*[result: {result_preview}]*\n"}) + "\n"
+                        yield json.dumps({"type": "flush"}) + "\n"
+
+                        # TODO: Trigger continuation generation with result injected
+                        # For now, append the result to response for context
+                        response_pieces.append(f"\n{result_xml}\n")
+
+                    except Exception as e:
+                        logger.warning("Tool call execution failed: %s", e)
+                        yield json.dumps({"type": "token", "value": f"\n*[tool error: {e}]*\n"}) + "\n"
 
             # Ensure a flush is always emitted so front-ends send accumulated text
             if response_pieces:

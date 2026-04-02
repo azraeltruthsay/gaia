@@ -1003,12 +1003,24 @@ async def process_packet(packet_data: Dict[str, Any]):
                 result = _think_tag_re.sub('', result)
                 return result
 
+            # ── Native tool call parser ──────────────────────────────────
+            # Intercepts <tool_call> tags in model output, executes via MCP,
+            # and can trigger a continuation generation with the result.
+            try:
+                from gaia_common.utils.tool_call_parser import (
+                    ToolCallParser, ParseEventType, format_tool_result,
+                )
+                _tc_parser = ToolCallParser()
+                _tc_enabled = True
+            except ImportError:
+                _tc_parser = None
+                _tc_enabled = False
+
             # AgentCore.run_turn is a synchronous generator. Each next()
             # call may block for seconds during llama_cpp inference.
             # Running in a thread executor prevents blocking the uvicorn
             # event loop, keeping /health and other endpoints responsive.
             loop = asyncio.get_event_loop()
-            logger.info("Main: creating run_turn generator (agent_core=%s)", type(_agent_core).__name__ if _agent_core else "None")
             gen = _agent_core.run_turn(
                 user_input=user_input,
                 session_id=session_id,
@@ -1017,16 +1029,14 @@ async def process_packet(packet_data: Dict[str, Any]):
                 metadata=metadata,
                 reflex_text=reflex_text
             )
-            logger.info("Main: run_turn generator created, calling first next()")
 
             def _next_event():
                 try:
                     return next(gen)
                 except StopIteration:
                     return None
-                except Exception as _gen_exc:
-                    logger.error("run_turn generator exception: %s", _gen_exc, exc_info=True)
-                    return None
+
+            _pending_tool_calls = []
 
             while True:
                 event = await loop.run_in_executor(None, _next_event)
@@ -1038,15 +1048,70 @@ async def process_packet(packet_data: Dict[str, Any]):
                         val = _strip_think_token(val)
                         if not val:
                             continue
-                        response_pieces.append(val)
-                        # Yield token immediately for real-time UI updates
-                        yield json.dumps({"type": "token", "value": val}) + "\n"
+
+                        # Feed through tool_call parser if enabled
+                        if _tc_enabled and _tc_parser:
+                            parse_events = _tc_parser.feed(val)
+                            for pe in parse_events:
+                                if pe.type == ParseEventType.TEXT:
+                                    response_pieces.append(pe.text)
+                                    yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                                elif pe.type == ParseEventType.TOOL_CALL_DETECTED:
+                                    # Show the user what tool is being called
+                                    tool_display = f"\n*[calling {pe.tool_name}({pe.tool_action})...]*\n"
+                                    yield json.dumps({"type": "token", "value": tool_display}) + "\n"
+                                    yield json.dumps({"type": "flush"}) + "\n"
+                                    _pending_tool_calls.append(pe)
+                                elif pe.type == ParseEventType.TOOL_ERROR:
+                                    response_pieces.append(pe.text)
+                                    yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                        else:
+                            response_pieces.append(val)
+                            yield json.dumps({"type": "token", "value": val}) + "\n"
+
                     elif event.get("type") == "flush":
-                        # Signal to front-ends to flush their buffers
                         yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
-                        # Store the final packet to yield at the very end
                         final_packet_dict = event.get("value")
+
+            # Flush any remaining parser buffer
+            if _tc_enabled and _tc_parser:
+                for pe in _tc_parser.flush():
+                    if pe.type == ParseEventType.TEXT and pe.text:
+                        response_pieces.append(pe.text)
+                        yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+
+            # ── Execute pending tool calls and generate continuation ───
+            if _pending_tool_calls:
+                for tc in _pending_tool_calls:
+                    try:
+                        # Execute via MCP JSON-RPC
+                        from gaia_core.utils.mcp_client import call_jsonrpc
+                        tool_params = dict(tc.tool_params or {})
+                        tool_params["action"] = tc.tool_action
+                        rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
+                            method=tc.tool_name,
+                            params=tool_params,
+                        ))
+                        if rpc_result.get("ok"):
+                            actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
+                            result_xml = format_tool_result(actual_result)
+                        else:
+                            error = rpc_result.get("error", "Tool call failed")
+                            result_xml = format_tool_result({"error": str(error)})
+
+                        # Show result to user (abbreviated)
+                        result_preview = str(actual_result)[:200] if rpc_result.get("ok") else str(error)[:200]
+                        yield json.dumps({"type": "token", "value": f"\n*[result: {result_preview}]*\n"}) + "\n"
+                        yield json.dumps({"type": "flush"}) + "\n"
+
+                        # TODO: Trigger continuation generation with result injected
+                        # For now, append the result to response for context
+                        response_pieces.append(f"\n{result_xml}\n")
+
+                    except Exception as e:
+                        logger.warning("Tool call execution failed: %s", e)
+                        yield json.dumps({"type": "token", "value": f"\n*[tool error: {e}]*\n"}) + "\n"
 
             # Ensure a flush is always emitted so front-ends send accumulated text
             if response_pieces:
@@ -1150,50 +1215,6 @@ async def audio_context():
         "count": len(_audio_context_buffer),
         "max": _audio_context_buffer.maxlen,
     }
-
-
-# ── Attachment Implementation Endpoint ─────────────────────────────────
-@app.post("/implement/attachments")
-async def implement_attachments(dry_run: bool = True):
-    """Run the focused attachment code generator."""
-    from gaia_core.cognition.attachment_plan import generate_attachment_code
-
-    prime = None
-    reviewer = None
-    if _ai_manager and _ai_manager.model_pool:
-        for name in ["gpu_prime", "prime", "lite", "core"]:
-            if name in _ai_manager.model_pool.models:
-                prime = _ai_manager.model_pool.acquire_model(name)
-                break
-        for name in ["lite", "core", "reflex"]:
-            if name in _ai_manager.model_pool.models and name != (prime and getattr(prime, '_model_name', '')):
-                try:
-                    reviewer = _ai_manager.model_pool.acquire_model(name)
-                except Exception:
-                    pass
-                break
-
-    if not prime:
-        return JSONResponse(status_code=503, content={"error": "No model available"})
-
-    async def _stream():
-        loop = asyncio.get_event_loop()
-        gen = generate_attachment_code(prime_model=prime, reviewer_model=reviewer, dry_run=dry_run)
-        def _next():
-            try:
-                return next(gen)
-            except StopIteration:
-                return None
-            except Exception as e:
-                logger.error("Attachment gen error: %s", e, exc_info=True)
-                return None
-        while True:
-            event = await loop.run_in_executor(None, _next)
-            if event is None:
-                break
-            yield json.dumps(event) + "\n"
-
-    return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 
 # ── Cognitive Similarity Endpoint ─────────────────────────────────────
