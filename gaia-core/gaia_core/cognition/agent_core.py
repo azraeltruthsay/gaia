@@ -3162,6 +3162,20 @@ class AgentCore:
             self.logger.info("Uncertainty escalation: planning request got short response (%d chars)", len(content))
             return True
 
+        # Signal 7: Very short response or classification tag — not a real answer
+        # Catches raw classification outputs like "COMPLEX", "SIMPLE", single words
+        stripped = content.strip()
+        if len(stripped) < 20:
+            self.logger.info("Uncertainty escalation: response too short to be a real answer (%d chars: '%s')", len(stripped), stripped[:30])
+            return True
+
+        # Signal 8: Response is a classification tag, not prose
+        classification_tags = {"complex", "simple", "routing", "escalate", "tool_use",
+                               "tool_routing", "decline", "redirect", "pass"}
+        if stripped.lower().rstrip(".!") in classification_tags:
+            self.logger.info("Uncertainty escalation: response is a classification tag, not an answer: '%s'", stripped)
+            return True
+
         return False
 
     # Escalation chain for slim path failures
