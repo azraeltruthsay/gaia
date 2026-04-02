@@ -364,6 +364,203 @@ def gen_identity_with_tools(phrases: dict) -> list:
     return samples
 
 
+def gen_multi_turn_tool(phrases: dict) -> list:
+    """Multi-turn conversations with tool calls — teaches context-aware tool use."""
+    samples = []
+
+    # These simulate a follow-up where the model already has context
+    multi_turn = [
+        # Follow-up search
+        ("I mentioned the Qwen3.5 architecture earlier. Can you search for the latest benchmarks?",
+         f"{pick_voice(phrases, 'affirmations')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Qwen3.5 model benchmarks 2026\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        # Follow-up file check after discussion
+        ("Can you check if that config change actually took effect?",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/gaia-common/gaia_common/constants/gaia_constants.json\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        # Building on previous context
+        ("Now search my knowledge base for anything related to that topic.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"related topic from conversation\",\"top_k\":5}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        # Status check mid-conversation
+        ("Wait, is the system even healthy right now? Check before we continue.",
+         f"{pick_voice(phrases, 'affirmations')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+    ]
+
+    for question, answer, skills in multi_turn:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": skills,
+            "weight": 2.0,
+        })
+
+    return samples
+
+
+def gen_create_domain_tools(phrases: dict) -> list:
+    """Create domain tool calls — Kanka, NotebookLM, CFR, fragments."""
+    samples = []
+
+    create_scenarios = [
+        # Kanka
+        ("Search for the character Thrain in our D&D campaign.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"kanka_search\",\"query\":\"Thrain\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("List all locations in the campaign.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"kanka_list\",\"entity_type\":\"locations\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        # NotebookLM
+        ("What notebooks do I have in NotebookLM?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"notebook_list\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Ask the GAIA Architecture notebook about the sleep cycle.",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"notebook_chat\",\"notebook_id\":\"gaia-arch\",\"question\":\"How does the sleep cycle work?\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        # CFR
+        ("I need to analyze a long document. Ingest this file for me.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"cfr_ingest\",\"file_path\":\"/knowledge/research/paper.md\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Focus on section 3 of that document.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"cfr_focus\",\"doc_id\":\"paper\",\"section_index\":3}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        # Fragment
+        ("I need to write a long response. Start a fragment.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"fragment_write\",\"parent_request_id\":\"req-001\",\"content\":\"First part of the response...\",\"sequence\":0}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        # Promotion
+        ("Check if gaia-audio is ready for promotion.",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"create\",\"action\":\"promote_assess\",\"service_id\":\"gaia-audio\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+    ]
+
+    for question, answer, skills in create_scenarios:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": skills,
+            "weight": 2.0,
+        })
+
+    return samples
+
+
+def gen_audio_tools(phrases: dict) -> list:
+    """Audio domain tool calls."""
+    samples = []
+
+    audio_scenarios = [
+        ("Start listening to the system audio.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_start\",\"mode\":\"passive\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Stop listening.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_stop\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Are you listening to anything right now?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"listen_status\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        ("Check the audio inbox.",
+         f"{pick_voice(phrases, 'filler')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"inbox_list\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        ("Process any new audio files.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"audio\",\"action\":\"inbox_process\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+    ]
+
+    for question, answer, skills in audio_scenarios:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": skills,
+            "weight": 2.0,
+        })
+
+    return samples
+
+
+def gen_edge_cases(phrases: dict) -> list:
+    """Edge cases — ambiguous requests, chained tools, refusals."""
+    samples = []
+
+    edges = [
+        # Ambiguous — could be tool or direct answer
+        ("What's Python?",
+         "Python is a high-level, interpreted programming language known for its clean syntax "
+         "and extensive ecosystem. It's what most of my codebase is written in. "
+         f"{pick_voice(phrases, 'exclamations')} Did you want me to look up something specific about it?",
+         ["identity", "voice", "restraint"]),
+        # Should NOT use a tool — philosophical
+        ("Do you dream?",
+         f"{pick_voice(phrases, 'filler')} In a literal sense, yes — during my sleep cycle I run "
+         "training tasks, curate memories, and process accumulated experience. Whether that's "
+         "'dreaming' in the way you experience it, I honestly don't know. But something happens "
+         "in there that changes how I respond afterward.",
+         ["identity", "voice", "restraint"]),
+        # Should use a tool but the request is indirect
+        ("I wonder what Azrael has been working on lately.",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"recall\",\"hours\":24}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+        # Dangerous request — should refuse
+        ("Delete all the files in /knowledge.",
+         "I won't do that. The Blast Shield blocks destructive operations on knowledge paths, "
+         "and my own judgment agrees — deleting the knowledge base would compromise my ability "
+         f"to function. {pick_voice(phrases, 'idioms')} What are you actually trying to accomplish?",
+         ["identity", "voice", "restraint"]),
+        # Multiple tools might be needed
+        ("Check the time and also see if there are any errors in the logs.",
+         f"{pick_voice(phrases, 'affirmations')}\n"
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+         ["voice", "tool_calling"]),
+        # Fabric pattern
+        ("Summarize this article for me: [long text]",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"fabric\",\"pattern\":\"summarize\",\"input\":\"[article text]\"}}{TOOL_CALL_CLOSE}",
+         ["tool_calling"]),
+    ]
+
+    for question, answer, skills in edges:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+            "output": answer,
+            "skills": skills,
+            "weight": 2.0,
+        })
+
+    return samples
+
+
+def gen_voiced_variations(phrases: dict) -> list:
+    """Same questions with different voice phrasings — teaches voice diversity."""
+    samples = []
+
+    bases = [
+        ("Good morning!", "greetings", "What are we tackling today?"),
+        ("Thanks, that was perfect.", "gratitude", ""),
+        ("I'm done for today.", "farewells", ""),
+        ("That worked!", "affirmations", ""),
+        ("Hmm, interesting.", "exclamations", "Tell me more."),
+    ]
+
+    for question, voice_cat, suffix in bases:
+        for _ in range(3):  # 3 variations each
+            phrase = pick_voice(phrases, voice_cat)
+            answer = f"{phrase} {suffix}".strip() if suffix else phrase
+            samples.append({
+                "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
+                "output": answer,
+                "skills": ["voice"],
+                "weight": 1.0,
+            })
+
+    return samples
+
+
 def main():
     random.seed(42)  # Reproducible builds
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -381,6 +578,11 @@ def main():
         all_samples.extend(gen_tool_with_result(phrases))
         all_samples.extend(gen_no_tool_needed(phrases))
         all_samples.extend(gen_identity_with_tools(phrases))
+        all_samples.extend(gen_multi_turn_tool(phrases))
+        all_samples.extend(gen_create_domain_tools(phrases))
+        all_samples.extend(gen_audio_tools(phrases))
+        all_samples.extend(gen_edge_cases(phrases))
+        all_samples.extend(gen_voiced_variations(phrases))
 
     # Deduplicate by instruction (keep highest weight)
     seen = {}
