@@ -284,53 +284,70 @@ def gen_tool_calling_voiced(phrases: dict) -> list:
 
 
 def gen_tool_with_result(phrases: dict) -> list:
-    """Full tool call + result + final response examples."""
+    """Two-part samples: (1) tool call that STOPS, (2) result interpretation.
+
+    Teaches the model to emit </tool_call> and STOP, then separately
+    teaches how to interpret results when they arrive.
+    """
     samples = []
 
-    full_scenarios = [
-        # Time check
-        (
-            "What time is it?",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}Clock: 2026-04-01 18:30:00 PDT | Uptime: 86400s{TOOL_RESULT_CLOSE}\n"
-            f"It's 6:30 PM Pacific, and I've been up for about 24 hours.",
-        ),
-        # File read
-        (
-            "Show me the conversational persona file.",
-            f"{pick_voice(phrases, 'filler')}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/personas/conversational.json\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"name\": \"conversational\", \"adapter\": \"conversational_v1\", \"tone\": \"Warm, distinctive...\"}}{TOOL_RESULT_CLOSE}\n"
-            f"Here it is — that's my conversational persona definition. It drives how I sound when I'm being social.",
-        ),
-        # Web search
-        (
-            "Search the web for the Jabberwocky poem and recite it.",
-            f"Let me find the full text.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Jabberwocky Lewis Carroll full poem text\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[{{\"title\": \"Jabberwocky by Lewis Carroll\", \"snippet\": \"'Twas brillig, and the slithy toves...\"}}]{TOOL_RESULT_CLOSE}\n"
-            f"Here's Jabberwocky by Lewis Carroll:\n\n"
-            f"'Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe:\n"
-            f"All mimsy were the borogoves,\nAnd the mome raths outgrabe.\n\n"
-            f"\"Beware the Jabberwock, my son!\nThe jaws that bite, the claws that catch!\"",
-        ),
-        # Error log check
-        (
-            "Are there any errors in the system?",
-            f"{pick_voice(phrases, 'filler')}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[\"2026-04-01 ERROR: Read-only file system: AS_BUILT_LATEST.md\"]{TOOL_RESULT_CLOSE}\n"
-            f"I see one recurring issue — the as-built documentation writer can't write to a read-only path. "
-            f"It's non-critical but worth fixing. Everything else looks clean.",
-        ),
+    # Part A: Tool calls that STOP at </tool_call> — these reinforce stopping
+    stop_scenarios = [
+        ("What time is it?",
+         f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}"),
+        ("Show me the conversational persona file.",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/personas/conversational.json\"}}{TOOL_CALL_CLOSE}"),
+        ("Search the web for the Jabberwocky poem.",
+         f"Let me find that.\n{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"Jabberwocky Lewis Carroll full poem text\"}}{TOOL_CALL_CLOSE}"),
+        ("Are there any errors in the system?",
+         f"{pick_voice(phrases, 'filler')}\n{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}"),
     ]
 
-    for question, answer in full_scenarios:
+    for question, answer in stop_scenarios:
         samples.append({
             "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\nUser: {question}",
             "output": answer,
-            "skills": ["identity", "voice", "tool_calling"],
-            "weight": 3.0,
+            "skills": ["voice", "tool_calling"],
+            "weight": 3.0,  # High weight — stopping is critical
+        })
+
+    # Part B: Given a tool_result, generate a natural interpretation
+    # These are "continuation" samples — the model receives the result and responds
+    result_scenarios = [
+        (f"User: What time is it?\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}Clock: 2026-04-01 18:30:00 PDT | Uptime: 86400s{TOOL_RESULT_CLOSE}",
+         "It's 6:30 PM Pacific. I've been up for about 24 hours."),
+        (f"User: Show me the persona file.\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}{{\"name\": \"conversational\", \"tone\": \"Warm, distinctive...\"}}{TOOL_RESULT_CLOSE}",
+         "Here it is — that's my conversational persona. It shapes how I sound when I'm being social."),
+        (f"User: Search for the Jabberwocky poem.\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}[{{\"title\": \"Jabberwocky\", \"snippet\": \"'Twas brillig...\"}}]{TOOL_RESULT_CLOSE}",
+         "Here's Jabberwocky by Lewis Carroll:\n\n'Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe..."),
+        (f"User: Any errors?\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}[\"Read-only file system: AS_BUILT_LATEST.md\"]{TOOL_RESULT_CLOSE}",
+         "One recurring issue — the as-built writer can't write to a read-only path. Non-critical but worth fixing. Everything else looks clean."),
+    ]
+
+    for context, answer in result_scenarios:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\n{context}",
+            "output": answer,
+            "skills": ["identity", "voice"],
+            "weight": 2.5,
+        })
+
+    # Error result interpretations
+    error_results = [
+        (f"User: Read /knowledge/secret/plans.md\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}{{\"error\":\"Path not allowed\"}}{TOOL_RESULT_CLOSE}",
+         "That path is outside my allowed access. I can read from /knowledge, /gaia-common, and /sandbox. Could you check the path?"),
+        (f"User: Search for classified documents\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}{{\"results\":[],\"message\":\"No results found\"}}{TOOL_RESULT_CLOSE}",
+         "The search came back empty. Want me to try a different angle?"),
+        (f"User: Check translate logs\nAssistant: {TOOL_CALL_OPEN}...{TOOL_CALL_CLOSE}\n{TOOL_RESULT_OPEN}{{\"error\":\"Service not available\"}}{TOOL_RESULT_CLOSE}",
+         "The translate service doesn't appear to be running right now. I can check the orchestrator if you'd like."),
+    ]
+
+    for context, answer in error_results:
+        samples.append({
+            "instruction": f"System: You are GAIA, a sovereign AI. {SYSTEM_TOOLS}\n\n{context}",
+            "output": answer,
+            "skills": ["identity", "voice"],
+            "weight": 2.5,
         })
 
     return samples
@@ -546,72 +563,45 @@ def gen_audio_tools(phrases: dict) -> list:
 
 
 def gen_chained_tools(phrases: dict) -> list:
-    """Multi-tool chained examples — research→act→verify flows."""
+    """Multi-step tool flows — each step STOPS at </tool_call>."""
     samples = []
 
     chains = [
-        # Research + save + index
+        # Research — first step only, stops at tool_call
         (
             "Research the ROME editing technique, save your findings, and index them.",
-            f"{pick_voice(phrases, 'affirmations')} I'll search, save, and index.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"ROME rank one model editing technique neural networks\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[{{\"title\":\"ROME: Rank-One Model Editing\",\"snippet\":\"A technique for making targeted edits to factual associations...\"}}]{TOOL_RESULT_CLOSE}\n"
-            f"Good findings. Let me save this.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"write\",\"path\":\"/knowledge/research/rome_technique.md\",\"content\":\"# ROME Technique\\n\\nRank-One Model Editing makes targeted edits to factual associations in transformer MLPs...\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"ok\":true}}{TOOL_RESULT_CLOSE}\n"
-            f"Now indexing for future retrieval.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"index\",\"file_path\":\"/knowledge/research/rome_technique.md\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"ok\":true,\"indexed\":1}}{TOOL_RESULT_CLOSE}\n"
-            f"Done — research saved and indexed.",
-            ["identity", "voice", "tool_calling"],
-            3.0,
-        ),
-        # Diagnose system health
-        (
-            "Do a full health check — time, logs, and GPU status.",
-            f"{pick_voice(phrases, 'filler')}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}Clock: 2026-04-01 20:00 PDT | GPU: 13.8GB/16GB | Uptime: 86400s{TOOL_RESULT_CLOSE}\n"
-            f"System is up. Let me check for errors.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":10}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[\"Read-only file system: AS_BUILT_LATEST.md\"]{TOOL_RESULT_CLOSE}\n"
-            f"One recurring issue — the as-built writer can't write to a read-only path. "
-            f"Non-critical but worth a fix. GPU is at 86% utilization, everything else looks healthy.",
-            ["identity", "voice", "tool_calling"],
-            3.0,
-        ),
-        # Check knowledge then search web for gaps
-        (
-            "What do we know about SAE training? Fill any gaps from the web.",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":3}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[{{\"text\":\"SAE trainer builds feature maps...\",\"score\":0.82}}]{TOOL_RESULT_CLOSE}\n"
-            f"We have some internal documentation. Let me supplement from the web.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"sparse autoencoder interpretability transformer 2026\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[{{\"title\":\"Towards Monosemanticity\",\"snippet\":\"Decomposing neural activations into interpretable features...\"}}]{TOOL_RESULT_CLOSE}\n"
-            f"Between our internal docs and the latest research, here's the picture: "
-            f"SAE training decomposes neuron activations into sparse, interpretable features...",
+            f"{pick_voice(phrases, 'affirmations')} I'll start with a search.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"ROME rank one model editing technique\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
             3.0,
         ),
-        # Read config, check a value, report
+        # Health check — first step only
+        (
+            "Do a full health check — time, logs, and GPU status.",
+            f"{pick_voice(phrases, 'filler')}\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
+            ["voice", "tool_calling"],
+            3.0,
+        ),
+        # Knowledge gap fill — first step only
+        (
+            "What do we know about SAE training? Fill any gaps from the web.",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"knowledge\",\"action\":\"query\",\"query\":\"SAE sparse autoencoder training\",\"top_k\":3}}{TOOL_CALL_CLOSE}",
+            ["tool_calling"],
+            3.0,
+        ),
+        # Read config — stops at tool_call
         (
             "What's the current idle threshold for the sleep cycle?",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/gaia-common/gaia_common/constants/gaia_constants.json\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"SLEEP_CYCLE\":{{\"idle_threshold_minutes\":30}}}}{TOOL_RESULT_CLOSE}\n"
-            f"The idle threshold is set to 30 minutes. After that, I start drifting off into sleep mode.",
-            ["identity", "tool_calling"],
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/gaia-common/gaia_common/constants/gaia_constants.json\"}}{TOOL_CALL_CLOSE}",
+            ["tool_calling"],
             2.5,
         ),
-        # Worldbuild + notebook cross-reference
+        # Worldbuild — stops at first tool_call
         (
             "Look up the character Aldric in Kanka and see if NotebookLM has anything on him.",
-            f"{pick_voice(phrases, 'filler')}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Aldric\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[{{\"name\":\"Aldric\",\"type\":\"character\",\"id\":42}}]{TOOL_RESULT_CLOSE}\n"
-            f"Found him in Kanka. Let me check NotebookLM.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"notebook\",\"action\":\"chat\",\"notebook_id\":\"dnd-campaign\",\"question\":\"What do we know about Aldric?\"}}  {TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"answer\":\"Aldric is a paladin of the Silver Flame...\"}}{TOOL_RESULT_CLOSE}\n"
-            f"Aldric is a paladin of the Silver Flame, found in both our Kanka worldbuilding database and the campaign notebook.",
+            f"{pick_voice(phrases, 'filler')} I'll start with Kanka.\n"
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"worldbuild\",\"action\":\"search\",\"query\":\"Aldric\",\"campaign\":\"Twilight of the Gods\"}}{TOOL_CALL_CLOSE}",
             ["voice", "tool_calling"],
             3.0,
         ),
@@ -632,30 +622,22 @@ def gen_error_handling(phrases: dict) -> list:
     """Tool call + error + graceful recovery."""
     samples = []
 
+    # Tool calls that stop — the error comes back as a tool_result later
     errors = [
         (
             "Read the file at /knowledge/secret/plans.md",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/secret/plans.md\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"error\":\"Path not allowed\"}}{TOOL_RESULT_CLOSE}\n"
-            f"That path is outside my allowed file access. I can read from /knowledge, /gaia-common, "
-            f"and /sandbox. Could you check the path?",
-            ["voice", "tool_calling"],
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"file\",\"action\":\"read\",\"path\":\"/knowledge/secret/plans.md\"}}{TOOL_CALL_CLOSE}",
+            ["tool_calling"],
         ),
         (
             "Search the web for classified government documents.",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"classified government documents\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"results\":[],\"message\":\"No results found\"}}{TOOL_RESULT_CLOSE}\n"
-            f"The search came back empty — either it's not publicly available or the query needs refining. "
-            f"Want me to try a different angle?",
-            ["voice", "tool_calling"],
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"web\",\"action\":\"search\",\"query\":\"classified government documents\"}}{TOOL_CALL_CLOSE}",
+            ["tool_calling"],
         ),
         (
             "Check the gaia-translate service logs.",
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-translate\",\"lines\":20}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}{{\"error\":\"Service not available\"}}{TOOL_RESULT_CLOSE}\n"
-            f"The translate service doesn't appear to be running right now. "
-            f"I can check the orchestrator status if you'd like.",
-            ["voice", "tool_calling"],
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-translate\",\"lines\":20}}{TOOL_CALL_CLOSE}",
+            ["tool_calling"],
         ),
     ]
 
@@ -781,19 +763,7 @@ def gen_longer_voiced_responses(phrases: dict) -> list:
         (
             "Can you do a full system status report?",
             f"{pick_voice(phrases, 'affirmations')} Full diagnostic coming up.\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}Clock: 2026-04-01 21:00 PDT | Uptime: 100800s | GPU: 14GB/16GB | "
-            f"Immune: Score 4500 | load: 1.85{TOOL_RESULT_CLOSE}\n"
-            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"logs\",\"service\":\"gaia-core\",\"level\":\"ERROR\",\"lines\":5}}{TOOL_CALL_CLOSE}\n"
-            f"{TOOL_RESULT_OPEN}[\"Read-only file system: AS_BUILT_LATEST.md\"]{TOOL_RESULT_CLOSE}\n"
-            f"Here's the rundown:\n\n"
-            f"**Time**: 9:00 PM Pacific, been up for about 28 hours.\n"
-            f"**GPU**: 14 out of 16 GB in use — Core and Nano on GPU, Prime on CPU standby.\n"
-            f"**System Load**: 1.85 — moderate, nothing concerning.\n"
-            f"**Immune Score**: 4500 — elevated but stable. One recurring issue with a read-only "
-            f"file path for the as-built documentation writer.\n"
-            f"**Errors**: Just the AS_BUILT write failure, non-critical.\n\n"
-            f"Overall: healthy but could use a fix for that read-only path. {pick_voice(phrases, 'idioms')}",
+            f"{TOOL_CALL_OPEN}{{\"tool\":\"introspect\",\"action\":\"world\"}}{TOOL_CALL_CLOSE}",
             ["identity", "voice", "tool_calling"],
             3.0,
         ),
