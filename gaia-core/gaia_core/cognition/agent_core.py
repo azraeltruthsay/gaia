@@ -2401,16 +2401,44 @@ class AgentCore:
                     yield {"type": "token", "value": f"\n\n[(i) Core response insufficient ({_escalation_reason}). Requesting FOCUSING mode — swapping Prime to GPU...]\n\n"}
 
                     # Request consciousness transition: AWAKE → FOCUSING
-                    # This swaps Core to CPU/GGUF and Prime to GPU/safetensors
+                    # This swaps Core to CPU/GGUF and Prime to GPU/safetensors.
+                    # The endpoint returns immediately (async) — we must poll lifecycle
+                    # state to know when the transition completes.
                     try:
                         _focus_resp = _httpx_esc.post(
                             f"{_orchestrator_endpoint}/consciousness/focusing",
-                            timeout=120.0,  # model swap takes time
+                            timeout=10.0,
                         )
                         if _focus_resp.status_code == 200:
-                            _focus_data = _focus_resp.json()
-                            logger.info("Consciousness transition to FOCUSING: %s", _focus_data.get("configuration"))
-                            yield {"type": "token", "value": "[(i) FOCUSING mode active — Prime on GPU.]\n"}
+                            logger.info("FOCUSING transition requested, waiting for completion...")
+                            yield {"type": "token", "value": "[(i) Switching to FOCUSING mode...]\n"}
+                            yield {"type": "flush"}
+
+                            # Poll lifecycle state until FOCUSING or timeout
+                            import time as _esc_time
+                            _focus_deadline = _esc_time.time() + 120.0
+                            _focusing_ready = False
+                            while _esc_time.time() < _focus_deadline:
+                                try:
+                                    _state_resp = _httpx_esc.get(
+                                        f"{_orchestrator_endpoint}/lifecycle/state",
+                                        timeout=5.0,
+                                    )
+                                    if _state_resp.status_code == 200:
+                                        _lstate = _state_resp.json().get("state", "")
+                                        if _lstate == "focusing":
+                                            _focusing_ready = True
+                                            break
+                                except Exception:
+                                    pass
+                                _esc_time.sleep(3.0)
+
+                            if _focusing_ready:
+                                logger.info("FOCUSING mode active — Prime on GPU")
+                                yield {"type": "token", "value": "[(i) FOCUSING mode active — Prime on GPU.]\n"}
+                            else:
+                                logger.warning("FOCUSING transition timed out — proceeding with available Prime")
+                                yield {"type": "token", "value": "[(i) GPU swap still in progress — trying Prime anyway.]\n"}
                         else:
                             logger.warning("Consciousness FOCUSING transition failed: %s", _focus_resp.status_code)
                             yield {"type": "token", "value": "[(i) GPU swap failed — using Prime on CPU.]\n"}

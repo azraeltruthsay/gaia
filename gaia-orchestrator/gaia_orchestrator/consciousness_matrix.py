@@ -650,7 +650,7 @@ class ConsciousnessMatrix:
         This is the fast path (~5s) vs full unload+reload (~95s).
         """
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
                     f"{endpoint}/model/migrate",
                     json={"device": target_device},

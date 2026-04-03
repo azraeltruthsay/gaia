@@ -286,7 +286,7 @@ class LifecycleMachine:
                         from_state=current,
                         to_state=resolved_target,
                     ),
-                    timeout=120.0,
+                    timeout=180.0,
                 )
                 if not result.get("ok"):
                     raise RuntimeError(result.get("error", "execution failed"))
