@@ -155,10 +155,15 @@ async def lifespan(app: FastAPI):
         global _consciousness_matrix
         from .consciousness_matrix import ConsciousnessMatrix
         _consciousness_matrix = ConsciousnessMatrix(lifecycle_machine=_lifecycle_machine)
+
+        # Wire the clutch: lifecycle machine delegates execution to consciousness matrix
+        if _lifecycle_machine:
+            _lifecycle_machine.set_consciousness_matrix(_consciousness_matrix)
+
         # Probe and poll start asynchronously — don't block startup.
-        # The continuous poll will probe and reconcile after uvicorn is serving.
+        # The consciousness matrix poll is the SINGLE reconcile loop (15s).
         await _consciousness_matrix.start_continuous_poll(interval=15.0)
-        logger.info("Consciousness matrix initialized: %s",
+        logger.info("Consciousness matrix initialized (clutch architecture active): %s",
                      {t: s["actual"] for t, s in _consciousness_matrix.get_matrix().items()})
     except Exception:
         logger.warning("Consciousness matrix initialization failed", exc_info=True)
@@ -179,20 +184,9 @@ async def lifespan(app: FastAPI):
         _container_poll_task = asyncio.create_task(_container_poll_loop())
         logger.info("Container status poll started (30s interval)")
 
-    # Start periodic lifecycle reconciliation (detect model drift)
-    _lifecycle_reconcile_task = None
-    if _lifecycle_machine:
-        async def _lifecycle_reconcile_loop():
-            await asyncio.sleep(30)  # Initial delay
-            while True:
-                try:
-                    await _lifecycle_machine.reconcile()
-                except Exception:
-                    logger.debug("Lifecycle reconcile failed", exc_info=True)
-                await asyncio.sleep(60)  # Every 60 seconds
-
-        _lifecycle_reconcile_task = asyncio.create_task(_lifecycle_reconcile_loop())
-        logger.info("Lifecycle reconciliation loop started (60s interval)")
+    # NOTE: No separate lifecycle reconcile loop. The consciousness matrix's
+    # 15s poll loop is the single reconcile authority. Manual reconcile is
+    # still available via POST /lifecycle/reconcile.
 
     logger.info("GAIA Orchestrator ready")
     yield
@@ -1309,23 +1303,15 @@ async def lifecycle_history(limit: int = 50):
 async def lifecycle_reconcile():
     """Force reconciliation — probe all tiers and infer actual state.
 
-    If stuck in TRANSITIONING, forces state to awake first.
+    Observe-only: probes tiers and infers the correct lifecycle state.
+    If stuck in TRANSITIONING, the reconcile method handles recovery
+    by inferring actual state from tier probes.
     """
     if _lifecycle_machine is None:
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
 
-    # Unstick from TRANSITIONING — force to awake so reconcile can work
-    from gaia_common.lifecycle.states import LifecycleState
-    if _lifecycle_machine._snapshot.state == LifecycleState.TRANSITIONING:
-        logger.warning("LIFECYCLE: forcing out of TRANSITIONING → awake for reconcile")
-        _lifecycle_machine._snapshot.state = LifecycleState.AWAKE
-        _lifecycle_machine._snapshot.transition_from = None
-        _lifecycle_machine._snapshot.transition_to = None
-        _lifecycle_machine._snapshot.transition_phase = None
-        _lifecycle_machine._snapshot.transition_error = None
-
-    asyncio.create_task(_lifecycle_machine.reconcile())
-    return {"ok": True, "new_state": _lifecycle_machine._snapshot.state.value, "message": "reconcile started (async)"}
+    result = await _lifecycle_machine.reconcile()
+    return result
 
 
 @app.get("/lifecycle/tiers")
@@ -1381,48 +1367,54 @@ async def consciousness_set(request: ConsciousnessRequest):
 
 @app.post("/consciousness/awake")
 async def consciousness_awake():
-    """Set AWAKE configuration: Core=3, Nano=3, Prime=2."""
+    """Set AWAKE configuration via lifecycle clutch protocol.
+
+    Flow: lifecycle declares AWAKE → clutch drains → consciousness loads tiers → clutch releases.
+    """
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    # Fire-and-forget — transitions can take minutes, don't block the HTTP response
+    # Fire-and-forget — transitions go through lifecycle → execute_shift (can take minutes)
     asyncio.create_task(_consciousness_matrix.awake())
-    return {"ok": True, "message": "AWAKE transition started (async)"}
+    return {"ok": True, "message": "AWAKE transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/focusing")
 async def consciousness_focusing():
-    """Set FOCUSING configuration: Core+Nano off GPU, Prime on GPU."""
+    """Set FOCUSING configuration via lifecycle clutch protocol.
+
+    Flow: clutch drains Core+Nano → unloads → VRAM clear → loads Prime → clutch releases.
+    """
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
     asyncio.create_task(_consciousness_matrix.focusing())
-    return {"ok": True, "message": "FOCUSING transition started (async)"}
+    return {"ok": True, "message": "FOCUSING transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/sleep")
 async def consciousness_sleep():
-    """Set SLEEP configuration: Nano=2, Core=2, Prime=1."""
+    """Set SLEEP configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
     asyncio.create_task(_consciousness_matrix.sleep())
-    return {"ok": True, "message": "SLEEP transition started (async)"}
+    return {"ok": True, "message": "SLEEP transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/deep-sleep")
 async def consciousness_deep_sleep():
-    """Set DEEP SLEEP configuration: All → 1 (Nano stays 2)."""
+    """Set DEEP SLEEP configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
     asyncio.create_task(_consciousness_matrix.deep_sleep())
-    return {"ok": True, "message": "DEEP SLEEP transition started (async)"}
+    return {"ok": True, "message": "DEEP SLEEP transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/training")
 async def consciousness_training(tier: str = "prime"):
-    """Set TRAINING configuration: target tier → 1, others → 2."""
+    """Set TRAINING configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
     asyncio.create_task(_consciousness_matrix.training(tier))
-    return {"ok": True, "message": f"TRAINING ({tier}) transition started (async)"}
+    return {"ok": True, "message": f"TRAINING ({tier}) transition started (via lifecycle clutch)"}
 
 
 # =============================================================================

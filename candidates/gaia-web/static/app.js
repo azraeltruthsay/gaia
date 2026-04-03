@@ -2898,6 +2898,20 @@ function lifecyclePanel() {
       this.refresh();
     },
 
+    async cancelInference(tier) {
+      try {
+        const resp = await fetch(`/api/system/inference/${tier}/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ respawn: true }),
+        });
+        this.lastResult = await resp.json();
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.refresh();
+    },
+
     transitionLabel(t) {
       const labels = {
         wake_signal: 'Wake',

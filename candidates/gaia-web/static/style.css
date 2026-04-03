@@ -1411,6 +1411,9 @@ html, body {
 .lc-meditation { border-color: #ffa726; color: #ffa726; }
 .lc-listening { border-color: #ce93d8; color: #ce93d8; }
 .lc-reconcile { border-color: var(--text-dim); color: var(--text-dim); }
+.lc-cancel { border-color: #ef5350; color: #ef5350; font-size: 9px; padding: 1px 6px; margin-top: 3px; }
+.lc-cancel:hover { background: #ef5350; color: #fff; }
+.th-drain { background: #ff9800; color: #000; font-size: 8px; font-weight: bold; padding: 0 3px; border-radius: 2px; }
 
 /* Status */
 .lifecycle-status { margin-bottom: 6px; font-size: 11px; }

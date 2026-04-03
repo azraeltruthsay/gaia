@@ -432,10 +432,13 @@
             <div class="tier-card-head">
               <span class="tier-name" x-text="tier"></span>
               <span class="tier-health" :class="info.healthy ? 'th-ok' : 'th-down'"></span>
+              <span x-show="info.draining" class="th-drain" title="Draining inference">D</span>
             </div>
             <div class="tier-device" x-text="info.device"></div>
             <div class="tier-vram" x-show="info.vram_mb > 0" x-text="info.vram_mb + ' MB'"></div>
             <div class="tier-managed" x-show="info.managed">managed</div>
+            <button class="lc-btn lc-cancel" x-show="info.model_loaded"
+                    @click="cancelInference(tier)" title="Stop generating">Stop</button>
           </div>
         </template>
       </div>

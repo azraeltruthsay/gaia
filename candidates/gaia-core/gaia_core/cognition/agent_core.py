@@ -3153,14 +3153,32 @@ class AgentCore:
                 self.logger.info("Uncertainty escalation: factual question but no value in response")
                 return True
 
-        # Signal 5: Nano explicitly declines a task it can't handle
-        # "I cannot create", "I can't generate", "I'm not able to" etc.
+        # Signal 5: Nano explicitly declines or deflects a task
+        # Catches "I can't recite", "I don't have knowledge", "I'm not familiar" etc.
         decline_phrases = ["i cannot create", "i can't create", "i cannot generate",
                           "i can't generate", "i'm not able to", "i am not able to",
                           "i cannot provide a detailed", "i can't provide a detailed",
-                          "beyond my capability", "outside my scope"]
+                          "beyond my capability", "outside my scope",
+                          "i can't recite", "i cannot recite",
+                          "i don't have knowledge", "i'm not familiar",
+                          "i am not familiar", "i don't have access to",
+                          "without verification", "without a source",
+                          "i can help you find", "let me know what you'd like to find",
+                          "i cannot use", "i can't use", "i don't have the ability",
+                          "i should acknowledge", "limits of my capabilities"]
         if any(phrase in lower for phrase in decline_phrases):
             self.logger.info("Uncertainty escalation: Nano explicitly declined the task")
+            return True
+
+        # Signal 5b: User asked for tool use but Nano described capability instead of acting
+        tool_request_signals = ["use your", "web search", "search for", "look up",
+                                "use the tool", "use a tool", "search tool"]
+        user_wants_tool = any(sig in input_lower for sig in tool_request_signals)
+        nano_described_not_acted = any(phrase in lower for phrase in [
+            "i can use", "i can search", "i can look", "i can help you find",
+            "let me know what", "what would you like"])
+        if user_wants_tool and nano_described_not_acted:
+            self.logger.info("Uncertainty escalation: user requested tool use, Nano only described capability")
             return True
 
         # Signal 6: Planning/architecture request answered with description only
