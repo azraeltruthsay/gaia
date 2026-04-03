@@ -2359,10 +2359,32 @@ class AgentCore:
             )
             _response_empty = not _stripped_response
 
-            if (_response_empty or _response_too_short) and selected_model_name not in (
+            # Check for recitation requests that got summarized instead of reproduced.
+            # "recite X" should return the full text, not a description of it.
+            _recitation_summarized = False
+            _input_lower = (user_input or "").lower()
+            if any(w in _input_lower for w in ["recite", "recitation", "full text", "reproduce", "quote the"]):
+                # Recitation expected — check if response looks like a summary
+                # (short, no line breaks suggesting verse structure, describes rather than reproduces)
+                _has_verse_structure = _stripped_response.count("\n") >= 3
+                _is_summary = len(_stripped_response) < 400 and not _has_verse_structure
+                _describes_not_recites = any(p in _stripped_response.lower() for p in [
+                    "is a poem", "is a nonsense poem", "features made-up", "tells a brief",
+                    "written by", "from his", "published in"])
+                if _is_summary or _describes_not_recites:
+                    _recitation_summarized = True
+                    logger.info("Quality gate: recitation requested but Core summarized instead (%d chars, %d newlines)",
+                                len(_stripped_response), _stripped_response.count("\n"))
+
+            if (_response_empty or _response_too_short or _recitation_summarized) and selected_model_name not in (
                 "gpu_prime", "prime", "thinker", "groq_fallback", "oracle_openai"
             ):
-                _escalation_reason = "empty response" if _response_empty else f"response too short ({len(_stripped_response)} chars)"
+                if _recitation_summarized:
+                    _escalation_reason = "recitation request got summary instead of full text"
+                elif _response_empty:
+                    _escalation_reason = "empty response"
+                else:
+                    _escalation_reason = f"response too short ({len(_stripped_response)} chars)"
                 logger.warning(
                     "Post-generation quality gate: %s from %s. Attempting Prime escalation.",
                     _escalation_reason, selected_model_name
@@ -2429,12 +2451,30 @@ class AgentCore:
                             break
                     if _prime_model_obj:
                         try:
-                            # VLLMRemoteModel uses create_chat_completion, not generate
+                            # Build Prime's prompt with tool results for grounded recitation
                             _sys_prompt = getattr(packet, '_system_prompt', '') or ''
                             _msgs = []
                             if _sys_prompt:
                                 _msgs.append({"role": "system", "content": _sys_prompt})
-                            _msgs.append({"role": "user", "content": user_input})
+
+                            # Include tool results (web search data) if available
+                            _tool_context = ""
+                            if hasattr(packet, 'tool_routing') and packet.tool_routing:
+                                _exec_result = getattr(packet.tool_routing, 'execution_result', None)
+                                if _exec_result and getattr(_exec_result, 'output', None):
+                                    _tool_output = _exec_result.output
+                                    if isinstance(_tool_output, dict) and _tool_output.get("results"):
+                                        _snippets = []
+                                        for r in _tool_output["results"][:3]:
+                                            _snippets.append(f"Source: {r.get('title', '')}\n{r.get('snippet', '')}")
+                                        _tool_context = "\n\nWeb search results:\n" + "\n---\n".join(_snippets)
+
+                            _user_msg = user_input
+                            if _tool_context:
+                                _user_msg += _tool_context
+                            if _recitation_summarized:
+                                _user_msg += "\n\nIMPORTANT: Please reproduce the FULL TEXT of the requested work, not a summary. Recite it verbatim."
+                            _msgs.append({"role": "user", "content": _user_msg})
                             _max_tok = packet.context.constraints.max_tokens if hasattr(packet.context, 'constraints') else 2048
                             _esc_result = _prime_model_obj.create_chat_completion(
                                 messages=_msgs,
