@@ -2366,14 +2366,28 @@ class AgentCore:
             _recitation_summarized = False
             _input_lower = (user_input or "").lower()
             if any(w in _input_lower for w in ["recite", "recitation", "full text", "reproduce", "quote the"]):
-                # Recitation expected — check if response looks like a summary
-                # (short, no line breaks suggesting verse structure, describes rather than reproduces)
-                _has_verse_structure = _stripped_response.count("\n") >= 3
-                _is_summary = len(_stripped_response) < 400 and not _has_verse_structure
-                _describes_not_recites = any(p in _stripped_response.lower() for p in [
-                    "is a poem", "is a nonsense poem", "features made-up", "tells a brief",
-                    "written by", "from his", "published in"])
-                if _is_summary or _describes_not_recites:
+                # Recitation expected — check if response reproduces actual text
+                # vs summarizing/analyzing it. The key signal: does the response
+                # contain recognizable lines from the requested work?
+                _resp_lower = _stripped_response.lower()
+
+                # Positive signal: actual poem text present (not an analysis)
+                _has_poem_content = any(line in _resp_lower for line in [
+                    "'twas brillig", "twas brillig",  # Jabberwocky
+                    "vorpal blade", "snicker-snack", "callooh! callay",
+                    "once upon a", "shall i compare thee",  # Generic poem starts
+                ])
+
+                # Negative signals: analysis/summary language instead of recitation
+                _analysis_language = any(p in _resp_lower for p in [
+                    "nonsense poem", "allegory", "metaphor", "literary",
+                    "analysis", "published in", "written by", "features made-up",
+                    "is a poem", "from his novel", "tells a brief",
+                    "action items", "cross-reference", "knowledge graph",
+                    "i can recite", "i'll recite", "here is a summary",
+                ])
+
+                if not _has_poem_content and _analysis_language:
                     _recitation_summarized = True
                     logger.info("Quality gate: recitation requested but Core summarized instead (%d chars, %d newlines)",
                                 len(_stripped_response), _stripped_response.count("\n"))
