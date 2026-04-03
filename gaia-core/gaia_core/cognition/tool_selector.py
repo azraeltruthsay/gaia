@@ -221,12 +221,20 @@ def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
 
         # Pattern 2: tool instruction is separate from the subject
         # "recite Jabberwocky. Use your web search tool to find it."
-        # → extract the subject from BEFORE "use your web search"
+        # "recite Jabberwocky for me? If you're unsure, feel free to use the web search..."
+        # → extract the subject from BEFORE the tool instruction clause
         if query is None:
             for tool_phrase in ["use your web search", "use the web search",
-                                "use web search", "search for it", "look it up"]:
+                                "use web search", "search for it", "look it up",
+                                "feel free to use", "please feel free"]:
                 if tool_phrase in lowered:
                     before = lowered.split(tool_phrase, 1)[0].strip().rstrip(".")
+                    # Strip conditional clauses: "if you're unsure, ..." etc.
+                    for conditional in ["if you're unsure", "if you are unsure",
+                                        "if you don't know", "if you can't",
+                                        "if you need to"]:
+                        if conditional in before:
+                            before = before.split(conditional, 1)[0].strip().rstrip(".,;")
                     if before:
                         query = before
                     break
@@ -235,18 +243,28 @@ def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
         if query is None:
             query = lowered
 
-        # Clean up common prefixes (addressing, politeness)
-        for prefix in ["gaia, ", "gaia ", "please ", "can you ", "could you ",
-                        "recite ", "find ", "tell me about "]:
-            if query.startswith(prefix):
-                query = query[len(prefix):]
+        # Clean up common prefixes (addressing, politeness) — apply repeatedly
+        _changed = True
+        while _changed:
+            _changed = False
+            for prefix in ["gaia, ", "gaia ", "please ", "can you ", "could you ",
+                            "can you please ", "recite ", "find ", "tell me about ",
+                            "read me ", "quote ", "reproduce ", "the poem "]:
+                if query.startswith(prefix):
+                    query = query[len(prefix):]
+                    _changed = True
 
-        # Clean up common suffixes
-        for suffix in [" and recite it", " and tell me", " and read it",
-                       " and show me", " please", " for me", " if you can",
-                       " use your web search tool", ". use your"]:
-            if query.endswith(suffix):
-                query = query[:-len(suffix)]
+        # Clean up common suffixes — apply repeatedly
+        _changed = True
+        while _changed:
+            _changed = False
+            for suffix in [" and recite it", " and tell me", " and read it",
+                           " and show me", " please", " for me", " for me?",
+                           " if you can", " use your web search tool", ". use your",
+                           "?"]:
+                if query.endswith(suffix):
+                    query = query[:-len(suffix)]
+                    _changed = True
 
         query = query.strip().strip(".")
         if not query or len(query) < 3:

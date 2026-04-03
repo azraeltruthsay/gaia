@@ -647,13 +647,35 @@ class ConsciousnessMatrix:
 
         Returns the migration result, or None if migration isn't supported
         (e.g., GGUF backend, no active worker, endpoint not available).
-        This is the fast path (~5s) vs full unload+reload (~95s).
+        This is the fast path (~0.5s) vs full unload+reload (~95s).
+
+        Pre-flight: quick health check to detect stale workers. NF4 models
+        on CPU can make the worker's HTTP thread unresponsive (502/timeout).
+        If stale, skip migration immediately — don't waste 10s waiting.
         """
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                # Pre-flight: is the worker actually responsive?
+                try:
+                    health = await client.get(f"{endpoint}/health")
+                    if health.status_code != 200:
+                        logger.info("Migration %s: health returned %d — worker stale, skipping",
+                                    tier, health.status_code)
+                        return None
+                    hdata = health.json()
+                    if not hdata.get("model_loaded") and hdata.get("mode") == "standby":
+                        logger.info("Migration %s: no model loaded (standby) — nothing to migrate",
+                                    tier)
+                        return None
+                except Exception:
+                    logger.info("Migration %s: health check failed — worker stale, skipping", tier)
+                    return None
+
+                # Worker is responsive — attempt migration
                 resp = await client.post(
                     f"{endpoint}/model/migrate",
                     json={"device": target_device},
+                    timeout=15.0,
                 )
                 if resp.status_code == 200:
                     return resp.json()
