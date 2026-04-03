@@ -1,4 +1,39 @@
+# GAIA Service-Oriented Architecture - Master Composition
+#
+# Services:
+#   - gaia-core:  The Brain   - Cognitive loop + embedded Core CPU inference (delegates to gaia-prime for GPU)
+#   - gaia-nano:  The Reflex  - Nano triage classifier (GPU, GAIA Engine managed mode)
+#   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
+#   - gaia-web:   The Face    - UI and API gateway
+#   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
+#   - gaia-mcp:   The Hands   - Sandboxed tool execution
+#
+# Volume Access:
+#   - knowledge/:       RO for all, RW for gaia-study
+#   - vector_store/:    RO for gaia-core, RW for gaia-study (SOLE WRITER)
+#   - gaia-models/:     RO for gaia-core, RW for gaia-study (LoRA adapters)
+#   - gaia-common/:     RO for all (shared library)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up gaia-web        # Start web + dependencies
+#   docker compose logs -f gaia-core  # Follow core logs
+#   docker compose down               # Stop all services
+#
+# Modular Swap (inject candidate into live flow):
+#   # Swap MCP: live core -> candidate MCP
+#   MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc docker compose up -d gaia-core
+#
+#   # Swap Core: live web -> candidate core
+#   CORE_ENDPOINT=http://gaia-core-candidate:6415 docker compose up -d gaia-web
+#
+#   # Swap Study: live core -> candidate study
+#   STUDY_ENDPOINT=http://gaia-study-candidate:8766 docker compose up -d gaia-core
+
 services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-orchestrator: The Coordinator - GPU and container lifecycle management
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-orchestrator:
     build:
       context: .
@@ -7,42 +42,59 @@ services:
     container_name: gaia-orchestrator
     hostname: gaia-orchestrator
     restart: unless-stopped
+
     volumes:
-    - /var/run/docker.sock:/var/run/docker.sock:ro
-    - ./gaia-orchestrator:/app:rw
-    - gaia-shared:/shared:rw
-    - gaia-candidate-shared:/candidate-shared:rw
-    - .:/gaia/GAIA_Project:ro
-    - /mnt/gaia_warm_pool:/warm_pool:rw
+      # Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Source code (development mode — live reload)
+      - ./gaia-orchestrator:/app:rw
+      # Shared state for persistence
+      - gaia-shared:/shared:rw
+      - gaia-candidate-shared:/candidate-shared:rw
+      # Project root for compose file access (read-only)
+      - .:/gaia/GAIA_Project:ro
+      # Warm pool for model sync (self-awareness pipeline)
+      - /mnt/gaia_warm_pool:/warm_pool:rw
+
+    # Grant access to the host Docker socket (GID 962 = docker group on host)
     group_add:
-    - '962'
+      - "962"
+
     environment:
-    - ORCHESTRATOR_HOST=0.0.0.0
-    - ORCHESTRATOR_PORT=6410
-    - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
-    - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
-    - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
-    - ORCHESTRATOR_CORE_URL=http://gaia-core:6415
-    - ORCHESTRATOR_WEB_URL=http://gaia-web:6414
-    - ORCHESTRATOR_STUDY_URL=http://gaia-study:8766
-    - ORCHESTRATOR_MCP_URL=http://gaia-mcp:8765
-    - ORCHESTRATOR_PRIME_URL=http://gaia-prime:7777
-    - CPU_ADAPTER_SCALE=${CPU_ADAPTER_SCALE:-0.5}
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ORCHESTRATOR_HOST=0.0.0.0
+      - ORCHESTRATOR_PORT=6410
+      - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
+      - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
+      - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
+      # Service endpoints (inside Docker network)
+      - ORCHESTRATOR_CORE_URL=http://gaia-core:6415
+      - ORCHESTRATOR_WEB_URL=http://gaia-web:6414
+      - ORCHESTRATOR_STUDY_URL=http://gaia-study:8766
+      - ORCHESTRATOR_MCP_URL=http://gaia-mcp:8765
+      - ORCHESTRATOR_PRIME_URL=http://gaia-prime:7777
+      # Skill adapters loaded on-demand by cognitive pipeline (not always-on)
+      # PRIME_CPU_ADAPTER= (empty = no auto-load on consciousness transition)
+      - CPU_ADAPTER_SCALE=${CPU_ADAPTER_SCALE:-0.5}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     ports:
-    - 6410:6410
+      - "6410:6410"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6410/health
+      test: ["CMD", "curl", "-f", "http://localhost:6410/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-prime: The Thinker — GAIA Engine in standby mode
+  # Always running. Model loaded/unloaded by orchestrator via /model/load.
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime:
     build:
       context: .
@@ -51,51 +103,58 @@ services:
     container_name: gaia-prime
     hostname: gaia-prime
     restart: unless-stopped
+
     volumes:
-    - ../gaia-instance/gaia-models:/models:ro
-    - /mnt/gaia_warm_pool:/warm_pool:ro
-    - ./gaia-common:/gaia-common:ro
-    - gaia-shared:/shared:rw
-    - ../gaia-instance/logs:/logs:rw
-    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      - ../gaia-instance/gaia-models:/models:ro
+      - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      - gaia-shared:/shared:rw
+      # Logs (activation stream for Neural Mind Map)
+      - ../gaia-instance/logs:/logs:rw
+
     environment:
-    - PYTHONDONTWRITEBYTECODE=1
-    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    - PRIME_PORT=7777
-    - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime}
-    - PRIME_DEVICE=cuda
-    - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-0}
-    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    - SHARED_DIR=/shared
-    - PYTHONPATH=/gaia-common
-    - GAIA_ENGINE_TIER=prime
-    - GGUF_THREADS=16
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PRIME_PORT=7777
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime}
+      - PRIME_DEVICE=cuda
+      - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-0}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - SHARED_DIR=/shared
+      - PYTHONPATH=/gaia-common
+      - GAIA_ENGINE_TIER=prime
+      - GGUF_THREADS=16
+
     ports:
-    - 7777:7777
+      - "7777:7777"
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:7777/health
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
     networks:
-    - gaia-net
+      - gaia-net
+
     deploy:
       resources:
         reservations:
           devices:
-          - driver: nvidia
-            count: 1
-            capabilities:
-            - gpu
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-nano: The Reflex — GAIA Engine managed mode (safetensors on GPU, GGUF CPU fallback)
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-nano:
     build:
       context: .
@@ -104,56 +163,70 @@ services:
     container_name: gaia-nano
     hostname: gaia-nano
     restart: unless-stopped
+
     volumes:
-    - ../gaia-instance/gaia-models:/models:ro
-    - /mnt/gaia_warm_pool:/warm_pool:ro
-    - ./gaia-common:/gaia-common:ro
-    - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
-    - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
-    - ../gaia-instance/logs:/logs:rw
-    - gaia-shared:/shared:rw
-    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      - ../gaia-instance/gaia-models:/models:ro
+      - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
+      - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
+      - ../gaia-instance/logs:/logs:rw
+      - gaia-shared:/shared:rw
+
     environment:
-    - PYTHONDONTWRITEBYTECODE=1
-    - GAIA_ENGINE_TIER=nano
-    - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
-    - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
-    - NANO_DEVICE=${NANO_DEVICE:-cuda}
-    - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf
-    - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
-    - NANO_PORT=8080
-    - NANO_CTX_SIZE=2048
-    - NANO_THREADS=4
-    - SAE_ATLAS_PATH=/shared/atlas/nano
-    - SHARED_DIR=/shared
+      - PYTHONDONTWRITEBYTECODE=1
+      - GAIA_ENGINE_TIER=nano
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
+      # Safetensors mode (GPU-native, enables polygraph + SAE)
+      # Loads from tmpfs warm pool for near-instant startup.
+      # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
+      # per-request. Training overrides few-shot pattern-following with hedging.
+      # Identity lives in Core (Operator), not Nano (Reflex).
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
+      - NANO_DEVICE=${NANO_DEVICE:-cuda}
+      # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
+      - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf
+      - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
+      - NANO_PORT=8080
+      - NANO_CTX_SIZE=2048
+      - NANO_THREADS=4
+      - SAE_ATLAS_PATH=/shared/atlas/nano
+      - SHARED_DIR=/shared
+
     ports:
-    - 8090:8080
+      - "8090:8080"
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8080/health
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 30s
+
     networks:
-    - gaia-net
+      - gaia-net
+
     deploy:
       resources:
         limits:
           memory: 4G
         reservations:
           devices:
-          - driver: nvidia
-            count: 1
-            capabilities:
-            - gpu
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-core: The Brain - Cognitive loop + embedded Core CPU inference
+  # Runs llama-server internally for Core/Lite (Qwen3.5-4B) on port 8092
+  # GPU inference offloaded to gaia-prime via PRIME_ENDPOINT
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-core:
     build:
       context: .
@@ -162,69 +235,99 @@ services:
     container_name: gaia-core
     hostname: gaia-core
     restart: unless-stopped
-    user: ${UID:-1000}:${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+    # Allow time for cognitive checkpoint writes before SIGKILL (Phase 4.5 HA)
     stop_grace_period: 25s
+
     volumes:
-    - .:/gaia/GAIA_Project:rw
-    - ./gaia-core:/app:rw
-    - ./gaia-core/entrypoint.sh:/entrypoint.sh:ro
-    - ./gaia-common:/gaia-common:ro
-    - ../gaia-instance/knowledge:/knowledge:rw
-    - ./knowledge/blueprints:/knowledge/blueprints:ro
-    - ./knowledge/system_reference:/knowledge/system_reference:ro
-    - ./knowledge/personas:/knowledge/personas:ro
-    - ./knowledge/research:/knowledge/research:ro
-    - ./knowledge/consent:/knowledge/consent:ro
-    - ./knowledge/templates:/knowledge/templates:ro
-    - ../gaia-instance/knowledge/vector_store:/vector_store:ro
-    - ../gaia-instance/gaia-models:/models:ro
-    - /mnt/gaia_warm_pool:/warm_pool:ro
-    - ../gaia-instance/logs:/logs:rw
-    - gaia-shared:/shared:rw
-    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
+      # Source code (development mode)
+      - ./gaia-core:/app:rw
+      # Entrypoint (live reload — standby control)
+      - ./gaia-core/entrypoint.sh:/entrypoint.sh:ro
+      # Shared library (development mode - mount for live reload)
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # Knowledge base (instance = runtime data: vector_store, logs, personal)
+      - ../gaia-instance/knowledge:/knowledge:rw
+      # Source-tracked knowledge (overlays instance — blueprints, identity, etc.)
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/research:/knowledge/research:ro
+      - ./knowledge/consent:/knowledge/consent:ro
+      - ./knowledge/templates:/knowledge/templates:ro
+      # Vector store (read-only - gaia-study is SOLE WRITER)
+      - ../gaia-instance/knowledge/vector_store:/vector_store:ro
+      # Model files (read-only, NVMe fallback)
+      - ../gaia-instance/gaia-models:/models:ro
+      # Warm pool (tmpfs-backed, near-instant model loads)
+      - /mnt/gaia_warm_pool:/warm_pool:ro
+      # Logs (consolidated service logs)
+      - ../gaia-instance/logs:/logs:rw
+      # Shared state
+      - gaia-shared:/shared:rw
+
     environment:
-    - PYTHONPATH=/app:/gaia-common
-    - GAIA_SERVICE=core
-    - GAIA_ENGINE_TIER=core
-    - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
-    - GAIA_ENV=${GAIA_ENV:-development}
-    - KNOWLEDGE_DIR=/knowledge
-    - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
-    - VECTOR_STORE_PATH=/vector_store
-    - MODELS_DIR=/models
-    - WARM_POOL_DIR=/warm_pool
-    - SHARED_DIR=/shared
-    - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
-    - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
-    - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
-    - GAIA_FORCE_CPU=0
-    - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
-    - N_GPU_LAYERS=16
-    - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-1}
-    - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
-    - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
-    - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
-    - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
-    - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
-    - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
-    - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-Multimodal-v4}
-    - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4}
-    - CORE_DEVICE=${CORE_DEVICE:-cuda}
-    - CORE_CPU_PORT=8092
-    - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf
-    - CORE_CPU_CTX=16384
-    - CORE_CPU_THREADS=8
-    - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
-    - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
-    - GROQ_API_KEY=${GROQ_API_KEY:-}
-    - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_SERVICE=core
+      - GAIA_ENGINE_TIER=core
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - VECTOR_STORE_PATH=/vector_store
+      - MODELS_DIR=/models
+      - WARM_POOL_DIR=/warm_pool
+      - SHARED_DIR=/shared
+      # Service endpoints (configurable for candidate injection)
+      - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
+      # CPU-only mode — GPU inference offloaded to gaia-prime
+      - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
+      - GAIA_FORCE_CPU=0
+      - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
+      - N_GPU_LAYERS=16
+      # Model pool initializes remote HTTP clients (not GPU models) on startup
+      - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-1}
+      - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
+      # Remote vLLM inference via gaia-prime
+      - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
+      - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
+      # Nano reflex endpoint (separate llama-server container)
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
+      - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
+      # Core/Operator inference endpoint (safetensors or GGUF, depending on mode)
+      - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-Multimodal-v4}
+      # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4}
+      - CORE_DEVICE=${CORE_DEVICE:-cuda}
+      # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
+      - CORE_CPU_PORT=8092
+      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf
+      - CORE_CPU_CTX=16384
+      - CORE_CPU_THREADS=8
+      # KV cache persistence for embedded llama-server
+      - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
+      # HA failover — candidate MCP as fallback
+      - MCP_FALLBACK_ENDPOINT=${MCP_FALLBACK_ENDPOINT:-http://gaia-mcp-candidate:8765/jsonrpc}
+      # Cloud fallback API keys (loaded from .env)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     ports:
-    - 6415:6415
+      - "6415:6415"
+
     deploy:
       resources:
         limits:
@@ -232,25 +335,27 @@ services:
         reservations:
           memory: 8G
           devices:
-          - driver: nvidia
-            count: 1
-            capabilities:
-            - gpu
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
       gaia-mcp:
         condition: service_healthy
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6415/health
+      test: ["CMD", "curl", "-f", "http://localhost:6415/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-web: The Face - UI and API gateway
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-web:
     build:
       context: .
@@ -259,67 +364,101 @@ services:
     container_name: gaia-web
     hostname: gaia-web
     restart: unless-stopped
-    user: ${UID:-1000}:${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
     group_add:
-    - ${DOCKER_GID:-962}
+      - "${DOCKER_GID:-962}"
+
     env_file:
-    - .env.discord
+      - .env.discord
+
     volumes:
-    - .:/gaia/GAIA_Project:rw
-    - ./gaia-web:/app:rw
-    - ./gaia-common:/gaia-common:ro
-    - ../gaia-instance/knowledge:/knowledge:ro
-    - ./knowledge/blueprints:/knowledge/blueprints:ro
-    - ./knowledge/system_reference:/knowledge/system_reference:ro
-    - ./knowledge/personas:/knowledge/personas:ro
-    - ./knowledge/consent:/knowledge/consent:ro
-    - ./gaia-web/static:/app/static:ro
-    - /var/run/docker.sock:/var/run/docker.sock:ro
-    - ../gaia-instance/logs:/logs:rw
-    - gaia-shared:/shared:rw
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
+      # Source code (development mode)
+      - ./gaia-web:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # Knowledge base (instance = runtime data)
+      - ../gaia-instance/knowledge:/knowledge:ro
+      # Source-tracked knowledge overlays
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/consent:/knowledge/consent:ro
+      # Static assets (if needed)
+      - ./gaia-web/static:/app/static:ro
+      # Docker socket for terminal access
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Logs (consolidated service logs)
+      - ../gaia-instance/logs:/logs:rw
+      # Shared state
+      - gaia-shared:/shared:rw
+
     environment:
-    - PYTHONPATH=/app:/gaia-common
-    - GAIA_SERVICE=web
-    - GAIA_ENV=${GAIA_ENV:-development}
-    - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
-    - FILE_ROOTS=project:/app,knowledge:/knowledge
-    - SHARED_DIR=/shared
-    - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
-    - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
-    - MCP_HEALTH_ENDPOINT=${MCP_HEALTH_ENDPOINT:-http://gaia-mcp:8765}
-    - HOST=0.0.0.0
-    - PORT=6414
-    - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
-    - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-http://gaia-core-candidate:6415}
-    - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
-    - TRANSLATE_ENDPOINT=${TRANSLATE_ENDPOINT:-http://gaia-translate:5000}
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_SERVICE=web
+      - GAIA_ENV=${GAIA_ENV:-development}
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - FILE_ROOTS=project:/app,knowledge:/knowledge
+      - SHARED_DIR=/shared
+      # Service endpoints (configurable for candidate injection)
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
+      - MCP_HEALTH_ENDPOINT=${MCP_HEALTH_ENDPOINT:-http://gaia-mcp:8765}
+      # Web server settings
+      - HOST=0.0.0.0
+      - PORT=6414
+      # Discord integration (Unified Interface Gateway)
+      # DISCORD_BOT_TOKEN loaded from env_file: .env.discord
+      - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
+      # HA failover — candidate-core as fallback
+      - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-http://gaia-core-candidate:6415}
+      # Wiki proxy (internal, auto-resolves on gaia-net)
+      - WIKI_ENDPOINT=${WIKI_ENDPOINT:-http://gaia-wiki:8080}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Chaos Monkey integration
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      # Translation service
+      - TRANSLATE_ENDPOINT=${TRANSLATE_ENDPOINT:-http://gaia-translate:5000}
+
     ports:
-    - 6414:6414
+      - "6414:6414"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
       gaia-core:
         condition: service_healthy
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6414/health
+      test: ["CMD", "curl", "-f", "http://localhost:6414/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
     deploy:
       resources:
         limits:
           memory: 8192M
         reservations:
           memory: 2048M
+
     secrets:
-    - discord_bot_token
+      - discord_bot_token
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-study: The Subconscious - Background processing
+  # SOLE WRITER to vector store and LoRA adapters
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-study:
     build:
       context: .
@@ -328,65 +467,93 @@ services:
     container_name: gaia-study
     hostname: gaia-study
     restart: unless-stopped
-    user: ${UID:-1000}:${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+
     volumes:
-    - .:/gaia/GAIA_Project:rw
-    - ./gaia-study:/app:rw
-    - ./gaia-common:/gaia-common:ro
-    - ../gaia-instance/knowledge:/knowledge:rw
-    - ./knowledge/blueprints:/knowledge/blueprints:ro
-    - ./knowledge/system_reference:/knowledge/system_reference:ro
-    - ./knowledge/personas:/knowledge/personas:ro
-    - ./knowledge/research:/knowledge/research:ro
-    - ./knowledge/templates:/knowledge/templates:ro
-    - ../gaia-instance/knowledge/vector_store:/vector_store:rw
-    - ../gaia-instance/gaia-models:/models:rw
-    - /mnt/gaia_warm_pool:/warm_pool:ro
-    - ../gaia-instance/logs:/logs:rw
-    - gaia-shared:/shared:rw
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
+      # Source code (development mode)
+      - ./gaia-study:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # Knowledge base (instance = runtime data, FULL ACCESS for indexing)
+      - ../gaia-instance/knowledge:/knowledge:rw
+      # Source-tracked knowledge overlays
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/research:/knowledge/research:ro
+      - ./knowledge/templates:/knowledge/templates:ro
+      # Vector store (SOLE WRITER)
+      - ../gaia-instance/knowledge/vector_store:/vector_store:rw
+      # Model files (WRITE for LoRA adapters)
+      - ../gaia-instance/gaia-models:/models:rw
+      # Warm pool (tmpfs-backed, near-instant base model loads)
+      - /mnt/gaia_warm_pool:/warm_pool:ro
+      # Logs (consolidated service logs)
+      - ../gaia-instance/logs:/logs:rw
+      # Shared state
+      - gaia-shared:/shared:rw
+
     environment:
-    - HOME=/tmp
-    - TRANSFORMERS_CACHE=/tmp/.cache
-    - GAIA_SERVICE=study
-    - GAIA_ENV=${GAIA_ENV:-development}
-    - KNOWLEDGE_DIR=/knowledge
-    - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
-    - VECTOR_STORE_PATH=/vector_store
-    - MODELS_DIR=/models
-    - WARM_POOL_DIR=/warm_pool
-    - SHARED_DIR=/shared
-    - GAIA_LOG_DIR=/logs
-    - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-    - EMBEDDING_MODEL=all-MiniLM-L6-v2
-    - MAX_TRAINING_CONTENT_KB=500
-    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/prime}
-    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:256
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
+      - GAIA_SERVICE=study
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - VECTOR_STORE_PATH=/vector_store
+      - MODELS_DIR=/models
+      - WARM_POOL_DIR=/warm_pool
+      - SHARED_DIR=/shared
+      - GAIA_LOG_DIR=/logs
+      # GPU settings for embedding
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      # Embedding model (loads from warm pool if available, /models fallback)
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      # Training limits + GPU memory optimization
+      - MAX_TRAINING_CONTENT_KB=500
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      # Training uses bf16 base + BnB NF4 quantization (proper gradient flow)
+      # AWQ model is for inference only (GEMM kernels lack backward pass)
+      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/prime}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:256
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     ports:
-    - 8766:8766
+      - "8766:8766"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     deploy:
       resources:
         limits:
           memory: 48G
         reservations:
           devices:
-          - driver: nvidia
-            count: all
-            capabilities:
-            - gpu
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8766/health
+      test: ["CMD", "curl", "-f", "http://localhost:8766/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-mcp: The Hands - Sandboxed tool execution
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-mcp:
     build:
       context: .
@@ -395,62 +562,93 @@ services:
     container_name: gaia-mcp
     hostname: gaia-mcp
     restart: unless-stopped
-    user: ${UID:-1000}:${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+
     volumes:
-    - .:/gaia/GAIA_Project:rw
-    - ./gaia-mcp:/app:rw
-    - ./gaia-common:/gaia-common:ro
-    - ../gaia-instance/knowledge:/knowledge:rw
-    - ./knowledge/blueprints:/knowledge/blueprints:ro
-    - ./knowledge/system_reference:/knowledge/system_reference:ro
-    - ./knowledge/personas:/knowledge/personas:ro
-    - ./knowledge/research:/knowledge/research:ro
-    - ../gaia-instance/gaia-models:/models:ro
-    - gaia-sandbox:/sandbox:rw
-    - ../gaia-instance/logs:/logs:rw
-    - ./candidates:/gaia/GAIA_Project/candidates:ro
-    - ./docker-compose.yml:/gaia/GAIA_Project/docker-compose.yml:ro
-    - gaia-shared:/shared:rw
-    - /home/azrael/.notebooklm:/auth/notebooklm:ro
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
+      # Source code (development mode)
+      - ./gaia-mcp:/app:rw
+      # Shared library (development mode)
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # Knowledge base (instance = runtime data)
+      - ../gaia-instance/knowledge:/knowledge:rw
+      # Source-tracked knowledge overlays
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+      - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/research:/knowledge/research:ro
+      # Model files (read-only for embeddings)
+      - ../gaia-instance/gaia-models:/models:ro
+      # Sandboxed workspace (isolated)
+      - gaia-sandbox:/sandbox:rw
+      # Logs (for introspect_logs tool + own log persistence)
+      - ../gaia-instance/logs:/logs:rw
+      # Candidates (for promotion readiness assessment)
+      - ./candidates:/gaia/GAIA_Project/candidates:ro
+      # Docker compose file (for compose_service check)
+      - ./docker-compose.yml:/gaia/GAIA_Project/docker-compose.yml:ro
+      # Shared state
+      - gaia-shared:/shared:rw
+      # NotebookLM auth (Playwright storage state, read-only)
+      - /home/azrael/.notebooklm:/auth/notebooklm:ro
+
     environment:
-    - HOME=/tmp
-    - TRANSFORMERS_CACHE=/tmp/.cache
-    - GAIA_SERVICE=mcp
-    - GAIA_MCP_BYPASS=${GAIA_MCP_BYPASS:-false}
-    - MODELS_DIR=/models
-    - GAIA_ENV=${GAIA_ENV:-development}
-    - SANDBOX_ROOT=/sandbox
-    - KNOWLEDGE_DIR=/knowledge
-    - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
-    - GAIA_LOG_DIR=/logs
-    - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
-    - MCP_APPROVAL_TTL=900
-    - KANKA_API_KEY=${KANKA_API_KEY:-}
-    - NOTEBOOKLM_HOME=/auth/notebooklm
-    - NOTEBOOKLM_STORAGE_STATE=/auth/notebooklm/storage_state.json
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
+      - GAIA_SERVICE=mcp
+      - GAIA_MCP_BYPASS=${GAIA_MCP_BYPASS:-false}
+      - MODELS_DIR=/models
+      - GAIA_ENV=${GAIA_ENV:-development}
+      # Paths
+      - SANDBOX_ROOT=/sandbox
+      - KNOWLEDGE_DIR=/knowledge
+      - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
+      - GAIA_LOG_DIR=/logs
+      # Security
+      - MCP_APPROVAL_REQUIRED=${MCP_APPROVAL_REQUIRED:-true}
+      - MCP_APPROVAL_TTL=900
+      # External API keys (authenticated web_fetch)
+      - KANKA_API_KEY=${KANKA_API_KEY:-}
+      # NotebookLM auth
+      - NOTEBOOKLM_HOME=/auth/notebooklm
+      - NOTEBOOKLM_STORAGE_STATE=/auth/notebooklm/storage_state.json
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     ports:
-    - 8765:8765
+      - "8765:8765"
+
     networks:
-    - gaia-net
+      - gaia-net
+
+    # Security hardening
     security_opt:
-    - no-new-privileges:true
+      - no-new-privileges:true
     cap_drop:
-    - ALL
+      - ALL
     cap_add:
-    - CHOWN
-    - SETGID
-    - SETUID
+      - CHOWN
+      - SETGID
+      - SETUID
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8765/health
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-audio: The Ears & Mouth - Full-duplex STT/TTS sensory service
+  # GPU-capable container for Whisper STT and RealtimeTTS
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-audio:
     build:
       context: .
@@ -460,48 +658,58 @@ services:
     hostname: gaia-audio
     restart: unless-stopped
     depends_on:
-    - gaia-nano
+      - gaia-nano
+
     volumes:
-    - .:/gaia/GAIA_Project:rw
-    - ./gaia-audio:/app:rw
-    - ./gaia-common:/gaia-common:ro
-    - ../gaia-instance/gaia-models:/models:ro
+      # Project root for unified access
+      - .:/gaia/GAIA_Project:rw
+      - ./gaia-audio:/app:rw
+      - ./gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      - ../gaia-instance/gaia-models:/models:ro
+
     environment:
-    - PYTHONPATH=/app:/gaia-common
-    - GAIA_SERVICE=audio
-    - GAIA_ENV=${GAIA_ENV:-production}
-    - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
-    - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
-    - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-    - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONPATH=/app:/gaia-common
+      - GAIA_SERVICE=audio
+      - GAIA_ENV=${GAIA_ENV:-production}
+      - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
     ports:
-    - 8080:8080
+      - "8080:8080"
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8080/health
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    command:
-    - sh
-    - -c
-    - PYTHONPATH=/app:/gaia-common uvicorn gaia_audio.main:app --host 0.0.0.0 --port
-      8080
+
+    command: ["sh", "-c", "PYTHONPATH=/app:/gaia-common uvicorn gaia_audio.main:app --host 0.0.0.0 --port 8080"]
+
     deploy:
       resources:
         reservations:
           devices:
-          - driver: nvidia
-            count: 1
-            capabilities:
-            - gpu
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
     networks:
-    - gaia-net
+      - gaia-net
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-wiki: The Library - Internal developer documentation
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-wiki:
     build:
       context: .
@@ -510,42 +718,58 @@ services:
     container_name: gaia-wiki
     hostname: gaia-wiki
     restart: unless-stopped
+
     volumes:
-    - ./gaia-wiki/docs:/docs/docs:ro
-    - ./gaia-wiki/mkdocs.yml:/docs/mkdocs.yml:ro
-    - ../gaia-instance/knowledge/wiki_auto:/docs/docs/auto:ro
-    - ../gaia-instance/knowledge:/knowledge:ro
-    - ./knowledge/blueprints:/knowledge/blueprints:ro
-    - ./knowledge/system_reference:/knowledge/system_reference:ro
+      # Live reload: mount docs for edit-without-rebuild
+      - ./gaia-wiki/docs:/docs/docs:ro
+      - ./gaia-wiki/mkdocs.yml:/docs/mkdocs.yml:ro
+      # Auto-generated docs from blueprint YAML (written by gaia-core sleep task)
+      - ../gaia-instance/knowledge/wiki_auto:/docs/docs/auto:ro
+      # Knowledge base (instance = runtime data)
+      - ../gaia-instance/knowledge:/knowledge:ro
+      # Source-tracked knowledge overlays
+      - ./knowledge/blueprints:/knowledge/blueprints:ro
+      - ./knowledge/system_reference:/knowledge/system_reference:ro
+
     environment:
-    - HOME=/tmp
-    - TRANSFORMERS_CACHE=/tmp/.cache
-    - GAIA_SERVICE=wiki
+      - HOME=/tmp
+      - TRANSFORMERS_CACHE=/tmp/.cache
+      - GAIA_SERVICE=wiki
+
     networks:
-    - gaia-net
+      - gaia-net
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8080
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # dozzle: The X-Ray - Real-time Docker log viewer
+  # ═══════════════════════════════════════════════════════════════════════════
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
     hostname: dozzle
     restart: unless-stopped
+
     volumes:
-    - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
     environment:
-    - DOZZLE_NO_ANALYTICS=true
+      - DOZZLE_NO_ANALYTICS=true
+
     ports:
-    - 9999:8080
+      - "9999:8080"
+
     networks:
-    - gaia-net
+      - gaia-net
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-doctor: The Immune System - Persistent HA watchdog
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-doctor:
     build:
       context: .
@@ -554,41 +778,53 @@ services:
     container_name: gaia-doctor
     hostname: gaia-doctor
     restart: unless-stopped
+
     environment:
-    - POLL_INTERVAL=15
-    - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
-    - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
-    - COMPOSE_PROJECT_NAME=gaia_project
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
-    - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
-    - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
-    - SHARED_DIR=/shared
-    - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
+      - POLL_INTERVAL=15
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      - COMPOSE_PROJECT_NAME=gaia_project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
+      - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      - ES_ENDPOINT=${ES_ENDPOINT:-http://elasticsearch:9200}
+      - SHARED_DIR=/shared
+      - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
+
     volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
-    - /usr/bin/docker:/usr/bin/docker:ro
-    - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
-    - .:/gaia/GAIA_Project:ro
-    - gaia-shared:/shared:rw
-    - ./docker-compose.candidate.yml:/compose/docker-compose.candidate.yml:ro
-    - ./docker-compose.ha.yml:/compose/docker-compose.ha.yml:ro
+      # Docker socket (read-write — doctor needs to restart containers)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Docker CLI + compose plugin (bind-mounted from host, avoids installing full docker.io)
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      # Project root for code monitoring (read-only for auditing)
+      - .:/gaia/GAIA_Project:ro
+      # Shared state for status persistence and maintenance mode flag
+      - gaia-shared:/shared:rw
+      # Compose files for HA-overlay restarts
+      - ./docker-compose.candidate.yml:/compose/docker-compose.candidate.yml:ro
+      - ./docker-compose.ha.yml:/compose/docker-compose.ha.yml:ro
+
     group_add:
-    - ${DOCKER_GID:-962}
+      - "${DOCKER_GID:-962}"
+
     ports:
-    - 6419:6419
+      - "6419:6419"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6419/health
+      test: ["CMD", "curl", "-f", "http://localhost:6419/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-monkey: Adversarial Chaos Service
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-monkey:
     build:
       context: ./gaia-monkey
@@ -597,198 +833,246 @@ services:
     container_name: gaia-monkey
     hostname: gaia-monkey
     restart: unless-stopped
+
     volumes:
-    - /var/run/docker.sock:/var/run/docker.sock:ro
-    - /usr/bin/docker:/usr/bin/docker:ro
-    - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
-    - gaia-shared:/shared:rw
-    - .:/gaia/GAIA_Project:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
+      - gaia-shared:/shared:rw
+      - .:/gaia/GAIA_Project:ro
+
     environment:
-    - CORE_ENDPOINT=http://gaia-core:6415
-    - DOCTOR_ENDPOINT=http://gaia-doctor:6419
-    - SHARED_DIR=/shared
-    - PROJECT_ROOT=/gaia/GAIA_Project
-    - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    - PROMPTFOO_HOME=/tmp/.promptfoo
+      - CORE_ENDPOINT=http://gaia-core:6415
+      - DOCTOR_ENDPOINT=http://gaia-doctor:6419
+      - SHARED_DIR=/shared
+      - PROJECT_ROOT=/gaia/GAIA_Project
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PROMPTFOO_HOME=/tmp/.promptfoo
+
     ports:
-    - 6420:6420
+      - "6420:6420"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
-    - gaia-core
+      - gaia-core
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6420/health
+      test: ["CMD", "curl", "-f", "http://localhost:6420/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # gaia-translate: The Tongue — Multi-language translation (LibreTranslate)
+  # ═══════════════════════════════════════════════════════════════════════════
   gaia-translate:
     image: libretranslate/libretranslate:v1.6.3
     container_name: gaia-translate
     hostname: gaia-translate
     restart: unless-stopped
+
     environment:
-    - LT_LOAD_ONLY=en,ja,ko,zh,es,fr,de,pt,ru,ar
-    - LT_DISABLE_WEB_UI=true
-    - LT_API_KEYS=false
-    - LT_SUGGESTIONS=false
-    - LT_METRICS=false
-    - LT_HOST=0.0.0.0
-    - LT_PORT=5000
+      - LT_LOAD_ONLY=en,ja,ko,zh,es,fr,de,pt,ru,ar
+      - LT_DISABLE_WEB_UI=true
+      - LT_API_KEYS=false
+      - LT_SUGGESTIONS=false
+      - LT_METRICS=false
+      - LT_HOST=0.0.0.0
+      - LT_PORT=5000
+
     ports:
-    - 5100:5000
+      - "5100:5000"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     deploy:
       resources:
         limits:
           memory: 4G
         reservations:
           memory: 2G
+
     healthcheck:
-      test:
-      - CMD
-      - python
-      - -c
-      - import urllib.request; urllib.request.urlopen('http://localhost:5000/languages')
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/languages')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 120s
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ELK Stack: Centralized Log Aggregation
+  # ═══════════════════════════════════════════════════════════════════════════
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     container_name: elasticsearch
     hostname: elasticsearch
     restart: unless-stopped
+
     volumes:
-    - gaia-elastic-data:/usr/share/elasticsearch/data
-    - ./elk/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - gaia-elastic-data:/usr/share/elasticsearch/data
+      - ./elk/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+
     environment:
-    - ES_JAVA_OPTS=-Xms1g -Xmx1g
-    - ELASTIC_PASSWORD=
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - ELASTIC_PASSWORD=
+
     ports:
-    - 9200:9200
+      - "9200:9200"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     deploy:
       resources:
         limits:
           memory: 2G
         reservations:
           memory: 1G
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
+
   logstash:
     image: docker.elastic.co/logstash/logstash:8.17.0
     container_name: logstash
     hostname: logstash
     restart: unless-stopped
+
     volumes:
-    - ./elk/logstash/pipeline/:/usr/share/logstash/pipeline/:ro
+      - ./elk/logstash/pipeline/:/usr/share/logstash/pipeline/:ro
+
     environment:
-    - LS_JAVA_OPTS=-Xms512m -Xmx512m
-    - XPACK_MONITORING_ENABLED=false
+      - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
+      - XPACK_MONITORING_ENABLED=false
+
     ports:
-    - 5044:5044
+      - "5044:5044"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
       elasticsearch:
         condition: service_healthy
+
     deploy:
       resources:
         limits:
           memory: 1G
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:9600/_node/stats
+      test: ["CMD", "curl", "-f", "http://localhost:9600/_node/stats"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
   kibana:
     image: docker.elastic.co/kibana/kibana:8.17.0
     container_name: kibana
     hostname: kibana
     restart: unless-stopped
+
     volumes:
-    - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+
     ports:
-    - 5601:5601
+      - "5601:5601"
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
       elasticsearch:
         condition: service_healthy
+
     deploy:
       resources:
         limits:
           memory: 1G
+
     healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:5601/api/status
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 90s
+
   filebeat:
     image: docker.elastic.co/beats/filebeat:8.17.0
     container_name: filebeat
     hostname: filebeat
     restart: unless-stopped
     user: root
-    command:
-    - --strict.perms=false
+    command: ["--strict.perms=false"]
+
     volumes:
-    - ./elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-    - /mnt/dockerdata/containers:/var/lib/docker/containers:ro
-    - /var/run/docker.sock:/var/run/docker.sock:ro
-    - gaia-filebeat-data:/usr/share/filebeat/data
+      - ./elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /mnt/dockerdata/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - gaia-filebeat-data:/usr/share/filebeat/data
+
     networks:
-    - gaia-net
+      - gaia-net
+
     depends_on:
       logstash:
         condition: service_healthy
+
     deploy:
       resources:
         limits:
           memory: 256M
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════════════════
 networks:
   gaia-net:
     name: gaia-network
     driver: bridge
     ipam:
       config:
-      - subnet: 172.28.0.0/16
+        - subnet: 172.28.0.0/16
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Volumes
+# ═══════════════════════════════════════════════════════════════════════════
 volumes:
+  # Shared state between services (sessions, packets, etc.)
   gaia-shared:
     name: gaia-shared
+
+  # Shared state for candidate services
   gaia-candidate-shared:
     name: gaia-candidate-shared
+
+  # Isolated sandbox for MCP tool execution
   gaia-sandbox:
     name: gaia-sandbox
+
+  # Elasticsearch data persistence
   gaia-elastic-data:
     name: gaia-elastic-data
+
+  # Filebeat registry persistence
   gaia-filebeat-data:
     name: gaia-filebeat-data
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Secrets (VouchCore ADC Pattern)
+# ═══════════════════════════════════════════════════════════════════════════
 secrets:
   groq_api_key:
     file: ${HOME}/.gaia/secrets/groq_api_key
