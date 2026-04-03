@@ -203,23 +203,58 @@ def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
     # Web search — most common explicit tool request
     if any(p in lowered for p in ["web search", "search the web", "search online",
                                    "search the internet", "google ", "look it up"]):
-        # Extract the search query — everything after the trigger phrase
-        # "use your web search tool to find X" → query = "find X" or just the topic
-        query = lowered
-        for prefix in ["use your web search tool to ", "web search for ",
-                        "search the web for ", "search online for ",
+        # Extract the search query — the SUBJECT of the request, not the tool instruction.
+        # "GAIA, please recite Jabberwocky. Use your web search tool to find it."
+        #   → query should be "Jabberwocky" (the subject), not "find it" (the action)
+        #
+        # Strategy: try to extract from explicit "search for X" patterns first.
+        # If those don't match, extract the subject from the part of the message
+        # BEFORE the tool instruction, stripping common prefixes.
+        query = None
+
+        # Pattern 1: explicit "search for X" after a trigger phrase
+        for prefix in ["web search for ", "search the web for ", "search online for ",
                         "search the internet for ", "google "]:
-            if prefix in query:
-                query = query.split(prefix, 1)[1]
+            if prefix in lowered:
+                query = lowered.split(prefix, 1)[1]
                 break
+
+        # Pattern 2: tool instruction is separate from the subject
+        # "recite Jabberwocky. Use your web search tool to find it."
+        # → extract the subject from BEFORE "use your web search"
+        if query is None:
+            for tool_phrase in ["use your web search", "use the web search",
+                                "use web search", "search for it", "look it up"]:
+                if tool_phrase in lowered:
+                    before = lowered.split(tool_phrase, 1)[0].strip().rstrip(".")
+                    if before:
+                        query = before
+                    break
+
+        # Pattern 3: fallback — use the full text but strip tool instructions
+        if query is None:
+            query = lowered
+
+        # Clean up common prefixes (addressing, politeness)
+        for prefix in ["gaia, ", "gaia ", "please ", "can you ", "could you ",
+                        "recite ", "find ", "tell me about "]:
+            if query.startswith(prefix):
+                query = query[len(prefix):]
+
         # Clean up common suffixes
         for suffix in [" and recite it", " and tell me", " and read it",
-                       " and show me", " please", " for me"]:
+                       " and show me", " please", " for me", " if you can",
+                       " use your web search tool", ". use your"]:
             if query.endswith(suffix):
                 query = query[:-len(suffix)]
+
+        query = query.strip().strip(".")
+        if not query or len(query) < 3:
+            query = lowered  # Last resort: use the whole thing
+
         return SelectedTool(
             tool_name="web",
-            params={"action": "search", "query": query.strip()},
+            params={"action": "search", "query": query},
             selection_reasoning="Deterministic match: user explicitly requested web search",
             selection_confidence=0.95,
         )

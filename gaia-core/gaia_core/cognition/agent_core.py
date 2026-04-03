@@ -6390,10 +6390,10 @@ Start your response with the first line of the file."""
                 from gaia_common.utils.domain_tools import DOMAIN_TOOLS
                 if canonical_name in DOMAIN_TOOLS:
                     logger.info(f"Dispatching domain tool '{canonical_name}' via MCP JSON-RPC")
-                    rpc_result = asyncio.run(mcp_client.call_jsonrpc(
+                    rpc_result = mcp_client.call_jsonrpc(
                         method=canonical_name,
                         params=tool.params or {}
-                    ))
+                    )
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     if rpc_result.get("ok"):
                         rpc_response = rpc_result.get("response", {})
@@ -6441,10 +6441,10 @@ Start your response with the first line of the file."""
             else:
                 # Dispatch via MCP JSON-RPC for tools not handled by local shims
                 logger.info(f"Dispatching tool '{canonical_name}' via MCP JSON-RPC")
-                rpc_result = asyncio.run(mcp_client.call_jsonrpc(
+                rpc_result = mcp_client.call_jsonrpc(
                     method=canonical_name,
                     params=tool.params or {}
-                ))
+                )
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 if rpc_result.get("ok"):
                     rpc_response = rpc_result.get("response", {})

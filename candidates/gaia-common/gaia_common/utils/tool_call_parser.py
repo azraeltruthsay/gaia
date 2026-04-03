@@ -32,9 +32,12 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger("GAIA.ToolCallParser")
 
-# Tags
+# Tags — the parser recognizes both <tool_call> and <tool_response> as call tags,
+# since some model variants emit one or the other depending on training data.
 TOOL_CALL_OPEN = "<tool_call>"
 TOOL_CALL_CLOSE = "</tool_call>"
+TOOL_RESPONSE_OPEN = "<tool_response>"
+TOOL_RESPONSE_CLOSE = "</tool_response>"
 TOOL_RESULT_OPEN = "<tool_result>"
 TOOL_RESULT_CLOSE = "</tool_result>"
 
@@ -92,12 +95,21 @@ class ToolCallParser:
 
         while True:
             if not self._in_tool_call:
-                # Look for tool call opening tag
+                # Look for tool call opening tag — accept both <tool_call> and <tool_response>
                 open_idx = self._buffer.find(TOOL_CALL_OPEN)
+                open_tag = TOOL_CALL_OPEN
+                close_tag = TOOL_CALL_CLOSE
+                # Also check <tool_response> (some model variants emit this)
+                resp_idx = self._buffer.find(TOOL_RESPONSE_OPEN)
+                if resp_idx != -1 and (open_idx == -1 or resp_idx < open_idx):
+                    open_idx = resp_idx
+                    open_tag = TOOL_RESPONSE_OPEN
+                    close_tag = TOOL_RESPONSE_CLOSE
+
                 if open_idx == -1:
                     # No tag found — emit all buffered text except last few chars
                     # (which might be a partial tag like "<tool_")
-                    safe_len = len(self._buffer) - len(TOOL_CALL_OPEN)
+                    safe_len = len(self._buffer) - len(TOOL_RESPONSE_OPEN)  # longest tag
                     if safe_len > 0:
                         events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer[:safe_len]))
                         self._buffer = self._buffer[safe_len:]
@@ -106,19 +118,21 @@ class ToolCallParser:
                     # Emit text before the tag
                     if open_idx > 0:
                         events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer[:open_idx]))
-                    self._buffer = self._buffer[open_idx + len(TOOL_CALL_OPEN):]
+                    self._buffer = self._buffer[open_idx + len(open_tag):]
                     self._in_tool_call = True
+                    self._active_close_tag = close_tag
 
             if self._in_tool_call:
                 # Look for closing tag
-                close_idx = self._buffer.find(TOOL_CALL_CLOSE)
+                close_tag = getattr(self, '_active_close_tag', TOOL_CALL_CLOSE)
+                close_idx = self._buffer.find(close_tag)
                 if close_idx == -1:
                     # Haven't received the full tool call yet — wait for more tokens
                     break
                 else:
                     # Extract the tool call JSON
                     tool_json = self._buffer[:close_idx].strip()
-                    self._buffer = self._buffer[close_idx + len(TOOL_CALL_CLOSE):]
+                    self._buffer = self._buffer[close_idx + len(close_tag):]
                     self._in_tool_call = False
 
                     # Parse the tool call
