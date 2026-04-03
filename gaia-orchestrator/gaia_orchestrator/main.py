@@ -129,7 +129,8 @@ async def lifespan(app: FastAPI):
         from .lifecycle_machine import LifecycleMachine
         _lifecycle_machine = LifecycleMachine(_state_manager)
         await _lifecycle_machine.load_persisted_state()
-        await _lifecycle_machine.reconcile()
+        # Don't reconcile during startup — it can block for minutes loading models.
+        # The periodic reconcile loop (line 183) handles this after startup.
         logger.info("Lifecycle state machine initialized: %s", _lifecycle_machine._snapshot.state)
     except Exception:
         logger.warning("Lifecycle state machine initialization failed", exc_info=True)
@@ -154,7 +155,8 @@ async def lifespan(app: FastAPI):
         global _consciousness_matrix
         from .consciousness_matrix import ConsciousnessMatrix
         _consciousness_matrix = ConsciousnessMatrix(lifecycle_machine=_lifecycle_machine)
-        await _consciousness_matrix.probe_all()
+        # Probe and poll start asynchronously — don't block startup.
+        # The continuous poll will probe and reconcile after uvicorn is serving.
         await _consciousness_matrix.start_continuous_poll(interval=15.0)
         logger.info("Consciousness matrix initialized: %s",
                      {t: s["actual"] for t, s in _consciousness_matrix.get_matrix().items()})
@@ -1367,15 +1369,18 @@ async def consciousness_awake():
     """Set AWAKE configuration: Core=3, Nano=3, Prime=2."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.awake()
+    # Fire-and-forget — transitions can take minutes, don't block the HTTP response
+    asyncio.create_task(_consciousness_matrix.awake())
+    return {"ok": True, "message": "AWAKE transition started (async)"}
 
 
 @app.post("/consciousness/focusing")
 async def consciousness_focusing():
-    """Set FOCUSING configuration: Nano=3, Core=2, Prime=3."""
+    """Set FOCUSING configuration: Core+Nano off GPU, Prime on GPU."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.focusing()
+    asyncio.create_task(_consciousness_matrix.focusing())
+    return {"ok": True, "message": "FOCUSING transition started (async)"}
 
 
 @app.post("/consciousness/sleep")
@@ -1383,7 +1388,8 @@ async def consciousness_sleep():
     """Set SLEEP configuration: Nano=2, Core=2, Prime=1."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.sleep()
+    asyncio.create_task(_consciousness_matrix.sleep())
+    return {"ok": True, "message": "SLEEP transition started (async)"}
 
 
 @app.post("/consciousness/deep-sleep")
@@ -1391,7 +1397,8 @@ async def consciousness_deep_sleep():
     """Set DEEP SLEEP configuration: All → 1 (Nano stays 2)."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.deep_sleep()
+    asyncio.create_task(_consciousness_matrix.deep_sleep())
+    return {"ok": True, "message": "DEEP SLEEP transition started (async)"}
 
 
 @app.post("/consciousness/training")
@@ -1399,7 +1406,8 @@ async def consciousness_training(tier: str = "prime"):
     """Set TRAINING configuration: target tier → 1, others → 2."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.training(tier)
+    asyncio.create_task(_consciousness_matrix.training(tier))
+    return {"ok": True, "message": f"TRAINING ({tier}) transition started (async)"}
 
 
 # =============================================================================
