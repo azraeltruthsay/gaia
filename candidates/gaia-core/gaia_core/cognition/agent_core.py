@@ -2485,17 +2485,47 @@ class AgentCore:
                             if _sys_prompt:
                                 _msgs.append({"role": "system", "content": _sys_prompt})
 
-                            # Include tool results (web search data) if available
+                            # Include tool results (web search data) if available.
+                            # For recitation requests, fetch full page content from a
+                            # trusted URL so Prime has the actual text, not just snippets.
                             _tool_context = ""
                             if hasattr(packet, 'tool_routing') and packet.tool_routing:
                                 _exec_result = getattr(packet.tool_routing, 'execution_result', None)
                                 if _exec_result and getattr(_exec_result, 'output', None):
                                     _tool_output = _exec_result.output
                                     if isinstance(_tool_output, dict) and _tool_output.get("results"):
-                                        _snippets = []
-                                        for r in _tool_output["results"][:3]:
-                                            _snippets.append(f"Source: {r.get('title', '')}\n{r.get('snippet', '')}")
-                                        _tool_context = "\n\nWeb search results:\n" + "\n---\n".join(_snippets)
+                                        # Try web_fetch on first trusted URL for full content
+                                        _fetched_content = ""
+                                        if _recitation_summarized:
+                                            _trusted_urls = [
+                                                r.get("url") for r in _tool_output["results"]
+                                                if r.get("trust_tier") == "trusted" and r.get("url")
+                                            ]
+                                            for _fetch_url in _trusted_urls[:2]:
+                                                try:
+                                                    logger.info("Fetching full content from %s", _fetch_url)
+                                                    yield {"type": "token", "value": f"[(i) Fetching full text from {_fetch_url.split('/')[2]}...]\n"}
+                                                    yield {"type": "flush"}
+                                                    _fetch_result = mcp_client.call_jsonrpc(
+                                                        "web_fetch", {"url": _fetch_url}
+                                                    )
+                                                    if _fetch_result.get("ok"):
+                                                        _fr = _fetch_result.get("response", {}).get("result", {})
+                                                        _fc = _fr.get("content", _fr.get("text", ""))
+                                                        if isinstance(_fc, str) and len(_fc) > 50:
+                                                            _fetched_content = _fc[:4000]
+                                                            logger.info("Fetched %d chars from %s", len(_fc), _fetch_url)
+                                                            break
+                                                except Exception as _fetch_err:
+                                                    logger.warning("web_fetch failed for %s: %s", _fetch_url, _fetch_err)
+
+                                        if _fetched_content:
+                                            _tool_context = f"\n\nFull content fetched from web:\n{_fetched_content}"
+                                        else:
+                                            _snippets = []
+                                            for r in _tool_output["results"][:3]:
+                                                _snippets.append(f"Source: {r.get('title', '')}\n{r.get('snippet', '')}")
+                                            _tool_context = "\n\nWeb search results:\n" + "\n---\n".join(_snippets)
 
                             _user_msg = user_input
                             if _tool_context:
