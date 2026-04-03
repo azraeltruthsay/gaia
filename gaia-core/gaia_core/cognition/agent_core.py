@@ -2110,8 +2110,10 @@ class AgentCore:
                             _stream_buf += token_str
                             # Live repetition detection: if the buffer's second half
                             # repeats the first half, stop streaming.
+                            # Skip for recitation intent — poems legitimately repeat stanzas.
+                            _is_recitation = getattr(packet, 'intent', None) and getattr(packet.intent, 'user_intent', '') == 'recitation'
                             _sb_len = len(_stream_buf)
-                            if _sb_len >= 80:
+                            if _sb_len >= 80 and not _is_recitation:
                                 _half = _sb_len // 2
                                 if _stream_buf[_half:].strip() and _stream_buf[:_half].rstrip().endswith(_stream_buf[_half:].strip()):
                                     logger.warning("AgentCore: Stream repetition detected at %d chars; truncating.", _sb_len)

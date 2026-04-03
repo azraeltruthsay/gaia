@@ -316,6 +316,10 @@ services:
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
       - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
+      # Force NF4 quantization for Core — bf16 (8.9GB) leaves too little
+      # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
+      # NF4 (~2.5GB) frees ~6GB for generation and prevents OOM.
+      - GAIA_ENGINE_QUANTIZE=nf4
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092
       - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf
