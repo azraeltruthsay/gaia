@@ -1307,10 +1307,25 @@ async def lifecycle_history(limit: int = 50):
 
 @app.post("/lifecycle/reconcile")
 async def lifecycle_reconcile():
-    """Force reconciliation — probe all tiers and infer actual state."""
+    """Force reconciliation — probe all tiers and infer actual state.
+
+    If stuck in TRANSITIONING, forces state to awake first.
+    """
     if _lifecycle_machine is None:
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
-    return await _lifecycle_machine.reconcile()
+
+    # Unstick from TRANSITIONING — force to awake so reconcile can work
+    from gaia_common.lifecycle.states import LifecycleState
+    if _lifecycle_machine._snapshot.state == LifecycleState.TRANSITIONING:
+        logger.warning("LIFECYCLE: forcing out of TRANSITIONING → awake for reconcile")
+        _lifecycle_machine._snapshot.state = LifecycleState.AWAKE
+        _lifecycle_machine._snapshot.transition_from = None
+        _lifecycle_machine._snapshot.transition_to = None
+        _lifecycle_machine._snapshot.transition_phase = None
+        _lifecycle_machine._snapshot.transition_error = None
+
+    asyncio.create_task(_lifecycle_machine.reconcile())
+    return {"ok": True, "new_state": _lifecycle_machine._snapshot.state.value, "message": "reconcile started (async)"}
 
 
 @app.get("/lifecycle/tiers")
