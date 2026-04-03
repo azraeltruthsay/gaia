@@ -2497,10 +2497,14 @@ class AgentCore:
                                         # Try web_fetch on first trusted URL for full content
                                         _fetched_content = ""
                                         if _recitation_summarized:
-                                            _trusted_urls = [
+                                            # Prefer clean poetry sites over Wikipedia (less cruft)
+                                            _PREFERRED_DOMAINS = ["poets.org", "poetryfoundation.org"]
+                                            _all_urls = [
                                                 r.get("url") for r in _tool_output["results"]
                                                 if r.get("trust_tier") == "trusted" and r.get("url")
                                             ]
+                                            # Sort: preferred domains first
+                                            _trusted_urls = sorted(_all_urls, key=lambda u: 0 if any(d in u for d in _PREFERRED_DOMAINS) else 1)
                                             for _fetch_url in _trusted_urls[:2]:
                                                 try:
                                                     logger.info("Fetching full content from %s", _fetch_url)
@@ -2513,7 +2517,9 @@ class AgentCore:
                                                         _fr = _fetch_result.get("response", {}).get("result", {})
                                                         _fc = _fr.get("content", _fr.get("text", ""))
                                                         if isinstance(_fc, str) and len(_fc) > 50:
-                                                            _fetched_content = _fc[:4000]
+                                                            # Cap at 2000 chars — enough for most poems,
+                                                            # avoids bloating the context with Wikipedia cruft
+                                                            _fetched_content = _fc[:2000]
                                                             logger.info("Fetched %d chars from %s", len(_fc), _fetch_url)
                                                             break
                                                 except Exception as _fetch_err:
