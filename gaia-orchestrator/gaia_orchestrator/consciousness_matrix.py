@@ -267,13 +267,20 @@ class ConsciousnessMatrix:
         return result
 
     async def focusing(self) -> dict:
-        """FOCUSING: Nano=3, Core=2, Prime=3"""
+        """FOCUSING: Core+Nano off GPU, Prime on GPU.
+
+        Must unload Core and Nano FIRST to free VRAM before loading Prime.
+        Prime (8B NF4) needs ~6GB — can't share with Core (8GB) on 16GB GPU.
+        """
         results = {}
-        # Demote Core first to free GPU
-        results["core"] = await self.set_target("core", ConsciousnessLevel.SUBCONSCIOUS)
-        # Then promote Prime
+        # Phase 1: Free GPU — unload Core and demote Nano to CPU
+        results["core"] = await self.set_target("core", ConsciousnessLevel.UNCONSCIOUS)
+        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
+        # Phase 2: Wait for VRAM to clear
+        import asyncio
+        await asyncio.sleep(2)
+        # Phase 3: Load Prime on GPU
         results["prime"] = await self.set_target("prime", ConsciousnessLevel.CONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
         result = {"configuration": "focusing", "results": results}
         lifecycle = await self._sync_lifecycle("focusing")
         if lifecycle:
