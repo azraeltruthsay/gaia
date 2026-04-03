@@ -113,6 +113,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       - gaia-shared:/shared:rw
       # Logs (activation stream for Neural Mind Map)
@@ -173,6 +175,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
       - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
@@ -253,6 +257,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       # Knowledge base (instance = runtime data: vector_store, logs, personal)
       - ../gaia-instance/knowledge:/knowledge:rw
@@ -383,6 +389,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       # Knowledge base (instance = runtime data)
       - ../gaia-instance/knowledge:/knowledge:ro
@@ -481,6 +489,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       # Knowledge base (instance = runtime data, FULL ACCESS for indexing)
       - ../gaia-instance/knowledge:/knowledge:rw
@@ -576,6 +586,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       # Knowledge base (instance = runtime data)
       - ../gaia-instance/knowledge:/knowledge:rw
@@ -670,6 +682,8 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       - ../gaia-instance/gaia-models:/models:ro
 
