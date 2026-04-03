@@ -57,7 +57,11 @@ services:
     - ./gaia-common:/gaia-common:ro
     - gaia-shared:/shared:rw
     - ../gaia-instance/logs:/logs:rw
-    - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
+    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
     environment:
     - PYTHONDONTWRITEBYTECODE=1
     - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -108,7 +112,11 @@ services:
     - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
     - ../gaia-instance/logs:/logs:rw
     - gaia-shared:/shared:rw
-    - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
+    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
     environment:
     - PYTHONDONTWRITEBYTECODE=1
     - GAIA_ENGINE_TIER=nano
@@ -173,7 +181,11 @@ services:
     - /mnt/gaia_warm_pool:/warm_pool:ro
     - ../gaia-instance/logs:/logs:rw
     - gaia-shared:/shared:rw
-    - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
+    - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+    - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+    - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+    - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+    - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
     environment:
     - PYTHONPATH=/app:/gaia-common
     - GAIA_SERVICE=core
