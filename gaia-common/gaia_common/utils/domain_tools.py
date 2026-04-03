@@ -360,10 +360,13 @@ def _build_mappings():
         # audio
         ("audio", "listen"): ("audio", "listen_start"),
         ("audio", "stop"): ("audio", "listen_stop"),
+        ("audio", "status"): ("audio", "listen_status"),
+        ("audio", "inbox"): ("audio", "inbox_status"),
         # study
         ("study", "load"): ("study", "adapter_load"),
         ("study", "unload"): ("study", "adapter_unload"),
         ("study", "info"): ("study", "adapter_info"),
+        ("study", "list"): ("study", "adapter_list"),
         # recall/introspect
         ("recall", "events"): ("introspect", "recall"),
         ("introspect", "events"): ("introspect", "recall"),
