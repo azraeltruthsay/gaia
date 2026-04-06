@@ -652,6 +652,244 @@ def probe_collections(
 # Top-level orchestrator
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# CIL (Cognitive Index Layer) integration
+# ---------------------------------------------------------------------------
+_cil_cache: Optional[Dict] = None
+_cil_cache_time: float = 0.0
+_CIL_CACHE_TTL = 60.0  # Reload index every 60 seconds
+
+
+def _load_cil_index() -> Dict[str, Dict]:
+    """Load and parse gaia-index.md into a keyword → entry mapping.
+
+    Returns dict of {keyword_lower: {"id": str, "path": str, "description": str}}
+    """
+    global _cil_cache, _cil_cache_time
+    now = time.time()
+    if _cil_cache is not None and (now - _cil_cache_time) < _CIL_CACHE_TTL:
+        return _cil_cache
+
+    from pathlib import Path
+    index_path = Path("/shared/memory/gaia-index.md")
+    if not index_path.exists():
+        _cil_cache = {}
+        _cil_cache_time = now
+        return _cil_cache
+
+    entries = {}
+    try:
+        text = index_path.read_text()
+        # Parse [ID-XXX] entries with their -> pointers
+        current_id = None
+        current_desc = ""
+        current_paths = []
+
+        for line in text.split("\n"):
+            line = line.strip()
+            # Match entry headers: [ID-001] description text
+            id_match = re.match(r'\[([A-Z]+-\d+)\]\s+(.*)', line)
+            if id_match:
+                # Save previous entry
+                if current_id and current_paths:
+                    # Extract keywords from description
+                    keywords = [w.lower() for w in current_desc.split()
+                                if len(w) > 3 and w.lower() not in _COMMON_WORDS]
+                    for kw in keywords:
+                        entries[kw] = {
+                            "id": current_id,
+                            "description": current_desc,
+                            "path": current_paths[0] if current_paths else "",
+                            "all_paths": current_paths,
+                        }
+                current_id = id_match.group(1)
+                current_desc = id_match.group(2)
+                current_paths = []
+            elif line.startswith("->"):
+                path = line[2:].strip()
+                current_paths.append(path)
+
+        # Save last entry
+        if current_id and current_paths:
+            keywords = [w.lower() for w in current_desc.split()
+                        if len(w) > 3 and w.lower() not in _COMMON_WORDS]
+            for kw in keywords:
+                entries[kw] = {
+                    "id": current_id,
+                    "description": current_desc,
+                    "path": current_paths[0],
+                    "all_paths": current_paths,
+                }
+    except Exception:
+        logger.debug("CIL index parse failed", exc_info=True)
+
+    _cil_cache = entries
+    _cil_cache_time = now
+    return entries
+
+
+def _cil_lookup(phrases: List[str]) -> Dict[str, Dict]:
+    """Check extracted phrases against the CIL index.
+
+    Returns dict of {phrase: {"path": str, "snippet": str}} for matches.
+    """
+    index = _load_cil_index()
+    if not index:
+        return {}
+
+    from pathlib import Path
+    hits = {}
+    for phrase in phrases:
+        phrase_lower = phrase.lower()
+        # Check each word in the phrase against index keywords
+        for word in phrase_lower.split():
+            if word in index:
+                entry = index[word]
+                # Try to fetch the topic file for a snippet
+                topic_path = entry["path"]
+                snippet = ""
+                try:
+                    p = Path(topic_path)
+                    if p.exists():
+                        content = p.read_text()
+                        # Take first 500 chars after the header
+                        lines = content.split("\n")
+                        body = "\n".join(l for l in lines if not l.startswith("#"))[:500]
+                        snippet = body.strip()
+                except Exception:
+                    pass
+
+                hits[phrase] = {
+                    "path": topic_path,
+                    "snippet": snippet,
+                    "index_id": entry["id"],
+                    "description": entry["description"],
+                }
+                break  # One match per phrase is enough
+
+    return hits
+
+
+def _find_ungrounded_entities(
+    phrases: List[str],
+    cil_hits: Dict,
+    probe_result,
+) -> List[str]:
+    """Find extracted entities that have no grounding from CIL or vector search.
+
+    Only returns entities that look like specific concepts (capitalized,
+    multi-word, or technical-looking) — not common conversational phrases.
+    """
+    grounded = set()
+
+    # Entities grounded by CIL
+    for phrase in (cil_hits or {}):
+        grounded.add(phrase.lower())
+
+    # Entities grounded by vector search (had hits)
+    if probe_result and hasattr(probe_result, 'hits'):
+        for hit in (probe_result.hits or []):
+            for phrase in (hit.matched_phrases or []):
+                grounded.add(phrase.lower())
+    # Also check primary/supplemental collections for any phrase matches
+    if probe_result and hasattr(probe_result, 'phrases_tested'):
+        tested = getattr(probe_result, 'phrases_tested', []) or []
+        if probe_result.has_hits:
+            # If probe found hits, all tested phrases are considered grounded
+            for p in tested:
+                grounded.add(p.lower())
+
+    # GAIA commands and state names — these are NOT entities to web-search
+    _GAIA_STOP_WORDS = {
+        "focus", "focusing", "sleep", "sleeping", "wake", "waking",
+        "awake", "dreaming", "drowsy", "active", "idle",
+        "prime", "core", "nano", "oracle", "groq",
+        "gaia", "execute", "tool", "tools", "search",
+        "please", "recite", "tell", "explain", "describe",
+        "help", "hello", "thanks", "thank",
+    }
+
+    ungrounded = []
+    for phrase in phrases:
+        if phrase.lower() in grounded:
+            continue
+        if phrase.lower() in _GAIA_STOP_WORDS:
+            continue
+        # Only include entity-like phrases:
+        # - Capitalized (proper noun)
+        # - Multi-word
+        # - Contains numbers (version-like)
+        # - 5+ chars (not just "the", "how")
+        if len(phrase) < 5:
+            continue
+        is_entity = (
+            phrase[0].isupper() or  # Starts with capital
+            " " in phrase or         # Multi-word
+            any(c.isdigit() for c in phrase)  # Contains numbers
+        )
+        if is_entity:
+            ungrounded.append(phrase)
+
+    return ungrounded[:3]  # Cap at 3 to limit latency
+
+
+def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:
+    """Lightweight web search for ungrounded entities.
+
+    Calls gaia-mcp web_search for each entity, returns top result titles
+    and snippets as grounding candidates. Timeout is aggressive (5s per query)
+    to avoid blocking the inference pipeline.
+
+    Returns: {entity: {"results": [...], "source": "web_search"}}
+    """
+    import json as _json
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError
+
+    MCP_ENDPOINT = "http://gaia-mcp:8765/jsonrpc"
+    results = {}
+
+    for entity in entities:
+        try:
+            payload = _json.dumps({
+                "jsonrpc": "2.0",
+                "method": "web_search",
+                "params": {"query": entity, "max_results": 3},
+                "id": 1,
+            }).encode()
+            req = Request(MCP_ENDPOINT, data=payload,
+                          headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read())
+
+            search_result = data.get("result", data)
+            if isinstance(search_result, list):
+                search_result = search_result[0] if search_result else {}
+
+            web_hits = search_result.get("results", [])
+            if web_hits:
+                # Summarize top results as title + snippet
+                candidates = []
+                for hit in web_hits[:3]:
+                    candidates.append({
+                        "title": hit.get("title", ""),
+                        "snippet": hit.get("body", hit.get("snippet", ""))[:200],
+                        "url": hit.get("href", hit.get("url", "")),
+                    })
+                results[entity] = {
+                    "results": candidates,
+                    "source": "web_search",
+                    "query": entity,
+                }
+                logger.debug("Web fallback for '%s': %d results", entity, len(candidates))
+        except (URLError, TimeoutError):
+            logger.debug("Web fallback timed out for '%s'", entity)
+        except Exception:
+            logger.debug("Web fallback failed for '%s'", entity, exc_info=True)
+
+    return results
+
+
 def should_skip_probe(user_input: str) -> bool:
     """Check short-circuit rules: skip probe for trivial inputs."""
     stripped = (user_input or "").strip()
@@ -708,12 +946,45 @@ def run_semantic_probe(
 
     logger.info("SemanticProbe: extracted %d phrases: %s", len(phrases), phrases)
 
+    # CIL lookup: check extracted phrases against the Cognitive Index Layer.
+    # If an entity matches an index entry, fetch the topic file directly
+    # instead of relying on vector similarity. This gives precise grounding.
+    cil_hits = _cil_lookup(phrases)
+    if cil_hits:
+        logger.info("SemanticProbe: CIL matched %d phrases → %s",
+                     len(cil_hits), list(cil_hits.keys()))
+
     result = probe_collections(
         phrases=phrases,
         knowledge_bases=knowledge_bases,
         session_id=session_id,
         top_k_per_phrase=top_k_per_phrase,
     )
+
+    # Inject CIL topic file content into result as supplemental context
+    if cil_hits:
+        for phrase, topic_info in cil_hits.items():
+            topic_path = topic_info.get("path")
+            topic_snippet = topic_info.get("snippet", "")
+            if topic_snippet:
+                result.cil_grounding = getattr(result, "cil_grounding", {})
+                result.cil_grounding[phrase] = {
+                    "path": topic_path,
+                    "snippet": topic_snippet,
+                    "source": "cognitive_index",
+                }
+
+    # Web search fallback: for entities that have NO grounding (no CIL match,
+    # no vector hits), trigger a lightweight web search to surface candidates.
+    # Only fires for proper-noun-like phrases that look like specific concepts.
+    ungrounded = _find_ungrounded_entities(phrases, cil_hits, result)
+    if ungrounded:
+        web_results = _web_search_fallback(ungrounded)
+        if web_results:
+            result.web_grounding = getattr(result, "web_grounding", {})
+            result.web_grounding.update(web_results)
+            logger.info("SemanticProbe: web fallback grounded %d entities: %s",
+                         len(web_results), list(web_results.keys()))
 
     if stats:
         stats.record(result)
