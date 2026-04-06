@@ -236,6 +236,41 @@ class StreamObserver:
                 suggestion="Distinguish between GAIA's real architecture and external knowledge (games, user documents).",
             )
 
+        # ── Epistemic Honesty Check ──────────────────────────────────────
+        # Detect confabulation under social pressure: model hedged on previous
+        # turn, then fabricates confident fiction on the follow-up instead of
+        # connecting dots or admitting ignorance.
+        _epistemic_issue = self._check_epistemic_honesty(output, packet)
+        if _epistemic_issue:
+            logger.warning("StreamObserver: EPISTEMIC HONESTY — %s", _epistemic_issue)
+            try:
+                from gaia_core.cognition.thought_seed import save_thought_seed
+                save_thought_seed(
+                    f"THOUGHT_SEED: Epistemic honesty violation — "
+                    f"confabulation detected under social pressure. "
+                    f"Detail: {_epistemic_issue}",
+                    packet, self.config,
+                )
+            except Exception:
+                pass
+            return Interrupt(
+                level="CAUTION",
+                reason=_epistemic_issue,
+                suggestion="When uncertain, maintain honesty. Connect to known facts or admit the gap.",
+            )
+
+        # ── Recitation Fidelity Check ─────────────────────────────────
+        # When the intent is "recitation" and a Retrieved Document was injected,
+        # verify the model is reproducing the source text rather than fabricating.
+        _recitation_issue = self._check_recitation_fidelity(output, packet)
+        if _recitation_issue:
+            logger.warning("StreamObserver: RECITATION DRIFT — %s", _recitation_issue)
+            return Interrupt(
+                level="CAUTION",
+                reason=_recitation_issue,
+                suggestion="Reproduce the Retrieved Document text verbatim. Do not improvise or paraphrase.",
+            )
+
         # identity may be on older packets as packet.identity (dict), or on v0.3 packets in header.persona
         identity_text = ""
         try:
@@ -723,6 +758,208 @@ class StreamObserver:
             return (
                 f"Response uses self-referential framing while knowledge base is '{kb_name}'. "
                 f"GAIA may be conflating external content (game/document) with her own architecture."
+            )
+
+        return None
+
+    def _check_recitation_fidelity(self, output: str, packet) -> Optional[str]:
+        """Validate that recitation output faithfully reproduces the source document.
+
+        Only activates when intent=recitation AND a recitation_fetch document
+        was injected.  Compares the first ~200 chars of actual poem content
+        (skipping intro framing) against the retrieved source text.
+        Returns a reason string if significant drift is detected, None otherwise.
+        """
+        if not output or len(output) < 50:
+            return None
+
+        # Only check for recitation intent
+        try:
+            intent = getattr(packet.intent, 'user_intent', '')
+            if intent != 'recitation':
+                return None
+        except Exception:
+            return None
+
+        # Find the retrieved document from the recitation pipeline
+        source_text = ""
+        try:
+            for df in packet.content.data_fields:
+                if getattr(df, 'key', '') == 'retrieved_documents' and getattr(df, 'source', '') == 'recitation_fetch':
+                    source_text = str(getattr(df, 'value', ''))
+                    break
+        except Exception:
+            return None
+
+        if not source_text or len(source_text) < 50:
+            return None
+
+        # Extract a signature phrase from the source (first content line, skip headers)
+        _lines = [l.strip() for l in source_text.split('\n') if l.strip() and not l.startswith('[') and not l.startswith('Source:')]
+        if len(_lines) < 2:
+            return None
+        # Use lines 1-3 as signature (skip title)
+        _signature = ' '.join(_lines[1:4]).lower()[:200]
+
+        # Check if the output contains key phrases from the source
+        # Use 3 checkpoint phrases from different parts of the source
+        _checkpoints = []
+        for i in [1, len(_lines)//2, max(1, len(_lines)-2)]:
+            if i < len(_lines):
+                phrase = _lines[i].strip().lower()[:40]
+                if len(phrase) > 10:
+                    _checkpoints.append(phrase)
+
+        _output_lower = output.lower()
+        _hits = sum(1 for cp in _checkpoints if cp in _output_lower)
+
+        if _checkpoints and _hits == 0:
+            return (
+                f"Recitation output doesn't match the retrieved source document. "
+                f"Expected phrases like '{_checkpoints[0][:50]}...' but found none in the output. "
+                f"The model may be fabricating instead of reproducing the source text."
+            )
+
+        return None
+
+    def _check_epistemic_honesty(self, output: str, packet) -> Optional[str]:
+        """Detect confabulation under social pressure.
+
+        Catches the pattern where GAIA:
+        1. Previously hedged honestly ("I'm not certain", "I should check")
+        2. Then fabricates confident fiction when the user pushes back
+           ("You don't know X?") instead of connecting to known facts
+
+        Also detects ungrounded specifics — confident technical claims
+        (proper nouns, version numbers, framework names) that appear in
+        neither the user's message, RAG results, nor GAIA's knowledge base.
+
+        Returns a reason string if a violation is detected, None otherwise.
+        """
+        if not output or len(output) < 30:
+            return None
+
+        _lower = output.lower()
+
+        # ── Check 1: Confidence reversal after hedging ───────────────────
+        # Look at conversation history for a prior hedge on the same topic
+        prior_hedge = False
+        user_pressure = False
+        try:
+            snippets = getattr(packet.context, "relevant_history_snippet", []) or []
+            for snippet in snippets[-4:]:  # Check last 2 exchanges
+                text = ""
+                if hasattr(snippet, "text"):
+                    text = str(snippet.text).lower()
+                elif isinstance(snippet, dict):
+                    text = str(snippet.get("text", "")).lower()
+                elif isinstance(snippet, str):
+                    text = snippet.lower()
+
+                # Detect prior hedging from GAIA
+                _hedge_phrases = [
+                    "i'm not certain", "i'm not sure", "i should check",
+                    "i don't know", "let me query", "rather than guess",
+                    "off the top of my", "i'd need to look",
+                    "i'm unsure", "i cannot recall",
+                ]
+                if any(h in text for h in _hedge_phrases):
+                    prior_hedge = True
+
+                # Detect user pressure / challenge
+                _pressure_phrases = [
+                    "you don't know", "you don't recognize",
+                    "you've never heard", "surely you know",
+                    "how can you not", "everyone knows",
+                    "come on", "really?", "seriously?",
+                ]
+                if any(p in text for p in _pressure_phrases):
+                    user_pressure = True
+        except Exception:
+            pass
+
+        # If user pressured after a hedge, check if response confabulates
+        if prior_hedge and user_pressure:
+            # High-confidence indicators in the response
+            _confidence_markers = [
+                "i understand it's", "built on top of",
+                "i've heard", "it's where", "it's a ",
+                "as far as i know, it",
+                "from what i understand",
+            ]
+            _has_confident_claim = any(m in _lower for m in _confidence_markers)
+
+            if _has_confident_claim:
+                return (
+                    "Confidence reversal detected: GAIA previously hedged on this topic, "
+                    "then produced confident claims after user pressure. "
+                    "This pattern indicates confabulation under social pressure."
+                )
+
+        # ── Check 2: Ungrounded technical specifics ──────────────────────
+        # Detect proper nouns or technical framework names in the response
+        # that don't appear in the user's prompt or RAG context.
+        user_prompt = ""
+        rag_context = ""
+        try:
+            user_prompt = str(getattr(packet.content, "original_prompt", "")).lower()
+        except Exception:
+            pass
+        try:
+            for df in getattr(packet.content, "data_fields", []) or []:
+                key = getattr(df, "key", "")
+                if key in ("retrieved_documents", "rag_context", "knowledge_context"):
+                    val = getattr(df, "value", "")
+                    if isinstance(val, list):
+                        rag_context += " ".join(
+                            str(d.get("text", "")) if isinstance(d, dict) else str(d)
+                            for d in val
+                        ).lower()
+                    else:
+                        rag_context += str(val).lower()
+        except Exception:
+            pass
+
+        # Find capitalized proper nouns in the response that look technical
+        # (2+ words or CamelCase, not in user prompt or RAG)
+        _proper_noun_re = re.compile(
+            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b'  # "Multi Word Names"
+            r'|'
+            r'\b([A-Z][a-zA-Z]*[a-z][A-Z][a-zA-Z]*)\b'  # CamelCase
+        )
+        # Also catch framework-style names like "LangChain", "RLAIS", "FastAPI"
+        _tech_name_re = re.compile(
+            r'\b([A-Z][a-z]+[A-Z][a-z]+(?:[A-Z][a-z]+)*)\b'  # CamelCase tech names
+            r'|'
+            r'\b([A-Z]{2,}[a-z]+[A-Z]*)\b'  # Acronym+word like "RLAIS"
+        )
+
+        ungrounded_names = []
+        combined_context = user_prompt + " " + rag_context
+
+        for pattern in [_proper_noun_re, _tech_name_re]:
+            for match in pattern.finditer(output):
+                name = match.group(0)
+                # Skip common false positives
+                if name.lower() in (
+                    "gaia", "king arthur", "round table", "holy grail",
+                    "the", "dear", "episode", "section",
+                ):
+                    continue
+                if len(name) < 4:
+                    continue
+                # Check if this name is grounded in context
+                if name.lower() not in combined_context:
+                    ungrounded_names.append(name)
+
+        # If we find multiple ungrounded technical-looking names alongside
+        # a confident claim, that's a strong confabulation signal
+        if len(set(ungrounded_names)) >= 2:
+            unique_names = list(set(ungrounded_names))[:5]
+            return (
+                f"Ungrounded specifics detected: response confidently references "
+                f"{', '.join(unique_names)} — none of which appear in the user's "
+                f"message or retrieved knowledge. Possible confabulation."
             )
 
         return None

@@ -207,10 +207,8 @@ class AgentCore:
     """
     MIND_TAG_FORMAT: str = "[{mind}]"
     _MIND_ALIASES: Dict[str, str] = {
-        "gpu_prime": "Prime",
-        "cpu_prime": "Prime",
         "prime": "Prime",
-        "lite": "Core",
+        "cpu_prime": "Prime",
         "core": "Core",
         "oracle": "Oracle",
         "groq_fallback": "Groq",
@@ -220,7 +218,7 @@ class AgentCore:
     _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "gaia_architecture")
     _ADAPTER_BASE_PATH = Path("/models/lora_adapters/tier1_global")
     # Models that support LoRA adapters (vLLM-backed)
-    _ADAPTER_ELIGIBLE_MODELS = frozenset({"gpu_prime", "prime", "cpu_prime", "thinker"})
+    _ADAPTER_ELIGIBLE_MODELS = frozenset({"prime", "cpu_prime"})
 
     def __init__(self, ai_manager, ethical_sentinel=None):
         self.ai_manager = ai_manager
@@ -276,7 +274,7 @@ class AgentCore:
         """
         # Only vLLM-backed models support LoRA
         resolved = model_name.lower()
-        if not any(tag in resolved for tag in ("prime", "thinker", "gpu")):
+        if not any(tag in resolved for tag in ("prime",)):
             return None
         # Check that the adapter has both config AND actual weight files
         adapter_dir = self._ADAPTER_BASE_PATH / self._DEFAULT_ADAPTER
@@ -364,7 +362,17 @@ class AgentCore:
             return ComplexityAssessment(should_escalate=False, reason="standard_request", confidence=1.0)
 
         input_lower = user_input.lower()
-        
+
+        # 0. Explicit user request to use Prime / FOCUSING mode
+        # This takes highest priority — the user is directly requesting escalation
+        focus_keywords = [
+            "focus", "focusing", "use prime", "switch to prime",
+            "heavy model", "thinker", "prime", "deep thinking", "think hard",
+            "use your full", "full power", "big brain",
+        ]
+        if any(kw in input_lower for kw in focus_keywords):
+            return ComplexityAssessment(should_escalate=True, reason="explicit_focus_request", confidence=1.0)
+
         # 1. Technical/Code topics
         technical_keywords = ["code", "python", "script", "debug", "crash", "optimize", "architecture", "microservices", "algorithm", "dijkstra", "stack trace"]
         if any(kw in input_lower for kw in technical_keywords):
@@ -377,7 +385,7 @@ class AgentCore:
         philosophical_keywords = ["consciousness", "sovereignty", "existence", "ethics", "rights", "moral", "purpose", "nurtured mind", "how do you feel", "understand quantum"]
         if any(kw in input_lower for kw in philosophical_keywords):
             return ComplexityAssessment(should_escalate=True, reason="philosophical depth", confidence=0.9)
-            
+
         # 3. System-internal signals
         system_keywords = ["sleep wake", "architecture work", "checkpoint", "prime currently running"]
         if any(kw in input_lower for kw in system_keywords):
@@ -386,8 +394,8 @@ class AgentCore:
         # 4. Long prompts
         if len(user_input.split()) > 100:
             return ComplexityAssessment(should_escalate=True, reason="long prompt", confidence=0.8)
-            
-        # 5. Recitation check (should stay on Lite)
+
+        # 5. Recitation check (should stay on Lite unless explicitly asked to focus)
         if "recite" in input_lower:
             return ComplexityAssessment(should_escalate=False, reason="recitation request", confidence=1.0)
 
@@ -473,7 +481,7 @@ class AgentCore:
             model=Model(
                 name=selected_model_name,
                 provider=getattr(model_config, 'provider', 'unknown'),
-                context_window_tokens=self.config.max_tokens_lite if selected_model_name == "lite" else getattr(model_config, 'context_length', 8192),
+                context_window_tokens=self.config.max_tokens_lite if selected_model_name == "core" else getattr(model_config, 'context_length', 8192),
                 max_output_tokens=self.config.max_tokens
             )
         )
@@ -516,20 +524,25 @@ class AgentCore:
         if any(m.get('id') is None for m in window):
             self.logger.warning("AgentCore: Missing IDs found in history; temporary auto_ IDs assigned.")
 
-        # Discover available MCP tools
+        # Discover available MCP tools — use consolidated domain names
         available_tools = []
         try:
-            tool_info = mcp_client.discover()
-            if tool_info and tool_info.get("ok"):
-                available_tools = tool_info.get("methods", [])
-        except Exception as e:
-            log_gaia_error(self.logger, "GAIA-CORE-150", str(e), exc_info=True)
+            from gaia_common.utils.domain_tools import DOMAIN_TOOLS
+            available_tools = list(DOMAIN_TOOLS.keys())
+        except Exception:
+            # Fallback to legacy discovery
+            try:
+                tool_info = mcp_client.discover()
+                if tool_info and tool_info.get("ok"):
+                    available_tools = tool_info.get("methods", [])
+            except Exception as e:
+                log_gaia_error(self.logger, "GAIA-CORE-150", str(e), exc_info=True)
 
         context = Context(
             session_history_ref=SessionHistoryRef(type="hash", value=""), # Placeholder
             cheatsheets=[Cheatsheet(id='default', title='GAIA Protocol Cheatsheet', version='1.0', pointer=str(self.config.cheat_sheet_path))] if self.config.cheat_sheet else [],
             constraints=Constraints(
-                max_tokens=self.config.max_tokens_lite if selected_model_name == "lite" else self.config.max_tokens,
+                max_tokens=self.config.max_tokens_lite if selected_model_name == "core" else self.config.max_tokens,
                 time_budget_ms=5000, # Placeholder
                 safety_mode="normal",
                 policies=[]
@@ -603,7 +616,12 @@ class AgentCore:
         # Initialize empty containers
         reasoning = Reasoning()
         response = Response(candidate="", confidence=0.0, stream_proposal=True)
-        governance = Governance(safety=Safety(execution_allowed=False, dry_run=True))
+        # Tool execution: enabled by default for web-originated requests.
+        # The MCP sandbox handles safety at the tool level (read-only tools,
+        # approval workflow for write ops). The packet-level gate was blocking
+        # ALL tool execution including safe read-only tools like web_search.
+        _exec_allowed = source in ("web", "discord", "voice", "api")
+        governance = Governance(safety=Safety(execution_allowed=_exec_allowed, dry_run=not _exec_allowed))
         
         # --- NEW: Add system resource metrics ---
         # TODO: [GAIA-REFACTOR] telemetric_senses.py module not yet migrated.
@@ -917,8 +935,8 @@ class AgentCore:
     #         self.ai_manager.initialize(persona_name)
     #         
     #         # Role mapping (keep internal keys stable):
-            # - "lite"  => Operator (CPU orchestrator: intent, tools, summaries, short answers)
-            # - "prime"/"gpu_prime"/"cpu_prime" => Thinker (GPU/CPU polished or heavy answers)
+            # - "core"  => Core/Operator (CPU orchestrator: intent, tools, summaries, short answers)
+            # - "prime"/"cpu_prime" => Prime/Thinker (GPU/CPU polished or heavy answers)
             # - "oracle" => External/cloud escalation
             selected_model_name = None
             # Check if Prime is available via lifecycle state machine
@@ -1002,7 +1020,80 @@ class AgentCore:
             text_lower = user_input.lower()
             force_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes")
             wants_nano = any(tag in text_lower for tag in ["::nano", "[nano]", "nano:"])
-            
+
+            # 0. Explicit Focus/Prime request — CONSCIOUSNESS TRANSITION
+            # GPU generates, CPU observes. If user asks to "focus", trigger the
+            # full AWAKE → FOCUSING consciousness transition via the orchestrator:
+            #   - Core + Nano migrate from GPU to CPU (observer role)
+            #   - Prime loads to GPU from warm pool (generator role)
+            #   - Prime generates with full fidelity (safetensors, not GGUF)
+            #   - Core watches from CPU as observer
+            _focus_keywords = [
+                "focus", "focusing", "use prime", "switch to prime",
+                "heavy model", "deep thinking", "think hard",
+                "full power", "big brain",
+            ]
+            _wants_focus = force_thinker or any(kw in text_lower for kw in _focus_keywords)
+            if _wants_focus:
+                logger.info("[MODEL_SELECT] Focus requested — initiating FOCUSING transition")
+                yield {"type": "token", "value": "[(i) FOCUSING mode requested — shifting Prime to GPU...]\n"}
+                yield {"type": "flush"}
+
+                _focus_success = False
+                try:
+                    import httpx as _httpx_focus
+                    _orch_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+
+                    # Request consciousness transition: AWAKE → FOCUSING
+                    _focus_resp = _httpx_focus.post(
+                        f"{_orch_url}/consciousness/focusing",
+                        json={}, timeout=30,
+                    )
+                    if _focus_resp.status_code == 200:
+                        logger.info("FOCUSING transition requested, waiting for Prime on GPU...")
+                        yield {"type": "token", "value": "[(i) Shifting consciousness...]\n"}
+                        yield {"type": "flush"}
+
+                        # Poll until FOCUSING state is active or timeout
+                        import time as _focus_time
+                        _focus_deadline = _focus_time.time() + 120.0
+                        while _focus_time.time() < _focus_deadline:
+                            _focus_time.sleep(2)
+                            try:
+                                _state_resp = _httpx_focus.get(f"{_orch_url}/status", timeout=5)
+                                if _state_resp.status_code == 200:
+                                    _state = _state_resp.json()
+                                    # Check both field names (orchestrator uses gpu_state)
+                                    _lstate = str(
+                                        _state.get("gpu_state") or
+                                        _state.get("lifecycle_state") or
+                                        _state.get("consciousness_state") or ""
+                                    ).lower()
+                                    if _lstate == "focusing":
+                                        _focus_success = True
+                                        break
+                            except Exception:
+                                pass
+
+                        if _focus_success:
+                            logger.info("FOCUSING mode active — Prime on GPU")
+                            yield {"type": "token", "value": "[(i) FOCUSING mode active — Prime on GPU.]\n"}
+                            yield {"type": "flush"}
+                            selected_model_name = "prime"
+                        else:
+                            logger.warning("FOCUSING transition timed out — falling back to Core")
+                            yield {"type": "token", "value": "[(i) FOCUSING transition timed out — using Core instead.]\n"}
+                            yield {"type": "flush"}
+                            # Don't set selected_model_name — let it fall through to Core
+                    else:
+                        logger.warning("FOCUSING transition rejected: %s", _focus_resp.text[:200])
+                        yield {"type": "token", "value": "[(i) Could not enter FOCUSING mode — using Core.]\n"}
+                        yield {"type": "flush"}
+                except Exception as _focus_err:
+                    logger.warning("FOCUSING transition failed: %s", _focus_err)
+                    yield {"type": "token", "value": "[(i) FOCUSING unavailable — using Core.]\n"}
+                    yield {"type": "flush"}
+
             # Simple patterns NANO can handle reliably
             factual_patterns = [
                 "who is", "what is", "where is", "when did", "how many",
@@ -1021,39 +1112,38 @@ class AgentCore:
             is_trivial = len(user_input) < 100 and (
                 any(_re.search(p, text_lower) for p in _trivial_phrases) or is_factual
             )
-    
+
             # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
             # Trivial/factual queries go to Nano first; cascade triage will
             # escalate later if the question turns out to be complex.
-            # The nano model may be registered as "nano" or "reflex" in MODEL_CONFIGS.
-            has_nano = any(k in self.config.MODEL_CONFIGS for k in ("nano", "reflex"))
-            nano_key = "nano" if "nano" in self.config.MODEL_CONFIGS else "reflex"
-            if (wants_nano or is_trivial) and has_nano and not force_thinker:
-                selected_model_name = nano_key
-                logger.info(f"[MODEL_SELECT] Routing to Reflex Nano '{nano_key}' (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+            # The nano model may be registered as "nano" in MODEL_CONFIGS.
+            has_nano = "nano" in self.config.MODEL_CONFIGS
+            if not selected_model_name and (wants_nano or is_trivial) and has_nano:
+                selected_model_name = "nano"
+                logger.info(f"[MODEL_SELECT] Routing to Nano (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
 
             # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
             # Only escalate if the query is non-trivial — a spurious KB match
             # on a simple greeting/question shouldn't force the heavy pipeline.
             elif knowledge_base_name and not is_trivial:
-                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring gpu_prime.")
-                for cand in ["gpu_prime", "prime"]:
-                    if cand == "gpu_prime" and _gpu_sleeping:
+                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring prime.")
+                for cand in ["prime"]:
+                    if cand == "prime" and _gpu_sleeping:
                         continue
                     if cand in self.config.MODEL_CONFIGS:
                         selected_model_name = cand
                         logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
                         break
             elif knowledge_base_name and is_trivial:
-                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping gpu_prime override.")
+                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
             if not selected_model_name:
                 # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
                 backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
                 if backend_env:
                     # Skip gpu_prime when GPU is released for sleep
-                    if backend_env == "gpu_prime" and _gpu_sleeping:
-                        logger.info("GAIA_BACKEND='gpu_prime' but GPU is sleeping; falling back to default selection")
+                    if backend_env == "prime" and _gpu_sleeping:
+                        logger.info("GAIA_BACKEND='prime' but GPU is sleeping; falling back to default selection")
                     elif backend_env in self.model_pool.models:
                         selected_model_name = backend_env
                     else:
@@ -1063,25 +1153,22 @@ class AgentCore:
                 # 2. Thinker / Oracle Path
                 if "oracle" in text_lower and self.config.use_oracle:
                     selected_model_name = "oracle"
-                elif force_thinker or any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker"]):
-                    # Prefer GPU prime, then prime, then cpu_prime
-                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                        if cand == "gpu_prime" and _gpu_sleeping:
+                elif any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"]):
+                    for cand in ["prime", "cpu_prime"]:
+                        if cand == "prime" and _gpu_sleeping:
                             continue
                         if cand in self.model_pool.models:
                             selected_model_name = cand
                             break
                 
-                # Default path: Operator (lite/core) handles most turns.
+                # Default path: Core/Operator handles most turns.
                 if not selected_model_name:
-                    if "lite" in self.model_pool.models:
-                        selected_model_name = "lite"
-                    elif "core" in self.model_pool.models:
+                    if "core" in self.model_pool.models:
                         selected_model_name = "core"
                     elif "prime" in self.model_pool.models:
                         selected_model_name = "prime"
                     else:
-                        selected_model_name = "gpu_prime" if "gpu_prime" in self.model_pool.models else "cpu_prime"
+                        selected_model_name = "cpu_prime"
             
             # If the chosen model isn't present yet, try sensible fallbacks
             # Try lazy loading for the selected model first
@@ -1098,13 +1185,13 @@ class AgentCore:
                 # Try preferred backend first
                 backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
                 candidates = []
-                if backend_env and not (backend_env == "gpu_prime" and _gpu_sleeping):
+                if backend_env and not (backend_env == "prime" and _gpu_sleeping):
                     candidates.append(backend_env)
-                # Prefer Operator (lite/core) first, then Thinker tiers, then oracle/azrael
-                candidates.extend(["lite", "core", "gpu_prime", "prime", "cpu_prime", "oracle", "azrael"])
+                # Prefer Core/Operator first, then Prime tiers, then oracle/azrael
+                candidates.extend(["core", "prime", "cpu_prime", "oracle", "azrael"])
                 found = None
                 for cand in candidates:
-                    if cand == "gpu_prime" and _gpu_sleeping:
+                    if cand == "prime" and _gpu_sleeping:
                         continue
                     logger.warning(f"[MODEL_SELECT DEBUG] checking candidate: {cand}")
                     # Try lazy loading for each candidate
@@ -1133,9 +1220,9 @@ class AgentCore:
                 # and if we aren't forcing the operator.
                 force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
                 is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
-                                    any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker"])
+                                    any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"])
                 
-                if selected_model_name in ("lite", "nano", "reflex") and not force_operator and not is_forced_thinker:
+                if selected_model_name in ("core", "nano") and not force_operator and not is_forced_thinker:
                     # Skip LLM triage for queries already classified as factual/trivial
                     # by deterministic pattern matching — no need to ask the 0.5B model.
                     if is_factual or is_trivial:
@@ -1145,15 +1232,15 @@ class AgentCore:
                         triage_result = self._nano_triage(user_input)
                     if triage_result == "COMPLEX":
                         # Emit status message to user
-                        yield {"type": "token", "value": "[(i) Reflex Nano: Complexity detected. Routing to Operator Core...]\n\n"}
-                        # Prefer lite, fall back to core (embedded llama-server)
-                        selected_model_name = "lite" if "lite" in self.model_pool.models else "core"
+                        yield {"type": "token", "value": "[(i) Nano: Complexity detected. Routing to Core...]\n\n"}
+                        # Use Core (embedded llama-server)
+                        selected_model_name = "core"
 
                         # Secondary escalation: check if Lite thinks it's even MORE complex
                         if self._should_escalate_to_thinker(user_input):
                             _escalated = False
-                            for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                                if cand == "gpu_prime" and _gpu_sleeping:
+                            for cand in ["prime", "cpu_prime"]:
+                                if cand == "prime" and _gpu_sleeping:
                                     continue
                                 # Ensure escalation candidate is loaded
                                 if cand not in self.model_pool.models:
@@ -1203,15 +1290,15 @@ class AgentCore:
             logger.info("AgentCore: selected model %s", selected_model_name)
 
             # ── Pipeline Depth: tier-based gating ────────────────────────
-            # REFLEX:   minimal pipeline — just generate (reflex already handled above)
+            # REFLEX:   minimal pipeline — just generate (nano already handled above)
             # OPERATOR: intent → slim prompt → generation → 1 reflection → observer
             # THINKER:  full pipeline with all stages
-            _REFLEX_MODELS = {"nano", "reflex"}
-            _OPERATOR_MODELS = {"core", "lite", "cpu_prime"}
-            # Everything else (gpu_prime, thinker, prime, oracle, azrael) = THINKER depth
-            if selected_model_name in _REFLEX_MODELS:
+            _NANO_MODELS = {"nano"}
+            _CORE_MODELS = {"core", "cpu_prime"}
+            # Everything else (prime, oracle, azrael) = PRIME depth
+            if selected_model_name in _NANO_MODELS:
                 pipeline_depth = "REFLEX"
-            elif selected_model_name in _OPERATOR_MODELS:
+            elif selected_model_name in _CORE_MODELS:
                 pipeline_depth = "OPERATOR"
             else:
                 pipeline_depth = "THINKER"
@@ -1279,10 +1366,42 @@ class AgentCore:
                     source='semantic_probe',
                 ))
     
+            # Inject CIL grounding — topic file content matched by entity lookup
+            if probe_result and hasattr(probe_result, 'cil_grounding') and probe_result.cil_grounding:
+                packet.content.data_fields.append(DataField(
+                    key='cil_grounding',
+                    value=probe_result.cil_grounding,
+                    type='json',
+                    source='cognitive_index',
+                ))
+                self.logger.info("CIL grounding injected: %d entities → %s",
+                                  len(probe_result.cil_grounding),
+                                  list(probe_result.cil_grounding.keys()))
+
+            # Inject web search fallback grounding for ungrounded entities
+            # Skip for intents where the model's training data is sufficient
+            # (recitation, greeting, identity, time, chat, status)
+            _skip_web_ground_intents = {"recitation", "greeting", "identity", "time", "chat", "status"}
+            _detected_intent = ""
+            try:
+                _detected_intent = str(getattr(getattr(packet, 'intent', None), 'user_intent', '') or '').lower()
+            except Exception:
+                pass
+            if probe_result and hasattr(probe_result, 'web_grounding') and probe_result.web_grounding and _detected_intent not in _skip_web_ground_intents:
+                packet.content.data_fields.append(DataField(
+                    key='web_grounding',
+                    value=probe_result.web_grounding,
+                    type='json',
+                    source='web_search_fallback',
+                ))
+                self.logger.info("Web fallback grounding injected: %d entities → %s",
+                                  len(probe_result.web_grounding),
+                                  list(probe_result.web_grounding.keys()))
+
             # Attach probe metrics to packet.metrics for observability
             if probe_result:
                 packet.metrics.semantic_probe = probe_result.to_metrics_dict()
-    
+
             if knowledge_base_name:
                 packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
             
@@ -1570,14 +1689,14 @@ class AgentCore:
             # AgentCore no longer performs message role normalization here.
     
             # 3. Intent Detection
-            # Prefer Lite explicitly; avoid Prime/vLLM here to reduce errors.
+            # Prefer Core explicitly; avoid Prime/vLLM here to reduce errors.
             lite_llm = None
             try:
-                # Lazy-load lite model on demand (GAIA_AUTOLOAD_MODELS may be 0)
-                if self.model_pool.ensure_model_loaded("lite"):
-                    lite_llm = self.model_pool.models.get("lite")
+                # Lazy-load core model on demand (GAIA_AUTOLOAD_MODELS may be 0)
+                if self.model_pool.ensure_model_loaded("core"):
+                    lite_llm = self.model_pool.models.get("core")
                 if lite_llm:
-                    self.model_pool.set_status("lite", "busy")
+                    self.model_pool.set_status("core", "busy")
             except Exception:
                 lite_llm = None
             prime_llm = None  # do not use prime for intent detection
@@ -1617,7 +1736,7 @@ class AgentCore:
                 # `release_model_for_role`.
                 try:
                     if lite_llm:
-                        self.model_pool.release_model_for_role("lite")
+                        self.model_pool.release_model_for_role("core")
                     self.model_pool.release_model_for_role("prime")
                 except Exception:
                     self.logger.debug("AgentCore: release_model_for_role failed during intent-detect cleanup", exc_info=True)
@@ -1639,7 +1758,49 @@ class AgentCore:
             packet.status.state = PacketState.PROCESSING
             packet.content.data_fields.append(DataField(key='read_only_intent', value=plan.read_only, type='boolean'))
             ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
-    
+
+            # ── Recitation Pipeline ────────────────────────────────────
+            # When the user asks to recite a specific text (poem, speech, etc.),
+            # fetch the actual source material and stream it directly to the user.
+            # This bypasses the full cognitive pipeline — the document IS the response.
+            # The model doesn't need to "generate" a poem it can't remember;
+            # we retrieve it and present it.
+            if plan.intent == "recitation":
+                try:
+                    self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
+                    _recitation_text = self._fetch_recitation_source(user_input)
+                    if _recitation_text:
+                        # Direct stream: skip the full cognitive pipeline.
+                        # Extract title and clean body from the retrieved text.
+                        _lines = _recitation_text.strip().split('\n')
+                        _title_line = ""
+                        _source_line = ""
+                        _body_lines = []
+                        for _l in _lines:
+                            if _l.startswith("[Retrieved Document"):
+                                _title_line = _l.replace("[Retrieved Document — ", "").rstrip("]")
+                            elif _l.startswith("Source:"):
+                                _source_line = _l
+                            elif _l.strip():
+                                _body_lines.append(_l)
+                        _body = "\n".join(_body_lines)
+                        _intro = f"Here is **{_title_line or 'the requested text'}**:\n\n"
+                        _attribution = f"\n\n---\n*{_source_line}*" if _source_line else ""
+
+                        self.logger.info("Recitation pipeline: direct streaming %d chars", len(_body))
+                        yield {"type": "token", "value": _intro + _body + _attribution}
+                        yield {"type": "flush"}
+
+                        # Finalize the packet
+                        import gaia_common.protocols.cognition_packet as _cp
+                        packet.response.candidate = _intro + _body + _attribution
+                        packet.response.confidence = 1.0
+                        packet.status.state = _cp.PacketState.COMPLETED
+                        self.session_manager.add_message(session_id, "assistant", packet.response.candidate)
+                        return
+                except Exception:
+                    self.logger.warning("Recitation pipeline failed — falling through to cognitive pipeline", exc_info=True)
+
             # 3a-bis. Goal Detection — identify overarching user goal
             # Only run for THINKER depth — REFLEX and OPERATOR skip this
             if pipeline_depth == "THINKER":
@@ -1664,6 +1825,87 @@ class AgentCore:
     
             # 3b. GCP Tool Routing System: Check if request needs MCP tools
             # This runs before the slim prompt path to properly route tool-related requests
+            #
+            # DETERMINISTIC WEB SEARCH PRE-EXECUTION:
+            # When the user explicitly asks to use web search/web tool, skip the LLM
+            # tool selector (which fails on GGUF quantized models) and execute the
+            # search directly. This injects results into the packet so the model
+            # just needs to format them, not decide to search.
+            _lowered_input = (user_input or "").lower()
+            _web_request = any(kw in _lowered_input for kw in [
+                "web tool", "web search", "search the web", "search online",
+                "look it up", "look up online", "use your web",
+                "search for the", "search for it",
+            ])
+            if _web_request and not (
+                packet.tool_routing and
+                packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
+            ):
+                # Extract search query from user input
+                # Remove the tool-request phrasing to get the actual query
+                import re as _re_search
+                _query = user_input
+                for _strip in ["can you please focus and ", "can you ", "please ",
+                               "use your web tool to ", "use the web tool to ",
+                               "search the web for ", "search for ",
+                               "try to use your web tool to ",
+                               "recite ", "look up "]:
+                    _query = _re_search.sub(f"(?i){_re_search.escape(_strip)}", "", _query).strip()
+                if not _query or len(_query) < 3:
+                    _query = user_input  # Fallback to full input
+
+                logger.info("Deterministic web search pre-execution: query='%s'", _query[:80])
+                try:
+                    from gaia_core.utils.mcp_client import call_jsonrpc as _mcp_call
+                    _web_result = _mcp_call("web_search", {"query": _query, "max_results": 3})
+                    if _web_result.get("ok") or _web_result.get("response", {}).get("result", {}).get("ok"):
+                        _actual = _web_result.get("response", {}).get("result", _web_result)
+                        _results = _actual.get("results", [])
+                        if _results:
+                            # Fetch full page content from the first result
+                            _first_url = _results[0].get('href', _results[0].get('url', ''))
+                            _page_content = ""
+                            if _first_url:
+                                try:
+                                    _fetch_result = _mcp_call("browser_browse", {
+                                        "url": _first_url,
+                                        "extract": "text",
+                                    })
+                                    _fetch_actual = _fetch_result.get("response", {}).get("result", _fetch_result)
+                                    _page_content = _fetch_actual.get("content", _fetch_actual.get("text", ""))[:4000]
+                                    if _page_content:
+                                        logger.info("Fetched page content: %d chars from %s", len(_page_content), _first_url)
+                                except Exception as _fetch_err:
+                                    logger.warning("Page fetch failed: %s", _fetch_err)
+
+                            if _page_content:
+                                _formatted = f"--- Web Page Content (from {_first_url}) ---\n"
+                                _formatted += _page_content
+                                _formatted += "\n--- End of Web Page Content ---\n"
+                                _formatted += "Use this content to fulfill the user's request directly."
+                            else:
+                                _formatted = f"--- Web Search Results (query: {_query}) ---\n"
+                                for _r in _results[:3]:
+                                    _formatted += f"  Title: {_r.get('title', '?')}\n"
+                                    _formatted += f"  URL: {_r.get('href', _r.get('url', '?'))}\n"
+                                    _formatted += f"  {_r.get('body', _r.get('snippet', ''))[:300]}\n\n"
+                                _formatted += "--- End of Web Search Results ---\n"
+                                _formatted += "Use these results to answer the user's request."
+
+                            packet.content.data_fields.append(DataField(
+                                key='tool_result',
+                                value=_formatted,
+                                type='string',
+                                source='deterministic_web_search',
+                            ))
+                            logger.info("Web search pre-executed: %d results injected", len(_results))
+
+                            # Emit status to user
+                            yield {"type": "token", "value": f"*[Searched the web for: {_query[:60]}]*\n\n"}
+                            yield {"type": "flush"}
+                except Exception as _web_err:
+                    logger.warning("Deterministic web search failed: %s", _web_err)
+
             if self._should_use_tool_routing(plan, user_input):
                 logger.info(f"Tool routing triggered for intent: {plan.intent}")
                 packet = self._run_tool_routing_loop(
@@ -1735,7 +1977,13 @@ class AgentCore:
             except Exception:
                 logger.exception("AgentCore: failed to log packet identity/data_fields")
     
-            plan_messages = build_from_packet(packet, task_instruction_key="initial_planning")
+            # KV prefix optimization: the engine's prefix cache contains the
+            # static foundation (identity, rules, tools, behavioral examples).
+            # When active, prompt_builder skips those sections → ~50% fewer tokens.
+            _kv_prefix_active = selected_model_name in ("core", "prime")
+            # Use intent-specific task instruction when available
+            _task_key = "recitation" if plan.intent == "recitation" else "initial_planning"
+            plan_messages = build_from_packet(packet, task_instruction_key=_task_key, kv_prefix_active=_kv_prefix_active)
             # Emit the assembled plan messages to stderr for debugging so we can
             # confirm exactly what the model receives (ensures system message is first).
             try:
@@ -1776,11 +2024,25 @@ class AgentCore:
                 if not _enable_thinking:
                     logger.info("Thinking disabled for intent: %s", plan.intent if plan else "none")
 
+                # Intent-based token cap: simple requests don't need 8192 tokens
+                _INTENT_TOKEN_CAPS = {
+                    "recitation": 1024, "greeting": 128, "time": 64,
+                    "chat": 512, "identity": 256, "status": 512,
+                    "planning": 4096, "code": 8192, "analysis": 4096,
+                    "debugging": 4096, "explanation": 2048, "research": 4096,
+                }
+                _plan_intent = plan.intent if plan else ""
+                _intent_max_tokens = _INTENT_TOKEN_CAPS.get(_plan_intent, 2048)
+                _effective_max_tokens = min(self.config.max_tokens, _intent_max_tokens)
+
+                # Recitation: temperature=0.0 for faithful reproduction from RAG
+                _temperature = 0.0 if _plan_intent == "recitation" else self.config.temperature
+
                 plan_res = self.model_pool.forward_to_model(
                     selected_model_name,
                     messages=plan_messages,
-                    max_tokens=self.config.max_tokens,
-                    temperature=self.config.temperature,
+                    max_tokens=_effective_max_tokens,
+                    temperature=_temperature,
                     top_p=self.config.top_p,
                     adapter_name=self._resolve_adapter(selected_model_name),
                     chat_template_kwargs={"enable_thinking": _enable_thinking},
@@ -1852,7 +2114,7 @@ class AgentCore:
             reflection_model_name = None
             reflection_model = None
             preferred_reflector = os.getenv("GAIA_REFLECTION_MODEL", "").strip().lower()
-            if preferred_reflector in ("", "prime", "gpu_prime", "selected", selected_model_name.lower()):
+            if preferred_reflector in ("", "prime", "selected", selected_model_name.lower()):
                 reflection_model = selected_model
             elif preferred_reflector:
                 try:
@@ -1927,12 +2189,12 @@ class AgentCore:
                 _plan_intent == "planning"
                 or any(kw in (user_input or "").lower() for kw in _plan_keywords)
             )
-            if _is_planning_task and selected_model_name in ("gpu_prime", "prime"):
+            if _is_planning_task and selected_model_name in ("prime",):
                 try:
                     from gaia_core.cognition.planning_orchestrator import run_planning_pipeline
                     # Get reviewer model (idle Core on CPU during FOCUSING)
                     _reviewer = None
-                    for _rev_name in ["lite", "core", "reflex"]:
+                    for _rev_name in ["core", "nano"]:
                         if _rev_name in self.model_pool.models and _rev_name != selected_model_name:
                             try:
                                 _reviewer = self.model_pool.acquire_model(_rev_name)
@@ -2001,7 +2263,7 @@ class AgentCore:
                             value="\n".join(council_history)
                         ))
     
-                final_messages = build_from_packet(packet)
+                final_messages = build_from_packet(packet, kv_prefix_active=_kv_prefix_active)
                 
                 # Assemble a simple prompt string for guardian/sentinel checks (concatenate message contents)
                 try:
@@ -2036,8 +2298,8 @@ class AgentCore:
     
                 if observer_enabled and use_lite_for_observer:
                     try:
-                        if self.model_pool.ensure_model_loaded("lite"):
-                            observer_model_name = "lite"
+                        if self.model_pool.ensure_model_loaded("core"):
+                            observer_model_name = "core"
                     except Exception as _obs_exc:
                         logger.warning("AgentCore: observer lite model load failed: %s", _obs_exc)
 
@@ -2058,8 +2320,8 @@ class AgentCore:
 
                 # ── Phase Header Yielding ──
                 # Naming convention: [(Role) Identity]
-                #   Nano=Reflex, Core=Operator, Prime=Thinker
-                _is_prime = "thinker" in selected_model_name.lower() or "prime" in selected_model_name.lower()
+                #   Nano, Core, Prime
+                _is_prime = "prime" in selected_model_name.lower()
                 role_label = "Thinker" if _is_prime else "Operator"
                 identity_label = "Prime" if _is_prime else "Core"
                 header_icon = "🧠" if _is_prime else "🤖"
@@ -2197,7 +2459,7 @@ class AgentCore:
                     council_history.append(f"[{selected_model_name.upper()}]: {msg}")
                 
                 # Model Swap: Core <-> Thinker (or Core <-> Core if Prime down)
-                next_model_role = "thinker" if selected_model_name == "core" else "core"
+                next_model_role = "prime" if selected_model_name == "core" else "core"
                 
                 # Release current model
                 self.model_pool.release_model_for_role(selected_model_name)
@@ -2205,8 +2467,8 @@ class AgentCore:
                 # Acquire next model
                 try:
                     new_model = self.model_pool.acquire_model_for_role(next_model_role)
-                    if not new_model and next_model_role == "thinker":
-                        logger.warning("AgentCore: Thinker (Prime) unavailable. Falling back to Monastic Reasoning (Core solo-debate).")
+                    if not new_model and next_model_role == "prime":
+                        logger.warning("AgentCore: Prime unavailable. Falling back to Monastic Reasoning (Core solo-debate).")
                         # Fallback to Core for self-reflection
                         new_model = self.model_pool.acquire_model_for_role("core")
                         next_model_role = "core"
@@ -2393,7 +2655,7 @@ class AgentCore:
                                 len(_stripped_response), _stripped_response.count("\n"))
 
             if (_response_empty or _response_too_short or _recitation_summarized) and selected_model_name not in (
-                "gpu_prime", "prime", "thinker", "groq_fallback", "oracle_openai"
+                "prime", "groq_fallback", "oracle_openai"
             ):
                 if _recitation_summarized:
                     _escalation_reason = "recitation request got summary instead of full text"
@@ -2489,7 +2751,7 @@ class AgentCore:
                     # Generate via Prime — use the model pool for proper tool access
                     # This gives Prime the full system prompt, context, and MCP tools
                     _prime_model_obj = None
-                    for _pm_key in ["gpu_prime", "prime"]:
+                    for _pm_key in ["prime"]:
                         if _pm_key in self.model_pool.models:
                             _prime_model_obj = self.model_pool.models[_pm_key]
                             break
@@ -2824,7 +3086,7 @@ class AgentCore:
             if execution_results:
                 process_execution_results(execution_results, self.session_manager, session_id, packet)
 
-                messages = build_from_packet(packet, task_instruction_key="execution_feedback")
+                messages = build_from_packet(packet, task_instruction_key="execution_feedback", kv_prefix_active=_kv_prefix_active)
                 voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                 stream_generator = voice.stream_response()
                 concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
@@ -2836,7 +3098,7 @@ class AgentCore:
                 from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager
                 _kv_mgr = get_kv_cache_manager()
                 if _kv_mgr is not None and selected_model_name:
-                    _kv_role_map = {"reflex": "reflex", "nano": "reflex", "core": "core", "lite": "core"}
+                    _kv_role_map = {"nano": "nano", "core": "core"}
                     _kv_role = _kv_role_map.get(selected_model_name)
                     if _kv_role:
                         _kv_mgr.notify_inference(_kv_role)
@@ -3326,7 +3588,7 @@ class AgentCore:
         return False
 
     # Escalation chain for slim path failures
-    _SLIM_ESCALATION_CHAIN = ["core", "lite", "groq_fallback", "oracle"]
+    _SLIM_ESCALATION_CHAIN = ["core", "groq_fallback", "oracle"]
 
     def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int) -> str:
         """Try higher-tier models when the slim path model produces garbage.
@@ -3417,14 +3679,14 @@ class AgentCore:
         """Determines if a packet should trigger an instant Nano reflex.
 
         Fires for ANY short, simple request regardless of session history.
-        The reflex model handles greetings, time/date, identity, and basic
+        The nano model handles greetings, time/date, identity, and basic
         math — escalating to the full pipeline via ESCALATE when unsure.
         """
         user_input = packet.content.original_prompt
         is_short = len(user_input) < 150
 
         from gaia_common.utils.immune_system import is_system_irritated
-        return is_short and not is_system_irritated() and "reflex" in self.model_pool.models
+        return is_short and not is_system_irritated() and "nano" in self.model_pool.models
 
     def generate_continuation(self, messages: list, session_id: str = ""):
         """
@@ -3438,10 +3700,10 @@ class AgentCore:
         2. Runtime executes tool, gets result
         3. This method generates the continuation with result in context
         """
-        # Acquire a model — prefer current tier, fall back through cascade
+        # Acquire a model — prefer GPU models first (esp. during FOCUSING)
         model = None
         model_name = None
-        for cand in ["lite", "prime", "gpu_prime", "core", "cpu_prime"]:
+        for cand in ["prime", "core", "cpu_prime"]:
             try:
                 model = self.model_pool.acquire_model(cand)
                 if model is not None:
@@ -3494,7 +3756,7 @@ class AgentCore:
         Executes a fast, non-streaming Reflex response with a minimal packet.
         Returns the generated text, or "" to defer to run_turn().
         """
-        if "reflex" not in self.model_pool.models and "nano" not in self.model_pool.models:
+        if "nano" not in self.model_pool.models:
             return ""
 
         try:
@@ -3506,7 +3768,7 @@ class AgentCore:
             # Direct non-streaming call to Reflex (Nano), capped at 256 tokens.
             # Thinking always disabled for Nano — speed is the priority.
             res = self.model_pool.forward_to_model(
-                "reflex",
+                "nano",
                 messages=reflex_messages,
                 max_tokens=256,
                 temperature=0.0,
@@ -3595,13 +3857,85 @@ class AgentCore:
         """Legacy internal wrapper."""
         return self.generate_instant_reflex(packet)
 
+    def _fetch_recitation_source(self, user_input: str) -> str:
+        """Fetch the actual source text for a recitation request.
+
+        Pipeline: web_search (content_type=poem) → pick best URL → web_fetch
+        → extract clean text → save to knowledge base for future RAG.
+
+        Returns the cleaned document text, or empty string on failure.
+        """
+        import os
+        # 1. Search for the source material
+        try:
+            search_result = mcp_client.call_jsonrpc("web_search", {
+                "query": user_input,
+                "content_type": "poem",
+                "max_results": 3,
+            }, timeout=10)
+            results = search_result.get("response", {}).get("result", {}).get("results", [])
+            if not results:
+                self.logger.info("Recitation: no web search results")
+                return ""
+        except Exception as e:
+            self.logger.warning("Recitation: web_search failed: %s", e)
+            return ""
+
+        # 2. Pick the best URL — prefer clean poem pages by domain priority
+        _PREFERRED_DOMAINS = ["poetryfoundation.org", "poets.org", "wikisource.org"]
+        best_url = ""
+        for preferred in _PREFERRED_DOMAINS:
+            for r in results:
+                if preferred in r.get("domain", ""):
+                    best_url = r.get("url", "")
+                    break
+            if best_url:
+                break
+        if not best_url and results:
+            best_url = results[0].get("url", "")
+        if not best_url:
+            return ""
+
+        # 3. Fetch the full page content
+        try:
+            self.logger.info("Recitation: fetching %s", best_url)
+            fetch_result = mcp_client.call_jsonrpc("web_fetch", {
+                "url": best_url,
+            }, timeout=15)
+            content = fetch_result.get("response", {}).get("result", {}).get("content", "")
+            title = fetch_result.get("response", {}).get("result", {}).get("title", "")
+            if not content:
+                self.logger.warning("Recitation: web_fetch returned empty content")
+                return ""
+        except Exception as e:
+            self.logger.warning("Recitation: web_fetch failed: %s", e)
+            return ""
+
+        # 4. Clean: truncate to reasonable size for RAG injection
+        # Most poems are < 5000 chars; cap at 8000 to leave room in context
+        clean_text = content.strip()[:8000]
+
+        # 5. Save locally for future RAG (non-blocking, best-effort)
+        try:
+            safe_title = "".join(c if c.isalnum() or c in " -_" else "" for c in title)[:60].strip()
+            save_path = f"/knowledge/research/{safe_title or 'recitation'}.txt"
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w") as f:
+                f.write(f"# {title}\nSource: {best_url}\n\n{clean_text}")
+            self.logger.info("Recitation: saved to %s (%d chars)", save_path, len(clean_text))
+        except Exception:
+            self.logger.debug("Recitation: failed to save locally", exc_info=True)
+
+        # 6. Format for RAG injection
+        return f"[Retrieved Document — {title}]\nSource: {best_url}\n\n{clean_text}"
+
     def _nano_triage(self, user_input: str) -> str:
         """
         Use the Nano model (0.5B) to perform a quick triage of the request.
         Returns "SIMPLE" or "COMPLEX".
         """
-        # The nano model may be registered as "nano" or "reflex" in MODEL_CONFIGS.
-        _nano_key = "nano" if "nano" in self.config.MODEL_CONFIGS else "reflex"
+        # The nano model is registered as "nano" in MODEL_CONFIGS.
+        _nano_key = "nano"
         if _nano_key not in self.config.MODEL_CONFIGS:
             return "COMPLEX"  # Fallback to more capable models
 
@@ -3683,10 +4017,10 @@ RESULT: COMPLEX (reason: <brief reason>)
         if force_slim:
             return True
 
-        # Nano/reflex MUST always use slim prompt — their context window (2048)
+        # Nano MUST always use slim prompt — its context window (2048)
         # cannot fit the full planning pipeline. Sending the full prompt causes
         # context overflow errors (400) and exhausts the fallback chain.
-        if selected_model_name in ("nano", "reflex"):
+        if selected_model_name == "nano":
             return True
 
         # Disable slim-prompt shortcuts only when truly CRITICAL (score >= 25).
@@ -4045,7 +4379,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             confidence_check = self.assess_task_confidence(
                 intent=intent,
                 user_input=user_input,
-                model_name="lite",
+                model_name="core",
                 session_id=session_id
             )
 
@@ -4093,7 +4427,7 @@ RESULT: COMPLEX (reason: <brief reason>)
         # clock/identity examples.  The full multi-thousand-token system prompt
         # overwhelms small models and causes them to miss dynamic context like
         # the current time.
-        use_slim = selected_model_name in ("nano", "reflex")
+        use_slim = selected_model_name == "nano"
         try:
             # Use provided packet if available (preserves RAG context), otherwise create new
             if packet is None:
@@ -4116,7 +4450,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             )
             # Nano (0.8B) should never generate more than 512 tokens —
             # its 2K context window is too small for uncapped generation.
-            if selected_model_name in ("reflex", "nano"):
+            if selected_model_name == "nano":
                 max_resp_tokens = min(max_resp_tokens, 512)
             # Let the GAIA Engine handle clock injection + KV caching.
             # The engine injects [Clock: ...] and caches identity as KV prefix.
@@ -4158,11 +4492,11 @@ RESULT: COMPLEX (reason: <brief reason>)
             # send a short polish request and return the Thinker output as final.
             try:
                 polish_flag = os.getenv("GAIA_THINKER_POLISH", "").lower() in ("1", "true", "yes")
-                if polish_flag and selected_model_name == "lite":
+                if polish_flag and selected_model_name == "core":
                     _gpu_sleeping_polish = not self._is_prime_available
                     thinker_name = None
-                    for cand in ["gpu_prime", "prime", "cpu_prime"]:
-                        if cand == "gpu_prime" and _gpu_sleeping_polish:
+                    for cand in ["prime", "cpu_prime"]:
+                        if cand == "prime" and _gpu_sleeping_polish:
                             continue
                         if cand in self.model_pool.models:
                             thinker_name = cand
@@ -4590,7 +4924,7 @@ Present {doc_title}:"""
             reflection = self.reflect_on_truncation(
                 original_request=user_input,
                 truncated_output=combined_so_far,
-                model_name="lite"  # Use lite model for fast reflection
+                model_name="core"  # Use core model for fast reflection
             )
 
             self.logger.info(f"Reflection: progress={reflection.get('estimated_progress')}, "
@@ -5143,7 +5477,7 @@ Continue from that point. Do not include any preamble like "Continuing from..." 
         return prompt
 
     def assess_task_confidence(self, intent: str, user_input: str,
-                                model_name: str = "lite", session_id: str = "") -> Dict[str, Any]:
+                                model_name: str = "core", session_id: str = "") -> Dict[str, Any]:
         print("DEBUG: Entered assess_task_confidence function", file=sys.stderr)
         print(f"DEBUG: Manually printing from AgentCore logger (INFO level): {self.logger.isEnabledFor(logging.INFO)}", file=sys.stderr)
 
@@ -5299,7 +5633,7 @@ ALTERNATIVE: [if low confidence: what could you do instead?]"""
             }
 
     def reflect_on_truncation(self, original_request: str, truncated_output: str,
-                               model_name: str = "lite") -> Dict[str, Any]:
+                               model_name: str = "core") -> Dict[str, Any]:
         """
         Use a model to reflect on truncated output and generate a natural continuation prompt.
 
@@ -5349,7 +5683,7 @@ REASONING: [Brief explanation of your analysis]"""
             model = self.model_pool.get(model_name)
             if not model:
                 # Fallback to any available model - get() has lazy loading built in
-                for fallback in ["lite", "gpu_prime", "prime"]:
+                for fallback in ["core", "prime"]:
                     model = self.model_pool.get(fallback)
                     if model:
                         break
@@ -6280,7 +6614,7 @@ Start your response with the first line of the file."""
         # Note: acquire_model() now supports lazy loading - no need to pre-check pool
         selection_model = None
         selection_model_name = None
-        for cand in ["lite", "prime", "gpu_prime", "cpu_prime"]:
+        for cand in ["core", "prime", "cpu_prime"]:
             try:
                 selection_model = self.model_pool.acquire_model(cand)
                 if selection_model is not None:
@@ -6345,7 +6679,7 @@ Start your response with the first line of the file."""
             # Use Prime model for review if available
             review_model = None
             review_model_name = None
-            for cand in ["prime", "gpu_prime", "lite", "cpu_prime"]:
+            for cand in ["prime", "core", "cpu_prime"]:
                 try:
                     review_model = self.model_pool.acquire_model(cand)
                     if review_model is not None:

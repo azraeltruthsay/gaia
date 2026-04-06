@@ -175,13 +175,13 @@ def resolve_model_paths(config: Config) -> dict:
     manifest_path = models_dir / "model_manifest.yaml"
     
     # env overrides win
-    env_map = {"prime": os.getenv("GAIA_PRIME_GGUF"), "lite": os.getenv("GAIA_LITE_GGUF")}
+    env_map = {"prime": os.getenv("GAIA_PRIME_GGUF"), "core": os.getenv("GAIA_CORE_GGUF") or os.getenv("GAIA_LITE_GGUF")}
     for role, val in env_map.items():
         if val:
             out[role] = str(Path(val).expanduser().resolve())
 
     # manifest fallback
-    if "prime" not in out or "lite" not in out:
+    if "prime" not in out or "core" not in out:
         if manifest_path.exists() and yaml is not None:
             mf = _read_manifest(manifest_path)
             for role, spec in mf.get("roles", {}).items():
@@ -386,14 +386,12 @@ class ModelPool:
             logger.warning("Prime load blocked: GAIA_ALLOW_PRIME_LOAD not enabled")
             return False
         self._apply_env_model_overrides()
-        prime_candidates = [name for name in ('gpu_prime', 'prime', 'cpu_prime') if name in self.config.MODEL_CONFIGS]
-        loaded = False
-        for name in prime_candidates:
-            loaded |= self._load_model_entry(name, use_oracle=False, force=force)
-            if 'prime' in self.models or 'gpu_prime' in self.models:
-                break
+        if 'prime' in self.config.MODEL_CONFIGS:
+            loaded = self._load_model_entry('prime', use_oracle=False, force=force)
+        else:
+            loaded = False
         self._promote_prime_aliases()
-        return bool(self.models.get('prime') or self.models.get('gpu_prime') or self.models.get('cpu_prime'))
+        return bool(self.models.get('prime'))
 
     def _prime_guard_allows(self, force: bool = False) -> bool:
         if force:
@@ -495,50 +493,37 @@ class ModelPool:
             # Support explicit HF prime model for vLLM via GAIA_PRIME_HF_MODEL
             prime_hf = os.getenv("GAIA_PRIME_HF_MODEL")
             prime_path = os.getenv("GAIA_PRIME_GGUF")
-            lite_path = os.getenv("GAIA_LITE_GGUF")
+            core_path = os.getenv("GAIA_CORE_GGUF") or os.getenv("GAIA_LITE_GGUF")
             observer_hf = os.getenv("GAIA_OBSERVER_HF_MODEL")
 
-            # If an HF prime is provided, prefer configuring it as a vLLM-backed gpu_prime.
-            # This ensures vLLM is used for HF directories (e.g., Qwen3) instead of llama_cpp.
+            # If an HF prime is provided, configure it directly under 'prime'.
             if prime_hf:
-                self.config.MODEL_CONFIGS["gpu_prime"] = {
+                self.config.MODEL_CONFIGS["prime"] = {
                     "type": "vllm",
                     "model": prime_hf,
                     "path": prime_hf,
                     "enabled": True,
                 }
-                # Also alias 'prime' to gpu_prime so other code finds it under 'prime'
-                self.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True}
-                # When an HF prime is explicitly provided, prefer vLLM and disable
-                # any CPU-based prime loads for now to avoid attempting to load
-                # HF directories with llama_cpp (which expects GGUF files).
-                try:
-                    if "cpu_prime" in self.config.MODEL_CONFIGS:
-                        self.config.MODEL_CONFIGS["cpu_prime"]["enabled"] = False
-                        logger.info("GAIA_PRIME_HF_MODEL set: disabling cpu_prime to force vLLM usage for prime")
-                except Exception:
-                    logger.exception("Failed to disable cpu_prime when GAIA_PRIME_HF_MODEL is set")
 
             # GGUF fallback: only register GGUF models when explicitly enabled.
             # Default path uses GAIA Engine (safetensors). GGUF is for emergency
             # CPU-only operation when no GPU is available.
             gguf_fallback = os.getenv("GAIA_GGUF_FALLBACK", "0") == "1"
-            if gguf_fallback and prime_path and "gpu_prime" not in self.config.MODEL_CONFIGS:
-                self.config.MODEL_CONFIGS["cpu_prime"] = {
+            if gguf_fallback and prime_path and not prime_hf:
+                self.config.MODEL_CONFIGS["prime"] = {
                     "type": "local",
                     "path": prime_path,
                     "enabled": True,
                 }
-                self.config.MODEL_CONFIGS["prime"] = {"alias": "cpu_prime", "enabled": True}
-                logger.info("GGUF fallback enabled: cpu_prime -> %s", prime_path)
+                logger.info("GGUF fallback enabled: prime -> %s", prime_path)
 
-            if gguf_fallback and lite_path:
-                self.config.MODEL_CONFIGS["lite"] = {
+            if gguf_fallback and core_path:
+                self.config.MODEL_CONFIGS["core"] = {
                     "type": "local",
-                    "path": lite_path,
+                    "path": core_path,
                     "enabled": True,
                 }
-                logger.info("GGUF fallback enabled: lite -> %s", lite_path)
+                logger.info("GGUF fallback enabled: core -> %s", core_path)
             if observer_hf:
                 self.config.MODEL_CONFIGS["observer"] = {
                     "type": "hf",
@@ -546,23 +531,23 @@ class ModelPool:
                     "enabled": True,
                 }
 
-            # Remote CPU inference via NANO_ENDPOINT (llama-server container)
+            # Remote inference via NANO_ENDPOINT (llama-server container)
             nano_endpoint = os.getenv("NANO_ENDPOINT")
             if nano_endpoint:
                 nano_model = os.getenv("NANO_MODEL", "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf")
-                self.config.MODEL_CONFIGS["reflex"] = {
+                self.config.MODEL_CONFIGS["nano"] = {
                     "type": "vllm_remote",
                     "endpoint": nano_endpoint,
                     "path": nano_model,
                     "enabled": True,
                     "max_model_len": 2048,
                 }
-                logger.info("NANO_ENDPOINT set: reflex -> llama-server @ %s", nano_endpoint)
+                logger.info("NANO_ENDPOINT set: nano -> llama-server @ %s", nano_endpoint)
 
-            # Remote CPU inference via CORE_CPU_ENDPOINT (llama-server container)
+            # Remote inference via CORE_CPU_ENDPOINT (GAIA Engine in gaia-core)
             core_cpu_endpoint = os.getenv("CORE_CPU_ENDPOINT")
             if core_cpu_endpoint:
-                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf")
+                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4")
                 self.config.MODEL_CONFIGS["core"] = {
                     "type": "vllm_remote",
                     "endpoint": core_cpu_endpoint,
@@ -570,37 +555,27 @@ class ModelPool:
                     "enabled": True,
                     "max_model_len": int(os.getenv("CORE_CPU_CTX", "8192")),
                 }
-                self.config.MODEL_CONFIGS["lite"] = {"alias": "core", "enabled": True}
-                logger.info("CORE_CPU_ENDPOINT set: core/lite -> llama-server @ %s", core_cpu_endpoint)
+                logger.info("CORE_CPU_ENDPOINT set: core -> GAIA Engine @ %s", core_cpu_endpoint)
 
-            # Remote vLLM inference via PRIME_ENDPOINT — switches gpu_prime to
+            # Remote vLLM inference via PRIME_ENDPOINT — switches prime to
             # a remote HTTP backend so gaia-core doesn't need local GPU access.
             prime_endpoint = os.getenv("PRIME_ENDPOINT")
             if prime_endpoint:
-                existing_cfg = self.config.MODEL_CONFIGS.get("gpu_prime", {})
-                self.config.MODEL_CONFIGS["gpu_prime"] = {
+                existing_cfg = self.config.MODEL_CONFIGS.get("prime", {})
+                self.config.MODEL_CONFIGS["prime"] = {
                     "type": "vllm_remote",
                     "endpoint": prime_endpoint,
-                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or self.config.model_path("prime", "merged") or "/models/Qwen3.5-4B-Abliterated-merged",
+                    "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or self.config.model_path("prime", "merged") or "/models/prime",
                     "enabled": True,
-                    "max_model_len": int(os.getenv("VLLM_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 8192)),
-                    "lora_config": self.config.constants.get("LORA_CONFIG", {}),
+                    "max_model_len": int(os.getenv("VLLM_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 16384)),
+                    "lora_config": self.config.constants.get("LORA_CONFIG", existing_cfg.get("lora_config", {})),
                 }
-                self.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True}
-                # Also update thinker config to match (gpu_prime resolves to thinker via role map)
-                if "thinker" in self.config.MODEL_CONFIGS:
-                    prime_model = os.getenv("PRIME_MODEL") or existing_cfg.get("path")
-                    if prime_model:
-                        self.config.MODEL_CONFIGS["thinker"]["path"] = prime_model
-                        self.config.MODEL_CONFIGS["thinker"]["endpoint"] = prime_endpoint
-                if "cpu_prime" in self.config.MODEL_CONFIGS:
-                    self.config.MODEL_CONFIGS["cpu_prime"]["enabled"] = False
-                logger.info("PRIME_ENDPOINT set: gpu_prime -> vllm_remote @ %s", prime_endpoint)
+                logger.info("PRIME_ENDPOINT set: prime -> vllm_remote @ %s", prime_endpoint)
         except Exception:
             logger.exception("Failed to apply GAIA_* model overrides")
 
     def _ordered_model_keys(self) -> List[str]:
-        preferred_order = ['gpu_prime', 'prime', 'lite', 'observer', 'cpu_prime']
+        preferred_order = ['prime', 'core', 'nano', 'observer']
         ordered_keys: List[str] = []
         for key in preferred_order:
             if key in self.config.MODEL_CONFIGS:
@@ -660,7 +635,7 @@ class ModelPool:
                     attempt_layers = [0]
                 # Force lite to stay on CPU to avoid competing with gpu_prime and to
                 # keep intent detection lightweight and reliable.
-                if model_name == "lite":
+                if model_name == "core":
                     attempt_layers = [0]
                 model_path = model_config.get('path') or (self.config.MODEL_CONFIGS.get(model_config.get('alias', ''), {}) or {}).get('path')
                 if not model_path:
@@ -673,8 +648,8 @@ class ModelPool:
 
                 for n_try in attempt_layers:
                     try:
-                        # Expand context for Operator (lite) without forcing Thinker to use the same window.
-                        ctx_tokens = getattr(self.config, "max_tokens_lite", self.config.max_tokens) if model_name == "lite" else self.config.max_tokens
+                        # Expand context for Core without forcing Prime to use the same window.
+                        ctx_tokens = getattr(self.config, "max_tokens_core", self.config.max_tokens) if model_name == "core" else self.config.max_tokens
                         _raw_llama = Llama(
                             model_path=model_path,
                             n_gpu_layers=n_try,
@@ -779,32 +754,29 @@ class ModelPool:
         return True
 
     def _promote_prime_aliases(self):
-        if "prime" not in self.models and "cpu_prime" in self.models:
-            logger.info("Promoting cpu_prime to 'prime' because no dedicated prime model was loaded")
-            self.models["prime"] = self.models["cpu_prime"]
-            self.model_status["prime"] = self.model_status.get("cpu_prime", "idle")
+        """Ensure 'prime' is available in the pool.
+
+        With canonical naming, 'prime' is loaded directly from MODEL_CONFIGS.
+        This method handles legacy compat: if old-style gpu_prime/cpu_prime
+        entries were loaded instead, promote them to 'prime'.
+        """
+        if "prime" in self.models:
+            return  # Already loaded under canonical name
+        # Legacy compat: promote old variant names if present
+        for legacy in ("gpu_prime", "cpu_prime"):
+            if legacy in self.models:
+                logger.info("Promoting %s to 'prime' (legacy compat)", legacy)
+                self.models["prime"] = self.models[legacy]
+                self.model_status["prime"] = self.model_status.get(legacy, "idle")
+                break
         try:
             import torch
-            if torch.cuda.is_available() and "gpu_prime" in self.models:
-                logger.info("Promoting gpu_prime to 'prime' for GPU inference")
-                self.models["prime"] = self.models["gpu_prime"]
-                self.model_status["prime"] = "idle"
-                try:
-                    setattr(self.config, "llm_backend", "gpu_prime")
-                    os.environ.setdefault("GAIA_BACKEND", "gpu_prime")
-                    logger.info("GAIA backend set to 'gpu_prime' by default because CUDA is available")
-                except Exception as _exc:
-                    logger.debug("ModelPool: backend env assignment failed: %s", _exc)
+            if torch.cuda.is_available() and "prime" in self.models:
+                setattr(self.config, "llm_backend", "prime")
+                os.environ.setdefault("GAIA_BACKEND", "prime")
+                logger.info("GAIA backend set to 'prime' by default because CUDA is available")
         except Exception as _exc:
-            logger.debug("ModelPool: prime alias promotion failed: %s", _exc)
-
-        # Promote lite alias: lite shares Core's model for intent detection,
-        # tool selection, and lightweight tasks. Without this, alias-only
-        # configs are skipped during model loading and lite stays unregistered.
-        if "lite" not in self.models and "core" in self.models:
-            self.models["lite"] = self.models["core"]
-            self.model_status["lite"] = self.model_status.get("core", "idle")
-            logger.info("Promoting core to 'lite' for intent detection + tool selection")
+            logger.debug("ModelPool: backend env assignment failed: %s", _exc)
 
     def wait_for_embed(self, timeout: float = None):
         """Block up to `timeout` seconds for the embed model to finish loading.
@@ -917,7 +889,7 @@ class ModelPool:
         at startup but will load on-demand when first requested.
         """
         # Block gpu_prime loading when GPU has been released for sleep
-        if name == "gpu_prime" and self._gpu_released and not force:
+        if name in ("gpu_prime", "prime") and self._gpu_released and not force:
             logger.info("[LAZY_LOAD] Blocked lazy-load of 'gpu_prime' — GPU is released for sleep")
             return False
 
@@ -1098,23 +1070,27 @@ class ModelPool:
             self.release_model(name)
 
     def _resolve_model_name_for_role(self, role: str) -> str | None:
-        """Resolve a logical role (reflex, core, thinker) to a physical model name."""
-        # --- Poetic Renaming Aliases ---
-        role_map = {
-            "nano": "reflex",
+        """Resolve a logical role to a canonical model name (nano, core, prime).
+
+        Legacy names (reflex, thinker, lite, operator, gpu_prime, cpu_prime)
+        are mapped to their canonical equivalents for backward compatibility.
+        """
+        # Legacy backward compat — old names resolve to canonical
+        _LEGACY_MAP = {
+            "reflex": "nano",
+            "thinker": "prime",
             "lite": "core",
             "operator": "core",
-            "prime": "thinker",
-            "gpu_prime": "thinker",
-            "cpu_prime": "thinker"
+            "gpu_prime": "prime",
+            "cpu_prime": "prime",
         }
-        target_role = role_map.get(role.lower(), role.lower())
+        target_role = _LEGACY_MAP.get(role.lower(), role.lower())
 
         # 1. If it's already a loaded key, return it
         if target_role in self.models:
             return target_role
 
-        # 2. Check MODEL_CONFIGS for alias or direct entry
+        # 2. Check MODEL_CONFIGS for direct entry or alias
         cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
 
         # If it's a remote model and enabled, return the role itself as the name (we'll handle lazy load next)
@@ -1124,16 +1100,7 @@ class ModelPool:
         alias = cfg.get('alias')
         if alias and alias in self.models:
             return alias
-        
-        # 3. Fallback logic for thinker
-        if target_role == 'thinker':
-            for cand in ['thinker', 'gpu_prime', 'prime']:
-                if cand in self.models:
-                    return cand
-                # Check config for remote candidate
-                if self.config.MODEL_CONFIGS.get(cand, {}).get("type") == "vllm_remote":
-                    return cand
-        
+
         return None
 
     def acquire_model_for_role(self, role: str, lazy_load: bool = True):
@@ -1162,7 +1129,7 @@ class ModelPool:
 
         # 3. FALLBACK CHAIN: If primary model unavailable for prime roles, try fallbacks
         if not name or name not in self.models:
-            if role in ('prime', 'gpu_prime', 'cpu_prime'):
+            if role in ('prime', 'gpu_prime', 'cpu_prime', 'thinker'):
                 fallback_chain = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
                 for fallback in fallback_chain:
                     if fallback in self.models:
@@ -1317,7 +1284,7 @@ class ModelPool:
         Uses the ``/v1/load_lora_adapter`` API to dynamically load an adapter
         without restarting the server.  Returns True on success, False on failure.
         """
-        prime_model = self.models.get("gpu_prime") or self.models.get("prime")
+        prime_model = self.models.get("prime")
         if prime_model is None:
             logger.warning("register_adapter_with_prime: no Prime model in pool")
             return False

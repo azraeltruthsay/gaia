@@ -421,7 +421,7 @@ def classify_domain_llm(text_snippet: str, available_kbs: list) -> str:
         from gaia_core.config import get_config
         config = get_config()
 
-        nano_key = "nano" if "nano" in config.MODEL_CONFIGS else "reflex"
+        nano_key = "nano"
         if nano_key not in config.MODEL_CONFIGS:
             logger.warning("No Nano model configured — falling back to keyword classification")
             return "general"

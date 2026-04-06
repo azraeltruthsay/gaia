@@ -137,7 +137,7 @@ _SOURCE_DEFAULTS: Dict[PacketSource, Dict[str, Any]] = {
         "time_budget_ms": 5000,
         "safety_mode": "strict",
         "dry_run": True,
-        "model_name": "lite",
+        "model_name": "core",
         "model_provider": "local",
         "context_window": 4096,
         "system_task": SystemTask.GENERATE_DRAFT,

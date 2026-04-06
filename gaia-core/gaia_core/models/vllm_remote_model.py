@@ -47,7 +47,7 @@ class VLLMRemoteModel:
             or self._registry_prime_path()
         )
 
-        self.timeout = int(model_config.get("timeout", 120))
+        self.timeout = int(model_config.get("timeout", 300))
 
         # Context window size for auto-clamping max_tokens
         self.max_model_len = int(
@@ -428,7 +428,12 @@ class VLLMRemoteModel:
 
     def _post(self, path: str, payload: dict, _allow_clamp_retry: bool = True) -> dict:
         url = f"{self.endpoint}{path}"
-        logger.debug("vLLM POST %s (model=%s)", url, payload.get("model", "?"))
+        import json as _json
+        _payload_bytes = len(_json.dumps(payload))
+        _n_msgs = len(payload.get("messages", []))
+        logger.warning("vLLM POST %s model=%s payload=%dB msgs=%d max_tokens=%s",
+                       url, payload.get("model", "?"), _payload_bytes, _n_msgs,
+                       payload.get("max_tokens", "?"))
         last_exc: Optional[Exception] = None
 
         for attempt in range(1, self._MAX_RETRIES + 1):

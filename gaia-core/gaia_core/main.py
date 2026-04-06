@@ -343,7 +343,7 @@ async def lifespan(app: FastAPI):
 
 
 def _write_shutdown_checkpoints(app: FastAPI) -> dict:
-    """Write prime.md and Lite.md checkpoints (called on shutdown and via endpoint)."""
+    """Write prime.md and Core.md checkpoints (called on shutdown and via endpoint)."""
     results = {}
 
     if _ai_manager is None:
@@ -368,7 +368,7 @@ def _write_shutdown_checkpoints(app: FastAPI) -> dict:
         results["prime"] = {"status": "error", "detail": str(exc)}
         logger.error("Shutdown checkpoint: prime.md failed: %s", exc, exc_info=True)
 
-    # Write Lite.md
+    # Write Core.md (formerly Lite.md)
     try:
         from gaia_core.cognition.lite_journal import LiteJournal
 
@@ -380,14 +380,14 @@ def _write_shutdown_checkpoints(app: FastAPI) -> dict:
         )
         entry = lj.write_entry()
         if entry:
-            results["lite"] = {"status": "ok", "chars": len(entry)}
-            logger.info("Shutdown checkpoint: Lite.md entry written")
+            results["core"] = {"status": "ok", "chars": len(entry)}
+            logger.info("Shutdown checkpoint: Core.md entry written")
         else:
-            results["lite"] = {"status": "skipped", "reason": "no Lite model available"}
-            logger.info("Shutdown checkpoint: Lite.md skipped (no model)")
+            results["core"] = {"status": "skipped", "reason": "no Core model available"}
+            logger.info("Shutdown checkpoint: Core.md skipped (no model)")
     except Exception as exc:
-        results["lite"] = {"status": "error", "detail": str(exc)}
-        logger.error("Shutdown checkpoint: Lite.md failed: %s", exc, exc_info=True)
+        results["core"] = {"status": "error", "detail": str(exc)}
+        logger.error("Shutdown checkpoint: Core.md failed: %s", exc, exc_info=True)
 
     return results
 
@@ -398,6 +398,14 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Inter-service HMAC authentication
+try:
+    from gaia_common.utils.service_auth import AuthMiddleware
+    if AuthMiddleware:
+        app.add_middleware(AuthMiddleware)
+except ImportError:
+    pass
 
 # Register GPU management endpoints (used by orchestrator for sleep/wake handoff)
 from gaia_core.api.gpu_endpoints import router as gpu_router
@@ -557,22 +565,27 @@ async def doctor_review(request: Request):
         return JSONResponse(status_code=500, content={"approved": False, "reason": str(e)})
 
 
+_core_boot_time = __import__("time").monotonic()
+_STARTUP_GRACE_SECONDS = 90  # Engine model load takes ~60s after container start
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for container orchestration.
 
     Returns 200 with inference_ok=true if the Core inference backend
-    is reachable, or 200 with inference_ok=false + degraded status
-    if inference is down but the API is alive. Doctor uses this to
-    distinguish between service-down and inference-down.
+    is reachable, or 200 with status=healthy during the startup grace
+    period while models are still loading (not degraded — loading is
+    expected, not broken).  After the grace window, reports degraded
+    if inference is unreachable so Doctor can remediate.
     """
-    import os
+    import os, time as _t
     core_endpoint = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092")
     inference_ok = False
     inference_detail = ""
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{core_endpoint}/health")
             inference_ok = resp.status_code == 200
             if not inference_ok:
@@ -580,7 +593,16 @@ async def health_check():
     except Exception as _inf_exc:
         inference_detail = str(_inf_exc)[:100]
 
-    status = "healthy" if inference_ok else "degraded"
+    in_grace = (_t.monotonic() - _core_boot_time) < _STARTUP_GRACE_SECONDS
+
+    if inference_ok:
+        status = "healthy"
+    elif in_grace:
+        status = "healthy"  # Still loading — don't trigger remediation
+        inference_detail = inference_detail or "engine loading (startup grace)"
+    else:
+        status = "degraded"
+
     return JSONResponse(
         status_code=200,
         content={
@@ -682,7 +704,7 @@ async def kv_cache_save():
 
 @app.post("/api/kv-cache/restore/{role}")
 async def kv_cache_restore(role: str):
-    """Restore KV cache for a specific role (e.g., 'reflex' or 'core')."""
+    """Restore KV cache for a specific role (e.g., 'nano' or 'core')."""
     from gaia_core.cognition.kv_cache_manager import get_kv_cache_manager, _CHECKPOINT_FILENAMES
     mgr = get_kv_cache_manager()
     if mgr is None:
@@ -893,33 +915,22 @@ async def process_packet(packet_data: Dict[str, Any]):
         )
 
     # ── Readiness Gate ──────────────────────────────────────────────────
-    # Verify inference engine is actually reachable before processing.
-    # If not ready, return a friendly message and request wake.
+    # Verify inference engine is reachable before processing.
+    # Health check only — no test inference (that adds 500ms+ per request).
     try:
         import httpx as _httpx
         _engine_ok = False
-        # Check health first (fast)
         try:
             _r = _httpx.get("http://localhost:8092/health", timeout=3)
             if _r.status_code == 200:
                 _health = _r.json()
                 if _health.get("model_loaded") or _health.get("status") == "ok":
-                    # Health says OK — verify with a minimal inference test
-                    try:
-                        _test = _httpx.post(
-                            "http://localhost:8092/v1/chat/completions",
-                            json={"model": "core", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
-                            timeout=10,
-                        )
-                        if _test.status_code == 200:
-                            _engine_ok = True
-                    except Exception:
-                        logger.warning("Readiness gate: health OK but inference failed — engine not truly ready")
+                    _engine_ok = True
         except Exception:
             pass
 
         if not _engine_ok:
-            logger.warning("Readiness gate: inference engine not ready — returning friendly message")
+            logger.warning("Readiness gate: inference engine not ready")
             # Try to trigger a wake signal
             try:
                 _wake_url = getattr(app.state, "_orchestrator_url", "http://gaia-orchestrator:6410")
@@ -927,11 +938,13 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 pass
 
-            # Return a streaming response with a friendly "waking up" message
+            # Return a friendly message — don't try to process the request
+            # from inside the gate (causes scoping issues with _run_loop).
+            # The user's client will see this and can retry.
             async def _waking_response():
                 yield json.dumps({
                     "type": "token",
-                    "value": "💤 I'm waking up — my inference engine is still loading. Give me a moment and try again."
+                    "value": "One moment — my inference engine is loading. Try again in a few seconds."
                 }) + "\n"
                 yield json.dumps({"type": "flush"}) + "\n"
 
@@ -1016,12 +1029,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                             from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
                             _gl = _get_gen_logger()
                             _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
-                            _gid = _gl.start_generation("reflex-0.5B", "nano", "response")
+                            _gid = _gl.start_generation("nano-0.8B", "nano", "response")
                             _gl.log_token(_gid, reflex_text)
                             _gl.end_generation(_gid)
                         except Exception:
                             pass
-                        formatted_reflex = f"⚡ **[(Reflex) Nano]**\n{reflex_text}"
+                        formatted_reflex = f"⚡ **[(Nano)]**\n{reflex_text}"
                         yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
@@ -1087,6 +1100,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                     return None
 
             _pending_tool_calls = []
+            _seen_tool_calls = set()  # Dedup repeated tool calls
 
             while True:
                 event = await loop.run_in_executor(None, _next_event)
@@ -1107,15 +1121,33 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     response_pieces.append(pe.text)
                                     yield json.dumps({"type": "token", "value": pe.text}) + "\n"
                                 elif pe.type == ParseEventType.TOOL_CALL_DETECTED:
-                                    # Show the user what tool is being called
+                                    # Dedup: only process each unique tool call once
+                                    _tc_key = f"{pe.tool_name}:{pe.tool_action}:{json.dumps(pe.tool_params, sort_keys=True)}"
+                                    if _tc_key in _seen_tool_calls:
+                                        logger.debug("Duplicate tool call skipped: %s", _tc_key[:80])
+                                        continue
+                                    _seen_tool_calls.add(_tc_key)
+
                                     tool_display = f"\n*[calling {pe.tool_name}({pe.tool_action})...]*\n"
                                     yield json.dumps({"type": "token", "value": tool_display}) + "\n"
                                     yield json.dumps({"type": "flush"}) + "\n"
                                     _pending_tool_calls.append(pe)
+
+                                    # Stop generation after first tool call — execute it,
+                                    # then continue generation with the result
+                                    break
                                 elif pe.type == ParseEventType.TOOL_ERROR:
                                     response_pieces.append(pe.text)
                                     yield json.dumps({"type": "token", "value": pe.text}) + "\n"
-                        else:
+
+                        # If we just detected a tool call, break the generation loop
+                        # to execute it immediately
+                        if _pending_tool_calls and _seen_tool_calls:
+                            break
+                        # else: parser already yielded the text — don't re-emit
+
+                        elif not _tc_enabled or not _tc_parser:
+                            # No parser — pass through raw
                             response_pieces.append(val)
                             yield json.dumps({"type": "token", "value": val}) + "\n"
 

@@ -16,6 +16,7 @@ import base64
 import io
 import json
 import logging
+import os
 import struct
 import subprocess
 import threading
@@ -648,10 +649,10 @@ class VoiceManager:
                     response_text = None
                     if len(text.strip()) < 150:
                         t0 = time.monotonic()
-                        response_text = await self._get_reflex_response(text)
+                        response_text = await self._get_nano_response(text)
                         if response_text:
-                            reflex_ms = (time.monotonic() - t0) * 1000
-                            logger.info("Voice: Reflex (%.0fms): %s", reflex_ms, response_text[:80])
+                            nano_ms = (time.monotonic() - t0) * 1000
+                            logger.info("Voice: Nano (%.0fms): %s", nano_ms, response_text[:80])
 
                     if not response_text:
                         # Fall through to full Thinker
@@ -727,12 +728,12 @@ class VoiceManager:
                     return candidate
         return response_text.strip() or None
 
-    async def _get_reflex_response(self, text: str) -> str | None:
-        """Try Reflex fast-path with a fresh session for cold-start eligibility.
+    async def _get_nano_response(self, text: str) -> str | None:
+        """Try Nano fast-path with a fresh session for cold-start eligibility.
 
         Uses a unique session_id per utterance so is_eligible_for_reflex sees
-        an empty history (cold start). Tight 5s timeout since reflex should
-        respond in <1s. Returns clean text or None if reflex didn't fire.
+        an empty history (cold start). Tight 5s timeout since Nano should
+        respond in <1s. Returns clean text or None if Nano didn't fire.
         """
         import uuid
         from gaia_common.utils.packet_factory import build_packet, PacketSource
@@ -742,7 +743,7 @@ class VoiceManager:
             PacketSource.VOICE_PRIME,
             text,
             user_id=user_id,
-            session_id=f"voice_reflex_{uuid.uuid4().hex[:12]}",
+            session_id=f"voice_nano_{uuid.uuid4().hex[:12]}",
         )
 
         try:
@@ -757,17 +758,18 @@ class VoiceManager:
                         return None
                     raw = await self._parse_ndjson_response(resp)
         except Exception:
-            logger.debug("Reflex request failed (falling back to Prime)", exc_info=True)
+            logger.debug("Nano request failed (falling back to Prime)", exc_info=True)
             return None
 
         if not raw:
             return None
 
-        # Strip reflex formatting header: ⚡ **[(Reflex) Nano]**\n...
+        # Strip nano formatting header: ⚡ **[(Nano)]**\n...
         clean = raw.strip()
-        prefix = "⚡ **[(Reflex) Nano]**"
-        if clean.startswith(prefix):
-            clean = clean[len(prefix):].lstrip("\n")
+        for prefix in ("⚡ **[(Nano)]**", "⚡ **[(Reflex) Nano]**"):
+            if clean.startswith(prefix):
+                clean = clean[len(prefix):].lstrip("\n")
+                break
         # Strip trailing markdown separator
         clean = clean.rstrip("-").rstrip("\n").strip()
         return clean or None

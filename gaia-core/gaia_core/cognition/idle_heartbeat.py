@@ -166,10 +166,10 @@ class IdleHeartbeat:
             logger.debug("Idle heartbeat: only %.0fs idle (threshold: %ds), skipping", idle_seconds, self._idle_threshold)
             return
 
-        # Get a model for the reflection — prefer lite/core, accept anything
+        # Get a model for the reflection — prefer core/nano, accept anything
         model = None
         if self.model_pool:
-            for name in ("lite", "core", "reflex", "nano"):
+            for name in ("core", "nano"):
                 try:
                     model = self.model_pool.get(name)
                     if model:

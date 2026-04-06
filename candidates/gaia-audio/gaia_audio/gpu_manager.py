@@ -197,6 +197,9 @@ class GPUManager:
             except Exception:
                 logger.error("Failed to reload Listener on wake", exc_info=True)
 
+            # Reset idle timer so watchdog doesn't immediately re-sleep
+            self.touch_activity()
+
             status_tracker.vram_used_mb = float(self.stt.vram_mb)
             status_tracker.gpu_mode = "three-tier"
             await status_tracker.emit("wake", "Listener reloaded on GPU")

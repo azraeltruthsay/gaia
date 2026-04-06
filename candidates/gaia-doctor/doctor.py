@@ -152,7 +152,7 @@ HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / 
 
 # KV cache pressure monitoring — independent of gaia-core
 KV_CACHE_ENDPOINTS = {
-    "reflex": "http://gaia-nano:8080/slots",
+    "nano": "http://gaia-nano:8080/slots",
     "core": "http://localhost:8092/slots",
 }
 KV_CACHE_DOCTOR_THRESHOLD = float(os.environ.get("KV_CACHE_DOCTOR_THRESHOLD", "0.90"))
@@ -392,7 +392,7 @@ def poll_kv_cache_pressure():
                 compacted = _request_compact(role)
                 if not compacted:
                     # Last resort: restart the service if it supports restart
-                    svc_name = "gaia-nano" if role == "reflex" else "gaia-core"
+                    svc_name = "gaia-nano" if role in ("nano", "reflex") else "gaia-core"
                     svc_entry = SERVICES.get(svc_name)
                     if svc_entry and svc_entry[1] == "restart":
                         log.warning(
@@ -2726,10 +2726,11 @@ def _check_prime_model_health():
 _audio_stt_warned = False  # Track if we've already warned about STT being down
 
 def _check_audio_sensory_health():
-    """Deep health check for gaia-audio: verify STT model is loaded.
+    """Deep health check for gaia-audio: verify the service is responsive.
 
-    The container can be healthy (HTTP 200) but with STT unloaded (no model).
-    This checks /status and attempts a wake if STT is missing.
+    Audio auto-sleeps STT when idle to free VRAM — this is normal and not an
+    irritation.  Doctor should only wake audio when there's actual demand
+    (voice call active or audio file pending in inbox), not unconditionally.
     """
     global _audio_stt_warned
     try:
@@ -2738,7 +2739,7 @@ def _check_audio_sensory_health():
             status = json.loads(resp.read().decode())
 
         stt_model = status.get("stt_model")
-        tts_engine = status.get("tts_engine")
+        gpu_mode = status.get("gpu_mode", "")
 
         if stt_model and "ASR" in stt_model:
             # STT is loaded — all good
@@ -2747,24 +2748,19 @@ def _check_audio_sensory_health():
                 _audio_stt_warned = False
             return
 
-        # STT not loaded — attempt wake
-        if not _audio_stt_warned:
-            log.warning("Audio STT not loaded (stt_model=%s). Attempting wake...", stt_model)
-            _audio_stt_warned = True
-            _record_irritation("gaia-audio", f"STT model not loaded: {stt_model}", "AudioSTTDown")
+        if gpu_mode == "sleeping":
+            # Idle sleep is a valid resting state — not an irritation.
+            # Audio will self-wake on demand when run_stt() is called.
+            if _audio_stt_warned:
+                log.info("Audio STT idle-sleeping (normal)")
+                _audio_stt_warned = False
+            return
 
-        try:
-            wake_req = Request(
-                "http://gaia-audio:8080/wake",
-                data=b"{}",
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urlopen(wake_req, timeout=10) as resp:
-                result = json.loads(resp.read().decode())
-            log.info("Audio wake requested: %s", result)
-        except Exception as e:
-            log.debug("Audio wake request failed: %s", e)
+        # STT unloaded for an unexpected reason (not idle sleep) — warn but
+        # don't force-wake.  Audio's ensure_awake() handles on-demand reload.
+        if not _audio_stt_warned:
+            log.warning("Audio STT not loaded (stt_model=%s, gpu_mode=%s)", stt_model, gpu_mode)
+            _audio_stt_warned = True
 
     except (URLError, OSError, TimeoutError):
         pass  # Container unreachable — normal health check will catch this
@@ -2857,6 +2853,18 @@ def poll_cycle():
                     _alarmed_services.discard(name)
             _service_state[name]["healthy"] = True
         else:
+            # Grace period: after a remediation restart, services need time
+            # to load models before they're fully healthy.  Suppress failure
+            # counting for 90s after the most recent restart to avoid a
+            # restart loop (doctor restarts Core, Core loads models for 60s,
+            # doctor sees degraded, restarts Core again).
+            _RESTART_GRACE_SECONDS = 90
+            recent = _restart_history.get(name, [])
+            if recent and (time.monotonic() - recent[-1]) < _RESTART_GRACE_SECONDS:
+                log.info("%s unhealthy but within restart grace period (%.0fs ago) — skipping failure count",
+                         name, time.monotonic() - recent[-1])
+                continue
+
             _consecutive_failures[name] += 1
             failures = _consecutive_failures[name]
 

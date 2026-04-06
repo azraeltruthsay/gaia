@@ -9,7 +9,7 @@ def initialize_default_registry():
 
     registry.register(ModelEntry(
         name="nano",
-        role="reflex",
+        role="nano",
         base_model="Qwen3.5-0.8B",
         safetensors_path="/models/Qwen3.5-0.8B-Abliterated-merged",
         gguf_path="/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf",
@@ -33,7 +33,7 @@ def initialize_default_registry():
 
     registry.register(ModelEntry(
         name="prime",
-        role="thinker",
+        role="prime",
         base_model="Huihui-Qwen3-8B-abliterated-v2",
         safetensors_path="/models/Huihui-Qwen3-8B-abliterated-v2-merged",
         gguf_path="",  # Prime doesn't need GGUF (GPU-only via vLLM)

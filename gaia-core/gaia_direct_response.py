@@ -39,8 +39,8 @@ Here is the transcript of their review:
     packet.intent.user_intent = "chat"
     packet.intent.confidence = 1.0
     
-    # Force model to gpu_prime
-    packet.header.model.name = "gpu_prime"
+    # Force model to prime
+    packet.header.model.name = "prime"
     
     logger.info("Starting direct turn...")
     processed_packet = agent_core.run_turn(packet)

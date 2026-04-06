@@ -21,10 +21,13 @@ logger = logging.getLogger("GAIA.PromptBuilder")
 
 SUMMARY_DIR = "data/shared/summaries"
 
-def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False) -> List[Dict]:
+def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
     If slim_mode=True, returns a minimal Identity + User Prompt list for speed.
+    If kv_prefix_active=True, skips static foundation sections (identity, rules,
+    tools, epistemic directives) that are already in the engine's KV cache prefix.
+    Only dynamic content (time, task instruction, world state, RAG, user msg) is injected.
     """
     logger.info("--- BUILDING PROMPT FROM COGNITION PACKET ---")
     if slim_mode:
@@ -418,26 +421,61 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     system_content_parts = []
 
-    # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
-    if identity_description_content:
-        system_content_parts.append(identity_description_content)
+    # ── KV Prefix Optimization ─────────────────────────────────────────
+    # When kv_prefix_active=True, the engine's KV cache already contains the
+    # static foundation (identity, persona rules, epistemic directives, tool
+    # conventions).  We skip injecting them here to halve prompt tokens.
+    # Only dynamic per-request content (time, task, world state, RAG) is sent.
+    if kv_prefix_active:
+        # Minimal context marker so the model knows its foundation is loaded
+        import time as _time
+        _current_time = _time.strftime('%Y-%m-%d %H:%M:%S UTC', _time.gmtime())
+        system_content_parts.append(
+            f"[System identity and rules loaded from KV cache prefix]\n"
+            f"Current time: {_current_time}\nPersona: {persona_id}\nRole: {role_val}"
+        )
+        # Skip to dynamic sections (world state, task instruction, RAG, etc.)
+    else:
+        # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
+        if identity_description_content:
+            system_content_parts.append(identity_description_content)
 
-    # 2. Persona Anchor (Role, Tone) + MCP one-liner
-    system_content_parts.append(persona_instructions)
-    if mcp_affordance_line:
-        system_content_parts.append(mcp_affordance_line)
+        # 2. Persona Anchor (Role, Tone) + MCP one-liner
+        system_content_parts.append(persona_instructions)
+        if mcp_affordance_line:
+            system_content_parts.append(mcp_affordance_line)
 
-    # 3. Safety & Openness Directive
-    if safety_openness_directive_content:
-        system_content_parts.append(safety_openness_directive_content)
+        # 3. Safety & Openness Directive
+        if safety_openness_directive_content:
+            system_content_parts.append(safety_openness_directive_content)
 
-    # 3.5. Epistemic Honesty — unconditional, every turn
-    epistemic_honesty_directive = (
+    # ── Context-aware directive compression ────────────────────────────
+    # Detect if we're targeting a small context model (≤8K).
+    # If so, use condensed directives (~300 tokens) instead of verbose (~1350).
+    # SKIP entirely when KV prefix contains these directives already.
+    _context_window = 8192
+    try:
+        _context_window = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+    except Exception:
+        pass
+    _small_context = _context_window <= 8192
+
+    # 3.5-3.86. Epistemic/Tool/Routing directives
+    # Skipped when kv_prefix_active — these are baked into the KV prefix
+    if not kv_prefix_active and _small_context:
+        # Condensed version for small context models
+        epistemic_honesty_directive = (
+            "RULES: Never fabricate sources, quotes, or data. Distinguish your knowledge base "
+            "(Retrieved Documents) from general training knowledge. When uncertain, say so. "
+            "Never treat fictional content as system status. Use tool calls to check real system state."
+        )
+    else:
+        epistemic_honesty_directive = (
         "EPISTEMIC HONESTY & ANTI-CONFABULATION RULES (mandatory — violations erode trust):\n"
         "\n"
         "── Source Integrity ──\n"
-        "1. NEVER cite a file path you have not read via an EXECUTE: directive in this conversation. "
-        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via EXECUTE: read_file.\n"
+        "1. NEVER cite a file path you have not read via a <tool_call> in this conversation. "
+        "If you reference a file, it MUST appear in the Retrieved Documents section above or you MUST have read it via a file read tool call.\n"
         "2. NEVER fabricate quotes. Do not use blockquote formatting (> ...) to present text as if it came from a document unless that exact text appears in your Retrieved Documents.\n"
         "3. CLEARLY DISTINGUISH sources: say 'From my knowledge base:' only for Retrieved Document content. "
         "Say 'From my general knowledge:' or 'I believe:' for anything from training data.\n"
@@ -451,7 +489,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         "NEVER treat fictional or project-narrative content as actual system status, telemetry, or operational data. "
         "A document about a D&D campaign is a game document — it says nothing about your real operational state.\n"
         "7. When asked about your OWN system status (sleep state, uptime, health, resource usage, errors, etc.), "
-        "you MUST use EXECUTE: directives to query actual system endpoints or read actual system logs. "
+        "you MUST use tool calls to query actual system endpoints or read actual system logs. "
         "Do NOT infer your system state from knowledge base documents, session context, or narrative content. "
         "If you cannot query the real data, say: 'I'd need to check my actual system status to answer that accurately.'\n"
         "\n"
@@ -462,11 +500,38 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         "that exact value from a tool call or it appears verbatim in your Retrieved Documents.\n"
         "9. When uncertain, use hedging language ('I'm not sure of the exact time', 'I don't have current metrics') "
         "rather than inventing plausible-sounding specifics. Vague honesty is always better than precise fiction."
-    )
+        )
     system_content_parts.append(epistemic_honesty_directive)
 
     # 3.55. Epistemic Drive — behavioral tendency toward knowledge grounding
-    epistemic_drive_directive = (
+    if _small_context:
+        epistemic_drive_directive = (
+            "BEHAVIOR: Be authentic, not performative. Calibrate confidence to source quality. "
+            "When uncertain, use tools to check. Emit THOUGHT_SEED: for knowledge gaps."
+        )
+        system_content_parts.append(epistemic_drive_directive)
+
+        # Skip verbose sections 3.6-3.86 for small context — condense to essentials
+        # Language constraint (keep — it's tiny)
+        system_content_parts.append(
+            "LANGUAGE: Always respond in English unless translation is explicitly requested."
+        )
+
+        # Tool calling (keep — critical for tool use)
+        tool_already_executed = (
+            getattr(packet, 'tool_routing', None)
+            and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
+        )
+        if not tool_already_executed:
+            system_content_parts.append(
+                "TOOLS: Use <tool_call>{\"tool\":\"name\",\"action\":\"verb\",...}</tool_call> to call tools. "
+                "System executes and returns <tool_result>. Never fabricate results."
+            )
+
+        # Skip thought seed, spinal routing, vital organ — not needed for inference
+        # Jump directly to world state
+    elif not kv_prefix_active:
+        epistemic_drive_directive = (
         "EPISTEMIC DRIVE (core behavioral tendency):\n"
         "\n"
         "── Authentic Engagement ──\n"
@@ -503,101 +568,59 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         "clarifying question or connect it to something you do know.\n"
         "6. Emit a THOUGHT_SEED when you identify a genuine knowledge gap: "
         "'THOUGHT_SEED: Knowledge gap — [topic]. Could be researched and added to knowledge base.'\n"
-    )
-    system_content_parts.append(epistemic_drive_directive)
+        )
+        system_content_parts.append(epistemic_drive_directive)
 
-    # 3.6. Language Constraint — always respond in English
-    language_constraint = (
-        "LANGUAGE CONSTRAINT: Always respond in English. "
-        "Do not use non-English words, characters, or scripts (e.g. Chinese, Japanese, Korean) "
-        "unless the user explicitly asks for translation or the content being quoted is in another language."
-    )
-    system_content_parts.append(language_constraint)
+        # 3.6-3.86 verbose versions for large context models
+        language_constraint = (
+            "LANGUAGE CONSTRAINT: Always respond in English. "
+            "Do not use non-English words, characters, or scripts (e.g. Chinese, Japanese, Korean) "
+            "unless the user explicitly asks for translation or the content being quoted is in another language."
+        )
+        system_content_parts.append(language_constraint)
 
-    # 3.7. Tool Calling Convention — only when tools are visible
-    # IMPORTANT: Suppress the EXECUTE syntax when a tool has already been executed
-    # by the tool routing pipeline.  Small models (3B) pattern-match on EXECUTE:
-    # examples and re-emit the directive instead of synthesising the injected
-    # results.  Removing the syntax from context prevents this echo failure.
-    tool_already_executed = (
-        getattr(packet, 'tool_routing', None)
-        and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
-    )
-    tool_calling_convention = ""
-    try:
-        if not tool_already_executed and (
-            "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or "")
-        ):
-            tool_calling_convention = (
-                "TOOL CALLING CONVENTION:\n"
-                "To use a tool, emit a directive on its own line in this exact format:\n"
-                "EXECUTE: tool_name {\"param\": \"value\"}\n"
-                "Examples:\n"
-                "  EXECUTE: read_file {\"path\": \"/knowledge/system_reference/core_identity.json\"}\n"
-                "  EXECUTE: web_search {\"query\": \"Gettysburg Address full text\"}\n"
-                "  EXECUTE: list_dir {\"path\": \"/knowledge\"}\n"
-                "NEVER fabricate tool results. NEVER write text like '[Tool call: ...]' or "
-                "pretend you already called a tool. Only use the EXECUTE: directive above. "
-                "If you need information from a file or the web, emit EXECUTE: and STOP — "
-                "the system will execute the tool and provide results in a follow-up."
-            )
-    except Exception:
+        tool_already_executed = (
+            getattr(packet, 'tool_routing', None)
+            and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
+        )
         tool_calling_convention = ""
+        try:
+            if not tool_already_executed and (
+                "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or "")
+            ):
+                tool_calling_convention = (
+                    "TOOL CALLING CONVENTION:\n"
+                    "To use a tool, emit a tool call tag in this exact format:\n"
+                    "<tool_call>{\"tool\": \"tool_name\", \"action\": \"verb\", ...params}</tool_call>\n"
+                    "Examples:\n"
+                    "  <tool_call>{\"tool\": \"web\", \"action\": \"search\", \"query\": \"Jabberwocky full text\"}</tool_call>\n"
+                    "  <tool_call>{\"tool\": \"file\", \"action\": \"read\", \"path\": \"/knowledge/...\"}</tool_call>\n"
+                    "System executes the tool and injects <tool_result>. Continue your response using the result.\n"
+                    "NEVER fabricate tool results. If you need information, emit the <tool_call> tag."
+                )
+        except Exception:
+            tool_calling_convention = ""
+        if tool_calling_convention:
+            system_content_parts.append(tool_calling_convention)
 
-    if tool_calling_convention:
-        system_content_parts.append(tool_calling_convention)
+        thought_seed_directive = (
+            "THOUGHT SEED DIRECTIVE:\n"
+            "Emit THOUGHT_SEED: <insight> sparingly (0-1 per response) for knowledge gaps, "
+            "novel patterns, or user preferences worth internalizing."
+        )
+        system_content_parts.append(thought_seed_directive)
 
-    # 3.8. Thought Seed directive — teach the model it can emit seeds
-    thought_seed_directive = (
-        "THOUGHT SEED DIRECTIVE:\n"
-        "When you notice a valuable insight, learning opportunity, or novel connection "
-        "during your response, you may emit a thought seed for later review:\n"
-        "THOUGHT_SEED: <brief description of the insight>\n"
-        "Use this sparingly (0-1 per response) for:\n"
-        "- KNOWLEDGE GAPS: When you lack information on a topic the user cares about, "
-        "emit: THOUGHT_SEED: Knowledge gap — [specific topic]. These are automatically "
-        "researched during idle time and added to your knowledge base.\n"
-        "- Novel problem-solving patterns worth remembering\n"
-        "- Connections between topics that could deepen understanding\n"
-        "- User preferences or interaction patterns to internalize\n"
-        "Seeds tagged as knowledge gaps are prioritized for autonomous research. "
-        "Do NOT use THOUGHT_SEED for routine observations."
-    )
-    system_content_parts.append(thought_seed_directive)
+        spinal_routing_directive = (
+            "SPINAL ROUTING: Use SKETCHPAD: for internal thoughts. "
+            "Use USER_CHAT: for user-facing status updates."
+        )
+        system_content_parts.append(spinal_routing_directive)
 
-    # 3.8.5 Spinal Routing Directive - Multi-destination thought processing
-    spinal_routing_directive = (
-        "SPINAL ROUTING DIRECTIVE (OutputRouting):\n"
-        "You are connected to a multi-destination nervous system. You do not need to send all "
-        "your thoughts to the user. You can split your output.\n"
-        "When performing complex or multi-step tasks, you may emit an intermediate status "
-        "update to the user, while directing your detailed planning to your internal sketchpad.\n"
-        "Use the following syntax on its own line to route information to your sketchpad:\n"
-        "SKETCHPAD: [Your detailed internal thoughts, plans, or working state]\n"
-        "Use the following syntax to send an interactive update to the user chat:\n"
-        "USER_CHAT: [A brief, polite status update letting them know what you are working on]\n"
-        "This allows you to 'think out loud' internally without cluttering the user interface."
-    )
-    system_content_parts.append(spinal_routing_directive)
-
-    # 3.8.6 Vital Organ Promotion Directive - Protocol for core system changes
-    vital_organ_directive = (
-        "VITAL ORGAN PROMOTION PROTOCOL:\n"
-        "The following modules are considered VITAL ORGANS: main.py, agent_core.py, "
-        "mcp_client.py, tools.py, and immune_system.py. Modifications to these must follow "
-        "a strict safety path:\n"
-        "1. CANDIDATE FIRST: Develop all changes in the `candidates/` directory first.\n"
-        "2. VALIDATION: You MUST run diffs, grammar checks (ruff), and Python compilation "
-        "checks (py_compile) against the candidate code.\n"
-        "3. REGRESSION TESTING: Verify that the candidate changes do not break existing logic.\n"
-        "4. COUNCIL APPROVAL: Present your final proposal and validation results to the "
-        "user (Azrael) for formal approval.\n"
-        "5. PROMOTION: Only after approval should changes be copied from `candidates/` to "
-        "production (live) directories for HA pairing integration.\n"
-        "Note: The Sovereign Shield compilation gate in your MCP will automatically block "
-        "any save that introduces syntax errors, but this does not replace the protocol."
-    )
-    system_content_parts.append(vital_organ_directive)
+        vital_organ_directive = (
+            "VITAL ORGAN PROTOCOL: For main.py, agent_core.py, tools.py — "
+            "candidates/ first → validate → council approval → promote."
+        )
+        system_content_parts.append(vital_organ_directive)
 
     # 3.9. Goal Context — inform the model of the detected user goal
     if packet.goal_state and packet.goal_state.current_goal:
@@ -685,6 +708,21 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         except Exception:
             logger.debug("Audio context injection skipped", exc_info=True)
 
+    # 5.9. Cognitive Index Layer (CIL) — lightweight pointer index
+    # Always injected (small, <2KB). Routes gaia-core to the right knowledge
+    # without loading it wholesale. See /shared/memory/gaia-index.md
+    if not compact_mode:
+        try:
+            from pathlib import Path
+            _cil_path = Path("/shared/memory/gaia-index.md")
+            if _cil_path.exists():
+                _cil_text = _cil_path.read_text().strip()
+                if _cil_text and len(_cil_text) < 4096:  # Safety cap
+                    system_content_parts.append(_cil_text)
+                    logger.debug("CIL injected: %d chars", len(_cil_text))
+        except Exception:
+            logger.debug("CIL injection skipped", exc_info=True)
+
     # 6. Knowledge Base Context
     if knowledge_base_content:
         system_content_parts.append(knowledge_base_content)
@@ -694,6 +732,63 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # 6.5. Semantic Probe Context (auto-detected domain context from vector lookup)
     if semantic_probe_content:
         system_content_parts.append(semantic_probe_content)
+
+    # 6.7. CIL Grounding — topic file content from Cognitive Index entity lookup
+    # This is the actual content fetched from topic files matched by the semantic
+    # probe's CIL lookup. Different from Tier 5.9 (the index itself) — this is
+    # the resolved content that the index pointed to.
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'cil_grounding' and getattr(df, 'value', None):
+                grounding = df.value
+                if isinstance(grounding, dict) and grounding:
+                    parts = ["--- Cognitive Index Grounding ---"]
+                    for entity, info in grounding.items():
+                        snippet = info.get("snippet", "")
+                        source_path = info.get("path", "")
+                        if snippet:
+                            parts.append(f"[{entity}] (from {source_path}):")
+                            parts.append(snippet[:500])
+                            parts.append("")
+                    if len(parts) > 1:
+                        parts.append("--- End of CIL Grounding ---")
+                        system_content_parts.append("\n".join(parts))
+                        logger.debug("CIL grounding injected: %d entities", len(grounding))
+                break
+    except Exception:
+        logger.debug("CIL grounding injection skipped", exc_info=True)
+
+    # 6.8. Web Search Fallback Grounding — search results for entities with
+    # no local knowledge. Surfaces titles + snippets so the model can reference
+    # or suggest deeper retrieval via CFR.
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
+                web_g = df.value
+                if isinstance(web_g, dict) and web_g:
+                    parts = ["--- Web Search Context (auto-retrieved for unknown entities) ---"]
+                    for entity, info in web_g.items():
+                        parts.append(f"Search: \"{entity}\"")
+                        for r in info.get("results", [])[:3]:
+                            title = r.get("title", "")
+                            snippet = r.get("snippet", "")
+                            url = r.get("url", "")
+                            if title:
+                                parts.append(f"  - {title}")
+                                if snippet:
+                                    parts.append(f"    {snippet[:150]}")
+                                if url:
+                                    parts.append(f"    ({url})")
+                        parts.append("")
+                    if len(parts) > 1:
+                        parts.append("NOTE: These are search result previews, not full content.")
+                        parts.append("If the user needs details, offer to fetch the full page.")
+                        parts.append("--- End of Web Search Context ---")
+                        system_content_parts.append("\n".join(parts))
+                        logger.debug("Web grounding injected: %d entities", len(web_g))
+                break
+    except Exception:
+        logger.debug("Web grounding injection skipped", exc_info=True)
 
     # 7. Retrieved Documents (RAG) or Epistemic Honesty Directive
     if retrieved_docs_content:
@@ -794,9 +889,94 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         logger.debug("PromptBuilder: failed to inject loop recovery context", exc_info=True)
 
-    system_prompt = {"role": "system", "content": "\n\n".join(system_content_parts).strip()}
-    logger.info("--- FINAL SYSTEM PROMPT ---")
-    logger.info(system_prompt)
+    # ── KV Cache Deduplication ─────────────────────────────────────────
+    # Remove sections that are already cached in the KV prefix.
+    # Static content (identity, epistemic rules, tool convention, etc.)
+    # should be in the prefix cache — no need to send it as raw text too.
+    try:
+        from gaia_common.engine.cogpacket_compressor import compress_system_prompt
+        _pre_compress = "\n\n".join(system_content_parts).strip()
+        _pre_tokens = count_tokens(_pre_compress)
+
+        # Try to get the engine's prefix cache for hash checking
+        _kv_cache = None
+        try:
+            import gaia_core.main as _core_main
+            _app = getattr(_core_main, 'app', None)
+            if _app:
+                _engine_ref = getattr(_app.state, 'engine', None)
+                if _engine_ref and hasattr(_engine_ref, 'prefix_cache'):
+                    _kv_cache = _engine_ref.prefix_cache
+        except Exception:
+            pass
+
+        _compressed = compress_system_prompt(
+            full_prompt=_pre_compress,
+            kv_cache=_kv_cache,
+        )
+        _post_tokens = count_tokens(_compressed)
+
+        if _post_tokens < _pre_tokens * 0.85:  # Only use if >15% savings
+            system_content_parts = [_compressed]
+            logger.info("CogPacket compression: %d → %d tokens (%.0f%% savings)",
+                        _pre_tokens, _post_tokens,
+                        (1 - _post_tokens / max(1, _pre_tokens)) * 100)
+    except ImportError:
+        logger.debug("CogPacketCompressor not available")
+    except Exception:
+        logger.debug("CogPacket compression failed", exc_info=True)
+
+    # ── Context Budget Enforcement ──────────────────────────────────────
+    # Trim lower-priority sections if the system prompt exceeds budget.
+    # Target: ≤3000 tokens for system prompt, leaving room for history,
+    # user prompt, and generation.
+    #
+    # Priority: identity/persona (keep) > rules (compress) > awareness (keep) >
+    # CIL index (keep) > grounding/RAG (trim) > web search (trim) >
+    # directives (trim verbose ones)
+    _system_text = "\n\n".join(system_content_parts).strip()
+    _system_tokens = count_tokens(_system_text)
+    _SYSTEM_BUDGET = 2000 if _small_context else 3000  # tokens
+
+    if _system_tokens > _SYSTEM_BUDGET:
+        logger.warning("System prompt over budget: %d tokens (budget: %d). Trimming.",
+                        _system_tokens, _SYSTEM_BUDGET)
+
+        # Trim from lowest priority first
+        # Tag parts by priority so we can identify what to remove
+        _trim_targets = [
+            "Web Search Context",           # P8 — trim first
+            "Cognitive Index Grounding",    # P7
+            "Reference Cheatsheets",        # P6
+            "VITAL ORGAN",                  # P5 — verbose protocol
+            "SPINAL ROUTING",               # P5
+            "THOUGHT SEED",                 # P5
+            "council",                      # P5
+            "Conversation summary",         # P4
+            "timeline",                     # P4
+        ]
+
+        for target in _trim_targets:
+            if _system_tokens <= _SYSTEM_BUDGET:
+                break
+            # Find and remove parts containing this target
+            new_parts = []
+            for part in system_content_parts:
+                if target.lower() in part.lower():
+                    removed_tokens = count_tokens(part)
+                    _system_tokens -= removed_tokens
+                    logger.info("Budget trim: removed '%s' section (~%d tokens)",
+                                target, removed_tokens)
+                else:
+                    new_parts.append(part)
+            system_content_parts = new_parts
+
+        _system_text = "\n\n".join(system_content_parts).strip()
+        _system_tokens = count_tokens(_system_text)
+        logger.info("System prompt after trim: %d tokens", _system_tokens)
+
+    system_prompt = {"role": "system", "content": _system_text}
+    logger.info("--- FINAL SYSTEM PROMPT: %d tokens ---", _system_tokens)
     # Log prompt assembly at INFO without content; include metrics at DEBUG.
     try:
         logger.info("PromptBuilder: assembled system prompt")
@@ -870,24 +1050,56 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         logger.debug("Failed to extract session RAG context", exc_info=True)
 
     # --- Tier 2: Add Relevant History Snippets (Short-Term Memory) ---
+    # Use the ContextCompactor for rolling summarization of conversation history.
+    # Recent turns: full resolution. Middle turns: compressed. Old turns: summarized.
     history_to_include = []
-    # Defensive access to history snippets: a missing context or attribute
-    # should not crash prompt building; fall back to empty history.
     try:
         history_snippets = getattr(getattr(packet, 'context', None), 'relevant_history_snippet', []) or []
     except Exception:
         history_snippets = []
-    for message in reversed(history_snippets):
-        # The new packet stores snippets, which are already summaries.
-        # We assume the role is either 'user' or 'assistant' for history.
-        msg_content = f"{message.role}: {message.summary}"
-        msg_tokens = count_tokens(msg_content)
-        if msg_tokens <= remaining_budget:
-            history_to_include.insert(0, {"role": message.role, "content": message.summary})
-            remaining_budget -= msg_tokens
-        else:
-            logger.debug("History budget exhausted. Trimming older snippets.")
-            break
+
+    if history_snippets:
+        # Convert snippets to message format for the compactor
+        raw_history = []
+        for message in history_snippets:
+            raw_history.append({
+                "role": getattr(message, "role", "user"),
+                "content": getattr(message, "summary", getattr(message, "text", "")),
+            })
+
+        # Run rolling compaction — fits history into remaining budget
+        try:
+            from gaia_core.memory.context_compactor import ContextCompactor
+            compactor = ContextCompactor(
+                recent_turns=6,
+                middle_turns=8,
+                target_budget_tokens=min(remaining_budget, 2000),
+            )
+            compacted = compactor.compact(raw_history, budget_tokens=remaining_budget)
+            history_to_include = compacted.to_messages()
+            remaining_budget -= compacted.estimated_tokens
+
+            if compacted.dedup_notes:
+                logger.info("Context compactor dedup: %s", compacted.dedup_notes)
+            if compacted.old_summary_covers_turns > 0:
+                logger.info("Context compactor: summarized %d old turns, %d middle, %d recent",
+                            compacted.old_summary_covers_turns,
+                            len(compacted.middle_turns),
+                            len(compacted.recent_turns))
+        except Exception:
+            # Fallback: simple budget-based trimming (original behavior)
+            logger.debug("Context compactor failed, using simple trim", exc_info=True)
+            for message in reversed(history_snippets):
+                msg_content = f"{message.role}: {getattr(message, 'summary', '')}"
+                msg_tokens = count_tokens(msg_content)
+                if msg_tokens <= remaining_budget:
+                    history_to_include.insert(0, {
+                        "role": getattr(message, "role", "user"),
+                        "content": getattr(message, "summary", ""),
+                    })
+                    remaining_budget -= msg_tokens
+                else:
+                    break
 
     # === Normalization helper ===
     def _map_role(role: str) -> str:

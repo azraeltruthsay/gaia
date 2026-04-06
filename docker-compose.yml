@@ -79,10 +79,19 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
-      - "6410:6410"
+      - "127.0.0.1:6410:6410"
 
     networks:
       - gaia-net
+
+    # GPU runtime for NVML monitoring (pynvml) — no VRAM reservation
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6410/health"]
@@ -134,7 +143,7 @@ services:
       - GGUF_THREADS=16
 
     ports:
-      - "7777:7777"
+      - "127.0.0.1:7777:7777"
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
@@ -204,7 +213,7 @@ services:
       - SHARED_DIR=/shared
 
     ports:
-      - "8090:8080"
+      - "127.0.0.1:8090:8080"
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -284,7 +293,7 @@ services:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
-      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-1}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
@@ -336,7 +345,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
-      - "6415:6415"
+      - "127.0.0.1:6415:6415"
 
     deploy:
       resources:
@@ -383,7 +392,7 @@ services:
 
     volumes:
       # Project root for unified access
-      - .:/gaia/GAIA_Project:rw
+      - .:/gaia/GAIA_Project:ro
       # Source code (development mode)
       - ./gaia-web:/app:rw
       # Shared library (development mode)
@@ -441,7 +450,7 @@ services:
       - TRANSLATE_ENDPOINT=${TRANSLATE_ENDPOINT:-http://gaia-translate:5000}
 
     ports:
-      - "6414:6414"
+      - "127.0.0.1:6414:6414"
 
     networks:
       - gaia-net
@@ -543,7 +552,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
-      - "8766:8766"
+      - "127.0.0.1:8766:8766"
 
     networks:
       - gaia-net
@@ -639,7 +648,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
-      - "8765:8765"
+      - "127.0.0.1:8765:8765"
 
     networks:
       - gaia-net
@@ -678,7 +687,7 @@ services:
 
     volumes:
       # Project root for unified access
-      - .:/gaia/GAIA_Project:rw
+      - .:/gaia/GAIA_Project:ro
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
@@ -702,7 +711,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -780,7 +789,7 @@ services:
       - DOZZLE_NO_ANALYTICS=true
 
     ports:
-      - "9999:8080"
+      - "127.0.0.1:9999:8080"
 
     networks:
       - gaia-net
@@ -799,7 +808,7 @@ services:
 
     environment:
       - POLL_INTERVAL=15
-      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-2}
+      - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-4}
       - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
       - COMPOSE_PROJECT_NAME=gaia_project
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -811,7 +820,7 @@ services:
 
     volumes:
       # Docker socket (read-write — doctor needs to restart containers)
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       # Docker CLI + compose plugin (bind-mounted from host, avoids installing full docker.io)
       - /usr/bin/docker:/usr/bin/docker:ro
       - /usr/lib/docker/cli-plugins/docker-compose:/usr/lib/docker/cli-plugins/docker-compose:ro
@@ -827,7 +836,7 @@ services:
       - "${DOCKER_GID:-962}"
 
     ports:
-      - "6419:6419"
+      - "127.0.0.1:6419:6419"
 
     networks:
       - gaia-net
@@ -868,7 +877,7 @@ services:
       - PROMPTFOO_HOME=/tmp/.promptfoo
 
     ports:
-      - "6420:6420"
+      - "127.0.0.1:6420:6420"
 
     networks:
       - gaia-net
@@ -903,7 +912,7 @@ services:
       - LT_PORT=5000
 
     ports:
-      - "5100:5000"
+      - "127.0.0.1:5100:5000"
 
     networks:
       - gaia-net
@@ -941,7 +950,7 @@ services:
       - ELASTIC_PASSWORD=
 
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
 
     networks:
       - gaia-net
@@ -974,7 +983,7 @@ services:
       - XPACK_MONITORING_ENABLED=false
 
     ports:
-      - "5044:5044"
+      - "127.0.0.1:5044:5044"
 
     networks:
       - gaia-net
@@ -1005,7 +1014,7 @@ services:
       - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
 
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"
 
     networks:
       - gaia-net
@@ -1104,3 +1113,5 @@ secrets:
     file: ${HOME}/.gaia/secrets/kanka_api_key
   discord_bot_token:
     file: ${HOME}/.gaia/secrets/discord_bot_token
+  gaia_service_key:
+    file: ${HOME}/.gaia/secrets/gaia_service_key

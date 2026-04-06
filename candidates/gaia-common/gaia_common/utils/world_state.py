@@ -71,7 +71,7 @@ def _model_paths() -> Dict[str, str]:
     return {
         "prime_hf": os.getenv("GAIA_PRIME_HF_MODEL") or "",
         "prime_gguf": os.getenv("GAIA_PRIME_GGUF") or "",
-        "lite": os.getenv("GAIA_LITE_GGUF") or os.getenv("LITE_MODEL_PATH") or "",
+        "core": os.getenv("GAIA_CORE_GGUF") or os.getenv("GAIA_LITE_GGUF") or os.getenv("CORE_MODEL_PATH") or "",
         "embed": os.getenv("EMBEDDING_MODEL_PATH") or "",
     }
 
@@ -229,12 +229,13 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
 
     tools = snap.get("mcp_tools") or []
     if tools:
-        lines.append("MCP tools: " + ", ".join(tools))
-
-    # Add capability affordances - natural language hints about what GAIA can do
-    affordances = _capability_affordances(tools)
-    if affordances:
-        lines.append("Affordances: " + " ".join(affordances))
+        # Use consolidated domain tool catalog (~150 tokens) instead of
+        # dumping all 70 legacy tool names (~300 tokens).
+        try:
+            from gaia_common.utils.domain_tools import build_prompt_catalog
+            lines.append(build_prompt_catalog())
+        except ImportError:
+            lines.append("MCP tools: " + ", ".join(tools))
 
     # Self-knowledge hint - where GAIA's core documents live
     lines.append(

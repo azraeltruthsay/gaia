@@ -117,7 +117,7 @@ _startup_logger = _logging.getLogger("GAIA.Rescue.startup")
 try:
     autoload = os.getenv("GAIA_AUTOLOAD_MODELS", "0") == "1"
     if not autoload:
-        _startup_logger.warning("[startup-diagnostic] autoload disabled (GAIA_AUTOLOAD_MODELS!=1); skipping automatic prime/lite autoload to avoid CUDA/fork hazards")
+        _startup_logger.warning("[startup-diagnostic] autoload disabled (GAIA_AUTOLOAD_MODELS!=1); skipping automatic prime/core autoload to avoid CUDA/fork hazards")
     else:
         # Defer actual autoload actions to the CLI `main()` so any spawn-based
         # loaders are invoked after interpreter bootstrap (avoids spawn/bootstrapping
@@ -683,15 +683,15 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str, initial_mode: str = 
             intent_str = "other"
             if os.getenv("GAIA_BACKEND") != "azrael":
                 from gaia_core.cognition.nlu.intent_service import detect_intent
-                # Prefer using ai.lite_llm if present; otherwise try to acquire an idle 'lite' model
+                # Prefer using ai.lite_llm if present; otherwise try to acquire an idle 'core' model
                 lite_model = ai.lite_llm
                 acquired_name = None
                 try:
                     if lite_model is None:
                         try:
-                            # Acquire a lite model from the model pool for intent detection
-                            lite_model = ai.model_pool.acquire_model_for_role('lite')
-                            acquired_name = 'lite'
+                            # Acquire a core model from the model pool for intent detection
+                            lite_model = ai.model_pool.acquire_model_for_role('core')
+                            acquired_name = 'core'
                         except Exception:
                             lite_model = None
 
@@ -987,7 +987,7 @@ def main():
 
     import os
     # If operator requested oracle mode, force backend selection to oracle_openai
-    # so intent/routing won't pick gpu_prime.
+    # so intent/routing won't pick prime.
     if getattr(args, "use_oracle", False):
         os.environ["GAIA_BACKEND"] = "oracle_openai"
 
@@ -1018,20 +1018,20 @@ def main():
     except Exception:
         logger.debug("Failed to register graceful shutdown hooks", exc_info=True)
     
-    # Allow operator to force which model provides observer/lite roles via env
+    # Allow operator to force which model provides observer/core roles via env
     observer_role = os.getenv("GAIA_OBSERVER_ROLE")
     if observer_role:
-        # If the operator requests 'lite' to be used for observer, set the sharing env var
-        if observer_role in ("lite", "prime", "gpu_prime"):
+        # If the operator requests 'core' to be used for observer, set the sharing env var
+        if observer_role in ("core", "prime"):
             os.environ.setdefault("GAIA_SHARE_LITE_WITH", observer_role)
-    # Ensure 'prime' config is set as alias for 'gpu_prime' if CUDA is available,
-    # but default backend stays Operator (lite) unless explicitly overridden.
+    # Ensure 'prime' config is available if CUDA is available,
+    # but default backend stays Operator (core) unless explicitly overridden.
     try:
         import torch
-        if torch.cuda.is_available() and "gpu_prime" in ai.model_pool.config.MODEL_CONFIGS:
-            ai.model_pool.config.MODEL_CONFIGS["prime"] = {"alias": "gpu_prime", "enabled": True, "type": "local"}
+        if torch.cuda.is_available() and "prime" in ai.model_pool.config.MODEL_CONFIGS:
+            ai.model_pool.config.MODEL_CONFIGS.setdefault("prime", {"enabled": True, "type": "local"})
             # Do not override GAIA_BACKEND unless operator explicitly sets it.
-        logger.info("Loading gpu_prime and lite models at startup (deferred to autoload or explicit request).")
+        logger.info("Loading prime and core models at startup (deferred to autoload or explicit request).")
     except Exception as e:
         logger.error(f"Model loading failed: {e}")
     ai.initialize(args.persona)
@@ -1067,11 +1067,11 @@ def main():
         # will prefer an in-process load but fall back to a spawn-based loader
         # when necessary. Calling this from main() (instead of at import time)
         # avoids the multiprocessing bootstrap race.
-        # Skip prime autoload when operator forces a non-prime backend (e.g., lite)
+        # Skip prime autoload when operator forces a non-prime backend (e.g., core)
         try:
             backend_env = os.getenv('GAIA_BACKEND', '').strip().lower()
             skip_prime = os.getenv('GAIA_SKIP_PRIME_LOAD', '0') == '1'
-            if backend_env in ('lite', 'observer') or skip_prime:
+            if backend_env in ('core', 'observer') or skip_prime:
                 logger.info("Skipping ensure_prime_loaded because GAIA_BACKEND=%s or GAIA_SKIP_PRIME_LOAD=1", backend_env or '<unset>')
             else:
                 mgr = get_manager()
@@ -1080,7 +1080,7 @@ def main():
         except Exception:
             logger.exception("ensure_prime_loaded() raised an exception")
 
-        # Then load remaining models (lite/observer/embed) into the pool.
+        # Then load remaining models (core/observer/embed) into the pool.
         model_pool.load_models(args.use_oracle)
         try:
             logger.warning("[MODEL_POOL DEBUG] after load: id=%s keys=%s", id(model_pool), list(getattr(model_pool, 'models', {}).keys()))
@@ -1093,8 +1093,8 @@ def main():
             missing = []
             if 'prime' not in model_pool.models:
                 missing.append('prime')
-            if 'lite' not in model_pool.models:
-                missing.append('lite')
+            if 'core' not in model_pool.models:
+                missing.append('core')
             if missing:
                 msg = f"Critical models missing after autoload: {missing}."
                 if fail_on_missing and not allow_missing:
@@ -1111,7 +1111,7 @@ def main():
             logger.info("No model files found at %s and GAIA_AUTOLOAD_MODELS not set; skipping model load in rescue mode.", models_dir)
 
     # Optional keepalive to keep EngineCore warm. Enable by setting GAIA_KEEPALIVE_SECONDS>0.
-    # GAIA_KEEPALIVE_MODEL selects which role to ping (default: gpu_prime).
+    # GAIA_KEEPALIVE_MODEL selects which role to ping (default: prime).
     def _start_keepalive():
         try:
             interval = float(os.getenv("GAIA_KEEPALIVE_SECONDS", "0"))
@@ -1119,7 +1119,7 @@ def main():
             interval = 0
         if interval <= 0:
             return
-        model_name = os.getenv("GAIA_KEEPALIVE_MODEL", "gpu_prime")
+        model_name = os.getenv("GAIA_KEEPALIVE_MODEL", "prime")
         def _loop():
             while True:
                 try:
@@ -1171,7 +1171,7 @@ def main():
 
     def _run_slim_prompt(prompt: str, model_name: str = None):
         """Bypass plan/reflect for single-shot prompts while still providing identity + MCP context."""
-        model_role = model_name or os.getenv("GAIA_BACKEND") or "gpu_prime"
+        model_role = model_name or os.getenv("GAIA_BACKEND") or "prime"
         mcp_summary = ai.config.constants.get("mcp_capabilities_summary") or ai.config.constants.get("mcp_capabilities") or ""
         system = (
             "You are GAIA - General Artisanal Intelligence Architecture. "

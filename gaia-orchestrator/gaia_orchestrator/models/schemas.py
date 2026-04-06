@@ -59,9 +59,9 @@ class GPUWatchState(BaseModel):
     """Complete GPU watch rotation state."""
     gpu_state: GPUState = GPUState.IDLE
     tiers: Dict[str, TierStatus] = Field(default_factory=lambda: {
-        "nano": TierStatus(name="nano", role="reflex"),
-        "core": TierStatus(name="core", role="operator"),
-        "prime": TierStatus(name="prime", role="thinker"),
+        "nano": TierStatus(name="nano", role="nano"),
+        "core": TierStatus(name="core", role="core"),
+        "prime": TierStatus(name="prime", role="prime"),
     })
     last_transition: Optional[datetime] = None
     transition_reason: str = ""
@@ -249,4 +249,3 @@ class OrchestratorState(BaseModel):
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    lifecycle: Optional[Dict] = Field(default=None, description="Lifecycle machine state for persistence across restarts")

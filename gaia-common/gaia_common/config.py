@@ -19,7 +19,7 @@ class Config:
 
     # ── Model Settings ──────────────────────────────────────────────
     MODEL_CONFIGS: Dict[str, Any] = field(default_factory=dict)
-    llm_backend: str = "gpu_prime"
+    llm_backend: str = "prime"
     n_gpu_layers: int = -1
     temperature: float = 0.7
     top_p: float = 0.95
@@ -166,16 +166,18 @@ class Config:
 
     def _apply_env_overrides(self):
         """Apply high-priority environment variable overrides."""
-        # 1. Backend & Inference
-        self.llm_backend = os.getenv("GAIA_BACKEND", self.llm_backend)
-        
+        # 1. Backend & Inference — normalize legacy names to canonical
+        backend = os.getenv("GAIA_BACKEND", self.llm_backend)
+        _BACKEND_COMPAT = {"gpu_prime": "prime", "cpu_prime": "prime", "thinker": "prime"}
+        self.llm_backend = _BACKEND_COMPAT.get(backend, backend)
+
         # 2. Remote vLLM override (Standardizes PRIME_ENDPOINT usage)
         prime_endpoint = os.getenv("PRIME_ENDPOINT")
         if prime_endpoint:
             self.endpoints["prime"] = prime_endpoint
-            if "gpu_prime" in self.MODEL_CONFIGS:
-                self.MODEL_CONFIGS["gpu_prime"]["endpoint"] = prime_endpoint
-                self.MODEL_CONFIGS["gpu_prime"]["type"] = "vllm_remote"
+            if "prime" in self.MODEL_CONFIGS:
+                self.MODEL_CONFIGS["prime"]["endpoint"] = prime_endpoint
+                self.MODEL_CONFIGS["prime"]["type"] = "vllm_remote"
 
         # 3. Port/Endpoint overrides
         for svc in self.endpoints:
@@ -185,11 +187,11 @@ class Config:
         # 4. Path overrides
         self.MODELS_DIR = os.getenv("MODELS_DIR", self.MODELS_DIR)
         self.KNOWLEDGE_DIR = os.getenv("KNOWLEDGE_DIR", self.KNOWLEDGE_DIR)
-        
+
         # 5. Model Window overrides (critical for VRAM management)
         vllm_max = os.getenv("VLLM_MAX_MODEL_LEN")
-        if vllm_max and "gpu_prime" in self.MODEL_CONFIGS:
-            self.MODEL_CONFIGS["gpu_prime"]["max_model_len"] = int(vllm_max)
+        if vllm_max and "prime" in self.MODEL_CONFIGS:
+            self.MODEL_CONFIGS["prime"]["max_model_len"] = int(vllm_max)
 
     def get_endpoint(self, service: str) -> str:
         """Get the endpoint for a specific service."""

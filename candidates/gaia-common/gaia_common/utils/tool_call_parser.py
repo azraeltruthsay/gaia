@@ -161,29 +161,58 @@ class ToolCallParser:
         return events
 
     def _parse_tool_call(self, json_str: str) -> ParseEvent:
-        """Parse a tool call JSON string into a ParseEvent."""
-        try:
-            data = json.loads(json_str)
-            tool = data.get("tool", "")
-            action = data.get("action", "")
-            # Remove tool and action from params, keep the rest
-            params = {k: v for k, v in data.items() if k not in ("tool", "action")}
+        """Parse a tool call JSON string into a ParseEvent.
 
-            logger.info("Tool call detected: %s(action=%s, %s)", tool, action, params)
+        Includes repair logic for common model malformations:
+        - ``"tool":"name":"web_search"`` → ``"tool_name":"web_search"``
+        - ``"action":"query":`` → ``"action":"query",``
+        """
+        import re as _re
+        raw = json_str.strip()
 
-            return ParseEvent(
-                type=ParseEventType.TOOL_CALL_DETECTED,
-                tool_name=tool,
-                tool_action=action,
-                tool_params=params,
-            )
-        except json.JSONDecodeError as e:
-            logger.warning("Malformed tool call JSON: %s — %s", json_str[:100], e)
-            return ParseEvent(
-                type=ParseEventType.TOOL_ERROR,
-                error=f"Malformed tool call: {e}",
-                text=f"{TOOL_CALL_OPEN}{json_str}{TOOL_CALL_CLOSE}",
-            )
+        # Repair: "tool":"name":"actual" → "tool_name":"actual"
+        # Small models often emit this double-colon pattern
+        repaired = _re.sub(
+            r'"tool"\s*:\s*"name"\s*:\s*"',
+            '"tool_name":"',
+            raw,
+        )
+        # Repair: "action":"verb": "value" → "action":"verb", "value_key": "value"
+        repaired = _re.sub(
+            r'"action"\s*:\s*"(\w+)"\s*:\s*"',
+            r'"action":"\1", "query":"',
+            repaired,
+        )
+
+        for attempt in (repaired, raw):
+            try:
+                data = json.loads(attempt)
+                # Normalize: accept both "tool" and "tool_name" keys
+                tool = data.get("tool") or data.get("tool_name") or data.get("name") or ""
+                action = data.get("action", "")
+                # Remove tool and action from params, keep the rest
+                params = {k: v for k, v in data.items() if k not in ("tool", "tool_name", "name", "action")}
+
+                if attempt != raw:
+                    logger.info("Tool call JSON repaired: %s → %s", raw[:80], attempt[:80])
+
+                logger.info("Tool call detected: %s(action=%s, %s)", tool, action, params)
+
+                return ParseEvent(
+                    type=ParseEventType.TOOL_CALL_DETECTED,
+                    tool_name=tool,
+                    tool_action=action,
+                    tool_params=params,
+                )
+            except json.JSONDecodeError:
+                continue
+
+        logger.warning("Malformed tool call JSON (repair failed): %s", raw[:100])
+        return ParseEvent(
+            type=ParseEventType.TOOL_ERROR,
+            error=f"Malformed tool call JSON",
+            text=f"{TOOL_CALL_OPEN}{json_str}{TOOL_CALL_CLOSE}",
+        )
 
     @property
     def tool_calls(self) -> List[Dict]:

@@ -131,7 +131,7 @@ class OutputRouting:
 @dataclass_json
 @dataclass
 class Model:
-    name: str = "thinker"
+    name: str = "prime"
     provider: str = "vllm"
     context_window_tokens: int = 8192
     max_output_tokens: Optional[int] = None

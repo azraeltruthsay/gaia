@@ -2,7 +2,7 @@
 KV Cache Manager — periodic checkpoint persistence and pressure-based
 auto-compaction for llama-server instances.
 
-Tracks inference activity per role (reflex/nano, core) and periodically saves
+Tracks inference activity per role (nano, core) and periodically saves
 KV cache state to disk via the llama-server /slots API.  Restores on startup
 to warm caches after container restart.
 
@@ -26,7 +26,7 @@ logger = logging.getLogger("GAIA.KVCacheManager")
 
 # Checkpoint filename per role (written into the slot-save-path directory)
 _CHECKPOINT_FILENAMES: Dict[str, str] = {
-    "reflex": "reflex_checkpoint",
+    "nano": "nano_checkpoint",
     "core": "core_checkpoint",
 }
 
@@ -60,7 +60,7 @@ class KVCacheManager:
         self._critical_threshold = critical_threshold
 
         # Track inference counts since last checkpoint per role
-        self._inference_counts: Dict[str, int] = {"reflex": 0, "core": 0}
+        self._inference_counts: Dict[str, int] = {"nano": 0, "core": 0}
         self._lock = threading.Lock()
 
         # Background threads
@@ -285,8 +285,8 @@ class KVCacheManager:
     def _get_model_for_role(self, role: str):
         """Resolve a VLLMRemoteModel instance for the given role.
 
-        - 'reflex' → the Nano endpoint model (models["reflex"])
-        - 'core'   → the Core/Lite CPU endpoint model (models["core"])
+        - 'nano' → the Nano endpoint model (models["nano"])
+        - 'core' → the Core CPU endpoint model (models["core"])
         """
         try:
             model_key = role  # role names match model pool keys
