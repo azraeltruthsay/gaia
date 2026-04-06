@@ -39,20 +39,20 @@ MODELS = [
         "tags": ["primary_school", "identity", "voice", "tool_calling", "prime", "clean_base"],
         "learning_rate": 1.5e-4,
         "target_loss": 0.20,
-        "max_steps": 500,       # More steps for 195 samples on fresh base
+        "max_steps": 1000,      # ~2.5 epochs on 400 sample curriculum
     },
     {
         "name": "primary_school_core",
         "display_name": "Primary School (Core 4B)",
-        "base_model": "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4",
+        "base_model": "/models/Qwen/Qwen3.5-4B",
         "output_dir": "/models/lora_adapters/tier1_global/primary_school_core",
-        "description": "Unified identity + voice + tool calling for Core (4B)",
+        "description": "Unified identity + voice + tool calling + epistemic honesty on clean Qwen3.5-4B (non-abliterated)",
         "tier": 1,
         "pillar": "primary",
-        "tags": ["primary_school", "identity", "voice", "tool_calling", "core"],
+        "tags": ["primary_school", "identity", "voice", "tool_calling", "epistemic_honesty", "core", "clean_base"],
         "learning_rate": 1.5e-4,
         "target_loss": 0.25,    # Core needs a bit more slack
-        "max_steps": 400,
+        "max_steps": 1000,      # ~2.5 epochs on expanded curriculum
     },
 ]
 
@@ -70,7 +70,7 @@ SHARED_CONFIG = {
     "warmup_steps": 15,
     "convergence_patience": 5,
     "num_train_epochs": None,
-    "max_training_time": 1800,  # 30 min per model
+    "max_training_time": 3600,  # 60 min per model (doubled for larger curriculum)
     "resume_from": None,
 }
 
