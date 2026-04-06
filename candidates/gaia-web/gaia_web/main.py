@@ -105,6 +105,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="GAIA Web Gateway")
 
+# Inter-service HMAC authentication
+# NOTE: gaia-web is special — it serves users directly, so we need to
+# allow unauthenticated access to user-facing routes (/, /static, /dashboard)
+# while requiring auth on API routes called by other services.
+try:
+    from gaia_common.utils.service_auth import AuthMiddleware, _PUBLIC_PATHS
+    if AuthMiddleware:
+        # Add user-facing paths to the public list
+        _PUBLIC_PATHS.update({"/", "/dashboard", "/static", "/api/activations"})
+        app.add_middleware(AuthMiddleware)
+except ImportError:
+    pass
+
 # Static files directory
 static_dir = Path(__file__).parent.parent / "static"
 
@@ -113,6 +126,14 @@ static_dir = Path(__file__).parent.parent / "static"
 async def root():
     """Serve the Mission Control dashboard."""
     return FileResponse(str(static_dir / "index.html"))
+
+
+# /dashboard redirect → static dashboard
+@app.get("/dashboard")
+async def dashboard_redirect():
+    """Redirect /dashboard to the static Mission Control page."""
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 # Mount static assets at /static
 if static_dir.exists():
@@ -147,7 +168,11 @@ async def process_user_input(user_input: str, request: Request):
     Standard entry point for user text input.
     Routes to the Core service and returns an NDJSON stream.
     """
-    session_id = request.headers.get("X-Session-ID", f"web_{uuid.uuid4().hex[:8]}")
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        session_id = f"web_{uuid.uuid4().hex[:8]}"
+        logger.warning("No X-Session-ID header — ephemeral session %s (follow-ups will lack context)", session_id)
+    logger.info("Processing user input for session %s", session_id)
     context_pool = request.headers.get("X-Context-Pool", "").lower() in ("true", "1", "yes")
     core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
     packet_id = f"web_{uuid.uuid4().hex[:8]}"

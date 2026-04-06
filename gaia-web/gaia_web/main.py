@@ -105,6 +105,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="GAIA Web Gateway")
 
+# Inter-service HMAC authentication
+# NOTE: gaia-web is special — it serves users directly, so we need to
+# allow unauthenticated access to user-facing routes (/, /static, /dashboard)
+# while requiring auth on API routes called by other services.
+try:
+    from gaia_common.utils.service_auth import AuthMiddleware, _PUBLIC_PATHS
+    if AuthMiddleware:
+        # Add user-facing paths to the public list
+        _PUBLIC_PATHS.update({"/", "/dashboard", "/static", "/api/activations"})
+        app.add_middleware(AuthMiddleware)
+except ImportError:
+    pass
+
 # Static files directory
 static_dir = Path(__file__).parent.parent / "static"
 
@@ -113,6 +126,14 @@ static_dir = Path(__file__).parent.parent / "static"
 async def root():
     """Serve the Mission Control dashboard."""
     return FileResponse(str(static_dir / "index.html"))
+
+
+# /dashboard redirect → static dashboard
+@app.get("/dashboard")
+async def dashboard_redirect():
+    """Redirect /dashboard to the static Mission Control page."""
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 # Mount static assets at /static
 if static_dir.exists():
@@ -147,7 +168,11 @@ async def process_user_input(user_input: str, request: Request):
     Standard entry point for user text input.
     Routes to the Core service and returns an NDJSON stream.
     """
-    session_id = request.headers.get("X-Session-ID", f"web_{uuid.uuid4().hex[:8]}")
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        session_id = f"web_{uuid.uuid4().hex[:8]}"
+        logger.warning("No X-Session-ID header — ephemeral session %s (follow-ups will lack context)", session_id)
+    logger.info("Processing user input for session %s", session_id)
     context_pool = request.headers.get("X-Context-Pool", "").lower() in ("true", "1", "yes")
     core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
     packet_id = f"web_{uuid.uuid4().hex[:8]}"
@@ -161,9 +186,8 @@ async def process_user_input(user_input: str, request: Request):
             yield json.dumps({"type": "error", "value": "Request blocked by security scan.", "error_code": "GAIA-WEB-020", "hint": "The security scanner blocked this request. Rephrase and try again."}) + "\n"
         return StreamingResponse(_blocked(), media_type="application/x-ndjson")
 
-    # Pre-flight: if planning request detected, request FOCUSING mode
-    # This runs BEFORE the packet hits core, so Prime loads while core
-    # processes the Nano triage and cascade routing.
+    # Pre-flight: if planning request detected, request FOCUSING mode so Prime
+    # loads while core processes the Nano triage and cascade routing.
     _planning_kw = ["implementation plan", "detailed plan", "create a plan",
                      "design a system", "plan for adding", "architecture plan",
                      "step by step implementation"]
@@ -187,6 +211,47 @@ async def process_user_input(user_input: str, request: Request):
             logger.warning("Pre-flight FOCUSING failed (non-blocking): %s", _focus_err)
 
     async def _stream_response():
+        # Readiness check — mirrors the gate already in the Discord interface.
+        # If core is asleep/drowsy: notify the user, send a wake signal, wait.
+        # If core returns a canned response (DREAMING/DISTRACTED): surface it and stop.
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as check_client:
+                check = await check_client.get(f"{core_url}/sleep/distracted-check")
+                if check.status_code == 200:
+                    data = check.json()
+                    core_state = data.get("state", "active")
+                    canned = data.get("canned_response")
+                    if canned:
+                        yield json.dumps({"type": "token", "value": canned}) + "\n"
+                        return
+                    if core_state in ("asleep", "drowsy"):
+                        yield json.dumps({"type": "status", "value": "GAIA is waking up — your message is queued, please hold..."}) + "\n"
+                        # Send wake signal. The web connection stays open so we
+                        # don't need persistent queue storage — just signal + poll.
+                        try:
+                            async with httpx.AsyncClient(timeout=5.0) as wake_client:
+                                await wake_client.post(f"{core_url}/sleep/wake")
+                        except Exception:
+                            logger.debug("Wake signal send failed (non-blocking)")
+                        import time as _time
+                        _deadline = _time.monotonic() + 120.0
+                        _woke = False
+                        while _time.monotonic() < _deadline:
+                            await asyncio.sleep(1.5)
+                            try:
+                                async with httpx.AsyncClient(timeout=5.0) as poll_client:
+                                    s = await poll_client.get(f"{core_url}/sleep/status")
+                                    if s.status_code == 200 and s.json().get("state") == "active":
+                                        _woke = True
+                                        break
+                            except Exception:
+                                pass
+                        if not _woke:
+                            yield json.dumps({"type": "error", "value": "GAIA is having trouble waking up. Please try again in a moment.", "error_code": "GAIA-WEB-050"}) + "\n"
+                            return
+        except Exception:
+            logger.debug("Readiness check failed — proceeding normally", exc_info=True)
+
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
                 # Forward to core as a v0.3 CognitionPacket
@@ -207,16 +272,16 @@ async def process_user_input(user_input: str, request: Request):
                         "context_pool": context_pool,
                     },
                 }
-                
+
                 async with client.stream("POST", f"{core_url}/process_packet", json=payload) as resp:
                     if resp.status_code != 200:
                         yield json.dumps({"type": "error", "value": f"Core returned {resp.status_code}", "error_code": "GAIA-WEB-001", "hint": "gaia-core is not responding correctly. Check that gaia-core is running."}) + "\n"
                         return
-                        
+
                     async for line in resp.aiter_lines():
                         if line:
                             yield line + "\n"
-                            
+
         except Exception as e:
             log_gaia_error(logger, "GAIA-WEB-030", str(e), exc_info=True)
             yield json.dumps({"type": "error", "value": str(e), "error_code": "GAIA-WEB-030"}) + "\n"

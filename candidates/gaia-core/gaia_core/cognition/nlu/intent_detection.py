@@ -579,6 +579,8 @@ _VALID_INTENTS = {
     "shell", "list_tools", "list_tree", "find_file", "list_files",
     "recitation", "tool_routing", "clarification", "correction",
     "brainstorming", "feedback", "chat", "other",
+    # New intents — distinguish follow-ups from new requests
+    "comprehension", "greeting", "identity", "planning",
 }
 
 
@@ -604,18 +606,50 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
     if len(text) > 2000:
         text = text[:1500] + "\n...\n" + text[-500:]
 
-    # ── Stage 1: Fast-track conversational intents ──
+    # ── Stage 1: Fast-track autonomic intents (exit, help, shell) ──
     fast_track_intent = _fast_track_intent_detection(text)
     if fast_track_intent:
         logger.info(f"Fast-track intent detection: {fast_track_intent}")
         return fast_track_intent
 
-    # ── Stage 2: NLU heuristics (no model needed) ──
-    # Skip fragmentation detection for heartbeat-sourced inputs — expanded
-    # thought seeds contain academic/literary keywords that false-positive
-    # as recitation requests, causing tool-call loops (web search on the
-    # entire expanded prompt).
+    # ── Stage 2: Embedding classifier (PRIMARY — runs before heuristics) ──
+    # The embedding classifier uses MiniLM cosine similarity against the
+    # exemplar bank.  When confidence is high (>= 0.55), it's authoritative
+    # and we skip all heuristic stages.  This replaces the growing pile of
+    # regex/keyword guards with a single semantic classifier.
+    _HIGH_CONFIDENCE = 0.55
+    embed_intent_cfg = {}
+    try:
+        embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
+    except Exception:
+        pass
+    _embed_intent = None
+    _embed_score = 0.0
+    if embed_model is not None and embed_intent_cfg.get("enabled", True):
+        classifier = EmbedIntentClassifier.instance()
+        if not classifier.ready:
+            classifier.initialise(embed_model, config=embed_intent_cfg)
+        if classifier.ready:
+            threshold = embed_intent_cfg.get("confidence_threshold", 0.42)
+            _embed_intent, _embed_score = classifier.classify(text, confidence_threshold=threshold)
+            if _embed_intent != "other" and _embed_score >= _HIGH_CONFIDENCE:
+                # File-keyword guard: downgrade to "chat" if no file references
+                if _embed_intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
+                    logger.info("Embed intent '%s' (%.3f) lacks file keywords; downgrading to 'chat'.", _embed_intent, _embed_score)
+                    return "chat"
+                logger.info("Embed intent classification (authoritative): %s (score=%.3f)", _embed_intent, _embed_score)
+                return _embed_intent
+            elif _embed_intent != "other":
+                logger.info("Embed intent tentative: %s (score=%.3f) — validating with heuristics", _embed_intent, _embed_score)
+                # Keep _embed_intent as tentative; validate below
+
+    # ── Stage 3: NLU heuristics (validates tentative embed results) ──
+    # Skip fragmentation detection for heartbeat-sourced inputs
     if source != "heartbeat" and _detect_fragmentation_request(text):
+        # If embedding said "comprehension", trust it over the heuristic
+        if _embed_intent == "comprehension":
+            logger.info("NLU heuristic says recitation, but embed says comprehension (%.3f) — trusting embed", _embed_score)
+            return "comprehension"
         logger.info("NLU fragmentation detection: recitation intent detected")
         return "recitation"
 
@@ -630,27 +664,10 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
     if "dev_matrix" in lowered:
         return "find_file"
 
-    # ── Stage 3: Embedding classifier (needs embed_model, not LLM) ──
-    embed_intent_cfg = {}
-    try:
-        embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
-    except Exception:
-        pass
-    if embed_model is not None and embed_intent_cfg.get("enabled", True):
-        classifier = EmbedIntentClassifier.instance()
-        if not classifier.ready:
-            classifier.initialise(embed_model, config=embed_intent_cfg)
-        if classifier.ready:
-            threshold = embed_intent_cfg.get("confidence_threshold", 0.45)
-            intent, score = classifier.classify(text, confidence_threshold=threshold)
-            if intent != "other":
-                # File-keyword guard: downgrade to "chat" not "other"
-                if intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
-                    logger.info("Embed intent '%s' lacks file keywords; downgrading to 'chat'.", intent)
-                    return "chat"
-                logger.info("Embed intent classification: %s (score=%.3f)", intent, score)
-                return intent
-            # Embedding returned "other" — fall through to LLM or keyword heuristic
+    # If embedding had a tentative result, use it now (heuristics didn't override)
+    if _embed_intent and _embed_intent != "other":
+        logger.info("Embed intent accepted (post-heuristic): %s (score=%.3f)", _embed_intent, _embed_score)
+        return _embed_intent
 
     # ── Stage 4: LLM prompt classification (only if non-llama_cpp model available) ──
     def _is_llama_cpp_instance(m):
@@ -685,7 +702,11 @@ def _run_llm_intent_classification(model, text: str, probe_context: str = "") ->
     prompt = (
         "You are an intent detector for GAIA. Return exactly one intent from:\n"
         "read_file, write_file, mark_task_complete, reflect, seed, shell, list_tools, list_tree, list_files, "
-        "recitation (the user wants to recite a known work like a poem, song, or story), "
+        "recitation (the user wants GAIA to fetch and recite a NEW known work like a poem or speech), "
+        "comprehension (the user is asking about something GAIA already shared — a follow-up question), "
+        "greeting (hello, good morning, casual opening), "
+        "identity (who are you, what are you, describe yourself), "
+        "planning (create a plan, design a system, step-by-step implementation), "
         "clarification (the user is asking for more information or clarification), "
         "correction (the user is correcting a previous statement by GAIA), "
         "brainstorming (the user is in a creative or brainstorming mode), "
@@ -806,7 +827,7 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
         # 2. LLM path (with embedding fallback)
         intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model, source=source)
     
-    read_only_intents = {"read_file", "explain_file", "explain_symbol"}
+    read_only_intents = {"read_file", "explain_file", "explain_symbol", "comprehension", "greeting", "identity"}
     plan = Plan(intent=intent_str, read_only=intent_str in read_only_intents)
     
     logger.debug(f"Detected plan: {plan}")

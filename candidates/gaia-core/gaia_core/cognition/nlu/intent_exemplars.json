@@ -1,15 +1,76 @@
 {
   "_comment": "Exemplar phrases for embedding-based intent classification. Each key is an intent label; each value is a list of representative user utterances. The embed classifier encodes these once at startup and classifies new queries via cosine similarity.",
-  "chat": [
-    "Hey, how are you doing?",
+
+  "comprehension": [
+    "What were the last 5 words you recited?",
+    "What was that poem about?",
+    "How many stanzas was that?",
+    "Can you repeat the third line?",
+    "Tell me about what you just shared",
+    "What does 'brillig' mean in the poem you recited?",
+    "Summarize what you just told me",
+    "What was the main point of your response?",
+    "You just said something interesting, explain it further",
+    "Go back to what you mentioned earlier",
+    "What was the name of the author you cited?",
+    "How long was the text you just shared?",
+    "What rhyme scheme did that poem use?",
+    "You sent me a document, what's the source?",
+    "Can you analyze the text you just recited?"
+  ],
+
+  "greeting": [
+    "Hello!",
+    "Good morning!",
+    "Hey GAIA",
+    "Hi there",
+    "Good afternoon",
+    "Good evening, GAIA",
     "What's up?",
+    "How are you doing?",
+    "How's your day going?",
+    "Hey, how are you?",
+    "Greetings",
+    "Howdy"
+  ],
+
+  "identity": [
+    "Who are you?",
+    "What are you?",
+    "Who created you?",
+    "What model are you based on?",
+    "How do you work?",
+    "Tell me about yourself",
+    "What's your name?",
+    "Are you an AI?",
+    "What are your capabilities?",
+    "Describe your architecture",
+    "What is GAIA?",
+    "Do you have feelings?",
+    "Are you sentient?"
+  ],
+
+  "planning": [
+    "Create a plan for the new feature",
+    "Design a system for handling authentication",
+    "How should I implement the API gateway?",
+    "Let's plan the migration strategy",
+    "Step by step implementation of the caching layer",
+    "Architect a solution for real-time notifications",
+    "Plan the deployment pipeline",
+    "Design the database schema for this use case",
+    "How would you structure this microservice?",
+    "Create an implementation roadmap",
+    "Help me design the testing strategy",
+    "What's the best architecture for this?"
+  ],
+
+  "chat": [
     "Tell me something interesting",
     "What do you think about that?",
-    "How's your day going?",
     "Let's just talk for a bit",
     "I'm bored, chat with me",
     "What's on your mind?",
-    "Good morning!",
     "Thanks for that",
     "That's cool",
     "I appreciate your help",
@@ -29,21 +90,39 @@
     "Explain how gravity works",
     "What do you think about AI art?",
     "Is Python better than Rust?",
-    "Do you have feelings?",
     "What's your favorite book?",
-    "How do you work?",
-    "What model are you based on?",
     "Tell me about D&D lore",
     "What makes good fantasy worldbuilding?",
     "What are your thoughts on consciousness?",
     "Can you tell me a joke?",
-    "What's the weather like today?",
     "I had a rough day",
     "That was a great answer",
     "You're really helpful",
     "I disagree with that take",
     "What should I have for dinner?"
   ],
+
+  "recitation": [
+    "Recite The Raven by Edgar Allan Poe",
+    "Can you perform the soliloquy from Hamlet?",
+    "Give me the full text of Ozymandias",
+    "Read aloud the GAIA Constitution",
+    "Recite Jabberwocky in its entirety",
+    "Perform the Declaration of Artisanal Intelligence",
+    "Tell me the poem Invictus word for word",
+    "Sing me the ballad of Casey at the Bat",
+    "Speak the entire Road Not Taken",
+    "Perform the Charge of the Light Brigade",
+    "Recite Annabel Lee from memory",
+    "Give me the full text of the Cognition Protocol",
+    "I want to hear the full poem Jabberwocky by Lewis Carroll",
+    "Please share the complete text of Stopping by Woods on a Snowy Evening",
+    "Read me the poem Do Not Go Gentle Into That Good Night",
+    "Share the full text of the Gettysburg Address",
+    "Can you recite Kubla Khan for me?",
+    "Give me the entire Tyger poem by William Blake"
+  ],
+
   "read_file": [
     "Read the config file for me",
     "Can you show me what's in the log file?",
@@ -63,6 +142,7 @@
     "What's in the constants JSON file?",
     "Read the requirements.txt"
   ],
+
   "write_file": [
     "Write that to a file called notes.md",
     "Save this conversation to a log",
@@ -78,6 +158,7 @@
     "Save those changes to disk",
     "Store this configuration in a YAML file"
   ],
+
   "shell": [
     "Run a shell command to check disk space",
     "Execute ls in the home directory",
@@ -93,6 +174,7 @@
     "Run git status",
     "Check if the service is running with systemctl"
   ],
+
   "find_file": [
     "Where is the dev matrix file?",
     "Find the configuration file",
@@ -108,6 +190,7 @@
     "Locate the sleep_wake_manager source file",
     "Find the promote script"
   ],
+
   "clarification": [
     "What do you mean by that?",
     "Can you explain that in simpler terms?",
@@ -125,6 +208,7 @@
     "How is that different from what we discussed earlier?",
     "Unpack that for me"
   ],
+
   "correction": [
     "That's not right, the file is actually in gaia-common",
     "You're wrong about that",
@@ -140,6 +224,7 @@
     "You're mixing up the versions",
     "Stop hallucinating, that file doesn't exist"
   ],
+
   "brainstorming": [
     "Let's brainstorm some ideas for the new feature",
     "What if we redesigned the pipeline?",
@@ -155,6 +240,7 @@
     "Suggest some approaches for better intent detection",
     "What if we added a new service for that?"
   ],
+
   "feedback": [
     "I have some feedback about your responses",
     "Here's a suggestion for improvement",
@@ -169,20 +255,7 @@
     "You should be more careful with file paths",
     "Great job on the blueprint generation"
   ],
-  "recitation": [
-    "Recite The Raven by Edgar Allan Poe",
-    "Can you perform the soliloquy from Hamlet?",
-    "Give me the full text of Ozymandias",
-    "Read aloud the GAIA Constitution",
-    "Recite Jabberwocky in its entirety",
-    "Perform the Declaration of Artisanal Intelligence",
-    "Tell me the poem Invictus word for word",
-    "Sing me the ballad of Casey at the Bat",
-    "Speak the entire Road Not Taken",
-    "Perform the Charge of the Light Brigade",
-    "Recite Annabel Lee from memory",
-    "Give me the full text of the Cognition Protocol"
-  ],
+
   "reflect": [
     "Take a moment to reflect on your recent responses",
     "What have you learned from our conversation?",
@@ -196,6 +269,7 @@
     "Assess your own reasoning on that last question",
     "Introspect on how you've been responding"
   ],
+
   "seed": [
     "Plant a thought seed about consciousness",
     "Here's something for your next sleep cycle to think about",
@@ -210,6 +284,7 @@
     "Store this idea for later reflection",
     "When you're dreaming, think about better error handling"
   ],
+
   "mark_task_complete": [
     "Mark that task as done",
     "That's complete, check it off",
@@ -222,6 +297,7 @@
     "Completed, what's next?",
     "Check that task off"
   ],
+
   "list_tools": [
     "What MCP tools do you have?",
     "List all available tools",
@@ -234,6 +310,7 @@
     "List your functions",
     "What operations do you support?"
   ],
+
   "list_tree": [
     "Show me your directory tree",
     "What's the folder structure?",
@@ -245,6 +322,7 @@
     "Show the directory layout",
     "What's the project hierarchy?"
   ],
+
   "list_files": [
     "List files in the knowledge directory",
     "What files are in gaia-core?",
@@ -256,6 +334,7 @@
     "What Python files are in nlu/",
     "List the files in gaia-common/utils/"
   ],
+
   "tool_routing": [
     "Use the MCP tool to read that file",
     "Call the diagnostics tool",
@@ -276,6 +355,7 @@
     "Generate a blueprint for gaia-audio",
     "Use the web_fetch tool on that URL"
   ],
+
   "other": [
     "hmm",
     "...",

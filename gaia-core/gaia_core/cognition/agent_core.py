@@ -1760,30 +1760,11 @@ class AgentCore:
             ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
 
             # ── Recitation Pipeline ────────────────────────────────────
-            # When the user asks to recite a specific text (poem, speech, etc.),
-            # fetch the actual source material and stream it directly to the user.
-            # This bypasses the full cognitive pipeline — the document IS the response.
-            #
-            # GUARD: Only fire for genuine "fetch me a new text" requests.
-            # Follow-up questions about already-recited content (e.g., "what are
-            # the last 5 words of the poem you sent?") should go through the
-            # normal cognitive pipeline with session history.
-            _lower_input = (user_input or "").lower()
-            _is_new_recitation = (
-                plan.intent == "recitation"
-                and any(kw in _lower_input for kw in [
-                    "recite", "read me", "read aloud", "share the text",
-                    "share the full", "full text", "the poem", "the speech",
-                    "sing me", "quote me",
-                ])
-                and not any(ref in _lower_input for ref in [
-                    "you just", "you sent", "you recited", "you shared",
-                    "the last", "the first", "which word", "what word",
-                    "what are", "what is", "what was", "how many",
-                    "tell me about", "explain", "analyze", "meaning of",
-                ])
-            )
-            if _is_new_recitation:
+            # When the classifier detects intent=recitation, fetch the source
+            # material and stream it directly.  Follow-up questions about
+            # already-recited content are classified as "comprehension" by the
+            # embedding classifier and go through the normal cognitive pipeline.
+            if plan.intent == "recitation":
                 try:
                     self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
                     _recitation_text = self._fetch_recitation_source(user_input)
