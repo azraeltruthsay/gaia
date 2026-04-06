@@ -6,7 +6,7 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from gaia_common.utils import get_logger
 try:
@@ -24,6 +24,7 @@ from gaia_common.utils.service_client import get_study_client
 
 from .approval import ApprovalStore
 from .web_tools import web_search, web_fetch
+from .browser_tools import browser_tool as _browser_tool
 from .kanka_tools import (
     kanka_list_campaigns, kanka_search, kanka_list_entities,
     kanka_get_entity, kanka_create_entity, kanka_update_entity,
@@ -100,14 +101,39 @@ SENSITIVE_TOOLS = {
     "notebooklm_create_note", "audio_listen_start"
 }
 
-def list_tools() -> List[str]:
-    """List all available tools."""
-    return list(TOOLS.keys())
+def list_tools() -> list:
+    """List available domain tools (13 public-facing interfaces).
+
+    Returns domain names only.  Legacy tool names (70+) are kept
+    internally for routing but are NOT exposed to clients.
+    Use ``describe_tool(domain)`` for full schema with actions.
+    """
+    from gaia_common.utils.domain_tools import DOMAIN_TOOLS
+    return list(DOMAIN_TOOLS.keys())
+
+
+def list_tools_full() -> dict:
+    """Full domain tool schemas with actions and sensitivity markers."""
+    from gaia_common.utils.domain_tools import build_domain_schemas
+    return build_domain_schemas()
 
 
 def describe_tool(tool_name: str) -> Dict[str, Any]:
-    """Get schema and description for a specific tool."""
-    return TOOLS.get(tool_name, {"error": "Tool not found"})
+    """Get schema and description for a specific tool.
+
+    Accepts both domain names (file, web, knowledge) and legacy
+    names (read_file, web_search) for backward compatibility.
+    """
+    # Try domain schema first
+    try:
+        from gaia_common.utils.domain_tools import build_domain_schemas
+        domains = build_domain_schemas()
+        if tool_name in domains:
+            return domains[tool_name]
+    except Exception:
+        pass
+    # Fallback to legacy
+    return TOOLS.get(tool_name, {"error": f"Tool '{tool_name}' not found. Available domains: file, web, knowledge, shell, audio, study, introspect, worldbuild, notebook, context, browser, manage, fabric"})
 
 
 async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore, pre_approved: bool = False) -> Any:
@@ -156,12 +182,15 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
             log_gaia_error(logger, "GAIA-MCP-010", f"Blocked '{method}': {e}")
             raise PermissionError(f"Blast Shield block: {e}")
 
-    # 3. Handle built-in discoveries
+    # 3. Handle built-in discoveries — expose domain tools, not legacy
     if method == "list_tools" or method == "rpc.discover":
-        return list(TOOLS.keys())
+        return list_tools()
+
+    if method == "list_tools_full":
+        return list_tools_full()
 
     if method == "describe_tool":
-        return TOOLS.get(params.get("tool_name"), {"error": "Tool not found"})
+        return describe_tool(params.get("tool_name", ""))
 
     # 4. Map tool implementations
     tool_map = {
@@ -200,6 +229,15 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "cfr_focus": lambda p: _cfr_manager.focus(doc_id=p["doc_id"], section_index=int(p["section_index"])),
         "cfr_expand": lambda p: _cfr_manager.expand(doc_id=p["doc_id"], section_index=int(p["section_index"])),
         "cfr_status": lambda p: _cfr_manager.status(doc_id=p.get("doc_id", "")),
+        # Browser tools (OpenClaw methodology, GAIA security)
+        "browser_browse": lambda p: _browser_tool({"action": "browse", **p}),
+        "browser_snapshot": lambda p: _browser_tool({"action": "snapshot", **p}),
+        "browser_links": lambda p: _browser_tool({"action": "links", **p}),
+        "browser_forms": lambda p: _browser_tool({"action": "forms", **p}),
+        "browser_click": lambda p: _browser_tool({"action": "click", "full_browser": True, **p}),
+        "browser_type": lambda p: _browser_tool({"action": "type", "full_browser": True, **p}),
+        "browser_screenshot": lambda p: _browser_tool({"action": "screenshot", "full_browser": True, **p}),
+        "cfr_review_conversation": lambda p: _cfr_review_conversation(p),
         # Knowledge base tools (VectorIndexer from gaia_common)
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
@@ -342,6 +380,18 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
             logger.info(f"ai_write: cwd={cwd} target={path} resolved={p.resolve()}")
         except Exception:
             logger.info(f"ai_write: cwd unknown target={p}")
+
+        # [Security] Path allowlist — same restrictions as write_file
+        _resolved = str(p.resolve())
+        _allowed_prefixes = ["/knowledge", "/sandbox", "/gaia/GAIA_Project",
+                             "/shared", "/tmp", "/logs"]
+        _blocked_prefixes = ["/etc", "/boot", "/root", "/.ssh", "/run/secrets",
+                             "/proc", "/sys", "/dev"]
+        if any(_resolved.startswith(bp) for bp in _blocked_prefixes):
+            return {"ok": False, "error": f"Path blocked by security policy: {_resolved}"}
+        if not any(_resolved.startswith(ap) for ap in _allowed_prefixes):
+            return {"ok": False, "error": f"Path outside allowed directories: {_resolved}"}
+
         # [Sovereign Shield] Pre-compile check
         _validate_python_content(str(p), content)
 
@@ -968,6 +1018,110 @@ _LOG_FILE_MAP = {
     "gaia-study": "/logs/gaia-study.log",
     "discord": "/logs/discord_bot.log",
 }
+
+# ---------------------------------------------------------------------------
+# CFR Conversation Review — ingest conversation history for deep review
+# ---------------------------------------------------------------------------
+
+def _cfr_review_conversation(params: dict) -> dict:
+    """Export current session's conversation history to a temp file and CFR-ingest it.
+
+    This allows GAIA to use CFR focus/compress/synthesize on her own conversation
+    history — reviewing earlier exchanges at variable resolution.
+
+    Params:
+        session_id (str, optional): Session to review. Fetched from gaia-core.
+
+    Returns:
+        CFR ingest result with doc_id and section count.
+    """
+    import json as _json
+    import tempfile
+    from urllib.request import Request, urlopen
+
+    session_id = params.get("session_id", "")
+
+    # Step 1: Fetch conversation history from gaia-core
+    try:
+        core_url = os.environ.get("GAIA_CORE_ENDPOINT", "http://gaia-core:6415")
+
+        # If no session_id, get the most recent active session
+        if not session_id:
+            req = Request(f"{core_url}/session/list", method="GET")
+            with urlopen(req, timeout=10) as resp:
+                sessions = _json.loads(resp.read())
+                if isinstance(sessions, list) and sessions:
+                    session_id = sessions[0].get("session_id", "")
+                elif isinstance(sessions, dict):
+                    # Might be a dict of session_id → data
+                    session_id = next(iter(sessions), "")
+
+        if not session_id:
+            return {"ok": False, "error": "No active session found"}
+
+        # Fetch history for this session
+        req = Request(f"{core_url}/session/{session_id}/history", method="GET")
+        with urlopen(req, timeout=10) as resp:
+            history = _json.loads(resp.read())
+
+        if not history:
+            return {"ok": False, "error": f"No history for session {session_id}"}
+
+    except Exception as e:
+        # Fallback: try reading from the markdown chat log directly
+        log_path = f"/logs/chat_history/{session_id}.md"
+        if os.path.exists(log_path):
+            with open(log_path) as f:
+                history_text = f.read()
+            if history_text.strip():
+                # Write directly and ingest
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".md", prefix=f"conv_{session_id}_",
+                    dir="/shared/gaia_state/cfr", delete=False,
+                )
+                tmp.write(history_text)
+                tmp.close()
+
+                doc_id = f"conversation_{session_id[:16]}"
+                result = _cfr_manager.ingest(file_path=tmp.name, doc_id=doc_id)
+                result["session_id"] = session_id
+                result["source"] = "chat_log_file"
+                return result
+
+        return {"ok": False, "error": f"Could not fetch session history: {e}"}
+
+    # Step 2: Format history as readable markdown
+    lines = [f"# Conversation History: {session_id}\n"]
+    for msg in history:
+        role = msg.get("role", "unknown").upper()
+        content = msg.get("content", "")
+        ts = msg.get("timestamp", "")
+        lines.append(f"### {role}" + (f" ({ts})" if ts else ""))
+        lines.append(content)
+        lines.append("")
+
+    history_text = "\n".join(lines)
+
+    # Step 3: Write to temp file
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", prefix=f"conv_{session_id[:16]}_",
+        dir="/shared/gaia_state/cfr", delete=False,
+    )
+    tmp.write(history_text)
+    tmp.close()
+
+    # Step 4: CFR ingest
+    doc_id = f"conversation_{session_id[:16]}"
+    result = _cfr_manager.ingest(file_path=tmp.name, doc_id=doc_id)
+    result["session_id"] = session_id
+    result["source"] = "session_manager"
+    result["message_count"] = len(history)
+
+    logger.info("CFR conversation review: session=%s, %d messages, %d sections",
+                session_id, len(history), result.get("section_count", 0))
+
+    return result
+
 
 # Severity levels in ascending order
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}

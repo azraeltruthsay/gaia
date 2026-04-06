@@ -275,12 +275,28 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "synthesize": {"params": {"doc_id": "string"}, "maps_to": "cfr_synthesize"},
             "status": {"params": {"doc_id": "string?"}, "maps_to": "cfr_status"},
             "rolling": {"params": {"doc_id": "string", "target_section": "integer"}, "maps_to": "cfr_rolling_context"},
+            # Conversation review — CFR-ingest the current conversation history
+            "review_conversation": {"params": {"session_id": "string?"}, "maps_to": "cfr_review_conversation"},
             # Fragments
             "fragment_write": {"params": {"parent_request_id": "string", "content": "string", "sequence": "integer?", "is_complete": "boolean?"}, "maps_to": "fragment_write"},
             "fragment_read": {"params": {"parent_request_id": "string"}, "maps_to": "fragment_read"},
             "fragment_assemble": {"params": {"parent_request_id": "string"}, "maps_to": "fragment_assemble"},
             "fragment_list": {"params": {}, "maps_to": "fragment_list_pending"},
             "fragment_clear": {"params": {"parent_request_id": "string?"}, "maps_to": "fragment_clear"},
+        },
+    },
+
+    # ── Browser (Web interaction — OpenClaw methodology, GAIA security) ─
+    "browser": {
+        "description": "Web browsing, page interaction, accessibility snapshots",
+        "actions": {
+            "browse": {"params": {"url": "string", "extract": "string?"}, "maps_to": "browser_browse"},
+            "snapshot": {"params": {"url": "string"}, "maps_to": "browser_snapshot"},
+            "links": {"params": {"url": "string"}, "maps_to": "browser_links"},
+            "forms": {"params": {"url": "string"}, "maps_to": "browser_forms"},
+            "click": {"params": {"url": "string", "selector": "string?", "text": "string?"}, "maps_to": "browser_click"},
+            "type": {"params": {"url": "string", "selector": "string", "text": "string"}, "maps_to": "browser_type"},
+            "screenshot": {"params": {"url": "string"}, "maps_to": "browser_screenshot"},
         },
     },
 
@@ -412,6 +428,43 @@ def build_prompt_catalog() -> str:
     lines.append("Format: {\"selected_tool\": \"domain\", \"params\": \"{\\\"action\\\": \\\"verb\\\", ...}\"}")
     lines.append("For unlisted tools, use introspect(action=tools) to discover all available actions.")
     return "\n".join(lines)
+
+
+def build_domain_schemas() -> Dict[str, dict]:
+    """Build JSON-RPC compatible tool schemas for the 13 domain tools.
+
+    This is the public-facing tool list.  Legacy tool names (read_file, etc.)
+    are kept internally for routing but are NOT exposed to clients.
+    """
+    schemas = {}
+    for domain, spec in DOMAIN_TOOLS.items():
+        if spec.get("dynamic"):
+            schemas[domain] = {
+                "description": spec["description"],
+                "params": {
+                    "pattern": {"type": "string", "description": "Fabric pattern name (e.g., summarize, extract_wisdom)"},
+                    "input": {"type": "string", "description": "Text to process"},
+                },
+            }
+            continue
+
+        actions = list(DOMAIN_ACTIONS.get(domain, []))
+        sensitive = [a for a in actions if (domain, a) in SENSITIVE_ACTIONS]
+
+        schemas[domain] = {
+            "description": spec["description"],
+            "params": {
+                "action": {
+                    "type": "string",
+                    "enum": actions,
+                    "description": f"Operation: {', '.join(actions)}",
+                },
+            },
+        }
+        if sensitive:
+            schemas[domain]["sensitive_actions"] = sensitive
+
+    return schemas
 
 
 # ═══════════════════════════════════════════════════════════════════════════
