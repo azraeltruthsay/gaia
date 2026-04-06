@@ -637,8 +637,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)
 
-    # 5. World State (compact)
-    if world_state_block_content:
+    # 5. World State (compact) — skip when KV prefix is active and intent
+    # doesn't need live system data (comprehension, greeting, identity, etc.)
+    if world_state_block_content and not kv_prefix_active:
         system_content_parts.append("World State (compact):\n" + world_state_block_content)
 
     # Defensive session id resolution: test harness packets and older headers
@@ -657,7 +658,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         return 'system'
 
     # 5.5. Temporal Context (wake cycle, session info, code evolution)
-    if not compact_mode:
+    if not compact_mode and not kv_prefix_active:
         try:
             from gaia_core.utils.temporal_context import build_temporal_context
 
@@ -699,7 +700,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             logger.debug("Temporal context injection skipped", exc_info=True)
 
     # 5.7. Ambient Audio Context (only when listening is active)
-    if not compact_mode:
+    if not compact_mode and not kv_prefix_active:
         try:
             from gaia_core.main import get_audio_context_for_prompt
             audio_block = get_audio_context_for_prompt()
@@ -709,9 +710,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             logger.debug("Audio context injection skipped", exc_info=True)
 
     # 5.9. Cognitive Index Layer (CIL) — lightweight pointer index
-    # Always injected (small, <2KB). Routes gaia-core to the right knowledge
-    # without loading it wholesale. See /shared/memory/gaia-index.md
-    if not compact_mode:
+    # Routes gaia-core to the right knowledge without loading it wholesale.
+    if not compact_mode and not kv_prefix_active:
         try:
             from pathlib import Path
             _cil_path = Path("/shared/memory/gaia-index.md")
@@ -737,31 +737,31 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # This is the actual content fetched from topic files matched by the semantic
     # probe's CIL lookup. Different from Tier 5.9 (the index itself) — this is
     # the resolved content that the index pointed to.
-    try:
-        for df in getattr(packet.content, 'data_fields', []) or []:
-            if getattr(df, 'key', '') == 'cil_grounding' and getattr(df, 'value', None):
-                grounding = df.value
-                if isinstance(grounding, dict) and grounding:
-                    parts = ["--- Cognitive Index Grounding ---"]
-                    for entity, info in grounding.items():
-                        snippet = info.get("snippet", "")
-                        source_path = info.get("path", "")
-                        if snippet:
-                            parts.append(f"[{entity}] (from {source_path}):")
-                            parts.append(snippet[:500])
-                            parts.append("")
-                    if len(parts) > 1:
-                        parts.append("--- End of CIL Grounding ---")
-                        system_content_parts.append("\n".join(parts))
-                        logger.debug("CIL grounding injected: %d entities", len(grounding))
-                break
-    except Exception:
-        logger.debug("CIL grounding injection skipped", exc_info=True)
+    if not kv_prefix_active:
+        try:
+            for df in getattr(packet.content, 'data_fields', []) or []:
+                if getattr(df, 'key', '') == 'cil_grounding' and getattr(df, 'value', None):
+                    grounding = df.value
+                    if isinstance(grounding, dict) and grounding:
+                        parts = ["--- Cognitive Index Grounding ---"]
+                        for entity, info in grounding.items():
+                            snippet = info.get("snippet", "")
+                            source_path = info.get("path", "")
+                            if snippet:
+                                parts.append(f"[{entity}] (from {source_path}):")
+                                parts.append(snippet[:500])
+                                parts.append("")
+                        if len(parts) > 1:
+                            parts.append("--- End of CIL Grounding ---")
+                            system_content_parts.append("\n".join(parts))
+                            logger.debug("CIL grounding injected: %d entities", len(grounding))
+                    break
+        except Exception:
+            logger.debug("CIL grounding injection skipped", exc_info=True)
 
-    # 6.8. Web Search Fallback Grounding — search results for entities with
-    # no local knowledge. Surfaces titles + snippets so the model can reference
-    # or suggest deeper retrieval via CFR.
-    try:
+    # 6.8. Web Search Fallback Grounding — skip when kv_prefix_active
+    if not kv_prefix_active:
+      try:
         for df in getattr(packet.content, 'data_fields', []) or []:
             if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
                 web_g = df.value
@@ -787,7 +787,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                         system_content_parts.append("\n".join(parts))
                         logger.debug("Web grounding injected: %d entities", len(web_g))
                 break
-    except Exception:
+      except Exception:
         logger.debug("Web grounding injection skipped", exc_info=True)
 
     # 7. Retrieved Documents (RAG) or Epistemic Honesty Directive

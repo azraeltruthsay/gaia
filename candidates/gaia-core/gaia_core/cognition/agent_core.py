@@ -2027,8 +2027,11 @@ class AgentCore:
                 _INTENT_TOKEN_CAPS = {
                     "recitation": 1024, "greeting": 128, "time": 64,
                     "chat": 512, "identity": 256, "status": 512,
+                    "comprehension": 512, "clarification": 512,
+                    "correction": 512, "feedback": 512,
                     "planning": 4096, "code": 8192, "analysis": 4096,
                     "debugging": 4096, "explanation": 2048, "research": 4096,
+                    "brainstorming": 2048,
                 }
                 _plan_intent = plan.intent if plan else ""
                 _intent_max_tokens = _INTENT_TOKEN_CAPS.get(_plan_intent, 2048)
