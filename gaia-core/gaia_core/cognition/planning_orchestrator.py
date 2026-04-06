@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Generator, Optional
+from typing import Dict, List, Any, Generator
 
 logger = logging.getLogger("GAIA.PlanningOrchestrator")
 

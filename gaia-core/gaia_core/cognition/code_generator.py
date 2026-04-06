@@ -17,10 +17,9 @@ related files so it fits the existing architecture.
 """
 
 import logging
-import os
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.CodeGenerator")
 
@@ -56,11 +55,11 @@ def generate_new_file(
         prompt += f"**Starter code from plan:**\n```\n{code_snippet}\n```\n\n"
 
     prompt += (
-        f"Write the complete file. Include:\n"
-        f"- Proper imports\n"
-        f"- Module docstring explaining the purpose\n"
-        f"- Complete, working implementation\n"
-        f"- Match the patterns of the related files shown above"
+        "Write the complete file. Include:\n"
+        "- Proper imports\n"
+        "- Module docstring explaining the purpose\n"
+        "- Complete, working implementation\n"
+        "- Match the patterns of the related files shown above"
     )
 
     return _call_model(model, prompt)

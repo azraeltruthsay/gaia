@@ -16,13 +16,11 @@ Trigger modes:
 import json
 import logging
 import os
-import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.request import Request, urlopen
-from urllib.error import URLError
 
 from gaia_core.cognition.code_evaluator import (
     Challenge, CodeGrade, evaluate_code, load_challenges, grade_to_dict,

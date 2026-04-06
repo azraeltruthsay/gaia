@@ -9,7 +9,7 @@ Then generate only the delta — what's missing.
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Generator, Optional, Tuple
+from typing import Dict, List, Any, Generator
 
 logger = logging.getLogger("GAIA.AttachmentPlan")
 
@@ -24,7 +24,6 @@ def generate_attachment_code(
     """
     Discover what exists, then generate what's missing for attachment support.
     """
-    from gaia_core.cognition.code_generator import generate_patch, apply_patches
     from gaia_common.utils.file_contracts import load_contract, contract_to_prompt
 
     yield {"type": "token", "value": "**[Attachment Implementation]**\n\n"}
@@ -61,7 +60,7 @@ def generate_attachment_code(
         yield {"type": "flush"}
 
         if not Path(file_path).exists():
-            yield {"type": "token", "value": f"  *File not found — skipping*\n"}
+            yield {"type": "token", "value": "  *File not found — skipping*\n"}
             results["failed"] += 1
             continue
 
@@ -145,7 +144,7 @@ def _discover_existing() -> Dict[str, Dict]:
         existing_routes = re.findall(r'@router\.\w+\("([^"]+)"', files)
         results["Upload endpoint"] = {
             "exists": has_upload,
-            "summary": f"Has /attachments/upload" if has_upload else f"Missing (existing routes: {', '.join(existing_routes)})",
+            "summary": "Has /attachments/upload" if has_upload else f"Missing (existing routes: {', '.join(existing_routes)})",
             "file": "candidates/gaia-web/gaia_web/routes/files.py",
         }
 
@@ -309,7 +308,7 @@ def _generate_via_replace(
             return False
         raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if not raw:
-            yield {"type": "token", "value": f"  *Empty response*\n"}
+            yield {"type": "token", "value": "  *Empty response*\n"}
             return False
 
         # Parse OLD_TEXT / NEW_TEXT
@@ -318,7 +317,7 @@ def _generate_via_replace(
 
         if not old_match or not new_match:
             logger.warning("Could not parse OLD/NEW from: %s", raw[:200])
-            yield {"type": "token", "value": f"  *Could not parse edit*\n"}
+            yield {"type": "token", "value": "  *Could not parse edit*\n"}
             return False
 
         old_text = old_match.group(1)
@@ -326,7 +325,7 @@ def _generate_via_replace(
 
         # Don't strip — preserve exact whitespace for matching
         if not old_text or not new_text:
-            yield {"type": "token", "value": f"  *Empty old/new text*\n"}
+            yield {"type": "token", "value": "  *Empty old/new text*\n"}
             return False
 
         # Find old_text in file (try exact, then first-line match)
@@ -341,7 +340,7 @@ def _generate_via_replace(
                 actual = "\n".join(file_lines[line_num:line_num + old_lines])
                 old_text = actual
             else:
-                yield {"type": "token", "value": f"  *OLD_TEXT not found in file*\n"}
+                yield {"type": "token", "value": "  *OLD_TEXT not found in file*\n"}
                 return False
 
         # Apply replacement
@@ -362,7 +361,7 @@ def _generate_via_replace(
             yield {"type": "token", "value": f"  *🔍 Dry run — {len(modified)} chars ready*\n"}
         else:
             _write_file(file_path, modified)
-            yield {"type": "token", "value": f"  *✅ Written*\n"}
+            yield {"type": "token", "value": "  *✅ Written*\n"}
         return True
 
     except Exception as e:

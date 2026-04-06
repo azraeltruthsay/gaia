@@ -73,7 +73,7 @@ def _mcp_call(method: str, params: dict) -> dict:
     """Make a JSON-RPC 2.0 call to gaia-mcp."""
     payload = json.dumps({
         "jsonrpc": "2.0",
-        "method": f"tools/call",
+        "method": "tools/call",
         "params": {"name": method, "arguments": params},
         "id": 1,
     }).encode()

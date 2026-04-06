@@ -150,7 +150,7 @@ def execute_plan_phase(
                     # Review step: have Core (CPU, 16K ctx) check the patches
                     if reviewer_model:
                         patches = _review_patches(reviewer_model, patches, real_path or planned_path, contract_text)
-                        yield {"type": "token", "value": f"  *Reviewed by observer*\n"}
+                        yield {"type": "token", "value": "  *Reviewed by observer*\n"}
 
                     modified, applied = apply_patches(current_content, patches, real_path or planned_path)
 
@@ -171,11 +171,11 @@ def execute_plan_phase(
                         else:
                             yield {"type": "token", "value": f"  *Error: {validation.get('error', '')[:200]}*\n"}
                     else:
-                        yield {"type": "token", "value": f"  *Patches generated but anchors not found in file*\n"}
+                        yield {"type": "token", "value": "  *Patches generated but anchors not found in file*\n"}
                 else:
                     # Fallback: generate additive code with relevant section context
                     from gaia_core.cognition.code_generator import generate_new_file, _find_relevant_section
-                    yield {"type": "token", "value": f"  *Patch generation failed — trying additive code*\n"}
+                    yield {"type": "token", "value": "  *Patch generation failed — trying additive code*\n"}
 
                     # Show the model the relevant section so it can match patterns
                     relevant_section = _find_relevant_section(
@@ -203,7 +203,7 @@ def execute_plan_phase(
                         elif validation["ok"]:
                             yield {"type": "token", "value": f"  *🔍 Dry run — would append {len(addition)} chars to {output_path}*\n"}
                     else:
-                        yield {"type": "token", "value": f"  *Could not generate code for this file*\n"}
+                        yield {"type": "token", "value": "  *Could not generate code for this file*\n"}
             elif prime_model:
                 from gaia_core.cognition.code_generator import generate_new_file
 
@@ -227,9 +227,9 @@ def execute_plan_phase(
                         _write_candidate(str(output_path), new_content)
                         yield {"type": "token", "value": f"  *✅ Created {output_path}*\n"}
                 else:
-                    yield {"type": "token", "value": f"  *Could not generate new file*\n"}
+                    yield {"type": "token", "value": "  *Could not generate new file*\n"}
         else:
-            yield {"type": "token", "value": f"  *No code to generate — needs implementation detail*\n"}
+            yield {"type": "token", "value": "  *No code to generate — needs implementation detail*\n"}
 
         yield {"type": "flush"}
 
@@ -329,7 +329,7 @@ def _generate_modification(
 
     if large_file:
         # Large file strategy: generate ONLY the new code to insert
-        prompt = f"Add new functionality to an existing file.\n\n"
+        prompt = "Add new functionality to an existing file.\n\n"
         prompt += f"**File:** {file_path}\n"
         prompt += f"**Change needed:** {description}\n\n"
 
@@ -353,7 +353,7 @@ def _generate_modification(
         )
     else:
         # Small file: can output complete modified file
-        prompt = f"Modify this existing file to add the described feature.\n\n"
+        prompt = "Modify this existing file to add the described feature.\n\n"
         prompt += f"**File:** {file_path}\n"
         prompt += f"**Change needed:** {description}\n\n"
 

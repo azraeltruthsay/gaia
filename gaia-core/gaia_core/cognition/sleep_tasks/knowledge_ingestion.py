@@ -102,7 +102,6 @@ def run_knowledge_ingestion(
         deduplicate_against_existing,
         generate_pairs_from_cfr,
         generate_pairs_from_raw,
-        validate_pair_length,
     )
 
     results: List[Dict[str, Any]] = []
@@ -482,7 +481,6 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 # ── Standalone test mode ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
     logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
     # Standalone test mode

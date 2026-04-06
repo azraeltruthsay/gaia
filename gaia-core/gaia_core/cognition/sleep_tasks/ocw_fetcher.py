@@ -10,7 +10,7 @@ All content fetched is CC BY-NC-SA 4.0 licensed (MIT OCW standard license).
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger("GAIA.OCWFetcher")

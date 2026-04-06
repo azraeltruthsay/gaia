@@ -193,7 +193,7 @@ def _check_doctor_dissonance() -> List[Dict[str, Any]]:
             if _is_doc_related(file_path):
                 results.append({
                     "target": file_path,
-                    "reason": f"Doctor dissonance: live/candidate hash mismatch",
+                    "reason": "Doctor dissonance: live/candidate hash mismatch",
                     "source": "doctor_dissonance",
                     "details": item,
                 })
@@ -408,10 +408,10 @@ def _generate_llm_draft(
     if files_text:
         prompt += f"Recently changed source files:\n{files_text}\n"
     prompt += (
-        f"\nWrite a brief (2-4 sentences) summary of what likely needs updating "
-        f"in this documentation file. Be specific about which sections or "
-        f"descriptions might be affected. Do not write the actual update — "
-        f"just describe what should be reviewed and why."
+        "\nWrite a brief (2-4 sentences) summary of what likely needs updating "
+        "in this documentation file. Be specific about which sections or "
+        "descriptions might be affected. Do not write the actual update — "
+        "just describe what should be reviewed and why."
     )
 
     try:
