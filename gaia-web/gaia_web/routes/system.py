@@ -677,5 +677,68 @@ async def consciousness_transition(target: str):
         return {"error": str(e)}
 
 
+# ── Inference Control (Clutch Architecture) ─────────────────────────────
+
+# Tier endpoint map for direct engine communication
+_TIER_ENDPOINTS = {
+    "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+    "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
+    "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
+}
+
+
+@router.post("/inference/{tier}/cancel")
+async def inference_cancel(tier: str, request: Request):
+    """Cancel active generation on a tier — stop button / answer now.
+
+    Kills the worker process and optionally respawns it.
+    """
+    if tier not in _TIER_ENDPOINTS:
+        return {"error": f"Unknown tier: {tier}"}
+    endpoint = _TIER_ENDPOINTS[tier]
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{endpoint}/inference/cancel",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/inference/{tier}/drain")
+async def inference_drain(tier: str):
+    """Drain inference on a tier — graceful stop for model transitions."""
+    if tier not in _TIER_ENDPOINTS:
+        return {"error": f"Unknown tier: {tier}"}
+    endpoint = _TIER_ENDPOINTS[tier]
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            resp = await client.post(
+                f"{endpoint}/inference/drain",
+                json={"timeout_s": 30},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/inference/{tier}/resume")
+async def inference_resume(tier: str):
+    """Resume inference on a tier after drain."""
+    if tier not in _TIER_ENDPOINTS:
+        return {"error": f"Unknown tier: {tier}"}
+    endpoint = _TIER_ENDPOINTS[tier]
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(f"{endpoint}/inference/resume")
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 ## NOTE: Duplicate lifecycle/state and lifecycle/history routes were removed.
 ## The canonical routes are defined earlier in this file (lines ~586-638).
