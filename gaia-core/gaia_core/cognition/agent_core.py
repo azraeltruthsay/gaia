@@ -1113,6 +1113,26 @@ class AgentCore:
                 any(_re.search(p, text_lower) for p in _trivial_phrases) or is_factual
             )
 
+            # Follow-up detection: anaphoric references ("the poem", "that stanza",
+            # "you recited", etc.) need conversation history that Nano's slim prompt
+            # cannot provide. Suppress is_trivial so these route to Core.
+            if is_trivial and self.session_manager.get_history(session_id):
+                _FOLLOWUP_SIGNALS = [
+                    "the poem", "that poem", "the stanza", "that stanza",
+                    "the last line", "the first line", "the second",
+                    "the third", "the fourth", "the fifth",
+                    "second-to-last", "second to last",
+                    "what does", "what did", "what was",
+                    "which line", "which stanza", "which verse",
+                    "you just", "you recited", "you said", "you mentioned",
+                    "that text", "the text", "the passage",
+                    "in that", "from that", "about that",
+                ]
+                if any(sig in text_lower for sig in _FOLLOWUP_SIGNALS):
+                    is_trivial = False
+                    is_factual = False
+                    logger.info("[MODEL_SELECT] Follow-up reference detected with session history — suppressing trivial classification")
+
             # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
             # Trivial/factual queries go to Nano first; cascade triage will
             # escalate later if the question turns out to be complex.
@@ -3677,15 +3697,35 @@ class AgentCore:
             logger.error("AgentCore: immune system health check failed — safety blind spot: %s", _imm_exc, exc_info=True)
         return None
 
+    # Keywords that indicate requests Nano should never handle — these need
+    # the full pipeline (intent classification, recitation source fetch, etc.)
+    _REFLEX_BYPASS_KEYWORDS = [
+        "recite", "recitation", "reciting",
+        "read me the poem", "read the poem", "full poem",
+        "word for word", "verbatim",
+        "sing me", "lyrics to", "lyrics of",
+        "tell me the story of",  # long-form narrative
+    ]
+
     def is_eligible_for_reflex(self, packet: CognitionPacket, history: list) -> bool:
         """Determines if a packet should trigger an instant Nano reflex.
 
         Fires for ANY short, simple request regardless of session history.
         The nano model handles greetings, time/date, identity, and basic
         math — escalating to the full pipeline via ESCALATE when unsure.
+
+        Recitation-type requests are excluded because Nano tends to refuse
+        them on copyright grounds instead of escalating, bypassing the
+        recitation pipeline entirely.
         """
         user_input = packet.content.original_prompt
         is_short = len(user_input) < 150
+
+        # Recitation and long-form requests must go through the full pipeline
+        input_lower = user_input.lower()
+        if any(kw in input_lower for kw in self._REFLEX_BYPASS_KEYWORDS):
+            self.logger.info("Reflex bypass: keyword match in '%s' — routing to full pipeline", user_input[:60])
+            return False
 
         from gaia_common.utils.immune_system import is_system_irritated
         return is_short and not is_system_irritated() and "nano" in self.model_pool.models
