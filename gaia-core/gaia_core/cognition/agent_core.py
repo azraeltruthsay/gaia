@@ -1097,7 +1097,8 @@ class AgentCore:
             # Simple patterns NANO can handle reliably
             factual_patterns = [
                 "who is", "what is", "where is", "when did", "how many",
-                "name of", "tell me what time", "what time", "what date",
+                "name of", "tell me what time", "tell me the time",
+                "what time", "what date", "the time?",
                 "current date", "current time", "date and time", "time and date",
                 "what day", "today's date", "right now",
             ]
@@ -4073,7 +4074,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             self.logger.info("AgentCore: System is CRITICAL; disabling Slim Prompt shortcut for awareness.")
             return False
 
-        if plan.intent in ("recitation", "chat"):
+        if plan.intent in ("recitation", "chat", "time"):
             # Don't slim-path if user explicitly asked for tools
             lowered = (user_input or "").lower()
             tool_signals = ["use your ", "use the ", "use my ", "look up", "look it up",

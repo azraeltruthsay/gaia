@@ -113,10 +113,18 @@ def run_time_check(endpoint: str = NANO_ENDPOINT) -> Dict[str, Any]:
     timestamp = datetime.now(timezone.utc).isoformat()
 
     try:
+        # Inject the actual clock so Nano can read it — Nano doesn't have
+        # an internal clock; it relies on the prompt for time awareness.
+        _tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
+        _tz_label = os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")
+        _local_tz = timezone(timedelta(hours=_tz_offset))
+        _now = datetime.now(_local_tz)
+        _clock = _now.strftime("%-I:%M %p") + f" {_tz_label}, " + _now.strftime("%A, %B %d, %Y")
+
         # Ask via Nano's OpenAI-compatible chat endpoint
         payload = json.dumps({
             "messages": [
-                {"role": "system", "content": "You are GAIA. Answer with just the time."},
+                {"role": "system", "content": f"You are GAIA. Current time: {_clock}\nAnswer with just the time."},
                 {"role": "user", "content": "What time is it?"},
             ],
             "max_tokens": 64,

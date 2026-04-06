@@ -34,6 +34,22 @@
     "Howdy"
   ],
 
+  "time": [
+    "What time is it?",
+    "Can you tell me the time?",
+    "What's the current time?",
+    "Tell me the time",
+    "What time do you have?",
+    "Do you know what time it is?",
+    "What's the time right now?",
+    "Current time please",
+    "What date is it?",
+    "What's today's date?",
+    "What day is it today?",
+    "Tell me the date",
+    "What is the current date and time?"
+  ],
+
   "identity": [
     "Who are you?",
     "What are you?",

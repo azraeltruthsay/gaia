@@ -102,9 +102,15 @@ class ImmuneSystem:
             
             # Calculate systemic score
             systemic_score = sum(s["weighted_score"] for s in log_stats.values())
-            # Add scores for diagnostic issues (proactive detection is high priority)
+            # Add scores for diagnostic issues (proactive detection).
+            # Cap MRI contribution at 25.0 to prevent static analysis lint
+            # findings (hundreds of F841 etc.) from drowning out actual
+            # runtime errors. Lint issues are important but not urgent.
+            _mri_score = 0.0
+            _MRI_SCORE_CAP = 25.0
             for issue in diagnostic_issues:
-                systemic_score += self._get_priority(issue) * 3.0 
+                _mri_score += self._get_priority(issue) * 3.0
+            systemic_score += min(_mri_score, _MRI_SCORE_CAP)
 
             if total_raw_events == 0 and not diagnostic_issues:
                 summary = "Immune System: STABLE. No active irritants."
