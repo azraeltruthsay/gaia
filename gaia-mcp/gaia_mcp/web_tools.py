@@ -203,6 +203,29 @@ def web_search(params: dict) -> dict:
     if not query:
         raise ValueError("query is required")
 
+    # Security: reject queries that leak internal system state to external search
+    _internal_markers = [
+        "gaia-core", "gaia-mcp", "gaia-prime", "gaia-web", "gaia-study",
+        "gaia-orchestrator", "gaia-doctor", "gaia-monkey", "gaia-audio",
+        "restart loop", "recursive restart", "system repair", "root cause",
+        "traceback", "stack trace", "stderr", "engine-manager",
+        "/shared/", "/knowledge/", "/models/", "docker exec",
+        "HTTP/1.1\" 200", "HTTP/1.1\" 500",
+    ]
+    _query_lower = query.lower()
+    if any(marker.lower() in _query_lower for marker in _internal_markers):
+        logger.warning("web_search: BLOCKED — query contains internal system state: %s", query[:100])
+        return {
+            "ok": False,
+            "error": "Query contains internal system information that should not be sent to external search engines.",
+            "blocked_reason": "internal_state_leak",
+        }
+
+    # Sanity: reject excessively long queries (likely dumped logs)
+    if len(query) > 500:
+        logger.warning("web_search: query too long (%d chars), truncating", len(query))
+        query = query[:200]
+
     content_type = params.get("content_type")
     domain_filter = params.get("domain_filter")
     max_results = min(int(params.get("max_results", 5)), 10)

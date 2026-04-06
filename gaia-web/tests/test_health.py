@@ -9,9 +9,9 @@ def test_health_returns_200(client):
     assert data["service"] == "gaia-web"
 
 
-def test_root_returns_service_info(client):
+def test_root_serves_dashboard(client):
+    """Root / now serves the Mission Control dashboard HTML."""
     response = client.get("/")
     assert response.status_code == 200
-    data = response.json()
-    assert data["service"] == "gaia-web"
-    assert "/health" in data["endpoints"]
+    content_type = response.headers.get("content-type", "")
+    assert "text/html" in content_type

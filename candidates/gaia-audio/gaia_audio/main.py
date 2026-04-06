@@ -48,6 +48,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 config: AudioConfig | None = None
 gpu_manager: GPUManager | None = None
 stt_engine: STTEngine | None = None
+audio_queue = None
+audio_watcher = None
 nano_speaker: NanoSpeaker | None = None
 prime_speaker: PrimeSpeaker | None = None
 espeak_fallback: EspeakFallback | None = None
@@ -114,6 +116,27 @@ async def lifespan(app: FastAPI):
 
     await status_tracker.emit("startup", "gaia-audio ready (three-tier Qwen3 architecture)")
 
+    # Initialize audio processing queue with readiness gate
+    global audio_queue, audio_watcher
+    from gaia_audio.audio_queue import AudioProcessingQueue, AudioFileWatcher
+
+    audio_queue = AudioProcessingQueue()
+    audio_queue.set_ready_checker(lambda: stt_engine is not None and stt_engine.loaded)
+    if stt_engine and stt_engine.loaded:
+        audio_queue.signal_model_ready()
+
+    # Watch /shared/audio_queue/incoming/ for new audio files
+    audio_watcher = AudioFileWatcher(
+        watch_dir="/shared/audio_queue/incoming",
+        queue=audio_queue,
+        source="listener",
+        priority=5,
+        poll_interval=2.0,
+    )
+    await audio_watcher.start()
+    await audio_queue.start_processing()
+    logger.info("Audio queue + file watcher started")
+
     # Register with orchestrator (best-effort)
     await _register_with_orchestrator()
 
@@ -121,6 +144,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: release all resources
     logger.info("Shutting down gaia-audio — releasing all resources")
+    if audio_queue:
+        await audio_queue.stop_processing()
+    if audio_watcher:
+        await audio_watcher.stop()
     if gpu_manager:
         await gpu_manager.release()
     await status_tracker.emit("shutdown", "gaia-audio stopped")
@@ -132,6 +159,14 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+# Inter-service HMAC authentication
+try:
+    from gaia_common.utils.service_auth import AuthMiddleware
+    if AuthMiddleware:
+        app.add_middleware(AuthMiddleware)
+except ImportError:
+    pass
 
 
 # ── Health & Status ───────────────────────────────────────────────────
@@ -591,6 +626,33 @@ async def gpu_status():
         "gpu_mode": status_tracker.gpu_mode,
         "muted": status_tracker.muted,
     }
+
+
+# ── Audio Queue Endpoints ─────────────────────────────────────────────
+
+
+@app.get("/queue/status")
+async def queue_status():
+    """Audio processing queue status."""
+    if not audio_queue:
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "queue_size": audio_queue.queue_size,
+        "is_processing": audio_queue.is_processing,
+        "model_ready": stt_engine.loaded if stt_engine else False,
+    }
+
+
+@app.post("/queue/enqueue")
+async def queue_enqueue(file_path: str, source: str = "upload", priority: int = 5):
+    """Manually enqueue an audio file for processing."""
+    if not audio_queue:
+        raise HTTPException(503, "Audio queue not initialized")
+    ok = audio_queue.enqueue_file(file_path, source=source, priority=priority)
+    if not ok:
+        raise HTTPException(429, "Queue full or file not found")
+    return {"ok": True, "queue_size": audio_queue.queue_size}
 
 
 # ── Internal helpers ──────────────────────────────────────────────────

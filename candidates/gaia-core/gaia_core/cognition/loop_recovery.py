@@ -509,7 +509,7 @@ class LoopDetectorObserver:
 
     def __init__(self, manager: Optional[LoopRecoveryManager] = None,
                  session_id: str = "",
-                 think_tag_char_threshold: int = 500,
+                 think_tag_char_threshold: int = 2000,
                  think_tag_ratio_threshold: float = 0.90):
         self.manager = manager or get_recovery_manager(session_id)
         self._token_buffer = ""

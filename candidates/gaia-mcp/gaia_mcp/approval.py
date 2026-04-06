@@ -59,17 +59,43 @@ class ApprovalStore:
         """
         if method == "run_shell":
             cmd = str(params.get("command", "")).lower()
-            forbidden = ["rm -rf", "sudo ", "mkfs", "dd ", "> /dev/sd"]
+            forbidden = [
+                # Destructive file operations
+                "rm -rf", "rm -fr", "rmdir /",
+                # Privilege escalation
+                "sudo ", "su -", "su root",
+                # Disk/filesystem destruction
+                "mkfs", "dd ", "> /dev/sd", "> /dev/nvme",
+                # Permission escalation
+                "chmod +s", "chmod u+s", "chmod 4",
+                # Remote code execution vectors
+                "curl | bash", "curl |bash", "wget | bash", "wget |bash",
+                "curl -s | sh", "wget -O - | sh",
+                # Container escape
+                "nsenter", "chroot",
+                # Credential theft
+                "cat /etc/shadow", "cat /etc/passwd",
+                "cat /run/secrets", "cat ~/.ssh",
+                # Network exfiltration
+                "nc -l", "ncat -l",
+                # Python/node arbitrary execution (bypasses whitelist)
+                "python -c", "python3 -c", "node -e",
+                # Find with exec (arbitrary command execution)
+                "-exec ", "-execdir ",
+            ]
             for pattern in forbidden:
                 if pattern in cmd:
                     logger.critical(f"🛡️ BLAST SHIELD: Forbidden command pattern detected: {pattern}")
                     raise ValueError(f"Blast Shield: Forbidden command pattern '{pattern}' detected.")
-        
-        if method == "write_file":
+
+        if method in ("write_file", "ai_write", "replace"):
             path = str(params.get("path", ""))
-            if path.startswith("/etc") or path.startswith("/boot") or ".ssh" in path:
-                logger.critical(f"🛡️ BLAST SHIELD: Attempt to write to system path: {path}")
-                raise ValueError("Blast Shield: Writing to system configuration paths is forbidden.")
+            blocked_paths = ["/etc", "/boot", "/.ssh", "/run/secrets",
+                             "/proc", "/sys", "/dev", "/root"]
+            for bp in blocked_paths:
+                if path.startswith(bp) or f"/{bp.lstrip('/')}" in path:
+                    logger.critical(f"🛡️ BLAST SHIELD: Attempt to write to system path: {path}")
+                    raise ValueError("Blast Shield: Writing to system/sensitive paths is forbidden.")
 
     def create_pending(
         self,

@@ -129,7 +129,8 @@ async def lifespan(app: FastAPI):
         from .lifecycle_machine import LifecycleMachine
         _lifecycle_machine = LifecycleMachine(_state_manager)
         await _lifecycle_machine.load_persisted_state()
-        await _lifecycle_machine.reconcile()
+        # Don't reconcile during startup — it can block for minutes loading models.
+        # The periodic reconcile loop (line 183) handles this after startup.
         logger.info("Lifecycle state machine initialized: %s", _lifecycle_machine._snapshot.state)
     except Exception:
         logger.warning("Lifecycle state machine initialization failed", exc_info=True)
@@ -154,9 +155,15 @@ async def lifespan(app: FastAPI):
         global _consciousness_matrix
         from .consciousness_matrix import ConsciousnessMatrix
         _consciousness_matrix = ConsciousnessMatrix(lifecycle_machine=_lifecycle_machine)
-        await _consciousness_matrix.probe_all()
+
+        # Wire the clutch: lifecycle machine delegates execution to consciousness matrix
+        if _lifecycle_machine:
+            _lifecycle_machine.set_consciousness_matrix(_consciousness_matrix)
+
+        # Probe and poll start asynchronously — don't block startup.
+        # The consciousness matrix poll is the SINGLE reconcile loop (15s).
         await _consciousness_matrix.start_continuous_poll(interval=15.0)
-        logger.info("Consciousness matrix initialized: %s",
+        logger.info("Consciousness matrix initialized (clutch architecture active): %s",
                      {t: s["actual"] for t, s in _consciousness_matrix.get_matrix().items()})
     except Exception:
         logger.warning("Consciousness matrix initialization failed", exc_info=True)
@@ -177,20 +184,9 @@ async def lifespan(app: FastAPI):
         _container_poll_task = asyncio.create_task(_container_poll_loop())
         logger.info("Container status poll started (30s interval)")
 
-    # Start periodic lifecycle reconciliation (detect model drift)
-    _lifecycle_reconcile_task = None
-    if _lifecycle_machine:
-        async def _lifecycle_reconcile_loop():
-            await asyncio.sleep(30)  # Initial delay
-            while True:
-                try:
-                    await _lifecycle_machine.reconcile()
-                except Exception:
-                    logger.debug("Lifecycle reconcile failed", exc_info=True)
-                await asyncio.sleep(60)  # Every 60 seconds
-
-        _lifecycle_reconcile_task = asyncio.create_task(_lifecycle_reconcile_loop())
-        logger.info("Lifecycle reconciliation loop started (60s interval)")
+    # NOTE: No separate lifecycle reconcile loop. The consciousness matrix's
+    # 15s poll loop is the single reconcile authority. Manual reconcile is
+    # still available via POST /lifecycle/reconcile.
 
     logger.info("GAIA Orchestrator ready")
     yield
@@ -671,6 +667,11 @@ async def gpu_wake():
     Called by gaia-core's SleepCycleLoop when entering WAKING state.
     Delegates to lifecycle machine which handles tier loading + KV prewarm.
     """
+    from gaia_common.utils.maintenance import is_maintenance_active
+    if is_maintenance_active():
+        logger.info("GPU wake suppressed — maintenance mode active")
+        return {"ok": False, "message": "maintenance mode active", "state": "suppressed"}
+
     if _lifecycle_machine is not None:
         from gaia_common.lifecycle.states import TransitionTrigger
         result = await _lifecycle_machine.transition(
@@ -1256,7 +1257,13 @@ async def lifecycle_transition(req: LifecycleTransitionRequest):
     if _lifecycle_machine is None:
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
 
+    from gaia_common.utils.maintenance import is_maintenance_active
     from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+
+    # During maintenance, only allow transitions toward sleep, not wake
+    if is_maintenance_active() and req.target in ("awake", "focusing"):
+        logger.info("Lifecycle transition to %s suppressed — maintenance mode active", req.target)
+        return JSONResponse(status_code=409, content={"ok": False, "error": "maintenance mode active"})
 
     try:
         trigger = TransitionTrigger(req.trigger)
@@ -1294,10 +1301,17 @@ async def lifecycle_history(limit: int = 50):
 
 @app.post("/lifecycle/reconcile")
 async def lifecycle_reconcile():
-    """Force reconciliation — probe all tiers and infer actual state."""
+    """Force reconciliation — probe all tiers and infer actual state.
+
+    Observe-only: probes tiers and infers the correct lifecycle state.
+    If stuck in TRANSITIONING, the reconcile method handles recovery
+    by inferring actual state from tier probes.
+    """
     if _lifecycle_machine is None:
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
-    return await _lifecycle_machine.reconcile()
+
+    result = await _lifecycle_machine.reconcile()
+    return result
 
 
 @app.get("/lifecycle/tiers")
@@ -1353,42 +1367,54 @@ async def consciousness_set(request: ConsciousnessRequest):
 
 @app.post("/consciousness/awake")
 async def consciousness_awake():
-    """Set AWAKE configuration: Core=3, Nano=3, Prime=2."""
+    """Set AWAKE configuration via lifecycle clutch protocol.
+
+    Flow: lifecycle declares AWAKE → clutch drains → consciousness loads tiers → clutch releases.
+    """
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.awake()
+    # Fire-and-forget — transitions go through lifecycle → execute_shift (can take minutes)
+    asyncio.create_task(_consciousness_matrix.awake())
+    return {"ok": True, "message": "AWAKE transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/focusing")
 async def consciousness_focusing():
-    """Set FOCUSING configuration: Nano=3, Core=2, Prime=3."""
+    """Set FOCUSING configuration via lifecycle clutch protocol.
+
+    Flow: clutch drains Core+Nano → unloads → VRAM clear → loads Prime → clutch releases.
+    """
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.focusing()
+    asyncio.create_task(_consciousness_matrix.focusing())
+    return {"ok": True, "message": "FOCUSING transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/sleep")
 async def consciousness_sleep():
-    """Set SLEEP configuration: Nano=2, Core=2, Prime=1."""
+    """Set SLEEP configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.sleep()
+    asyncio.create_task(_consciousness_matrix.sleep())
+    return {"ok": True, "message": "SLEEP transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/deep-sleep")
 async def consciousness_deep_sleep():
-    """Set DEEP SLEEP configuration: All → 1 (Nano stays 2)."""
+    """Set DEEP SLEEP configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.deep_sleep()
+    asyncio.create_task(_consciousness_matrix.deep_sleep())
+    return {"ok": True, "message": "DEEP SLEEP transition started (via lifecycle clutch)"}
 
 
 @app.post("/consciousness/training")
 async def consciousness_training(tier: str = "prime"):
-    """Set TRAINING configuration: target tier → 1, others → 2."""
+    """Set TRAINING configuration via lifecycle clutch protocol."""
     if _consciousness_matrix is None:
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
-    return await _consciousness_matrix.training(tier)
+    asyncio.create_task(_consciousness_matrix.training(tier))
+    return {"ok": True, "message": f"TRAINING ({tier}) transition started (via lifecycle clutch)"}
 
 
 # =============================================================================

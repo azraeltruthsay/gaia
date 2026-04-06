@@ -309,9 +309,12 @@ class QLoRATrainer:
                     ) / (1024**3)
 
                 # NF4 is ~4x compression. The actual GPU usage will be bf16/4.
-                # Allow direct GPU loading if NF4 size fits with headroom.
+                # But transformers temporarily holds bf16 weights during quantization,
+                # so we need bf16 to fit in VRAM during the transient loading phase.
                 nf4_estimated_gb = bf16_size_gb / 4
-                if nf4_estimated_gb < max_gpu_gb * 0.7:
+                gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+                bf16_fits_in_vram = bf16_size_gb < gpu_free_gb * 0.85
+                if nf4_estimated_gb < max_gpu_gb * 0.7 and bf16_fits_in_vram:
                     # Model fits on GPU — load directly for full GPU training
                     logger.info(
                         "Loading model to GPU (bf16 size: %.1fGiB fits in %.1fGiB VRAM)",
@@ -356,7 +359,15 @@ class QLoRATrainer:
                     )
                     logger.info("Model loaded to CPU. Quantizing with quanto int4...")
                     # Step 2: Quantize on CPU with quanto
-                    from optimum.quanto import quantize, qint4, freeze
+                    try:
+                        from optimum.quanto import quantize, qint4, freeze
+                    except ImportError:
+                        try:
+                            from quanto import quantize, qint4, freeze
+                        except ImportError:
+                            import sys
+                            sys.path.insert(0, "/shared/pylibs")
+                            from quanto import quantize, qint4, freeze
                     quantize(self.model, weights=qint4)
                     freeze(self.model)
                     logger.info("Quantized on CPU. Moving to GPU...")
@@ -387,11 +398,24 @@ class QLoRATrainer:
                 self.config.gradient_checkpointing = False
                 logger.info("GPTQ model: disabled gradient checkpointing (can segfault with GPTQ kernels)")
             elif self.config.load_in_4bit and bitsandbytes is not None:
-                self.model = peft.prepare_model_for_kbit_training(
-                    self.model,
-                    use_gradient_checkpointing=self.config.gradient_checkpointing,
+                # Check if model was quantized with quanto (QBitsTensor can't change dtype)
+                _is_quanto = any(
+                    "QBitsTensor" in str(type(p)) or "quanto" in str(type(p)).lower()
+                    for p in self.model.parameters()
                 )
-                logger.info("Model prepared for k-bit training")
+                if _is_quanto:
+                    # quanto: skip prepare_model_for_kbit_training (incompatible dtype cast)
+                    # Just enable gradient checkpointing for memory savings
+                    if self.config.gradient_checkpointing:
+                        self.model.gradient_checkpointing_enable()
+                    logger.info("Quanto-quantized model: skipped kbit_training prep, gradient checkpointing=%s",
+                                self.config.gradient_checkpointing)
+                else:
+                    self.model = peft.prepare_model_for_kbit_training(
+                        self.model,
+                        use_gradient_checkpointing=self.config.gradient_checkpointing,
+                    )
+                    logger.info("Model prepared for k-bit training (BnB NF4)")
             elif self.config.gradient_checkpointing:
                 self.model.gradient_checkpointing_enable()
 

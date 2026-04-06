@@ -196,6 +196,15 @@ class SleepTaskScheduler:
         ))
 
         self.register_task(SleepTask(
+            task_id="samvega_kv_fold",
+            task_type="REFLECTIVE_MEMORY",
+            priority=2,
+            interruptible=True,
+            estimated_duration_seconds=30,
+            handler=self._run_samvega_kv_fold,
+        ))
+
+        self.register_task(SleepTask(
             task_id="tier5_training",
             task_type="RETRAINABLE_MEMORY",
             priority=2,
@@ -445,7 +454,8 @@ class SleepTaskScheduler:
         try:
             from gaia_common.utils.code_evolution import generate_code_evolution_snapshot
             
-            output_path = "/knowledge/system_reference/AS_BUILT_LATEST.md"
+            # Write to /shared/ (writable) not /knowledge/system_reference/ (read-only mount)
+            output_path = "/shared/docs_drafts/AS_BUILT_LATEST.md"
             generate_code_evolution_snapshot(
                 project_root="/gaia/GAIA_Project",
                 output_path=output_path,
@@ -2413,6 +2423,24 @@ class SleepTaskScheduler:
 
     # ------------------------------------------------------------------
     # Tier 5 Retrainable Memory
+    # ------------------------------------------------------------------
+    # Samvega → KV Cache Fold
+    # ------------------------------------------------------------------
+
+    def _run_samvega_kv_fold(self, **kwargs) -> None:
+        """Fold samvega corrections into the KV prefix cache.
+
+        Queries high-weight unreviewed artifacts, formats as correction context,
+        injects into the engine's prefix cache, and saves the updated state.
+        This creates a persistent correction layer — learning without training.
+        """
+        try:
+            from gaia_core.cognition.sleep_tasks.samvega_kv_fold import run_samvega_kv_fold
+            result = run_samvega_kv_fold()
+            logger.info("Samvega KV fold: %s", result)
+        except Exception:
+            logger.error("Samvega KV fold failed", exc_info=True)
+
     # ------------------------------------------------------------------
 
     def _run_tier5_training(self) -> None:

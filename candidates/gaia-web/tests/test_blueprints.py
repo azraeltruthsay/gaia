@@ -116,9 +116,10 @@ def test_dashboard_redirect(client):
     assert "/static/index.html" in resp.headers.get("location", "")
 
 
-def test_root_includes_new_endpoints(client):
+def test_root_serves_dashboard(client):
+    """Root / now serves the Mission Control dashboard HTML."""
     resp = client.get("/")
     assert resp.status_code == 200
-    data = resp.json()
-    assert "/dashboard" in data["endpoints"]
-    assert "/api/blueprints" in data["endpoints"]
+    # Should be HTML content, not JSON
+    content_type = resp.headers.get("content-type", "")
+    assert "text/html" in content_type

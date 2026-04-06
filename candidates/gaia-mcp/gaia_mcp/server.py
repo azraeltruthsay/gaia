@@ -38,13 +38,38 @@ gaia_helper = GAIARescueHelper(config)
 approval_store = ApprovalStore()
 
 # Opt-in bypass for approval flow (useful for local testing)
-MCP_BYPASS = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
+# Time-limited: bypass expires after 1 hour if set via env var.
+# This prevents forgotten bypass flags from persisting indefinitely.
+_BYPASS_ENV = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
+_BYPASS_EXPIRES = None
+if _BYPASS_ENV:
+    import time as _bypass_time
+    _BYPASS_EXPIRES = _bypass_time.time() + 3600  # 1 hour
+    logger.warning("MCP_BYPASS active — will auto-expire in 1 hour")
+
+def _is_bypass_active() -> bool:
+    if not _BYPASS_ENV:
+        return False
+    if _BYPASS_EXPIRES and _bypass_time.time() > _BYPASS_EXPIRES:
+        logger.warning("MCP_BYPASS has EXPIRED (1 hour limit reached)")
+        return False
+    return True
+
+MCP_BYPASS = _is_bypass_active  # Now a callable, not a static bool
 
 app = FastAPI(
     title="GAIA MCP-Lite Server",
     description="Provides a secure JSON-RPC interface to GAIA's tools.",
     version="0.1.0"
 )
+
+# Inter-service HMAC authentication
+try:
+    from gaia_common.utils.service_auth import AuthMiddleware
+    if AuthMiddleware:
+        app.add_middleware(AuthMiddleware)
+except ImportError:
+    pass  # gaia_common not available — skip auth
 
 
 @app.on_event("shutdown")
@@ -84,7 +109,7 @@ async def jsonrpc_endpoint(request: Request):
 
     # Enforce approval for sensitive legacy tools unless bypass is enabled.
     # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_tool.
-    if (not MCP_BYPASS) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
+    if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
         return JSONResponse(content={"jsonrpc": "2.0", "error": {"code": -32001, "message": f"'{method}' requires approval. Use /request_approval first."}, "id": request_id}, status_code=403)
 
     # Validate params against the tool's schema (skip for domain tools — they validate internally)
@@ -107,7 +132,7 @@ async def jsonrpc_endpoint(request: Request):
             method=method, 
             params=params, 
             approval_store=approval_store,
-            pre_approved=MCP_BYPASS # Bypass checks if MCP_BYPASS is active
+            pre_approved=MCP_BYPASS() # Bypass checks if MCP_BYPASS is active
         )
         
         return JSONResponse(content={
