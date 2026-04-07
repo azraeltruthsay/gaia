@@ -65,7 +65,11 @@ SHARED_CONFIG = {
     "lora_r": 16,
     "lora_alpha": 32,
     "lora_dropout": 0.05,
-    "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"],
+    # Qwen3.5 hybrid architecture: full_attention layers use q/k/v/o_proj,
+    # linear_attention layers use in_proj_qkv/out_proj. Target both to get
+    # LoRA on ALL 32 layers, not just the 8 full_attention ones.
+    # Qwen3-8B (Prime) is standard transformer — extra modules are ignored.
+    "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj", "in_proj_qkv", "out_proj"],
     "batch_size": 1,
     "gradient_accumulation_steps": 4,
     "warmup_steps": 15,
