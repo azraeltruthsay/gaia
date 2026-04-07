@@ -471,16 +471,60 @@ class QLoRATrainer:
         _lazy_import()
 
         def format_instruction(sample):
-            """Format an instruction-style sample."""
+            """Format an instruction-style sample using the model's chat template.
+
+            The training data has 'instruction' (system + user prompt) and 'output'
+            (expected assistant response). We format these through the tokenizer's
+            chat template so the LoRA learns patterns that activate during normal
+            inference — NOT a raw Alpaca format that never appears at inference time.
+            """
             instruction = sample.get("instruction", "")
             input_text = sample.get("input", "")
             output = sample.get("output", "")
 
-            if input_text:
-                text = f"### Instruction:\n{instruction}\n\n### Input:\n{input_text}\n\n### Response:\n{output}"
-            else:
-                text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
+            # Split instruction into system prompt and user message
+            # Format: "System: ...\n\nUser: ..." or just the user message
+            system_msg = ""
+            user_msg = instruction
+            if instruction.startswith("System:"):
+                parts = instruction.split("\n\nUser: ", 1)
+                if len(parts) == 2:
+                    system_msg = parts[0].replace("System: ", "", 1)
+                    user_msg = parts[1]
+                else:
+                    # System prompt contains the user message on the last line
+                    lines = instruction.split("\n")
+                    # Find the last non-empty line that looks like a user message
+                    for i in range(len(lines) - 1, -1, -1):
+                        if lines[i].strip() and not lines[i].startswith("System:") and not lines[i].startswith("  "):
+                            system_msg = "\n".join(lines[:i]).replace("System: ", "", 1)
+                            user_msg = lines[i]
+                            break
 
+            if input_text:
+                user_msg = f"{user_msg}\n{input_text}"
+
+            # Build messages for chat template
+            messages = []
+            if system_msg:
+                messages.append({"role": "system", "content": system_msg})
+            messages.append({"role": "user", "content": user_msg})
+            messages.append({"role": "assistant", "content": output})
+
+            # Use the tokenizer's chat template if available
+            if self.tokenizer and hasattr(self.tokenizer, 'apply_chat_template'):
+                try:
+                    text = self.tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=False
+                    )
+                    return {"text": text}
+                except Exception:
+                    pass
+
+            # Fallback: manual chat template (Qwen-style)
+            text = ""
+            for msg in messages:
+                text += f"<|im_start|>{msg['role']}\n{msg['content']}<|im_end|>\n"
             return {"text": text}
 
         def format_completion(sample):
