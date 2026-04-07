@@ -174,12 +174,15 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
             and packet.reasoning
             and packet.reasoning.reflection_log):
         for entry in reversed(packet.reasoning.reflection_log):
-            if entry.step == "refined_plan" and entry.summary:
+            # reflection_log entries may be ReflectionLog dataclass or raw dict
+            _step = entry.step if hasattr(entry, 'step') else entry.get('step', '')
+            _summary = entry.summary if hasattr(entry, 'summary') else entry.get('summary', '')
+            if _step == "refined_plan" and _summary:
                 logger.info(
                     "Recovering response from reflection log (refined_plan, %d chars)",
-                    len(entry.summary),
+                    len(_summary),
                 )
-                packet.response.candidate = entry.summary
+                packet.response.candidate = _summary
                 break
 
     # 1. Check for authoritative blocks from the observer or other safety systems.

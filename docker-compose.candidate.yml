@@ -24,6 +24,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ../gaia-instance/gaia-models:/models:rw
       - gaia-candidate-shared:/shared:rw
       - ../gaia-instance/logs:/logs:rw
@@ -87,6 +88,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ../gaia-instance/logs:/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -143,6 +145,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ../gaia-instance/gaia-models:/models:ro
       - gaia-candidate-sandbox:/sandbox:rw
       - gaia-candidate-shared:/shared:rw
@@ -245,6 +248,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ../gaia-instance/gaia-models:/models:rw
       - gaia-candidate-shared:/shared:rw
       - ../gaia-instance/logs:/logs:rw

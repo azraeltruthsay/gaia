@@ -275,6 +275,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ./knowledge/research:/knowledge/research:ro
       - ./knowledge/consent:/knowledge/consent:ro
       - ./knowledge/templates:/knowledge/templates:ro
@@ -411,6 +412,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ./knowledge/consent:/knowledge/consent:ro
       # Static assets (if needed)
       - ./gaia-web/static:/app/static:ro
@@ -511,6 +513,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ./knowledge/research:/knowledge/research:ro
       - ./knowledge/templates:/knowledge/templates:ro
       # Vector store (SOLE WRITER)
@@ -608,6 +611,7 @@ services:
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
+      - ./knowledge/penpal:/knowledge/penpal:rw
       - ./knowledge/research:/knowledge/research:ro
       # Model files (read-only for embeddings)
       - ../gaia-instance/gaia-models:/models:ro
