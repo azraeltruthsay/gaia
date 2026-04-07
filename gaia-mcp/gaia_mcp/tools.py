@@ -519,18 +519,16 @@ def _list_files_impl(params: dict):
 
 # ── Knowledge Graph (temporal triple store) ──────────────────────────────
 
+_kg_instance = None
+
 def _get_kg():
     """Lazy-load the KnowledgeGraph singleton."""
     global _kg_instance
-    try:
+    if _kg_instance is not None:
         return _kg_instance
-    except NameError:
-        pass
-    from gaia_core.memory.knowledge_graph import KnowledgeGraph
+    from gaia_common.utils.knowledge_graph import KnowledgeGraph
     _kg_instance = KnowledgeGraph()
     return _kg_instance
-
-_kg_instance = None
 
 
 def _kg_query_impl(params: dict) -> dict:

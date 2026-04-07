@@ -225,7 +225,7 @@ def _score_markers(text: str, markers: List[str]) -> Tuple[float, List[str]]:
 # MAIN EXTRACTION
 # =============================================================================
 
-def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
+def extract_memories(text: str, min_confidence: float = 0.2) -> List[Dict]:
     """Extract classified memory segments from text.
 
     Returns list of dicts: {"content": str, "memory_type": str, "chunk_index": int}
