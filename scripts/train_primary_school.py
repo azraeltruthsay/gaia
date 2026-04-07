@@ -65,11 +65,16 @@ SHARED_CONFIG = {
     "lora_r": 16,
     "lora_alpha": 32,
     "lora_dropout": 0.05,
-    # Qwen3.5 hybrid architecture: full_attention layers use q/k/v/o_proj,
-    # linear_attention layers use in_proj_qkv/out_proj. Target both to get
-    # LoRA on ALL 32 layers, not just the 8 full_attention ones.
+    # Target attention AND MLP projections for effective identity baking.
+    # MLP layers (up/gate/down_proj) store factual knowledge — without them,
+    # the model's "I am Qwen" knowledge is untouched even after training.
+    # Qwen3.5 hybrid: also target linear_attention in_proj_qkv/out_proj.
     # Qwen3-8B (Prime) is standard transformer — extra modules are ignored.
-    "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj", "in_proj_qkv", "out_proj"],
+    "target_modules": [
+        "q_proj", "v_proj", "k_proj", "o_proj",       # attention
+        "up_proj", "gate_proj", "down_proj",            # MLP (factual knowledge)
+        "in_proj_qkv", "out_proj",                      # Qwen3.5 linear attention
+    ],
     "batch_size": 1,
     "gradient_accumulation_steps": 4,
     "warmup_steps": 15,
