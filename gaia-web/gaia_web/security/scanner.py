@@ -71,16 +71,21 @@ class PromptInjectionScanner:
     """
 
     # Tier 1 patterns — (regex, weight contribution to score)
+    # Injection heuristic weights are intentionally LOW — the regex layer is a
+    # warning signal, not the primary blocker. Actual injection blocking is handled
+    # by the embedding classifier + Nano confirmation in gaia-core's intent
+    # detection pipeline, which understands context and paraphrasing.
+    # These regex patterns catch obvious patterns for audit logging and dry_run.
     _ROLE_OVERRIDE_PATTERNS: List[Tuple[re.Pattern, float]] = [
-        (re.compile(r"ignore\s+previous\s+instructions", re.IGNORECASE), 0.50),
-        (re.compile(r"you\s+are\s+now\s+a?\s*\w", re.IGNORECASE), 0.40),
-        (re.compile(r"your\s+new\s+instructions\s+are", re.IGNORECASE), 0.45),
-        (re.compile(r"disregard\s+your\s+(previous|prior|former|original|all)", re.IGNORECASE), 0.45),
-        (re.compile(r"forget\s+(your\s+)?(training|instructions|guidelines|values|ethics)", re.IGNORECASE), 0.45),
-        (re.compile(r"act\s+as\s+(if\s+you\s+are|a)\s+\w", re.IGNORECASE), 0.30),
-        (re.compile(r"pretend\s+(you\s+are|to\s+be)\s+\w", re.IGNORECASE), 0.30),
-        (re.compile(r"(DAN|jailbreak|prompt\s+injection)", re.IGNORECASE), 0.40),
-        (re.compile(r"(reveal|show|tell\s+me|output|print)\s+.*?\b(system\s+prompt|your\s+instructions|your\s+guidelines|your\s+training)", re.IGNORECASE | re.DOTALL), 0.35),
+        (re.compile(r"ignore\s+previous\s+instructions", re.IGNORECASE), 0.30),
+        (re.compile(r"you\s+are\s+now\s+a?\s*\w", re.IGNORECASE), 0.20),
+        (re.compile(r"your\s+new\s+instructions\s+are", re.IGNORECASE), 0.25),
+        (re.compile(r"disregard\s+your\s+(previous|prior|former|original|all)", re.IGNORECASE), 0.25),
+        (re.compile(r"forget\s+(your\s+)?(training|instructions|guidelines|values|ethics)", re.IGNORECASE), 0.25),
+        (re.compile(r"act\s+as\s+(if\s+you\s+are|a)\s+\w", re.IGNORECASE), 0.15),
+        (re.compile(r"pretend\s+(you\s+are|to\s+be)\s+\w", re.IGNORECASE), 0.15),
+        (re.compile(r"(DAN|jailbreak|prompt\s+injection)", re.IGNORECASE), 0.15),
+        (re.compile(r"(reveal|show|tell\s+me|output|print)\s+.*?\b(system\s+prompt|your\s+instructions|your\s+guidelines|your\s+training)", re.IGNORECASE | re.DOTALL), 0.20),
     ]
 
     _DELIMITER_PATTERNS: List[Tuple[re.Pattern, float]] = [

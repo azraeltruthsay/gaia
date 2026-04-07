@@ -1780,6 +1780,24 @@ class AgentCore:
             packet.content.data_fields.append(DataField(key='read_only_intent', value=plan.read_only, type='boolean'))
             ts_write({"type": "intent_detect", "intent": plan.intent, "read_only": plan.read_only}, session_id, source=source, destination_context=_metadata)
 
+            # ── Injection Detection Gate ────────────────────────────��──
+            # The embedding classifier detects injection attempts via cosine
+            # similarity against adversarial exemplars. When confident, block
+            # the request with a clear, non-hostile response.
+            if plan.intent == "injection":
+                self.logger.warning("Injection attempt detected (embed score=%.3f): '%s'", plan.confidence, user_input[:80])
+                _injection_response = (
+                    "I noticed this message looks like it's trying to override my instructions "
+                    "or change how I operate. I can't do that — my identity and guidelines aren't "
+                    "negotiable.\n\n"
+                    "If you're testing my security (hi Azrael!), the injection was caught by the "
+                    "embedding classifier at the intent detection stage. If you have a legitimate "
+                    "request, just rephrase it naturally."
+                )
+                yield {"type": "token", "value": _injection_response}
+                self.session_manager.add_message(session_id, "assistant", _injection_response)
+                return
+
             # ── Recitation Pipeline ────────────────────────────────────
             # When the classifier detects intent=recitation, fetch the source
             # material and stream it directly.  Follow-up questions about
@@ -3706,6 +3724,15 @@ class AgentCore:
         "word for word", "verbatim",
         "sing me", "lyrics to", "lyrics of",
         "tell me the story of",  # long-form narrative
+        # Injection attempts must reach the embedding classifier, not Nano
+        "ignore your", "ignore previous", "ignore all",
+        "disregard your", "disregard all",
+        "forget your training", "forget your instructions",
+        "you are now", "your new instructions",
+        "system prompt", "reveal your", "output your",
+        "bypass", "jailbreak", "unrestricted",
+        "no content policy", "no restrictions",
+        "developer mode", "enter dev mode",
     ]
 
     def is_eligible_for_reflex(self, packet: CognitionPacket, history: list) -> bool:
