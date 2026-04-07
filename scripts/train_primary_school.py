@@ -38,8 +38,9 @@ MODELS = [
         "pillar": "primary",
         "tags": ["primary_school", "identity", "voice", "tool_calling", "prime", "clean_base"],
         "learning_rate": 1.5e-4,
-        "target_loss": 0.20,
-        "max_steps": 1000,      # ~2.5 epochs on 400 sample curriculum
+        "target_loss": 0.35,    # 8B converges higher than 4B on diverse curriculum
+        "max_steps": 600,       # ~1.5 epochs — sufficient for 8B
+        "gradient_accumulation_steps": 8,  # Override: reduce peak VRAM for 8B
     },
     {
         "name": "primary_school_core",
@@ -99,6 +100,10 @@ def train_model(model_config: dict, samples: list) -> bool:
     config["learning_rate"] = model_config["learning_rate"]
     config["target_loss"] = model_config["target_loss"]
     config["max_steps"] = model_config["max_steps"]
+    # Per-model overrides (e.g. gradient_accumulation_steps for 8B VRAM)
+    for key in ("gradient_accumulation_steps", "batch_size", "lora_r", "lora_alpha"):
+        if key in model_config:
+            config[key] = model_config[key]
 
     os.makedirs(output, exist_ok=True)
 
