@@ -322,9 +322,9 @@ services:
       - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6}
       # Core/Operator inference endpoint (safetensors or GGUF, depending on mode)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-Multimodal-v4}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-v5}
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
-      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4}
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-v5}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       # Force NF4 quantization for Core — bf16 (8.9GB) leaves too little
       # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
