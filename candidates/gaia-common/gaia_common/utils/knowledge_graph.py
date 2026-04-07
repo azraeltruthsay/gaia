@@ -44,11 +44,41 @@ DEFAULT_KG_PATH = os.environ.get(
 )
 
 
-class KnowledgeGraph:
-    """SQLite-backed temporal knowledge graph."""
+class Contradiction:
+    """A detected conflict between an incoming triple and existing facts."""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, incoming: dict, existing: list, resolution: str = "pending"):
+        self.incoming = incoming      # {"subject", "predicate", "object", "valid_from", ...}
+        self.existing = existing      # List of conflicting triples from the DB
+        self.resolution = resolution  # "update", "reject", "coexist", "pending"
+        self.reason = ""
+
+    def __repr__(self):
+        return (
+            f"Contradiction(incoming={self.incoming['subject']}→{self.incoming['predicate']}→{self.incoming['object']}, "
+            f"conflicts={len(self.existing)}, resolution={self.resolution})"
+        )
+
+
+class KnowledgeGraph:
+    """SQLite-backed temporal knowledge graph with contradiction detection."""
+
+    def __init__(self, db_path: str = None, contradiction_callback=None):
+        """
+        Args:
+            db_path: Path to SQLite database
+            contradiction_callback: Optional callable(Contradiction) → Contradiction
+                Called when a conflicting triple is detected. The callback should
+                set contradiction.resolution to one of:
+                - "update": invalidate old fact, insert new one
+                - "reject": discard the incoming triple
+                - "coexist": both facts are valid simultaneously
+                - "pending": flag for human review (default)
+                If no callback is set, contradictions auto-resolve as "update"
+                (assume newer information supersedes older).
+        """
         self.db_path = db_path or DEFAULT_KG_PATH
+        self._contradiction_callback = contradiction_callback
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         logger.info("KnowledgeGraph initialized: %s", self.db_path)
@@ -142,6 +172,59 @@ class KnowledgeGraph:
         if existing:
             conn.close()
             return existing[0]
+
+        # ── Contradiction detection (Tier 1: deterministic) ──────────
+        # Check for same subject+predicate but DIFFERENT object (conflict)
+        conflicting = conn.execute(
+            "SELECT t.*, e.name as obj_name FROM triples t "
+            "JOIN entities e ON t.object = e.id "
+            "WHERE t.subject=? AND t.predicate=? AND t.object!=? AND t.valid_to IS NULL",
+            (sub_id, pred, obj_id),
+        ).fetchall()
+
+        if conflicting:
+            conflicts = [
+                {
+                    "id": row[0], "subject": subject, "predicate": pred,
+                    "object": row[8], "valid_from": row[4],
+                }
+                for row in conflicting
+            ]
+            incoming = {
+                "subject": subject, "predicate": predicate, "object": obj,
+                "valid_from": valid_from, "source": source,
+            }
+            contradiction = Contradiction(incoming=incoming, existing=conflicts)
+
+            # Tier 2: Observer adjudication (if callback registered)
+            if self._contradiction_callback:
+                try:
+                    contradiction = self._contradiction_callback(contradiction)
+                except Exception as e:
+                    logger.warning("Contradiction callback failed: %s — defaulting to update", e)
+                    contradiction.resolution = "update"
+            else:
+                # No observer — default to update (newer supersedes older)
+                contradiction.resolution = "update"
+                contradiction.reason = "auto-update (no observer)"
+
+            logger.info(
+                "Contradiction detected: %s → %s → %s conflicts with %d existing facts. Resolution: %s",
+                subject, predicate, obj, len(conflicts), contradiction.resolution,
+            )
+
+            if contradiction.resolution == "reject":
+                conn.close()
+                return f"REJECTED:{conflicts[0]['id']}"
+            elif contradiction.resolution == "coexist":
+                pass  # Fall through to insert — both facts are valid
+            elif contradiction.resolution in ("update", "pending"):
+                # Invalidate old facts before inserting new one
+                for c in conflicts:
+                    conn.execute(
+                        "UPDATE triples SET valid_to=? WHERE id=?",
+                        (valid_from or date.today().isoformat(), c["id"]),
+                    )
 
         triple_id = (
             f"t_{sub_id}_{pred}_{obj_id}_"
