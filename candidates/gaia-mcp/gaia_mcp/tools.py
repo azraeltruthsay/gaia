@@ -243,6 +243,12 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
         "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
         "index_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
+        # Knowledge Graph (temporal triple store)
+        "kg_query": lambda p: _kg_query_impl(p),
+        "kg_add": lambda p: _kg_add_impl(p),
+        "kg_invalidate": lambda p: _kg_invalidate_impl(p),
+        "kg_timeline": lambda p: _kg_timeline_impl(p),
+        "kg_stats": lambda p: _kg_stats_impl(p),
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
@@ -509,6 +515,82 @@ def _list_files_impl(params: dict):
     walk(root_path, 0)
     truncated = len(results) >= max_entries
     return {"ok": True, "path": str(root_path), "max_depth": max_depth, "files": results, "truncated": truncated}
+
+
+# ── Knowledge Graph (temporal triple store) ──────────────────────────────
+
+def _get_kg():
+    """Lazy-load the KnowledgeGraph singleton."""
+    global _kg_instance
+    try:
+        return _kg_instance
+    except NameError:
+        pass
+    from gaia_core.memory.knowledge_graph import KnowledgeGraph
+    _kg_instance = KnowledgeGraph()
+    return _kg_instance
+
+_kg_instance = None
+
+
+def _kg_query_impl(params: dict) -> dict:
+    """Query the knowledge graph for an entity's relationships."""
+    kg = _get_kg()
+    entity = params.get("entity") or params.get("subject", "")
+    as_of = params.get("as_of")
+    direction = params.get("direction", "both")
+    if not entity:
+        return {"ok": False, "error": "entity parameter required"}
+    results = kg.query_entity(entity, as_of=as_of, direction=direction)
+    return {"ok": True, "entity": entity, "facts": results, "count": len(results)}
+
+
+def _kg_add_impl(params: dict) -> dict:
+    """Add a fact (triple) to the knowledge graph."""
+    kg = _get_kg()
+    subject = params.get("subject", "")
+    predicate = params.get("predicate", "")
+    obj = params.get("object", "")
+    if not (subject and predicate and obj):
+        return {"ok": False, "error": "subject, predicate, and object are all required"}
+    triple_id = kg.add_triple(
+        subject=subject,
+        predicate=predicate,
+        obj=obj,
+        valid_from=params.get("valid_from"),
+        valid_to=params.get("valid_to"),
+        confidence=float(params.get("confidence", 1.0)),
+        source=params.get("source"),
+    )
+    return {"ok": True, "triple_id": triple_id}
+
+
+def _kg_invalidate_impl(params: dict) -> dict:
+    """Mark a fact as no longer valid."""
+    kg = _get_kg()
+    subject = params.get("subject", "")
+    predicate = params.get("predicate", "")
+    obj = params.get("object", "")
+    ended = params.get("ended")
+    if not (subject and predicate and obj):
+        return {"ok": False, "error": "subject, predicate, and object are all required"}
+    rows = kg.invalidate(subject, predicate, obj, ended=ended)
+    return {"ok": True, "invalidated": rows}
+
+
+def _kg_timeline_impl(params: dict) -> dict:
+    """Get chronological facts, optionally filtered by entity."""
+    kg = _get_kg()
+    entity = params.get("entity")
+    limit = int(params.get("limit", 100))
+    facts = kg.timeline(entity_name=entity, limit=limit)
+    return {"ok": True, "facts": facts, "count": len(facts)}
+
+
+def _kg_stats_impl(params: dict) -> dict:
+    """Get knowledge graph statistics."""
+    kg = _get_kg()
+    return {"ok": True, **kg.stats()}
 
 
 def _list_knowledge_bases_impl(params: dict) -> dict:

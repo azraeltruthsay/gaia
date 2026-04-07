@@ -126,6 +126,27 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "maps_to": "memory_rebuild_index",
                 "sensitive": True,
             },
+            # Knowledge Graph (temporal triple store)
+            "kg_query": {
+                "params": {"entity": "string", "as_of": "string?", "direction": "string?"},
+                "maps_to": "kg_query",
+            },
+            "kg_add": {
+                "params": {"subject": "string", "predicate": "string", "object": "string", "valid_from": "string?", "source": "string?"},
+                "maps_to": "kg_add",
+            },
+            "kg_invalidate": {
+                "params": {"subject": "string", "predicate": "string", "object": "string", "ended": "string?"},
+                "maps_to": "kg_invalidate",
+            },
+            "kg_timeline": {
+                "params": {"entity": "string?", "limit": "integer?"},
+                "maps_to": "kg_timeline",
+            },
+            "kg_stats": {
+                "params": {},
+                "maps_to": "kg_stats",
+            },
         },
     },
 
