@@ -329,52 +329,42 @@ class QLoRATrainer:
                         torch_dtype=torch.bfloat16,
                     )
                 else:
-                    # Model too large for direct GPU loading — quantize on
-                    # CPU first, then move to GPU. This avoids the peak VRAM
-                    # spike from bf16→NF4 conversion happening on GPU.
+                    # Model too large for direct GPU loading — bf16 weights
+                    # won't fit in VRAM during the transient BnB quantization.
+                    # Use BnB with CPU offload: load bf16 to CPU, quantize
+                    # layer-by-layer to GPU. This avoids the bf16 VRAM peak.
+                    #
+                    # IMPORTANT: Do NOT use quanto here — it only wraps a
+                    # subset of layers, causing LoRA to attach to only ~22%
+                    # of attention layers. BnB wraps ALL linear layers.
                     gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     logger.info(
                         "Model bf16 size (%.1fGiB) exceeds GPU budget (%.1fGiB free) "
-                        "— loading to CPU for NF4 quantization, then moving to GPU",
+                        "— using BnB with CPU offload for NF4 quantization",
                         bf16_size_gb, gpu_free_gb
-                    )
-                    # Model too large for from_pretrained GPU quantization.
-                    # Load bf16 to CPU, quantize with quanto int4 on CPU,
-                    # then move to GPU. This avoids the bf16 VRAM peak entirely.
-                    logger.info(
-                        "Loading bf16 model to CPU for quanto int4 quantization "
-                        "(bf16 size: %.1fGiB → int4 ~%.1fGiB on GPU)",
-                        bf16_size_gb, bf16_size_gb / 4
                     )
                     import gc
                     gc.collect()
                     torch.cuda.empty_cache()
-                    # Step 1: Load bf16 to CPU
+                    # max_memory tells transformers how much GPU to use.
+                    # The rest spills to CPU RAM during the bf16→NF4 conversion.
+                    max_gpu_mb = int(gpu_free_gb * 0.85 * 1024)
+                    logger.info(
+                        "BnB CPU-offload: max_gpu=%dMiB, bf16 loads to CPU then "
+                        "quantizes layer-by-layer to GPU",
+                        max_gpu_mb
+                    )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
-                        device_map="cpu",
-                        torch_dtype=torch.bfloat16,
+                        quantization_config=bnb_config,
+                        device_map="auto",
+                        max_memory={0: f"{max_gpu_mb}MiB", "cpu": "48GiB"},
                         low_cpu_mem_usage=True,
+                        torch_dtype=torch.bfloat16,
                     )
-                    logger.info("Model loaded to CPU. Quantizing with quanto int4...")
-                    # Step 2: Quantize on CPU with quanto
-                    try:
-                        from optimum.quanto import quantize, qint4, freeze
-                    except ImportError:
-                        try:
-                            from quanto import quantize, qint4, freeze
-                        except ImportError:
-                            import sys
-                            sys.path.insert(0, "/shared/pylibs")
-                            from quanto import quantize, qint4, freeze
-                    quantize(self.model, weights=qint4)
-                    freeze(self.model)
-                    logger.info("Quantized on CPU. Moving to GPU...")
-                    # Step 3: Move quantized model to GPU
-                    self.model = self.model.to("cuda:0")
                     gpu_used = torch.cuda.memory_allocated(0) / (1024**3)
-                    logger.info("Model on GPU: %.1fGiB", gpu_used)
+                    logger.info("Model on GPU via BnB CPU-offload: %.1fGiB", gpu_used)
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")
