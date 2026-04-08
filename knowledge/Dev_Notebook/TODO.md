@@ -10,7 +10,7 @@
 ## Phase 2: Configuration Harmonization (from Gemini v2 audit)
 
 - [x] **Config harmonization** — Orchestrator config, tier router, and consciousness matrix all load from `gaia_constants.json` via `gaia_common.Config`. Added `INFERENCE_ENDPOINTS` and `core` to `MODEL_REGISTRY`. (2026-04-08)
-- [ ] **Tool routing cleanup** — Remove legacy tool aliases (`ai.read` -> `read_file` etc.) from `AgentCore._execute_mcp_tool`. Promote `kg_*` tools to `ESSENTIAL_TOOLS`. Establish Hierarchy of Truth (KG > Vector).
+- [x] **Tool routing cleanup** — Removed legacy aliases (ai.read etc.), promoted kg_* to ESSENTIAL_TOOLS, added Hierarchy of Truth (KG > Vector > Web) to task instructions and prompt tools (2026-04-08)
 - [ ] **Fragmentation enforcement** — Add `SequenceID` to `ResponseFragment` in CognitionPacket v0.4. Stream integrity verification in `gaia-web`. Auto-trigger fragmentation at 10K char mark.
 
 ## Architecture & Pipeline

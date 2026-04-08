@@ -6898,16 +6898,6 @@ Start your response with the first line of the file."""
             # Normalize tool names for SOA schema alignment
             canonical_name = tool.tool_name
 
-            # Map legacy internal tool names to their MCP equivalents
-            _INTERNAL_ALIASES = {
-                "ai.read": "read_file",
-                "ai.write": "write_file",
-                "ai.execute": "run_shell",
-                "embedding.query": "memory_query",
-            }
-            if canonical_name in _INTERNAL_ALIASES:
-                canonical_name = _INTERNAL_ALIASES[canonical_name]
-
             # Domain tools (file, shell, web, etc.) go directly through MCP
             # The MCP server's execute_tool handles domain→legacy routing
             try:

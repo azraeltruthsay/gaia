@@ -101,42 +101,10 @@ def _registry_to_catalog(registry: Dict[str, Any]) -> Dict[str, Any]:
     return catalog
 
 
-# Internal tools not in tools_registry (handled directly by _execute_mcp_tool)
-_INTERNAL_TOOLS: Dict[str, Any] = {
-    "ai.read": {
-        "description": "Read a file from the filesystem",
-        "params": ["path"],
-        "param_descriptions": {"path": "Absolute path to the file to read"},
-        "requires_approval": False,
-    },
-    "ai.write": {
-        "description": "Write content to a file on the filesystem",
-        "params": ["path", "content"],
-        "param_descriptions": {
-            "path": "Absolute path to the file to write",
-            "content": "Content to write to the file",
-        },
-        "requires_approval": True,
-    },
-    "ai.execute": {
-        "description": "Execute a shell command",
-        "params": ["command"],
-        "param_descriptions": {"command": "Shell command to execute"},
-        "requires_approval": True,
-    },
-    "embedding.query": {
-        "description": "Query the vector database for semantic search",
-        "params": ["query", "top_k"],
-        "param_descriptions": {
-            "query": "Search query text",
-            "top_k": "Number of results to return (default: 5)",
-        },
-        "requires_approval": False,
-    },
-}
-
-# Merged catalog: registry tools + internal tools (internal wins on collision)
-AVAILABLE_TOOLS: Dict[str, Any] = {**_registry_to_catalog(_REGISTRY_TOOLS), **_INTERNAL_TOOLS}
+# Merged catalog from registry tools.
+# Legacy aliases (ai.read, ai.write, ai.execute, embedding.query) removed —
+# use canonical MCP names (read_file, write_file, run_shell, memory_query).
+AVAILABLE_TOOLS: Dict[str, Any] = _registry_to_catalog(_REGISTRY_TOOLS)
 
 # Tools to show in the LLM selection prompt.  The full AVAILABLE_TOOLS
 # catalog has 30+ entries — dumping all of them overwhelms a 3B model.
@@ -145,15 +113,15 @@ AVAILABLE_TOOLS: Dict[str, Any] = {**_registry_to_catalog(_REGISTRY_TOOLS), **_I
 # if selected by name.
 _PROMPT_TOOLS = {
     # File operations
-    "read_file", "write_file", "ai.read", "ai.write",
+    "read_file", "write_file",
     # Shell
-    "run_shell", "ai.execute",
-    # Search & knowledge
-    "web_search", "web_fetch", "embedding.query",
-    "memory_query", "find_files", "find_relevant_documents",
-    "query_knowledge", "add_document",
-    # Directory listing
-    "list_dir", "list_tree",
+    "run_shell",
+    # Knowledge (Hierarchy of Truth: KG → Vector → Web)
+    "kg_query", "kg_add", "kg_timeline",
+    "memory_query", "find_relevant_documents", "query_knowledge",
+    "web_search", "web_fetch",
+    # Directory & file discovery
+    "list_dir", "list_tree", "find_files",
     # Self-introspection
     "introspect_logs",
     # Tool discovery (for tools not in this list)

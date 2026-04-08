@@ -86,7 +86,7 @@ class InitiativeEngine:
             "`update_topic` primitive to update its status or the `add_topic` "
             "primitive to create sub-tasks.\n"
             "- If the task requires writing code or a document, I will use the "
-            "`ai.write` primitive.\n"
+            "`write_file` primitive.\n"
             "\n"
             "Based on this, what is my next logical action?"
         )
