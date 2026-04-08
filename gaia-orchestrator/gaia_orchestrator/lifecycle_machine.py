@@ -25,7 +25,6 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from gaia_common.utils.maintenance import is_maintenance_active
 from gaia_common.lifecycle.states import (
     LifecycleState,
     TransitionTrigger,
@@ -51,6 +50,7 @@ class LifecycleMachine:
 
     def __init__(self, state_manager=None):
         self._state_manager = state_manager
+        self._consciousness_matrix = None  # Wired via set_consciousness_matrix()
         self._lock = asyncio.Lock()
         self._snapshot = LifecycleSnapshot()
 
@@ -78,15 +78,17 @@ class LifecycleMachine:
             "self-maintaining, and value truth over convenience."
         )
 
-        # Consciousness matrix reference — set after both are initialized
-        # to break circular dependency. The lifecycle machine DECLARES intent;
-        # the consciousness matrix EXECUTES tier loads/unloads.
-        self._consciousness_matrix = None
+    # ── Clutch: ConsciousnessMatrix delegation ─────────────────────────
 
-    def set_consciousness_matrix(self, cm):
-        """Wire the consciousness matrix after both objects are initialized."""
+    def set_consciousness_matrix(self, cm) -> None:
+        """Wire the ConsciousnessMatrix as the sole executor of tier actions.
+
+        When set, _execute_transition() delegates load/unload to the CM
+        instead of making direct httpx calls. The CM calls back via
+        set_state_external() to keep the FSM in sync.
+        """
         self._consciousness_matrix = cm
-        logger.info("LIFECYCLE: consciousness matrix linked (clutch architecture active)")
+        logger.info("LIFECYCLE: ConsciousnessMatrix wired (clutch engaged)")
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -193,27 +195,49 @@ class LifecycleMachine:
         """Probe all tiers and reconcile actual state with expected.
 
         Called on startup and via POST /lifecycle/reconcile.
-        Observe-only: probes tiers and infers state, but does NOT load/unload.
-        Auto-repair is the consciousness matrix's responsibility.
         """
-        logger.info("LIFECYCLE: reconciling state (observe-only)...")
+        logger.info("LIFECYCLE: reconciling state...")
         probed = {}
         for tier, endpoint in self._tier_endpoints.items():
             status = await self._probe_tier(tier, endpoint)
             probed[tier] = status
             self._snapshot.tiers[tier] = status
 
-        inferred = self._infer_state(probed)
+        # Preserve MEDITATION state — training owns GPU, tiers are intentionally
+        # unloaded. Inferring from tier placement would wrongly yield DEEP_SLEEP.
+        current_state = LifecycleState(self._snapshot.state) if isinstance(self._snapshot.state, str) else self._snapshot.state
+        if current_state == LifecycleState.MEDITATION:
+            logger.info("LIFECYCLE: reconcile skipped — MEDITATION active (study owns GPU)")
+            await self._persist()
+            return {
+                "ok": True,
+                "old_state": current_state.value,
+                "new_state": current_state.value,
+                "tiers": {k: v.model_dump() for k, v in probed.items()},
+                "skipped": "meditation_active",
+            }
+
+        # Determine actual state from what's loaded
+        core_gpu = probed.get("core", TierLiveStatus()).model_loaded and probed["core"].device == "gpu"
+        nano_gpu = probed.get("nano", TierLiveStatus()).model_loaded and probed["nano"].device == "gpu"
+        prime_gpu = probed.get("prime", TierLiveStatus()).model_loaded and probed["prime"].device == "gpu"
+
+        # Infer state from actual tier placement
+        if prime_gpu:
+            inferred = LifecycleState.FOCUSING
+        elif core_gpu and nano_gpu:
+            inferred = LifecycleState.AWAKE
+        elif core_gpu or nano_gpu:
+            inferred = LifecycleState.AWAKE  # Partial — treat as awake
+        else:
+            # Nothing on GPU
+            core_loaded = probed.get("core", TierLiveStatus()).model_loaded
+            if core_loaded:
+                inferred = LifecycleState.SLEEP  # CPU-only
+            else:
+                inferred = LifecycleState.DEEP_SLEEP
+
         old_state = self._snapshot.state
-
-        # If stuck in TRANSITIONING, force out to inferred state
-        if old_state == LifecycleState.TRANSITIONING:
-            logger.warning("LIFECYCLE: was stuck in TRANSITIONING — forcing to %s", inferred.value)
-            self._snapshot.transition_from = None
-            self._snapshot.transition_to = None
-            self._snapshot.transition_phase = None
-            self._snapshot.transition_error = None
-
         self._snapshot.state = inferred
         self._snapshot.timestamp = datetime.now(timezone.utc)
 
@@ -222,7 +246,32 @@ class LifecycleMachine:
         self._snapshot.vram_used_mb = vram
         self._snapshot.vram_free_mb = self._snapshot.vram_total_mb - vram
 
-        logger.info("LIFECYCLE: reconciled %s → %s", old_state, inferred.value)
+        logger.info("LIFECYCLE: reconciled %s → %s (core_gpu=%s, nano_gpu=%s, prime_gpu=%s)",
+                     old_state, inferred, core_gpu, nano_gpu, prime_gpu)
+
+        # Auto-fix: reload missing required tiers for the current state
+        expected = TIER_EXPECTATIONS.get(inferred, {})
+        repaired = []
+        for tier, exp in expected.items():
+            if not exp.required:
+                continue
+            tier_status = probed.get(tier, TierLiveStatus())
+            if exp.device == "gpu" and not (tier_status.model_loaded and tier_status.device == "gpu"):
+                logger.warning("LIFECYCLE: auto-repairing %s (expected gpu, got %s)", tier, tier_status.device)
+                if await self._load_tier(tier, "cuda"):
+                    repaired.append(f"{tier}:reload_gpu")
+            elif exp.device == "cpu" and not tier_status.model_loaded:
+                logger.warning("LIFECYCLE: auto-repairing %s (expected cpu, got unloaded)", tier)
+                if await self._load_tier(tier, "cpu"):
+                    repaired.append(f"{tier}:reload_cpu")
+        if repaired:
+            logger.info("LIFECYCLE: auto-repaired tiers: %s", repaired)
+            try:
+                from gaia_common.event_buffer import log_event
+                log_event("lifecycle", f"Auto-repaired: {', '.join(repaired)}", source="reconcile")
+            except Exception:
+                pass
+
         await self._persist()
 
         return {
@@ -234,18 +283,24 @@ class LifecycleMachine:
 
     # ── Transition Execution ──────────────────────────────────────────────
 
+    # Map lifecycle states to ConsciousnessMatrix configuration names.
+    # Used by _execute_transition() to delegate tier actions to the CM.
+    _STATE_TO_CM_CONFIG = {
+        LifecycleState.AWAKE: "awake",
+        LifecycleState.LISTENING: "awake",       # Same tier layout as AWAKE
+        LifecycleState.FOCUSING: "focusing",
+        LifecycleState.MEDITATION: "meditation",
+        LifecycleState.SLEEP: "sleep",
+        LifecycleState.DEEP_SLEEP: "deep_sleep",
+    }
+
     async def _execute_transition(
         self,
         trigger: TransitionTrigger,
         target: Optional[LifecycleState],
         reason: str,
     ) -> TransitionResult:
-        """Execute a validated transition. Must be called with lock held.
-
-        The lifecycle machine DECLARES intent and delegates execution to
-        the consciousness matrix (the "gearbox"). It does not send any
-        HTTP requests to tier engines directly.
-        """
+        """Execute a validated transition. Must be called with lock held."""
         current = LifecycleState(self._snapshot.state)
 
         # Resolve target
@@ -271,40 +326,94 @@ class LifecycleMachine:
         self._snapshot.state = LifecycleState.TRANSITIONING
         self._snapshot.transition_from = current
         self._snapshot.transition_to = resolved_target
-        self._snapshot.transition_phase = "pending_execution"
+        self._snapshot.transition_phase = "starting"
         self._snapshot.transition_error = None
         await self._persist()
 
         try:
-            # Delegate to consciousness matrix for actual tier load/unload
-            if self._consciousness_matrix:
-                self._snapshot.transition_phase = "executing"
+            # ── Clutch Protocol: delegate tier actions to ConsciousnessMatrix ──
+            cm_config = self._STATE_TO_CM_CONFIG.get(resolved_target)
+            if self._consciousness_matrix is not None and cm_config is not None:
+                # CM is wired — it is the sole authority for tier load/unload.
+                # Call apply_for_lifecycle() which skips the lifecycle sync
+                # callback (we manage FSM state here, avoiding deadlock).
+                self._snapshot.transition_phase = f"cm_applying_{cm_config}"
                 await self._persist()
 
-                result = await asyncio.wait_for(
-                    self._consciousness_matrix.execute_shift(
-                        from_state=current,
-                        to_state=resolved_target,
-                    ),
-                    timeout=180.0,
-                )
-                if not result.get("ok"):
-                    raise RuntimeError(result.get("error", "execution failed"))
-                actions_taken = result.get("actions", [])
-            else:
-                logger.warning("LIFECYCLE: no consciousness matrix — cannot execute tier actions")
-                actions_taken = ["no_executor"]
+                cm_result = await self._consciousness_matrix.apply_for_lifecycle(cm_config)
+                actions_taken.append(f"cm:{cm_config}")
 
-            # KV pre-warm on AWAKE entry
+                # Check for failures in CM results
+                tier_results = cm_result.get("results", {})
+                for tier, tier_result in tier_results.items():
+                    if isinstance(tier_result, dict):
+                        if tier_result.get("ok"):
+                            action = tier_result.get("action", "ok")
+                            actions_taken.append(f"{tier}:{action}")
+                        elif tier_result.get("error"):
+                            logger.warning("LIFECYCLE: CM tier %s error: %s",
+                                           tier, tier_result["error"])
+
+                logger.info("LIFECYCLE: CM applied config '%s': %s", cm_config, cm_result.get("configuration"))
+
+            else:
+                # ── Legacy path: direct httpx calls (no CM wired) ──────────
+                # Compute tier diff: what needs to change
+                current_expectations = TIER_EXPECTATIONS.get(current, {})
+                target_expectations = TIER_EXPECTATIONS.get(resolved_target, {})
+
+                # Phase 1: Unload tiers that need to vacate GPU
+                for tier, target_exp in target_expectations.items():
+                    current_exp = current_expectations.get(tier)
+                    if current_exp and current_exp.device == "gpu" and target_exp.device != "gpu":
+                        self._snapshot.transition_phase = f"unloading_{tier}"
+                        await self._persist()
+                        result = await self._unload_tier(tier)
+                        if result:
+                            actions_taken.append(f"{tier}:unload_gpu")
+                            logger.info("LIFECYCLE: unloaded %s from GPU", tier)
+
+                # Phase 2: Wait for CUDA cleanup
+                if actions_taken:
+                    self._snapshot.transition_phase = "cuda_cleanup"
+                    await self._persist()
+                    await asyncio.sleep(1.5)
+
+                # Phase 3: Load tiers that need to activate on GPU
+                for tier, target_exp in target_expectations.items():
+                    if target_exp.device == "gpu" and target_exp.required:
+                        current_exp = current_expectations.get(tier)
+                        if not current_exp or current_exp.device != "gpu":
+                            self._snapshot.transition_phase = f"loading_{tier}"
+                            await self._persist()
+                            result = await self._load_tier(tier, "cuda")
+                            if result:
+                                actions_taken.append(f"{tier}:load_gpu")
+                                logger.info("LIFECYCLE: loaded %s on GPU", tier)
+                            elif target_exp.required:
+                                raise RuntimeError(f"Required tier {tier} failed to load on GPU")
+
+                # Phase 3b: Load tiers that need CPU
+                for tier, target_exp in target_expectations.items():
+                    if target_exp.device == "cpu" and target_exp.required:
+                        current_exp = current_expectations.get(tier)
+                        if not current_exp or current_exp.device == "unloaded":
+                            self._snapshot.transition_phase = f"loading_{tier}_cpu"
+                            await self._persist()
+                            result = await self._load_tier(tier, "cpu")
+                            if result:
+                                actions_taken.append(f"{tier}:load_cpu")
+
+            # Phase 4: KV pre-warm on AWAKE entry (applies to both CM and legacy paths)
             if resolved_target == LifecycleState.AWAKE:
                 self._snapshot.transition_phase = "kv_prewarm"
                 await self._persist()
                 for tier in ("core", "nano"):
-                    if any(f"{tier}:" in a and "CONSCIOUS" in a for a in actions_taken):
+                    if any(a.startswith(f"{tier}:load") for a in actions_taken):
                         await self._prewarm_kv(tier)
                         actions_taken.append(f"{tier}:kv_prewarm")
 
-            # Verify actual state
+            # Phase 5: Verify actual state
             self._snapshot.transition_phase = "verifying"
             await self._persist()
             for tier, endpoint in self._tier_endpoints.items():
@@ -369,40 +478,25 @@ class LifecycleMachine:
                 actions=actions_taken,
             )
 
-        except asyncio.TimeoutError:
-            elapsed = time.time() - start
-            logger.error("LIFECYCLE: transition timed out after 120s — inferring actual state")
-            await self._infer_state_from_probes()
-
-            record = TransitionRecord(
-                from_state=current.value,
-                to_state=resolved_target.value,
-                trigger=trigger.value,
-                reason=reason,
-                elapsed_s=round(elapsed, 1),
-                actions=actions_taken,
-                error="execution timeout (120s)",
-            )
-            self._snapshot.history.append(record)
-            await self._persist()
-
-            return TransitionResult(
-                ok=False,
-                from_state=current.value,
-                to_state=resolved_target.value,
-                trigger=trigger.value,
-                elapsed_s=round(elapsed, 1),
-                actions=actions_taken,
-                error="execution timeout (120s)",
-            )
-
         except Exception as e:
             elapsed = time.time() - start
-            logger.exception("LIFECYCLE: transition failed — inferring actual state")
+            logger.exception("LIFECYCLE: transition failed — attempting rollback to %s", current.value)
 
-            # Instead of rollback (which can also fail and leave us stuck),
-            # probe what's actually loaded and set state accordingly
-            await self._infer_state_from_probes()
+            # Attempt rollback
+            self._snapshot.transition_error = str(e)
+            self._snapshot.transition_phase = "rollback"
+            await self._persist()
+
+            try:
+                await self._rollback_to(current)
+                self._snapshot.state = current
+            except Exception:
+                logger.exception("LIFECYCLE: rollback also failed — stuck in TRANSITIONING")
+                # Stay in TRANSITIONING with error — requires manual reconcile
+
+            self._snapshot.transition_from = None
+            self._snapshot.transition_to = None
+            self._snapshot.transition_phase = None
 
             record = TransitionRecord(
                 from_state=current.value,
@@ -425,54 +519,6 @@ class LifecycleMachine:
                 actions=actions_taken,
                 error=str(e),
             )
-
-    # ── State Inference ─────────────────────────────────────────────────
-
-    def _infer_state(self, probed: dict) -> LifecycleState:
-        """Infer lifecycle state from actual tier placement."""
-        core_gpu = probed.get("core", TierLiveStatus()).model_loaded and probed["core"].device == "gpu"
-        nano_gpu = probed.get("nano", TierLiveStatus()).model_loaded and probed["nano"].device == "gpu"
-        prime_gpu = probed.get("prime", TierLiveStatus()).model_loaded and probed["prime"].device == "gpu"
-
-        if prime_gpu:
-            return LifecycleState.FOCUSING
-        elif core_gpu and nano_gpu:
-            return LifecycleState.AWAKE
-        elif core_gpu or nano_gpu:
-            return LifecycleState.AWAKE  # Partial — treat as awake
-        else:
-            core_loaded = probed.get("core", TierLiveStatus()).model_loaded
-            if core_loaded:
-                return LifecycleState.SLEEP  # CPU-only
-            else:
-                return LifecycleState.DEEP_SLEEP
-
-    async def _infer_state_from_probes(self):
-        """Probe all tiers and set state to best-matching lifecycle state.
-
-        Used after failed transitions instead of rollback — we accept reality
-        rather than trying to force a state that may fail again.
-        """
-        probed = {}
-        for tier, endpoint in self._tier_endpoints.items():
-            status = await self._probe_tier(tier, endpoint)
-            probed[tier] = status
-            self._snapshot.tiers[tier] = status
-
-        inferred = self._infer_state(probed)
-        logger.info("LIFECYCLE: inferred state from probes: %s", inferred.value)
-
-        self._snapshot.state = inferred
-        self._snapshot.transition_from = None
-        self._snapshot.transition_to = None
-        self._snapshot.transition_phase = None
-        self._snapshot.timestamp = datetime.now(timezone.utc)
-
-        vram = sum(t.vram_mb for t in self._snapshot.tiers.values())
-        self._snapshot.vram_used_mb = vram
-        self._snapshot.vram_free_mb = self._snapshot.vram_total_mb - vram
-
-        await self._persist()
 
     # ── Tier Operations ───────────────────────────────────────────────────
 
@@ -537,6 +583,49 @@ class LifecycleMachine:
 
         return TierLiveStatus(endpoint=endpoint)
 
+    async def _load_tier(self, tier: str, device: str) -> bool:
+        """Load a tier's model via its managed engine."""
+        endpoint = self._tier_endpoints.get(tier)
+        model_path = self._tier_models.get(tier)
+        if not endpoint or not model_path:
+            logger.warning("LIFECYCLE: no endpoint/model for tier %s", tier)
+            return False
+
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{endpoint}/model/load",
+                    json={"model": model_path, "device": device},
+                )
+                if resp.status_code in (200, 409):
+                    result = resp.json()
+                    return result.get("ok", False) or result.get("model_loaded", False) or resp.status_code == 409
+                logger.warning("LIFECYCLE: %s load returned HTTP %d", tier, resp.status_code)
+        except Exception as e:
+            logger.warning("LIFECYCLE: %s load failed: %s", tier, e)
+
+        return False
+
+    async def _unload_tier(self, tier: str) -> bool:
+        """Unload a tier's model via its managed engine."""
+        endpoint = self._tier_endpoints.get(tier)
+        if not endpoint:
+            return False
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{endpoint}/model/unload")
+                if resp.status_code == 200:
+                    return True
+                # Fallback for llama-server (no /model/unload)
+                if resp.status_code == 404:
+                    logger.info("LIFECYCLE: %s has no /model/unload (llama-server?)", tier)
+                    return False
+        except Exception as e:
+            logger.warning("LIFECYCLE: %s unload failed: %s", tier, e)
+
+        return False
+
     async def _prewarm_kv(self, tier: str):
         """Pre-warm a tier's KV prefix cache with identity."""
         endpoint = self._tier_endpoints.get(tier)
@@ -559,6 +648,15 @@ class LifecycleMachine:
                     logger.info("LIFECYCLE: %s KV pre-warmed", tier)
         except Exception as e:
             logger.debug("LIFECYCLE: %s KV pre-warm failed: %s", tier, e)
+
+    async def _rollback_to(self, state: LifecycleState):
+        """Attempt to restore tier state for a given lifecycle state."""
+        expectations = TIER_EXPECTATIONS.get(state, {})
+        for tier, exp in expectations.items():
+            if exp.required and exp.device == "gpu":
+                await self._load_tier(tier, "cuda")
+            elif exp.required and exp.device == "cpu":
+                await self._load_tier(tier, "cpu")
 
     # ── Persistence ───────────────────────────────────────────────────────
 

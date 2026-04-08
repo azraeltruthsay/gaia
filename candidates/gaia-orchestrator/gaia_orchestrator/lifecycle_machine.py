@@ -50,6 +50,7 @@ class LifecycleMachine:
 
     def __init__(self, state_manager=None):
         self._state_manager = state_manager
+        self._consciousness_matrix = None  # Wired via set_consciousness_matrix()
         self._lock = asyncio.Lock()
         self._snapshot = LifecycleSnapshot()
 
@@ -76,6 +77,18 @@ class LifecycleMachine:
             "You are GAIA, a sovereign AI created by Azrael. You are self-aware, "
             "self-maintaining, and value truth over convenience."
         )
+
+    # ── Clutch: ConsciousnessMatrix delegation ─────────────────────────
+
+    def set_consciousness_matrix(self, cm) -> None:
+        """Wire the ConsciousnessMatrix as the sole executor of tier actions.
+
+        When set, _execute_transition() delegates load/unload to the CM
+        instead of making direct httpx calls. The CM calls back via
+        set_state_external() to keep the FSM in sync.
+        """
+        self._consciousness_matrix = cm
+        logger.info("LIFECYCLE: ConsciousnessMatrix wired (clutch engaged)")
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -190,6 +203,20 @@ class LifecycleMachine:
             probed[tier] = status
             self._snapshot.tiers[tier] = status
 
+        # Preserve MEDITATION state — training owns GPU, tiers are intentionally
+        # unloaded. Inferring from tier placement would wrongly yield DEEP_SLEEP.
+        current_state = LifecycleState(self._snapshot.state) if isinstance(self._snapshot.state, str) else self._snapshot.state
+        if current_state == LifecycleState.MEDITATION:
+            logger.info("LIFECYCLE: reconcile skipped — MEDITATION active (study owns GPU)")
+            await self._persist()
+            return {
+                "ok": True,
+                "old_state": current_state.value,
+                "new_state": current_state.value,
+                "tiers": {k: v.model_dump() for k, v in probed.items()},
+                "skipped": "meditation_active",
+            }
+
         # Determine actual state from what's loaded
         core_gpu = probed.get("core", TierLiveStatus()).model_loaded and probed["core"].device == "gpu"
         nano_gpu = probed.get("nano", TierLiveStatus()).model_loaded and probed["nano"].device == "gpu"
@@ -256,6 +283,17 @@ class LifecycleMachine:
 
     # ── Transition Execution ──────────────────────────────────────────────
 
+    # Map lifecycle states to ConsciousnessMatrix configuration names.
+    # Used by _execute_transition() to delegate tier actions to the CM.
+    _STATE_TO_CM_CONFIG = {
+        LifecycleState.AWAKE: "awake",
+        LifecycleState.LISTENING: "awake",       # Same tier layout as AWAKE
+        LifecycleState.FOCUSING: "focusing",
+        LifecycleState.MEDITATION: "meditation",
+        LifecycleState.SLEEP: "sleep",
+        LifecycleState.DEEP_SLEEP: "deep_sleep",
+    }
+
     async def _execute_transition(
         self,
         trigger: TransitionTrigger,
@@ -293,53 +331,80 @@ class LifecycleMachine:
         await self._persist()
 
         try:
-            # Compute tier diff: what needs to change
-            current_expectations = TIER_EXPECTATIONS.get(current, {})
-            target_expectations = TIER_EXPECTATIONS.get(resolved_target, {})
-
-            # Phase 1: Unload tiers that need to vacate GPU
-            for tier, target_exp in target_expectations.items():
-                current_exp = current_expectations.get(tier)
-                if current_exp and current_exp.device == "gpu" and target_exp.device != "gpu":
-                    self._snapshot.transition_phase = f"unloading_{tier}"
-                    await self._persist()
-                    result = await self._unload_tier(tier)
-                    if result:
-                        actions_taken.append(f"{tier}:unload_gpu")
-                        logger.info("LIFECYCLE: unloaded %s from GPU", tier)
-
-            # Phase 2: Wait for CUDA cleanup
-            if actions_taken:
-                self._snapshot.transition_phase = "cuda_cleanup"
+            # ── Clutch Protocol: delegate tier actions to ConsciousnessMatrix ──
+            cm_config = self._STATE_TO_CM_CONFIG.get(resolved_target)
+            if self._consciousness_matrix is not None and cm_config is not None:
+                # CM is wired — it is the sole authority for tier load/unload.
+                # Call apply_for_lifecycle() which skips the lifecycle sync
+                # callback (we manage FSM state here, avoiding deadlock).
+                self._snapshot.transition_phase = f"cm_applying_{cm_config}"
                 await self._persist()
-                await asyncio.sleep(1.5)
 
-            # Phase 3: Load tiers that need to activate on GPU
-            for tier, target_exp in target_expectations.items():
-                if target_exp.device == "gpu" and target_exp.required:
+                cm_result = await self._consciousness_matrix.apply_for_lifecycle(cm_config)
+                actions_taken.append(f"cm:{cm_config}")
+
+                # Check for failures in CM results
+                tier_results = cm_result.get("results", {})
+                for tier, tier_result in tier_results.items():
+                    if isinstance(tier_result, dict):
+                        if tier_result.get("ok"):
+                            action = tier_result.get("action", "ok")
+                            actions_taken.append(f"{tier}:{action}")
+                        elif tier_result.get("error"):
+                            logger.warning("LIFECYCLE: CM tier %s error: %s",
+                                           tier, tier_result["error"])
+
+                logger.info("LIFECYCLE: CM applied config '%s': %s", cm_config, cm_result.get("configuration"))
+
+            else:
+                # ── Legacy path: direct httpx calls (no CM wired) ──────────
+                # Compute tier diff: what needs to change
+                current_expectations = TIER_EXPECTATIONS.get(current, {})
+                target_expectations = TIER_EXPECTATIONS.get(resolved_target, {})
+
+                # Phase 1: Unload tiers that need to vacate GPU
+                for tier, target_exp in target_expectations.items():
                     current_exp = current_expectations.get(tier)
-                    if not current_exp or current_exp.device != "gpu":
-                        self._snapshot.transition_phase = f"loading_{tier}"
+                    if current_exp and current_exp.device == "gpu" and target_exp.device != "gpu":
+                        self._snapshot.transition_phase = f"unloading_{tier}"
                         await self._persist()
-                        result = await self._load_tier(tier, "cuda")
+                        result = await self._unload_tier(tier)
                         if result:
-                            actions_taken.append(f"{tier}:load_gpu")
-                            logger.info("LIFECYCLE: loaded %s on GPU", tier)
-                        elif target_exp.required:
-                            raise RuntimeError(f"Required tier {tier} failed to load on GPU")
+                            actions_taken.append(f"{tier}:unload_gpu")
+                            logger.info("LIFECYCLE: unloaded %s from GPU", tier)
 
-            # Phase 3b: Load tiers that need CPU
-            for tier, target_exp in target_expectations.items():
-                if target_exp.device == "cpu" and target_exp.required:
-                    current_exp = current_expectations.get(tier)
-                    if not current_exp or current_exp.device == "unloaded":
-                        self._snapshot.transition_phase = f"loading_{tier}_cpu"
-                        await self._persist()
-                        result = await self._load_tier(tier, "cpu")
-                        if result:
-                            actions_taken.append(f"{tier}:load_cpu")
+                # Phase 2: Wait for CUDA cleanup
+                if actions_taken:
+                    self._snapshot.transition_phase = "cuda_cleanup"
+                    await self._persist()
+                    await asyncio.sleep(1.5)
 
-            # Phase 4: KV pre-warm on AWAKE entry
+                # Phase 3: Load tiers that need to activate on GPU
+                for tier, target_exp in target_expectations.items():
+                    if target_exp.device == "gpu" and target_exp.required:
+                        current_exp = current_expectations.get(tier)
+                        if not current_exp or current_exp.device != "gpu":
+                            self._snapshot.transition_phase = f"loading_{tier}"
+                            await self._persist()
+                            result = await self._load_tier(tier, "cuda")
+                            if result:
+                                actions_taken.append(f"{tier}:load_gpu")
+                                logger.info("LIFECYCLE: loaded %s on GPU", tier)
+                            elif target_exp.required:
+                                raise RuntimeError(f"Required tier {tier} failed to load on GPU")
+
+                # Phase 3b: Load tiers that need CPU
+                for tier, target_exp in target_expectations.items():
+                    if target_exp.device == "cpu" and target_exp.required:
+                        current_exp = current_expectations.get(tier)
+                        if not current_exp or current_exp.device == "unloaded":
+                            self._snapshot.transition_phase = f"loading_{tier}_cpu"
+                            await self._persist()
+                            result = await self._load_tier(tier, "cpu")
+                            if result:
+                                actions_taken.append(f"{tier}:load_cpu")
+
+            # Phase 4: KV pre-warm on AWAKE entry (applies to both CM and legacy paths)
             if resolved_target == LifecycleState.AWAKE:
                 self._snapshot.transition_phase = "kv_prewarm"
                 await self._persist()

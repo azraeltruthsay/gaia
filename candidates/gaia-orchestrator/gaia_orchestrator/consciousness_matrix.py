@@ -252,58 +252,74 @@ class ConsciousnessMatrix:
 
     # ── Preset Configurations ─────────────────────────────────────────
 
+    # Tier targets for each configuration.
+    # Used by both the public preset methods and _apply_configuration().
+    _PRESETS = {
+        "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.CONSCIOUS},
+        "sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+        "deep_sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+        "meditation": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+    }
+
+    async def _apply_configuration(self, config_name: str, sync_lifecycle: bool = True) -> dict:
+        """Apply a consciousness configuration to all tiers.
+
+        Args:
+            config_name: One of the preset names (awake, focusing, sleep, etc.)
+            sync_lifecycle: If True (default), sync the lifecycle FSM after
+                applying. Set to False when the LifecycleMachine is the caller
+                (it manages its own FSM state to avoid deadlock).
+
+        Returns:
+            Dict with configuration name, per-tier results, and optional lifecycle sync.
+        """
+        targets = self._PRESETS.get(config_name)
+        if not targets:
+            return {"ok": False, "error": f"Unknown configuration: {config_name}"}
+
+        results = {}
+        for tier, level in targets.items():
+            results[tier] = await self.set_target(tier, level)
+
+        result = {"configuration": config_name, "results": results}
+
+        if sync_lifecycle:
+            lifecycle = await self._sync_lifecycle(config_name)
+            if lifecycle:
+                result["lifecycle"] = lifecycle
+
+        return result
+
+    async def apply_for_lifecycle(self, config_name: str) -> dict:
+        """Apply a configuration on behalf of the LifecycleMachine.
+
+        Skips lifecycle sync (the FSM is already managing its own state).
+        This is the method LifecycleMachine._execute_transition() calls
+        to delegate actual tier load/unload work.
+        """
+        logger.info("Consciousness applying config for lifecycle: %s", config_name)
+        return await self._apply_configuration(config_name, sync_lifecycle=False)
+
     async def awake(self) -> dict:
         """AWAKE: Core=3, Nano=3, Prime=2"""
-        results = {}
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.CONSCIOUS)
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.SUBCONSCIOUS)
-        result = {"configuration": "awake", "results": results}
-        lifecycle = await self._sync_lifecycle("awake")
-        if lifecycle:
-            result["lifecycle"] = lifecycle
-        return result
+        return await self._apply_configuration("awake")
 
     async def focusing(self) -> dict:
         """FOCUSING: Nano=3, Core=2, Prime=3"""
-        results = {}
-        # Demote Core first to free GPU
-        results["core"] = await self.set_target("core", ConsciousnessLevel.SUBCONSCIOUS)
-        # Then promote Prime
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.CONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
-        result = {"configuration": "focusing", "results": results}
-        lifecycle = await self._sync_lifecycle("focusing")
-        if lifecycle:
-            result["lifecycle"] = lifecycle
-        return result
+        return await self._apply_configuration("focusing")
 
     async def sleep(self) -> dict:
         """SLEEP: Nano=2, Core=2, Prime=1"""
-        results = {}
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.SUBCONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        result = {"configuration": "sleep", "results": results}
-        lifecycle = await self._sync_lifecycle("sleep")
-        if lifecycle:
-            result["lifecycle"] = lifecycle
-        return result
+        return await self._apply_configuration("sleep")
 
     async def deep_sleep(self) -> dict:
         """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
-        results = {}
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.UNCONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        result = {"configuration": "deep_sleep", "results": results}
-        lifecycle = await self._sync_lifecycle("deep_sleep")
-        if lifecycle:
-            result["lifecycle"] = lifecycle
-        return result
+        return await self._apply_configuration("deep_sleep")
 
     async def training(self, tier: str = "prime") -> dict:
         """TRAINING: Target tier → 1 (free GPU), others → 2"""
+        # Build custom targets for the specific training tier
         results = {}
         for t in self._tiers:
             if t == tier:
@@ -550,11 +566,36 @@ class ConsciousnessMatrix:
 
     # ── Internal: Continuous Poll ─────────────────────────────────────
 
+    def _is_meditation_active(self) -> bool:
+        """Check if the lifecycle FSM is in MEDITATION (study owns GPU).
+
+        During MEDITATION, tiers are intentionally unloaded. Auto-reconcile
+        must NOT reload them or it will fight with training for VRAM.
+        """
+        if not self._lifecycle_machine:
+            return False
+        try:
+            from gaia_common.lifecycle.states import LifecycleState
+            current = self._lifecycle_machine._snapshot.state
+            if isinstance(current, str):
+                current = LifecycleState(current)
+            return current == LifecycleState.MEDITATION
+        except Exception:
+            return False
+
     async def _poll_loop(self, interval: float):
         """Continuously probe tiers, validate matrix, and auto-reconcile drift."""
         while True:
             try:
                 await self.probe_all()
+
+                # Skip auto-reconcile during MEDITATION — tiers are intentionally
+                # unloaded while Study owns the GPU for training.
+                if self._is_meditation_active():
+                    logger.debug("Consciousness poll: MEDITATION active — skipping auto-reconcile")
+                    await asyncio.sleep(interval)
+                    continue
+
                 # Auto-reconcile: if target > actual, load the tier
                 for tier, state in self._tiers.items():
                     if state.ok or state.transitioning:

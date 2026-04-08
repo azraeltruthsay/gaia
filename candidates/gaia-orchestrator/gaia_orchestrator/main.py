@@ -635,6 +635,11 @@ async def gpu_sleep():
     """
     if _lifecycle_machine is not None:
         from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
+        # Guard: MEDITATION means Study owns GPU for training — do NOT sleep
+        current = LifecycleState(_lifecycle_machine._snapshot.state)
+        if current == LifecycleState.MEDITATION:
+            logger.info("GPU sleep rejected — MEDITATION active (study owns GPU)")
+            return {"ok": True, "message": "MEDITATION active — study owns GPU", "state": current.value}
         result = await _lifecycle_machine.transition(
             TransitionTrigger.IDLE_TIMEOUT, reason="sleep_cycle")
         if result.ok:

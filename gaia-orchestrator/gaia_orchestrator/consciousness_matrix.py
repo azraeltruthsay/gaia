@@ -27,8 +27,6 @@ from typing import Dict, Optional
 
 import httpx
 
-from gaia_common.utils.maintenance import is_maintenance_active
-
 logger = logging.getLogger("GAIA.Orchestrator.Consciousness")
 
 
@@ -93,16 +91,16 @@ class ConsciousnessMatrix:
 
         # Safetensors model paths (for state 3 = Conscious/GPU)
         self._gpu_models = {
-            "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/nano"),
-            "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/core"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
+            "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6"),
+            "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Qwen3-8B-GAIA-Prime-v2"),
         }
 
         # GGUF model paths (for state 2 = Subconscious/CPU)
         self._cpu_models = {
-            "nano": os.environ.get("NANO_GGUF_PATH", "/models/nano.gguf"),
-            "core": os.environ.get("CORE_GGUF_PATH", "/models/core.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/prime.gguf"),
+            "nano": os.environ.get("NANO_GGUF_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf"),
+            "core": os.environ.get("CORE_GGUF_PATH", "/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf"),
+            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Qwen3-8B-GAIA-Prime-v2-Q4_K_M.gguf"),
         }
 
         # The matrix — one entry per tier
@@ -129,9 +127,6 @@ class ConsciousnessMatrix:
 
         self._lock = asyncio.Lock()
         self._poll_task: Optional[asyncio.Task] = None
-        # Cooldown: suppress auto-reconcile after execute_shift to prevent
-        # the poll loop from immediately undoing a transition
-        self._shift_cooldown_until: float = 0.0
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -255,260 +250,87 @@ class ConsciousnessMatrix:
             logger.warning("Lifecycle sync failed for %s: %s", config_name, e)
             return {"lifecycle_sync": "error", "error": str(e)[:100]}
 
-    # ── Clutch Protocol (Lifecycle-Delegated Execution) ────────────────
-
-    async def execute_shift(self, from_state, to_state) -> dict:
-        """Execute a full tier reconfiguration for a lifecycle state transition.
-
-        Called by LifecycleMachine._execute_transition. This is THE method
-        that moves models. Implements the clutch protocol:
-          1. ENGAGE CLUTCH — drain changing tiers (finish in-flight inference)
-          2. SHIFT GEARS — unload/load tiers to match target state
-          3. RELEASE CLUTCH — resume inference on new configuration
-        """
-        from gaia_common.lifecycle.states import TIER_EXPECTATIONS
-
-        target_expectations = TIER_EXPECTATIONS.get(to_state, {})
-        from_expectations = TIER_EXPECTATIONS.get(from_state, {})
-        actions = []
-
-        # Compute which tiers are changing
-        tiers_changing = self._compute_changing_tiers(from_expectations, target_expectations)
-        logger.info("Clutch: %s → %s (changing: %s)", from_state, to_state, tiers_changing)
-
-        # Phase 1: ENGAGE CLUTCH — drain changing tiers
-        if tiers_changing:
-            drain_results = await self._engage_clutch(tiers_changing)
-            actions.append(f"clutch:engaged({','.join(tiers_changing)})")
-            for tier, result in drain_results.items():
-                if result.get("ok"):
-                    logger.info("Clutch: %s drained", tier)
-                else:
-                    logger.warning("Clutch: %s drain failed: %s", tier, result.get("error", ""))
-
-        try:
-            # Phase 2: SHIFT GEARS — compute target consciousness levels
-            tier_targets = self._expectations_to_consciousness(target_expectations)
-
-            # Unload phase (downgrading tiers — free VRAM first)
-            did_unload = False
-            for tier, target_level in tier_targets.items():
-                current_level = self._tiers[tier].actual
-                if target_level < current_level:
-                    result = await self._transition_tier(tier, current_level, target_level)
-                    actions.append(f"{tier}:{current_level.name}->{target_level.name}")
-                    if result.get("ok"):
-                        did_unload = True
-                    else:
-                        logger.warning("Clutch: %s downgrade failed: %s", tier, result.get("error"))
-
-            # CUDA cleanup delay if we unloaded anything from GPU
-            if did_unload:
-                await asyncio.sleep(1.5)
-
-            # Load phase (upgrading tiers)
-            for tier, target_level in tier_targets.items():
-                current_level = self._tiers[tier].actual
-                if target_level > current_level:
-                    result = await self._transition_tier(tier, current_level, target_level)
-                    actions.append(f"{tier}:{current_level.name}->{target_level.name}")
-                    if not result.get("ok"):
-                        raise RuntimeError(f"{tier} load failed: {result.get('error', 'unknown')}")
-
-            # Verify
-            await self.probe_all()
-
-            # Update targets to match the new state
-            for tier, level in tier_targets.items():
-                self._tiers[tier].target = level
-
-            # Suppress auto-reconcile for 60s so the poll loop doesn't
-            # immediately undo this transition by reverting to startup targets
-            self._shift_cooldown_until = time.time() + 30.0
-            logger.info("Clutch: shift complete, auto-reconcile suppressed for 30s")
-
-            return {"ok": True, "actions": actions}
-
-        except Exception as e:
-            logger.error("Clutch: shift failed: %s", e)
-            return {"ok": False, "error": str(e), "actions": actions}
-
-        finally:
-            # Phase 3: RELEASE CLUTCH — always resume, even on error
-            if tiers_changing:
-                await self._release_clutch(tiers_changing)
-                actions.append("clutch:released")
-
-    async def _engage_clutch(self, tiers: list) -> dict:
-        """Drain inference on specified tiers before model swap.
-
-        Sends POST /inference/drain to each tier's engine. If the endpoint
-        doesn't exist (pre-Phase-0 engine), proceeds without drain.
-        """
-        results = {}
-        for tier in tiers:
-            endpoint = self._endpoints.get(tier)
-            if not endpoint:
-                continue
-            try:
-                async with httpx.AsyncClient(timeout=35.0) as client:
-                    resp = await client.post(
-                        f"{endpoint}/inference/drain",
-                        json={"timeout_s": 30},
-                    )
-                    results[tier] = resp.json() if resp.status_code == 200 else {"ok": False, "error": f"HTTP {resp.status_code}"}
-            except Exception as e:
-                # Engine may not have drain endpoint yet — proceed gracefully
-                logger.debug("Clutch: drain %s failed (may not support drain yet): %s", tier, e)
-                results[tier] = {"ok": False, "error": str(e)[:100]}
-        return results
-
-    async def _release_clutch(self, tiers: list) -> dict:
-        """Resume inference on specified tiers after model swap."""
-        results = {}
-        for tier in tiers:
-            endpoint = self._endpoints.get(tier)
-            if not endpoint:
-                continue
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    resp = await client.post(f"{endpoint}/inference/resume")
-                    results[tier] = resp.json() if resp.status_code == 200 else {"ok": False}
-            except Exception:
-                pass  # Engine may have been unloaded — that's fine
-        return results
-
-    @staticmethod
-    def _compute_changing_tiers(from_exp: dict, to_exp: dict) -> list:
-        """Determine which tiers are changing state between lifecycle states."""
-        changing = []
-        all_tiers = set(list(from_exp.keys()) + list(to_exp.keys()))
-        for tier in all_tiers:
-            if tier in ("study", "audio"):
-                continue  # Not managed by consciousness matrix
-            from_device = from_exp[tier].device if tier in from_exp else "unloaded"
-            to_device = to_exp[tier].device if tier in to_exp else "unloaded"
-            if from_device != to_device:
-                changing.append(tier)
-        return changing
-
-    @staticmethod
-    def _expectations_to_consciousness(expectations: dict) -> dict:
-        """Map lifecycle TierExpectations to ConsciousnessLevel per tier."""
-        mapping = {
-            "gpu": ConsciousnessLevel.CONSCIOUS,
-            "cpu": ConsciousnessLevel.SUBCONSCIOUS,
-            "unloaded": ConsciousnessLevel.UNCONSCIOUS,
-        }
-        result = {}
-        for tier, exp in expectations.items():
-            if tier in ("study", "audio"):
-                continue  # Not managed by consciousness matrix
-            result[tier] = mapping.get(exp.device, ConsciousnessLevel.UNCONSCIOUS)
-        return result
-
     # ── Preset Configurations ─────────────────────────────────────────
 
-    async def awake(self) -> dict:
-        """AWAKE: Core+Nano GPU, Prime CPU.
+    # Tier targets for each configuration.
+    # Used by both the public preset methods and _apply_configuration().
+    _PRESETS = {
+        "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.CONSCIOUS},
+        "sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+        "deep_sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+        "meditation": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+    }
 
-        Delegates through the lifecycle machine (which calls back to execute_shift).
-        Falls back to direct execution if lifecycle machine isn't available.
+    async def _apply_configuration(self, config_name: str, sync_lifecycle: bool = True) -> dict:
+        """Apply a consciousness configuration to all tiers.
+
+        Args:
+            config_name: One of the preset names (awake, focusing, sleep, etc.)
+            sync_lifecycle: If True (default), sync the lifecycle FSM after
+                applying. Set to False when the LifecycleMachine is the caller
+                (it manages its own FSM state to avoid deadlock).
+
+        Returns:
+            Dict with configuration name, per-tier results, and optional lifecycle sync.
         """
-        if self._lifecycle_machine:
-            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
-            result = await self._lifecycle_machine.transition(
-                TransitionTrigger.USER_REQUEST, target=LifecycleState.AWAKE,
-                reason="consciousness_matrix:awake")
-            return {"configuration": "awake", "lifecycle": result.__dict__ if hasattr(result, '__dict__') else str(result)}
-        return await self._direct_awake()
+        targets = self._PRESETS.get(config_name)
+        if not targets:
+            return {"ok": False, "error": f"Unknown configuration: {config_name}"}
 
-    async def _direct_awake(self) -> dict:
-        """Direct execution fallback for awake (no lifecycle machine)."""
         results = {}
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.CONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.CONSCIOUS)
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "awake", "results": results}
+        for tier, level in targets.items():
+            results[tier] = await self.set_target(tier, level)
+
+        result = {"configuration": config_name, "results": results}
+
+        if sync_lifecycle:
+            lifecycle = await self._sync_lifecycle(config_name)
+            if lifecycle:
+                result["lifecycle"] = lifecycle
+
+        return result
+
+    async def apply_for_lifecycle(self, config_name: str) -> dict:
+        """Apply a configuration on behalf of the LifecycleMachine.
+
+        Skips lifecycle sync (the FSM is already managing its own state).
+        This is the method LifecycleMachine._execute_transition() calls
+        to delegate actual tier load/unload work.
+        """
+        logger.info("Consciousness applying config for lifecycle: %s", config_name)
+        return await self._apply_configuration(config_name, sync_lifecycle=False)
+
+    async def awake(self) -> dict:
+        """AWAKE: Core=3, Nano=3, Prime=2"""
+        return await self._apply_configuration("awake")
 
     async def focusing(self) -> dict:
-        """FOCUSING: Core+Nano off GPU, Prime on GPU.
-
-        Delegates through the lifecycle machine (which calls back to execute_shift).
-        The clutch protocol handles VRAM safety — drain, unload, load, resume.
-        """
-        if self._lifecycle_machine:
-            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
-            result = await self._lifecycle_machine.transition(
-                TransitionTrigger.USER_REQUEST, target=LifecycleState.FOCUSING,
-                reason="consciousness_matrix:focusing")
-            return {"configuration": "focusing", "lifecycle": result.__dict__ if hasattr(result, '__dict__') else str(result)}
-        return await self._direct_focusing()
-
-    async def _direct_focusing(self) -> dict:
-        """Direct execution fallback for focusing (no lifecycle machine)."""
-        results = {}
-        results["core"] = await self.set_target("core", ConsciousnessLevel.UNCONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        await asyncio.sleep(2)
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.CONSCIOUS)
-        return {"configuration": "focusing", "results": results}
+        """FOCUSING: Nano=3, Core=2, Prime=3"""
+        return await self._apply_configuration("focusing")
 
     async def sleep(self) -> dict:
-        """SLEEP: Nano+Core CPU, Prime unloaded."""
-        if self._lifecycle_machine:
-            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
-            result = await self._lifecycle_machine.transition(
-                TransitionTrigger.USER_REQUEST, target=LifecycleState.SLEEP,
-                reason="consciousness_matrix:sleep")
-            return {"configuration": "sleep", "lifecycle": result.__dict__ if hasattr(result, '__dict__') else str(result)}
-        return await self._direct_sleep()
-
-    async def _direct_sleep(self) -> dict:
-        """Direct execution fallback for sleep (no lifecycle machine)."""
-        results = {}
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.SUBCONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "sleep", "results": results}
+        """SLEEP: Nano=2, Core=2, Prime=1"""
+        return await self._apply_configuration("sleep")
 
     async def deep_sleep(self) -> dict:
-        """DEEP SLEEP: All unloaded except Nano CPU for wake detection."""
-        if self._lifecycle_machine:
-            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
-            result = await self._lifecycle_machine.transition(
-                TransitionTrigger.USER_REQUEST, target=LifecycleState.DEEP_SLEEP,
-                reason="consciousness_matrix:deep_sleep")
-            return {"configuration": "deep_sleep", "lifecycle": result.__dict__ if hasattr(result, '__dict__') else str(result)}
-        return await self._direct_deep_sleep()
-
-    async def _direct_deep_sleep(self) -> dict:
-        """Direct execution fallback for deep_sleep (no lifecycle machine)."""
-        results = {}
-        results["prime"] = await self.set_target("prime", ConsciousnessLevel.UNCONSCIOUS)
-        results["core"] = await self.set_target("core", ConsciousnessLevel.UNCONSCIOUS)
-        results["nano"] = await self.set_target("nano", ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": "deep_sleep", "results": results}
+        """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
+        return await self._apply_configuration("deep_sleep")
 
     async def training(self, tier: str = "prime") -> dict:
-        """TRAINING: Target tier unloaded (free GPU), others CPU."""
-        if self._lifecycle_machine:
-            from gaia_common.lifecycle.states import TransitionTrigger, LifecycleState
-            result = await self._lifecycle_machine.transition(
-                TransitionTrigger.TRAINING_SCHEDULED, target=None,
-                reason=f"consciousness_matrix:training_{tier}")
-            return {"configuration": f"training_{tier}", "lifecycle": result.__dict__ if hasattr(result, '__dict__') else str(result)}
-        return await self._direct_training(tier)
-
-    async def _direct_training(self, tier: str = "prime") -> dict:
-        """Direct execution fallback for training (no lifecycle machine)."""
+        """TRAINING: Target tier → 1 (free GPU), others → 2"""
+        # Build custom targets for the specific training tier
         results = {}
         for t in self._tiers:
             if t == tier:
                 results[t] = await self.set_target(t, ConsciousnessLevel.UNCONSCIOUS)
             else:
                 results[t] = await self.set_target(t, ConsciousnessLevel.SUBCONSCIOUS)
-        return {"configuration": f"training_{tier}", "results": results}
+        result = {"configuration": f"training_{tier}", "results": results}
+        lifecycle = await self._sync_lifecycle("training")
+        if lifecycle:
+            result["lifecycle"] = lifecycle
+        return result
 
     # ── Internal: Tier Probing ────────────────────────────────────────
 
@@ -589,17 +411,7 @@ class ConsciousnessMatrix:
 
         try:
             if to_level == ConsciousnessLevel.UNCONSCIOUS:
-                # Try fast migration to CPU first (keeps weights in RAM for quick reload)
-                if from_level == ConsciousnessLevel.CONSCIOUS:
-                    migrate_result = await self._try_migrate(tier, endpoint, "cpu")
-                    if migrate_result and migrate_result.get("ok"):
-                        state.actual = ConsciousnessLevel.UNCONSCIOUS
-                        state.gpu_mb = 0
-                        logger.info("Fast path: %s migrated GPU→CPU (%.1fs)",
-                                    tier, migrate_result.get("elapsed_s", 0))
-                        return {"ok": True, "tier": tier, "action": "migrated_to_cpu",
-                                "elapsed_s": migrate_result.get("elapsed_s", 0)}
-                # Fallback: full unload
+                # Unload everything
                 return await self._unload_tier(tier, endpoint, state)
 
             elif to_level == ConsciousnessLevel.SUBCONSCIOUS:
@@ -614,19 +426,7 @@ class ConsciousnessMatrix:
                 return await self._load_tier_cpu(tier, endpoint, state)
 
             elif to_level == ConsciousnessLevel.CONSCIOUS:
-                # Try fast migration from CPU first (if worker still has weights in RAM)
-                migrate_result = await self._try_migrate(tier, endpoint, "cuda")
-                if migrate_result and not migrate_result.get("ok"):
-                    logger.info("Migration %s→GPU declined: %s", tier, migrate_result.get("error", "unknown"))
-                if migrate_result and migrate_result.get("ok"):
-                    state.actual = ConsciousnessLevel.CONSCIOUS
-                    state.gpu_mb = migrate_result.get("vram_mb", 0)
-                    logger.info("Fast path: %s migrated CPU→GPU (%.1fs, %dMB)",
-                                tier, migrate_result.get("elapsed_s", 0),
-                                migrate_result.get("vram_mb", 0))
-                    return {"ok": True, "tier": tier, "action": "migrated_to_gpu",
-                            "elapsed_s": migrate_result.get("elapsed_s", 0)}
-                # Fallback: full load from disk
+                # Load safetensors on GPU
                 if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
                     unload_result = await self._unload_tier(tier, endpoint, state)
                     if not unload_result.get("ok"):
@@ -641,49 +441,6 @@ class ConsciousnessMatrix:
         finally:
             state.transitioning = False
             await self._probe_tier(tier)
-
-    async def _try_migrate(self, tier: str, endpoint: str, target_device: str) -> Optional[dict]:
-        """Try to migrate a tier's model between GPU and CPU via /model/migrate.
-
-        Returns the migration result, or None if migration isn't supported
-        (e.g., GGUF backend, no active worker, endpoint not available).
-        This is the fast path (~0.5s) vs full unload+reload (~95s).
-
-        Pre-flight: quick health check to detect stale workers. NF4 models
-        on CPU can make the worker's HTTP thread unresponsive (502/timeout).
-        If stale, skip migration immediately — don't waste 10s waiting.
-        """
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                # Pre-flight: is the worker actually responsive?
-                try:
-                    health = await client.get(f"{endpoint}/health")
-                    if health.status_code != 200:
-                        logger.info("Migration %s: health returned %d — worker stale, skipping",
-                                    tier, health.status_code)
-                        return None
-                    hdata = health.json()
-                    if not hdata.get("model_loaded") and hdata.get("mode") == "standby":
-                        logger.info("Migration %s: no model loaded (standby) — nothing to migrate",
-                                    tier)
-                        return None
-                except Exception:
-                    logger.info("Migration %s: health check failed — worker stale, skipping", tier)
-                    return None
-
-                # Worker is responsive — attempt migration
-                resp = await client.post(
-                    f"{endpoint}/model/migrate",
-                    json={"device": target_device},
-                    timeout=15.0,
-                )
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.info("Migration %s→%s returned HTTP %d — using fallback path",
-                            tier, target_device, resp.status_code)
-        except Exception as e:
-            logger.info("Migration %s→%s failed: %s — using fallback path", tier, target_device, e)
-        return None
 
     async def _wait_for_manager_ready(self, tier: str, endpoint: str,
                                        timeout: float = 10.0):
@@ -730,13 +487,7 @@ class ConsciousnessMatrix:
             return {"ok": False, "tier": tier, "error": str(e)}
 
     async def _load_tier_gpu(self, tier: str, endpoint: str, state: TierState) -> dict:
-        """Load a tier on GPU (safetensors → conscious).
-
-        If the tier already has a GGUF/CPU model loaded, unloads it first
-        and waits for the manager to return to standby before loading GPU.
-        The GAIA Engine auto-detects when NF4 quantization is needed based
-        on available VRAM.
-        """
+        """Load a tier on GPU (safetensors → conscious)."""
         model = self._gpu_models.get(tier)
         if not model:
             return {"ok": False, "tier": tier, "error": "no GPU model configured"}
@@ -744,40 +495,25 @@ class ConsciousnessMatrix:
         logger.info("Loading %s to GPU: %s", tier, model)
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
-                # Check current state — may need to unload GGUF first
+                # Check if already loaded
                 health = await client.get(f"{endpoint}/health")
                 if health.status_code == 200:
                     hdata = health.json()
-                    if hdata.get("model_loaded") and hdata.get("device") == "cuda":
+                    if hdata.get("model_loaded") and hdata.get("mode") == "active":
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("%s already loaded on GPU", tier)
                         return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
-                    _has_model = hdata.get("model_loaded") or hdata.get("status") == "ok"
-                    if _has_model:
-                        # Model loaded but not on GPU (GGUF/CPU) — unload first
-                        logger.info("%s has model on %s — unloading before GPU load",
-                                    tier, hdata.get("device", "cpu"))
-                        await self._unload_tier(tier, endpoint, state)
-                        await self._wait_for_manager_ready(tier, endpoint)
 
                 resp = await client.post(
                     f"{endpoint}/model/load",
                     json={"model": model, "device": "cuda"},
                 )
-                if resp.status_code == 200:
+                if resp.status_code in (200, 409):
                     data = resp.json()
-                    if data.get("ok"):
+                    if data.get("ok") or resp.status_code == 409:
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("Loaded %s to GPU", tier)
                         return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
-                if resp.status_code == 409:
-                    # 409 = already loaded — verify it's actually on GPU
-                    h2 = await client.get(f"{endpoint}/health")
-                    if h2.status_code == 200 and h2.json().get("device") == "cuda":
-                        state.actual = ConsciousnessLevel.CONSCIOUS
-                        logger.info("Loaded %s to GPU (409 = already loaded)", tier)
-                        return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
-                    logger.warning("%s 409 but not on GPU — load may have failed", tier)
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
@@ -830,29 +566,37 @@ class ConsciousnessMatrix:
 
     # ── Internal: Continuous Poll ─────────────────────────────────────
 
+    def _is_meditation_active(self) -> bool:
+        """Check if the lifecycle FSM is in MEDITATION (study owns GPU).
+
+        During MEDITATION, tiers are intentionally unloaded. Auto-reconcile
+        must NOT reload them or it will fight with training for VRAM.
+        """
+        if not self._lifecycle_machine:
+            return False
+        try:
+            from gaia_common.lifecycle.states import LifecycleState
+            current = self._lifecycle_machine._snapshot.state
+            if isinstance(current, str):
+                current = LifecycleState(current)
+            return current == LifecycleState.MEDITATION
+        except Exception:
+            return False
+
     async def _poll_loop(self, interval: float):
         """Continuously probe tiers, validate matrix, and auto-reconcile drift."""
         while True:
             try:
                 await self.probe_all()
 
-                # Skip auto-reconcile during maintenance, active transition, or cooldown
-                if is_maintenance_active():
-                    await asyncio.sleep(15)
-                    continue
-                if time.time() < self._shift_cooldown_until:
-                    logger.debug("Poll: skipping auto-reconcile — shift cooldown active")
+                # Skip auto-reconcile during MEDITATION — tiers are intentionally
+                # unloaded while Study owns the GPU for training.
+                if self._is_meditation_active():
+                    logger.debug("Consciousness poll: MEDITATION active — skipping auto-reconcile")
                     await asyncio.sleep(interval)
                     continue
-                if self._lifecycle_machine:
-                    from gaia_common.lifecycle.states import LifecycleState as _LS
-                    current = self._lifecycle_machine._snapshot.state
-                    if current == _LS.TRANSITIONING or current == "transitioning":
-                        logger.debug("Poll: skipping auto-reconcile — lifecycle is TRANSITIONING")
-                        await asyncio.sleep(interval)
-                        continue
 
-                # Auto-reconcile: if target != actual, load/unload the tier
+                # Auto-reconcile: if target > actual, load the tier
                 for tier, state in self._tiers.items():
                     if state.ok or state.transitioning:
                         continue
@@ -867,15 +611,12 @@ class ConsciousnessMatrix:
                             )
                             if result.get("ok"):
                                 logger.info("Auto-reconciled %s → %s", tier, state.target.name)
-                                # Sync lifecycle after drift recovery
-                                await self._sync_lifecycle(
-                                    self._infer_config_from_matrix())
                             else:
                                 logger.warning("Auto-reconcile %s failed: %s", tier, result.get("error", ""))
                         except Exception as e:
                             logger.warning("Auto-reconcile %s error: %s", tier, e)
                     elif not state.ok and not state.transitioning:
-                        logger.debug(
+                        logger.warning(
                             "Matrix mismatch: %s target=%s actual=%s healthy=%s error=%s",
                             tier, state.target.name, state.actual.name,
                             state.healthy, state.error[:50] if state.error else ""
@@ -883,19 +624,3 @@ class ConsciousnessMatrix:
             except Exception as e:
                 logger.debug("Poll error: %s", e)
             await asyncio.sleep(interval)
-
-    def _infer_config_from_matrix(self) -> str:
-        """Infer the current configuration name from the consciousness matrix state."""
-        nano = self._tiers["nano"].actual
-        core = self._tiers["core"].actual
-        prime = self._tiers["prime"].actual
-
-        if prime == ConsciousnessLevel.CONSCIOUS:
-            return "focusing"
-        if core == ConsciousnessLevel.CONSCIOUS and nano == ConsciousnessLevel.CONSCIOUS:
-            return "awake"
-        if core == ConsciousnessLevel.SUBCONSCIOUS and nano == ConsciousnessLevel.SUBCONSCIOUS:
-            return "sleep"
-        if core == ConsciousnessLevel.UNCONSCIOUS and nano == ConsciousnessLevel.SUBCONSCIOUS:
-            return "deep_sleep"
-        return "awake"  # Default fallback
