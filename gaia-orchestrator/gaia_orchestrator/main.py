@@ -195,8 +195,7 @@ async def lifespan(app: FastAPI):
     logger.info("GAIA Orchestrator shutting down...")
     if _container_poll_task and not _container_poll_task.done():
         _container_poll_task.cancel()
-    if _lifecycle_reconcile_task and not _lifecycle_reconcile_task.done():
-        _lifecycle_reconcile_task.cancel()
+    # NOTE: _lifecycle_reconcile_task removed — CM poll is the single reconcile authority
     if _nano_pressure_task and not _nano_pressure_task.done():
         _nano_pressure_task.cancel()
     if _health_watchdog:

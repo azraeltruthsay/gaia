@@ -91,16 +91,16 @@ class ConsciousnessMatrix:
 
         # Safetensors model paths (for state 3 = Conscious/GPU)
         self._gpu_models = {
-            "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-Multimodal-v6"),
-            "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Qwen3-8B-GAIA-Prime-v2"),
+            "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/nano"),
+            "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/core"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
         }
 
         # GGUF model paths (for state 2 = Subconscious/CPU)
         self._cpu_models = {
-            "nano": os.environ.get("NANO_GGUF_PATH", "/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf"),
-            "core": os.environ.get("CORE_GGUF_PATH", "/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/Qwen3-8B-GAIA-Prime-v2-Q4_K_M.gguf"),
+            "nano": os.environ.get("NANO_GGUF_PATH", "/models/nano.gguf"),
+            "core": os.environ.get("CORE_GGUF_PATH", "/models/core.gguf"),
+            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/prime.gguf"),
         }
 
         # The matrix — one entry per tier
@@ -363,14 +363,16 @@ class ConsciousnessMatrix:
 
                     if managed:
                         # Managed engine — check if worker is active
-                        if mode == "active" and model_loaded:
-                            if backend == "gguf" or device == "cpu":
+                        if model_loaded:
+                            if backend in ("gguf", "cpp") or device == "cpu" or data.get("has_gpu") is False:
                                 state.actual = ConsciousnessLevel.SUBCONSCIOUS
-                            elif device == "cuda" or device == "gpu":
+                            elif device in ("cuda", "gpu") or data.get("has_gpu") is True:
+                                state.actual = ConsciousnessLevel.CONSCIOUS
+                            elif mode == "active":
                                 state.actual = ConsciousnessLevel.CONSCIOUS
                             else:
-                                # Unknown device — infer from backend
-                                state.actual = ConsciousnessLevel.CONSCIOUS if backend == "engine" else ConsciousnessLevel.SUBCONSCIOUS
+                                # Loaded but can't determine device — assume conscious
+                                state.actual = ConsciousnessLevel.CONSCIOUS
                         elif mode == "standby" or model_loaded is False:
                             state.actual = ConsciousnessLevel.UNCONSCIOUS
                         elif worker_pid is not None:
