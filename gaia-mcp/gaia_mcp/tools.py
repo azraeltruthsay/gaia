@@ -275,6 +275,11 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         "audio_listen_start": lambda p: audio_listen_start(p),
         "audio_listen_stop": lambda p: audio_listen_stop(p),
         "audio_listen_status": lambda p: audio_listen_status(p),
+        # MemPalace tools
+        "palace_store": lambda p: _palace_store_impl(p),
+        "palace_recall": lambda p: _palace_recall_impl(p),
+        "palace_navigate": lambda p: _palace_navigate_impl(p),
+        "palace_status": lambda p: _palace_status_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         "replace": lambda p: _replace_impl(p),
@@ -591,6 +596,57 @@ def _kg_stats_impl(params: dict) -> dict:
     return {"ok": True, **kg.stats()}
 
 
+# ── MemPalace (structured memory architecture) ────────────────────────────
+
+_palace_instance = None
+
+def _get_palace():
+    """Lazy-load the MemPalace singleton."""
+    global _palace_instance
+    if _palace_instance is not None:
+        return _palace_instance
+    from gaia_common.utils.mempalace import MemPalace
+    conf = Config()
+    palace_config = conf.constants.get("MEMPALACE", {})
+    _palace_instance = MemPalace(palace_config)
+    return _palace_instance
+
+
+def _palace_store_impl(params: dict) -> dict:
+    """Store a memory in the palace."""
+    palace = _get_palace()
+    text = params.get("text", "")
+    if not text:
+        return {"ok": False, "error": "text parameter required"}
+    source = params.get("source", "conversation")
+    date_str = params.get("date")
+    return palace.store(text, source=source, date_str=date_str)
+
+
+def _palace_recall_impl(params: dict) -> dict:
+    """Recall memories by text search with KG enrichment."""
+    palace = _get_palace()
+    query = params.get("query", "")
+    if not query:
+        return {"ok": False, "error": "query parameter required"}
+    top_k = int(params.get("top_k", 5))
+    return palace.recall(query, top_k=top_k)
+
+
+def _palace_navigate_impl(params: dict) -> dict:
+    """Browse the palace spatially."""
+    palace = _get_palace()
+    wing = params.get("wing")
+    room = params.get("room")
+    return palace.navigate(wing=wing, room=room)
+
+
+def _palace_status_impl(params: dict) -> dict:
+    """Get palace-wide stats."""
+    palace = _get_palace()
+    return palace.status()
+
+
 def _list_knowledge_bases_impl(params: dict) -> dict:
     """Return all configured knowledge bases and their doc directories."""
     conf = Config()
@@ -767,7 +823,7 @@ def _memory_rebuild_index_impl(params: dict):
     doc_dir = params.get("doc_dir") or "./knowledge/system_reference/GAIA_Function_Map"
     Path("/knowledge/vector_store/index.json") # Define here for now
     vi = VectorIndexer.instance()
-    ok = vi.build_index_from_docs(doc_dir=doc_dir)
+    ok = vi.build_index_from_docs()
     vi.refresh_index()
     return {
         "ok": bool(ok),

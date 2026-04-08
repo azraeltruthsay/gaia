@@ -186,7 +186,7 @@ class KnowledgeGraph:
             conflicts = [
                 {
                     "id": row[0], "subject": subject, "predicate": pred,
-                    "object": row[8], "valid_from": row[4],
+                    "object": row[9], "valid_from": row[4],
                 }
                 for row in conflicting
             ]

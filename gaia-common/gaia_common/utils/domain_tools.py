@@ -150,6 +150,29 @@ DOMAIN_TOOLS: Dict[str, dict] = {
         },
     },
 
+    # ── MemPalace ──────────────────────────────────────────────────────
+    "palace": {
+        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories",
+        "actions": {
+            "store": {
+                "params": {"text": "string", "source": "string?", "date": "string?"},
+                "maps_to": "palace_store",
+            },
+            "recall": {
+                "params": {"query": "string", "top_k": "integer?"},
+                "maps_to": "palace_recall",
+            },
+            "navigate": {
+                "params": {"wing": "string?", "room": "string?"},
+                "maps_to": "palace_navigate",
+            },
+            "status": {
+                "params": {},
+                "maps_to": "palace_status",
+            },
+        },
+    },
+
     # ── Audio ──────────────────────────────────────────────────────────
     "audio": {
         "description": "Audio capture, transcription, and inbox management",
