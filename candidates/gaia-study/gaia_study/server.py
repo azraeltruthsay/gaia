@@ -6,6 +6,7 @@ and LoRA adapter training (Study Mode).
 """
 
 import os
+import time
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -15,6 +16,7 @@ from gaia_common.utils import get_logger
 
 from .indexer import VectorIndexer
 from .study_mode_manager import StudyModeManager, TrainingConfig
+from .adaptive_trainer import AdaptiveTrainer, AdaptiveTrainingState
 
 logger = get_logger(__name__)
 
@@ -121,6 +123,22 @@ class StudyStartRequest(BaseModel):
     base_model: Optional[str] = Field(default=None, description="Base model path (default: env BASE_MODEL_PATH)")
     activation_triggers: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
+
+
+class AdaptiveTrainRequest(BaseModel):
+    """Request to start adaptive training."""
+    adapter_name: str
+    base_model: str
+    train_data_path: str = Field(default="/gaia/GAIA_Project/knowledge/curricula/primary_school/train.json")
+    resume_from: Optional[str] = Field(default=None, description="Existing adapter path to test+repair")
+    max_phases: int = Field(default=6, ge=1, le=10)
+    pass_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    rank: int = Field(default=32, ge=1, le=64)
+    alpha: int = Field(default=64, ge=1, le=128)
+    target_modules: Optional[List[str]] = None
+    max_steps_phase1: int = Field(default=300, ge=10, le=1000)
+    max_steps_repair: int = Field(default=100, ge=10, le=500)
+    training_timeout: int = Field(default=1800, ge=60, le=7200)
 
 
 class AdapterLoadRequest(BaseModel):
@@ -692,5 +710,103 @@ def create_app() -> FastAPI:
             "pid": _pipeline_proc.pid if running else None,
             "state": state,
         }
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Adaptive Training Endpoints
+    # ═══════════════════════════════════════════════════════════════════════
+
+    _adaptive_trainer: Optional[AdaptiveTrainer] = None
+
+    @app.post("/study/adaptive-train")
+    async def adaptive_train_start(request: AdaptiveTrainRequest, background_tasks: BackgroundTasks):
+        """Start adaptive training (train → test → prune → loop)."""
+        nonlocal _adaptive_trainer
+        try:
+            if _adaptive_trainer and _adaptive_trainer.state.status == "running":
+                raise HTTPException(409, "Adaptive training already in progress")
+
+            state = AdaptiveTrainingState(
+                adapter_name=request.adapter_name,
+                base_model_path=request.base_model,
+                train_data_path=request.train_data_path,
+                resume_from=request.resume_from,
+                max_phases=request.max_phases,
+                pass_threshold=request.pass_threshold,
+                rank=request.rank,
+                alpha=request.alpha,
+                target_modules=request.target_modules or [
+                    "q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj",
+                ],
+                max_steps_phase1=request.max_steps_phase1,
+                max_steps_repair=request.max_steps_repair,
+                training_timeout=request.training_timeout,
+            )
+            _adaptive_trainer = AdaptiveTrainer(state)
+
+            async def do_adaptive():
+                try:
+                    await _adaptive_trainer.run()
+                except Exception as e:
+                    logger.exception(f"Adaptive training error: {e}")
+
+            background_tasks.add_task(do_adaptive)
+
+            return {
+                "ok": True,
+                "status": "started",
+                "adapter_name": request.adapter_name,
+                "message": "Adaptive training started. Use /study/adaptive-train/status to monitor.",
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to start adaptive training: {e}")
+            raise HTTPException(500, str(e))
+
+    @app.get("/study/adaptive-train/status")
+    async def adaptive_train_status():
+        """Get adaptive training status and phase history."""
+        if not _adaptive_trainer:
+            return {"ok": True, "status": "idle", "message": "No adaptive training session"}
+
+        state = _adaptive_trainer.state
+        elapsed = time.time() - state.start_time if state.start_time else 0
+
+        return {
+            "ok": True,
+            "status": state.status,
+            "current_phase": state.current_phase,
+            "max_phases": state.max_phases,
+            "globally_passed": state.globally_passed,
+            "current_adapter_path": state.current_adapter_path,
+            "elapsed_seconds": round(elapsed, 1),
+            "error": state.error,
+            "phase_results": [
+                {
+                    "phase": pr["phase"],
+                    "skills_trained": pr["skills_trained"],
+                    "samples_used": pr["samples_used"],
+                    "training_steps": pr["training_steps"],
+                    "training_loss": round(pr["training_loss"], 4),
+                    "passed_skills": pr["passed_skills"],
+                    "failed_skills": pr["failed_skills"],
+                    "regressed_skills": pr["regressed_skills"],
+                    "duration_seconds": round(pr["duration_seconds"], 1),
+                }
+                for pr in state.phase_results
+            ],
+        }
+
+    @app.post("/study/adaptive-train/cancel")
+    async def adaptive_train_cancel():
+        """Cancel adaptive training at the next phase boundary."""
+        if not _adaptive_trainer:
+            return {"ok": False, "message": "No adaptive training session"}
+        if _adaptive_trainer.state.status != "running":
+            return {"ok": False, "message": f"Not running (status: {_adaptive_trainer.state.status})"}
+
+        _adaptive_trainer.cancel()
+        return {"ok": True, "message": "Cancel requested — will stop after current phase"}
 
     return app
