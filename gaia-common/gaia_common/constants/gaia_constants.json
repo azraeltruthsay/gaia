@@ -225,6 +225,16 @@
     "summary_temperature": 0.3,
     "max_documents": 50
   },
+  "GROUNDING": {
+    "enabled": true,
+    "extraction_tier": "nano",
+    "max_entities": 5,
+    "hierarchy": ["kg", "vector", "web"],
+    "kg_top_k": 3,
+    "vector_top_k": 3,
+    "web_fallback": true,
+    "timeout_ms": 500
+  },
   "TOOL_ROUTING": {
     "ENABLED": true,
     "SELECTION_TEMPERATURE": 0.15,

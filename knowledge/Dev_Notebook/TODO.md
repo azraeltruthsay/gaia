@@ -15,7 +15,7 @@
 
 ## Architecture & Pipeline
 
-- [ ] **Pre-inference grounding** — Auto-extract entities from prompts, search KB + web BEFORE inference, inject into cognitive packet. Nano regex + Observer LLM + vector search. ~30-80ms overhead.
+- [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
 - [ ] **Native tool calling** — Train LoRA adapter for inline `<tool_call>` emission. Replace 3-step heuristic/selection/review pipeline. ~100 training examples across 9 domains.
 - [ ] **RAG + self-exploration** — Index contracts/services/*.yaml + AST summaries into vector store. CFR compression into `code_architecture` KV prefix segment. Hash-based staleness invalidation.
 

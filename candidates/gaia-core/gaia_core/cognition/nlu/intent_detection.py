@@ -894,3 +894,50 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
     print(f"INTENT_DETECTED: {plan.intent}", file=sys.stderr)
     logger.debug("[DEBUG] Intent detect done intent=%s read_only=%s", plan.intent, plan.read_only)
     return plan
+
+
+# ── Stage 0: Neural Grounding — Entity Extraction ──────────────────────
+
+_ENTITY_EXTRACTION_PROMPT = """\
+Extract key entities from the user message. Categories: ENTITY (people, places, systems), EVENT (actions, incidents), TECH (tools, models, protocols), CONCEPT (ideas, patterns).
+Output ONLY a JSON list of strings. No explanation. Max {max_entities} entities.
+If the message is a simple greeting or has no extractable entities, output [].
+
+User message: {message}"""
+
+
+def extract_entities_neural(text: str, max_entities: int = 5) -> list:
+    """Use Nano to extract named entities from user input.
+
+    Returns a list of entity strings, e.g. ["MemPalace", "9B-Prime", "training pipeline"].
+    Fast path: ~50-100ms on Nano.
+    """
+    if not text or len(text.strip()) < 5:
+        return []
+
+    try:
+        prompt = _ENTITY_EXTRACTION_PROMPT.format(message=text[:500], max_entities=max_entities)
+        payload = json.dumps({
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 128,
+            "temperature": 0.0,
+        }).encode()
+        req = Request(
+            f"{_NANO_ENDPOINT}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=3) as resp:
+            result = json.loads(resp.read().decode())
+        answer = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        # Strip think tags if present
+        if "</think>" in answer:
+            answer = answer.split("</think>")[-1].strip()
+        # Parse JSON list
+        entities = json.loads(answer)
+        if isinstance(entities, list):
+            return [str(e).strip() for e in entities[:max_entities] if e]
+        return []
+    except (json.JSONDecodeError, Exception) as e:
+        logger.debug("Neural entity extraction failed (non-blocking): %s", e)
+        return []

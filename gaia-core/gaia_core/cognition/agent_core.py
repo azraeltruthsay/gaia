@@ -265,6 +265,75 @@ class AgentCore:
         # Legacy fallback
         return not getattr(self.model_pool, '_gpu_released', False)
 
+    def _run_grounding_probes(self, entities: list, session_id: str) -> dict:
+        """Stage 0: Neural Grounding — probe KG and vector for extracted entities.
+
+        Follows Hierarchy of Truth: KG → Vector → Web.
+        Returns dict with grounded context per entity.
+        """
+        if not entities:
+            return {}
+
+        grounding_cfg = self.config.constants.get("GROUNDING", {})
+        kg_top_k = grounding_cfg.get("kg_top_k", 3)
+        vector_top_k = grounding_cfg.get("vector_top_k", 3)
+        web_fallback = grounding_cfg.get("web_fallback", True)
+
+        from gaia_core.utils import mcp_client
+        results = {}
+
+        for entity in entities:
+            entry = {"entity": entity, "sources": []}
+
+            # 1. KG probe (MemPalace)
+            try:
+                kg_result = asyncio.run(mcp_client.call_jsonrpc("kg_query", {
+                    "query": entity, "top_k": kg_top_k
+                }))
+                if kg_result.get("ok"):
+                    kg_data = kg_result.get("response", {}).get("result", {})
+                    hits = kg_data.get("results", []) if isinstance(kg_data, dict) else []
+                    if hits:
+                        entry["sources"].append({"type": "kg", "hits": len(hits), "preview": str(hits[0])[:200]})
+                        entry["kg"] = hits
+            except Exception as e:
+                self.logger.debug("Grounding KG probe failed for '%s': %s", entity, e)
+
+            # 2. Vector probe (semantic search)
+            if not entry.get("kg"):
+                try:
+                    vec_result = asyncio.run(mcp_client.call_jsonrpc("memory_query", {
+                        "query": entity, "top_k": vector_top_k
+                    }))
+                    if vec_result.get("ok"):
+                        vec_data = vec_result.get("response", {}).get("result", {})
+                        hits = vec_data.get("results", []) if isinstance(vec_data, dict) else []
+                        if hits:
+                            entry["sources"].append({"type": "vector", "hits": len(hits), "preview": str(hits[0])[:200]})
+                            entry["vector"] = hits
+                except Exception as e:
+                    self.logger.debug("Grounding vector probe failed for '%s': %s", entity, e)
+
+            # 3. Web fallback (only if KG and vector returned nothing)
+            if web_fallback and not entry["sources"]:
+                try:
+                    web_result = mcp_client.call_jsonrpc("web_search", {
+                        "query": entity, "max_results": 2
+                    })
+                    if web_result.get("ok"):
+                        web_data = web_result.get("response", {}).get("result", {})
+                        web_hits = web_data.get("results", []) if isinstance(web_data, dict) else []
+                        if web_hits:
+                            entry["sources"].append({"type": "web", "hits": len(web_hits), "preview": str(web_hits[0])[:200]})
+                            entry["web"] = web_hits
+                except Exception as e:
+                    self.logger.debug("Grounding web probe failed for '%s': %s", entity, e)
+
+            if entry["sources"]:
+                results[entity] = entry
+
+        return results
+
     def _resolve_adapter(self, model_name: str) -> Optional[str]:
         """Return the LoRA adapter name to use for the given model, or None.
 
@@ -893,6 +962,28 @@ class AgentCore:
             except Exception:
                 logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
 
+            # --- Stage 0: Neural Grounding (pre-cognition context injection) ---
+            # Extract entities via Nano, probe KG → Vector → Web per hierarchy.
+            # Results injected into packet.content.data_fields as 'auto_grounding'.
+            _grounding_context = None
+            grounding_cfg = constants.get("GROUNDING", {})
+            if grounding_cfg.get("enabled", False):
+                try:
+                    import time as _gt
+                    _g0 = _gt.perf_counter()
+                    from gaia_core.cognition.nlu.intent_detection import extract_entities_neural
+                    _max_ents = grounding_cfg.get("max_entities", 5)
+                    entities = extract_entities_neural(user_input, max_entities=_max_ents)
+                    if entities:
+                        _grounding_context = self._run_grounding_probes(entities, session_id)
+                        _g_elapsed = (_gt.perf_counter() - _g0) * 1000
+                        logger.info("Stage 0 Grounding: %d entities → %d grounded (%.0fms)",
+                                    len(entities), len(_grounding_context), _g_elapsed)
+                    else:
+                        logger.debug("Stage 0 Grounding: no entities extracted")
+                except Exception:
+                    logger.debug("Stage 0 Grounding failed (non-blocking)", exc_info=True)
+
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
             if probe_result and probe_result.primary_collection:
             # Probe found a dominant domain — adopt that persona
@@ -1423,9 +1514,20 @@ class AgentCore:
             if probe_result:
                 packet.metrics.semantic_probe = probe_result.to_metrics_dict()
 
+            # Inject Stage 0 neural grounding results
+            if _grounding_context:
+                packet.content.data_fields.append(DataField(
+                    key='auto_grounding',
+                    value=_grounding_context,
+                    type='json',
+                    source='neural_grounding_stage0',
+                ))
+                self.logger.info("Neural grounding injected: %d entities → %s",
+                                  len(_grounding_context), list(_grounding_context.keys()))
+
             if knowledge_base_name:
                 packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
-            
+
             # Enhance the packet with knowledge from the knowledge base
             packet = enhance_packet(packet)
     
