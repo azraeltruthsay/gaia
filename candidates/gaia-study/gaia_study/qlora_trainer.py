@@ -607,22 +607,43 @@ class QLoRATrainer:
             # the assistant response. Without this, the model learns to predict
             # template tokens (<|im_start|>, <|im_end|>, <think>) which are
             # trivially easy, drowning out the actual content signal.
-            try:
-                from trl import DataCollatorForCompletionOnlyLM
-                # response_template: the token sequence that marks the start of
-                # the assistant's response. Everything before this is masked.
-                response_template = "<|im_start|>assistant\n"
-                data_collator = DataCollatorForCompletionOnlyLM(
-                    response_template=response_template,
-                    tokenizer=self.tokenizer,
-                )
-                logger.info("Using completion-only collator (loss on assistant response only)")
-            except ImportError:
-                logger.warning("trl not available — falling back to full-sequence loss (identity baking will be weak)")
-                data_collator = transformers.DataCollatorForLanguageModeling(
-                    tokenizer=self.tokenizer,
-                    mlm=False,
-                )
+            # Mask prompt tokens so loss is computed ONLY on the assistant
+            # response. Without this, the model learns to predict template
+            # tokens which are trivially easy, drowning out content signal.
+            _response_token_ids = self.tokenizer.encode(
+                "<|im_start|>assistant\n", add_special_tokens=False
+            )
+            logger.info(
+                "Completion-only masking: response_template=%d tokens %s",
+                len(_response_token_ids), _response_token_ids,
+            )
+
+            _base_collator = transformers.DataCollatorForLanguageModeling(
+                tokenizer=self.tokenizer, mlm=False,
+            )
+
+            def _completion_only_collator(features):
+                """Mask all tokens before the assistant response template."""
+                batch = _base_collator(features)
+                for i in range(batch["labels"].shape[0]):
+                    labels = batch["labels"][i]
+                    input_ids = batch["input_ids"][i]
+                    # Find the response template position
+                    found = False
+                    for j in range(len(input_ids) - len(_response_token_ids) + 1):
+                        if input_ids[j:j + len(_response_token_ids)].tolist() == _response_token_ids:
+                            # Mask everything up to and including the template
+                            labels[:j + len(_response_token_ids)] = -100
+                            found = True
+                            break
+                    if not found:
+                        # No response template found — mask everything (skip this sample)
+                        labels[:] = -100
+                    batch["labels"][i] = labels
+                return batch
+
+            data_collator = _completion_only_collator
+            logger.info("Using completion-only collator (loss on assistant response only)")
 
             # Custom callback for progress reporting and convergence detection
             class ProgressCallback(transformers.TrainerCallback):
