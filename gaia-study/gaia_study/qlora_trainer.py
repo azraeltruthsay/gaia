@@ -603,11 +603,26 @@ class QLoRATrainer:
                 dataloader_pin_memory=False,
             )
 
-            # Data collator for causal LM
-            data_collator = transformers.DataCollatorForLanguageModeling(
-                tokenizer=self.tokenizer,
-                mlm=False,
-            )
+            # Data collator — mask prompt tokens so loss is computed ONLY on
+            # the assistant response. Without this, the model learns to predict
+            # template tokens (<|im_start|>, <|im_end|>, <think>) which are
+            # trivially easy, drowning out the actual content signal.
+            try:
+                from trl import DataCollatorForCompletionOnlyLM
+                # response_template: the token sequence that marks the start of
+                # the assistant's response. Everything before this is masked.
+                response_template = "<|im_start|>assistant\n"
+                data_collator = DataCollatorForCompletionOnlyLM(
+                    response_template=response_template,
+                    tokenizer=self.tokenizer,
+                )
+                logger.info("Using completion-only collator (loss on assistant response only)")
+            except ImportError:
+                logger.warning("trl not available — falling back to full-sequence loss (identity baking will be weak)")
+                data_collator = transformers.DataCollatorForLanguageModeling(
+                    tokenizer=self.tokenizer,
+                    mlm=False,
+                )
 
             # Custom callback for progress reporting and convergence detection
             class ProgressCallback(transformers.TrainerCallback):
