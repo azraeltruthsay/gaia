@@ -642,6 +642,11 @@ class DiscordInterface:
                             elif event_type == "packet":
                                 # Final results for internal use
                                 packet_dict = event.get("value", {})
+                                # v0.4 stream integrity check
+                                integrity = packet_dict.get("response", {}).get("stream_integrity")
+                                if integrity and not integrity.get("continuous", True):
+                                    logger.warning("Discord: stream integrity violation — gaps=%s fragments=%d",
+                                                   integrity.get("gaps"), integrity.get("fragment_count", 0))
                                 completed_packet = CognitionPacket.from_dict(packet_dict)
                             
                             elif event_type == "error":

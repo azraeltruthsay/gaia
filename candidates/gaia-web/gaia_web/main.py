@@ -254,9 +254,9 @@ async def process_user_input(user_input: str, request: Request):
 
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
-                # Forward to core as a v0.3 CognitionPacket
+                # Forward to core as a v0.4 CognitionPacket
                 payload = {
-                    "version": "v0.3",
+                    "version": "v0.4",
                     "header": {
                         "session_id": session_id,
                         "packet_id": packet_id,

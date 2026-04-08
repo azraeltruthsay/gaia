@@ -1242,7 +1242,20 @@ async def process_packet(packet_data: Dict[str, Any]):
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
                     final_packet_dict["response"]["candidate"] = full_response
-                
+
+                # v0.4 stream integrity: include fragment metadata if fragmentation occurred
+                resp_data = final_packet_dict.get("response", {})
+                if resp_data.get("fragments"):
+                    frag_count = len(resp_data["fragments"])
+                    sequences = sorted(f.get("sequence", 0) for f in resp_data["fragments"])
+                    expected = list(range(frag_count))
+                    final_packet_dict["response"]["stream_integrity"] = {
+                        "fragment_count": frag_count,
+                        "continuous": sequences == expected,
+                        "gaps": [i for i in expected if i not in sequences],
+                        "total_chars": len(full_response),
+                    }
+
                 yield json.dumps({"type": "packet", "value": final_packet_dict}) + "\n"
 
             # Reset idle timer after response completes

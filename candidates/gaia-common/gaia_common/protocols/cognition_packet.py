@@ -196,7 +196,7 @@ class RelevantHistorySnippet:
 class Cheatsheet:
     id: str = "default"
     title: str = "GAIA Protocol"
-    version: str = "v0.3"
+    version: str = "v0.4"
     pointer: str = "core"
     ref_type: Optional[str] = None
 
@@ -276,14 +276,20 @@ class ResponseFragment:
     """
     Represents a fragment of a response that exceeded token limits.
     Used for fragmentation/rehydration of long-form content.
+
+    v0.4: Added sequence_id for stream integrity — enables deduplication
+    and gap detection at the client. sequence_id is a UUID assigned at
+    creation time; sequence is the ordinal position (0, 1, 2...).
     """
     fragment_id: str                      # UUID for this fragment
     parent_request_id: str                # Links fragments from same request
     sequence: int                         # 0, 1, 2, ... ordering
-    content: str                          # The actual text content
+    sequence_id: str = ""                 # UUID for stream integrity / dedup (v0.4)
+    content: str = ""                     # The actual text content
     continuation_hint: str = ""           # Context for continuation (e.g., "The Raven stanza 10/18")
     is_complete: bool = False             # True for final fragment
     token_count: int = 0                  # Approximate tokens in this fragment
+    total_fragments: int = 0             # Expected total (0 = unknown until is_complete)
     created_at: Optional[str] = None      # ISO timestamp
 
 @dataclass_json

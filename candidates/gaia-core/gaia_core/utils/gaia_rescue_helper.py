@@ -237,11 +237,13 @@ class GAIARescueHelper:
         """
         import uuid
         fragment_id = str(uuid.uuid4())
+        sequence_id = str(uuid.uuid4())
 
         fragment = {
             "fragment_id": fragment_id,
             "parent_request_id": parent_request_id,
             "sequence": sequence,
+            "sequence_id": sequence_id,
             "content": content,
             "continuation_hint": continuation_hint,
             "is_complete": is_complete,
@@ -263,7 +265,7 @@ class GAIARescueHelper:
             store["pending"].remove(parent_request_id)
 
         if self._save_fragments_store(store):
-            return {"ok": True, "fragment_id": fragment_id, "sequence": sequence}
+            return {"ok": True, "fragment_id": fragment_id, "sequence_id": sequence_id, "sequence": sequence}
         return {"ok": False, "error": "Failed to save fragment"}
 
     def fragment_read(self, parent_request_id: str) -> List[Dict[str, Any]]:
@@ -300,6 +302,16 @@ class GAIARescueHelper:
         # Check completeness
         is_complete = any(f.get("is_complete", False) for f in fragments)
 
+        # Sequence continuity check (v0.4 stream integrity)
+        sequences = [f.get("sequence", 0) for f in fragments]
+        expected = list(range(len(sequences)))
+        gaps = [i for i in expected if i not in sequences]
+        duplicates = [s for s in sequences if sequences.count(s) > 1]
+        if gaps:
+            logger.warning("Fragment assembly: sequence gaps detected: %s", gaps)
+        if duplicates:
+            logger.warning("Fragment assembly: duplicate sequences detected: %s", set(duplicates))
+
         # Assemble content
         assembled_parts = []
         for i, frag in enumerate(fragments):
@@ -333,7 +345,12 @@ class GAIARescueHelper:
             "fragment_count": len(fragments),
             "total_tokens": total_tokens,
             "is_complete": is_complete,
-            "parent_request_id": parent_request_id
+            "parent_request_id": parent_request_id,
+            "integrity": {
+                "gaps": gaps,
+                "duplicates": list(set(duplicates)),
+                "continuous": len(gaps) == 0 and len(duplicates) == 0,
+            },
         }
 
     def fragment_clear(self, parent_request_id: Optional[str] = None) -> str:

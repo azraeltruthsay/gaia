@@ -11,7 +11,7 @@
 
 - [x] **Config harmonization** — Orchestrator config, tier router, and consciousness matrix all load from `gaia_constants.json` via `gaia_common.Config`. Added `INFERENCE_ENDPOINTS` and `core` to `MODEL_REGISTRY`. (2026-04-08)
 - [x] **Tool routing cleanup** — Removed legacy aliases (ai.read etc.), promoted kg_* to ESSENTIAL_TOOLS, added Hierarchy of Truth (KG > Vector > Web) to task instructions and prompt tools (2026-04-08)
-- [ ] **Fragmentation enforcement** — Add `SequenceID` to `ResponseFragment` in CognitionPacket v0.4. Stream integrity verification in `gaia-web`. Auto-trigger fragmentation at 10K char mark.
+- [x] **Fragmentation enforcement** — CognitionPacket bumped to v0.4 with `sequence_id` + `total_fragments` in ResponseFragment. Gap/duplicate detection in fragment assembly. Stream integrity metadata in final packet. Discord client warns on violations. (2026-04-08)
 
 ## Architecture & Pipeline
 

@@ -11,7 +11,9 @@
     "enabled": true,
     "max_fragments": 20,
     "auto_trigger_chars": 10000,
-    "sketchpad_prefix": "recitation_fragment"
+    "sketchpad_prefix": "recitation_fragment",
+    "stream_integrity": true,
+    "schema_version": "v0.4"
   },
   "MCP_LITE_ENABLED": true,
   "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
