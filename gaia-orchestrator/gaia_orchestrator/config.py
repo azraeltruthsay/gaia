@@ -27,39 +27,17 @@ class OrchestratorConfig(BaseSettings):
     )
     state_file: str = Field(default="state.json", description="State filename")
 
-    # Service endpoints
-    core_url: str = Field(
-        default="http://gaia-core:6415",
-        description="gaia-core endpoint"
-    )
-    core_candidate_url: str = Field(
-        default="http://gaia-core-candidate:6415",
-        description="gaia-core-candidate endpoint"
-    )
-    web_url: str = Field(
-        default="http://gaia-web:6414",
-        description="gaia-web endpoint"
-    )
-    study_url: str = Field(
-        default="http://gaia-study:8766",
-        description="gaia-study endpoint"
-    )
-    mcp_url: str = Field(
-        default="http://gaia-mcp:8765",
-        description="gaia-mcp endpoint"
-    )
-    prime_url: str = Field(
-        default="http://gaia-prime:7777",
-        description="gaia-prime inference server endpoint"
-    )
-    prime_candidate_url: str = Field(
-        default="http://gaia-prime-candidate:7777",
-        description="gaia-prime-candidate inference server endpoint"
-    )
-    audio_url: str = Field(
-        default="http://gaia-audio:8080",
-        description="gaia-audio endpoint"
-    )
+    # Service endpoints — defaults loaded from gaia_constants.json via
+    # gaia_common.Config at __init__ time. Environment variables (ORCHESTRATOR_*)
+    # still take final precedence via pydantic-settings.
+    core_url: str = Field(default="http://gaia-core:6415", description="gaia-core endpoint")
+    core_candidate_url: str = Field(default="http://gaia-core-candidate:6415", description="gaia-core-candidate endpoint")
+    web_url: str = Field(default="http://gaia-web:6414", description="gaia-web endpoint")
+    study_url: str = Field(default="http://gaia-study:8766", description="gaia-study endpoint")
+    mcp_url: str = Field(default="http://gaia-mcp:8765", description="gaia-mcp endpoint")
+    prime_url: str = Field(default="http://gaia-prime:7777", description="gaia-prime inference server endpoint")
+    prime_candidate_url: str = Field(default="http://gaia-prime-candidate:7777", description="gaia-prime-candidate endpoint")
+    audio_url: str = Field(default="http://gaia-audio:8080", description="gaia-audio endpoint")
 
     # GPU VRAM quotas (v0.3 Sovereign Sensory Architecture)
     gpu_prime_vram_quota: float = Field(
@@ -148,22 +126,50 @@ _config: Optional[OrchestratorConfig] = None
 
 
 def get_config() -> OrchestratorConfig:
-    """Get the singleton configuration instance."""
+    """Get the singleton configuration instance.
+
+    Priority (highest wins): env vars > YAML > gaia_constants.json > hardcoded defaults.
+    """
     global _config
     if _config is None:
-        # Load YAML config as base defaults.
-        # Environment variables (ORCHESTRATOR_*) take precedence over YAML values.
-        # pydantic-settings resolves env vars automatically, but only when the
-        # field value isn't passed as a kwarg. So we must filter out any YAML
-        # keys that have a corresponding env var set.
+        # Load shared constants as base layer
+        shared_defaults = _load_shared_constants()
+
+        # Load YAML config as second layer
         yaml_config = load_yaml_config()
+        # Merge: YAML overrides shared constants
+        merged = {**shared_defaults, **yaml_config}
+
+        # Environment variables (ORCHESTRATOR_*) take precedence over everything.
+        # pydantic-settings resolves env vars automatically, but only when the
+        # field value isn't passed as a kwarg. So we must filter out any merged
+        # keys that have a corresponding env var set.
         env_prefix = "ORCHESTRATOR_"
         filtered = {
-            k: v for k, v in yaml_config.items()
+            k: v for k, v in merged.items()
             if os.getenv(f"{env_prefix}{k.upper()}") is None
         }
         _config = OrchestratorConfig(**filtered)
     return _config
+
+
+def _load_shared_constants() -> dict:
+    """Load endpoint defaults from gaia_common.Config (gaia_constants.json)."""
+    try:
+        from gaia_common.config import Config
+        cfg = Config.get_instance()
+        return {
+            "core_url": cfg.get_endpoint("core"),
+            "web_url": cfg.get_endpoint("web"),
+            "study_url": cfg.get_endpoint("study"),
+            "prime_url": cfg.get_endpoint("prime"),
+            "audio_url": cfg.get_endpoint("audio"),
+            "core_candidate_url": cfg.get_endpoint("core_candidate") or "http://gaia-core-candidate:6415",
+            "prime_candidate_url": cfg.get_endpoint("prime_candidate") or "http://gaia-prime-candidate:7777",
+        }
+    except Exception:
+        # gaia_common not available — use hardcoded defaults
+        return {}
 
 
 def reset_config() -> None:

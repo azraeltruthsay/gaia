@@ -82,25 +82,28 @@ class ConsciousnessMatrix:
     def __init__(self, lifecycle_machine=None):
         self._lifecycle_machine = lifecycle_machine
 
+        # Load defaults from shared constants, with env var overrides
+        cfg = self._load_config()
+
         # Tier engine endpoints
         self._endpoints = {
-            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
-            "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
-            "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("nano", "http://gaia-nano:8080")),
+            "core": os.environ.get("CORE_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("core", "http://gaia-core:8092")),
+            "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("prime", "http://gaia-prime:7777")),
         }
 
         # Safetensors model paths (for state 3 = Conscious/GPU)
         self._gpu_models = {
-            "nano": os.environ.get("NANO_SAFETENSORS_PATH", "/models/nano"),
-            "core": os.environ.get("CORE_SAFETENSORS_PATH", "/models/core"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
+            "nano": os.environ.get("NANO_SAFETENSORS_PATH", cfg["gpu_models"].get("nano", "/models/nano")),
+            "core": os.environ.get("CORE_SAFETENSORS_PATH", cfg["gpu_models"].get("core", "/models/core")),
+            "prime": os.environ.get("PRIME_MODEL_PATH", cfg["gpu_models"].get("prime", "/models/prime")),
         }
 
         # GGUF model paths (for state 2 = Subconscious/CPU)
         self._cpu_models = {
-            "nano": os.environ.get("NANO_GGUF_PATH", "/models/nano.gguf"),
-            "core": os.environ.get("CORE_GGUF_PATH", "/models/core.gguf"),
-            "prime": os.environ.get("PRIME_GGUF_PATH", "/models/prime.gguf"),
+            "nano": os.environ.get("NANO_GGUF_PATH", cfg["cpu_models"].get("nano", "/models/nano.gguf")),
+            "core": os.environ.get("CORE_GGUF_PATH", cfg["cpu_models"].get("core", "/models/core.gguf")),
+            "prime": os.environ.get("PRIME_GGUF_PATH", cfg["cpu_models"].get("prime", "/models/prime.gguf")),
         }
 
         # The matrix — one entry per tier
@@ -249,6 +252,31 @@ class ConsciousnessMatrix:
         except Exception as e:
             logger.warning("Lifecycle sync failed for %s: %s", config_name, e)
             return {"lifecycle_sync": "error", "error": str(e)[:100]}
+
+    # ── Config Loading ──────────────────────────────────────────────
+
+    @staticmethod
+    def _load_config() -> dict:
+        """Load tier paths and endpoints from gaia_constants.json."""
+        defaults = {
+            "inference_endpoints": {"nano": "http://gaia-nano:8080", "core": "http://gaia-core:8092", "prime": "http://gaia-prime:7777"},
+            "gpu_models": {"nano": "/models/nano", "core": "/models/core", "prime": "/models/prime"},
+            "cpu_models": {"nano": "/models/nano.gguf", "core": "/models/core.gguf", "prime": "/models/prime.gguf"},
+        }
+        try:
+            from gaia_common.config import Config
+            cfg = Config.get_instance()
+            defaults["inference_endpoints"] = dict(cfg.inference_endpoints)
+            for tier in ("nano", "core", "prime"):
+                merged = cfg.model_path(tier, "merged")
+                if merged:
+                    defaults["gpu_models"][tier] = merged
+                gguf = cfg.model_path(tier, "gguf")
+                if gguf:
+                    defaults["cpu_models"][tier] = gguf
+        except Exception:
+            pass
+        return defaults
 
     # ── Preset Configurations ─────────────────────────────────────────
 

@@ -21,27 +21,58 @@ import httpx
 
 logger = logging.getLogger("GAIA.Orchestrator.TierRouter")
 
-# Tier definitions: endpoint, model path, device preference
-TIER_DEFAULTS = {
-    "core": {
-        "engine_endpoint": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
-        "model_path": os.environ.get("CORE_MODEL_PATH", "/models/Qwen3.5-2B-GAIA-Core-v3"),
-        "device": os.environ.get("CORE_DEVICE", "cuda"),
-        "compile_mode": "reduce-overhead",
-    },
-    "nano": {
-        "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
-        "model_path": os.environ.get("NANO_MODEL_PATH", "/models/Qwen3.5-0.8B-Abliterated-merged"),
-        "device": os.environ.get("NANO_DEVICE", "cuda"),
-        "compile_mode": "reduce-overhead",
-    },
-    "prime": {
-        "engine_endpoint": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
-        "model_path": os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive"),
-        "device": os.environ.get("PRIME_DEVICE", "cuda"),
-        "compile_mode": "reduce-overhead",
-    },
-}
+
+def _build_tier_defaults() -> dict:
+    """Build tier defaults from gaia_constants.json with env var overrides."""
+    try:
+        from gaia_common.config import Config
+        cfg = Config.get_instance()
+        return {
+            "core": {
+                "engine_endpoint": os.environ.get("CORE_INFERENCE_ENDPOINT", cfg.get_inference_endpoint("core") or "http://gaia-core:8092"),
+                "model_path": os.environ.get("CORE_MODEL_PATH", cfg.model_path("core", "merged") or "/models/core"),
+                "device": os.environ.get("CORE_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+            "nano": {
+                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg.get_inference_endpoint("nano") or "http://gaia-nano:8080"),
+                "model_path": os.environ.get("NANO_MODEL_PATH", cfg.model_path("nano", "merged") or "/models/nano"),
+                "device": os.environ.get("NANO_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+            "prime": {
+                "engine_endpoint": os.environ.get("PRIME_INFERENCE_ENDPOINT", cfg.get_inference_endpoint("prime") or "http://gaia-prime:7777"),
+                "model_path": os.environ.get("PRIME_MODEL_PATH", cfg.model_path("prime", "merged") or "/models/prime"),
+                "device": os.environ.get("PRIME_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+        }
+    except Exception:
+        # Fallback if gaia_common not available
+        return {
+            "core": {
+                "engine_endpoint": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
+                "model_path": os.environ.get("CORE_MODEL_PATH", "/models/core"),
+                "device": os.environ.get("CORE_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+            "nano": {
+                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+                "model_path": os.environ.get("NANO_MODEL_PATH", "/models/nano"),
+                "device": os.environ.get("NANO_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+            "prime": {
+                "engine_endpoint": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
+                "model_path": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
+                "device": os.environ.get("PRIME_DEVICE", "cuda"),
+                "compile_mode": "reduce-overhead",
+            },
+        }
+
+
+# Lazy-initialized on first use
+TIER_DEFAULTS = None
 
 
 class TierRouter:
@@ -56,6 +87,9 @@ class TierRouter:
         self.lifecycle_machine = lifecycle_machine
         self._current_gpu_tier: Optional[str] = None
         self._lock = asyncio.Lock()
+        global TIER_DEFAULTS
+        if TIER_DEFAULTS is None:
+            TIER_DEFAULTS = _build_tier_defaults()
         self._tiers = {k: dict(v) for k, v in TIER_DEFAULTS.items()}
 
     async def ensure_tier(self, tier: str, device: str = "cuda") -> dict:

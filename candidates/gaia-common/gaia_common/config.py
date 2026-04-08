@@ -49,6 +49,13 @@ class Config:
         "orchestrator": "http://gaia-orchestrator:6410"
     })
 
+    # ── Inference Endpoints (engine-level, not service-level) ──────
+    inference_endpoints: Dict[str, str] = field(default_factory=lambda: {
+        "nano": "http://gaia-nano:8080",
+        "core": "http://gaia-core:8092",
+        "prime": "http://gaia-prime:7777"
+    })
+
     # ── Timeouts ────────────────────────────────────────────────────
     timeouts: Dict[str, float] = field(default_factory=lambda: {
         "HTTP_DEFAULT": 30.0,
@@ -130,6 +137,7 @@ class Config:
         self.FRAGMENTATION = data.get("fragmentation", {})
         self.INTEGRATIONS = data.get("INTEGRATIONS", {})
         self.endpoints.update(data.get("SERVICE_ENDPOINTS", {}))
+        self.inference_endpoints.update(data.get("INFERENCE_ENDPOINTS", {}))
         self.timeouts.update(data.get("TIMEOUTS", {}))
 
         # Derive EMBEDDING_MODEL_PATH from registry if available
@@ -196,6 +204,10 @@ class Config:
     def get_endpoint(self, service: str) -> str:
         """Get the endpoint for a specific service."""
         return self.endpoints.get(service, "")
+
+    def get_inference_endpoint(self, tier: str) -> str:
+        """Get the inference engine endpoint for a tier (nano/core/prime)."""
+        return self.inference_endpoints.get(tier, "")
 
     def get_timeout(self, key: str, default: float = 30.0) -> float:
         """Get a specific timeout value."""

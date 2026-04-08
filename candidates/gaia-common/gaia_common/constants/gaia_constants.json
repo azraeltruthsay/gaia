@@ -25,7 +25,7 @@
       "max_num_prompt_tokens": 16384,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+      "path": "/models/prime",
       "trust_remote_code": true,
       "template": "raw",
       "type": "vllm_remote",
@@ -583,7 +583,8 @@
     "models_dir": "/models",
     "prime": {
       "base": "/models/Qwen/Qwen3.5-9B",
-      "merged": "/models/Qwen3.5-9B-GAIA-Prime-v1",
+      "merged": "/models/prime",
+      "gguf": "/models/prime.gguf",
       "family": "qwen3.5",
       "params": "9B",
       "multimodal": true,
@@ -596,9 +597,20 @@
       "gguf": "/models/Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf",
       "notes": "Legacy 8B — retained for rollback"
     },
+    "core": {
+      "base": "/models/Qwen/Qwen3.5-4B",
+      "merged": "/models/core",
+      "gguf": "/models/core.gguf",
+      "family": "qwen3.5",
+      "params": "4B",
+      "multimodal": true,
+      "skills": "13/14 Primary School",
+      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
+    },
     "nano": {
       "base": "/models/Qwen/Qwen3.5-0.8B",
-      "merged": "/models/Qwen3.5-0.8B-GAIA-Nano-v1",
+      "merged": "/models/nano",
+      "gguf": "/models/nano.gguf",
       "family": "qwen3.5",
       "params": "0.8B",
       "multimodal": true,
@@ -709,7 +721,15 @@
     "mcp": "http://gaia-mcp:8765/jsonrpc",
     "study": "http://gaia-study:8766",
     "audio": "http://gaia-audio:8080",
-    "orchestrator": "http://gaia-orchestrator:6410"
+    "orchestrator": "http://gaia-orchestrator:6410",
+    "core_candidate": "http://gaia-core-candidate:6415",
+    "prime_candidate": "http://gaia-prime-candidate:7777",
+    "mcp_candidate": "http://gaia-mcp-candidate:8765/jsonrpc"
+  },
+  "INFERENCE_ENDPOINTS": {
+    "nano": "http://gaia-nano:8080",
+    "core": "http://gaia-core:8092",
+    "prime": "http://gaia-prime:7777"
   },
   "TEMPORAL_AWARENESS": {
     "enabled": true,

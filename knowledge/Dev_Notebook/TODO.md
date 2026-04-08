@@ -9,7 +9,7 @@
 
 ## Phase 2: Configuration Harmonization (from Gemini v2 audit)
 
-- [ ] **Config harmonization** — Make orchestrator load model paths/endpoints from `gaia_constants.json` instead of hardcoded `OrchestratorConfig` defaults. Dynamic tier routing in `tier_router.py` from `MODEL_CONFIGS`.
+- [x] **Config harmonization** — Orchestrator config, tier router, and consciousness matrix all load from `gaia_constants.json` via `gaia_common.Config`. Added `INFERENCE_ENDPOINTS` and `core` to `MODEL_REGISTRY`. (2026-04-08)
 - [ ] **Tool routing cleanup** — Remove legacy tool aliases (`ai.read` -> `read_file` etc.) from `AgentCore._execute_mcp_tool`. Promote `kg_*` tools to `ESSENTIAL_TOOLS`. Establish Hierarchy of Truth (KG > Vector).
 - [ ] **Fragmentation enforcement** — Add `SequenceID` to `ResponseFragment` in CognitionPacket v0.4. Stream integrity verification in `gaia-web`. Auto-trigger fragmentation at 10K char mark.
 
