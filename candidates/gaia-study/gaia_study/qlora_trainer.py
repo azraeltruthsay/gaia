@@ -181,9 +181,15 @@ class QLoRATrainer:
         _lazy_import()
 
         try:
-            # Pre-flight: verify enough system RAM for BnB NF4 loading (~5GB for 4B model)
+            # Pre-flight: verify enough system RAM for BnB NF4 loading.
+            # CPU-offload path needs bf16 model in RAM (~18GB for 9B, ~8GB for 4B).
+            base_p = Path(self.base_model_path)
+            bf16_mb = sum(f.stat().st_size for f in base_p.glob("*.safetensors")) / (1024**2)
+            if bf16_mb == 0:
+                bf16_mb = sum(f.stat().st_size for f in base_p.glob("*.bin")) / (1024**2)
+            needed_mb = max(8000, int(bf16_mb * 1.3))  # bf16 size + 30% overhead
             if _require_memory is not None:
-                _require_memory(needed_mb=8000, label="QLoRA training setup")
+                _require_memory(needed_mb=needed_mb, label="QLoRA training setup")
 
             logger.info("Setting up QLoRA training for %s", self.base_model_path)
 
@@ -230,17 +236,33 @@ class QLoRATrainer:
                     quant_method, peft.__version__ if 'peft' in dir() else '?'
                 )
 
-            # Detect multimodal model — use AutoModelForImageTextToText to
-            # preserve vision encoder so merged adapters produce a full
-            # ForConditionalGeneration model (not stripped CausalLM).
+            # Detect multimodal model. For TEXT-ONLY training (identity bake,
+            # tool calling, etc.), load as CausalLM to skip the vision encoder
+            # and save ~1GB+ VRAM. For vision training, use ImageTextToText.
             auto_cls = transformers.AutoModelForCausalLM
+            _is_multimodal = False
+            _text_only_config = None
             try:
                 _cfg = transformers.AutoConfig.from_pretrained(
                     self.base_model_path, trust_remote_code=True
                 )
                 if hasattr(_cfg, "vision_config") and _cfg.vision_config is not None:
-                    auto_cls = transformers.AutoModelForImageTextToText
-                    logger.info("Multimodal model detected — using AutoModelForImageTextToText")
+                    _is_multimodal = True
+                    # Extract text_config for CausalLM loading (skips vision encoder)
+                    if hasattr(_cfg, "text_config") and _cfg.text_config is not None:
+                        _text_only_config = _cfg.text_config
+                        auto_cls = transformers.AutoModelForCausalLM
+                        logger.info(
+                            "Multimodal model detected — extracting text_config for CausalLM "
+                            "loading (skips vision encoder, saves ~1GB+ VRAM). "
+                            "Text model: %d layers, hidden=%d, vocab=%d",
+                            getattr(_text_only_config, "num_hidden_layers", -1),
+                            getattr(_text_only_config, "hidden_size", -1),
+                            getattr(_text_only_config, "vocab_size", -1),
+                        )
+                    else:
+                        auto_cls = transformers.AutoModelForImageTextToText
+                        logger.info("Multimodal model — no text_config found, using ImageTextToText")
             except Exception:
                 pass
 
@@ -288,17 +310,8 @@ class QLoRATrainer:
                     logger.error("GPTQModel.load with AUTO_TRAINABLE failed: %s", _gptq_err)
                     raise
             elif self.config.load_in_4bit and bitsandbytes is not None:
-                # QLoRA: BnB NF4 quantization on bf16 base model (~2-3GB final VRAM for 4B)
-                # This is the canonical QLoRA technique — proper gradient flow via STE.
-                bnb_config = transformers.BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=getattr(torch, self.config.bnb_4bit_compute_dtype),
-                    bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
-                    bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
-                )
-                # Estimate bf16 model size to decide loading strategy.
-                # transformers >=5.2 temporarily loads bf16 weights before BnB quantizes,
-                # so we need the bf16 size to fit in VRAM during loading.
+                # QLoRA: BnB NF4 quantization on bf16 base model
+                # Estimate bf16 model size first — needed for loading decisions.
                 base_p = Path(self.base_model_path)
                 bf16_size_gb = sum(
                     f.stat().st_size for f in base_p.glob("*.safetensors")
@@ -308,12 +321,40 @@ class QLoRATrainer:
                         f.stat().st_size for f in base_p.glob("*.bin")
                     ) / (1024**3)
 
+                # For large models with untied embeddings (e.g. Qwen3.5-9B),
+                # the lm_head is ~1.9GB in bf16. Force-quantizing it saves
+                # significant VRAM during loading. This is safe for LoRA
+                # training since we don't modify lm_head weights.
+                gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+                _skip_modules = None  # default: skip lm_head
+                if bf16_size_gb > gpu_free_gb * 0.8:
+                    _skip_modules = []  # empty = quantize everything including lm_head
+                    logger.info(
+                        "Large model (%.1fGiB bf16 > %.1fGiB budget) — "
+                        "forcing lm_head quantization to save ~1.5GiB VRAM",
+                        bf16_size_gb, gpu_free_gb * 0.8,
+                    )
+
+                bnb_config = transformers.BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=getattr(torch, self.config.bnb_4bit_compute_dtype),
+                    bnb_4bit_quant_type=self.config.bnb_4bit_quant_type,
+                    bnb_4bit_use_double_quant=self.config.bnb_4bit_use_double_quant,
+                    llm_int8_enable_fp32_cpu_offload=True,
+                    llm_int8_skip_modules=_skip_modules,
+                )
+
                 # NF4 is ~4x compression. The actual GPU usage will be bf16/4.
                 # But transformers temporarily holds bf16 weights during quantization,
                 # so we need bf16 to fit in VRAM during the transient loading phase.
                 nf4_estimated_gb = bf16_size_gb / 4
                 gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                 bf16_fits_in_vram = bf16_size_gb < gpu_free_gb * 0.85
+                # Extra kwargs for text-only loading of multimodal models
+                _config_kwargs = {}
+                if _text_only_config is not None:
+                    _config_kwargs["config"] = _text_only_config
+
                 if nf4_estimated_gb < max_gpu_gb * 0.7 and bf16_fits_in_vram:
                     # Model fits on GPU — load directly for full GPU training
                     logger.info(
@@ -327,44 +368,39 @@ class QLoRATrainer:
                         device_map={"": 0},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
+                        **_config_kwargs,
                     )
                 else:
-                    # Model too large for direct GPU loading — bf16 weights
-                    # won't fit in VRAM during the transient BnB quantization.
-                    # Use BnB with CPU offload: load bf16 to CPU, quantize
-                    # layer-by-layer to GPU. This avoids the bf16 VRAM peak.
-                    #
-                    # IMPORTANT: Do NOT use quanto here — it only wraps a
-                    # subset of layers, causing LoRA to attach to only ~22%
-                    # of attention layers. BnB wraps ALL linear layers.
+                    # Model bf16 size exceeds VRAM but NF4 model should fit.
+                    # With lm_head quantization (if enabled above), the final
+                    # model is ~5-6GB. Use device_map={"":0} to force all NF4
+                    # layers onto GPU. The transient bf16 peak during loading
+                    # should stay within budget.
                     gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
-                    logger.info(
-                        "Model bf16 size (%.1fGiB) exceeds GPU budget (%.1fGiB free) "
-                        "— using BnB with CPU offload for NF4 quantization",
-                        bf16_size_gb, gpu_free_gb
-                    )
                     import gc
                     gc.collect()
                     torch.cuda.empty_cache()
-                    # max_memory tells transformers how much GPU to use.
-                    # The rest spills to CPU RAM during the bf16→NF4 conversion.
-                    max_gpu_mb = int(gpu_free_gb * 0.85 * 1024)
+                    gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     logger.info(
-                        "BnB CPU-offload: max_gpu=%dMiB, bf16 loads to CPU then "
-                        "quantizes layer-by-layer to GPU",
-                        max_gpu_mb
+                        "Loading NF4 model directly to GPU (%.1fGiB free, "
+                        "bf16=%.1fGiB → NF4 est. %.1fGiB)",
+                        gpu_free_gb, bf16_size_gb, nf4_estimated_gb,
                     )
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map="auto",
-                        max_memory={0: f"{max_gpu_mb}MiB", "cpu": "48GiB"},
+                        device_map={"": 0},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
+                        **_config_kwargs,
                     )
                     gpu_used = torch.cuda.memory_allocated(0) / (1024**3)
-                    logger.info("Model on GPU via BnB CPU-offload: %.1fGiB", gpu_used)
+                    gpu_free_after = torch.cuda.mem_get_info()[0] / (1024**3)
+                    logger.info(
+                        "Model loaded: %.1fGiB on GPU (%.1fGiB free)",
+                        gpu_used, gpu_free_after,
+                    )
             else:
                 # Fallback: bf16 directly to GPU (only works for small models)
                 logger.info("Loading model in bf16 to GPU (no quantization)")

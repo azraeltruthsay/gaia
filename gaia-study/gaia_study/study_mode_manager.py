@@ -223,6 +223,19 @@ class StudyModeManager:
                                 samples.append(entry)
                         except json.JSONDecodeError:
                             continue
+                # JSON files: array of instruction/output pairs (e.g. Primary School curriculum)
+                elif path.suffix == ".json":
+                    try:
+                        entries = json.loads(content)
+                        if isinstance(entries, list):
+                            for entry in entries:
+                                if isinstance(entry, dict) and "instruction" in entry and "output" in entry:
+                                    samples.append(entry)
+                            logger.info(f"Loaded {len(entries)} entries from JSON array: {doc_path}")
+                        else:
+                            logger.warning(f"JSON file is not an array, skipping: {doc_path}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON file {doc_path}: {e}")
                 # Generate training samples based on format
                 elif output_format == "instruction":
                     samples.extend(self._create_instruction_samples(content, path.name))

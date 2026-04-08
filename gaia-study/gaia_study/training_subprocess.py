@@ -146,10 +146,15 @@ def run_training(config_dict: dict) -> None:
     # Install signal handler early
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    # Configure logging in subprocess
+    # Configure logging in subprocess — write to file so logs survive subprocess exit
+    _log_path = os.environ.get("TRAINING_LOG_PATH", "/shared/study/training_subprocess.log")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] training-subprocess: %(message)s",
+        handlers=[
+            logging.StreamHandler(),  # stderr (may not reach docker logs)
+            logging.FileHandler(_log_path, mode="w"),  # persistent file
+        ],
     )
     sub_logger = logging.getLogger("training-subprocess")
 
@@ -164,8 +169,22 @@ def run_training(config_dict: dict) -> None:
         _write_progress("setup", pid=pid, adapter_dir=config.adapter_dir)
         sub_logger.info("Importing torch and training libraries...")
 
+        # Set CUDA allocator config BEFORE importing torch to ensure it takes effect
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
         # All CUDA imports happen here — in the subprocess only
         import torch
+
+        # Force sequential model loading in transformers 5.x.
+        # The default (4 workers) loads multiple bf16 tensors to GPU in parallel
+        # before BnB quantizes them, causing massive transient VRAM spikes.
+        # Sequential loading (1 worker) means only 1 bf16 tensor is on GPU at a time.
+        try:
+            import transformers.core_model_loading as _cml
+            _cml.GLOBAL_WORKERS = 1
+            sub_logger.info("Set transformers GLOBAL_WORKERS=1 (sequential loading for VRAM safety)")
+        except Exception:
+            pass
         from gaia_study.qlora_trainer import QLoRATrainer, QLoRAConfig
 
         if torch.cuda.is_available():
