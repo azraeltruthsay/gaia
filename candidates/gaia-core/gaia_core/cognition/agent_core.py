@@ -892,7 +892,8 @@ class AgentCore:
             # Initialize turn variables to prevent NameErrors in finally block or loop
             observer_model_name = None
             observer_instance = None
-            active_stream_observer = None  # NOTE: currently unused — kept for future streaming observer support
+            active_stream_observer = None  # Parallel Observer: CPU tier audits GPU tier's stream
+            _parallel_observer_model_name = None
             post_run_observer = None
             disable_observer = True # Default to safe
             reflex_text = "" # Default to empty
@@ -2474,6 +2475,27 @@ class AgentCore:
                 if _stream_adapter and hasattr(selected_model, 'set_active_adapter'):
                     selected_model.set_active_adapter(_stream_adapter)
 
+                # ── Parallel Observer: always-on CPU audit ──
+                # AWAKE: Core (GPU) generates → Prime (CPU/GGUF) observes
+                # FOCUSING: Prime (GPU) generates → Core (CPU/GGUF) observes
+                # The observer tier is whichever is NOT the primary generator.
+                if active_stream_observer is None:
+                    try:
+                        _par_obs_name = "prime" if "core" in selected_model_name.lower() else "core"
+                        # Only use as observer if it's different from the generator
+                        if _par_obs_name != selected_model_name:
+                            _par_obs_model = self.model_pool.acquire_model_for_role(_par_obs_name)
+                            if _par_obs_model is not None:
+                                active_stream_observer = StreamObserver(
+                                    config=self.config, llm=_par_obs_model,
+                                    name=f"ParallelObserver-{_par_obs_name.title()}"
+                                )
+                                _parallel_observer_model_name = _par_obs_name
+                                logger.info("Parallel Observer activated: %s observing %s",
+                                            _par_obs_name.title(), role_label)
+                    except Exception as _pobs_exc:
+                        logger.debug("Parallel Observer setup failed (non-blocking): %s", _pobs_exc)
+
                 voice = ExternalVoice(
                     model=selected_model,
                     model_pool=self.model_pool,
@@ -2481,6 +2503,7 @@ class AgentCore:
                     messages=final_messages,
                     source=identity_label.lower(),  # "prime" or "core" for generation stream
                     observer=observer_instance,
+                    active_stream_observer=active_stream_observer,
                     context={"packet": packet, "ethical_sentinel": self.ethical_sentinel},
                     session_id=session_id,
                 )
@@ -2586,9 +2609,13 @@ class AgentCore:
                 routing_result = route_output(current_response, packet, self, session_id, destination)
                 council_msgs = routing_result.get("council_messages", [])
                 
-                # Release observer before potentially continuing debate
+                # Release observers before potentially continuing debate
                 if observer_model_name:
                     self.model_pool.release_model_for_role(observer_model_name)
+                if _parallel_observer_model_name:
+                    self.model_pool.release_model_for_role(_parallel_observer_model_name)
+                    _parallel_observer_model_name = None
+                    active_stream_observer = None
 
                 if not council_msgs:
                     # Consensus reached: yield final cleaned response

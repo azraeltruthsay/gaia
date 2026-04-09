@@ -21,7 +21,7 @@
 
 ## Orchestrator Quality
 
-- [ ] **Core cognitive overhead** — `run_turn` takes ~60s (reflection, audit) before quality gate. Needs streamlining for interactive speed.
+- [x] **Parallel Observer pipeline** — Always-on CPU Observer audits GPU Operator/Thinker stream in background. Role-symmetric: AWAKE=Prime observes Core, FOCUSING=Core observes Prime. Non-blocking via ThreadPoolExecutor. Can interrupt on safety/accuracy/epistemic issues. (2026-04-08)
 - [x] **Model pool staleness** — `/refresh_pool` endpoint on gaia-core clears stale `gpu_prime`/`cpu_prime` entries. ConsciousnessMatrix triggers it after every tier transition. Auth whitelisted. (2026-04-08)
 
 ## Training & Models

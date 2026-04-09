@@ -75,6 +75,7 @@ class ExternalVoice:
         session_id: str = "shell",
         source: str = "web",
         observer: Optional[StreamObserver] = None,
+        active_stream_observer: Optional[StreamObserver] = None,
     ) -> None:
         self.model = model
         self.model_pool = model_pool
@@ -85,6 +86,12 @@ class ExternalVoice:
         self.session_id = session_id
         self.source = source
         self.observer = observer
+        # Parallel Observer: runs on CPU/GGUF, audits every token non-blocking.
+        # In AWAKE: Prime (CPU) observes Operator (Core GPU).
+        # In FOCUSING: Core (CPU) observes Thinker (Prime GPU).
+        self.active_stream_observer = active_stream_observer
+        self._active_observer_buffer = []
+        self._active_observer_future = None
 
         self.logical_stop_punct = getattr(self.config, 'LOGICAL_STOP_PUNCTUATION', None) or self.config.constants.get("LOGICAL_STOP_PUNCTUATION", [".", "!", "?", "\n"])
         self.observer_threshold = getattr(self.config, 'OBSERVER_TOKEN_THRESHOLD', None) or self.config.constants.get("OBSERVER_TOKEN_THRESHOLD", 1000)
@@ -316,6 +323,27 @@ class ExternalVoice:
                         logger.debug("ExternalVoice: token log failed: %s", _tl_exc)
 
                 yield token
+
+                # --- Parallel Observer: feed token to CPU observer non-blocking ---
+                if self.active_stream_observer and isinstance(token, str):
+                    self._active_observer_buffer.append(token)
+                    # Check for interrupt from a previous observer review
+                    if self.active_stream_observer.interrupted:
+                        reason = getattr(self.active_stream_observer, "interrupt_reason", "observer interrupt")
+                        logger.info("ExternalVoice: parallel observer interrupt: %s", reason)
+                        yield {"event": "interruption", "data": {
+                            "reason": f"Observer: {reason}",
+                            "type": "parallel_observer",
+                        }}
+                        break
+                    # Trigger observer review periodically (non-blocking, in thread pool)
+                    buf_len = len(self._active_observer_buffer)
+                    if buf_len > 0 and buf_len % 50 == 0 and (self._active_observer_future is None or self._active_observer_future.done()):
+                        accumulated = "".join(self._active_observer_buffer)
+                        packet = self.context.get("packet")
+                        self._active_observer_future = self._observer_executor.submit(
+                            self.active_stream_observer.observe, packet, accumulated
+                        )
 
                 # --- Loop Detection: Check for token-level patterns ---
                 if self._loop_detector_observer:
