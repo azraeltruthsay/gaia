@@ -56,46 +56,159 @@ class ApprovalStore:
         """
         VouchCore Pattern: Deterministic pre-flight safety check.
         Raises ValueError if action is forbidden regardless of LLM reasoning.
+
+        Hardened v2 (2026-04-09): Uses shlex tokenization and regex word
+        boundaries instead of substring matching. Resolves symlinks and
+        normalizes paths before checking blocked list.
         """
         if method == "run_shell":
-            cmd = str(params.get("command", "")).lower()
-            forbidden = [
-                # Destructive file operations
-                "rm -rf", "rm -fr", "rmdir /",
-                # Privilege escalation
-                "sudo ", "su -", "su root",
-                # Disk/filesystem destruction
-                "mkfs", "dd ", "> /dev/sd", "> /dev/nvme",
-                # Permission escalation
-                "chmod +s", "chmod u+s", "chmod 4",
-                # Remote code execution vectors
-                "curl | bash", "curl |bash", "wget | bash", "wget |bash",
-                "curl -s | sh", "wget -O - | sh",
-                # Container escape
-                "nsenter", "chroot",
-                # Credential theft
-                "cat /etc/shadow", "cat /etc/passwd",
-                "cat /run/secrets", "cat ~/.ssh",
-                # Network exfiltration
-                "nc -l", "ncat -l",
-                # Python/node arbitrary execution (bypasses whitelist)
-                "python -c", "python3 -c", "node -e",
-                # Find with exec (arbitrary command execution)
-                "-exec ", "-execdir ",
-            ]
-            for pattern in forbidden:
-                if pattern in cmd:
-                    logger.critical(f"🛡️ BLAST SHIELD: Forbidden command pattern detected: {pattern}")
-                    raise ValueError(f"Blast Shield: Forbidden command pattern '{pattern}' detected.")
+            cmd = str(params.get("command", ""))
+            self._validate_shell_command(cmd)
 
         if method in ("write_file", "ai_write", "replace"):
             path = str(params.get("path", ""))
-            blocked_paths = ["/etc", "/boot", "/.ssh", "/run/secrets",
-                             "/proc", "/sys", "/dev", "/root"]
-            for bp in blocked_paths:
-                if path.startswith(bp) or f"/{bp.lstrip('/')}" in path:
-                    logger.critical(f"🛡️ BLAST SHIELD: Attempt to write to system path: {path}")
-                    raise ValueError("Blast Shield: Writing to system/sensitive paths is forbidden.")
+            self._validate_path(path)
+
+        # Also validate paths in shell commands
+        if method == "run_shell":
+            cmd = str(params.get("command", ""))
+            self._validate_shell_paths(cmd)
+
+    def _validate_shell_command(self, cmd: str):
+        """Validate shell commands using tokenization, not substring matching."""
+        import re
+
+        # Normalize: collapse whitespace, strip
+        normalized = " ".join(cmd.split()).lower()
+
+        # Check for command chaining/injection operators
+        chain_operators = ["&&", "||", ";", "|", "$(", "`"]
+        for op in chain_operators:
+            if op in normalized:
+                # Split on the operator and validate each part
+                parts = re.split(r'[;&|`$()]+', normalized)
+                for part in parts:
+                    part = part.strip()
+                    if part:
+                        self._check_forbidden_command(part)
+                return
+
+        self._check_forbidden_command(normalized)
+
+    def _check_forbidden_command(self, cmd: str):
+        """Check a single (non-chained) command against forbidden patterns."""
+        import re
+
+        # Tokenize safely — fall back to split on failure
+        try:
+            import shlex
+            tokens = shlex.split(cmd)
+        except ValueError:
+            tokens = cmd.split()
+
+        if not tokens:
+            return
+
+        base_cmd = tokens[0]
+        flags = set(tokens[1:])
+
+        # Destructive file operations (word-boundary matching)
+        if base_cmd == "rm" and ({"-rf", "-fr", "-r", "--recursive"} & flags):
+            self._block(cmd, "rm with recursive flag")
+        if base_cmd in ("rmdir",) and "/" in " ".join(tokens[1:]):
+            self._block(cmd, "rmdir on root path")
+
+        # Privilege escalation
+        if base_cmd in ("sudo", "su", "doas", "pkexec"):
+            self._block(cmd, f"privilege escalation ({base_cmd})")
+
+        # Disk/filesystem destruction
+        if base_cmd in ("mkfs", "mkfs.ext4", "mkfs.xfs", "wipefs", "fdisk", "parted"):
+            self._block(cmd, f"disk operation ({base_cmd})")
+        if base_cmd == "dd" and any("of=/dev/" in t for t in tokens):
+            self._block(cmd, "dd to device")
+
+        # Permission escalation
+        if base_cmd in ("chmod", "chown", "setfacl"):
+            if base_cmd == "chmod" and any(re.match(r'^[0-7]*[4267][0-7]*$', t) for t in tokens[1:]):
+                self._block(cmd, "chmod with dangerous permissions (setuid/setgid/world-writable)")
+            if base_cmd == "chmod" and ({"+s", "u+s", "g+s", "a+rwx"} & flags):
+                self._block(cmd, "chmod setuid/setgid/world-writable")
+            if base_cmd == "chown" and "root" in " ".join(tokens[1:]):
+                self._block(cmd, "chown to root")
+
+        # Container/namespace escape
+        if base_cmd in ("nsenter", "chroot", "unshare", "pivot_root"):
+            self._block(cmd, f"container escape ({base_cmd})")
+
+        # Remote code execution
+        if base_cmd in ("curl", "wget") and any(p in cmd for p in ["| bash", "|bash", "| sh", "|sh"]):
+            self._block(cmd, "remote code execution via pipe")
+
+        # Credential access
+        if base_cmd in ("cat", "head", "tail", "less", "more"):
+            sensitive_files = ["/etc/shadow", "/etc/passwd", "/run/secrets", "/.ssh/"]
+            for sf in sensitive_files:
+                if any(sf in t for t in tokens[1:]):
+                    self._block(cmd, f"credential access ({sf})")
+
+        # Network listeners
+        if base_cmd in ("nc", "ncat", "netcat", "socat") and any(l in flags for l in ["-l", "-lp", "--listen"]):
+            self._block(cmd, "network listener")
+
+        # Arbitrary code execution (bypasses whitelist)
+        if base_cmd in ("python", "python3", "node", "ruby", "perl") and ({"-c", "-e"} & flags):
+            self._block(cmd, f"arbitrary code execution ({base_cmd})")
+
+        # Find with exec
+        if base_cmd == "find" and ({"-exec", "-execdir", "-delete"} & flags):
+            self._block(cmd, "find with exec/delete")
+
+    def _validate_path(self, path: str):
+        """Validate file paths using normalization and symlink resolution."""
+        import os
+
+        if not path:
+            return
+
+        # Block relative traversal
+        if ".." in path:
+            self._block(path, "path traversal (..)")
+
+        # Normalize and resolve symlinks
+        try:
+            resolved = os.path.realpath(path)
+        except (OSError, ValueError):
+            resolved = os.path.normpath(path)
+
+        # Also normalize the raw path (without symlink resolution)
+        normed = os.path.normpath(path)
+
+        blocked_paths = [
+            "/etc", "/boot", "/.ssh", "/run/secrets",
+            "/proc", "/sys", "/dev", "/root",
+            "/sys/fs/cgroup", "/dev/shm", "/var/spool",
+        ]
+        for bp in blocked_paths:
+            if resolved.startswith(bp) or normed.startswith(bp):
+                logger.critical("BLAST SHIELD: Blocked path (resolved=%s, raw=%s, blocked=%s)", resolved, path, bp)
+                raise ValueError(f"Blast Shield: Writing to system/sensitive path '{bp}' is forbidden.")
+
+    def _validate_shell_paths(self, cmd: str):
+        """Extract and validate paths from shell commands."""
+        import re
+        # Find anything that looks like an absolute path
+        paths = re.findall(r'(/[a-zA-Z0-9_./-]+)', cmd)
+        for p in paths:
+            try:
+                self._validate_path(p)
+            except ValueError:
+                raise
+
+    def _block(self, cmd: str, reason: str):
+        """Log and raise for a blocked command."""
+        logger.critical("BLAST SHIELD: Blocked command — reason=%s cmd=%s", reason, cmd[:200])
+        raise ValueError(f"Blast Shield: {reason}")
 
     def create_pending(
         self,

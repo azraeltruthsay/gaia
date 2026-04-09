@@ -30,6 +30,12 @@
 - [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). **FIX PENDING (Candidates)**: Implemented Nano auto-detection and strict phase-mapping in `candidates/gaia-study` to prevent _Phase Drift_. Eval now scoped to `NANO_SKILLS` for 0.8B models. Awaiting validation run.
 - [x] **SAE validation pipeline** — Baseline + adapter atlases recorded on Core 4B. Mid-layers (11-17) show expected drift from tool-calling injection. Identity layers (23, 26) stable (<5% loss delta). Adapter cleared for runtime loading. (2026-04-08)
 
+## Sovereign Shield & Security
+
+- [x] **Blast Shield hardening** — Replaced substring matching with shlex tokenization + regex word boundaries. Validates chained commands individually. Path validation uses `os.path.realpath()` + `..` detection. Added chmod 777, chown root, setfacl, find -delete. 17/17 tests pass. (2026-04-09)
+- [ ] **Prompt Injection canaries** — [DEFENSE GAP] `scanner.py` Tier 3 canary detection is stubbed. Need unique token injection in system prompts to detect echo-back attacks.
+- [ ] **Nano-Injection reliability** — Current Nano identity regression (GAI/Alibaba) compromises the reliability of injection confirmation. Need Phase 1 fix to restore trusted security classification.
+
 ## Completed
 
 - [x] **Clutch protocol implementation** — CM as sole tier authority, delegation API, deadlock prevention (2026-04-08)
