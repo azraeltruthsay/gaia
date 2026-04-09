@@ -4064,13 +4064,35 @@ class AgentCore:
     def _fetch_recitation_source(self, user_input: str) -> str:
         """Fetch the actual source text for a recitation request.
 
-        Pipeline: web_search (content_type=poem) → pick best URL → web_fetch
-        → extract clean text → save to knowledge base for future RAG.
+        Pipeline: local cache check → web_search → web_fetch → save locally.
+        Checks /knowledge/research/ first to avoid redundant web fetches
+        when the text was already retrieved in a previous turn.
 
         Returns the cleaned document text, or empty string on failure.
         """
         import os
-        # 1. Search for the source material
+        import glob
+
+        # 0. Check local cache first — may already have it from a previous turn
+        try:
+            research_dir = "/knowledge/research"
+            if os.path.isdir(research_dir):
+                # Extract key terms from user input for matching
+                query_lower = user_input.lower()
+                for cached_file in glob.glob(os.path.join(research_dir, "*.txt")):
+                    fname = os.path.basename(cached_file).lower().replace(".txt", "").replace("-", " ").replace("_", " ")
+                    # Match if any significant word from the filename appears in the query
+                    fname_words = [w for w in fname.split() if len(w) > 3]
+                    if fname_words and any(w in query_lower for w in fname_words):
+                        with open(cached_file, "r") as f:
+                            cached_text = f.read()
+                        if len(cached_text) > 50:
+                            self.logger.info("Recitation: using cached source from %s", cached_file)
+                            return cached_text
+        except Exception:
+            self.logger.debug("Recitation: local cache check failed", exc_info=True)
+
+        # 1. Search for the source material (web fallback)
         try:
             search_result = mcp_client.call_jsonrpc("web_search", {
                 "query": user_input,
