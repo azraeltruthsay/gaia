@@ -417,6 +417,8 @@ def _build_mappings():
 
     # Simplified action aliases (adapter_list → list, listen_start → listen, etc.)
     _ACTION_ALIASES = {
+        # shell
+        ("shell", "run_shell"): ("shell", "run"),
         # audio
         ("audio", "listen"): ("audio", "listen_start"),
         ("audio", "stop"): ("audio", "listen_stop"),
