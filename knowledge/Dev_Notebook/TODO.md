@@ -16,17 +16,18 @@
 ## Architecture & Pipeline
 
 - [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
-- [ ] **Native tool calling** — [IN PROGRESS] Curriculum complete (100 samples). Phase 1 training on Core (4B) at loss 0.008; converging. Next: Train Prime (9B).
+- [ ] **Native tool calling** — [IN PROGRESS] Standalone adapter trained but merge degraded identity (v2 rollback). Now training combined curriculum (Primary School 475 + tool_calling 100 = 575 samples) as `primary_school_v2`. Identity + tool calling trained together so gradients don't fight.
 - [x] **RAG + self-exploration (Architectural RAG)** — `scripts/index_architecture.py` extracts AST summaries + contracts into `code_architecture` vector collection. 9 services, 21 docs, 179 chunks indexed. (2026-04-08)
 
 ## Orchestrator Quality
 
 - [x] **Parallel Observer pipeline** — Always-on CPU Observer audits GPU Operator/Thinker stream in background. Role-symmetric: AWAKE=Prime observes Core, FOCUSING=Core observes Prime. Non-blocking via ThreadPoolExecutor. Can interrupt on safety/accuracy/epistemic issues. (2026-04-08)
 - [x] **Model pool staleness** — `/refresh_pool` endpoint on gaia-core clears stale `gpu_prime`/`cpu_prime` entries. ConsciousnessMatrix triggers it after every tier transition. Auth whitelisted. (2026-04-08)
+- [x] **Core Cognitive Overload fix** — Fixed `AttributeError: 'dict' object has no attribute 'encode'` in `gaia-core/main.py`. `process_packet` now correctly serializes unknown dictionary events (e.g., from self-improvement) before yielding to `StreamingResponse`. (2026-04-09)
 
 ## Training & Models
 
-- [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). **DIAGNOSED**: _Phase Drift_ — eval probes for `restraint` and `anti_confabulation` are running in Phase 1 before they are taught (mapped to Phase 3). Samvega Dataset C is also too complex for 0.8B weights.
+- [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). **FIX PENDING (Candidates)**: Implemented Nano auto-detection and strict phase-mapping in `candidates/gaia-study` to prevent _Phase Drift_. Eval now scoped to `NANO_SKILLS` for 0.8B models. Awaiting validation run.
 - [x] **SAE validation pipeline** — Baseline + adapter atlases recorded on Core 4B. Mid-layers (11-17) show expected drift from tool-calling injection. Identity layers (23, 26) stable (<5% loss delta). Adapter cleared for runtime loading. (2026-04-08)
 
 ## Completed

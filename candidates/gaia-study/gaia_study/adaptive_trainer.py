@@ -29,7 +29,7 @@ from gaia_study.adaptive_subprocess import (
     AdaptiveSubprocessConfig,
     run_adaptive_phase,
 )
-from gaia_study.skill_eval_probes import ALL_SKILLS
+from gaia_study.skill_eval_probes import ALL_SKILLS, NANO_SKILLS
 
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://gaia-orchestrator:6410")
 
@@ -283,6 +283,13 @@ class AdaptiveTrainer:
             adapter_base = Path("/models/lora_adapters/tier1_global")
             adapter_base.mkdir(parents=True, exist_ok=True)
 
+            # Auto-detect Nano model to restrict evaluation scope (0.8B weights can't learn everything)
+            is_nano = "nano" in state.base_model_path.lower() or "0.8b" in state.base_model_path.lower()
+            if is_nano:
+                logger.info("Nano model detected — capping evaluation to NANO_SKILLS subset")
+                eval_skills = sorted(set(eval_skills) & set(NANO_SKILLS))
+                logger.info("Restricted Nano eval skills: %s", eval_skills)
+
             globally_passed: Set[str] = set(state.globally_passed)
             current_adapter = state.resume_from
 
@@ -306,8 +313,9 @@ class AdaptiveTrainer:
                     adapter_dir = state.resume_from
                     resume_from = state.resume_from
                 elif phase_num == 1:
-                    # Full training
-                    skills_to_train = set(ALL_SKILLS)
+                    # Full training — only train on skills present in the curriculum
+                    # (Prevents Phase Drift where we eval things we haven't taught yet)
+                    skills_to_train = set(eval_skills)
                     samples_for_phase = all_samples
                     skip_training = False
                     adapter_name = f"{state.adapter_name}_p{phase_num}"

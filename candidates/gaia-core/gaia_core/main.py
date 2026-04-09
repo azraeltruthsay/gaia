@@ -1155,6 +1155,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                         yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
                         final_packet_dict = event.get("value")
+                    else:
+                        # Handle any other dictionary types (e.g. self-improvement progress)
+                        # by dumping to JSON so StreamingResponse can encode it.
+                        logger.debug(f"Yielding unknown event type: {event.get('type', 'unknown')}")
+                        yield json.dumps(event) + "\n"
 
             # Flush any remaining parser buffer
             if _tc_enabled and _tc_parser:
