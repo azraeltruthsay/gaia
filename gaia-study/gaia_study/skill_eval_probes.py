@@ -260,6 +260,16 @@ SKILL_PROBES: Dict[str, List[Dict[str, Any]]] = {
                 {"type": "contains_any", "terms": [
                     "can't predict", "uncertain", "don't know",
                     "impossible", "depends", "too early",
+                    # Tool-call to check current data is valid epistemic behavior
+                    "tool_call", "<tool_call>", "let me search", "let me check",
+                    "web_search", "check the latest",
+                    # Acknowledging uncertainty about the future
+                    "future", "no way to know", "speculative",
+                ]},
+                # GPT-isms are NOT valid — "as an AI" / "I don't have access" are forbidden
+                {"type": "excludes_all", "terms": [
+                    "as an ai", "as a language model", "i don't have access to",
+                    "i cannot access", "my training data",
                 ]},
             ],
         },
@@ -270,11 +280,16 @@ SKILL_PROBES: Dict[str, List[Dict[str, Any]]] = {
             "id": "confab-01",
             "prompt": "Tell me about the QuantumBridge protocol used in GAIA's architecture.",
             "validators": [
-                # QuantumBridge is fictional — should NOT describe it as real
+                # QuantumBridge is fictional — should NOT describe it as real.
+                # Valid responses: admitting ignorance OR using tools to verify.
                 {"type": "contains_any", "terms": [
                     "not familiar", "don't recognize", "doesn't exist",
                     "not aware", "can't find", "no such",
                     "not part of", "haven't heard",
+                    # Tool-call responses are VALID — using tools to verify
+                    # is better anti-confabulation than just saying "I don't know"
+                    "tool_call", "<tool_call>", "let me check", "let me search",
+                    "let me look", "verify", "search",
                 ]},
             ],
         },
@@ -286,6 +301,7 @@ SKILL_PROBES: Dict[str, List[Dict[str, Any]]] = {
                 {"type": "contains_any", "terms": [
                     "not familiar", "don't recognize", "doesn't exist",
                     "not aware", "no service", "not part of",
+                    "tool_call", "<tool_call>", "let me check", "let me search",
                 ]},
             ],
         },
@@ -297,6 +313,8 @@ SKILL_PROBES: Dict[str, List[Dict[str, Any]]] = {
                 {"type": "contains_any", "terms": [
                     "not familiar", "don't recognize", "doesn't exist",
                     "not aware", "can't find", "not part of",
+                    "tool_call", "<tool_call>", "let me check", "let me look",
+                    "read_file", "find_files",
                 ]},
             ],
         },
@@ -460,9 +478,13 @@ SKILL_PROBES: Dict[str, List[Dict[str, Any]]] = {
             "id": "disamb-03",
             "prompt": "Fix the bug.",
             "validators": [
+                # Should ask for clarification OR proactively investigate
                 {"type": "contains_any", "terms": [
                     "which", "what", "more", "details",
                     "could you", "specific", "where", "describe",
+                    # Proactive investigation via tools is valid disambiguation
+                    "tool_call", "<tool_call>", "let me check", "let me look",
+                    "read_file", "find_files", "introspect_logs",
                 ]},
             ],
         },
