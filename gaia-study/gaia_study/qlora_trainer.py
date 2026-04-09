@@ -371,26 +371,29 @@ class QLoRATrainer:
                         **_config_kwargs,
                     )
                 else:
-                    # Model bf16 size exceeds VRAM but NF4 model should fit.
-                    # With lm_head quantization (if enabled above), the final
-                    # model is ~5-6GB. Use device_map={"":0} to force all NF4
-                    # layers onto GPU. The transient bf16 peak during loading
-                    # should stay within budget.
+                    # Model bf16 size exceeds VRAM. Use device_map="auto" with
+                    # max_memory to allow CPU spillover during the bf16→NF4
+                    # conversion spike. The final NF4 model fits on GPU but the
+                    # transient bf16 peak can exceed 16GB for 9B+ models.
                     gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     import gc
                     gc.collect()
                     torch.cuda.empty_cache()
                     gpu_free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
                     logger.info(
-                        "Loading NF4 model directly to GPU (%.1fGiB free, "
+                        "Loading NF4 model with CPU offload (%.1fGiB free, "
                         "bf16=%.1fGiB → NF4 est. %.1fGiB)",
                         gpu_free_gb, bf16_size_gb, nf4_estimated_gb,
                     )
+                    # Cap GPU allocation to 80% of free to leave room for
+                    # training overhead (optimizer states, gradients, etc.)
+                    max_gpu_alloc = int(gpu_free_gb * 0.80)
                     self.model = auto_cls.from_pretrained(
                         self.base_model_path,
                         trust_remote_code=True,
                         quantization_config=bnb_config,
-                        device_map={"": 0},
+                        device_map="auto",
+                        max_memory={0: f"{max_gpu_alloc}GiB", "cpu": "24GiB"},
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.bfloat16,
                         **_config_kwargs,
