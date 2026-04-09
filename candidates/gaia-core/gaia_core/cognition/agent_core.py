@@ -1516,7 +1516,10 @@ class AgentCore:
                 packet.metrics.semantic_probe = probe_result.to_metrics_dict()
 
             # Inject Stage 0 neural grounding results
-            if _grounding_context:
+            # Skip for intents where grounding context interferes with the task
+            # (e.g., recitation — web results about poems override the actual poem)
+            _skip_grounding_intents = {"recitation", "greeting", "identity", "chat"}
+            if _grounding_context and _detected_intent not in _skip_grounding_intents:
                 packet.content.data_fields.append(DataField(
                     key='auto_grounding',
                     value=_grounding_context,
@@ -1525,6 +1528,8 @@ class AgentCore:
                 ))
                 self.logger.info("Neural grounding injected: %d entities → %s",
                                   len(_grounding_context), list(_grounding_context.keys()))
+            elif _grounding_context and _detected_intent in _skip_grounding_intents:
+                self.logger.info("Neural grounding skipped for intent=%s", _detected_intent)
 
             if knowledge_base_name:
                 packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
