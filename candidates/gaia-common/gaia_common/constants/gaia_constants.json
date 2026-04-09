@@ -362,6 +362,10 @@
     "wiki": {
       "doc_dir": "/gaia-wiki/docs",
       "vector_store_dir": "vector_store/wiki"
+    },
+    "code_architecture": {
+      "doc_dir": "code_architecture",
+      "vector_store_dir": "vector_store/code_architecture"
     }
   },
   "SEMANTIC_PROBE": {

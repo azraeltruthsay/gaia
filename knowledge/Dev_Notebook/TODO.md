@@ -17,7 +17,7 @@
 
 - [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
 - [ ] **Native tool calling** — Train LoRA adapter for inline `<tool_call>` emission. Replace 3-step heuristic/selection/review pipeline. ~100 training examples across 9 domains.
-- [ ] **RAG + self-exploration** — Index contracts/services/*.yaml + AST summaries into vector store. CFR compression into `code_architecture` KV prefix segment. Hash-based staleness invalidation.
+- [x] **RAG + self-exploration (Architectural RAG)** — `scripts/index_architecture.py` extracts AST summaries + contracts into `code_architecture` vector collection. 9 services, 21 docs, 179 chunks indexed. (2026-04-08)
 
 ## Orchestrator Quality
 
