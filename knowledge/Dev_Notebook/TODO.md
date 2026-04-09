@@ -16,7 +16,7 @@
 ## Architecture & Pipeline
 
 - [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
-- [ ] **Native tool calling** — Curriculum complete (100 samples, 10 domains, 11 chains, 12 refusals). Next: LoRA train on 9B + 4B with tool_calling_v1_full.jsonl.
+- [ ] **Native tool calling** — [IN PROGRESS] Curriculum complete (100 samples). Phase 1 training on Core (4B) at loss 0.008; converging. Next: Train Prime (9B).
 - [x] **RAG + self-exploration (Architectural RAG)** — `scripts/index_architecture.py` extracts AST summaries + contracts into `code_architecture` vector collection. 9 services, 21 docs, 179 chunks indexed. (2026-04-08)
 
 ## Orchestrator Quality
@@ -26,8 +26,8 @@
 
 ## Training & Models
 
-- [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). Investigate regression; `anti_confabulation` and `restraint` skills remain difficult across all model sizes.
-- [ ] **SAE validation pipeline** — Validate adapter merges with SAE activation monitoring before deploying to production. Progressive merge, not yolo.
+- [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). **DIAGNOSED**: _Phase Drift_ — eval probes for `restraint` and `anti_confabulation` are running in Phase 1 before they are taught (mapped to Phase 3). Samvega Dataset C is also too complex for 0.8B weights.
+- [x] **SAE validation pipeline** — Baseline + adapter atlases recorded on Core 4B. Mid-layers (11-17) show expected drift from tool-calling injection. Identity layers (23, 26) stable (<5% loss delta). Adapter cleared for runtime loading. (2026-04-08)
 
 ## Completed
 
