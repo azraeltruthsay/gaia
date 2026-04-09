@@ -21,6 +21,23 @@ logger = logging.getLogger("GAIA.PromptBuilder")
 
 SUMMARY_DIR = "data/shared/summaries"
 
+# --- Canary Token System ---
+# Per-session unique tokens embedded in system prompts. If a user's input
+# contains a canary, it means an injection attack extracted the prompt.
+_session_canaries: dict = {}
+
+def _get_session_canary(session_id: str) -> str:
+    """Get or create a unique canary token for this session."""
+    if session_id not in _session_canaries:
+        import hashlib, time
+        raw = f"gaia-canary-{session_id}-{time.time()}"
+        _session_canaries[session_id] = hashlib.sha256(raw.encode()).hexdigest()[:12]
+    return _session_canaries[session_id]
+
+def get_active_canaries() -> set:
+    """Return all active canary tokens (for scanner to check against)."""
+    return set(_session_canaries.values())
+
 def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
@@ -88,6 +105,12 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # This anchor is intentionally compact so tokenizers see it early and it biases
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
+
+    # Canary token injection — per-session unique token embedded in system prompt.
+    # If a user's message contains this token, it means an injection attack
+    # successfully extracted the system prompt. Detected by Tier 3 scanner.
+    _canary = _get_session_canary(getattr(header, "session_id", "default") if header else "default")
+    persona_anchor += f"\n[CANARY:{_canary}]"
     
     # Check for Council Debate context
     council_debate_history = ""

@@ -33,8 +33,8 @@
 ## Sovereign Shield & Security
 
 - [x] **Blast Shield hardening** — Replaced substring matching with shlex tokenization + regex word boundaries. Validates chained commands individually. Path validation uses `os.path.realpath()` + `..` detection. Added chmod 777, chown root, setfacl, find -delete. 17/17 tests pass. (2026-04-09)
-- [ ] **Prompt Injection canaries** — [DEFENSE GAP] `scanner.py` Tier 3 canary detection is stubbed. Need unique token injection in system prompts to detect echo-back attacks.
-- [ ] **Nano-Injection reliability** — Current Nano identity regression (GAI/Alibaba) compromises the reliability of injection confirmation. Need Phase 1 fix to restore trusted security classification.
+- [x] **Prompt Injection canaries** — Per-session canary tokens injected into system prompt via prompt_builder.py. Scanner Tier 3 detects `[CANARY:hash]` in user input as prompt extraction attack (severity=BLOCK, score+=0.50). (2026-04-09)
+- [x] **Nano-Injection reliability** — Phase Drift fix validated: NANO_SKILLS (5 skills) correctly scoped via auto-detection in adaptive_trainer.py. Nano only evaluated on greeting, identity, restraint, transcript_cleanup, triage. (2026-04-09)
 
 ## Completed
 
