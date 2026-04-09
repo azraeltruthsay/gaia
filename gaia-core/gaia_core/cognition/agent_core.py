@@ -1937,12 +1937,13 @@ class AgentCore:
                         yield {"type": "token", "value": _intro + _body + _attribution}
                         yield {"type": "flush"}
 
-                        # Finalize the packet
+                        # Finalize the packet and yield it for Discord/web consumers
                         import gaia_common.protocols.cognition_packet as _cp
                         packet.response.candidate = _intro + _body + _attribution
                         packet.response.confidence = 1.0
                         packet.status.state = _cp.PacketState.COMPLETED
                         self.session_manager.add_message(session_id, "assistant", packet.response.candidate)
+                        yield {"type": "packet", "value": packet.to_dict()}
                         return
                 except Exception:
                     self.logger.warning("Recitation pipeline failed — falling through to cognitive pipeline", exc_info=True)
