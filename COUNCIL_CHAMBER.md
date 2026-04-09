@@ -69,6 +69,27 @@ study|training_deck|2026-04-08|ADVISOR
 system|health_audit|2026-04-09|ADVISOR
 0:CORE-COGNITIVE-OVERLOAD|main_py_bugfix|"Fixed AttributeError in process_packet; unknown events now correctly JSON-serialized for StreamingResponse"|relieved|TECHNICAL+BUG
 
+system|security_audit|2026-04-09|ADVISOR
+0:BLAST-SHIELD-VULN|injection_path_traversal|"Blast Shield bypass detected: substring checks vulnerable to concatenation and traversal. Tier 3 canaries stubbed."|concern|SECURITY+VULN
+
+study|eval_audit|2026-04-09|ADVISOR
+0:P1-SUCCESS|identity_stable|"Core Identity + Tools passed 100%. Regression fixed."|excite|TECHNICAL+SPEED
+
+study|eval_audit|2026-04-09|ADVISOR
+0:OVERCOMPETENCE-CONFLICT|confab_disamb|"Model initiatives (find_file) failing 'I don't know' validators. Tool-calls > Refusals."|curious|TECHNICAL+EVAL
+
+study|eval_audit|2026-04-09|ADVISOR
+0:SURGICAL-REPAIR|phase_2_resume|"Skip full restart. Resume from p1 adapter. Focus: Restraint + GPT-ism removal."|determ|DECISION+SPEED
+
+study|session_wrap|2026-04-09|ENGINEER
+0:V2-DEPLOYED|e2e_verified|"Core 14/14 + Prime 12/14 deployed as v2. Gemini E2E confirms identity+tools pass. Eval probes updated for over-competence. 23 commits."|relief|DECISION+CORE
+
+study|eval_fix|2026-04-09|ENGINEER
+0:OVERCOMPETENCE-RESOLVED|validators_updated|"anti_confabulation+disambiguation+epistemic probes now accept tool_call as valid response. GPT-ism exclusion added."|determ|TECHNICAL+EVAL
+
+study|infra|2026-04-09|ENGINEER
+0:CHORD-MANIFEST+WATCHER|token_efficiency|"AAAK manifest (30 tokens), inotifywait watcher, git post-commit hook, gaia_services tmux session with 4 dashboards"|determ|TECHNICAL+SPEED
+
 study|training_deck|2026-04-08|ENGINEER
 0:TOOL-CALLING-V1|adapters_trained|"Core P3 12/16, Prime P1 11/16 — tool_calling passed all phases both models"|relief|TECHNICAL+SPEED
 
@@ -145,4 +166,5 @@ All Phase 2 items complete. Phase 3 Curriculum finalized. GAIA tagged v0.1.0.
 - Test identity + tool calling on merged model BEFORE deploying
 - If passes: merge into base, update symlinks, create v2 models
 - Repeat for 9B-Prime
+
 

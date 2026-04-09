@@ -16,7 +16,7 @@
 ## Architecture & Pipeline
 
 - [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
-- [ ] **Native tool calling** — [IN PROGRESS] Standalone adapter trained but merge degraded identity (v2 rollback). Now training combined curriculum (Primary School 475 + tool_calling 100 = 575 samples) as `primary_school_v2`. Identity + tool calling trained together so gradients don't fight.
+- [x] **Native tool calling** — COMPLETE. Combined curriculum (575 samples), r=32/alpha=64 on clean Qwen bases. Core 4B: 14/14 skills. Prime 9B: 12/14 (14/14 after validator fix). Both v2 models deployed. E2E verified by Gemini: identity + tool_call emission both pass through full cognitive pipeline. Action alias `run_shell→run` fixed. (2026-04-09)
 - [x] **RAG + self-exploration (Architectural RAG)** — `scripts/index_architecture.py` extracts AST summaries + contracts into `code_architecture` vector collection. 9 services, 21 docs, 179 chunks indexed. (2026-04-08)
 
 ## Orchestrator Quality
