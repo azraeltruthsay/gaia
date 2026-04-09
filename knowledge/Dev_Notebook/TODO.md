@@ -22,7 +22,7 @@
 ## Orchestrator Quality
 
 - [ ] **Core cognitive overhead** — `run_turn` takes ~60s (reflection, audit) before quality gate. Needs streamlining for interactive speed.
-- [ ] **Model pool staleness** — After FOCUSING->AWAKE, `gpu_prime` stays registered in Core's model pool even though Prime moved to CPU. Causes ReadTimeout until pool refresh. (Partially addressed by CM probe fix, but Core's internal pool still needs refresh logic.)
+- [x] **Model pool staleness** — `/refresh_pool` endpoint on gaia-core clears stale `gpu_prime`/`cpu_prime` entries. ConsciousnessMatrix triggers it after every tier transition. Auth whitelisted. (2026-04-08)
 
 ## Training & Models
 

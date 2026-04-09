@@ -1353,6 +1353,31 @@ class ModelPool:
              logger.warning(f"⚠️ ModelPool.complete() failed for '{name}': {e}")
              return ""
 
+    def remove_model(self, name: str) -> bool:
+        """Remove a model entry from the pool. Returns True if removed."""
+        removed = self.models.pop(name, None) is not None
+        self.model_status.pop(name, None)
+        if removed:
+            logger.info("ModelPool: removed stale entry '%s'", name)
+        return removed
+
+    def refresh_pool(self) -> dict:
+        """Remove GPU-tier model entries that may be stale after tier transitions.
+
+        Called when the orchestrator changes lifecycle state (e.g., FOCUSING→AWAKE)
+        and GPU-backed models are no longer available at their previous endpoints.
+        """
+        stale_keys = [k for k in self.models if k in ("gpu_prime", "cpu_prime")]
+        removed = {}
+        for key in stale_keys:
+            self.remove_model(key)
+            removed[key] = True
+        if removed:
+            logger.info("ModelPool.refresh_pool: removed stale entries %s", list(removed.keys()))
+        else:
+            logger.debug("ModelPool.refresh_pool: no stale entries found")
+        return {"removed": removed, "remaining": self.list_models()}
+
     def shutdown(self) -> None:
         """Best-effort shutdown for model backends (vLLM, llama.cpp, API stubs)."""
         try:

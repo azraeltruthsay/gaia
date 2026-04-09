@@ -1524,6 +1524,20 @@ async def model_status():
     return ms.status()
 
 
+@app.post("/refresh_pool")
+async def refresh_pool():
+    """Remove stale GPU-tier model entries from the pool.
+
+    Called by gaia-orchestrator after tier transitions (e.g., FOCUSING→AWAKE)
+    to ensure Core's model pool doesn't route to non-existent GPU endpoints.
+    """
+    global _ai_manager
+    if _ai_manager is None or not hasattr(_ai_manager, 'model_pool'):
+        return JSONResponse(status_code=503, content={"ok": False, "error": "model pool not initialized"})
+    result = _ai_manager.model_pool.refresh_pool()
+    return {"ok": True, **result}
+
+
 # ── Cognitive Status Aliases ───────────────────────────────────────────
 # Convenience endpoints expected by test plans and gaia-doctor.
 # These delegate to existing functionality.

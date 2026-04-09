@@ -67,6 +67,7 @@ _PUBLIC_PATHS = {
     "/model/", "/cache/", "/adapter/",
     "/consciousness",
     "/engine",
+    "/refresh_pool",
 }
 
 

@@ -317,6 +317,10 @@ class ConsciousnessMatrix:
             if lifecycle:
                 result["lifecycle"] = lifecycle
 
+        # Notify gaia-core to refresh its model pool after tier changes.
+        # This clears stale gpu_prime entries that cause ReadTimeout errors.
+        await self._notify_core_refresh_pool()
+
         return result
 
     async def apply_for_lifecycle(self, config_name: str) -> dict:
@@ -593,6 +597,34 @@ class ConsciousnessMatrix:
                                    tier, resp.status_code, resp.text[:100])
         except Exception as e:
             logger.warning("Adapter load on %s failed: %s", tier, e)
+
+    async def _notify_core_refresh_pool(self):
+        """Tell gaia-core to clear stale GPU model entries from its pool.
+
+        Non-blocking — if Core is unreachable we log and continue.
+        """
+        core_endpoint = self._endpoints.get("core", "").replace(":8092", ":6415")
+        if not core_endpoint:
+            # Fallback: use the service endpoint from config
+            try:
+                from gaia_common.config import Config
+                core_endpoint = Config.get_instance().get_endpoint("core")
+            except Exception:
+                core_endpoint = "http://gaia-core:6415"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(f"{core_endpoint}/refresh_pool")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    removed = data.get("removed", {})
+                    if removed:
+                        logger.info("Core model pool refreshed: removed %s", list(removed.keys()))
+                    else:
+                        logger.debug("Core model pool refresh: no stale entries")
+                else:
+                    logger.debug("Core /refresh_pool returned %d", resp.status_code)
+        except Exception as e:
+            logger.debug("Core /refresh_pool call failed (non-blocking): %s", e)
 
     # ── Internal: Continuous Poll ─────────────────────────────────────
 
