@@ -296,6 +296,26 @@ def _detect_fragmentation_request(text: str) -> bool:
     # Check for known works
     has_known_work = any(w in lowered for w in known_works)
 
+    # Surgical/partial indicators — requesting a specific part of a work
+    # is comprehension, NOT full recitation. These should route to the
+    # normal cognitive pipeline with cached context, not re-fetch the whole text.
+    partial_indicators = [
+        "first ", "second ", "third ", "fourth ", "fifth ", "last ",
+        "second to last", "next to last", "penultimate",
+        "opening ", "closing ", "final ",
+        "which stanza", "what stanza", "how many stanza",
+        "which verse", "what verse",
+        "line ", "lines ", "paragraph ",
+        "meaning of", "explain ", "analyze ", "interpret ",
+        "what does", "what do ", "why does", "who is ",
+        "summarize", "summary",
+    ]
+    has_partial = any(p in lowered for p in partial_indicators)
+
+    if has_partial:
+        logger.debug("Fragmentation SKIPPED: partial/surgical request detected — routing to comprehension")
+        return False
+
     # Decision logic:
     # 1. Explicit recitation verb + work type = fragmentation
     # 2. Long-form modifier + work type = fragmentation
