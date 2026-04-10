@@ -194,14 +194,32 @@ FOUNDATION_TARGETS = [
 14. Integration with pre-inference grounding pipeline
 15. End-to-end test: prompt → triage → compose → generate
 
-### Phase 5e: Foundation Tuning
-16. LoRA config for Foundation targets only
-17. Training run with Active Expert Buffering
-18. Identity validation (SAE probes on shared expert activations)
-19. Compare identity stability vs. full-model LoRA baseline
+### Phase 5e: SAE Full Feature Map (GATE — blocks Phase 5f)
+16. Verify SAE trainer works with Gemma 4 architecture (layer naming, activation shapes)
+17. Run comprehensive SAE scan across ALL components: shared expert, attention, AND private experts
+18. Build full feature map of base weights — catalog what each component stores:
+    - Which private experts specialize in what? (code, math, language, reasoning, safety, etc.)
+    - What does the shared expert encode? (universal features? identity? instruction-following?)
+    - What do attention layers carry at each depth? (shallow=syntax, mid=semantics, deep=planning?)
+    - Where do identity/persona/instruction-following features live?
+    - Where do tool-calling, code generation, and reasoning features concentrate?
+19. Produce a Gemma 4 26B-A4B "neural atlas" — reference map for all future training decisions
+20. Decision gate: based on atlas evidence, determine optimal LoRA targets.
+    If identity is in shared expert → proceed with Foundation Tuning as planned.
+    If identity is in private expert(s) → revise LoRA targets to include those experts.
+    If identity is distributed → evaluate feasibility of migrating it to shared path.
+    Bonus: atlas tells us which experts to NEVER touch (e.g., core reasoning, safety).
+
+### Phase 5f: Foundation Tuning (blocked by 5e evidence)
+21. LoRA config based on SAE evidence (Foundation targets, possibly + specific experts)
+22. Training run with Active Expert Buffering
+23. Post-training SAE validation: confirm identity features strengthened in target components
+24. Compare identity stability vs. full-model LoRA baseline
 
 ## Open Questions
 
+- SAE on MoE: can we run SAE on individual expert outputs, or only on the combined post-routing output? Per-expert activation capture may need custom hooks.
+- Expert specialization: are the 128 experts cleanly specialized (one domain each) or is knowledge distributed/overlapping? This affects how useful the atlas is for targeted training.
 - Expert swap latency: CPU→GPU transfer for 8 experts per token — is PCIe bandwidth the bottleneck?
 - KV segment compatibility: can we concatenate KV states from separate forward passes? Position encoding alignment?
 - Router interference: does Foundation Tuning shift the routing distribution? (shared expert changes could affect router decisions)
