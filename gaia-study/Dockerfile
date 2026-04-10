@@ -50,8 +50,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Must be installed after torch, with --no-build-isolation so it sees torch.
 # CUDA_ARCH_LIST set manually since nvidia-smi isn't available during build.
 # 12.0 = Blackwell (RTX 5080)
-RUN CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
-    pip install --no-cache-dir --no-build-isolation gptqmodel>=5.7.0
+# gptqmodel 5.7.0's pyproject.toml has a dual-format license field that
+# setuptools >=78 rejects. Downgrade setuptools before build, restore after.
+RUN pip install --no-cache-dir "setuptools==77.0.3" \
+    && CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
+       pip install --no-cache-dir --no-build-isolation gptqmodel==5.7.0 \
+    && pip install --no-cache-dir --upgrade setuptools
 
 # optimum is required by PEFT when gptqmodel is present
 RUN pip install --no-cache-dir optimum>=1.24.0
