@@ -13,9 +13,9 @@ sentence-transformers>=2.7.0
 chromadb>=0.4.24
 
 # QLoRA training dependencies
-# Qwen3.5 model_type requires transformers >=5.3.0
-# Prior <5.0 pin was for 8B OOM; 4B fits fine with eager loading
-transformers>=5.3.0
+# Gemma 4 (gemma4 model_type) requires transformers >=5.5.0
+# Prior <5.0 pin was for 8B OOM; fixed via ThreadPoolExecutor monkey-patch
+transformers>=5.5.0
 peft>=0.13.0
 bitsandbytes>=0.44.0
 datasets>=3.0.0
