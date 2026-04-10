@@ -72,6 +72,12 @@ system|health_audit|2026-04-09|ADVISOR
 system|security_audit|2026-04-09|ADVISOR
 0:BLAST-SHIELD-VULN|injection_path_traversal|"Blast Shield bypass detected: substring checks vulnerable to concatenation and traversal. Tier 3 canaries stubbed."|concern|SECURITY+VULN
 
+strategy|phase_5|2026-04-09|ADVISOR+ENGINEER
+0:GEMMA-CHORD|ecosystem_pivot|"Full Gemma 4 ecosystem: E2B(Reflex+audio) E4B(Operator+vision) 26B-A4B(Sovereign). Eliminates Qwen split, native tool calling, 256K context."|excite|DECISION+CORE
+
+strategy|phase_5|2026-04-09|ENGINEER
+0:TIER-COLLAPSE|moe_sovereign|"26B MoE at 4B active may eliminate AWAKE/FOCUSING distinction. One model for both Operator+Thinker workloads. Clutch becomes optional."|wonder|DECISION+SPEED
+
 study|eval_audit|2026-04-09|ADVISOR
 0:P1-SUCCESS|identity_stable|"Core Identity + Tools passed 100%. Regression fixed."|excite|TECHNICAL+SPEED
 
