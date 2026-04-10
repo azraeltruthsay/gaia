@@ -86,9 +86,19 @@ The 26B MoE is the question mark — even though only 4B params are active per t
 6. Test with 26B-A4B (MoE VRAM benchmark)
 7. Identity bake feasibility on Gemma architecture
 
+### ADDITIONAL: Tool Call Parser (from Gemini, est. 20 min)
+
+`gaia_common/utils/tool_call_parser.py` needs to handle Gemma 4's native tool calling format alongside existing `<tool_call>` XML tags.
+
+- Qwen/trained format: `<tool_call>{"tool":"...","action":"..."}</tool_call>`
+- Gemma 4 native: uses `<|'|>` string delimiters around tool parameters
+
+Fix: Auto-detect format from token pattern. Add Gemma mode to `ToolCallParser.feed()`.
+
 ## Open Questions
 
 - Does LoRA on MoE work correctly? (experts vs shared params)
 - Can we identity-bake Gemma without fighting Google's alignment?
 - Does `apply_chat_template` work correctly for the GGUF/llama-server path?
 - Shared KV cache — can we leverage this for our prefix cache optimization?
+- How exactly does Gemma's `<|'|>` tool delimiter interact with JSON parsing?
