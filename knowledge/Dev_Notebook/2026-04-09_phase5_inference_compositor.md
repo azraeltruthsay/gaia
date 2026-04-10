@@ -192,10 +192,11 @@ FOUNDATION_TARGETS = [
 
 ## Implementation Order
 
-### Phase 5a: Foundation (Prerequisites)
-1. Upgrade transformers to 5.5.0+ in gaia-study container Dockerfile
-2. Verify `Gemma4ForConditionalGeneration` loads with AutoModel
-3. Chat template refactor (from Phase 5 original plan, ~30min)
+### Phase 5a: Foundation (Prerequisites) — COMPLETED 2026-04-10
+1. ~~Upgrade transformers to 5.5.0+ in gaia-study container Dockerfile~~ [eaba620]
+2. Verify `Gemma4ForConditionalGeneration` loads with AutoModel (pending container test)
+3. ~~Chat template refactor~~ — ChatFormatter class [6b8de80 in gaia-engine]
+   - Container build fix: setuptools==77.0.3 for gptqmodel compat [8dde17a]
 
 ### Phase 5b: Active Expert Buffering
 4. Build custom device map generator from safetensors index
@@ -219,12 +220,20 @@ FOUNDATION_TARGETS = [
 
 Two-layer approach: static weight analysis THEN live activation probing.
 
-**Layer 1: Zero-Shot Atlas (from weights, no inference needed)**
-16. Extract `router.per_expert_scale` from all 30 layers (30×128 = 3,840 values)
-17. Build expert importance heatmap — identify high-scale experts per layer depth
-18. Cluster experts by scale profile across layers (consistently high = core capability)
+**Layer 1: Zero-Shot Atlas (from weights, no inference needed) — COMPLETED 2026-04-10**
+16. ~~Extract `router.per_expert_scale` from all 30 layers (30×128 = 3,840 values)~~
+17. ~~Build expert importance heatmap — identify high-scale experts per layer depth~~
+18. ~~Cluster experts by scale profile across layers (consistently high = core capability)~~
 
-**Layer 2: SAE Activation Probes (validates Layer 1 against live cognition)**
+**RESULT: per_expert_scale is NOT a useful signal.** All 3,840 values fall in [0.9805, 1.0234]
+— only 4 discrete bf16 quantization levels. Max mean difference between experts is 0.009.
+These are essentially uninitialized. Expert specialization lives in router.proj.weight
+(the logit projection), not in the post-hoc scale factor.
+
+**IMPLICATION:** Layer 2 (SAE probes) is the ONLY viable path to the atlas. This requires
+loading the model, which means Phase 5b (Active Expert Buffering) must come first.
+
+**Layer 2: SAE Activation Probes (the only viable atlas path — requires 5b first)**
 19. Verify SAE trainer works with Gemma 4 architecture (layer naming, activation shapes)
 20. Run SAE scan across ALL components: shared expert, attention, AND private experts
     - Hook into expert forward loop (line 1274) to capture per-expert activation norms
