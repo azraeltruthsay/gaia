@@ -366,6 +366,10 @@
     "code_architecture": {
       "doc_dir": "code_architecture",
       "vector_store_dir": "vector_store/code_architecture"
+    },
+    "research": {
+      "doc_dir": "research",
+      "vector_store_dir": "vector_store/research"
     }
   },
   "SEMANTIC_PROBE": {

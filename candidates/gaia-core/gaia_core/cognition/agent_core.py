@@ -1948,6 +1948,34 @@ class AgentCore:
                 except Exception:
                     self.logger.warning("Recitation pipeline failed — falling through to cognitive pipeline", exc_info=True)
 
+            # Research Glance: for comprehension intents (and partial recitation
+            # queries that routed here), check /knowledge/research/ for cached
+            # source texts that can serve as RAG context.
+            if plan.intent in ("comprehension", "explain_file", "explain_symbol") or \
+               (plan.intent == "recitation" and not _detect_fragmentation_request(user_input)):
+                try:
+                    import glob
+                    _research_dir = "/knowledge/research"
+                    _query_lower = user_input.lower()
+                    for _rf in glob.glob(f"{_research_dir}/*.txt"):
+                        _fname = os.path.basename(_rf).lower().replace(".txt", "").replace("-", " ").replace("_", " ")
+                        _fname_words = [w for w in _fname.split() if len(w) > 3]
+                        if _fname_words and any(w in _query_lower for w in _fname_words):
+                            with open(_rf, "r") as _f:
+                                _research_text = _f.read()[:6000]
+                            if len(_research_text) > 50:
+                                packet.content.data_fields.append(DataField(
+                                    key='research_context',
+                                    value=_research_text,
+                                    type='text',
+                                    source='research_glance',
+                                ))
+                                self.logger.info("Research glance: injected %s (%d chars)",
+                                                  os.path.basename(_rf), len(_research_text))
+                                break
+                except Exception:
+                    self.logger.debug("Research glance failed (non-blocking)", exc_info=True)
+
             # 3a-bis. Goal Detection — identify overarching user goal
             # Only run for THINKER depth — REFLEX and OPERATOR skip this
             if pipeline_depth == "THINKER":
