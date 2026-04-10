@@ -62,26 +62,47 @@ A new coordination layer that manages two parallel resource pools:
 
 ### JIT Expert Swap
 
-```python
-# Forward hook on each MoE layer
-def expert_swap_hook(module, args, kwargs):
-    """Pre-forward hook: load routed experts to GPU before MoE forward."""
-    router_logits = module.router(hidden_states)
-    top_k_indices = router_logits.topk(8).indices  # [batch, seq, 8]
-    unique_experts = top_k_indices.unique().tolist()
+**CRITICAL FINDING (from transformers 5.5.3 source):** `Gemma4TextExperts` stores all 128 experts
+in TWO packed 3D `nn.Parameter` tensors — NOT separate modules per expert:
+- `gate_up_proj`: shape `[128, 1408, 2816]` (packed gate+up)
+- `down_proj`: shape `[128, 2816, 704]`
 
-    # Evict previous experts (unless in LRU cache)
-    for idx in module._gpu_resident_experts:
-        if idx not in unique_experts:
-            module.experts[idx] = module.experts[idx].to("cpu", non_blocking=True)
-    
-    # Load needed experts
-    for idx in unique_experts:
-        if idx not in module._gpu_resident_experts:
-            module.experts[idx] = module.experts[idx].to("cuda", non_blocking=True)
-    
-    torch.cuda.synchronize()
-    module._gpu_resident_experts = set(unique_experts)
+Cannot do per-expert `.to(device)`. Must use **slice-and-transfer** approach:
+
+```python
+# Monkey-patch Gemma4TextExperts.forward to use GPU-cached expert slices
+# Original forward loops: for expert_idx in expert_hit: F.linear(x, self.gate_up_proj[expert_idx])
+# Patched: replace tensor indexing with GPU-cached 2D slices from LRU dict
+
+class ExpertCache:
+    """LRU cache for expert weight slices on GPU."""
+    def __init__(self, max_cached=16):
+        self.max_cached = max_cached
+        self._cache = OrderedDict()  # {(layer_idx, expert_idx): (gate_up_gpu, down_gpu)}
+
+    def get_or_transfer(self, layer_idx, expert_idx, gate_up_cpu, down_cpu):
+        key = (layer_idx, expert_idx)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        # Evict LRU if full
+        while len(self._cache) >= self.max_cached:
+            evicted = self._cache.popitem(last=False)
+            del evicted  # GPU tensors freed
+        # Transfer slice to GPU
+        gpu_gate_up = gate_up_cpu[expert_idx].to("cuda", non_blocking=True)
+        gpu_down = down_cpu[expert_idx].to("cuda", non_blocking=True)
+        self._cache[key] = (gpu_gate_up, gpu_down)
+        return self._cache[key]
+```
+
+The forward already loops per-expert (line 1274), so each `F.linear(x, self.gate_up_proj[idx])`
+call naturally only touches one expert slice at a time. We intercept at this level.
+
+**Architecture confirmed:** shared MLP + experts run in PARALLEL and are SUMMED:
+```python
+# Line 1396 of Gemma4TextDecoderLayer.forward:
+hidden_states = hidden_states_1 + hidden_states_2  # shared_mlp + expert_output
 ```
 
 ### LRU Expert Cache (Optional)
@@ -194,17 +215,34 @@ FOUNDATION_TARGETS = [
 14. Integration with pre-inference grounding pipeline
 15. End-to-end test: prompt → triage → compose → generate
 
-### Phase 5e: SAE Full Feature Map (GATE — blocks Phase 5f)
-16. Verify SAE trainer works with Gemma 4 architecture (layer naming, activation shapes)
-17. Run comprehensive SAE scan across ALL components: shared expert, attention, AND private experts
-18. Build full feature map of base weights — catalog what each component stores:
+### Phase 5e: Neural Parity Audit — Full Feature Map (GATE — blocks Phase 5f)
+
+Two-layer approach: static weight analysis THEN live activation probing.
+
+**Layer 1: Zero-Shot Atlas (from weights, no inference needed)**
+16. Extract `router.per_expert_scale` from all 30 layers (30×128 = 3,840 values)
+17. Build expert importance heatmap — identify high-scale experts per layer depth
+18. Cluster experts by scale profile across layers (consistently high = core capability)
+
+**Layer 2: SAE Activation Probes (validates Layer 1 against live cognition)**
+19. Verify SAE trainer works with Gemma 4 architecture (layer naming, activation shapes)
+20. Run SAE scan across ALL components: shared expert, attention, AND private experts
+    - Hook into expert forward loop (line 1274) to capture per-expert activation norms
+    - Feed identity probes, tool-calling probes, code probes, reasoning probes
+    - Capture which experts activate for each probe category
+21. Build full neural atlas — catalog what each component stores:
     - Which private experts specialize in what? (code, math, language, reasoning, safety, etc.)
     - What does the shared expert encode? (universal features? identity? instruction-following?)
     - What do attention layers carry at each depth? (shallow=syntax, mid=semantics, deep=planning?)
     - Where do identity/persona/instruction-following features live?
     - Where do tool-calling, code generation, and reasoning features concentrate?
-19. Produce a Gemma 4 26B-A4B "neural atlas" — reference map for all future training decisions
-20. Decision gate: based on atlas evidence, determine optimal LoRA targets.
+
+**Layer 3: Parity Check (weight importance vs. live activation)**
+22. Cross-reference: do high-scale experts (Layer 1) match high-activation experts (Layer 2)?
+    - Alignment → high confidence in atlas
+    - Divergence → investigate why (expert may be important but dormant for our use cases)
+23. Produce final Gemma 4 26B-A4B neural atlas with confidence scores
+24. Decision gate: based on atlas evidence, determine optimal LoRA targets.
     If identity is in shared expert → proceed with Foundation Tuning as planned.
     If identity is in private expert(s) → revise LoRA targets to include those experts.
     If identity is distributed → evaluate feasibility of migrating it to shared path.
