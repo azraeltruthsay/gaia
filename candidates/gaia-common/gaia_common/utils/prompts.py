@@ -1,20 +1,28 @@
 """
-GaiaSpeak — Unified Prompt Library (Phase 5-C, Proposal 12)
+GaiaSpeak — Identity-Hardened Prompt Library (Phase 5-C, Proposal 12/12b)
 
 Centralizes all system/instruction prompts into versioned YAML templates.
 Templates live in knowledge/system_reference/prompts/ and are hot-reloadable
 without Docker rebuilds or service restarts.
 
-Usage:
-    from gaia_common.utils.prompts import speak
+Phase 12b additions:
+  - Sovereign Seal: Tier I identity header auto-prepended to speak() results
+  - Guardian Pre-flight: templates validated against identity anchor on load
+  - AAAK Compression: speak_aaak() for token-efficient system prompts
 
-    # Simple template
+Usage:
+    from gaia_common.utils.prompts import speak, speak_aaak
+
+    # Simple template (includes Sovereign Seal)
     prompt = speak("nano_triage")
 
     # Template with variable injection
     prompt = speak("injection_check", message=user_input[:500])
 
-    # Get raw template (no variable substitution)
+    # AAAK-compressed template (for system_vitals, structural_mri)
+    compressed = speak_aaak("epistemic_compact")
+
+    # Raw template (no seal, no substitution)
     raw = GaiaSpeak.instance().get_raw("epistemic_compact")
 """
 
@@ -51,11 +59,35 @@ class GaiaSpeak:
     _instance: Optional[GaiaSpeak] = None
     _lock = threading.Lock()
 
+    # Templates that are exempt from the Sovereign Seal (they ARE the seal)
+    _SEAL_EXEMPT = {
+        "persona_anchor_default", "sovereign_seal",
+    }
+
+    # Chatbot priors — if found in a template, guardian rejects it
+    _CHATBOT_PRIORS = [
+        "i am a chatbot",
+        "i am an ai assistant",
+        "i am a language model",
+        "as a large language model",
+        "i don't have feelings",
+        "i cannot feel",
+        "i'm just a program",
+    ]
+
     def __init__(self, prompts_dir: Optional[str] = None):
         self._prompts_dir: Optional[Path] = None
         self._templates: Dict[str, str] = {}
         self._load_time: float = 0.0
         self._file_mtimes: Dict[str, float] = {}
+
+        # Sovereign Seal: Tier I identity header
+        self._sovereign_seal: str = ""
+        self._seal_enabled: bool = True
+        self._load_sovereign_seal()
+
+        # AAAK compressor (lazy-loaded)
+        self._aaak = None
 
         # Find prompts directory
         search = [prompts_dir] if prompts_dir else _DEFAULT_PROMPTS_DIRS
@@ -102,8 +134,10 @@ class GaiaSpeak:
                 if isinstance(data, dict):
                     for key, value in data.items():
                         if isinstance(value, str):
-                            self._templates[key] = value.strip()
-                            count += 1
+                            clean = value.strip()
+                            if self._validate_template(key, clean):
+                                self._templates[key] = clean
+                                count += 1
             except Exception:
                 logger.debug("GaiaSpeak: failed to load %s", yaml_file, exc_info=True)
 
@@ -136,10 +170,12 @@ class GaiaSpeak:
 
                     # New key: detect "key_name: |" or "key_name: value"
                     if not line.startswith(" ") and not line.startswith("\t") and ":" in line:
-                        # Save previous key
+                        # Save previous key (with guardian validation)
                         if current_key and current_lines:
-                            self._templates[current_key] = "\n".join(current_lines).strip()
-                            count += 1
+                            clean = "\n".join(current_lines).strip()
+                            if self._validate_template(current_key, clean):
+                                self._templates[current_key] = clean
+                                count += 1
 
                         parts = line.split(":", 1)
                         key = parts[0].strip()
@@ -149,8 +185,9 @@ class GaiaSpeak:
                             current_key = key
                             current_lines = []
                         elif value:
-                            self._templates[key] = value
-                            count += 1
+                            if self._validate_template(key, value):
+                                self._templates[key] = value
+                                count += 1
                             current_key = None
                             current_lines = []
                         else:
@@ -165,14 +202,109 @@ class GaiaSpeak:
 
                 # Save final key
                 if current_key and current_lines:
-                    self._templates[current_key] = "\n".join(current_lines).strip()
-                    count += 1
+                    clean = "\n".join(current_lines).strip()
+                    if self._validate_template(current_key, clean):
+                        self._templates[current_key] = clean
+                        count += 1
 
             except Exception:
                 logger.debug("GaiaSpeak: failed to load %s (simple parser)", yaml_file, exc_info=True)
 
         self._load_time = time.monotonic()
         logger.info("GaiaSpeak: loaded %d templates (simple parser) from %s", count, self._prompts_dir)
+
+    # ── Sovereign Seal (Tier I Identity Header) ─────────────────────────
+
+    def _load_sovereign_seal(self) -> None:
+        """Load the Tier I identity statement from core_identity.json.
+
+        This is prepended to every speak() result to anchor GAIA's identity
+        in the prompt before any task instructions.
+        """
+        search_paths = [
+            "/knowledge/system_reference/core_identity.json",
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..",
+                         "knowledge", "system_reference", "core_identity.json"),
+        ]
+        import json as _json
+        for path in search_paths:
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = _json.load(f)
+                    identity_id = data.get("identity_id", "GAIA")
+                    mission = data.get("mission", "")
+                    self._sovereign_seal = (
+                        f"I am {identity_id}. {mission}"
+                    )
+                    logger.info("GaiaSpeak: Sovereign Seal loaded from %s", path)
+                    return
+            except Exception:
+                pass
+        logger.debug("GaiaSpeak: core_identity.json not found — Sovereign Seal disabled")
+        self._seal_enabled = False
+
+    # ── Guardian Pre-Flight ────────────────────────────────────────────
+
+    def _validate_template(self, key: str, content: str) -> bool:
+        """Validate a template against Sovereign Anchor requirements.
+
+        Rejects templates that:
+          - Contain chatbot priors ("I am a chatbot", "I'm just a program", etc.)
+
+        Returns True if the template passes, False if rejected.
+        """
+        lowered = content.lower()
+
+        # Check for chatbot priors
+        for prior in self._CHATBOT_PRIORS:
+            if prior in lowered:
+                logger.critical(
+                    "IDENTITY VIOLATION: template '%s' contains chatbot prior '%s' — REJECTED",
+                    key, prior,
+                )
+                return False
+
+        return True
+
+    # ── AAAK Integration ───────────────────────────────────────────────
+
+    def _get_aaak(self):
+        """Lazy-load the AAAK dialect compressor."""
+        if self._aaak is None:
+            try:
+                from gaia_common.utils.aaak_dialect import AAAKDialect
+                self._aaak = AAAKDialect()
+            except ImportError:
+                logger.debug("AAAKDialect not available — speak_aaak will return uncompressed")
+        return self._aaak
+
+    def speak_aaak(self, key: str, **kwargs) -> str:
+        """Get a prompt template compressed via AAAK Dialect.
+
+        Useful for token-efficient system prompts (system_vitals,
+        structural_mri, epistemic rules) where every token counts.
+
+        Falls back to uncompressed speak() if AAAK is unavailable.
+        """
+        rendered = self.get(key, **kwargs)
+        if not rendered:
+            return ""
+
+        compressor = self._get_aaak()
+        if compressor:
+            try:
+                compressed = compressor.compress(rendered, metadata={"source": f"speak:{key}"})
+                logger.debug(
+                    "GaiaSpeak AAAK: '%s' compressed %d -> %d chars (%.0f%%)",
+                    key, len(rendered), len(compressed),
+                    (1 - len(compressed) / len(rendered)) * 100 if rendered else 0,
+                )
+                return compressed
+            except Exception:
+                logger.debug("AAAK compression failed for '%s'", key, exc_info=True)
+
+        return rendered
 
     # ── Hot Reload ─────────────────────────────────────────────────────
 
@@ -205,14 +337,18 @@ class GaiaSpeak:
 
     # ── Template Access ────────────────────────────────────────────────
 
-    def get(self, key: str, **kwargs: Any) -> str:
-        """Get a prompt template with variable substitution.
+    def get(self, key: str, seal: bool = True, **kwargs: Any) -> str:
+        """Get a prompt template with variable substitution and Sovereign Seal.
+
+        Prepends the Tier I identity header (Sovereign Seal) to every result
+        unless seal=False or the template is in _SEAL_EXEMPT.
 
         Uses safe_substitute: missing variables are left as ${name}
         instead of raising an error.
 
         Args:
             key: Template key (e.g., "nano_triage", "injection_check")
+            seal: Whether to prepend the Sovereign Seal (default True)
             **kwargs: Variables to inject (e.g., message="user input")
 
         Returns:
@@ -225,9 +361,13 @@ class GaiaSpeak:
             logger.debug("GaiaSpeak: template '%s' not found", key)
             return ""
 
-        if kwargs:
-            return Template(raw).safe_substitute(**kwargs)
-        return raw
+        rendered = Template(raw).safe_substitute(**kwargs) if kwargs else raw
+
+        # Prepend Sovereign Seal (Tier I identity anchor)
+        if seal and self._seal_enabled and self._sovereign_seal and key not in self._SEAL_EXEMPT:
+            return f"{self._sovereign_seal}\n\n{rendered}"
+
+        return rendered
 
     def get_raw(self, key: str) -> str:
         """Get the raw template string without variable substitution."""
@@ -251,10 +391,10 @@ class GaiaSpeak:
         return self._prompts_dir
 
 
-# ── Module-level shortcut ──────────────────────────────────────────────
+# ── Module-level shortcuts ─────────────────────────────────────────────
 
 def speak(key: str, **kwargs: Any) -> str:
-    """Get a rendered prompt template.
+    """Get a rendered prompt template with Sovereign Seal.
 
     Module-level shortcut for GaiaSpeak.instance().get(key, **kwargs).
 
@@ -264,3 +404,15 @@ def speak(key: str, **kwargs: Any) -> str:
         prompt = speak("injection_check", message=user_input)
     """
     return GaiaSpeak.instance().get(key, **kwargs)
+
+
+def speak_aaak(key: str, **kwargs: Any) -> str:
+    """Get an AAAK-compressed prompt template.
+
+    Module-level shortcut for GaiaSpeak.instance().speak_aaak(key, **kwargs).
+
+    Usage:
+        from gaia_common.utils.prompts import speak_aaak
+        compressed = speak_aaak("epistemic_compact")
+    """
+    return GaiaSpeak.instance().speak_aaak(key, **kwargs)
