@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from dataclasses_json import dataclass_json
 
 # --- CognitionPacket Version — single source of truth ---
-COGPACKET_VERSION = "v0.3"
+# v0.3: Original SOA packet (2026-02)
+# v0.5: Multimodal — AudioPayload, TargetEngine expansion, Limb terminology (2026-04)
+COGPACKET_VERSION = "v0.5"
 COGPACKET_SCHEMA_ID = f"https://gaia.local/schemas/cognitive_packet/{COGPACKET_VERSION}.json"
 
 # --- Enums for Type Safety ---
@@ -29,6 +31,7 @@ class Origin(Enum):
 
 class TargetEngine(Enum):
     PRIME = "Prime"
+    CORE = "Core"       # v0.5: explicit Core routing (multimodal audio, medium tasks)
     LITE = "Lite"
     CODEMIND = "CodeMind"
     COUNCIL = "Council"
@@ -247,11 +250,30 @@ class TimelineEvent:
 
 @dataclass_json
 @dataclass
+class AudioPayload:
+    """Native audio delivery for multimodal models (v0.5).
+
+    Carries raw audio bytes (base64-encoded) with metadata for models
+    that support native audio input (Gemma 4 E2B/E4B). Replaces the
+    legacy STT-first pipeline when the target model has an audio encoder.
+    """
+    data_base64: str                          # base64-encoded audio bytes
+    mime_type: str = "audio/wav"              # MIME type (wav, mp3, ogg, flac)
+    duration_seconds: float = 0.0
+    sample_rate: int = 16000
+    channels: int = 1                         # mono by default
+    content_hash: str = ""                    # SHA256 for dedup/provenance
+    filename: Optional[str] = None
+    encoding: str = "base64"                  # always base64 for JSON transport
+
+@dataclass_json
+@dataclass
 class Content:
     original_prompt: str
     data_fields: List[DataField] = field(default_factory=list)
     attachments: List[Attachment] = field(default_factory=list)
-    timeline: List[TimelineEvent] = field(default_factory=list) # Temporal Context support
+    audio_payloads: List[AudioPayload] = field(default_factory=list)  # v0.5: native audio
+    timeline: List[TimelineEvent] = field(default_factory=list)
     intent: Optional[Intent] = None
 
 # --- Reasoning ---

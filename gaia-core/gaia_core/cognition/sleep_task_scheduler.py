@@ -2714,22 +2714,28 @@ class SleepTaskScheduler:
             result = json.loads(resp.read().decode())
 
         # list_tools_full returns domain schemas — flatten to limb list
+        # Schema: {domain: {description, params: {action: {enum: [...]}}, sensitive_actions: [...]}}
         domains = result.get("result", result)
         if isinstance(domains, dict):
             limbs = []
             for domain, domain_data in domains.items():
                 if not isinstance(domain_data, dict):
                     continue
-                actions = domain_data.get("actions", {})
-                for action_name, action_cfg in actions.items():
-                    sensitive = action_cfg.get("sensitive", False)
-                    desc = action_cfg.get("description", "")
+                desc = domain_data.get("description", "")
+                sensitive_actions = set(domain_data.get("sensitive_actions", []))
+                # Extract actions from params.action.enum
+                action_enum = (
+                    domain_data.get("params", {})
+                    .get("action", {})
+                    .get("enum", [])
+                )
+                for action_name in action_enum:
                     limbs.append({
                         "domain": domain,
                         "action": action_name,
                         "source": "static",
-                        "sensitive": sensitive,
-                        "legacy_name": action_cfg.get("legacy_name", ""),
+                        "sensitive": action_name in sensitive_actions,
+                        "legacy_name": "",
                         "description": desc[:100] if isinstance(desc, str) else "",
                     })
             return limbs
