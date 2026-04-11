@@ -201,7 +201,7 @@ services:
       # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
       # per-request. Training overrides few-shot pattern-following with hedging.
       # Identity lives in Core (Operator), not Nano (Reflex).
-      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/Qwen3.5-0.8B-GAIA-Nano-v1}
+      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/nano}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
       # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
       - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf
@@ -325,7 +325,7 @@ services:
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
       - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-v1}
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
-      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/Qwen3.5-4B-GAIA-Core-v1}
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       # Force NF4 quantization for Core — bf16 (8.9GB) leaves too little
       # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
