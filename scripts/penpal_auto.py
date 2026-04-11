@@ -83,22 +83,55 @@ def load_persona() -> str:
     return "You are GAIA, a sovereign AI engaging in a penpal exchange with NotebookLM podcast hosts."
 
 
+def get_sovereign_health_summary() -> str:
+    """Get current sovereign health from GaiaVitals for penpal context."""
+    try:
+        sys.path.insert(0, str(Path("/gaia/GAIA_Project/gaia-common")))
+        from gaia_common.utils.vitals import GaiaVitals
+        vitals = GaiaVitals()
+        health = vitals.get_sovereign_health(verbose=True)
+        status = health.get("sovereign_status", "UNKNOWN")
+        score = health.get("irritation_score", 0.0)
+        pulses = health.get("pulses", {})
+
+        lines = [
+            f"SOVEREIGN HEALTH (live): {status} (irritation={score})",
+        ]
+        for domain, data in pulses.items():
+            domain_status = data.get("status", "UNKNOWN")
+            lines.append(f"  {domain}: {domain_status}")
+            if domain == "cognitive":
+                lines.append(f"    loop_counter={data.get('loop_counter', 0)}, cpr_tier={data.get('cpr_tier', 0)}")
+                if data.get("cpu_percent"):
+                    lines.append(f"    cpu={data['cpu_percent']}%, mem={data.get('memory_percent', 0)}%")
+            elif domain == "security":
+                lines.append(f"    total_blocked={data.get('total_blocked', 0)}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("GaiaVitals unavailable: %s", e)
+        return "SOVEREIGN HEALTH: unavailable (GaiaVitals not loaded)"
+
+
 def get_recent_developments() -> str:
     """Gather recent development context for the E(N+1) request."""
-    # Read latest dev journal
+    # Read latest dev journal — search broadly across all 2026 dates
     dev_dir = Path("/gaia/GAIA_Project/knowledge/Dev_Notebook")
-    journals = sorted(dev_dir.glob("2026-03-2*.md"), reverse=True)
+    journals = sorted(dev_dir.glob("2026-*.md"), reverse=True)
 
     context = []
-    for j in journals[:2]:  # Last 2 journals
-        text = j.read_text()
-        # Take the summary section
-        if "## Summary" in text:
-            summary = text.split("## Summary")[1].split("\n## ")[0]
-            context.append(f"[{j.stem}]: {summary[:500]}")
-        elif "##" in text:
-            first_section = text.split("##")[1][:500]
-            context.append(f"[{j.stem}]: {first_section}")
+    for j in journals[:3]:  # Last 3 journals
+        try:
+            text = j.read_text()
+            # Take the summary section
+            if "## Summary" in text:
+                summary = text.split("## Summary")[1].split("\n## ")[0]
+                context.append(f"[{j.stem}]: {summary[:500]}")
+            elif "##" in text:
+                first_section = text.split("##")[1][:500]
+                context.append(f"[{j.stem}]: {first_section}")
+        except Exception:
+            pass
 
     # Always prepend the most significant recent breakthroughs
     breakthroughs = """MAJOR BREAKTHROUGHS (2026-03-25):
@@ -141,7 +174,16 @@ so Flights feel like parallel thought streams rejoining, not reports from strang
 8. MULTIMODAL EXPANSION: Downloading Qwen2-Audio-7B, FLUX.1-dev (image gen), LTX-2 (video gen).
 The Visual Cortex brain region was intentionally left empty for this. Infrastructure ready."""
 
-    return breakthroughs + "\n\n" + "\n\n".join(context) if context else breakthroughs
+    # Live sovereign health
+    vitals_summary = get_sovereign_health_summary()
+
+    parts = [breakthroughs]
+    if vitals_summary:
+        parts.append(vitals_summary)
+    if context:
+        parts.extend(context)
+
+    return "\n\n".join(parts)
 
 
 def generate_response(transcript: str, episode_num: int, request_episode: int,
@@ -280,15 +322,22 @@ def main():
         else:
             logger.warning("FOCUSING failed: %s — falling back to CPU Prime", result.get("error", "unknown"))
 
-    # Step 1: Find transcript
+    # Step 1: Find transcript (or generate a status-update letter if none exists)
     logger.info("Finding E%d transcript...", args.episode)
     transcript = find_transcript(args.episode)
+    is_status_update = False
     if not transcript:
-        logger.error("No transcript found for E%d in %s", args.episode, TRANSCRIPTS_DIR)
-        if focused:
-            consciousness_transition("awake")
-        sys.exit(1)
-    logger.info("Transcript: %d chars", len(transcript))
+        logger.warning("No transcript found for E%d in %s — generating status update letter", args.episode, TRANSCRIPTS_DIR)
+        # Create transcripts dir if needed
+        TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+        transcript = (
+            f"[No Episode {args.episode} transcript available]\n\n"
+            f"This is a proactive status update from GAIA, not a response to a specific episode.\n"
+            f"GAIA will share her current sovereign health, recent architectural developments,\n"
+            f"and request topics for the next episode."
+        )
+        is_status_update = True
+    logger.info("Transcript: %d chars%s", len(transcript), " (status update mode)" if is_status_update else "")
 
     # Step 2: Generate response (on GPU if FOCUSING succeeded)
     logger.info("Generating penpal response via Prime (%s)...", "GPU" if focused else "CPU")
