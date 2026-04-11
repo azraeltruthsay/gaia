@@ -155,6 +155,10 @@ class NeuralRouter:
                     self._embed_classifier = clf
         return self._embed_classifier
 
+    # Stage 0 thresholds for adaptive audio routing
+    AUDIO_SHORT_THRESHOLD = 5.0    # seconds — below this, Nano can handle it
+    AUDIO_LONG_THRESHOLD = 120.0   # seconds — above this, consider Prime
+
     def route(
         self,
         text: str,
@@ -162,7 +166,7 @@ class NeuralRouter:
         is_factual: bool = False,
         is_trivial: bool = False,
         probe_context: str = "",
-        has_audio: bool = False,
+        audio_payloads: Optional[list] = None,
     ) -> RouterResult:
         """Route a user input to the appropriate engine and intent.
 
@@ -172,22 +176,24 @@ class NeuralRouter:
             is_factual: Pre-classified as a factual query.
             is_trivial: Pre-classified as trivial.
             probe_context: Semantic probe hint for heuristic fallback.
-            has_audio: True if the packet contains audio_payloads (v0.5).
+            audio_payloads: List of AudioPayload objects from the packet (v0.5).
 
         Returns:
             RouterResult with target engine, intent, score, and Plan.
         """
-        # ── Stage 0: Multimodal Audio Override (v0.5) ──
-        # Packets with audio_payloads ALWAYS route to Core — only Core/Prime
-        # tiers have native audio encoders. No text-based routing needed.
-        if has_audio:
+        # ── Stage 0: Adaptive Multimodal Routing (Proposal 11) ──
+        # Triage audio packets across Nano/Core/Prime based on duration,
+        # source context, and text complexity markers.
+        if audio_payloads:
+            target, reason = self._triage_audio(text, source, audio_payloads)
+            score = {TargetEngine.NANO: 0.2, TargetEngine.CORE: 0.6, TargetEngine.PRIME: 0.9}
             return self._build_result(
-                target=TargetEngine.CORE,
+                target=target,
                 intent="audio_inbox_review",
-                score=0.6,
+                score=score.get(target, 0.6),
                 confidence=1.0,
                 source="multimodal_audio",
-                escalation_reason="audio_payloads present — native multimodal",
+                escalation_reason=reason,
             )
 
         # Truncate excessively long inputs (pasted content)
@@ -468,6 +474,59 @@ class NeuralRouter:
             return TargetEngine.PRIME
         # Default complex → Core (it can handle most things)
         return TargetEngine.CORE
+
+    # ── Adaptive Audio Triage (Proposal 11) ──────────────────────────
+
+    @staticmethod
+    def _triage_audio(
+        text: str,
+        source: str,
+        audio_payloads: list,
+    ) -> tuple:
+        """Decide which engine handles an audio payload.
+
+        Returns (TargetEngine, reason_string).
+
+        Decision matrix:
+          Short audio (<5s) + reflex/heartbeat source  → NANO  (fast command)
+          Technical markers in text + any audio         → PRIME (deep analysis)
+          Long audio (>120s) + complex text             → PRIME (deep analysis)
+          Everything else                               → CORE  (standard multimodal)
+        """
+        # Extract primary payload metadata
+        ap = audio_payloads[0]
+        duration = getattr(ap, "duration_seconds", 0) or 0
+        if isinstance(ap, dict):
+            duration = ap.get("duration_seconds", 0) or 0
+
+        lowered = (text or "").lower()
+
+        # Case 1: Short audio from reflex/heartbeat sources → Nano
+        reflex_sources = {"reflex", "heartbeat", "voice_command", "wake_word"}
+        if duration < NeuralRouter.AUDIO_SHORT_THRESHOLD and source in reflex_sources:
+            return TargetEngine.NANO, f"short audio ({duration:.1f}s) + reflex source"
+
+        # Case 2: Short audio with trivial text → Nano
+        if duration < NeuralRouter.AUDIO_SHORT_THRESHOLD:
+            words = text.split() if text else []
+            if len(words) <= 6:
+                return TargetEngine.NANO, f"short audio ({duration:.1f}s) + brief text"
+
+        # Case 3: Technical markers in text → Prime (deep multimodal analysis)
+        complex_hits = sum(1 for m in _COMPLEX_MARKERS if m in lowered)
+        if complex_hits >= 2:
+            return TargetEngine.PRIME, f"technical markers ({complex_hits} hits) + audio"
+
+        # Case 4: Long audio with any complexity signal → Prime
+        if duration > NeuralRouter.AUDIO_LONG_THRESHOLD and complex_hits >= 1:
+            return TargetEngine.PRIME, f"long audio ({duration:.0f}s) + technical context"
+
+        # Case 5: Very long audio (>10min) always escalates to Prime
+        if duration > 600:
+            return TargetEngine.PRIME, f"very long audio ({duration:.0f}s) — deep analysis needed"
+
+        # Default: Core handles standard multimodal
+        return TargetEngine.CORE, f"standard audio ({duration:.1f}s) — Core multimodal"
 
     # ── Nano Tiebreak ──────────────────────────────────────────────────
 
