@@ -69,6 +69,120 @@ class Plan:
     intent: str
     read_only: bool = False
     confidence: float = 1.0
+    complexity_score: float = 0.5
+    routing: str = "TRIAGE"  # PRIME | LITE | TRIAGE
+
+
+# ── Weighted Confidence Routing ────────────────────────────────────────
+
+# Intent categories mapped to inherent complexity weights.
+_INTENT_COMPLEXITY = {
+    "planning": 0.9, "shell": 0.7, "write_file": 0.6,
+    "tool_routing": 0.6, "recitation": 0.5, "correction": 0.5,
+    "brainstorming": 0.55, "find_file": 0.4, "read_file": 0.35,
+    "clarification": 0.4, "comprehension": 0.35, "feedback": 0.4,
+    "chat": 0.15, "greeting": 0.05, "identity": 0.1,
+    "mark_task_complete": 0.1, "list_tools": 0.15, "list_tree": 0.15,
+    "list_files": 0.15, "other": 0.5,
+}
+
+_COMPLEX_MARKERS = [
+    "implement", "refactor", "debug", "architecture", "design pattern",
+    "algorithm", "optimize", "migration", "deploy", "pipeline",
+    "multi-step", "step by step", "walk me through", "deep dive",
+    "compare and contrast", "trade-off", "tradeoff", "pros and cons",
+    "root cause", "stack trace", "traceback", "exception",
+    "docker", "kubernetes", "ci/cd", "database schema",
+]
+
+_SIMPLE_MARKERS = [
+    "hello", "hi", "hey", "thanks", "thank you", "good morning",
+    "good evening", "good afternoon", "what time", "how are you",
+    "yes", "no", "ok", "okay", "sure", "cool", "nice",
+]
+
+
+class WeightedIntentClassifier:
+    """Calculates a complexity score [0.0-1.0] from multiple NLU signals.
+
+    Routing thresholds:
+      score > 0.8  -> PRIME  (bypass Nano triage, route to Prime)
+      score < 0.3  -> LITE   (bypass Nano triage, stay on Nano/Lite)
+      0.3 - 0.8    -> TRIAGE (ambiguous, fall through to _nano_triage)
+    """
+
+    W_INTENT = 0.40
+    W_EMBED = 0.25
+    W_TEXT = 0.20
+    W_LENGTH = 0.15
+
+    THRESHOLD_PRIME = 0.8
+    THRESHOLD_LITE = 0.3
+
+    @staticmethod
+    def score(
+        text: str,
+        embed_intent: Optional[str] = None,
+        embed_confidence: float = 0.0,
+    ) -> float:
+        """Compute complexity score from NLU signals. Returns float [0.0, 1.0]."""
+        # Signal 1: Intent category complexity
+        intent_weight = _INTENT_COMPLEXITY.get(embed_intent or "other", 0.5)
+
+        # Signal 2: Embedding confidence as certainty modifier
+        if embed_confidence >= 0.55:
+            embed_signal = intent_weight  # confident — trust the intent
+        elif embed_confidence >= 0.42:
+            embed_signal = 0.4 + (intent_weight - 0.4) * 0.5
+        else:
+            embed_signal = 0.5  # no useful signal
+
+        # Signal 3: Textual complexity markers
+        lowered = (text or "").lower()
+        complex_hits = sum(1 for m in _COMPLEX_MARKERS if m in lowered)
+        simple_hits = sum(1 for m in _SIMPLE_MARKERS if m in lowered)
+        if complex_hits + simple_hits > 0:
+            text_signal = complex_hits / (complex_hits + simple_hits)
+        else:
+            text_signal = 0.5
+
+        # Signal 4: Length and structural complexity
+        words = text.split() if text else []
+        word_count = len(words)
+        sentence_count = max(1, len(re.split(r'[.!?]+', text or "")))
+
+        if word_count <= 5:
+            length_signal = 0.1
+        elif word_count <= 15:
+            length_signal = 0.3
+        elif word_count <= 40:
+            length_signal = 0.5
+        elif word_count <= 80:
+            length_signal = 0.7
+        else:
+            length_signal = 0.9
+
+        if sentence_count >= 3:
+            length_signal = min(1.0, length_signal + 0.1)
+
+        # Weighted aggregation
+        score = (
+            WeightedIntentClassifier.W_INTENT * intent_weight
+            + WeightedIntentClassifier.W_EMBED * embed_signal
+            + WeightedIntentClassifier.W_TEXT * text_signal
+            + WeightedIntentClassifier.W_LENGTH * length_signal
+        )
+        return round(min(1.0, max(0.0, score)), 3)
+
+    @staticmethod
+    def route(score: float) -> str:
+        """Map complexity score to routing decision: PRIME | LITE | TRIAGE."""
+        if score > WeightedIntentClassifier.THRESHOLD_PRIME:
+            return "PRIME"
+        elif score < WeightedIntentClassifier.THRESHOLD_LITE:
+            return "LITE"
+        return "TRIAGE"
+
 
 # ---- Reflex path for \u201cautonomic\u201d commands ----
 def fast_intent_check(text):
@@ -889,7 +1003,12 @@ def _parse_llm_intent_response(content: str) -> str:
 def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source="") -> Plan:
     """
     Detects intent using reflex path, else LLM.
-    Returns a Plan object.
+    Returns a Plan object with intent, complexity_score, and routing.
+
+    Weighted Confidence Routing:
+      - complexity_score > 0.8 -> routing=PRIME  (skip Nano triage)
+      - complexity_score < 0.3 -> routing=LITE   (skip Nano triage)
+      - 0.3 - 0.8             -> routing=TRIAGE  (defer to _nano_triage)
 
     Args:
         probe_context: Optional domain hint from semantic probe for LLM-based classification.
@@ -900,19 +1019,47 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
         logger.debug("[DEBUG] Intent detect start len=%d", len(text or ""))
     except Exception:
         logger.debug("[DEBUG] Intent detect start")
+
+    # ── Gather embed signals (cheap — singleton classifier, cached matrix) ──
+    embed_intent = None
+    embed_score = 0.0
+    try:
+        embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
+    except Exception:
+        embed_intent_cfg = {}
+    if embed_model is not None and embed_intent_cfg.get("enabled", True):
+        classifier = EmbedIntentClassifier.instance()
+        if not classifier.ready:
+            classifier.initialise(embed_model, config=embed_intent_cfg)
+        if classifier.ready:
+            threshold = embed_intent_cfg.get("confidence_threshold", 0.42)
+            embed_intent, embed_score = classifier.classify(text, confidence_threshold=threshold)
+
     # 1. Reflex check
     intent_str = fast_intent_check(text)
     if not intent_str:
         # 2. LLM path (with embedding fallback)
         intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model, source=source)
-    
+
+    # ── Weighted Confidence Routing ──
+    complexity = WeightedIntentClassifier.score(text, embed_intent=embed_intent, embed_confidence=embed_score)
+    routing = WeightedIntentClassifier.route(complexity)
+
     read_only_intents = {"read_file", "explain_file", "explain_symbol", "comprehension", "greeting", "identity"}
-    plan = Plan(intent=intent_str, read_only=intent_str in read_only_intents)
-    
-    logger.debug(f"Detected plan: {plan}")
-    logger.info("Intent detection: done intent=%s", plan.intent)
-    print(f"INTENT_DETECTED: {plan.intent}", file=sys.stderr)
-    logger.debug("[DEBUG] Intent detect done intent=%s read_only=%s", plan.intent, plan.read_only)
+    plan = Plan(
+        intent=intent_str,
+        read_only=intent_str in read_only_intents,
+        complexity_score=complexity,
+        routing=routing,
+    )
+
+    logger.info(
+        "Intent detection: done intent=%s complexity=%.3f routing=%s",
+        plan.intent, plan.complexity_score, plan.routing,
+    )
+    print(f"INTENT_DETECTED: {plan.intent} complexity={plan.complexity_score} routing={plan.routing}", file=sys.stderr)
+    logger.debug("[DEBUG] Intent detect done intent=%s read_only=%s complexity=%.3f routing=%s",
+                 plan.intent, plan.read_only, plan.complexity_score, plan.routing)
     return plan
 
 

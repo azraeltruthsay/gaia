@@ -298,6 +298,7 @@ services:
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
+      - MEMPAL_PALACE_PATH=/knowledge/mempalace
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
@@ -534,6 +535,7 @@ services:
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
+      - MEMPAL_PALACE_PATH=/knowledge/mempalace
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - VECTOR_STORE_PATH=/vector_store
       - MODELS_DIR=/models
@@ -638,6 +640,7 @@ services:
       # Paths
       - SANDBOX_ROOT=/sandbox
       - KNOWLEDGE_DIR=/knowledge
+      - MEMPAL_PALACE_PATH=/knowledge/mempalace
       - GAIA_BLUEPRINTS_ROOT=/knowledge/blueprints
       - GAIA_LOG_DIR=/logs
       # Security
@@ -703,14 +706,15 @@ services:
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       - ../gaia-instance/gaia-models:/models:ro
+      - gaia-shared:/shared:rw
 
     environment:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=audio
       - GAIA_ENV=${GAIA_ENV:-production}
       - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
-      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NVIDIA_VISIBLE_DEVICES=none
+      - CUDA_VISIBLE_DEVICES=
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

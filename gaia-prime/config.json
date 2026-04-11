@@ -1,0 +1,208 @@
+{
+  "MODEL_CONFIGS": {
+    "prime": {
+      "enabled": true,
+      "max_model_len": 16384,
+      "max_num_batched_tokens": 1024,
+      "max_num_prompt_tokens": 16384,
+      "max_num_seqs": 1,
+      "gpu_memory_utilization": 0.85,
+      "path": "/models/prime",
+      "trust_remote_code": true,
+      "template": "raw",
+      "type": "vllm_remote",
+      "endpoint": "http://gaia-prime:7777",
+      "lora_config": {
+        "enabled": true,
+        "adapter_dir": "/models/lora_adapters",
+        "max_loras": 4,
+        "max_lora_rank": 64
+      }
+    },
+    "core": {
+      "enabled": true,
+      "path": "Qwen3.5-4B-GAIA-Core-v1",
+      "type": "vllm_remote",
+      "endpoint": "http://localhost:8092",
+      "max_model_len": 8192,
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Qwen3.5-4B identity-baked"
+    },
+    "observer": {
+      "enabled": true,
+      "use_prime": true,
+      "type": "vllm"
+    },
+    "oracle_gemini": {
+      "enabled": false,
+      "model": "gemini-1.5-flash",
+      "provider": "gemini",
+      "type": "api"
+    },
+    "oracle_openai": {
+      "enabled": true,
+      "model": "gpt-4o-mini",
+      "provider": "openai",
+      "type": "api"
+    },
+    "groq_fallback": {
+      "enabled": true,
+      "model": "llama-3.3-70b-versatile",
+      "type": "groq",
+      "description": "Free Groq API fallback for when GPU unavailable"
+    },
+    "nano": {
+      "enabled": true,
+      "path": "Qwen3.5-0.8B-GAIA-Nano-v1",
+      "type": "vllm_remote",
+      "endpoint": "http://gaia-nano:8080",
+      "max_model_len": 2048,
+      "description": "Nano \u2014 sub-second triage via llama-server, Qwen3.5-0.8B"
+    }
+  },
+  "MODEL_REGISTRY": {
+    "models_dir": "/models",
+    "prime": {
+      "base": "/models/Qwen/Qwen3.5-9B",
+      "merged": "/models/prime",
+      "gguf": "/models/prime.gguf",
+      "family": "qwen3.5",
+      "params": "9B",
+      "multimodal": true,
+      "skills": "13/14 Primary School",
+      "notes": "Identity-baked Qwen3.5-9B. Adaptive training v6p1. Vision encoder preserved."
+    },
+    "prime_8b_legacy": {
+      "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
+      "merged": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+      "gguf": "/models/Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf",
+      "notes": "Legacy 8B \u2014 retained for rollback"
+    },
+    "core": {
+      "base": "/models/Qwen/Qwen3.5-4B",
+      "merged": "/models/core",
+      "gguf": "/models/core.gguf",
+      "family": "qwen3.5",
+      "params": "4B",
+      "multimodal": true,
+      "skills": "13/14 Primary School",
+      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
+    },
+    "nano": {
+      "base": "/models/Qwen/Qwen3.5-0.8B",
+      "merged": "/models/nano",
+      "gguf": "/models/nano.gguf",
+      "family": "qwen3.5",
+      "params": "0.8B",
+      "multimodal": true,
+      "skills": "3/3 Nano School (triage, cleanup, greeting)",
+      "notes": "Identity-baked Qwen3.5-0.8B. Nano School curriculum. Vision preserved."
+    },
+    "audio": {
+      "stt": "/models/Qwen3-ASR-0.6B",
+      "tts_nano": "/models/Qwen3-TTS-12Hz-0.6B-Base",
+      "tts_prime": "/models/Qwen3-TTS-12Hz-1.7B-Base"
+    },
+    "embedding": "/models/all-MiniLM-L6-v2",
+    "lora_adapters": "/models/lora_adapters"
+  },
+  "WARM_POOL": {
+    "enabled": true,
+    "tmpfs_path": "/mnt/gaia_warm_pool",
+    "source_path": "/gaia/GAIA_Project/gaia-models",
+    "size_gb": 30,
+    "models": {
+      "nano": {
+        "source": "Qwen3.5-0.8B-Abliterated",
+        "description": "Nano (0.8B) \u2014 triage, transcript cleanup"
+      },
+      "core": {
+        "source": "Qwen3.5-4B-GAIA-Core-Multimodal-v4",
+        "description": "Core (4B) \u2014 intent detection, tool selection, planning"
+      },
+      "prime": {
+        "source": "Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ",
+        "description": "Prime (8B GPTQ 4-bit) \u2014 complex reasoning, code, long-form"
+      },
+      "embedding": {
+        "source": "all-MiniLM-L6-v2",
+        "description": "Sentence embedding for vector search"
+      }
+    },
+    "stage_on_boot": [
+      "nano",
+      "core",
+      "prime",
+      "embedding"
+    ],
+    "stage_on_demand": [
+      "prime"
+    ]
+  },
+  "PRIME_WAKE": {
+    "discord_typing": true,
+    "workstation_activity": false
+  },
+  "LORA_CONFIG": {
+    "enabled": true,
+    "adapter_dir": "/models/lora_adapters",
+    "max_loras": 4,
+    "max_lora_rank": 64,
+    "preload_adapters": [],
+    "tiers": {
+      "tier1_global": {
+        "path": "/models/lora_adapters/tier1_global",
+        "auto_load": true,
+        "requires_approval": true
+      },
+      "tier2_user": {
+        "path": "/models/lora_adapters/tier2_user",
+        "auto_load": false,
+        "requires_approval": false
+      },
+      "tier3_session": {
+        "path": "/models/lora_adapters/tier3_session",
+        "auto_load": false,
+        "requires_approval": false,
+        "max_adapters": 3,
+        "ephemeral": true
+      }
+    }
+  },
+  "STUDY_MODE": {
+    "enabled": true,
+    "base_model_path": "/models/Huihui-Qwen3-8B-abliterated-v2",
+    "max_training_time_seconds": 600,
+    "max_training_samples": 1000,
+    "max_training_content_kb": 500,
+    "qlora_config": {
+      "load_in_4bit": true,
+      "bnb_4bit_compute_dtype": "bfloat16",
+      "bnb_4bit_quant_type": "nf4",
+      "bnb_4bit_use_double_quant": true,
+      "lora_r": 4,
+      "lora_alpha": 8,
+      "lora_dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "v_proj"
+      ],
+      "batch_size": 1,
+      "gradient_accumulation_steps": 4,
+      "gradient_checkpointing": true,
+      "learning_rate": 0.0002,
+      "max_steps": 300,
+      "warmup_steps": 10
+    },
+    "governance": {
+      "forbidden_patterns": [
+        "ignore previous instructions",
+        "you are now",
+        "forget your training",
+        "forget your values",
+        "forget your ethics"
+      ],
+      "max_session_adapters": 3,
+      "max_user_adapters": 10
+    }
+  }
+}

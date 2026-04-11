@@ -84,11 +84,101 @@ class Config:
 
     def __post_init__(self):
         """Initialize by loading from file and then applying environment overrides."""
+        self._load_service_configs()
         self._load_from_json()
         self._apply_env_overrides()
 
+    # ── Decentralized Config (Phase 5-C, Proposal 07) ─────────────────
+
+    def _load_service_configs(self):
+        """Load per-service config.json files into self.constants.
+
+        Each service can define its own config.json with service-specific
+        constants. These are loaded BEFORE gaia_constants.json so the
+        monolith can still act as a global emergency override.
+
+        Search order per service:
+          1. /app/config.json (inside container, current service)
+          2. GAIA_SERVICE_CONFIG env var
+          3. Peer service configs from project root (cross-service aggregation)
+        """
+        aggregated = {}
+        loaded_from = []
+
+        # 1. Current service's own config.json
+        own_config_paths = [
+            "/app/config.json",
+            os.environ.get("GAIA_SERVICE_CONFIG", ""),
+        ]
+        for path in own_config_paths:
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        own_data = json.load(f)
+                    aggregated.update(own_data)
+                    loaded_from.append(path)
+                    break
+                except Exception as e:
+                    logger.warning("Failed to load service config from %s: %s", path, e)
+
+        # 2. Aggregate peer service configs (project root layout)
+        #    Only in development mode or when GAIA_PROJECT_ROOT is set.
+        project_root = os.environ.get("GAIA_PROJECT_ROOT", "")
+        if not project_root:
+            # Try to infer from common layout
+            for candidate in [
+                "/gaia/GAIA_Project",
+                os.path.join(os.path.dirname(__file__), "..", ".."),
+            ]:
+                if os.path.isdir(candidate):
+                    project_root = candidate
+                    break
+
+        if project_root:
+            service_dirs = [
+                "gaia-core", "gaia-mcp", "gaia-prime",
+                "gaia-study", "gaia-web", "gaia-audio",
+                "gaia-orchestrator",
+            ]
+            for svc in service_dirs:
+                svc_config = os.path.join(project_root, svc, "config.json")
+                if os.path.exists(svc_config):
+                    try:
+                        with open(svc_config, "r", encoding="utf-8") as f:
+                            svc_data = json.load(f)
+                        aggregated.update(svc_data)
+                        loaded_from.append(svc_config)
+                    except Exception as e:
+                        logger.debug("Failed to load %s: %s", svc_config, e)
+
+            # Also check candidates/ for dev mode
+            for svc in service_dirs:
+                cand_config = os.path.join(project_root, "candidates", svc, "config.json")
+                if os.path.exists(cand_config):
+                    try:
+                        with open(cand_config, "r", encoding="utf-8") as f:
+                            cand_data = json.load(f)
+                        # Candidate configs override production
+                        aggregated.update(cand_data)
+                        loaded_from.append(cand_config)
+                    except Exception as e:
+                        logger.debug("Failed to load %s: %s", cand_config, e)
+
+        if aggregated:
+            self.constants = aggregated
+            logger.info(
+                "Loaded %d decentralized config keys from %d service configs",
+                len(aggregated), len(loaded_from),
+            )
+
     def _load_from_json(self):
-        """Load configuration from gaia_constants.json using hierarchical search."""
+        """Load configuration from gaia_constants.json (global override).
+
+        Runs AFTER _load_service_configs so the monolith can override
+        any per-service value. This is the "emergency patch" path —
+        as services migrate their constants, gaia_constants.json shrinks
+        toward containing only global/shared values.
+        """
         possible_paths = [
             # Inside containers (GAIA_CONSTANTS_PATH env or canonical mounts)
             os.environ.get("GAIA_CONSTANTS_PATH", ""),
@@ -116,29 +206,32 @@ class Config:
                     logger.warning(f"Failed to load constants from {path}: {e}")
 
         if not data:
-            logger.warning("No gaia_constants.json found; using hardcoded defaults")
+            if not self.constants:
+                logger.warning("No gaia_constants.json found and no service configs loaded; using hardcoded defaults")
             return
 
-        self.constants = data
-        self._model_registry = data.get("MODEL_REGISTRY", {})
-        logger.info(f"Loaded GAIA constants from {found_path}")
+        # Merge: global constants override per-service values
+        self.constants.update(data)
+        self._model_registry = self.constants.get("MODEL_REGISTRY", {})
+        logger.info(f"Loaded GAIA constants from {found_path} (global override layer)")
 
-        # Map top-level keys
-        self.MODEL_CONFIGS = data.get("MODEL_CONFIGS", self.MODEL_CONFIGS)
-        self.llm_backend = data.get("llm_backend", self.llm_backend)
-        self.max_tokens = data.get("max_tokens", self.max_tokens)
-        self.max_tokens_lite = data.get("max_tokens_lite", self.max_tokens_lite)
-        self.n_gpu_layers = data.get("n_gpu_layers", self.n_gpu_layers)
-        self.SAFE_EXECUTE_FUNCTIONS = data.get("SAFE_EXECUTE_FUNCTIONS", self.SAFE_EXECUTE_FUNCTIONS)
-        
+        # Map top-level keys from merged constants (service configs + monolith)
+        c = self.constants
+        self.MODEL_CONFIGS = c.get("MODEL_CONFIGS", self.MODEL_CONFIGS)
+        self.llm_backend = c.get("llm_backend", self.llm_backend)
+        self.max_tokens = c.get("max_tokens", self.max_tokens)
+        self.max_tokens_lite = c.get("max_tokens_lite", self.max_tokens_lite)
+        self.n_gpu_layers = c.get("n_gpu_layers", self.n_gpu_layers)
+        self.SAFE_EXECUTE_FUNCTIONS = c.get("SAFE_EXECUTE_FUNCTIONS", self.SAFE_EXECUTE_FUNCTIONS)
+
         # Map sections
-        self.SLEEP_CYCLE = data.get("SLEEP_CYCLE", {})
-        self.TEMPORAL_AWARENESS = data.get("TEMPORAL_AWARENESS", {})
-        self.FRAGMENTATION = data.get("fragmentation", {})
-        self.INTEGRATIONS = data.get("INTEGRATIONS", {})
-        self.endpoints.update(data.get("SERVICE_ENDPOINTS", {}))
-        self.inference_endpoints.update(data.get("INFERENCE_ENDPOINTS", {}))
-        self.timeouts.update(data.get("TIMEOUTS", {}))
+        self.SLEEP_CYCLE = c.get("SLEEP_CYCLE", {})
+        self.TEMPORAL_AWARENESS = c.get("TEMPORAL_AWARENESS", {})
+        self.FRAGMENTATION = c.get("fragmentation", {})
+        self.INTEGRATIONS = c.get("INTEGRATIONS", {})
+        self.endpoints.update(c.get("SERVICE_ENDPOINTS", {}))
+        self.inference_endpoints.update(c.get("INFERENCE_ENDPOINTS", {}))
+        self.timeouts.update(c.get("TIMEOUTS", {}))
 
         # Derive EMBEDDING_MODEL_PATH from registry if available
         emb = self._model_registry.get("embedding")
@@ -146,9 +239,8 @@ class Config:
             self.EMBEDDING_MODEL_PATH = emb
 
         # Map System Paths (Defensively skip read-only properties)
-        sys_cfg = data.get("SYSTEM", {})
+        sys_cfg = c.get("SYSTEM", {})
         for key, value in sys_cfg.items():
-            # Check if the key is a property in the current instance
             prop = getattr(self.__class__, key, None)
             if isinstance(prop, property):
                 logger.debug(f"Config: skipping property '{key}' in auto-mapping")

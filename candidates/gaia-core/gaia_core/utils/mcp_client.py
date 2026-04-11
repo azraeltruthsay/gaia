@@ -93,6 +93,27 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
             pass
         return {"ok": False, "error": str(e)}
 
+def execute_limb(domain: str, action: str, params: Dict = None, **kwargs) -> Dict:
+    """Execute a capability via the unified domain.action interface.
+
+    Sends the request as a JSON-RPC call with the domain as the method
+    and the action embedded in params. The CapabilityEngine on gaia-mcp
+    handles resolution and dispatch.
+
+    Args:
+        domain: Capability domain (e.g. "file", "web", "knowledge")
+        action: Action within the domain (e.g. "read", "search")
+        params: Action parameters
+        **kwargs: Passed to call_jsonrpc (endpoint, timeout)
+
+    Returns:
+        Dict with ok, response/error keys.
+    """
+    rpc_params = dict(params or {})
+    rpc_params["action"] = action
+    return call_jsonrpc(method=domain, params=rpc_params, **kwargs)
+
+
 def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> List[Dict]:
     """
     Dispatches all sidecar actions in a packet to the MCP-lite server.

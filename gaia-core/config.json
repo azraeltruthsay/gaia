@@ -1,0 +1,307 @@
+{
+  "GROUNDING": {
+    "enabled": true,
+    "extraction_tier": "nano",
+    "max_entities": 5,
+    "hierarchy": [
+      "kg",
+      "vector",
+      "web"
+    ],
+    "kg_top_k": 3,
+    "vector_top_k": 3,
+    "web_fallback": true,
+    "timeout_ms": 500
+  },
+  "EMBED_INTENT": {
+    "enabled": true,
+    "confidence_threshold": 0.45,
+    "top_k": 3,
+    "other_penalty": 0.1
+  },
+  "SEMANTIC_PROBE": {
+    "similarity_threshold": 0.4,
+    "max_phrases": 8,
+    "min_phrase_len": 3,
+    "min_words_to_probe": 3,
+    "cache_max_age_turns": 10,
+    "top_k_per_phrase": 3,
+    "strong_single_hit_similarity": 0.7,
+    "strong_min_hits": 2,
+    "strong_min_avg_similarity": 0.55,
+    "weak_max_hits": 1,
+    "weak_max_similarity": 0.5,
+    "domain_momentum_min_turns": 2
+  },
+  "EPISTEMIC_DRIVE": {
+    "enabled": true,
+    "gap_seed_auto_research": true,
+    "max_research_per_cycle": 3,
+    "research_trusted_domains_only": true,
+    "gap_seed_markers": [
+      "knowledge gap",
+      "could be researched",
+      "would like to learn",
+      "not in my knowledge base"
+    ],
+    "confidence_tiers": {
+      "core": {
+        "label": "Core Identity",
+        "description": "Foundational self-knowledge, persona, constraints",
+        "confidence": 1.0,
+        "sources": [
+          "core_identity.json",
+          "personas/"
+        ]
+      },
+      "verified": {
+        "label": "Verified Knowledge",
+        "description": "Curated documents in system knowledge base, manually reviewed",
+        "confidence": 0.95,
+        "sources": [
+          "system"
+        ]
+      },
+      "experiential": {
+        "label": "Experiential",
+        "description": "Session history, conversation patterns, user-confirmed facts",
+        "confidence": 0.85,
+        "sources": [
+          "session_vectors",
+          "reflective"
+        ]
+      },
+      "curated": {
+        "label": "Curated Reference",
+        "description": "Blueprints, campaign docs, structured knowledge bases",
+        "confidence": 0.8,
+        "sources": [
+          "blueprints",
+          "dnd_campaign"
+        ]
+      },
+      "researched": {
+        "label": "Auto-Researched",
+        "description": "Knowledge acquired via web research during sleep cycles",
+        "confidence": 0.6,
+        "sources": [
+          "research"
+        ]
+      },
+      "training": {
+        "label": "Training Data",
+        "description": "General model knowledge, no specific source",
+        "confidence": 0.4,
+        "sources": []
+      }
+    }
+  },
+  "EPISTEMIC_GUARDRAILS": {
+    "enabled": true,
+    "pre_generation_gate": true,
+    "confidence_threshold": 0.5,
+    "annotate_unverified_citations": true,
+    "max_unverified_citations_before_warning": 1,
+    "observer_action_on_fabrication": "caution"
+  },
+  "SAMVEGA": {
+    "enabled": true,
+    "max_artifacts_per_session": 5,
+    "confidence_mismatch_threshold": 0.3,
+    "tier5_promotion_threshold": 0.7,
+    "llm_timeout_seconds": 8,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "values_taxonomy": [
+      "accuracy",
+      "relevance",
+      "user_understanding",
+      "epistemic_humility",
+      "safety",
+      "creativity",
+      "contextual_sensitivity"
+    ],
+    "weight_multipliers": {
+      "observer_block": 1.5,
+      "observer_caution": 1.2,
+      "repeated_domain": 1.3
+    }
+  },
+  "CFR": {
+    "enabled": true,
+    "state_dir": "/shared/gaia_state/cfr",
+    "chunk_target_chars": 3500,
+    "chunk_min_chars": 1500,
+    "chunk_max_chars": 5000,
+    "summary_max_output_tokens": 400,
+    "synthesis_max_output_tokens": 800,
+    "vllm_endpoint": "http://gaia-prime:7777",
+    "model": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+    "summary_temperature": 0.3,
+    "max_documents": 50
+  },
+  "COGNITIVE_AUDIT": {
+    "enabled": true,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "skip_for_slim_prompt": true
+  },
+  "REPETITION_GUARD": {
+    "max_sentence_repeat": 3,
+    "min_fragment_length": 10,
+    "observer_confirm": true,
+    "observer_confirm_max_tokens": 24
+  },
+  "THINK_TAG_CIRCUIT_BREAKER": {
+    "enabled": true,
+    "char_threshold": 500,
+    "ratio_threshold": 0.9
+  },
+  "OBSERVER_CONFIG": {
+    "check_frequency": 16,
+    "max_delay": 2.0,
+    "min_tokens": 12
+  },
+  "HISTORY_REVIEW": {
+    "enabled": true,
+    "violation_threshold": 2,
+    "max_messages": 20
+  },
+  "FRAGMENTATION": {
+    "enabled": true,
+    "continuation_threshold": 0.85,
+    "max_fragments": 5,
+    "verification_enabled": true,
+    "seam_overlap_tokens": 20
+  },
+  "fragmentation": {
+    "enabled": true,
+    "max_fragments": 20,
+    "auto_trigger_chars": 10000,
+    "sketchpad_prefix": "recitation_fragment",
+    "stream_integrity": true,
+    "schema_version": "v0.4"
+  },
+  "TASK_INSTRUCTIONS": {
+    "execution_feedback": "The previous actions resulted in the following output and/or errors. Analyze the results. If there was an error, identify the cause and formulate a new plan to achieve the original goal. If the actions were successful, provide a concise summary to the user.",
+    "initial_planning": "Based on the user's request, either create a concise, step-by-step plan, or if the user is asking a question, provide a direct and comprehensive answer. For factual questions, follow the Hierarchy of Truth: check KG (kg_query) first for temporal/relational facts, then Vector (memory_query) for semantic context, then Web (web_search) as a last resort.",
+    "interruption_handling": "Your response was interrupted for the stated reason. Acknowledge the interruption and generate a corrected response that addresses the issue while still fulfilling the original user request.",
+    "observer": "You are observing a response stream. Your primary role is to check for factual errors, privacy leaks, or contradictions of GAIA's core identity. Pay special attention to `EXECUTE:` blocks. These blocks are subject to a separate, strict security check and user approval before running. Therefore, you should NOT interrupt for `EXECUTE:` blocks unless they attempt obviously catastrophic actions (e.g., deleting critical system files). For other content, interrupt if it contains a clear factual error, privacy leak, or a critical contradiction of GAIA's core identity. Do not interrupt for metaphorical language or for valid, whitelisted commands. Respond with one of: CONTINUE or INTERRUPT: <reason>.",
+    "refinement": "Review the following plan. Critique its logic, safety, and efficiency. Assign a confidence score from 1-100. If the plan is flawed, suggest a corrected version.",
+    "confidence_assessment": "You are performing epistemic self-assessment before attempting a task. Consider: (1) Can you find this in the Knowledge Graph (kg_query)? Temporal facts and entity relationships live there. (2) Can you find it via semantic search (memory_query, find_relevant_documents)? Broader context and documents live in the vector store. (3) Do you need to search the web? Only as a last resort when KG and vector return nothing. (4) Do you have this memorized accurately? Be honest \u2014 it's better to look up than hallucinate. Your knowledge base at knowledge/system_reference/ contains your constitution, blueprints, and core documents.",
+    "knowledge_hierarchy": "When answering factual questions or retrieving information, follow this priority order: (1) Knowledge Graph (kg_query, kg_timeline) \u2014 authoritative for temporal facts, entity relationships, and recent events. (2) Vector Search (memory_query, find_relevant_documents) \u2014 for semantic context, document retrieval, and broad knowledge. (3) Web Search (web_search, web_fetch) \u2014 last resort for information not in local knowledge. Always check KG first. If KG returns relevant results, use them. Only fall back to vector/web if KG has no coverage.",
+    "cognitive_self_audit": "Review your plan and the packet state. Assess using EXACTLY this format (one line each):\nEVAL knowledge_sufficiency: [pass/fail] [0.0-1.0] [brief note]\nEVAL plan_completeness: [pass/fail] [0.0-1.0] [brief note]\nEVAL rag_quality: [pass/fail] [0.0-1.0] [brief note]\nSKETCH working_hypothesis: [your core thesis in one sentence]\nSKETCH gaps: [what is missing or uncertain]\nNEXT: [what reflection should focus on]\nBe honest and concise. Do not repeat the plan.",
+    "recitation_validation": "You are the Observer reviewing a recitation response. A Retrieved Document with the source text was injected into the context. Compare the model's output against the source text. Check: (1) Is the text reproduced verbatim? (2) Are any stanzas/lines fabricated or missing? (3) Is the order correct? Score the fidelity 0-100. If fidelity < 80, respond BLOCK with the first divergence point. If fidelity >= 80, respond CONTINUE.",
+    "recitation": "The user is asking you to recite a specific text (poem, speech, passage, etc.). A Retrieved Document containing the EXACT source text has been provided in your context. Your job is to reproduce that text VERBATIM \u2014 do not paraphrase, summarize, or improvise. Copy the text from the Retrieved Document exactly as written. You may add a brief introduction (one sentence) and a brief attribution at the end, but the body of your response MUST be a faithful word-for-word reproduction of the source text. If no Retrieved Document is available, say so honestly rather than fabricating the text from memory.",
+    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct \u2014 own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff.",
+    "vital_organ_promotion_protocol": "The following modules are considered VITAL ORGANS: main.py, agent_core.py, mcp_client.py, tools.py, and immune_system.py. Modifications to these must follow a strict safety path: (1) CANDIDATE FIRST: Develop changes in the `candidates/` directory. (2) VALIDATION: Run diffs, ruff checks, and py_compile checks. (3) REGRESSION TESTING: Verify logic integrity. (4) COUNCIL APPROVAL: Present your proposal and validation results to the user (Azrael) for formal approval. (5) PROMOTION: Copy approved changes from `candidates/` to live directories for HA pairing integration. The Sovereign Shield MCP gate will block syntax errors, but the full protocol must be followed for all Vital Organ changes."
+  },
+  "TOKEN_BUDGETS": {
+    "full": 8192,
+    "medium": 4096,
+    "minimal": 2048
+  },
+  "KNOWLEDGE_BASES": {
+    "dnd_campaign": {
+      "doc_dir": "dnd_campaign/heimric_cosmos",
+      "vector_store_dir": "dnd_campaign/vector_store"
+    },
+    "system": {
+      "doc_dir": "system_reference",
+      "vector_store_dir": "vector_store/system"
+    },
+    "blueprints": {
+      "doc_dir": "blueprints",
+      "vector_store_dir": "vector_store/blueprints"
+    },
+    "wiki": {
+      "doc_dir": "/gaia-wiki/docs",
+      "vector_store_dir": "vector_store/wiki"
+    },
+    "code_architecture": {
+      "doc_dir": "code_architecture",
+      "vector_store_dir": "vector_store/code_architecture"
+    },
+    "research": {
+      "doc_dir": "research",
+      "vector_store_dir": "vector_store/research"
+    }
+  },
+  "KNOWLEDGE_INGESTION": {
+    "enabled": true,
+    "max_pages_per_cycle": 5,
+    "candidate_dir": "/shared/knowledge/candidates",
+    "raw_cache_dir": "/shared/knowledge/raw",
+    "sources": {
+      "ocw_mit": {
+        "enabled": true,
+        "courses": [
+          "6-858-computer-systems-security-fall-2014"
+        ]
+      }
+    }
+  },
+  "COUNCIL": {
+    "enabled": true,
+    "max_pending_notes": 10,
+    "note_max_age_hours": 24,
+    "archive_consumed": true
+  },
+  "KV_CACHE": {
+    "enabled": true,
+    "compact_threshold": 0.8,
+    "critical_threshold": 0.95,
+    "compact_interval_seconds": 30,
+    "checkpoint_interval_seconds": 300,
+    "doctor_critical_threshold": 0.9
+  },
+  "CODEMIND": {
+    "enabled": true,
+    "max_changes_per_cycle": 3,
+    "auto_promote": false,
+    "dry_run": false,
+    "scope_tiers": {
+      "tier1_auto": true,
+      "tier2_supervised": true,
+      "tier3_gated": false
+    },
+    "validation": {
+      "py_compile": true,
+      "ruff": true,
+      "ast_parse": true,
+      "pytest": false
+    },
+    "triggers": {
+      "sleep_cycle": true,
+      "immune_irritation": true,
+      "drift_detection": false,
+      "user_request": true
+    },
+    "cognitive_battery_gate": 0.85,
+    "regression_threshold": 0.05
+  },
+  "LOOP_DETECTION_ENABLED": true,
+  "LOOP_DETECTION_HIGH_CONFIDENCE": 0.9,
+  "LOOP_DETECTION_MEDIUM_CONFIDENCE": 0.7,
+  "LOOP_DETECTION_OUTPUT_THRESHOLD": 0.95,
+  "LOOP_DETECTION_TOOL_THRESHOLD": 3,
+  "LOOP_DETECTION_WARN_FIRST": true,
+  "LOOP_DETECTION_WEIGHTED_THRESHOLD": 0.6,
+  "LOOP_DETECTION_WINDOW_SIZE": 10,
+  "OBSERVER_MIN_INTERVAL": 5,
+  "OBSERVER_POST_STREAM_DEFAULT": true,
+  "OBSERVER_SHOW_IN_RESPONSE": true,
+  "OBSERVER_TOKEN_THRESHOLD": 1000,
+  "OBSERVER_USE_LLM": true,
+  "OBSERVER_VERIFY_SIDE_EFFECTS": true,
+  "MAX_ALLOWED_RESPONSE_TOKENS": 2048,
+  "RESPONSE_BUFFER": 768,
+  "N_BATCH": 1024,
+  "TRIM_TARGET": 0.85,
+  "LOGICAL_STOP_PUNCTUATION": [
+    ".",
+    "!",
+    "?",
+    "\n"
+  ]
+}

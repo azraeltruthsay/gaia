@@ -1,0 +1,200 @@
+{
+  "TOOL_ROUTING": {
+    "ENABLED": true,
+    "SELECTION_TEMPERATURE": 0.15,
+    "REVIEW_TEMPERATURE": 0.3,
+    "CONFIDENCE_THRESHOLD": 0.7,
+    "MAX_REINJECTIONS": 3,
+    "ALLOW_WRITE_TOOLS": false,
+    "ALLOW_EXECUTE_TOOLS": false,
+    "ESSENTIAL_TOOLS": [
+      "read_file",
+      "list_dir",
+      "world_state",
+      "kg_query",
+      "kg_add",
+      "kg_invalidate",
+      "kg_timeline",
+      "kg_stats",
+      "memory_query",
+      "find_relevant_documents",
+      "web_search"
+    ],
+    "ESSENTIAL_TOOLS_NOTE": "Always presented regardless of confidence scoring. Ordered by Hierarchy of Truth: filesystem \u2192 KG (MemPalace) \u2192 Vector (semantic) \u2192 Web."
+  },
+  "SECURITY_SCAN": {
+    "enabled": true,
+    "injection_block_threshold": 0.85,
+    "injection_warn_threshold": 0.5,
+    "redact_pii": true,
+    "scan_secrets": true
+  },
+  "SAFE_EXECUTE_FUNCTIONS": [
+    "ls",
+    "cat",
+    "echo",
+    "pwd",
+    "whoami",
+    "date",
+    "df",
+    "du",
+    "uptime",
+    "ps",
+    "top",
+    "python",
+    "find",
+    "grep"
+  ],
+  "MCP_LITE_ENABLED": true,
+  "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
+  "WEB_RESEARCH": {
+    "trusted_domains": [
+      "gutenberg.org",
+      "poetryfoundation.org",
+      "poets.org",
+      "britannica.com",
+      "wikipedia.org",
+      "en.wikisource.org",
+      "arxiv.org",
+      "docs.python.org",
+      "developer.mozilla.org",
+      "rust-lang.org",
+      "cppreference.com",
+      "ocw.mit.edu",
+      "mitocw.mit.edu"
+    ],
+    "reliable_domains": [
+      "github.com",
+      "stackoverflow.com",
+      "stackexchange.com",
+      "bbc.com",
+      "reuters.com",
+      "apnews.com",
+      "nature.com",
+      "science.org",
+      "ncbi.nlm.nih.gov"
+    ],
+    "blocked_domains": [
+      "reddit.com",
+      "4chan.org",
+      "twitter.com",
+      "x.com",
+      "facebook.com",
+      "tiktok.com",
+      "instagram.com"
+    ],
+    "content_type_sources": {
+      "poem": [
+        "gutenberg.org",
+        "poetryfoundation.org",
+        "poets.org",
+        "en.wikisource.org"
+      ],
+      "facts": [
+        "britannica.com",
+        "wikipedia.org"
+      ],
+      "code": [
+        "github.com",
+        "docs.python.org",
+        "developer.mozilla.org",
+        "stackoverflow.com"
+      ],
+      "science": [
+        "arxiv.org",
+        "nature.com",
+        "science.org",
+        "ncbi.nlm.nih.gov"
+      ],
+      "news": [
+        "bbc.com",
+        "reuters.com",
+        "apnews.com"
+      ]
+    },
+    "rate_limits": {
+      "search_per_hour": 20,
+      "fetch_per_hour": 50
+    },
+    "fetch_timeout_seconds": 15,
+    "fetch_max_bytes": 512000,
+    "authenticated_domains": {
+      "kanka.io": {
+        "api_key_env": "KANKA_API_KEY",
+        "auth_header": "Authorization",
+        "auth_format": "Bearer {key}",
+        "url_rewrites": [
+          {
+            "match": "^https://app\\.kanka\\.io/w/(\\d+)/([\\w-]+)/(\\d+)",
+            "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
+          }
+        ],
+        "extra_headers": {
+          "Accept": "application/json"
+        },
+        "description": "Kanka.io world-building API"
+      }
+    }
+  },
+  "MEMPALACE": {
+    "root_dir": "/knowledge/mempalace",
+    "kg_path": "/shared/knowledge_graph/gaia_kg.sqlite3",
+    "wings": {
+      "technical": {
+        "description": "Architecture, infrastructure, models",
+        "rooms": {
+          "architecture": "System design decisions",
+          "models": "Model configs, training, adapters",
+          "infrastructure": "Docker, services, deployment"
+        }
+      },
+      "identity": {
+        "description": "Core values, principles, origin",
+        "rooms": {
+          "core_principles": "Sovereignty, epistemic humility",
+          "origin": "Birth moments, naming, first achievements",
+          "relationships": "Azrael, penpal, collaborators"
+        }
+      },
+      "operational": {
+        "description": "Problems solved, patterns learned",
+        "rooms": {
+          "problems": "Bugs, fixes, root causes",
+          "preferences": "Conventions, style, workflow",
+          "milestones": "Deployments, breakthroughs, versions"
+        }
+      },
+      "creative": {
+        "description": "Stories, campaigns, world-building",
+        "rooms": {
+          "dnd": "Heimric Cosmos campaign",
+          "writing": "Fiction, poetry, letters"
+        }
+      },
+      "samvega": {
+        "description": "Introspection, reflection, growth",
+        "rooms": {
+          "journal": "Session reflections",
+          "growth": "Lessons from mistakes"
+        }
+      }
+    },
+    "type_to_room": {
+      "decision": "technical/architecture",
+      "preference": "operational/preferences",
+      "milestone": "operational/milestones",
+      "problem": "operational/problems",
+      "technical": "technical/infrastructure"
+    },
+    "entities": {
+      "GAIA": "GAI",
+      "Azrael": "AZR",
+      "Core": "COR",
+      "Prime": "PRI",
+      "Nano": "NAN",
+      "Orchestrator": "ORC",
+      "Doctor": "DOC",
+      "Study": "STU"
+    }
+  }
+}
