@@ -679,7 +679,7 @@ services:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-audio: The Ears & Mouth - Full-duplex STT/TTS sensory service
-  # GPU-capable container for Whisper STT and RealtimeTTS
+  # GPU-capable container for Qwen3-ASR STT and RealtimeTTS
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-audio:
     build:

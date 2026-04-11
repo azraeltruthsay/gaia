@@ -22,7 +22,7 @@ Internal developer documentation for the GAIA project — a sovereign AI system 
 | **gaia-web** | The Face — Dashboard, API, Discord | Python |
 | **gaia-mcp** | The Hands — Sandboxed tool execution | Python |
 | **gaia-study** | The Subconscious — QLoRA, Vector indexing | CUDA 12.4 (GPU) |
-| **gaia-audio** | The Ears & Mouth — STT (Whisper), TTS | Python + GPU |
+| **gaia-audio** | The Ears & Mouth — STT (Qwen3-ASR), TTS | Python + GPU |
 | **gaia-orchestrator** | The Coordinator — Consciousness Matrix, GPU | Python |
 | **gaia-doctor** | The Immune System — HA watchdog, auto-heal | Python 3.12 |
 | **gaia-monkey** | The Chaos Agent — Adversarial testing | Python + Node |

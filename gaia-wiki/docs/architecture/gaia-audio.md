@@ -1,6 +1,6 @@
 # gaia-audio — The Ears & Mouth
 
-**Port:** 8080 | **GPU:** Yes (shared) | **Dependencies:** Whisper, Coqui XTTS v2
+**Port:** 8080 | **GPU:** Yes (shared) | **Dependencies:** Qwen3-ASR-0.6B, Coqui XTTS v2
 
 gaia-audio provides GAIA with auditory input (STT), text refinement (Nano-Refiner), and vocal output (TTS).
 

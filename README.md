@@ -82,7 +82,7 @@ GAIA operates on a three-state consciousness model, allowing different parts of 
                                          |
                           [gaia-orchestrator]       Coordinator — GPU scheduling, Consciousness Matrix
 
-              [gaia-audio]               Ears & Mouth — STT (Whisper), TTS (Coqui)
+              [gaia-audio]               Ears & Mouth — STT (Qwen3-ASR), TTS (Coqui)
               [gaia-doctor]              Immune System — HA watchdog, cognitive battery
               [gaia-monkey]              Chaos Agent — adversarial testing, serenity
               [gaia-translate]           Tongue — multi-language translation (LibreTranslate)
@@ -99,7 +99,7 @@ GAIA operates on a three-state consciousness model, allowing different parts of 
 | **gaia-web** | Discord bot, HTTP API, voice manager, dashboard | 6414 | Python 3.11 |
 | **gaia-mcp** | Tool registry (file I/O, shell, knowledge, study gateway) | 8765 | Python 3.11 |
 | **gaia-study** | Vector index (sole writer), QLoRA adapter training | 8766 | CUDA 12.4 |
-| **gaia-audio** | STT (Whisper), TTS (Coqui), voice processing | 8080 | Python 3.11 + GPU |
+| **gaia-audio** | STT (Qwen3-ASR), TTS (Coqui), voice processing | 8080 | Python 3.11 + GPU |
 | **gaia-doctor** | HA watchdog, cognitive test battery, auto-heal | 6419 | Python 3.12 |
 | **gaia-monkey** | Adversarial chaos engine, serenity/meditation | 6420 | Python 3.12 + Node |
 | **gaia-wiki** | Internal MkDocs Material documentation server | 8080* | Python 3.11 |
@@ -135,7 +135,7 @@ Nano classifies queries (SIMPLE/COMPLEX) -> Core handles intent and tool selecti
 GAIA runs a Discord bot (discord.py) with text and voice support.
 
 - **Text**: DM/Mention support, newline-aware splitting, sleep-aware queuing.
-- **Voice**: Whisper STT -> Core Cognition -> Coqui TTS. Join via `!call`, leave via `!hangup`.
+- **Voice**: Qwen3-ASR STT -> Core Cognition -> Coqui TTS. Join via `!call`, leave via `!hangup`.
 
 ## GPU Handoff
 

@@ -1,5 +1,5 @@
 # gaia-audio: The Ears & Mouth - Half-duplex STT/TTS sensory service
-# GPU-capable container for Whisper STT and RealtimeTTS
+# GPU-capable container for Qwen3-ASR STT and RealtimeTTS
 
 FROM python:3.11-slim AS base
 
