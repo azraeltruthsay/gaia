@@ -59,7 +59,9 @@ RUN pip install --no-cache-dir \
     bitsandbytes \
     optimum-quanto \
     optimum \
-    && pip install --no-cache-dir --no-build-isolation gptqmodel
+    && pip install --no-cache-dir "setuptools==77.0.3" \
+    && pip install --no-cache-dir --no-build-isolation gptqmodel==5.7.0 \
+    && pip install --no-cache-dir --upgrade setuptools
 
 # Clean up build deps (no longer needed after gptqmodel install)
 RUN apt-get purge -y build-essential libpcre2-dev pkg-config \
