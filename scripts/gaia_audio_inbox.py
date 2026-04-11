@@ -57,12 +57,20 @@ from gaia_transcribe import (
 # Configuration
 # ---------------------------------------------------------------------------
 
+import base64
+import hashlib
+
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac", ".wma", ".opus"}
 CONTROL_POLL_INTERVAL = 2   # seconds between control-file checks
 TRANSCRIPT_MAX_CHARS = 30000  # truncate for review prompt
 
 DEFAULT_AUDIO_URL = os.getenv("GAIA_AUDIO_URL", "http://localhost:8080")
 DEFAULT_CORE_URL = os.getenv("GAIA_CORE_URL", "http://localhost:6415")
+
+# Native multimodal: skip STT middleman, send raw audio to Core (Phase 6b)
+NATIVE_AUDIO_ENABLED = os.getenv("GAIA_NATIVE_AUDIO", "").lower() in ("1", "true", "yes")
+# Max audio file size for base64 inline delivery (10MB)
+NATIVE_AUDIO_MAX_BYTES = int(os.getenv("GAIA_NATIVE_AUDIO_MAX_BYTES", 10 * 1024 * 1024))
 
 CHUNK_DURATION = 60         # seconds per transcription chunk
 CHUNK_OVERLAP = 2           # seconds overlap between chunks
@@ -245,6 +253,153 @@ def _build_cognition_packet(
         },
         "status": {"finalized": False, "state": "initialized", "next_steps": []},
         "tool_routing": {"ENABLED": False}, # Do not seek tools for the review itself
+    }
+
+
+def _build_native_audio_packet(
+    filename: str,
+    audio_path: str,
+    duration_str: str,
+) -> dict:
+    """Build a CognitionPacket with raw audio payload for native multimodal processing.
+
+    Instead of pre-transcribing via Qwen3-ASR, this packages the raw audio
+    bytes as a base64-encoded DataField. The Core model (Gemma 4 E4B) receives
+    the audio natively and performs transcription, diarization, and emotional
+    analysis in a single pass.
+    """
+    stem = Path(filename).stem
+    session_id = f"audio_inbox_{stem}"
+    packet_id = f"pkt-inbox-{uuid.uuid4().hex[:12]}"
+    now = datetime.now().isoformat()
+
+    # Read and encode audio
+    audio_bytes = Path(audio_path).read_bytes()
+    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+    content_hash = hashlib.sha256(audio_bytes).hexdigest()[:16]
+    file_size = len(audio_bytes)
+
+    # Detect MIME type from extension
+    ext = Path(filename).suffix.lower()
+    mime_map = {
+        ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
+        ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+        ".opus": "audio/opus", ".wma": "audio/x-ms-wma",
+    }
+    mime_type = mime_map.get(ext, "audio/wav")
+
+    prompt = (
+        f"[AUDIO_PAYLOAD]\n"
+        f"You received a new audio transmission in your inbox "
+        f"(File: {filename}, Duration: {duration_str}, Size: {file_size} bytes).\n\n"
+        f"The raw audio is attached as 'audio_payload' in the data fields.\n\n"
+        f"INSTRUCTIONS:\n"
+        f"1. Transcribe this audio with full speaker diarization.\n"
+        f"2. Identify distinct speakers (Speaker A, Speaker B, etc.) using acoustic features.\n"
+        f"3. Note the emotional tone of each speaker (calm, excited, hesitant, etc.).\n"
+        f"4. Summarize the key ideas, arguments, and themes discussed.\n"
+        f"5. Flag anything particularly interesting or worth remembering.\n\n"
+        f"Share your honest, thoughtful analysis."
+    )
+
+    return {
+        "version": "0.3",
+        "header": {
+            "datetime": now,
+            "session_id": session_id,
+            "packet_id": packet_id,
+            "sub_id": "audio_inbox_native",
+            "persona": {
+                "identity_id": "audio_inbox",
+                "persona_id": "audio_reviewer",
+                "role": "Default",
+                "tone_hint": "thoughtful",
+            },
+            "origin": "user",
+            "routing": {
+                "target_engine": "Core",
+                "priority": 5,
+            },
+            "model": {
+                "name": "auto",
+                "provider": "auto",
+                "context_window_tokens": 32000,
+            },
+            "output_routing": {
+                "primary": {
+                    "destination": "web",
+                    "channel_id": session_id,
+                    "user_id": "audio_inbox",
+                    "metadata": {
+                        "source": "audio_inbox_native",
+                        "original_file": filename,
+                        "duration": duration_str,
+                        "native_audio": True,
+                    },
+                },
+                "source_destination": "web",
+                "addressed_to_gaia": True,
+            },
+            "operational_status": {"status": "initialized"},
+        },
+        "intent": {
+            "user_intent": "audio_inbox_review",
+            "system_task": "GenerateDraft",
+            "confidence": 0.0,
+        },
+        "context": {
+            "session_history_ref": {"type": "audio_inbox", "value": session_id},
+            "cheatsheets": [],
+            "constraints": {
+                "max_tokens": 4096,
+                "time_budget_ms": 180000,  # 3min — native audio processing takes longer
+                "safety_mode": "standard",
+            },
+        },
+        "content": {
+            "original_prompt": prompt,
+            "data_fields": [
+                {
+                    "key": "audio_payload",
+                    "value": audio_b64,
+                    "type": "audio_base64",
+                    "source": "audio_inbox",
+                },
+                {
+                    "key": "audio_metadata",
+                    "value": {
+                        "filename": filename,
+                        "mime_type": mime_type,
+                        "duration": duration_str,
+                        "size_bytes": file_size,
+                        "content_hash": content_hash,
+                        "encoding": "base64",
+                    },
+                    "type": "metadata",
+                    "source": "audio_inbox",
+                },
+            ],
+            "attachments": [
+                {
+                    "name": filename,
+                    "mime": mime_type,
+                    "content_hash": content_hash,
+                    "bytes": file_size,
+                    "location": audio_path,
+                },
+            ],
+        },
+        "reasoning": {},
+        "response": {"candidate": "", "confidence": 0.0, "stream_proposal": False},
+        "governance": {
+            "safety": {"execution_allowed": False, "dry_run": False},
+        },
+        "metrics": {
+            "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "latency_ms": 0,
+        },
+        "status": {"finalized": False, "state": "initialized", "next_steps": []},
+        "tool_routing": {"ENABLED": False},
     }
 
 
@@ -456,7 +611,15 @@ class AudioInboxDaemon:
         return final_refined
 
     def _process_file(self, source: Path):
-        """Full pipeline: move → transcribe → refine → build packet → POST → sidecars."""
+        """Full pipeline with dual-path routing.
+
+        Native path (GAIA_NATIVE_AUDIO=1):
+          move → encode base64 → build native packet → POST to Core
+          Core (Gemma 4 E4B) handles transcription + diarization + analysis
+
+        Legacy path (default):
+          move → transcribe via gaia-audio → refine via Nano → build packet → POST
+        """
         filename = source.name
         stem = source.stem
         self._current_file = filename
@@ -467,8 +630,38 @@ class AudioInboxDaemon:
         source.rename(processing_path)
 
         try:
-            # 1. Transcribe
-            logger.info("Transcribing %s...", filename)
+            # Get duration for both paths
+            dur = get_audio_duration(str(processing_path))
+            mins, secs = divmod(int(dur), 60)
+            duration_str = f"{mins}m {secs}s"
+
+            file_size = processing_path.stat().st_size
+
+            # ── Native Multimodal Path (Phase 6b) ──
+            if NATIVE_AUDIO_ENABLED and file_size <= NATIVE_AUDIO_MAX_BYTES:
+                logger.info("Native audio path: sending raw audio to Core (%d bytes, %s)",
+                            file_size, duration_str)
+
+                packet = _build_native_audio_packet(
+                    filename, str(processing_path), duration_str
+                )
+
+                review_text = self._post_packet_to_core(packet, filename)
+                transcript = f"[Native audio — transcription performed by Core model]\n{review_text}"
+
+                self._push_autonomous_message(filename, duration_str, review_text)
+                self._move_to_done(
+                    processing_path, stem, transcript,
+                    stats={"duration_seconds": dur, "native_audio": True},
+                    review=review_text,
+                )
+                self._files_processed += 1
+                logger.info("Done (native path) %s (total: %d files)", filename, self._files_processed)
+                return
+
+            # ── Legacy STT Path ──
+            logger.info("Legacy path: transcribing via gaia-audio STT")
+
             transcript, stats = transcribe_file(
                 path=str(processing_path),
                 chunk_duration=CHUNK_DURATION,
@@ -484,48 +677,20 @@ class AudioInboxDaemon:
                 self._move_to_done(processing_path, stem, transcript="", stats=stats, review="[No speech detected]")
                 return
 
-            # 2. Refine (Semantic Diarization)
+            # Refine (Semantic Diarization)
             transcript = self._refine_transcript(transcript, stats)
 
-            # 3. Build duration string
-            dur = stats.get("duration_seconds", 0)
-            mins, secs = divmod(int(dur), 60)
-            duration_str = f"{mins}m {secs}s"
-
-            # 4. Build CognitionPacket and POST to gaia-core
+            # Build CognitionPacket and POST to gaia-core
             packet = _build_cognition_packet(filename, duration_str, transcript, stats)
+            review_text = self._post_packet_to_core(packet, filename)
 
-            logger.info("Sending review packet to gaia-core (%d char transcript)...", len(transcript))
-            try:
-                resp = requests.post(
-                    f"{self.core_url}/process_packet",
-                    json=packet,
-                    timeout=300,
-                )
-                if resp.status_code == 200:
-                    review_data = resp.json()
-                    review_text = review_data.get("response", {}).get("candidate", "")
-                    if not review_text:
-                        review_text = json.dumps(review_data, indent=2)
-                    logger.info("Review received (%d chars)", len(review_text))
-                else:
-                    review_text = f"[gaia-core returned {resp.status_code}: {resp.text[:500]}]"
-                    logger.warning("gaia-core returned %d", resp.status_code)
-            except Exception as e:
-                review_text = f"[gaia-core request failed: {e}]"
-                logger.error("Failed to send packet to gaia-core: %s", e)
-
-            # 4. Push review to dashboard chat (autonomous_messages.jsonl)
             self._push_autonomous_message(filename, duration_str, review_text)
-
-            # 5. Write sidecars and move to done/
             self._move_to_done(processing_path, stem, transcript, stats, review_text)
             self._files_processed += 1
-            logger.info("Done processing %s (total: %d files)", filename, self._files_processed)
+            logger.info("Done (legacy path) %s (total: %d files)", filename, self._files_processed)
 
         except Exception as e:
             logger.error("Failed to process %s: %s", filename, e, exc_info=True)
-            # Move back to new/ for retry on next cycle
             try:
                 processing_path.rename(self.new_dir / filename)
                 logger.info("Moved %s back to new/ for retry", filename)
@@ -534,6 +699,28 @@ class AudioInboxDaemon:
 
         finally:
             self._current_file = None
+
+    def _post_packet_to_core(self, packet: dict, filename: str) -> str:
+        """POST a CognitionPacket to gaia-core and return the review text."""
+        try:
+            resp = requests.post(
+                f"{self.core_url}/process_packet",
+                json=packet,
+                timeout=300,
+            )
+            if resp.status_code == 200:
+                review_data = resp.json()
+                review_text = review_data.get("response", {}).get("candidate", "")
+                if not review_text:
+                    review_text = json.dumps(review_data, indent=2)
+                logger.info("Review received (%d chars)", len(review_text))
+                return review_text
+            else:
+                logger.warning("gaia-core returned %d", resp.status_code)
+                return f"[gaia-core returned {resp.status_code}: {resp.text[:500]}]"
+        except Exception as e:
+            logger.error("Failed to send packet to gaia-core: %s", e)
+            return f"[gaia-core request failed: {e}]"
 
     def _move_to_done(
         self,
