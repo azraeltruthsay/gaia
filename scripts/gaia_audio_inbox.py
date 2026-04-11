@@ -67,8 +67,9 @@ TRANSCRIPT_MAX_CHARS = 30000  # truncate for review prompt
 DEFAULT_AUDIO_URL = os.getenv("GAIA_AUDIO_URL", "http://localhost:8080")
 DEFAULT_CORE_URL = os.getenv("GAIA_CORE_URL", "http://localhost:6415")
 
-# Native multimodal: skip STT middleman, send raw audio to Core (Phase 6b)
-NATIVE_AUDIO_ENABLED = os.getenv("GAIA_NATIVE_AUDIO", "").lower() in ("1", "true", "yes")
+# Native multimodal is now the DEFAULT (Phase 6b).
+# Set GAIA_LEGACY_STT=1 to force the old Qwen3-ASR transcribe/refine path.
+LEGACY_STT_ENABLED = os.getenv("GAIA_LEGACY_STT", "").lower() in ("1", "true", "yes")
 # Max audio file size for base64 inline delivery (10MB)
 NATIVE_AUDIO_MAX_BYTES = int(os.getenv("GAIA_NATIVE_AUDIO_MAX_BYTES", 10 * 1024 * 1024))
 
@@ -256,54 +257,63 @@ def _build_cognition_packet(
     }
 
 
+_MIME_MAP = {
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
+    ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".opus": "audio/opus", ".wma": "audio/x-ms-wma",
+}
+
+# Multimodal diarization prompt (Phase 6b)
+_MULTIMODAL_AUDIO_PROMPT = """\
+[AUDIO_PAYLOAD]
+You received a new audio transmission in your inbox \
+(File: {filename}, Duration: {duration_str}, Size: {file_size} bytes).
+
+The raw audio is attached in content.audio_payloads[0] as base64.
+
+INSTRUCTIONS:
+1. Acoustically and semantically diarize the audio input. Label speakers \
+by voice print and context (Speaker A, Speaker B, etc.).
+2. Transcribe every speaker turn with timestamps where possible.
+3. Note the emotional tone of each speaker (calm, excited, hesitant, urgent, sarcastic, etc.).
+4. Summarize the key ideas, arguments, and themes discussed.
+5. Flag anything particularly interesting, surprising, or worth remembering.
+
+Share your honest, thoughtful analysis."""
+
+
 def _build_native_audio_packet(
     filename: str,
     audio_path: str,
     duration_str: str,
+    duration_seconds: float = 0.0,
 ) -> dict:
-    """Build a CognitionPacket with raw audio payload for native multimodal processing.
+    """Build a v0.5 CognitionPacket with AudioPayload for native multimodal processing.
 
-    Instead of pre-transcribing via Qwen3-ASR, this packages the raw audio
-    bytes as a base64-encoded DataField. The Core model (Gemma 4 E4B) receives
-    the audio natively and performs transcription, diarization, and emotional
-    analysis in a single pass.
+    Uses the typed AudioPayload protocol field (content.audio_payloads)
+    instead of ad-hoc DataFields. The Core model (Gemma 4 E4B) receives
+    the audio natively and performs transcription + acoustic diarization +
+    emotional analysis in a single pass.
     """
     stem = Path(filename).stem
     session_id = f"audio_inbox_{stem}"
     packet_id = f"pkt-inbox-{uuid.uuid4().hex[:12]}"
     now = datetime.now().isoformat()
 
-    # Read and encode audio
     audio_bytes = Path(audio_path).read_bytes()
     audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
     content_hash = hashlib.sha256(audio_bytes).hexdigest()[:16]
     file_size = len(audio_bytes)
 
-    # Detect MIME type from extension
     ext = Path(filename).suffix.lower()
-    mime_map = {
-        ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
-        ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
-        ".opus": "audio/opus", ".wma": "audio/x-ms-wma",
-    }
-    mime_type = mime_map.get(ext, "audio/wav")
+    mime_type = _MIME_MAP.get(ext, "audio/wav")
 
-    prompt = (
-        f"[AUDIO_PAYLOAD]\n"
-        f"You received a new audio transmission in your inbox "
-        f"(File: {filename}, Duration: {duration_str}, Size: {file_size} bytes).\n\n"
-        f"The raw audio is attached as 'audio_payload' in the data fields.\n\n"
-        f"INSTRUCTIONS:\n"
-        f"1. Transcribe this audio with full speaker diarization.\n"
-        f"2. Identify distinct speakers (Speaker A, Speaker B, etc.) using acoustic features.\n"
-        f"3. Note the emotional tone of each speaker (calm, excited, hesitant, etc.).\n"
-        f"4. Summarize the key ideas, arguments, and themes discussed.\n"
-        f"5. Flag anything particularly interesting or worth remembering.\n\n"
-        f"Share your honest, thoughtful analysis."
+    prompt = _MULTIMODAL_AUDIO_PROMPT.format(
+        filename=filename, duration_str=duration_str, file_size=file_size,
     )
 
     return {
-        "version": "0.3",
+        "version": "v0.5",
         "header": {
             "datetime": now,
             "session_id": session_id,
@@ -352,42 +362,26 @@ def _build_native_audio_packet(
             "cheatsheets": [],
             "constraints": {
                 "max_tokens": 4096,
-                "time_budget_ms": 180000,  # 3min — native audio processing takes longer
+                "time_budget_ms": 180000,
                 "safety_mode": "standard",
             },
         },
         "content": {
             "original_prompt": prompt,
-            "data_fields": [
+            "data_fields": [],
+            "audio_payloads": [
                 {
-                    "key": "audio_payload",
-                    "value": audio_b64,
-                    "type": "audio_base64",
-                    "source": "audio_inbox",
-                },
-                {
-                    "key": "audio_metadata",
-                    "value": {
-                        "filename": filename,
-                        "mime_type": mime_type,
-                        "duration": duration_str,
-                        "size_bytes": file_size,
-                        "content_hash": content_hash,
-                        "encoding": "base64",
-                    },
-                    "type": "metadata",
-                    "source": "audio_inbox",
-                },
-            ],
-            "attachments": [
-                {
-                    "name": filename,
-                    "mime": mime_type,
+                    "data_base64": audio_b64,
+                    "mime_type": mime_type,
+                    "duration_seconds": duration_seconds,
+                    "sample_rate": 16000,
+                    "channels": 1,
                     "content_hash": content_hash,
-                    "bytes": file_size,
-                    "location": audio_path,
+                    "filename": filename,
+                    "encoding": "base64",
                 },
             ],
+            "attachments": [],
         },
         "reasoning": {},
         "response": {"candidate": "", "confidence": 0.0, "stream_proposal": False},
@@ -611,14 +605,14 @@ class AudioInboxDaemon:
         return final_refined
 
     def _process_file(self, source: Path):
-        """Full pipeline with dual-path routing.
+        """Full pipeline — native multimodal by default, legacy STT as fallback.
 
-        Native path (GAIA_NATIVE_AUDIO=1):
-          move → encode base64 → build native packet → POST to Core
-          Core (Gemma 4 E4B) handles transcription + diarization + analysis
+        Native path (default):
+          move → encode base64 → AudioPayload in v0.5 packet → POST to Core
+          Core (Gemma 4 E4B) performs native transcription + acoustic diarization
 
-        Legacy path (default):
-          move → transcribe via gaia-audio → refine via Nano → build packet → POST
+        Legacy path (GAIA_LEGACY_STT=1 or file too large):
+          move → /transcribe via gaia-audio → /refine via Nano → text packet → POST
         """
         filename = source.name
         stem = source.stem
@@ -637,17 +631,18 @@ class AudioInboxDaemon:
 
             file_size = processing_path.stat().st_size
 
-            # ── Native Multimodal Path (Phase 6b) ──
-            if NATIVE_AUDIO_ENABLED and file_size <= NATIVE_AUDIO_MAX_BYTES:
+            # ── Native Multimodal Path (default, Phase 6b) ──
+            if not LEGACY_STT_ENABLED and file_size <= NATIVE_AUDIO_MAX_BYTES:
                 logger.info("Native audio path: sending raw audio to Core (%d bytes, %s)",
                             file_size, duration_str)
 
                 packet = _build_native_audio_packet(
-                    filename, str(processing_path), duration_str
+                    filename, str(processing_path), duration_str,
+                    duration_seconds=dur,
                 )
 
                 review_text = self._post_packet_to_core(packet, filename)
-                transcript = f"[Native audio — transcription performed by Core model]\n{review_text}"
+                transcript = f"[Native audio — transcription + diarization by Core model]\n{review_text}"
 
                 self._push_autonomous_message(filename, duration_str, review_text)
                 self._move_to_done(
@@ -659,8 +654,9 @@ class AudioInboxDaemon:
                 logger.info("Done (native path) %s (total: %d files)", filename, self._files_processed)
                 return
 
-            # ── Legacy STT Path ──
-            logger.info("Legacy path: transcribing via gaia-audio STT")
+            # ── Legacy STT Path (fallback) ──
+            logger.info("Legacy STT path: transcribing via gaia-audio (%s)",
+                        "GAIA_LEGACY_STT=1" if LEGACY_STT_ENABLED else f"file too large ({file_size} bytes)")
 
             transcript, stats = transcribe_file(
                 path=str(processing_path),
@@ -677,10 +673,10 @@ class AudioInboxDaemon:
                 self._move_to_done(processing_path, stem, transcript="", stats=stats, review="[No speech detected]")
                 return
 
-            # Refine (Semantic Diarization)
+            # Refine (Semantic Diarization via Nano)
             transcript = self._refine_transcript(transcript, stats)
 
-            # Build CognitionPacket and POST to gaia-core
+            # Build legacy text-only CognitionPacket and POST to gaia-core
             packet = _build_cognition_packet(filename, duration_str, transcript, stats)
             review_text = self._post_packet_to_core(packet, filename)
 

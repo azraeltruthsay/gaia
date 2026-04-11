@@ -1328,6 +1328,8 @@ class AgentCore:
     
             # --- Cascade Routing (Phase 5-C: NeuralRouter) ---
             # Unified routing: embed + weighted score + Nano tiebreak in one call.
+            # v0.5: audio_payloads force Core routing for native multimodal.
+            _has_audio = bool(getattr(getattr(packet, 'content', None), 'audio_payloads', None))
             try:
                 force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
                 is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
@@ -1341,6 +1343,7 @@ class AgentCore:
                         is_factual=is_factual,
                         is_trivial=is_trivial,
                         probe_context=_probe_context,
+                        has_audio=_has_audio,
                     )
                     logger.info(
                         "[CASCADE] NeuralRouter: target=%s intent=%s score=%.3f source=%s",

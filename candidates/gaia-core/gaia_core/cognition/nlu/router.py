@@ -162,6 +162,7 @@ class NeuralRouter:
         is_factual: bool = False,
         is_trivial: bool = False,
         probe_context: str = "",
+        has_audio: bool = False,
     ) -> RouterResult:
         """Route a user input to the appropriate engine and intent.
 
@@ -171,10 +172,24 @@ class NeuralRouter:
             is_factual: Pre-classified as a factual query.
             is_trivial: Pre-classified as trivial.
             probe_context: Semantic probe hint for heuristic fallback.
+            has_audio: True if the packet contains audio_payloads (v0.5).
 
         Returns:
             RouterResult with target engine, intent, score, and Plan.
         """
+        # ── Stage 0: Multimodal Audio Override (v0.5) ──
+        # Packets with audio_payloads ALWAYS route to Core — only Core/Prime
+        # tiers have native audio encoders. No text-based routing needed.
+        if has_audio:
+            return self._build_result(
+                target=TargetEngine.CORE,
+                intent="audio_inbox_review",
+                score=0.6,
+                confidence=1.0,
+                source="multimodal_audio",
+                escalation_reason="audio_payloads present — native multimodal",
+            )
+
         # Truncate excessively long inputs (pasted content)
         original_text = text
         if len(text) > 2000:

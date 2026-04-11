@@ -520,6 +520,35 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         logger.debug("Could not extract loop_diagnosis from packet.content.data_fields")
 
+    # ── Native Audio Perception (Phase 6b) ────────────────────────────
+    # When audio_payloads are present, inject a multimodal directive
+    # telling the model to perform acoustic diarization and analysis.
+    try:
+        audio_payloads = getattr(packet.content, 'audio_payloads', None) or []
+        if audio_payloads:
+            ap = audio_payloads[0]  # Primary audio payload
+            _dur = getattr(ap, 'duration_seconds', 0) or 0
+            _mime = getattr(ap, 'mime_type', 'audio/wav')
+            _fname = getattr(ap, 'filename', 'audio')
+            system_content_parts.append(
+                "[NATIVE AUDIO PERCEPTION]\n"
+                f"This turn includes a raw audio payload ({_fname}, {_mime}, {_dur:.1f}s).\n"
+                "You have direct access to the audio waveform via your audio encoder.\n\n"
+                "INSTRUCTIONS:\n"
+                "- Acoustically and semantically diarize the audio input.\n"
+                "- Label speakers by voice print and context (Speaker A, Speaker B, etc.).\n"
+                "- Transcribe each speaker's turns with timestamps.\n"
+                "- Note emotional tone per speaker (calm, excited, hesitant, urgent, sarcastic).\n"
+                "- Provide a summary of the key themes and arguments.\n"
+                "[/NATIVE AUDIO PERCEPTION]"
+            )
+            if len(audio_payloads) > 1:
+                system_content_parts.append(
+                    f"NOTE: {len(audio_payloads)} audio payloads attached. Process the first one primarily."
+                )
+    except Exception:
+        logger.debug("Could not process audio_payloads for prompt injection")
+
     # ── Context-aware directive compression ────────────────────────────
     # Detect if we're targeting a small context model (≤8K).
     # If so, use condensed directives (~300 tokens) instead of verbose (~1350).
