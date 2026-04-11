@@ -312,6 +312,25 @@ class SleepTaskScheduler:
             handler=self._run_penpal_review,
         ))
 
+        # DocSentinel — living documentation (Phase 6)
+        self.register_task(SleepTask(
+            task_id="doc_sentinel_glossary",
+            task_type="DOC_SENTINEL",
+            priority=6,
+            interruptible=True,
+            estimated_duration_seconds=15,
+            handler=self._run_doc_sentinel_glossary,
+        ))
+
+        self.register_task(SleepTask(
+            task_id="doc_sentinel_catalog",
+            task_type="DOC_SENTINEL",
+            priority=6,
+            interruptible=True,
+            estimated_duration_seconds=10,
+            handler=self._run_doc_sentinel_catalog,
+        ))
+
         self.register_task(SleepTask(
             task_id="curriculum_training",
             task_type="CURRICULUM_SYNC",
@@ -2640,3 +2659,78 @@ class SleepTaskScheduler:
                     )
         else:
             logger.info("Resilience drill complete (no fix attempted this cycle)")
+
+    # ------------------------------------------------------------------
+    # DocSentinel — Living Documentation (Phase 6)
+    # ------------------------------------------------------------------
+
+    def _run_doc_sentinel_glossary(self, **kwargs) -> None:
+        """Mine proposals and council chamber for technical terms.
+
+        Updates auto/glossary.md in the wiki auto-generated directory.
+        Pure file I/O + regex — no LLM inference required.
+        """
+        try:
+            from gaia_common.utils.doc_sentinel import DocSentinel
+            sentinel = DocSentinel()
+            path = sentinel.mine_glossary()
+            logger.info("DocSentinel glossary: updated %s", path)
+        except Exception:
+            logger.error("DocSentinel glossary mining failed", exc_info=True)
+
+    def _run_doc_sentinel_catalog(self, **kwargs) -> None:
+        """Fetch capability list from gaia-mcp and generate catalog.
+
+        Calls the MCP JSON-RPC list_tools_full endpoint, then generates
+        auto/capabilities.md from the result.
+        """
+        try:
+            from gaia_common.utils.doc_sentinel import DocSentinel
+
+            # Fetch limb list from gaia-mcp via JSON-RPC
+            limbs = self._fetch_capability_list()
+
+            sentinel = DocSentinel()
+            path = sentinel.generate_capability_catalog(limbs)
+            logger.info("DocSentinel catalog: updated %s (%d limbs)", path, len(limbs or []))
+        except Exception:
+            logger.error("DocSentinel catalog generation failed", exc_info=True)
+
+    def _fetch_capability_list(self) -> list:
+        """Fetch the list of registered capabilities from gaia-mcp."""
+        import json
+        from urllib.request import Request, urlopen
+
+        mcp_endpoint = os.environ.get("MCP_ENDPOINT", "http://gaia-mcp:8765/jsonrpc")
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "list_tools_full",
+            "params": {},
+            "id": "doc_sentinel_catalog",
+        }).encode()
+        req = Request(mcp_endpoint, data=payload, headers={"Content-Type": "application/json"})
+
+        with urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+
+        # list_tools_full returns domain schemas — flatten to limb list
+        domains = result.get("result", result)
+        if isinstance(domains, dict):
+            limbs = []
+            for domain, domain_data in domains.items():
+                if not isinstance(domain_data, dict):
+                    continue
+                actions = domain_data.get("actions", {})
+                for action_name, action_cfg in actions.items():
+                    sensitive = action_cfg.get("sensitive", False)
+                    desc = action_cfg.get("description", "")
+                    limbs.append({
+                        "domain": domain,
+                        "action": action_name,
+                        "source": "static",
+                        "sensitive": sensitive,
+                        "legacy_name": action_cfg.get("legacy_name", ""),
+                        "description": desc[:100] if isinstance(desc, str) else "",
+                    })
+            return limbs
+        return []

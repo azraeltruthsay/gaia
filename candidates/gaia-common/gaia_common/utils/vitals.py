@@ -112,6 +112,8 @@ class GaiaVitals:
 
     def __init__(self, log_dir: str = "/logs"):
         self.log_dir = Path(log_dir)
+        self._last_status: Optional[str] = None
+        self._doc_sentinel = None
 
     # ── Public API ─────────────────────────────────────────────────────
 
@@ -160,7 +162,32 @@ class GaiaVitals:
             "Sovereign Health: %s (irritation=%.1f, took %dms)",
             sovereign_status, irritation, elapsed_ms,
         )
+
+        # DocSentinel: auto-record incident on state transition
+        self._record_transition_if_needed(report)
+
         return report
+
+    def _record_transition_if_needed(self, report: Dict[str, Any]) -> None:
+        """Fire DocSentinel incident report on sovereign status change."""
+        current = report.get("sovereign_status", "STABLE")
+        if self._last_status is not None and current != self._last_status:
+            # Only record escalations (not recovery-to-stable)
+            if current != "STABLE":
+                try:
+                    if self._doc_sentinel is None:
+                        from gaia_common.utils.doc_sentinel import DocSentinel
+                        self._doc_sentinel = DocSentinel()
+                    self._doc_sentinel.record_event(
+                        status=current,
+                        reason=f"Sovereign status transition: {self._last_status} -> {current}",
+                        previous_status=self._last_status,
+                        vitals_snapshot=report,
+                    )
+                    logger.info("DocSentinel: recorded transition %s -> %s", self._last_status, current)
+                except Exception:
+                    logger.debug("DocSentinel: failed to record transition", exc_info=True)
+        self._last_status = current
 
     def calculate_irritation_score(
         self,
