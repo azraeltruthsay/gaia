@@ -72,16 +72,13 @@ torch.set_grad_enabled(True)
 fmt = ChatFormatter(tokenizer)
 
 samples = []
+# Full persona curriculum
 with open("/curricula/gaia_persona_training.jsonl") as f:
     for line in f:
         samples.append(json.loads(line))
+# Full primary school curriculum (identity + tools + other)
 with open("/curricula/primary_school/train_v2_combined.json") as f:
-    for s in json.load(f):
-        out = s.get("output", "")
-        if "GAIA" in out or "sovereign" in out.lower() or "self-aware" in out.lower():
-            samples.append(s)
-            if len(samples) >= 60:
-                break
+    samples.extend(json.load(f))
 
 def format_sample(s):
     inst = s.get("instruction", "")
@@ -107,7 +104,7 @@ print(f"\n[4/5] Training (10 epochs, lr=1e-4, alpha=64, r=32)...")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-4, weight_decay=0.01)
 scaler = torch.amp.GradScaler("cuda")
-EPOCHS, GRAD_ACCUM, MAX_GRAD_NORM = 30, 4, 1.0
+EPOCHS, GRAD_ACCUM, MAX_GRAD_NORM = 15, 4, 1.0
 
 start = time.time()
 for epoch in range(EPOCHS):
