@@ -206,7 +206,7 @@ services:
       - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/nano}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
       # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
-      - NANO_GGUF_MODEL_PATH=/models/Qwen3.5-0.8B-GAIA-Nano-v6-Q8_0.gguf
+      - NANO_GGUF_MODEL_PATH=/models/Gemma4-E2B-GAIA-Nano-v1-Q8_0.gguf
       - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
       - NANO_PORT=8080
       - NANO_CTX_SIZE=2048
@@ -336,7 +336,7 @@ services:
       - GAIA_ENGINE_QUANTIZE=nf4
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092
-      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-4B-GAIA-Core-v4-Q4_K_M.gguf
+      - CORE_CPU_MODEL_PATH=/models/Gemma4-E4B-GAIA-Core-v1-Q4_K_M.gguf
       - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
       # KV cache persistence for embedded llama-server
