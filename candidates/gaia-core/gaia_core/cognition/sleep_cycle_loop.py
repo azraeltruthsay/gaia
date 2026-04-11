@@ -34,9 +34,19 @@ class SleepCycleLoop:
     POLL_INTERVAL_ASLEEP = 2   # seconds when ASLEEP — react fast to wake signals
     DISTRACTED_RECHECK_INTERVAL = 300  # 5 min between distracted rechecks
 
-    def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None, session_manager=None) -> None:
+    # Initiative Bridge thresholds
+    INITIATIVE_IDLE_THRESHOLD = 15  # minutes idle before initiative fires
+    INITIATIVE_COOLDOWN = 1800      # 30 minutes between initiative turns
+
+    def __init__(self, config, discord_connector=None, model_pool=None, agent_core=None, session_manager=None,
+                 turn_semaphore=None, event_loop=None) -> None:
         self.config = config
         self.idle_monitor = IdleMonitor()
+
+        # Initiative Bridge: semaphore prevents model contention with user turns
+        self._turn_semaphore = turn_semaphore  # asyncio.Semaphore from main.py
+        self._event_loop = event_loop          # asyncio event loop from main.py
+        self._last_initiative_time = 0.0       # monotonic timestamp of last initiative turn
 
         # Temporal grounding: shared timeline event log
         shared_dir = config.SHARED_DIR
@@ -163,6 +173,18 @@ class SleepCycleLoop:
     # ------------------------------------------------------------------
 
     def _handle_active(self, idle_minutes: float) -> None:
+        # ── Initiative Bridge (Phase 6) ──
+        # When idle for 15+ min but not yet drowsy, trigger an autonomous
+        # initiative turn. Respects cooldown and turn semaphore to prevent
+        # model contention with user requests.
+        if idle_minutes >= self.INITIATIVE_IDLE_THRESHOLD:
+            now = time.monotonic()
+            cooldown_ok = (now - self._last_initiative_time) >= self.INITIATIVE_COOLDOWN
+            not_drowsy_yet = not self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes)
+
+            if cooldown_ok and not_drowsy_yet and self.agent_core:
+                self._run_initiative_turn()
+
         if self.sleep_wake_manager.should_transition_to_drowsy(idle_minutes):
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
 
@@ -260,6 +282,82 @@ class SleepCycleLoop:
         if self._resource_monitor and self._resource_monitor.check_and_clear_distracted():
             self.sleep_wake_manager.exit_distracted()
             self._update_presence("sleeping...", sleeping=True)
+
+    # ------------------------------------------------------------------
+    # Initiative Bridge (Phase 6)
+    # ------------------------------------------------------------------
+
+    def _run_initiative_turn(self) -> None:
+        """Execute an autonomous initiative turn while ACTIVE.
+
+        Acquires the turn semaphore (via the event loop) to prevent
+        model contention with user requests. If the semaphore is
+        already held (user turn in progress), skips silently.
+        """
+        import asyncio
+
+        # Try to acquire the semaphore non-blocking
+        acquired = False
+        if self._turn_semaphore and self._event_loop:
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._try_acquire_semaphore(), self._event_loop
+                )
+                acquired = future.result(timeout=2)
+            except Exception:
+                logger.debug("Initiative: failed to acquire semaphore", exc_info=True)
+                return
+        else:
+            # No semaphore — proceed without contention guard (dev/test mode)
+            acquired = True
+
+        if not acquired:
+            logger.info("Initiative: semaphore held (user turn active) — skipping")
+            return
+
+        try:
+            self._update_presence("reflecting...")
+            logger.info("Initiative: starting autonomous turn")
+
+            try:
+                from gaia_core.cognition.initiative_engine import InitiativeEngine
+                engine = InitiativeEngine(self.config, agent_core=self.agent_core)
+                result = engine.execute_turn()
+
+                if result:
+                    logger.info("Initiative: turn complete — topic=%s status=%s",
+                                result.get("topic_id"), result.get("status"))
+                else:
+                    logger.info("Initiative: no topics to work on")
+
+            except Exception:
+                logger.error("Initiative: turn failed", exc_info=True)
+
+            self._last_initiative_time = time.monotonic()
+
+        finally:
+            # Release semaphore
+            if self._turn_semaphore and self._event_loop:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._release_semaphore(), self._event_loop
+                    ).result(timeout=2)
+                except Exception:
+                    logger.debug("Initiative: failed to release semaphore", exc_info=True)
+
+            # Restore presence
+            self._update_presence("ready")
+
+    async def _try_acquire_semaphore(self) -> bool:
+        """Non-blocking semaphore acquire (runs on the event loop)."""
+        if self._turn_semaphore.locked():
+            return False
+        await self._turn_semaphore.acquire()
+        return True
+
+    async def _release_semaphore(self) -> None:
+        """Release the turn semaphore (runs on the event loop)."""
+        self._turn_semaphore.release()
 
     # ------------------------------------------------------------------
     # GPU release / reclaim via orchestrator

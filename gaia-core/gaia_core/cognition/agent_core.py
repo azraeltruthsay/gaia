@@ -4353,6 +4353,25 @@ RESULT: COMPLEX (reason: <brief reason>)
         ]
         return any(m in t for m in markers)
 
+    def run_initiative_cycle(self) -> None:
+        """Execute an autonomous initiative turn (Phase 6 — Initiative Bridge).
+
+        Called by SleepTaskScheduler during sleep tasks or by SleepCycleLoop
+        during active idle. Uses InitiativeEngine to select a topic from the
+        cache and run a self-directed reflection through the cognitive pipeline.
+        """
+        try:
+            from gaia_core.cognition.initiative_engine import InitiativeEngine
+            engine = InitiativeEngine(self.config, agent_core=self)
+            result = engine.execute_turn()
+            if result:
+                self.logger.info("Initiative cycle complete: topic=%s status=%s",
+                                 result.get("topic_id"), result.get("status"))
+            else:
+                self.logger.info("Initiative cycle: no topics available")
+        except Exception:
+            self.logger.error("Initiative cycle failed", exc_info=True)
+
     def _should_use_slim_prompt(self, plan: Plan, user_input: str, selected_model_name: str = "") -> bool:
         """
         Decide whether to bypass the full plan/reflect pipeline and use a light prompt.

@@ -220,11 +220,18 @@ async def lifespan(app: FastAPI):
         from gaia_core.cognition.sleep_cycle_loop import SleepCycleLoop
         sleep_enabled = getattr(config, "SLEEP_ENABLED", True)
         if sleep_enabled:
+            # Pass turn semaphore and event loop for Initiative Bridge (Phase 6)
+            try:
+                _loop = asyncio.get_running_loop()
+            except RuntimeError:
+                _loop = None
             _sleep_loop = SleepCycleLoop(
                 config,
                 model_pool=_ai_manager.model_pool if _ai_manager else None,
                 agent_core=_agent_core,
                 session_manager=_ai_manager.session_manager if _ai_manager else None,
+                turn_semaphore=_turn_semaphore,
+                event_loop=_loop,
             )
             # Store sleep-specific instances on app.state
             app.state.sleep_wake_manager = _sleep_loop.sleep_wake_manager
