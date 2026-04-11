@@ -1000,6 +1000,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                         "is_dm": routing.primary.metadata.get("is_dm", False) if routing.primary.metadata else False,
                     }
 
+            # v0.5: Pass audio_payloads through metadata for NeuralRouter (Proposal 11)
+            _audio = getattr(getattr(packet, 'content', None), 'audio_payloads', None)
+            if _audio:
+                metadata["_audio_payloads"] = _audio
+
             logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
             # Log to event buffer for episodic memory

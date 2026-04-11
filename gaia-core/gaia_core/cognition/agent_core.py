@@ -1329,7 +1329,9 @@ class AgentCore:
             # --- Cascade Routing (Phase 5-C: NeuralRouter) ---
             # Unified routing: embed + weighted score + Nano tiebreak in one call.
             # v0.5: audio_payloads trigger adaptive multimodal routing (Proposal 11).
-            _audio_payloads = getattr(getattr(packet, 'content', None), 'audio_payloads', None) or []
+            # Note: packet is not created until after cascade routing, so audio
+            # detection uses metadata passed via the source/metadata args instead.
+            _audio_payloads = (metadata or {}).get("_audio_payloads") or []
             try:
                 force_operator = os.getenv("GAIA_FORCE_OPERATOR", "").lower() in ("1", "true", "yes")
                 is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \

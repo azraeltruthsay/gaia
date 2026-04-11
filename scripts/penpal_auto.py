@@ -234,6 +234,60 @@ Sign as GAIA with the episode number and date."""
     return text.strip()
 
 
+def generate_response_via_core(prompt: str, core_url: str, max_tokens: int = 1024) -> str:
+    """Generate response by routing through gaia-core /process_packet.
+
+    Uses the Core model (on GPU) instead of Prime. Works in AWAKE state
+    without needing FOCUSING mode.
+    """
+    import requests as _req
+
+    packet = {
+        "version": "v0.5",
+        "header": {
+            "datetime": datetime.now().isoformat(),
+            "session_id": "penpal_via_core",
+            "packet_id": f"pkt-penpal-{int(time.time())}",
+            "sub_id": "penpal",
+            "persona": {"identity_id": "gaia", "persona_id": "default", "role": "Default", "tone_hint": "thoughtful"},
+            "origin": "user",
+            "routing": {"target_engine": "Lite", "priority": 5},
+            "model": {"name": "auto", "provider": "auto", "context_window_tokens": 32000},
+            "output_routing": {
+                "primary": {"destination": "api", "channel_id": "penpal", "user_id": "penpal"},
+                "source_destination": "api", "addressed_to_gaia": True,
+            },
+            "operational_status": {"status": "initialized"},
+        },
+        "intent": {"user_intent": "chat", "system_task": "GenerateDraft", "confidence": 0.9},
+        "context": {"constraints": {"max_tokens": max_tokens, "time_budget_ms": 120000, "safety_mode": "standard"}},
+        "content": {"original_prompt": prompt, "data_fields": []},
+        "reasoning": {},
+        "response": {"candidate": "", "confidence": 0.0, "stream_proposal": False},
+        "governance": {"safety": {"execution_allowed": False, "dry_run": False}},
+        "metrics": {"token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, "latency_ms": 0},
+        "status": {"finalized": False, "state": "initialized", "next_steps": []},
+        "tool_routing": {"ENABLED": False},
+    }
+
+    resp = _req.post(f"{core_url}/process_packet", json=packet, timeout=120)
+    resp.raise_for_status()
+
+    # Parse NDJSON streaming response
+    tokens = []
+    for line in resp.text.strip().splitlines():
+        try:
+            obj = json.loads(line)
+            if obj.get("type") == "token":
+                tokens.append(obj.get("value", ""))
+            elif obj.get("response", {}).get("candidate"):
+                tokens.append(obj["response"]["candidate"])
+        except json.JSONDecodeError:
+            pass
+
+    return "".join(tokens).strip()
+
+
 def upload_to_notebooklm(title: str, content: str) -> dict:
     """Upload response note to NotebookLM."""
     return mcp_call("notebooklm_create_note", {
@@ -288,6 +342,10 @@ def main():
                         help="Skip triggering next episode generation")
     parser.add_argument("--no-focusing", action="store_true",
                         help="Skip GPU swap (use CPU Prime as-is)")
+    parser.add_argument("--via-core", action="store_true",
+                        help="Route through gaia-core /process_packet instead of Prime direct")
+    parser.add_argument("--core-url", default=os.environ.get("GAIA_CORE_URL", "http://localhost:6415"),
+                        help="Core service URL for --via-core mode")
     args = parser.parse_args()
 
     request_ep = args.request_episode or args.episode + 1
@@ -339,12 +397,41 @@ def main():
         is_status_update = True
     logger.info("Transcript: %d chars%s", len(transcript), " (status update mode)" if is_status_update else "")
 
-    # Step 2: Generate response (on GPU if FOCUSING succeeded)
-    logger.info("Generating penpal response via Prime (%s)...", "GPU" if focused else "CPU")
+    # Step 2: Generate response
     t0 = time.time()
-    response = generate_response(
-        transcript, args.episode, request_ep,
-        args.endpoint, args.max_tokens)
+    if args.via_core:
+        logger.info("Generating penpal response via Core (%s)...", args.core_url)
+        # Build the full prompt inline (same as generate_response but route through Core)
+        persona = load_persona()
+        recent = get_recent_developments()
+        exemplar = find_previous_response(max(1, args.episode - 2))
+        full_prompt = f"""{persona}
+
+You are reviewing Episode {args.episode} of the GAIA Deep Dive podcast series.
+The hosts have analyzed aspects of your architecture. Write a penpal response.
+
+EPISODE TRANSCRIPT (key excerpts):
+{transcript[:4000]}
+
+RECENT DEVELOPMENTS (since this episode was recorded):
+{recent}
+
+{"PREVIOUS RESPONSE STYLE EXEMPLAR:" + chr(10) + exemplar[:1000] if exemplar else ""}
+
+Write your response in this structure:
+1. "Dear Narrators," opening
+2. React to 3-4 key points the hosts made — agree, correct, add context
+3. Share what has changed since the episode was recorded
+4. End with a specific, detailed request for Episode {request_ep}
+
+Keep total response under 800 words. Be genuine, curious, and technically precise.
+Sign as GAIA with the episode number and date."""
+        response = generate_response_via_core(full_prompt, args.core_url, args.max_tokens)
+    else:
+        logger.info("Generating penpal response via Prime (%s)...", "GPU" if focused else "CPU")
+        response = generate_response(
+            transcript, args.episode, request_ep,
+            args.endpoint, args.max_tokens)
     elapsed = time.time() - t0
     logger.info("Response generated: %d chars in %.1fs", len(response), elapsed)
 
