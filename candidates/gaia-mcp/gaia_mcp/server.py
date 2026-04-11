@@ -14,7 +14,7 @@ from gaia_common.config import Config
 from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
 from .approval import ApprovalStore
 from .notebooklm_tools import _close_client as _close_notebooklm_client
-from .tools import execute_tool, TOOLS, SENSITIVE_TOOLS
+from .tools import execute_limb, TOOLS, SENSITIVE_TOOLS
 from gaia_common.utils.domain_tools import DOMAIN_TOOLS
 
 import os
@@ -108,7 +108,7 @@ async def jsonrpc_endpoint(request: Request):
     params = body.get("params", {})
 
     # Enforce approval for sensitive legacy tools unless bypass is enabled.
-    # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_tool.
+    # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_limb.
     if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
         return JSONResponse(content={"jsonrpc": "2.0", "error": {"code": -32001, "message": f"'{method}' requires approval. Use /request_approval first."}, "id": request_id}, status_code=403)
 
@@ -127,8 +127,8 @@ async def jsonrpc_endpoint(request: Request):
     # Dispatch the tool call via the authoritative tools module
     try:
         # Note: server.py handles its own security checks (sensitive tools & blast shield) 
-        # but we also pass the approval_store to execute_tool for consistent internal checks.
-        result = await execute_tool(
+        # but we also pass the approval_store to execute_limb for consistent internal checks.
+        result = await execute_limb(
             method=method, 
             params=params, 
             approval_store=approval_store,
@@ -236,7 +236,7 @@ async def approve_action_endpoint(request: Request):
         
         logger.info(f"✅ ACTION APPROVED: '{method}' (ID: {action_id})")
         
-        result = await execute_tool(
+        result = await execute_limb(
             method=method, 
             params=params, 
             approval_store=approval_store,

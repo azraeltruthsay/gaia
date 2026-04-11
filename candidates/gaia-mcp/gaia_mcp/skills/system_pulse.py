@@ -11,7 +11,7 @@ Pulse Domains:
   4. Security    — Recent adversarial_summary hits (gaia-core /status)
 
 Usage (via MCP SkillManager):
-    result = await skill_manager.execute_skill("system_pulse", {})
+    result = await skill_manager.execute_limb("system_pulse", {})
 """
 
 import json

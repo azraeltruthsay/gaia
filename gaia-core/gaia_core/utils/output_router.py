@@ -17,7 +17,7 @@ from gaia_common.protocols import CognitionPacket, PacketState, OutputDestinatio
 from gaia_common.protocols.cognition_packet import ToolExecutionStatus
 from gaia_common.utils.packet_utils import is_execution_safe
 
-from gaia_core.utils.mcp_client import dispatch_sidecar_actions
+from gaia_core.utils.mcp_client import dispatch_sidecar_limbs
 
 logger = logging.getLogger("GAIA.OutputRouter")
 
@@ -198,7 +198,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
         logger.info(f"Packet contains {len(packet.response.sidecar_actions)} sidecar actions to evaluate.")
         if is_execution_safe(packet):
             logger.info("Safety gate passed. Proceeding with execution.")
-            execution_results = dispatch_sidecar_actions(packet, config)
+            execution_results = dispatch_sidecar_limbs(packet, config)
             for res in execution_results:
                 side_effects.append({
                     "type": "sidecar_action",

@@ -114,7 +114,7 @@ def execute_limb(domain: str, action: str, params: Dict = None, **kwargs) -> Dic
     return call_jsonrpc(method=domain, params=rpc_params, **kwargs)
 
 
-def dispatch_sidecar_actions(packet: "CognitionPacket", config: "Config") -> List[Dict]:
+def dispatch_sidecar_limbs(packet: "CognitionPacket", config: "Config") -> List[Dict]:
     """
     Dispatches all sidecar actions in a packet to the MCP-lite server.
 

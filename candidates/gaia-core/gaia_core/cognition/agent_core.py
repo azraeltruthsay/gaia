@@ -7182,7 +7182,7 @@ Start your response with the first line of the file."""
             canonical_name = tool.tool_name
 
             # Domain tools (file, shell, web, etc.) go directly through MCP
-            # The MCP server's execute_tool handles domain→legacy routing
+            # The MCP server's execute_limb handles domain→legacy routing
             try:
                 from gaia_common.utils.domain_tools import DOMAIN_TOOLS
                 if canonical_name in DOMAIN_TOOLS:

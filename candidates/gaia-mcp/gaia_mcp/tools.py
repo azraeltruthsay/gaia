@@ -136,7 +136,7 @@ def describe_tool(tool_name: str) -> Dict[str, Any]:
     return TOOLS.get(tool_name, {"error": f"Tool '{tool_name}' not found. Available domains: file, web, knowledge, shell, audio, study, introspect, worldbuild, notebook, context, browser, manage, fabric"})
 
 
-async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore, pre_approved: bool = False) -> Any:
+async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore, pre_approved: bool = False) -> Any:
     """
     Executes a tool method with the given parameters.
     Handles sensitive tools requiring approval and blast shield validation.
@@ -155,7 +155,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
         # Check domain-level sensitivity before delegating
         if not pre_approved and is_sensitive(method, action):
             raise PermissionError(f"Tool '{method}(action={action})' requires explicit approval.")
-        return await execute_tool(legacy_name, params, approval_store, pre_approved=True)
+        return await execute_limb(legacy_name, params, approval_store, pre_approved=True)
 
     # Fabric domain: pattern param selects which fabric tool to run
     if method == "fabric":
@@ -164,7 +164,7 @@ async def execute_tool(method: str, params: Dict, approval_store: ApprovalStore,
             raise ValueError("fabric tool requires a 'pattern' parameter")
         legacy_name = f"fabric_{pattern}"
         logger.info("Domain route: fabric(pattern=%s) → %s", pattern, legacy_name)
-        return await execute_tool(legacy_name, params, approval_store, pre_approved)
+        return await execute_limb(legacy_name, params, approval_store, pre_approved)
 
     # ── Legacy tool execution ──────────────────────────────────────────
     logger.info("Executing tool '%s'", method)

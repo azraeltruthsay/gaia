@@ -144,7 +144,7 @@ EXECUTE: write_file {json.dumps({"path": test_path, "content": test_content})}""
         check("write_file gets 403", False, str(e))
         return 1
 
-    # Route through approval flow (same as dispatch_sidecar_actions does on 403)
+    # Route through approval flow (same as dispatch_sidecar_limbs does on 403)
     approval_req = mcp_client.request_approval_via_mcp("write_file", {
         **action.params,
         "_allow_pending": True,
