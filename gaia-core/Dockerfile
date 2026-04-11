@@ -1,11 +1,11 @@
-# gaia-core: The Brain — Cognitive loop + embedded Core inference engine
-# Inherits unified GAIA engine base with all ML capabilities.
-# Adds: FastAPI application, llama-server (GGUF fallback), service code.
+# gaia-core-candidate: GPU-capable variant for testing and training
+# Embeds CUDA-enabled llama-server for GPU-accelerated Core/Operator inference
+# Production gaia-core stays CPU-only; this candidate can offload to GPU when available
 
 ARG LLAMA_CPP_TAG=b8250
 ARG CUDA_VERSION=12.8.1
 
-# ── Build llama-server (CUDA) — for GGUF CPU fallback ───────────────────
+# ── Build llama-server (CUDA) ────────────────────────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS llama-builder
 
 ARG LLAMA_CPP_TAG
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git curl ca-certificates libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Make CUDA stubs visible for linking
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
     && ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so \
     && ldconfig
@@ -30,44 +31,60 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server llama-quantize -j$(nproc)
 
-# ── Main image (from unified engine base) ────────────────────────────────
-FROM localhost:5000/gaia-engine-base:latest
+# ── Main image ───────────────────────────────────────────────────────────────
+FROM python:3.11-slim AS base
 
-# System deps for llama-server
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install system deps + CUDA runtime libs for llama-server
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential cmake \
     libcurl4 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# CUDA runtime libs + llama binaries (for GGUF CPU/GPU fallback)
+# Install CUDA runtime (needed for GPU llama-server at runtime)
 COPY --from=llama-builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
 COPY --from=llama-builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
 COPY --from=llama-builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
+
+# Install llama-server + llama-quantize binaries and shared libs
 COPY --from=llama-builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=llama-builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
 COPY --from=llama-builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
 RUN ldconfig
-
-# flash-linear-attention for Qwen3.5 hybrid attention (DeltaNet fast path)
-RUN pip install --no-cache-dir flash-linear-attention
 
 # Create non-root user
 RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
 ENV HOME=/home/gaia
 ENV USER=gaia
 
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install PyTorch with CUDA 12.8 (for safetensors inference server)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+
+# Install transformers for safetensors model loading (>=5.5.0 for Gemma 4 support)
+RUN pip install --no-cache-dir "transformers>=5.5.0" accelerate
+
+# flash-linear-attention for Qwen3.5 hybrid attention (DeltaNet fast path)
+# causal-conv1d is optional — FLA works without it via torch fallback
+RUN pip install --no-cache-dir flash-linear-attention
+
 WORKDIR /app
 
-# Application deps (FastAPI, Discord, httpx, etc.)
+# Install Python dependencies
 COPY candidates/gaia-core/requirements.txt .
+COPY candidates/gaia-common /gaia-common
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Dev dependencies
+# Install dev dependencies
 COPY candidates/gaia-core/pyproject.toml .
 COPY candidates/gaia-core/README.md .
 RUN pip install -e ".[dev]"
 
-# Service code
+# Copy service code
 COPY candidates/gaia-core/gaia_core/ ./gaia_core/
 COPY candidates/gaia-core/gaia_rescue.py ./gaia_rescue.py
 COPY candidates/gaia-core/entrypoint.sh /entrypoint.sh

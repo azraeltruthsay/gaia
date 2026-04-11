@@ -205,6 +205,9 @@ services:
       # Identity lives in Core (Operator), not Nano (Reflex).
       - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/nano}
       - NANO_DEVICE=${NANO_DEVICE:-cuda}
+      # NF4 quantization — E2B bf16 (9.7GB) is too large to coexist with Core on 16GB
+      # NF4 reduces to ~2.4GB, leaving room for Core NF4 (~3.8GB) + KV cache
+      - GAIA_ENGINE_QUANTIZE=nf4
       # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
       - NANO_GGUF_MODEL_PATH=/models/Gemma4-E2B-GAIA-Nano-v1-Q8_0.gguf
       - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
