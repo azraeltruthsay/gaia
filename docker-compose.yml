@@ -122,6 +122,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -184,6 +185,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -266,6 +268,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -404,6 +407,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -505,6 +509,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -604,6 +609,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
@@ -702,6 +708,7 @@ services:
       - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
       - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
       - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
