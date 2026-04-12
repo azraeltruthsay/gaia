@@ -291,17 +291,17 @@ class ConsciousnessMatrix:
 
     # Tier targets for each configuration.
     # Used by both the public preset methods and _apply_configuration().
-    # Gemma 4 VRAM reality on 16GB GPU:
-    #   Nano NF4 (E2B): 6.3GB | Core NF4 (E4B): 8.8GB | Prime MoE: 4.6GB
-    #   Nano + Core = 15.1GB → OOM (no KV cache room)
-    #   Only one large tier on GPU at a time; others serve from GGUF/CPU
+    # Sovereign Duality: Two-tier architecture (Core + Prime)
+    # Nano (E2B) deprecated — E4B handles all operator tasks including triage.
+    # Core (E4B): 8.8GB NF4 on GPU — operator, triage, tools, vision, audio
+    # Prime (26B-A4B): 4.6GB Expert Buffering — deep reasoning, FOCUSING only
+    # Future: E4B text-only reflex (~2.8GB) + on-demand modality tower loading
     _PRESETS = {
-        "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-        "operating": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-        "focusing": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS},
-        "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
-        "deep_sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
-        "meditation": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
+        "awake": {"core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        "sleep": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        "deep_sleep": {"core": ConsciousnessLevel.UNCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        "meditation": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
     }
 
     async def _apply_configuration(self, config_name: str, sync_lifecycle: bool = True) -> dict:

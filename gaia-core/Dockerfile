@@ -65,8 +65,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Install PyTorch with CUDA 12.8 (for safetensors inference server)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 
-# Install transformers for safetensors model loading
-RUN pip install --no-cache-dir transformers accelerate
+# Install transformers (>=5.5.0 for Gemma 4) + quantization + adapters
+RUN pip install --no-cache-dir "transformers>=5.5.0" accelerate bitsandbytes peft
 
 # flash-linear-attention for Qwen3.5 hybrid attention (DeltaNet fast path)
 # causal-conv1d is optional — FLA works without it via torch fallback
