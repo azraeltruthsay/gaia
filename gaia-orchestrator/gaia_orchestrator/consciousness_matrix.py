@@ -128,6 +128,15 @@ class ConsciousnessMatrix:
         }
         self._adapter_scale = float(os.environ.get("CPU_ADAPTER_SCALE", "0.5"))
 
+        # GPU adapters — identity/skill LoRA loaded after safetensors model loads.
+        # Used for models where adapter is not merged into base weights.
+        self._gpu_adapters = {
+            "prime": os.environ.get("PRIME_GPU_ADAPTER", ""),
+            "core": os.environ.get("CORE_GPU_ADAPTER", ""),
+            "nano": os.environ.get("NANO_GPU_ADAPTER", ""),
+        }
+        self._gpu_adapter_scale = float(os.environ.get("GPU_ADAPTER_SCALE", "1.0"))
+
         self._lock = asyncio.Lock()
         self._poll_task: Optional[asyncio.Task] = None
 
@@ -547,6 +556,13 @@ class ConsciousnessMatrix:
                     if data.get("ok") or resp.status_code == 409:
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("Loaded %s to GPU", tier)
+
+                        # Auto-load identity/skill adapter if configured
+                        adapter_path = self._gpu_adapters.get(tier, "")
+                        if adapter_path:
+                            await self._load_adapter(tier, endpoint, adapter_path,
+                                                     scale=self._gpu_adapter_scale)
+
                         return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:
