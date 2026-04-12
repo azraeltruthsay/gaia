@@ -41,11 +41,11 @@
     },
     "core": {
       "enabled": true,
-      "path": "Qwen3.5-4B-GAIA-Core-v1",
+      "path": "/models/core",
       "type": "vllm_remote",
       "endpoint": "http://localhost:8092",
       "max_model_len": 8192,
-      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Qwen3.5-4B identity-baked"
+      "description": "Core (Operator) \u2014 Gemma 4 E4B, triage + tools + vision + audio, identity-baked"
     },
     "observer": {
       "enabled": true,
@@ -71,12 +71,12 @@
       "description": "Free Groq API fallback for when GPU unavailable"
     },
     "nano": {
-      "enabled": true,
-      "path": "Qwen3.5-0.8B-GAIA-Nano-v1",
+      "enabled": false,
+      "path": "Gemma4-E2B-GAIA-Nano-v1",
       "type": "vllm_remote",
       "endpoint": "http://gaia-nano:8080",
       "max_model_len": 2048,
-      "description": "Nano \u2014 sub-second triage via llama-server, Qwen3.5-0.8B"
+      "description": "DEPRECATED \u2014 E2B retired in Sovereign Duality. Core handles all triage."
     }
   },
   "N_BATCH": 1024,
