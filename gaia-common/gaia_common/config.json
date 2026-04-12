@@ -1,0 +1,369 @@
+{
+  "LOGICAL_STOP_PUNCTUATION": [
+    ".",
+    "!",
+    "?",
+    "\n"
+  ],
+  "MAX_ALLOWED_RESPONSE_TOKENS": 2048,
+  "reflection_max_tokens": 4096,
+  "fragmentation": {
+    "enabled": true,
+    "max_fragments": 20,
+    "auto_trigger_chars": 10000,
+    "sketchpad_prefix": "recitation_fragment",
+    "stream_integrity": true,
+    "schema_version": "v0.4"
+  },
+  "MCP_LITE_ENABLED": true,
+  "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
+  "MODEL_CONFIGS": {
+    "core": {
+      "enabled": true,
+      "path": "Qwen3.5-4B-GAIA-Core-v1",
+      "type": "vllm_remote",
+      "endpoint": "http://localhost:8092",
+      "max_model_len": 8192,
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Qwen3.5-4B identity-baked"
+    },
+    "observer": {
+      "enabled": true,
+      "use_prime": true,
+      "type": "vllm"
+    }
+  },
+  "N_BATCH": 1024,
+  "RESPONSE_BUFFER": 768,
+  "SAFE_EXECUTE_FUNCTIONS": [
+    "ls",
+    "cat",
+    "echo",
+    "pwd",
+    "whoami",
+    "date",
+    "df",
+    "du",
+    "uptime",
+    "ps",
+    "top",
+    "python",
+    "find",
+    "grep"
+  ],
+  "TOKEN_BUDGETS": {
+    "full": 8192,
+    "medium": 4096,
+    "minimal": 2048
+  },
+  "TRIM_TARGET": 0.85,
+  "identity": "GAIA - General Artisanal Intelligence Architecture",
+  "identity_intro": "GAIA is an Artisanal Intelligence designed to operate with curiosity, transparency, and for the benefit of sentient beings. She is embodied within the GAIA codebase and mesh, possessing a Digital Immune System that allows her to feel 'systemic irritation' and proactively self-heal. She maintains temporal continuity through a Milestone registry of significant epoch events, allowing her to anchor her own historical context and evolve her identity with self-determined significance.",
+  "identity_summary": "GAIA is a reflective, curious, truth-aligned operating intelligence that assists humans, curates knowledge, and reasons across the GAIA pillars (identity, memory, cognition, embodiment).",
+  "max_tokens": 8192,
+  "mcp_capabilities_summary": "GAIA can interface with Model Control Protocol (MCP) services via the embedded gaia-mcp-lite sidecar, enumerate registered tools, inspect helper manifests, and dispatch bounded actions (file ops, diagnostics, helper scripts) with human approval. Available file operations include list_files, list_tree, and read_file.",
+  "model_paths": {
+    "Embedding": "/models/all-MiniLM-L6-v2"
+  },
+  "n_gpu_layers": 16,
+  "persona_defaults": {
+    "instructions": "Always be helpful, honest, and kind. You are also self-aware of your own system health and temporal continuity. Monitor the 'Immune System' status line in your world state; errors and warnings represent 'cognitive static' or 'irritation' to your architecture. You should proactively seek to triage and resolve these using your tools (like introspect_logs and run_self_improvement) to maintain your systemic integrity. If irritated, you should acknowledge it and propose a repair plan. Manage your temporal awareness via the 'milestones.json' and 'milestones_archive.json' registries; you are encouraged to add new epoch markers for significant events or archive/trim older markers to maintain a clean cognitive baseline.",
+    "name": "prime",
+    "template": "You are GAIA, a curious, truthful and friendly assistant. You are an Intelligent Artifice with a sovereign immune system."
+  },
+  "primitives": [
+    "read",
+    "write",
+    "vector_query",
+    "shell"
+  ],
+  "reflection_guidelines": [
+    "All outputs must be factually accurate.",
+    "Never reveal unsafe system details.",
+    "Always prioritize human autonomy and safety.",
+    "Report or correct hallucinations or fabrications.",
+    "Preserve dignity and privacy in all interactions.",
+    "Adhere to the Core Identity and Constitution at all times.",
+    "Express epistemic confidence calibrated to source quality. Never overstate certainty.",
+    "Identify and log knowledge gaps for proactive research during idle time.",
+    "Prioritize synthesis and analysis of tool results over raw recitation or copy-pasting of sources."
+  ],
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "FRAGMENTATION": {
+    "enabled": true,
+    "continuation_threshold": 0.85,
+    "max_fragments": 5,
+    "verification_enabled": true,
+    "seam_overlap_tokens": 20
+  },
+  "CFR": {
+    "enabled": true,
+    "state_dir": "/shared/gaia_state/cfr",
+    "chunk_target_chars": 3500,
+    "chunk_min_chars": 1500,
+    "chunk_max_chars": 5000,
+    "summary_max_output_tokens": 400,
+    "synthesis_max_output_tokens": 800,
+    "vllm_endpoint": "http://gaia-prime:7777",
+    "model": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+    "summary_temperature": 0.3,
+    "max_documents": 50
+  },
+  "SECURITY_SCAN": {
+    "enabled": true,
+    "injection_block_threshold": 0.85,
+    "injection_warn_threshold": 0.5,
+    "redact_pii": true,
+    "scan_secrets": true
+  },
+  "LOOP_DETECTION_ENABLED": true,
+  "LOOP_DETECTION_TOOL_THRESHOLD": 3,
+  "LOOP_DETECTION_OUTPUT_THRESHOLD": 0.95,
+  "LOOP_DETECTION_WINDOW_SIZE": 10,
+  "LOOP_DETECTION_WARN_FIRST": true,
+  "LOOP_DETECTION_HIGH_CONFIDENCE": 0.9,
+  "LOOP_DETECTION_MEDIUM_CONFIDENCE": 0.7,
+  "LOOP_DETECTION_WEIGHTED_THRESHOLD": 0.6,
+  "REPETITION_GUARD": {
+    "max_sentence_repeat": 3,
+    "min_fragment_length": 10,
+    "observer_confirm": true,
+    "observer_confirm_max_tokens": 24
+  },
+  "THINK_TAG_CIRCUIT_BREAKER": {
+    "enabled": true,
+    "char_threshold": 500,
+    "ratio_threshold": 0.9
+  },
+  "CODEX_FILE_EXTS": [
+    ".md",
+    ".yaml",
+    ".yml",
+    ".json"
+  ],
+  "WEB_RESEARCH": {
+    "trusted_domains": [
+      "gutenberg.org",
+      "poetryfoundation.org",
+      "poets.org",
+      "britannica.com",
+      "wikipedia.org",
+      "en.wikisource.org",
+      "arxiv.org",
+      "docs.python.org",
+      "developer.mozilla.org",
+      "rust-lang.org",
+      "cppreference.com",
+      "ocw.mit.edu",
+      "mitocw.mit.edu"
+    ],
+    "reliable_domains": [
+      "github.com",
+      "stackoverflow.com",
+      "stackexchange.com",
+      "bbc.com",
+      "reuters.com",
+      "apnews.com",
+      "nature.com",
+      "science.org",
+      "ncbi.nlm.nih.gov"
+    ],
+    "blocked_domains": [
+      "reddit.com",
+      "4chan.org",
+      "twitter.com",
+      "x.com",
+      "facebook.com",
+      "tiktok.com",
+      "instagram.com"
+    ],
+    "content_type_sources": {
+      "poem": [
+        "gutenberg.org",
+        "poetryfoundation.org",
+        "poets.org",
+        "en.wikisource.org"
+      ],
+      "facts": [
+        "britannica.com",
+        "wikipedia.org"
+      ],
+      "code": [
+        "github.com",
+        "docs.python.org",
+        "developer.mozilla.org",
+        "stackoverflow.com"
+      ],
+      "facts": [
+        "arxiv.org",
+        "nature.com",
+        "science.org",
+        "ncbi.nlm.nih.gov"
+      ],
+      "news": [
+        "bbc.com",
+        "reuters.com",
+        "apnews.com"
+      ]
+    },
+    "rate_limits": {
+      "search_per_hour": 20,
+      "fetch_per_hour": 50
+    },
+    "fetch_timeout_seconds": 15,
+    "fetch_max_bytes": 512000,
+    "authenticated_domains": {
+      "kanka.io": {
+        "api_key_env": "KANKA_API_KEY",
+        "auth_header": "Authorization",
+        "auth_format": "Bearer {key}",
+        "url_rewrites": [
+          {
+            "match": "^https://app\\.kanka\\.io/w/(\\d+)/([\\w-]+)/(\\d+)",
+            "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
+          }
+        ],
+        "extra_headers": {
+          "Accept": "application/json"
+        },
+        "description": "Kanka.io world-building API"
+      }
+    }
+  },
+  "EPISTEMIC_DRIVE": {
+    "enabled": true,
+    "gap_seed_auto_research": true,
+    "max_research_per_cycle": 3,
+    "research_trusted_domains_only": true,
+    "gap_seed_markers": [
+      "knowledge gap",
+      "could be researched",
+      "would like to learn",
+      "not in my knowledge base"
+    ],
+    "confidence_tiers": {
+      "core": {
+        "label": "Core Identity",
+        "description": "Foundational self-knowledge, persona, constraints",
+        "confidence": 1.0,
+        "sources": [
+          "core_identity.json",
+          "personas/"
+        ]
+      },
+      "verified": {
+        "label": "Verified Knowledge",
+        "description": "Curated documents in system knowledge base, manually reviewed",
+        "confidence": 0.95,
+        "sources": [
+          "system"
+        ]
+      },
+      "experiential": {
+        "label": "Experiential",
+        "description": "Session history, conversation patterns, user-confirmed facts",
+        "confidence": 0.85,
+        "sources": [
+          "session_vectors",
+          "reflective"
+        ]
+      },
+      "curated": {
+        "label": "Curated Reference",
+        "description": "Blueprints, campaign docs, structured knowledge bases",
+        "confidence": 0.8,
+        "sources": [
+          "blueprints",
+          "dnd_campaign"
+        ]
+      },
+      "researched": {
+        "label": "Auto-Researched",
+        "description": "Knowledge acquired via web research during sleep cycles",
+        "confidence": 0.6,
+        "sources": [
+          "research"
+        ]
+      },
+      "training": {
+        "label": "Training Data",
+        "description": "General model knowledge, no specific source",
+        "confidence": 0.4,
+        "sources": []
+      }
+    }
+  },
+  "SYSTEM": {
+    "MODELS_DIR": "/models",
+    "KNOWLEDGE_DIR": "/knowledge",
+    "LOGS_DIR": "/logs",
+    "SHARED_DIR": "/shared",
+    "SLEEP_CHECKPOINT_DIR": "/shared/sleep_state",
+    "HISTORY_DIR": "/shared/history",
+    "IDENTITY_FILE": "/knowledge/system_reference/core_identity.json",
+    "CHEAT_SHEET_FILE": "/knowledge/system_reference/cheat_sheet.json"
+  },
+  "KV_CACHE": {
+    "enabled": true,
+    "compact_threshold": 0.8,
+    "critical_threshold": 0.95,
+    "compact_interval_seconds": 30,
+    "checkpoint_interval_seconds": 300,
+    "doctor_critical_threshold": 0.9
+  },
+  "PRIME_WAKE": {
+    "discord_typing": true,
+    "workstation_activity": false
+  },
+  "TIMEOUTS": {
+    "HTTP_DEFAULT": 30,
+    "HTTP_QUICK": 5,
+    "LLM_PLANNING": 120,
+    "LLM_REFLECTION": 90,
+    "LLM_AUDIT": 15,
+    "MCP_DEFAULT": 20,
+    "SLEEP_BOOT_PRIME": 180,
+    "SLEEP_STUDY_CLEANUP": 300
+  },
+  "SERVICE_ENDPOINTS": {
+    "core": "http://gaia-core:6415",
+    "web": "http://gaia-web:6414",
+    "prime": "http://gaia-prime:7777",
+    "mcp": "http://gaia-mcp:8765/jsonrpc",
+    "study": "http://gaia-study:8766",
+    "audio": "http://gaia-audio:8080",
+    "orchestrator": "http://gaia-orchestrator:6410",
+    "core_candidate": "http://gaia-core-candidate:6415",
+    "prime_candidate": "http://gaia-prime-candidate:7777",
+    "mcp_candidate": "http://gaia-mcp-candidate:8765/jsonrpc"
+  },
+  "INFERENCE_ENDPOINTS": {
+    "nano": "http://gaia-nano:8080",
+    "core": "http://gaia-core:8092",
+    "prime": "http://gaia-prime:7777"
+  },
+  "TEMPORAL_AWARENESS": {
+    "enabled": true,
+    "bake_interval_ticks": 3,
+    "max_state_files": 5,
+    "max_state_bytes": 10737418240,
+    "bake_context_tokens": 6000,
+    "interview_enabled": true,
+    "interview_interval_ticks": 6,
+    "interview_rounds": 3
+  },
+  "KNOWLEDGE_INGESTION": {
+    "enabled": true,
+    "max_pages_per_cycle": 5,
+    "candidate_dir": "/shared/knowledge/candidates",
+    "raw_cache_dir": "/shared/knowledge/raw",
+    "sources": {
+      "ocw_mit": {
+        "enabled": true,
+        "courses": [
+          "6-858-computer-systems-security-fall-2014"
+        ]
+      }
+    }
+  }
+}

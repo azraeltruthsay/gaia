@@ -1,0 +1,295 @@
+service: gaia-web
+port: 6414
+role: "The Face — dashboard, API gateway, Discord bridge"
+protocol: http
+framework: FastAPI
+
+provides:
+  - endpoint: /health
+    method: GET
+    description: "System health check."
+    consumers: [gaia-doctor]
+
+  - endpoint: /process_user_input
+    method: POST
+    description: "Standard entry point for user text input from dashboard. Builds CognitionPacket and streams to gaia-core."
+    request_schema:
+      query_params:
+        user_input: string
+      headers:
+        X-Session-ID: string (optional)
+    response_schema:
+      type: StreamingResponse
+      media_type: application/x-ndjson
+    consumers: [dashboard]
+
+  - endpoint: /presence
+    method: POST
+    description: "Update Discord bot presence from gaia-core sleep cycle."
+    request_schema:
+      fields:
+        activity: string
+        status: "idle | online | dnd | invisible"
+    consumers: [gaia-core]
+
+  # ── System Routes (prefix: /api/system) ────────────────────────────
+  # These are all proxy routes to backend services, exposed for the dashboard.
+  - endpoint: /api/system/services
+    method: GET
+    description: "Aggregate service health from gaia-doctor."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/sleep
+    method: GET
+    description: "Get sleep state from gaia-core + GPU owner from orchestrator."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/status
+    method: GET
+    description: "Orchestrator status + serenity state."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/doctor/status
+    method: GET
+    description: "Raw doctor status proxy."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/irritations
+    method: GET
+    description: "Full irritation list (proxy to doctor)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/dissonance
+    method: GET
+    description: "Prod vs candidate dissonance report."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/oom/history
+    method: GET
+    description: "OOM resolution history."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/maintenance/*
+    method: GET/POST
+    description: "Maintenance mode management (proxy to doctor)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/cognitive/*
+    method: GET/POST
+    description: "Cognitive battery status, results, tests, run, monitor (proxy to doctor)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/pipeline/*
+    method: GET/POST
+    description: "Training pipeline status and run trigger (proxy to doctor)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/surgeon/*
+    method: GET/POST
+    description: "Surgeon approval queue management (proxy to doctor)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/lifecycle/*
+    method: GET/POST
+    description: "Lifecycle state machine (proxy to orchestrator)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/training/progress
+    method: GET
+    description: "Training progress (proxy to gaia-study)."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/registry/validation
+    method: GET
+    description: "Service registry wiring validation."
+    consumers: [dashboard]
+
+  - endpoint: /api/system/registry/paths
+    method: GET
+    description: "Live path interconnectivity validation against running services' OpenAPI."
+    consumers: [dashboard]
+
+  # ── Other Route Groups ─────────────────────────────────────────────
+  - endpoint: /api/chaos/*
+    method: GET/POST
+    description: "Chaos injection proxy (routes to gaia-monkey)."
+    consumers: [dashboard]
+
+  - endpoint: /api/changelog/*
+    method: GET
+    description: "Changelog display routes."
+    consumers: [dashboard]
+
+  - endpoint: /api/codemind/*
+    method: GET/POST
+    description: "CodeMind autonomous improvement proxy."
+    consumers: [dashboard]
+
+consumes:
+  - service: gaia-core
+    endpoint: /process_packet
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Primary cognition entry: send CognitionPacket, receive NDJSON stream"
+
+  - service: gaia-core
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 6415
+    description: "Health + sleep state check"
+
+  - service: gaia-core
+    endpoint: /sleep/*
+    method: GET/POST
+    protocol: http
+    port: 6415
+    description: "Sleep cycle management (status, wake, force, deep, toggle, hold, config)"
+
+  - service: gaia-doctor
+    endpoint: /status
+    method: GET
+    protocol: http
+    port: 6419
+    description: "Aggregate service health"
+
+  - service: gaia-doctor
+    endpoint: /cognitive/*
+    method: GET/POST
+    protocol: http
+    port: 6419
+    description: "Cognitive battery (status, results, tests, run, monitor)"
+
+  - service: gaia-doctor
+    endpoint: /pipeline
+    method: GET
+    protocol: http
+    port: 6419
+    description: "Training pipeline status"
+
+  - service: gaia-doctor
+    endpoint: /maintenance/*
+    method: GET/POST
+    protocol: http
+    port: 6419
+    description: "Maintenance mode management"
+
+  - service: gaia-doctor
+    endpoint: /surgeon/*
+    method: GET/POST
+    protocol: http
+    port: 6419
+    description: "Surgeon approval queue"
+
+  - service: gaia-doctor
+    endpoint: /irritations
+    method: GET
+    protocol: http
+    port: 6419
+    description: "Irritation list"
+
+  - service: gaia-doctor
+    endpoint: /dissonance
+    method: GET
+    protocol: http
+    port: 6419
+    description: "Prod vs candidate dissonance"
+
+  - service: gaia-doctor
+    endpoint: /oom/history
+    method: GET
+    protocol: http
+    port: 6419
+    description: "OOM resolution history"
+
+  - service: gaia-doctor
+    endpoint: /registry
+    method: GET
+    protocol: http
+    port: 6419
+    description: "Service registry validation"
+
+  - service: gaia-orchestrator
+    endpoint: /status
+    method: GET
+    protocol: http
+    port: 6410
+    description: "GPU owner, general health"
+
+  - service: gaia-orchestrator
+    endpoint: /lifecycle/*
+    method: GET/POST
+    protocol: http
+    port: 6410
+    description: "Lifecycle state, transitions, history, reconcile"
+
+  - service: gaia-monkey
+    endpoint: /serenity
+    method: GET
+    protocol: http
+    port: 6420
+    description: "Serenity state (primary source)"
+
+  - service: gaia-monkey
+    endpoint: /chaos/*
+    method: POST
+    protocol: http
+    port: 6420
+    description: "Chaos injection"
+
+  - service: gaia-study
+    endpoint: /study/training/status
+    method: GET
+    protocol: http
+    port: 8766
+    description: "Training progress"
+
+  - service: gaia-wiki
+    endpoint: /*
+    method: GET
+    protocol: http
+    port: 8080
+    description: "Wiki documentation proxy"
+
+environment:
+  CORE_ENDPOINT: "http://gaia-core:6415"
+  CORE_FALLBACK_ENDPOINT: "http://gaia-core-candidate:6415"
+  MCP_ENDPOINT: "http://gaia-mcp:8765/jsonrpc"
+  MCP_HEALTH_ENDPOINT: "http://gaia-mcp:8765"
+  DOCTOR_ENDPOINT: "http://gaia-doctor:6419"
+  ORCHESTRATOR_ENDPOINT: "http://gaia-orchestrator:6410"
+  MONKEY_ENDPOINT: "http://gaia-monkey:6420"
+  STUDY_ENDPOINT: "http://gaia-study:8766"
+  WIKI_ENDPOINT: "http://gaia-wiki:8080"
+  TRANSLATE_ENDPOINT: "http://gaia-translate:5000"
+
+volumes:
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library"
+  - path: /app
+    mode: rw
+    purpose: "Service source code"
+  - path: /knowledge
+    mode: ro
+    purpose: "Knowledge base (static content)"
+  - path: /logs
+    mode: rw
+    purpose: "Consolidated logs + security audit"
+  - path: /shared
+    mode: rw
+    purpose: "Shared state"
+  - path: /var/run/docker.sock
+    mode: ro
+    purpose: "Docker socket for terminal access"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+depends_on:
+  - gaia-core

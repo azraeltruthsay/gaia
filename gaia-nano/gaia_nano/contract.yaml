@@ -1,0 +1,120 @@
+service: gaia-nano
+port: 8080
+host_port: 8090
+role: "The Reflex — Nano triage classifier (GPU primary, GGUF fallback)"
+protocol: http
+framework: "GAIA Engine (dual-mode: safetensors on GPU, GGUF fallback on CPU)"
+
+notes: |
+  gaia-nano runs the same GAIA Engine as gaia-prime but for the 0.8B Nano/Reflex
+  model. It operates in dual mode: safetensors on GPU (primary, enables polygraph
+  and SAE) with GGUF on CPU as fallback. The internal container port is 8080,
+  mapped to host port 8090.
+
+  The Nano Reflex uses the raw abliterated base model — few-shot prompting teaches
+  behavior per-request. Identity lives in Core (Operator), not Nano (Reflex).
+
+provides:
+  # ── OpenAI-Compatible Inference ────────────────────────────────────
+  - endpoint: /v1/chat/completions
+    method: POST
+    description: "OpenAI-compatible chat completions for Nano triage and reflex responses."
+    request_schema:
+      type: OpenAI ChatCompletionRequest
+    consumers: [gaia-core, gaia-audio]
+
+  - endpoint: /v1/models
+    method: GET
+    description: "List loaded models."
+    consumers: [gaia-core]
+
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Liveness check with model loaded status."
+    consumers: [gaia-core, gaia-doctor, gaia-orchestrator]
+
+  - endpoint: /status
+    method: GET
+    description: "Detailed engine status."
+    consumers: [gaia-orchestrator]
+
+  # ── GAIA Engine Endpoints ──────────────────────────────────────────
+  # Same as gaia-prime — polygraph, adapters, thought snapshots, etc.
+  # Subset most commonly used:
+
+  - endpoint: /model/load
+    method: POST
+    description: "Load model (managed mode)."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /model/unload
+    method: POST
+    description: "Unload model."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /device/gpu
+    method: POST
+    description: "Migrate model to GPU."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /device/cpu
+    method: POST
+    description: "Migrate model to CPU (VRAM pressure backoff)."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /polygraph/activations
+    method: GET
+    description: "Polygraph activation data."
+    consumers: [gaia-core]
+
+  - endpoint: /adapter/load
+    method: POST
+    description: "Load LoRA adapter."
+    consumers: [gaia-core]
+
+  - endpoint: /adapter/status
+    method: GET
+    description: "Adapter status."
+    consumers: [gaia-core]
+
+consumes: []
+  # gaia-nano is a pure inference provider. It does not call other services.
+
+environment:
+  NANO_SAFETENSORS_PATH: "/models/Qwen3.5-0.8B-Abliterated"
+  NANO_DEVICE: "cuda"
+  NANO_GGUF_MODEL_PATH: "/models/Qwen3.5-0.8B-GAIA-Nano-v7-Q8_0.gguf"
+  NANO_GPU_LAYERS: "999"
+  NANO_PORT: "8080"
+  NANO_CTX_SIZE: "2048"
+  SAE_ATLAS_PATH: "/shared/atlas/nano"
+
+volumes:
+  - path: /models
+    mode: ro
+    purpose: "Model files"
+  - path: /warm_pool
+    mode: ro
+    purpose: "Tmpfs-backed warm pool"
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library (GAIA Engine code)"
+  - path: /kvcache
+    mode: rw
+    purpose: "KV cache persistence for Nano"
+  - path: /shared
+    mode: rw
+    purpose: "SAE atlas output"
+
+health_check:
+  endpoint: /health
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
+deploy:
+  gpu: true
+  gpu_count: 1
+  memory_limit: 4G

@@ -1,0 +1,34 @@
+{
+  "audio": {
+    "enabled": true,
+    "endpoint": "http://gaia-audio:8080",
+    "stt_model": "base.en",
+    "tts_engine": "coqui",
+    "tts_voice": "/models/voice/gaia_identity.wav",
+    "sample_rate": 16000,
+    "vram_budget_mb": 5600,
+    "half_duplex": false,
+    "mute_on_sleep": true,
+    "cloud_fallback": {
+      "provider": "elevenlabs",
+      "enabled": false,
+      "api_key_env": "ELEVENLABS_API_KEY"
+    }
+  },
+  "AUDIO_COMMENTARY": {
+    "enabled": true,
+    "interval_seconds": 90,
+    "min_gap_seconds": 60,
+    "comment_threshold": "interesting",
+    "lite_triage_max_tokens": 128,
+    "commentary_max_tokens": 512
+  },
+  "AUDIO_INBOX": {
+    "refinement_enabled": true,
+    "refinement_chunk_size": 4000,
+    "refinement_overlap": 200,
+    "refinement_timeout_seconds": 600,
+    "core_review_timeout_seconds": 300,
+    "transcript_max_chars": 30000
+  }
+}

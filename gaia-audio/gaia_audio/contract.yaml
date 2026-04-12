@@ -1,0 +1,196 @@
+service: gaia-audio
+port: 8080
+host_port: 8080
+role: "The Ears & Mouth — three-tier Qwen3 STT/TTS sensory service"
+protocol: http
+framework: FastAPI
+
+notes: |
+  Three-tier audio architecture:
+    - Listener:      Qwen3-ASR 0.6B (GPU, always-on, coexists with Prime LLM)
+    - Nano Speaker:  Qwen3-TTS 0.6B (CPU, always-on, instant short phrases)
+    - Prime Speaker: Qwen3-TTS 1.7B (GPU, on-demand, high-quality long-form)
+
+  Auto-routing for TTS: short text -> Nano Speaker (CPU), long text -> Prime Speaker (GPU).
+  Espeak as final fallback if neither Qwen3-TTS model is available.
+
+provides:
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Liveness probe."
+    consumers: [gaia-doctor, gaia-orchestrator]
+
+  - endpoint: /status
+    method: GET
+    description: "Full status snapshot: state, GPU mode, models, VRAM, mute, queue, events."
+    consumers: [gaia-web]
+
+  - endpoint: /status/ws
+    method: WebSocket
+    description: "Real-time status stream for dashboard widget."
+    consumers: [gaia-web]
+
+  # ── Transcription (STT) ────────────────────────────────────────────
+  - endpoint: /transcribe
+    method: POST
+    description: "Transcribe audio to text using Qwen3-ASR (Listener). Signals wake to gaia-core."
+    request_schema:
+      fields:
+        audio_base64: string (base64-encoded WAV/MP3/FLAC/OGG/PCM)
+        sample_rate: int (default 16000)
+        language: string (optional)
+    response_schema:
+      fields:
+        text: string
+        language: string
+        confidence: float
+        duration_seconds: float
+        latency_ms: float
+        segments: list
+        context_markers: list
+    consumers: [gaia-web]
+
+  # ── Audio Analysis ─────────────────────────────────────────────────
+  - endpoint: /analyze
+    method: POST
+    description: "Deep musical and environmental analysis (BPM, key, genre, etc.)."
+    request_schema:
+      fields:
+        audio_base64: string
+        sample_rate: int
+    consumers: [gaia-web]
+
+  # ── Refinement (Nano LLM) ─────────────────────────────────────────
+  - endpoint: /refine
+    method: POST
+    description: "Clean up and format a transcript using the nano-refiner (via gaia-nano HTTP)."
+    request_schema:
+      fields:
+        text: string
+        max_tokens: int
+    response_schema:
+      fields:
+        refined_text: string
+        latency_ms: float
+    consumers: [gaia-web]
+
+  # ── Synthesis (TTS) ────────────────────────────────────────────────
+  - endpoint: /synthesize
+    method: POST
+    description: "Synthesize text to speech. Three-tier routing: auto, nano (CPU), prime (GPU)."
+    request_schema:
+      fields:
+        text: string
+        voice: string (optional)
+        tier: "auto | nano | prime" # default auto
+    response_schema:
+      fields:
+        audio_base64: string
+        sample_rate: int
+        duration_seconds: float
+        latency_ms: float
+        engine_used: string
+        tier_used: "nano | prime | espeak"
+    consumers: [gaia-web]
+
+  # ── Voices ─────────────────────────────────────────────────────────
+  - endpoint: /voices
+    method: GET
+    description: "List available TTS voices across all tiers."
+    consumers: [gaia-web]
+
+  # ── Config ─────────────────────────────────────────────────────────
+  - endpoint: /config
+    method: GET
+    description: "Return current audio config (read-only)."
+    consumers: [gaia-web]
+
+  # ── Mute / Unmute (Sleep Governance) ───────────────────────────────
+  - endpoint: /mute
+    method: POST
+    description: "Mute the audio service (called by gaia-core on sleep)."
+    consumers: [gaia-core]
+
+  - endpoint: /unmute
+    method: POST
+    description: "Unmute the audio service (called by gaia-core on wake)."
+    consumers: [gaia-core]
+
+  # ── Deep Sleep / Wake ──────────────────────────────────────────────
+  - endpoint: /sleep
+    method: POST
+    description: "Deep sleep: mute + unload Listener from GPU. Nano Speaker stays on CPU."
+    consumers: [gaia-core]
+
+  - endpoint: /wake
+    method: POST
+    description: "Wake from deep sleep: unmute + reload Listener on GPU (background task)."
+    consumers: [gaia-core]
+
+  # ── GPU Release / Reclaim ──────────────────────────────────────────
+  - endpoint: /gpu/release
+    method: POST
+    description: "Release GPU VRAM by unloading all GPU models. Does NOT mute — STT lazy-reloads."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /gpu/reclaim
+    method: POST
+    description: "Reclaim GPU by reloading STT model in background."
+    consumers: [gaia-orchestrator]
+
+  - endpoint: /gpu/status
+    method: GET
+    description: "Current GPU usage: VRAM, model loaded states, muted flag."
+    consumers: [gaia-orchestrator]
+
+consumes:
+  - service: gaia-core
+    endpoint: /sleep/wake
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Signal voice activity detected (wake trigger)"
+
+  - service: gaia-nano
+    endpoint: /v1/chat/completions
+    method: POST
+    protocol: http
+    port: 8080
+    description: "Nano-Refiner for transcript cleanup"
+
+  - service: gaia-orchestrator
+    endpoint: /register
+    method: POST
+    protocol: http
+    port: 6410
+    description: "Register capabilities on startup (best-effort)"
+
+environment:
+  NANO_ENDPOINT: "http://gaia-nano:8080"
+  GAIA_CONSTANTS_PATH: "/gaia-common/gaia_common/constants/gaia_constants.json"
+
+volumes:
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library"
+  - path: /app
+    mode: rw
+    purpose: "Service source code"
+  - path: /models
+    mode: ro
+    purpose: "Audio model files (Qwen3-ASR, Qwen3-TTS)"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+deploy:
+  gpu: true
+  gpu_count: 1
+
+depends_on:
+  - gaia-nano

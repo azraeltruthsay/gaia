@@ -1,0 +1,81 @@
+{
+  "MODEL_REGISTRY": {
+    "models_dir": "/models",
+    "prime": {
+      "base": "/models/Qwen/Qwen3.5-9B",
+      "merged": "/models/prime",
+      "gguf": "/models/prime.gguf",
+      "family": "qwen3.5",
+      "params": "9B",
+      "multimodal": true,
+      "skills": "13/14 Primary School",
+      "notes": "Identity-baked Qwen3.5-9B. Adaptive training v6p1. Vision encoder preserved."
+    },
+    "prime_8b_legacy": {
+      "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
+      "merged": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+      "gguf": "/models/Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf",
+      "notes": "Legacy 8B \u2014 retained for rollback"
+    },
+    "core": {
+      "base": "/models/Qwen/Qwen3.5-4B",
+      "merged": "/models/core",
+      "gguf": "/models/core.gguf",
+      "family": "qwen3.5",
+      "params": "4B",
+      "multimodal": true,
+      "skills": "13/14 Primary School",
+      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
+    },
+    "nano": {
+      "base": "/models/Qwen/Qwen3.5-0.8B",
+      "merged": "/models/nano",
+      "gguf": "/models/nano.gguf",
+      "family": "qwen3.5",
+      "params": "0.8B",
+      "multimodal": true,
+      "skills": "3/3 Nano School (triage, cleanup, greeting)",
+      "notes": "Identity-baked Qwen3.5-0.8B. Nano School curriculum. Vision preserved."
+    },
+    "audio": {
+      "stt": "/models/Qwen3-ASR-0.6B",
+      "tts_nano": "/models/Qwen3-TTS-12Hz-0.6B-Base",
+      "tts_prime": "/models/Qwen3-TTS-12Hz-1.7B-Base"
+    },
+    "embedding": "/models/all-MiniLM-L6-v2",
+    "lora_adapters": "/models/lora_adapters"
+  },
+  "WARM_POOL": {
+    "enabled": true,
+    "tmpfs_path": "/mnt/gaia_warm_pool",
+    "source_path": "/gaia/GAIA_Project/gaia-models",
+    "size_gb": 30,
+    "models": {
+      "nano": {
+        "source": "Qwen3.5-0.8B-Abliterated",
+        "description": "Nano (0.8B) \u2014 triage, transcript cleanup"
+      },
+      "core": {
+        "source": "Qwen3.5-4B-GAIA-Core-Multimodal-v4",
+        "description": "Core (4B) \u2014 intent detection, tool selection, planning"
+      },
+      "prime": {
+        "source": "Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ",
+        "description": "Prime (8B GPTQ 4-bit) \u2014 complex reasoning, code, long-form"
+      },
+      "embedding": {
+        "source": "all-MiniLM-L6-v2",
+        "description": "Sentence embedding for vector search"
+      }
+    },
+    "stage_on_boot": [
+      "nano",
+      "core",
+      "prime",
+      "embedding"
+    ],
+    "stage_on_demand": [
+      "prime"
+    ]
+  }
+}

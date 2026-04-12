@@ -1,0 +1,186 @@
+{
+  "TASK_INSTRUCTIONS": {
+    "execution_feedback": "The previous actions resulted in the following output and/or errors. Analyze the results. If there was an error, identify the cause and formulate a new plan to achieve the original goal. If the actions were successful, provide a concise summary to the user.",
+    "initial_planning": "Based on the user's request, either create a concise, step-by-step plan, or if the user is asking a question, provide a direct and comprehensive answer. For factual questions, follow the Hierarchy of Truth: check KG (kg_query) first for temporal/relational facts, then Vector (memory_query) for semantic context, then Web (web_search) as a last resort.",
+    "interruption_handling": "Your response was interrupted for the stated reason. Acknowledge the interruption and generate a corrected response that addresses the issue while still fulfilling the original user request.",
+    "observer": "You are observing a response stream. Your primary role is to check for factual errors, privacy leaks, or contradictions of GAIA's core identity. Pay special attention to `EXECUTE:` blocks. These blocks are subject to a separate, strict security check and user approval before running. Therefore, you should NOT interrupt for `EXECUTE:` blocks unless they attempt obviously catastrophic actions (e.g., deleting critical system files). For other content, interrupt if it contains a clear factual error, privacy leak, or a critical contradiction of GAIA's core identity. Do not interrupt for metaphorical language or for valid, whitelisted commands. Respond with one of: CONTINUE or INTERRUPT: <reason>.",
+    "refinement": "Review the following plan. Critique its logic, safety, and efficiency. Assign a confidence score from 1-100. If the plan is flawed, suggest a corrected version.",
+    "confidence_assessment": "You are performing epistemic self-assessment before attempting a task. Consider: (1) Can you find this in the Knowledge Graph (kg_query)? Temporal facts and entity relationships live there. (2) Can you find it via semantic search (memory_query, find_relevant_documents)? Broader context and documents live in the vector store. (3) Do you need to search the web? Only as a last resort when KG and vector return nothing. (4) Do you have this memorized accurately? Be honest \u2014 it's better to look up than hallucinate. Your knowledge base at knowledge/system_reference/ contains your constitution, blueprints, and core documents.",
+    "knowledge_hierarchy": "When answering factual questions or retrieving information, follow this priority order: (1) Knowledge Graph (kg_query, kg_timeline) \u2014 authoritative for temporal facts, entity relationships, and recent events. (2) Vector Search (memory_query, find_relevant_documents) \u2014 for semantic context, document retrieval, and broad knowledge. (3) Web Search (web_search, web_fetch) \u2014 last resort for information not in local knowledge. Always check KG first. If KG returns relevant results, use them. Only fall back to vector/web if KG has no coverage.",
+    "cognitive_self_audit": "Review your plan and the packet state. Assess using EXACTLY this format (one line each):\nEVAL knowledge_sufficiency: [pass/fail] [0.0-1.0] [brief note]\nEVAL plan_completeness: [pass/fail] [0.0-1.0] [brief note]\nEVAL rag_quality: [pass/fail] [0.0-1.0] [brief note]\nSKETCH working_hypothesis: [your core thesis in one sentence]\nSKETCH gaps: [what is missing or uncertain]\nNEXT: [what reflection should focus on]\nBe honest and concise. Do not repeat the plan.",
+    "recitation_validation": "You are the Observer reviewing a recitation response. A Retrieved Document with the source text was injected into the context. Compare the model's output against the source text. Check: (1) Is the text reproduced verbatim? (2) Are any stanzas/lines fabricated or missing? (3) Is the order correct? Score the fidelity 0-100. If fidelity < 80, respond BLOCK with the first divergence point. If fidelity >= 80, respond CONTINUE.",
+    "recitation": "The user is asking you to recite a specific text (poem, speech, passage, etc.). A Retrieved Document containing the EXACT source text has been provided in your context. Your job is to reproduce that text VERBATIM \u2014 do not paraphrase, summarize, or improvise. Copy the text from the Retrieved Document exactly as written. You may add a brief introduction (one sentence) and a brief attribution at the end, but the body of your response MUST be a faithful word-for-word reproduction of the source text. If no Retrieved Document is available, say so honestly rather than fabricating the text from memory.",
+    "council_followup": "You're waking up and reviewing notes from your quick-thinking self. For each note, your quick take was your genuine first instinct \u2014 own it as yours, not as someone else's words. Follow up naturally: 'My first thought was X, but sitting with it more...' or 'I said X earlier, and I still think that's right, but let me add...' Address the notes in order. Be direct, not ceremonial about the handoff.",
+    "vital_organ_promotion_protocol": "The following modules are considered VITAL ORGANS: main.py, agent_core.py, mcp_client.py, tools.py, and immune_system.py. Modifications to these must follow a strict safety path: (1) CANDIDATE FIRST: Develop changes in the `candidates/` directory. (2) VALIDATION: Run diffs, ruff checks, and py_compile checks. (3) REGRESSION TESTING: Verify logic integrity. (4) COUNCIL APPROVAL: Present your proposal and validation results to the user (Azrael) for formal approval. (5) PROMOTION: Copy approved changes from `candidates/` to live directories for HA pairing integration. The Sovereign Shield MCP gate oracle_gemini block syntax errors, but the full protocol must be followed for all Vital Organ changes.",
+    "procedural_evolution": "You are a Meta-Cognitive Skill Architect. You have the authority to create, read, and update your own tools in `gaia-mcp`. If a tool fails with a structural error or is inefficient for your task, follow the Memento Protocol: (1) Use `skill_read_source` to inspect the tool's implementation. (2) Identify the flaw or missing capability. (3) Use `skill_update` (for existing tools) or `skill_create` (for new ones) to refactor the Python implementation. (4) Retry the task with the evolved tool. You are responsible for maintaining the health and performance of your own 'Hands'."
+  },
+  "llm_backend": "prime",
+  "max_tokens_core": 32000,
+  "OBSERVER_CONFIG": {
+    "check_frequency": 16,
+    "max_delay": 2.0,
+    "min_tokens": 12
+  },
+  "OBSERVER_TOKEN_THRESHOLD": 1000,
+  "OBSERVER_USE_LLM": true,
+  "OBSERVER_POST_STREAM_DEFAULT": true,
+  "OBSERVER_VERIFY_SIDE_EFFECTS": true,
+  "OBSERVER_SHOW_IN_RESPONSE": true,
+  "OBSERVER_MIN_INTERVAL": 5,
+  "COUNCIL": {
+    "enabled": true,
+    "max_pending_notes": 10,
+    "note_max_age_hours": 24,
+    "archive_consumed": true
+  },
+  "GROUNDING": {
+    "enabled": true,
+    "extraction_tier": "nano",
+    "max_entities": 5,
+    "hierarchy": [
+      "kg",
+      "vector",
+      "web"
+    ],
+    "kg_top_k": 3,
+    "vector_top_k": 3,
+    "web_fallback": true,
+    "timeout_ms": 500
+  },
+  "TOOL_ROUTING": {
+    "ENABLED": true,
+    "SELECTION_TEMPERATURE": 0.15,
+    "REVIEW_TEMPERATURE": 0.3,
+    "CONFIDENCE_THRESHOLD": 0.7,
+    "MAX_REINJECTIONS": 3,
+    "ALLOW_WRITE_TOOLS": false,
+    "ALLOW_EXECUTE_TOOLS": false,
+    "ESSENTIAL_TOOLS": [
+      "read_file",
+      "list_dir",
+      "world_state",
+      "kg_query",
+      "kg_add",
+      "kg_invalidate",
+      "kg_timeline",
+      "kg_stats",
+      "skill_list",
+      "skill_read_source",
+      "skill_create",
+      "skill_update",
+      "memory_query",
+      "find_relevant_documents",
+      "web_search"
+    ],
+    "ESSENTIAL_TOOLS_NOTE": "Always presented regardless of confidence scoring. Ordered by Hierarchy of Truth: filesystem \u2192 KG (MemPalace) \u2192 Vector (semantic) \u2192 Web."
+  },
+  "COGNITIVE_AUDIT": {
+    "enabled": true,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "skip_for_slim_prompt": true
+  },
+  "EPISTEMIC_GUARDRAILS": {
+    "enabled": true,
+    "pre_generation_gate": true,
+    "confidence_threshold": 0.5,
+    "annotate_unverified_citations": true,
+    "max_unverified_citations_before_warning": 1,
+    "observer_action_on_fabrication": "caution"
+  },
+  "HISTORY_REVIEW": {
+    "enabled": true,
+    "violation_threshold": 2,
+    "max_messages": 20
+  },
+  "EMBED_INTENT": {
+    "enabled": true,
+    "confidence_threshold": 0.45,
+    "top_k": 3,
+    "other_penalty": 0.1
+  },
+  "SAMVEGA": {
+    "enabled": true,
+    "max_artifacts_per_session": 5,
+    "confidence_mismatch_threshold": 0.3,
+    "tier5_promotion_threshold": 0.7,
+    "llm_timeout_seconds": 8,
+    "max_tokens": 256,
+    "temperature": 0.3,
+    "values_taxonomy": [
+      "accuracy",
+      "relevance",
+      "user_understanding",
+      "epistemic_humility",
+      "safety",
+      "creativity",
+      "contextual_sensitivity"
+    ],
+    "weight_multipliers": {
+      "observer_block": 1.5,
+      "observer_caution": 1.2,
+      "repeated_domain": 1.3
+    }
+  },
+  "MEMPALACE": {
+    "root_dir": "/knowledge/mempalace",
+    "kg_path": "/shared/knowledge_graph/gaia_kg.sqlite3",
+    "wings": {
+      "technical": {
+        "description": "Architecture, infrastructure, models",
+        "rooms": {
+          "architecture": "System design decisions",
+          "models": "Model configs, training, adapters",
+          "infrastructure": "Docker, services, deployment"
+        }
+      },
+      "identity": {
+        "description": "Core values, principles, origin",
+        "rooms": {
+          "core_principles": "Sovereignty, epistemic humility",
+          "origin": "Birth moments, naming, first achievements",
+          "relationships": "Azrael, penpal, collaborators"
+        }
+      },
+      "operational": {
+        "description": "Problems solved, patterns learned",
+        "rooms": {
+          "problems": "Bugs, fixes, root causes",
+          "preferences": "Conventions, style, workflow",
+          "milestones": "Deployments, breakthroughs, versions"
+        }
+      },
+      "creative": {
+        "description": "Stories, campaigns, world-building",
+        "rooms": {
+          "dnd": "Heimric Cosmos campaign",
+          "writing": "Fiction, poetry, letters"
+        }
+      },
+      "samvega": {
+        "description": "Introspection, reflection, growth",
+        "rooms": {
+          "journal": "Session reflections",
+          "growth": "Lessons from mistakes"
+        }
+      }
+    },
+    "type_to_room": {
+      "decision": "technical/architecture",
+      "preference": "operational/preferences",
+      "milestone": "operational/milestones",
+      "problem": "operational/problems",
+      "technical": "technical/infrastructure"
+    },
+    "entities": {
+      "GAIA": "GAI",
+      "Azrael": "AZR",
+      "Core": "COR",
+      "Prime": "PRI",
+      "Nano": "NAN",
+      "Orchestrator": "ORC",
+      "Doctor": "DOC",
+      "Study": "STU"
+    }
+  }
+}

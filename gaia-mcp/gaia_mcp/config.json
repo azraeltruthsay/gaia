@@ -1,0 +1,5 @@
+{
+  "MCP_LITE_ENABLED": true,
+  "MCP_LITE_ENDPOINT": "http://gaia-mcp:8765/jsonrpc",
+  "mcp_capabilities_summary": "GAIA can interface with Model Control Protocol (MCP) services via the embedded gaia-mcp-lite sidecar, enumerate registered tools, inspect helper manifests, and dispatch bounded actions (file ops, diagnostics, helper scripts) with human approval. Available file operations include list_files, list_tree, and read_file."
+}

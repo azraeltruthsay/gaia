@@ -1,0 +1,39 @@
+{
+  "prime": {
+    "enabled": true,
+    "max_model_len": 16384,
+    "max_num_batched_tokens": 1024,
+    "max_num_prompt_tokens": 16384,
+    "max_num_seqs": 1,
+    "gpu_memory_utilization": 0.85,
+    "path": "/models/prime",
+    "trust_remote_code": true,
+    "template": "raw",
+    "type": "vllm_remote",
+    "endpoint": "http://gaia-prime:7777",
+    "lora_config": {
+      "enabled": true,
+      "adapter_dir": "/models/lora_adapters",
+      "max_loras": 4,
+      "max_lora_rank": 64
+    }
+  },
+  "oracle_gemini": {
+    "enabled": false,
+    "model": "gemini-1.5-flash",
+    "provider": "gemini",
+    "type": "api"
+  },
+  "oracle_openai": {
+    "enabled": true,
+    "model": "gpt-4o-mini",
+    "provider": "openai",
+    "type": "api"
+  },
+  "groq_fallback": {
+    "enabled": true,
+    "model": "llama-3.3-70b-versatile",
+    "type": "groq",
+    "description": "Free Groq API fallback for when GPU unavailable"
+  }
+}

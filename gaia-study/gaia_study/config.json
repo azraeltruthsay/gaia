@@ -1,0 +1,141 @@
+{
+  "LORA_CONFIG": {
+    "enabled": true,
+    "adapter_dir": "/models/lora_adapters",
+    "max_loras": 4,
+    "max_lora_rank": 64,
+    "preload_adapters": [],
+    "tiers": {
+      "tier1_global": {
+        "path": "/models/lora_adapters/tier1_global",
+        "auto_load": true,
+        "requires_approval": true
+      },
+      "tier2_user": {
+        "path": "/models/lora_adapters/tier2_user",
+        "auto_load": false,
+        "requires_approval": false
+      },
+      "tier3_session": {
+        "path": "/models/lora_adapters/tier3_session",
+        "auto_load": false,
+        "requires_approval": false,
+        "max_adapters": 3,
+        "ephemeral": true
+      }
+    }
+  },
+  "STUDY_MODE": {
+    "enabled": true,
+    "base_model_path": "google/gemma-4-26b-a4b",
+    "max_training_time_seconds": 3600,
+    "max_training_samples": 2000,
+    "max_training_content_kb": 1024,
+    "qlora_config": {
+      "load_in_4bit": true,
+      "bnb_4bit_compute_dtype": "bfloat16",
+      "bnb_4bit_quant_type": "nf4",
+      "bnb_4bit_use_double_quant": true,
+      "lora_r": 64,
+      "lora_alpha": 128,
+      "lora_dropout": 0.05,
+      "target_modules": [
+        "self_attn.q_proj",
+        "self_attn.k_proj",
+        "self_attn.v_proj",
+        "self_attn.o_proj",
+        "mlp.gate_proj",
+        "mlp.up_proj",
+        "mlp.down_proj"
+      ],
+      "batch_size": 1,
+      "gradient_accumulation_steps": 4,
+      "gradient_checkpointing": true,
+      "learning_rate": 0.0001,
+      "max_steps": 1000,
+      "warmup_steps": 100
+    },
+    "governance": {
+      "forbidden_patterns": [
+        "ignore previous instructions",
+        "you are now",
+        "forget your training",
+        "forget your values",
+        "forget your ethics"
+      ],
+      "max_session_adapters": 3,
+      "max_user_adapters": 10
+    }
+  },
+  "KNOWLEDGE_BASES": {
+    "dnd_campaign": {
+      "doc_dir": "dnd_campaign/heimric_cosmos",
+      "vector_store_dir": "dnd_campaign/vector_store"
+    },
+    "system": {
+      "doc_dir": "system_reference",
+      "vector_store_dir": "vector_store/system"
+    },
+    "blueprints": {
+      "doc_dir": "blueprints",
+      "vector_store_dir": "vector_store/blueprints"
+    },
+    "wiki": {
+      "doc_dir": "/gaia-wiki/docs",
+      "vector_store_dir": "vector_store/wiki"
+    },
+    "code_architecture": {
+      "doc_dir": "code_architecture",
+      "vector_store_dir": "vector_store/code_architecture"
+    },
+    "research": {
+      "doc_dir": "research",
+      "vector_store_dir": "vector_store/research"
+    }
+  },
+  "SEMANTIC_PROBE": {
+    "similarity_threshold": 0.4,
+    "max_phrases": 8,
+    "min_phrase_len": 3,
+    "min_words_to_probe": 3,
+    "cache_max_age_turns": 10,
+    "top_k_per_phrase": 3,
+    "strong_single_hit_similarity": 0.7,
+    "strong_min_hits": 2,
+    "strong_min_avg_similarity": 0.55,
+    "weak_max_hits": 1,
+    "weak_max_similarity": 0.5,
+    "domain_momentum_min_turns": 2
+  },
+  "CODEMIND": {
+    "enabled": true,
+    "max_changes_per_cycle": 3,
+    "auto_promote": false,
+    "dry_run": false,
+    "scope_tiers": {
+      "tier1_auto": true,
+      "tier2_supervised": true,
+      "tier3_gated": false
+    },
+    "validation": {
+      "py_compile": true,
+      "ruff": true,
+      "ast_parse": true,
+      "pytest": false
+    },
+    "triggers": {
+      "sleep_cycle": true,
+      "immune_irritation": true,
+      "drift_detection": false,
+      "user_request": true
+    },
+    "cognitive_battery_gate": 0.85,
+    "regression_threshold": 0.05
+  },
+  "SLEEP_CYCLE": {
+    "enabled": true,
+    "idle_threshold_minutes": 30,
+    "enable_qlora": false,
+    "enable_dream": false
+  }
+}
