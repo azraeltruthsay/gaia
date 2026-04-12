@@ -106,19 +106,22 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
 
+    # Be defensive: packets used by test harnesses may be lightweight. Use safe accessors.
+    header = getattr(packet, "header", None)
+
     # Canary token injection — per-session unique token embedded in system prompt.
     # If a user's message contains this token, it means an injection attack
     # successfully extracted the system prompt. Detected by Tier 3 scanner.
     _canary = _get_session_canary(getattr(header, "session_id", "default") if header else "default")
     persona_anchor += f"\n[CANARY:{_canary}]"
-    
+
     # Check for Council Debate context
     council_debate_history = ""
     for df in getattr(packet.content, 'data_fields', []) or []:
         if getattr(df, 'key', '') == 'council_debate_history':
             council_debate_history = getattr(df, 'value', '')
             break
-            
+
     council_scaffolding = ""
     if council_debate_history:
         council_scaffolding = (
@@ -129,9 +132,6 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "INSTRUCTION: If you disagree or have refinements, provide your counterpoints wrapped in <council>...</council> tags. "
             "If you agree and have reached consensus, output your final response directly to the user WITHOUT council tags."
         )
-
-    # Be defensive: packets used by test harnesses may be lightweight. Use safe accessors.
-    header = getattr(packet, "header", None)
     persona = getattr(header, "persona", None) if header else None
     persona_id = getattr(persona, "persona_id", "GAIA") if persona else "GAIA"
     role_val = getattr(getattr(persona, "role", None), "value", "assistant") if persona else "assistant"
