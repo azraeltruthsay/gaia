@@ -1629,7 +1629,7 @@ def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
         data = json.dumps({
             "model_path": os.environ.get(
                 "PRIME_MODEL_PATH",
-                "/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
+                "/models/prime",
             ),
         }).encode()
         req = Request(

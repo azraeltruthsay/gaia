@@ -61,11 +61,11 @@ class LifecycleMachine:
             "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
         }
 
-        # Model paths per tier
+        # Model paths per tier (symlinks resolve to current model family)
         self._tier_models = {
-            "core": os.environ.get("CORE_MODEL_PATH", "/models/Qwen3.5-2B-GAIA-Core-v3"),
-            "nano": os.environ.get("NANO_MODEL_PATH", "/models/Qwen3.5-0.8B-Abliterated-merged"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ"),
+            "core": os.environ.get("CORE_MODEL_PATH", "/models/core"),
+            "nano": os.environ.get("NANO_MODEL_PATH", "/models/nano"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
         }
 
         # Audio endpoint

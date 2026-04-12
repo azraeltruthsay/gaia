@@ -293,7 +293,7 @@ class ConsciousnessMatrix:
     # Used by both the public preset methods and _apply_configuration().
     _PRESETS = {
         "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.CONSCIOUS},
+        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
         "sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
         "deep_sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
         "meditation": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
