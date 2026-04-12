@@ -43,14 +43,21 @@ def _strip_think_tags_robust(text: str) -> str:
 
     result = text
 
-    # Regex to match both <think>...</think> and <thinking>...</thinking> blocks
+    # Regex to match think blocks across model families:
+    # ChatML/Qwen: <think>...</think>, <thinking>...</thinking>
+    # Gemma 4: <|think|>...<|think|> (uses same token for open and close)
     think_pattern = re.compile(r'<(?:think|thinking)>.*?</(?:think|thinking)>\s*', re.DOTALL)
     result = think_pattern.sub('', result)
+    # Gemma 4 think tokens (paired <|think|>...<|think|>)
+    gemma_think = re.compile(r'<\|think\|>.*?<\|think\|>\s*', re.DOTALL)
+    result = gemma_think.sub('', result)
 
     # Handle UNCLOSED opening tags: <think>content... (to end of string)
     # This catches cases where the model starts thinking but never closes
     unclosed_pattern = re.compile(r'<(?:think|thinking)>.*$', re.DOTALL)
     result = unclosed_pattern.sub('', result)
+    # Gemma 4 unclosed think
+    result = re.sub(r'<\|think\|>.*$', '', result, flags=re.DOTALL)
 
     # Handle truncated/malformed tags
     result = re.sub(r'</?(?:think|thinking)[^>]*>', '', result)
@@ -65,6 +72,11 @@ def _strip_think_tags_robust(text: str) -> str:
         result = re.sub(rf'<{tag}>.*$', '', result, flags=re.DOTALL | re.IGNORECASE)
         # Malformed tags
         result = re.sub(rf'</?{tag}[^>]*>', '', result, flags=re.IGNORECASE)
+
+    # Strip leaked chat format tokens (ChatML + Gemma 4)
+    result = result.replace("<|im_start|>", "").replace("<|im_end|>", "")
+    result = re.sub(r'<\|turn>[a-z]*<turn\|>\n?', '', result)
+    result = result.replace("<turn|>", "").replace("<eos>", "")
 
     # If we're left with just whitespace, return empty
     return result.strip()

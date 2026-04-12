@@ -97,12 +97,14 @@ def analyze(prompt: str, system: str = "", max_tokens: int = 50) -> dict:
         if _model is None:
             return {"error": "Prime not loaded"}
 
-        # Build prompt
+        # Build prompt (model-family-aware)
+        from gaia_common.utils.chat_format import ChatFormat
+        _fmt = ChatFormat.from_tokenizer(_tokenizer)
         parts = []
         if system:
-            parts.append(f"<|im_start|>system\n{system}<|im_end|>")
-        parts.append(f"<|im_start|>user\n{prompt}<|im_end|>")
-        parts.append("<|im_start|>assistant\n")
+            parts.append(_fmt.system(system))
+        parts.append(_fmt.message("user", prompt))
+        parts.append(_fmt.assistant_prefix())
         full_text = "\n".join(parts)
 
         input_ids = _tokenizer.encode(full_text, return_tensors="pt").to(_model.device)

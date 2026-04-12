@@ -138,8 +138,10 @@ def _is_valid_code_output(code: str) -> bool:
     """Check if the generated text looks like valid Python code."""
     if not code or len(code) < 10:
         return False
-    # Reject ChatML token leakage
+    # Reject chat format token leakage (ChatML or Gemma 4)
     if "<|im_start|>" in code or "<|im_end|>" in code:
+        return False
+    if "<|turn>" in code or "<turn|>" in code:
         return False
     # Must contain a function or class definition
     if "def " not in code and "class " not in code:
@@ -153,9 +155,12 @@ def _is_valid_code_output(code: str) -> bool:
 
 def _extract_code(text: str) -> str:
     """Extract Python code from LLM output, stripping markdown fences and ChatML."""
-    # Strip ChatML tokens
+    # Strip chat format tokens (ChatML + Gemma 4)
     text = text.replace("<|im_start|>", "").replace("<|im_end|>", "")
-    text = text.replace("<|im_start|>assistant\n", "").strip()
+    text = text.replace("<|im_start|>assistant\n", "")
+    import re
+    text = re.sub(r"<\|turn>[a-z]+<turn\|>\n?", "", text)
+    text = text.strip()
 
     # Strip ```python ... ``` fences if present
     if "```python" in text:

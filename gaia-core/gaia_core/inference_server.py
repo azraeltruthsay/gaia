@@ -160,8 +160,10 @@ class KVPrefixCache:
         if not prefix_text.strip():
             return None, torch.tensor([[]], dtype=torch.long), 0
 
-        # Wrap in system message format
-        system_msg = f"<|im_start|>system\n{prefix_text}<|im_end|>\n"
+        # Wrap in system message format (model-family-aware)
+        from gaia_common.utils.chat_format import ChatFormat
+        _fmt = ChatFormat.from_tokenizer(self.tokenizer)
+        system_msg = _fmt.system(prefix_text) + "\n"
         prefix_ids = self.tokenizer.encode(system_msg, return_tensors="pt").to(self.device)
         prefix_len = prefix_ids.shape[1]
 
@@ -515,12 +517,14 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
             past_kv, _, prefix_len = _kv_cache.get_prefix_kv()
 
         # Build the conversation portion
+        from gaia_common.utils.chat_format import ChatFormat
+        _fmt = ChatFormat.from_tokenizer(_tokenizer)
         conv_parts = []
         for msg in conversation_msgs:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            conv_parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
-        conv_parts.append("<|im_start|>assistant\n")
+            conv_parts.append(_fmt.message(role, content))
+        conv_parts.append(_fmt.assistant_prefix())
         conv_text = "\n".join(conv_parts)
 
         if past_kv is not None:
@@ -530,7 +534,7 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
         else:
             # No cache — build full prompt
             if system_content:
-                full_text = f"<|im_start|>system\n{system_content}<|im_end|>\n{conv_text}"
+                full_text = _fmt.system(system_content) + "\n" + conv_text
             else:
                 full_text = conv_text
             input_ids = _tokenizer.encode(full_text, return_tensors="pt").to(_model.device)
