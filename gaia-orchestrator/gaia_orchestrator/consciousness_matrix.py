@@ -291,12 +291,17 @@ class ConsciousnessMatrix:
 
     # Tier targets for each configuration.
     # Used by both the public preset methods and _apply_configuration().
+    # Gemma 4 VRAM reality on 16GB GPU:
+    #   Nano NF4 (E2B): 6.3GB | Core NF4 (E4B): 8.8GB | Prime MoE: 4.6GB
+    #   Nano + Core = 15.1GB → OOM (no KV cache room)
+    #   Only one large tier on GPU at a time; others serve from GGUF/CPU
     _PRESETS = {
-        "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-        "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
-        "sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
-        "deep_sleep": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
-        "meditation": {"prime": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.SUBCONSCIOUS},
+        "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+        "operating": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+        "focusing": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS},
+        "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
+        "deep_sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.UNCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
+        "meditation": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
     }
 
     async def _apply_configuration(self, config_name: str, sync_lifecycle: bool = True) -> dict:
