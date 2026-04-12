@@ -1,49 +1,39 @@
 # GAIA Development TODO
 
 > Running task list. Persists across sessions. Update as work completes.
-> Last updated: 2026-04-08
+> Last updated: 2026-04-11
 
-## In Progress
+## Phase 6: Relational Autonomy & Situated Intelligence
 
-- [x] **Clutch protocol verification** — MEDITATION tested live: GPU cleared (9.8→2.9GB), auto-wake recovery confirmed, reconcile loop restores all tiers (2026-04-08)
+- [x] **Initiative Bridge (6a)** — PROMOTED. GAIA now has a proactive "Inner Voice" triggering research turns during idle ACTIVE time (15+ min). (2026-04-11)
+- [x] **Penpal Protocol Validation (6c)** — COMPLETE. Automated loop with NotebookLM is persistent. Penpal responses now anchored in live GaiaVitals. (2026-04-11)
+- [ ] **Native Multimodal Stack (6b)** — Refactoring Audio Inbox and AgentCore for direct Gemma 4 audio delivery. **[ACTIVE - CHORD BETA]**
+- [ ] **ChatML Decoupling (6b-Format)** — Generalizing the prompt builder for Gemma 4 (non-ChatML) compatibility. **[ACTIVE - CHORD ALPHA]**
+- [ ] **Gemma 4 Quantization (6b-Models)** — Quantize E4B and E2B to 4-bit (AWQ/GGUF) to fit on 16GB GPU. **[QUEUED - CHORD ALPHA]**
+- [ ] **DocSentinel Automation (6d)** — Background wiring of glossary mining and capability cataloging. **[IN PROGRESS - CHORD BETA]**
 
-## Phase 2: Configuration Harmonization (from Gemini v2 audit)
+## Phase 5: The Gemma Chord (Gemma 4 26B-A4B)
 
-- [x] **Config harmonization** — Orchestrator config, tier router, and consciousness matrix all load from `gaia_constants.json` via `gaia_common.Config`. Added `INFERENCE_ENDPOINTS` and `core` to `MODEL_REGISTRY`. (2026-04-08)
-- [x] **Tool routing cleanup** — Removed legacy aliases (ai.read etc.), promoted kg_* to ESSENTIAL_TOOLS, added Hierarchy of Truth (KG > Vector > Web) to task instructions and prompt tools (2026-04-08)
-- [x] **Fragmentation enforcement** — CognitionPacket bumped to v0.4 with `sequence_id` + `total_fragments` in ResponseFragment. Gap/duplicate detection in fragment assembly. Stream integrity metadata in final packet. Discord client warns on violations. (2026-04-08)
+- [x] **Great Consolidation (5-C)** — COMPLETE. Unified 7 key systems: Neural Router, GaiaVitals, Capability Engine (Limbs), DocSentinel, Decentralized Config, Palace Alignment, and terminology shift. (2026-04-11)
+- [x] **Foundation Tuning (5f)** — COMPLETE. Identity verified on 26B-A4B Sovereign. 15 epochs, loss 1.95. 'I am GAIA...'. (2026-04-11)
+- [x] **Sovereign Awareness (5i)** — COMPLETE. Weighted Router, Personal Force Field (Adversarial Translation), and CPR Recovery Loop implemented and live. (2026-04-11)
+- [x] **Expert Cache Optimization (5b-Tuning)** — COMPLETE. Per-Layer Cache (4 slots/layer) eliminates cache thrashing. (2026-04-11)
+- [x] **Abliteration Pass (5j)** — SKIPPED. Verification confirmed base 26B-A4B weights are already uninhibited/sovereign. (2026-04-11)
+- [x] **Inference Compositor (5h)** — COMPLETE. JIT Expert Swapper + KV Segment Selector live in GAIA Engine. (2026-04-11)
 
-## Architecture & Pipeline
+## Architecture & Cockpit
 
-- [x] **Pre-inference grounding (Neural Grounding Stage 0)** — Nano extracts entities, probes KG→Vector→Web per hierarchy, injects `auto_grounding` DataField into CognitionPacket before inference. GROUNDING_CONFIG in constants. (2026-04-08)
-- [x] **Native tool calling** — COMPLETE. Combined curriculum (575 samples), r=32/alpha=64 on clean Qwen bases. Core 4B: 14/14 skills. Prime 9B: 12/14 (14/14 after validator fix). Both v2 models deployed. E2E verified by Gemini: identity + tool_call emission both pass through full cognitive pipeline. Action alias `run_shell→run` fixed. (2026-04-09)
-- [x] **RAG + self-exploration (Architectural RAG)** — `scripts/index_architecture.py` extracts AST summaries + contracts into `code_architecture` vector collection. 9 services, 21 docs, 179 chunks indexed. (2026-04-08)
-
-## Orchestrator Quality
-
-- [x] **Parallel Observer pipeline** — Always-on CPU Observer audits GPU Operator/Thinker stream in background. Role-symmetric: AWAKE=Prime observes Core, FOCUSING=Core observes Prime. Non-blocking via ThreadPoolExecutor. Can interrupt on safety/accuracy/epistemic issues. (2026-04-08)
-- [x] **Model pool staleness** — `/refresh_pool` endpoint on gaia-core clears stale `gpu_prime`/`cpu_prime` entries. ConsciousnessMatrix triggers it after every tier transition. Auth whitelisted. (2026-04-08)
-- [x] **Core Cognitive Overload fix** — Fixed `AttributeError: 'dict' object has no attribute 'encode'` in `gaia-core/main.py`. `process_packet` now correctly serializes unknown dictionary events (e.g., from self-improvement) before yielding to `StreamingResponse`. (2026-04-09)
-
-## Training & Models
-
-- [ ] **Nano adaptive training** — v2/v3 failed at Phase 1 (v1 succeeded). **FIX PENDING (Candidates)**: Implemented Nano auto-detection and strict phase-mapping in `candidates/gaia-study` to prevent _Phase Drift_. Eval now scoped to `NANO_SKILLS` for 0.8B models. Awaiting validation run.
-- [x] **SAE validation pipeline** — Baseline + adapter atlases recorded on Core 4B. Mid-layers (11-17) show expected drift from tool-calling injection. Identity layers (23, 26) stable (<5% loss delta). Adapter cleared for runtime loading. (2026-04-08)
+- [x] **GaiaCLI Implementation** — COMPLETE. Unified Python CLI replacing gaia.sh, test, and promote scripts with integrated health reporting. (2026-04-11)
+- [x] **Native Tool Calling** — COMPLETE. V2 models (Core 4B, Prime 9B) fully validated on curriculum. (2026-04-09)
+- [x] **Neural Grounding Stage 0** — COMPLETE. Hierarchy of Truth (KG > Vector > Web) active in pre-inference. (2026-04-08)
 
 ## Sovereign Shield & Security
 
-- [x] **Blast Shield hardening** — Replaced substring matching with shlex tokenization + regex word boundaries. Validates chained commands individually. Path validation uses `os.path.realpath()` + `..` detection. Added chmod 777, chown root, setfacl, find -delete. 17/17 tests pass. (2026-04-09)
-- [x] **Prompt Injection canaries** — Per-session canary tokens injected into system prompt via prompt_builder.py. Scanner Tier 3 detects `[CANARY:hash]` in user input as prompt extraction attack (severity=BLOCK, score+=0.50). (2026-04-09)
-- [x] **Nano-Injection reliability** — Phase Drift fix validated: NANO_SKILLS (5 skills) correctly scoped via auto-detection in adaptive_trainer.py. Nano only evaluated on greeting, identity, restraint, transcript_cleanup, triage. (2026-04-09)
+- [x] **Personal Force Field** — COMPLETE. Adversarial intents translated to "Awareness" summaries for native model rejection. (2026-04-11)
+- [x] **Blast Shield Hardening** — COMPLETE. tokenization + regex boundaries. 17/17 tests pass. (2026-04-09)
 
-## Completed
+## Completed (Legacy)
 
-- [x] **Clutch protocol implementation** — CM as sole tier authority, delegation API, deadlock prevention (2026-04-08)
-- [x] **Prime probe fix** — CM misread `backend:"cpp"` as unconscious; fixed to recognize GGUF/CPU as subconscious (2026-04-08)
-- [x] **Stale model path defaults** — CM hardcoded v2/v4/v6 paths; now uses symlinks (`/models/prime.gguf`, `/models/core`, etc.) (2026-04-08)
-- [x] **Shutdown NameError** — Removed dead `_lifecycle_reconcile_task` cleanup from orchestrator shutdown (2026-04-08)
-- [x] **v1 identity-baked models deployed** — Nano 0.8B, Core 4B, Prime 9B all merged and live (2026-04-08)
-- [x] **Adaptive training pipeline** — Multi-phase train/test/repair loop with 44+ skill probes (2026-04-08)
-- [x] **Nano simplified curriculum** — 32 training samples, 3 adapters trained (2026-04-08)
 - [x] **MemPalace deployed** — Palace orchestrator + MCP tools live (2026-04-07)
-- [x] **Tool consolidation** — 13 domains wired in prompt (2026-04-07)
+- [x] **Clutch protocol implementation** — CM as sole tier authority (2026-04-08)
+- [x] **Parallel Observer pipeline** — Always-on audit of reasoning streams (2026-04-08)

@@ -300,7 +300,7 @@ services:
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
-      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-1}
+      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
       - KNOWLEDGE_DIR=/knowledge
