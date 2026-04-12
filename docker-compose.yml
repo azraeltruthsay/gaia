@@ -337,6 +337,8 @@ services:
       # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
       # NF4 (~2.5GB) frees ~6GB for generation and prevents OOM.
       - GAIA_ENGINE_QUANTIZE=nf4
+      # Disable vision tower for Core — saves ~5GB VRAM. Vision handled by dedicated request.
+      - GAIA_ENGINE_DISABLE_VISION=true
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092
       - CORE_CPU_MODEL_PATH=/models/Gemma4-E4B-GAIA-Core-v1-Q4_K_M.gguf
