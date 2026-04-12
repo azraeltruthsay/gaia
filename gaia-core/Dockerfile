@@ -66,7 +66,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 
 # Install transformers for safetensors model loading (>=5.5.0 for Gemma 4 support)
-RUN pip install --no-cache-dir "transformers>=5.5.0" accelerate
+# bitsandbytes for NF4 quantization (E4B is 15GB bf16, needs NF4 to fit on 16GB GPU)
+RUN pip install --no-cache-dir "transformers>=5.5.0" accelerate bitsandbytes peft
 
 # flash-linear-attention for Qwen3.5 hybrid attention (DeltaNet fast path)
 # causal-conv1d is optional — FLA works without it via torch fallback
