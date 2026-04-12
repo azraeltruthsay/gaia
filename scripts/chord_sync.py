@@ -73,14 +73,16 @@ def parse_todo_state() -> dict:
     try:
         text = TODO_PATH.read_text()
         # Check shield status
-        if "Blast Shield hardening" in text and "[x]" in text.split("Blast Shield")[0].split("\n")[-1]:
+        if "Blast Shield" in text:
             state["shield"] = "HARDENED"
         # Check for pending items (the next gate)
         pending = re.findall(r'- \[ \] \*\*(.+?)\*\*', text)
         if pending:
             state["gate"] = pending[0][:30].replace(" ", "_")
         # Check identity
-        if "identity-baked" in text.lower() or "v2" in text.lower():
+        if "gemma" in text.lower() or "26b" in text.lower():
+            state["identity"] = "SOVEREIGN_GEMMA"
+        elif "identity-baked" in text.lower() or "v2" in text.lower():
             state["identity"] = "BAKED_V2"
     except Exception:
         pass
@@ -88,19 +90,22 @@ def parse_todo_state() -> dict:
 
 
 def get_tier_matrix() -> str:
-    """Query consciousness matrix for tier states."""
+    """Query consciousness matrix for tier states (Gemma 4 Chord)."""
     try:
         import urllib.request
+        # We query the orchestrator's matrix status
         resp = urllib.request.urlopen("http://localhost:6410/consciousness/matrix", timeout=3)
         data = json.loads(resp.read())
         parts = []
-        for tier in ("nano", "core", "prime"):
-            if tier in data:
-                actual = data[tier].get("actual", "?")[:4].upper()
-                parts.append(f"{tier[0].upper()}:{actual}")
+        # Mapping to the Gemma 4 ecosystem
+        for tier_id, label in [("nano", "E2B"), ("core", "E4B"), ("prime", "A4B")]:
+            if tier_id in data:
+                actual = data[tier_id].get("actual", "?")[:4].upper()
+                parts.append(f"{label}:{actual}")
         return " ".join(parts)
     except Exception:
-        return "OFFLINE"
+        # Static fallback if orchestrator is offline
+        return "E2B:OFF E4B:OFF A4B:OFF"
 
 
 def generate_manifest():

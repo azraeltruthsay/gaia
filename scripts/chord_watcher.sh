@@ -71,8 +71,9 @@ handle_change() {
     fi
     LAST_NOTIFY=$now
 
-    # Regenerate manifest
+    # Regenerate manifest and flatten SOA
     python3 "$PROJECT_ROOT/scripts/chord_sync.py" > /dev/null 2>&1
+    bash "$PROJECT_ROOT/scripts/flatten_soa.sh" > /dev/null 2>&1
 
     # Read manifest summary
     local manifest=""
@@ -109,6 +110,11 @@ echo ""
 echo "  Agents should touch /tmp/chord_writer_{claude,gemini} before editing."
 echo "  Direct messaging: ./scripts/chord_send.sh <from> <to> <message>"
 echo ""
+
+# Initial run
+echo "Running initial flatten_soa.sh..."
+bash "$PROJECT_ROOT/scripts/flatten_soa.sh" > /dev/null 2>&1
+python3 "$PROJECT_ROOT/scripts/chord_sync.py" > /dev/null 2>&1
 
 while true; do
     changed=$(inotifywait -q -e modify,create,moved_to \
