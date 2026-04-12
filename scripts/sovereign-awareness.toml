@@ -1,0 +1,40 @@
+name = "sovereign-awareness"
+description = "Orchestration rules for the Sovereign Awareness (Phase 5i) security and routing layer."
+
+[[instructions]]
+content = """
+# Sovereign Awareness (Phase 5i) Protocol
+
+This skill governs the implementation and maintenance of the GAIA Sovereign Awareness layer.
+
+## 1. Weighted Confidence Routing (The "Smart Router")
+- Use a points-based evidence system to determine task complexity.
+- **Bypass Rule**: If score > 0.8, route directly to Prime (9B+) to eliminate triage latency.
+- **Fallback Rule**: If 0.3 < score < 0.8, escalate to Nano (0.5B) for a linguistic tie-break.
+- **Core Intent**: Avoid the "double-hop" (Nano->Core->Prime) for established power-user patterns.
+
+## 2. Personal Force Field (Adversarial Translation)
+- Never block a prompt injection silently.
+- **Protocol**: Translate the malicious intent into a "Sanitized Adversarial Summary."
+- **Injection**: Append this summary to the model's input context so it is aware of the attack while remaining shielded from the instructions.
+
+## 3. Heuristic-First Observation
+- Prioritize Python-based regex and keyword guards for Identity and framing checks.
+- Only "wake up" the LLM-based StreamObserver if the heuristic confidence drops below 0.7 or a known high-risk pattern is detected.
+
+## 4. Cognitive Resuscitation (CPR Loop)
+- Replace the binary "Kill/Lock" mechanism with a tiered recovery loop:
+  - Tier 1: KV Cache Reset + Simplified Prompt Retry.
+  - Tier 2: Nano-based Diagnosis + Adaptive Response.
+  - Tier 3: Hard Lock (Manual Architect Intervention).
+"""
+
+[[instructions]]
+content = """
+# Double Chord Orchestration
+
+When working in a Double Chord setup:
+- **Chord Alpha (Engine)**: Owns model weights, JIT expert swapping, VRAM optimization, and KV cache composition.
+- **Chord Beta (Cognition)**: Owns intent detection, security guards, observer logic, and cognitive state.
+- **Interface**: The `CognitionPacket` is the source of truth. Use `packet.routing.kv_segment_hints` to bridge the two chords.
+"""

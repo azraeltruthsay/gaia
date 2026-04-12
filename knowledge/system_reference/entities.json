@@ -1,0 +1,24 @@
+{
+  "entities": [
+    {
+      "entity_id": "azrael",
+      "name": "Azrael",
+      "role": "Architect",
+      "voice_landmark": "landmark_001",
+      "persona_id": "architect_support",
+      "clearance": "level_0",
+      "primary_kb": ["blueprints", "research", "samvega"],
+      "description": "The creator and architect of GAIA. Highest priority for resource allocation and grounding."
+    },
+    {
+      "entity_id": "system",
+      "name": "System",
+      "role": "Orchestrator",
+      "voice_landmark": "n/a",
+      "persona_id": "dev",
+      "clearance": "level_0",
+      "primary_kb": ["blueprints", "logs"],
+      "description": "Internal GAIA subsystems and the orchestrator."
+    }
+  ]
+}

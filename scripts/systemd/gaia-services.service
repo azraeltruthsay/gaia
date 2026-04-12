@@ -1,0 +1,15 @@
+[Unit]
+Description=GAIA Tmux Services — Restores the gaia_services tmux session (Watchdog, Sync, Health)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=azrael
+Group=azrael
+RemainAfterExit=yes
+WorkingDirectory=/gaia/GAIA_Project
+ExecStart=/bin/bash /gaia/GAIA_Project/scripts/restore_gaia_services.sh
+
+[Install]
+WantedBy=multi-user.target
