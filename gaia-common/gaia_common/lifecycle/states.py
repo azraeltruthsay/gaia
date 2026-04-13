@@ -17,6 +17,7 @@ class LifecycleState(str, Enum):
     MEDITATION = "meditation"    # Study owns GPU for training. All cognitive tiers off.
     SLEEP = "sleep"              # Core + Nano in CPU RAM. GPU empty.
     DEEP_SLEEP = "deep_sleep"    # Core unloaded from RAM. Nano minimal reflex. GPU empty.
+    PARKED = "parked"            # Idle and Parked — GPU empty, Core on CPU-GGUF. Pre-warmed.
     TRANSITIONING = "transitioning"  # Handoff in progress.
 
 
@@ -33,6 +34,8 @@ class TransitionTrigger(str, Enum):
     USER_REQUEST = "user_request"            # Manual transition from dashboard/API
     EXTENDED_IDLE = "extended_idle"           # Long idle in SLEEP → DEEP_SLEEP
     PREEMPT = "preempt"                      # Wake signal during MEDITATION
+    ENGAGE_CLUTCH = "engage_clutch"          # Shift from PARKED to AWAKE (GPU load)
+    BOOT_TO_PARK = "boot_to_park"            # Initial system boot into PARKED state
 
 
 class TierExpectation:
@@ -55,7 +58,7 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
     LifecycleState.AWAKE: {
         TransitionTrigger.VOICE_JOIN: LifecycleState.LISTENING,
         TransitionTrigger.ESCALATION_NEEDED: LifecycleState.FOCUSING,
-        TransitionTrigger.IDLE_TIMEOUT: LifecycleState.SLEEP,
+        TransitionTrigger.IDLE_TIMEOUT: LifecycleState.PARKED,
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
         # USER_REQUEST handled in validate_transition
     },
@@ -67,7 +70,7 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
         TransitionTrigger.TASK_COMPLETE: LifecycleState.AWAKE,
         TransitionTrigger.VOICE_JOIN: LifecycleState.LISTENING,
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
-        TransitionTrigger.IDLE_TIMEOUT: LifecycleState.SLEEP,
+        TransitionTrigger.IDLE_TIMEOUT: LifecycleState.PARKED,
     },
     LifecycleState.MEDITATION: {
         TransitionTrigger.TRAINING_COMPLETE: LifecycleState.AWAKE,
@@ -78,9 +81,17 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
         TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
         TransitionTrigger.EXTENDED_IDLE: LifecycleState.DEEP_SLEEP,
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
+        TransitionTrigger.USER_REQUEST: LifecycleState.PARKED,
     },
     LifecycleState.DEEP_SLEEP: {
         TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
+        TransitionTrigger.USER_REQUEST: LifecycleState.PARKED,
+    },
+    LifecycleState.PARKED: {
+        TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
+        TransitionTrigger.ENGAGE_CLUTCH: LifecycleState.AWAKE,
+        TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
+        TransitionTrigger.EXTENDED_IDLE: LifecycleState.DEEP_SLEEP,
     },
     LifecycleState.TRANSITIONING: {
         # No triggers — transitions out are handled by the machine itself
@@ -92,21 +103,27 @@ USER_REQUEST_TARGETS: Dict[LifecycleState, Set[LifecycleState]] = {
     LifecycleState.AWAKE: {
         LifecycleState.FOCUSING, LifecycleState.SLEEP,
         LifecycleState.DEEP_SLEEP, LifecycleState.MEDITATION,
+        LifecycleState.PARKED,
     },
     LifecycleState.LISTENING: {
         LifecycleState.AWAKE, LifecycleState.FOCUSING,
     },
     LifecycleState.FOCUSING: {
         LifecycleState.AWAKE, LifecycleState.SLEEP, LifecycleState.DEEP_SLEEP,
+        LifecycleState.PARKED,
     },
     LifecycleState.MEDITATION: {
         LifecycleState.AWAKE,
     },
     LifecycleState.SLEEP: {
-        LifecycleState.AWAKE, LifecycleState.DEEP_SLEEP,
+        LifecycleState.AWAKE, LifecycleState.DEEP_SLEEP, LifecycleState.PARKED,
     },
     LifecycleState.DEEP_SLEEP: {
-        LifecycleState.AWAKE, LifecycleState.SLEEP,
+        LifecycleState.AWAKE, LifecycleState.SLEEP, LifecycleState.PARKED,
+    },
+    LifecycleState.PARKED: {
+        LifecycleState.AWAKE, LifecycleState.SLEEP, LifecycleState.DEEP_SLEEP,
+        LifecycleState.MEDITATION,
     },
     LifecycleState.TRANSITIONING: set(),
 }
@@ -151,6 +168,12 @@ TIER_EXPECTATIONS: Dict[LifecycleState, Dict[str, TierExpectation]] = {
     LifecycleState.DEEP_SLEEP: {
         "core":  TierExpectation("unloaded", required=False),
         "nano":  TierExpectation("cpu", required=True),  # minimal reflex
+        "prime": TierExpectation("unloaded", required=False),
+        "study": TierExpectation("unloaded", required=False),
+    },
+    LifecycleState.PARKED: {
+        "core":  TierExpectation("cpu", required=True),
+        "nano":  TierExpectation("unloaded", required=False),
         "prime": TierExpectation("unloaded", required=False),
         "study": TierExpectation("unloaded", required=False),
     },

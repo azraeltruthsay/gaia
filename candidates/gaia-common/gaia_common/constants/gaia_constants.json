@@ -41,11 +41,11 @@
     },
     "core": {
       "enabled": true,
-      "path": "Qwen3.5-4B-GAIA-Core-v1",
+      "path": "Gemma4-E4B-GAIA-Core-v1",
       "type": "vllm_remote",
       "endpoint": "http://localhost:8092",
-      "max_model_len": 8192,
-      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Qwen3.5-4B identity-baked"
+      "max_model_len": 4096,
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma 4 E4B identity-baked"
     },
     "observer": {
       "enabled": true,

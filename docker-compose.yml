@@ -61,6 +61,9 @@ services:
       - "962"
 
     environment:
+      - VLLM_GPU_MEMORY_UTILIZATION=0.55
+      - VLLM_GPU_MEMORY_UTILIZATION=0.25
+      - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - ORCHESTRATOR_HOST=0.0.0.0
       - ORCHESTRATOR_PORT=6410
       - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
@@ -112,6 +115,7 @@ services:
     container_name: gaia-prime
     hostname: gaia-prime
     restart: unless-stopped
+    command: python3 -m gaia_engine --managed --port 7777
 
     volumes:
       - ../gaia-instance/gaia-models:/models:ro
@@ -131,6 +135,7 @@ services:
       - ../gaia-instance/logs:/logs:rw
 
     environment:
+      - VLLM_GPU_MEMORY_UTILIZATION=0.55
       - PYTHONDONTWRITEBYTECODE=1
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
@@ -141,6 +146,8 @@ services:
       - SHARED_DIR=/shared
       - PYTHONPATH=/gaia-common
       - GAIA_ENGINE_TIER=prime
+      - GAIA_ENGINE_SAE_ENABLE=true
+      - GAIA_ENGINE_MOE_OFFLOAD=true
       - GGUF_THREADS=16
 
     ports:
@@ -195,6 +202,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - VLLM_GPU_MEMORY_UTILIZATION=0.25
       - PYTHONDONTWRITEBYTECODE=1
       - GAIA_ENGINE_TIER=nano
       - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
@@ -297,6 +305,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
@@ -539,6 +548,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - HOME=/tmp
       - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=study

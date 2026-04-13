@@ -18,11 +18,13 @@ Key principles:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
+from pathlib import Path
 from typing import Dict, Optional
 
 import httpx
@@ -192,16 +194,12 @@ class ConsciousnessMatrix:
 
         # Apply startup preset — sets targets so auto-reconcile can load tiers
         preset = self._default_preset
-        if preset != "unconscious":
-            presets = {
-                "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-                "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
-            }
-            if preset in presets:
-                for tier, level in presets[preset].items():
-                    self._tiers[tier].target = level
-                logger.info("Consciousness startup preset: %s (targets: %s)",
-                            preset, {t: l.name for t, l in presets[preset].items()})
+        if preset != "unconscious" and preset in self._PRESETS:
+            targets = self._PRESETS[preset]
+            for tier, level in targets.items():
+                self._tiers[tier].target = level
+            logger.info("Consciousness startup preset: %s (targets: %s)",
+                        preset, {t: l.name for t, l in targets.items()})
 
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info("Consciousness matrix continuous poll started (%.0fs interval)", interval)
@@ -218,6 +216,7 @@ class ConsciousnessMatrix:
         "focusing": "focusing",
         "sleep": "sleep",
         "deep_sleep": "deep_sleep",
+        "parked": "parked",
         "training": "meditation",
     }
 
@@ -301,6 +300,7 @@ class ConsciousnessMatrix:
         "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
         "sleep": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
         "deep_sleep": {"core": ConsciousnessLevel.UNCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        "parked": {"nano": ConsciousnessLevel.UNCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
         "meditation": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
     }
 
@@ -348,20 +348,24 @@ class ConsciousnessMatrix:
         return await self._apply_configuration(config_name, sync_lifecycle=False)
 
     async def awake(self) -> dict:
-        """AWAKE: Core=3, Nano=3, Prime=2"""
+        """AWAKE (First Gear): Core=3 (GPU), Prime=2 (CPU)"""
         return await self._apply_configuration("awake")
 
     async def focusing(self) -> dict:
-        """FOCUSING: Nano=3, Core=2, Prime=3"""
+        """FOCUSING: Prime=3 (GPU), Core=2 (CPU)"""
         return await self._apply_configuration("focusing")
 
     async def sleep(self) -> dict:
-        """SLEEP: Nano=2, Core=2, Prime=1"""
+        """SLEEP: Core=2 (CPU), Prime=1 (Unloaded)"""
         return await self._apply_configuration("sleep")
 
     async def deep_sleep(self) -> dict:
-        """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
+        """DEEP SLEEP: All → 1 (Unloaded)"""
         return await self._apply_configuration("deep_sleep")
+
+    async def parked(self) -> dict:
+        """PARKED: Core=2 (CPU), GPU empty, ready for Gear 1 shift."""
+        return await self._apply_configuration("parked")
 
     async def training(self, tier: str = "prime") -> dict:
         """TRAINING: Target tier → 1 (free GPU), others → 2"""
@@ -464,14 +468,22 @@ class ConsciousnessMatrix:
 
             elif to_level == ConsciousnessLevel.SUBCONSCIOUS:
                 # Load GGUF on CPU
-                # First unload current if anything is loaded
+                # Neural Handoff: capture context before unloading GPU engine
+                handoff_context = None
+                if from_level == ConsciousnessLevel.CONSCIOUS:
+                    handoff_context = await self._capture_context(tier, endpoint)
+                # Unload current if anything is loaded
                 if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
                     unload_result = await self._unload_tier(tier, endpoint, state)
                     if not unload_result.get("ok"):
                         logger.warning("Unload %s before CPU load returned: %s", tier, unload_result)
-                    # Wait for engine manager to be ready after unload
                     await self._wait_for_manager_ready(tier, endpoint)
-                return await self._load_tier_cpu(tier, endpoint, state)
+                result = await self._load_tier_cpu(tier, endpoint, state)
+                # Neural Handoff: replay captured context into the CPU backend
+                if result.get("ok") and handoff_context is not None:
+                    replayed = await self._replay_context(tier, endpoint)
+                    result["neural_handoff"] = "replayed" if replayed else "skipped"
+                return result
 
             elif to_level == ConsciousnessLevel.CONSCIOUS:
                 # Load safetensors on GPU
@@ -618,6 +630,106 @@ class ConsciousnessMatrix:
                                    tier, resp.status_code, resp.text[:100])
         except Exception as e:
             logger.warning("Adapter load on %s failed: %s", tier, e)
+
+    # ── Neural Handoff: Cross-Backend Context Relay ─────────────────────
+
+    # Shared path for context handoff files (inside gaia-shared Docker volume)
+    _HANDOFF_DIR = "/shared/kvcache"
+
+    async def _capture_context(self, tier: str, endpoint: str) -> Optional[dict]:
+        """Capture prefix cache context from a GPU engine before unload.
+
+        Calls the GAIA Engine /cache/export_context endpoint to retrieve
+        the raw segment text. This text is backend-agnostic and can be
+        replayed into any inference backend to warm its KV cache.
+
+        Returns the context dict or None if capture failed/unavailable.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{endpoint}/cache/export_context")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok") and data.get("prefix_tokens", 0) > 0:
+                        # Persist to shared volume for the CPU backend to pick up
+                        handoff_path = Path(self._HANDOFF_DIR) / tier / "handoff_context.json"
+                        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+                        handoff_path.write_text(json.dumps({
+                            "segments": data["segments"],
+                            "prefix_text": data["prefix_text"],
+                            "prefix_tokens": data["prefix_tokens"],
+                            "captured_at": time.time(),
+                            "from_backend": "gaia_engine_gpu",
+                        }, indent=2))
+                        logger.info(
+                            "Neural Handoff: captured %d tokens (%d segments) from %s → %s",
+                            data["prefix_tokens"], data["segment_count"],
+                            tier, str(handoff_path),
+                        )
+                        return data
+                    else:
+                        logger.debug("Neural Handoff: no prefix context to capture from %s", tier)
+                else:
+                    logger.debug("Neural Handoff: export_context returned %d for %s", resp.status_code, tier)
+        except Exception as e:
+            logger.debug("Neural Handoff: context capture failed for %s: %s", tier, e)
+        return None
+
+    async def _replay_context(self, tier: str, endpoint: str) -> bool:
+        """Replay captured context into a GGUF llama-server to warm its KV cache.
+
+        Reads the handoff context file and sends the prefix text as a
+        completion request with max_tokens=1, which forces llama-server to
+        process the full prompt and populate its KV cache. The single
+        generated token is discarded.
+
+        Returns True if replay succeeded.
+        """
+        handoff_path = Path(self._HANDOFF_DIR) / tier / "handoff_context.json"
+        if not handoff_path.exists():
+            logger.debug("Neural Handoff: no context file for %s at %s", tier, handoff_path)
+            return False
+
+        try:
+            context = json.loads(handoff_path.read_text())
+            prefix_text = context.get("prefix_text", "")
+            if not prefix_text.strip():
+                logger.debug("Neural Handoff: empty prefix text for %s", tier)
+                return False
+
+            # Age check — don't replay stale context (>10 min old)
+            captured_at = context.get("captured_at", 0)
+            age = time.time() - captured_at
+            if age > 600:
+                logger.info("Neural Handoff: context for %s is %.0fs old, skipping replay", tier, age)
+                return False
+
+            # Send as a completion to warm the KV cache.
+            # llama-server populates KV for the full prompt, we discard the output.
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{endpoint}/v1/completions",
+                    json={
+                        "prompt": prefix_text,
+                        "max_tokens": 1,
+                        "temperature": 0.0,
+                    },
+                )
+                if resp.status_code == 200:
+                    tokens = context.get("prefix_tokens", 0)
+                    logger.info(
+                        "Neural Handoff: replayed %d tokens into %s CPU backend (%.1fs old)",
+                        tokens, tier, age,
+                    )
+                    return True
+                else:
+                    logger.warning(
+                        "Neural Handoff: replay failed for %s (HTTP %d): %s",
+                        tier, resp.status_code, resp.text[:100],
+                    )
+        except Exception as e:
+            logger.warning("Neural Handoff: replay failed for %s: %s", tier, e)
+        return False
 
     async def _notify_core_refresh_pool(self):
         """Tell gaia-core to clear stale GPU model entries from its pool.

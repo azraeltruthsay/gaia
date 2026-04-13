@@ -2,7 +2,7 @@
 # Embeds CUDA-enabled llama-server for GPU-accelerated Core/Operator inference
 # Production gaia-core stays CPU-only; this candidate can offload to GPU when available
 
-ARG LLAMA_CPP_TAG=b8250
+ARG LLAMA_CPP_TAG=b8770
 ARG CUDA_VERSION=12.8.1
 
 # ── Build llama-server (CUDA) ────────────────────────────────────────────────

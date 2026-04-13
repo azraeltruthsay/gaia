@@ -1,7 +1,7 @@
 # gaia-nano: Dual-mode Reflex tier — GGUF (llama-server) + Safetensors (GAIAEngine)
 # GGUF mode: fast inference via llama.cpp with CUDA
 # Safetensors mode: full activation monitoring (polygraph), SAE analysis, adapter loading
-ARG LLAMA_CPP_TAG=b8250
+ARG LLAMA_CPP_TAG=b8770
 ARG CUDA_VERSION=12.8.1
 
 # ── Build llama-server (CUDA) ──────────────────────────────────────────────

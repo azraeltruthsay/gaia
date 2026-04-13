@@ -83,7 +83,7 @@ elif [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$G
     echo "[entrypoint] Starting GAIA Inference Engine DIRECT (device=$CORE_DEVICE)..."
     echo "[entrypoint] Model: $CORE_SAFETENSORS_PATH"
     COMPILE_MODE="${GAIA_COMPILE_MODE:-reduce-overhead}"
-    python -m gaia_common.engine \
+    python -m gaia_common.engine --gpu-memory-utilization 0.3 \
         --model "$CORE_SAFETENSORS_PATH" \
         --port "$CORE_CPU_PORT" \
         --device "$CORE_DEVICE" \

@@ -2,14 +2,15 @@
   "MODEL_REGISTRY": {
     "models_dir": "/models",
     "prime": {
-      "base": "/models/Qwen/Qwen3.5-9B",
-      "merged": "/models/prime",
-      "gguf": "/models/prime.gguf",
-      "family": "qwen3.5",
-      "params": "9B",
+      "base": "google/gemma-4-26B-A4B",
+      "merged": "/models/Gemma4-26B-A4B-Sovereign-v1",
+      "gguf": "/models/Gemma4-26B-A4B-GAIA-Prime-v1-Q4_K_M.gguf",
+      "family": "gemma4",
+      "params": "26B",
       "multimodal": true,
-      "skills": "13/14 Primary School",
-      "notes": "Identity-baked Qwen3.5-9B. Adaptive training v6p1. Vision encoder preserved."
+      "backend": "managed",
+      "skills": "Sovereign Identity",
+      "notes": "Identity-baked Gemma 4 26B-A4B MoE. Expert Buffering active."
     },
     "prime_8b_legacy": {
       "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
@@ -18,50 +19,57 @@
       "notes": "Legacy 8B \u2014 retained for rollback"
     },
     "core": {
-      "base": "/models/Qwen/Qwen3.5-4B",
+      "base": "google/gemma-4-E4B",
       "merged": "/models/core",
       "gguf": "/models/core.gguf",
-      "family": "qwen3.5",
-      "params": "4B",
+      "family": "gemma4",
+      "params": "8B",
       "multimodal": true,
-      "skills": "13/14 Primary School",
-      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
+      "backend": "managed",
+      "skills": "Primary School v2",
+      "notes": "Identity-baked Gemma 4 E4B. Native audio/vision enabled."
     },
     "nano": {
-      "base": "/models/Qwen/Qwen3.5-0.8B",
+      "base": "google/gemma-4-E2B",
       "merged": "/models/nano",
       "gguf": "/models/nano.gguf",
-      "family": "qwen3.5",
-      "params": "0.8B",
+      "family": "gemma4",
+      "params": "5B",
       "multimodal": true,
-      "skills": "3/3 Nano School (triage, cleanup, greeting)",
-      "notes": "Identity-baked Qwen3.5-0.8B. Nano School curriculum. Vision preserved."
+      "backend": "managed",
+      "skills": "Nano School (triage, security, awareness)",
+      "notes": "Identity-baked Gemma 4 E2B. Native audio/vision enabled."
     },
     "audio": {
-      "stt": "/models/Qwen3-ASR-0.6B",
-      "tts_nano": "/models/Qwen3-TTS-12Hz-0.6B-Base",
-      "tts_prime": "/models/Qwen3-TTS-12Hz-1.7B-Base"
+      "stt": "native",
+      "tts_nano": "/models/google/gemma-4-E2B",
+      "tts_prime": "/models/google/gemma-4-E4B"
     },
     "embedding": "/models/all-MiniLM-L6-v2",
     "lora_adapters": "/models/lora_adapters"
   },
+  "VRAM_THRESHOLDS": {
+    "nano_vram_pressure_threshold_mb": 100,
+    "core_vram_pressure_threshold_mb": 500,
+    "prime_min_free_mb": 4000
+  },
   "WARM_POOL": {
     "enabled": true,
     "tmpfs_path": "/mnt/gaia_warm_pool",
-    "source_path": "/gaia/GAIA_Project/gaia-models",
+    "source_path": "/gaia/gaia-instance/gaia-models",
     "size_gb": 30,
     "models": {
       "nano": {
-        "source": "Qwen3.5-0.8B-Abliterated",
-        "description": "Nano (0.8B) \u2014 triage, transcript cleanup"
+        "source": "Gemma4-E2B-GAIA-Nano-v1",
+        "description": "Reflex (5B NF4) \u2014 triage, transcript cleanup, audio native"
       },
       "core": {
-        "source": "Qwen3.5-4B-GAIA-Core-Multimodal-v4",
-        "description": "Core (4B) \u2014 intent detection, tool selection, planning"
+        "source": "Gemma4-E4B-GAIA-Core-v1",
+        "description": "Operator (8B NF4) \u2014 intent detection, tool selection, native multimodal"
       },
       "prime": {
-        "source": "Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ",
-        "description": "Prime (8B GPTQ 4-bit) \u2014 complex reasoning, code, long-form"
+        "source": "Gemma4-26B-A4B-Sovereign-v1",
+        "description": "Sovereign (26B-A4B NF4) \u2014 deep reasoning, code, long-form"
       },
       "embedding": {
         "source": "all-MiniLM-L6-v2",

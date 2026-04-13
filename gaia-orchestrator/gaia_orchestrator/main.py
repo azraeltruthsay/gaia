@@ -1369,6 +1369,15 @@ async def consciousness_set(request: ConsciousnessRequest):
     return await _consciousness_matrix.set_target(request.tier, level)
 
 
+@app.post("/consciousness/park")
+async def consciousness_park():
+    """Set PARKED configuration (Core on CPU, GPU empty)."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    asyncio.create_task(_consciousness_matrix.parked())
+    return {"ok": True, "message": "PARKED transition started"}
+
+
 @app.post("/consciousness/awake")
 async def consciousness_awake():
     """Set AWAKE configuration via lifecycle clutch protocol.
