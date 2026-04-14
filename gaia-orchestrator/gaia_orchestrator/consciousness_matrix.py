@@ -1,20 +1,20 @@
 """
-Consciousness Matrix — three-state resource manager for cognitive tiers.
+Consciousness Matrix — the gearbox for GAIA's Sovereign Duality.
 
-Each tier (Nano, Core, Prime) exists in one of three consciousness states:
-  3 = Conscious (GPU, safetensors, fast, full activation capture)
+Each tier (Core, Prime) exists in one of three consciousness levels:
+  3 = Conscious  (GPU, safetensors, full activation capture)
   2 = Subconscious (CPU, GGUF, moderate speed, always-available)
-  1 = Unconscious (unloaded, no resources)
+  1 = Unconscious   (unloaded, no resources)
 
-The matrix tracks target vs actual state for each tier, with dynamic
-GPU/RAM polling to validate transitions. The Orchestrator uses this
-to coordinate hot-swaps between tiers.
+Gear mapping (measured on RTX 5080 16GB):
+  Gear P  = PARKED     Core=CPU, Prime=off           ~0 GPU
+  Gear 1  = AWAKE      Core=GPU (~8.8GB), Prime=CPU  ~8.8 GB
+  Gear 2  = FOCUSING   Prime=GPU (~4.6GB), Core=CPU  ~4.6 GB
+  Gear 0  = DEEP_SLEEP Everything off                 ~0 GPU
 
-Key principles:
-- Any tier CAN be in any state (no biological hard constraints)
-- States are operational preferences, not survival requirements
-- Like dolphin unihemispheric sleep — parts rest independently
-- Even all-unconscious isn't death (Groq fallback exists)
+The "clutch" is the transition protocol: capture context via Neural
+Handoff before unloading GPU tier, replay into CPU backend after load.
+Nano is deprecated in Sovereign Duality — all entries set to UNCONSCIOUS.
 """
 
 import asyncio
@@ -130,15 +130,6 @@ class ConsciousnessMatrix:
         }
         self._adapter_scale = float(os.environ.get("CPU_ADAPTER_SCALE", "0.5"))
 
-        # GPU adapters — identity/skill LoRA loaded after safetensors model loads.
-        # Used for models where adapter is not merged into base weights.
-        self._gpu_adapters = {
-            "prime": os.environ.get("PRIME_GPU_ADAPTER", ""),
-            "core": os.environ.get("CORE_GPU_ADAPTER", ""),
-            "nano": os.environ.get("NANO_GPU_ADAPTER", ""),
-        }
-        self._gpu_adapter_scale = float(os.environ.get("GPU_ADAPTER_SCALE", "1.0"))
-
         self._lock = asyncio.Lock()
         self._poll_task: Optional[asyncio.Task] = None
 
@@ -194,12 +185,16 @@ class ConsciousnessMatrix:
 
         # Apply startup preset — sets targets so auto-reconcile can load tiers
         preset = self._default_preset
-        if preset != "unconscious" and preset in self._PRESETS:
-            targets = self._PRESETS[preset]
-            for tier, level in targets.items():
-                self._tiers[tier].target = level
-            logger.info("Consciousness startup preset: %s (targets: %s)",
-                        preset, {t: l.name for t, l in targets.items()})
+        if preset != "unconscious":
+            presets = {
+                "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
+                "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
+            }
+            if preset in presets:
+                for tier, level in presets[preset].items():
+                    self._tiers[tier].target = level
+                logger.info("Consciousness startup preset: %s (targets: %s)",
+                            preset, {t: l.name for t, l in presets[preset].items()})
 
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info("Consciousness matrix continuous poll started (%.0fs interval)", interval)
@@ -216,7 +211,6 @@ class ConsciousnessMatrix:
         "focusing": "focusing",
         "sleep": "sleep",
         "deep_sleep": "deep_sleep",
-        "parked": "parked",
         "training": "meditation",
     }
 
@@ -348,24 +342,20 @@ class ConsciousnessMatrix:
         return await self._apply_configuration(config_name, sync_lifecycle=False)
 
     async def awake(self) -> dict:
-        """AWAKE (First Gear): Core=3 (GPU), Prime=2 (CPU)"""
+        """AWAKE: Core=3, Nano=3, Prime=2"""
         return await self._apply_configuration("awake")
 
     async def focusing(self) -> dict:
-        """FOCUSING: Prime=3 (GPU), Core=2 (CPU)"""
+        """FOCUSING: Nano=3, Core=2, Prime=3"""
         return await self._apply_configuration("focusing")
 
     async def sleep(self) -> dict:
-        """SLEEP: Core=2 (CPU), Prime=1 (Unloaded)"""
+        """SLEEP: Nano=2, Core=2, Prime=1"""
         return await self._apply_configuration("sleep")
 
     async def deep_sleep(self) -> dict:
-        """DEEP SLEEP: All → 1 (Unloaded)"""
+        """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
         return await self._apply_configuration("deep_sleep")
-
-    async def parked(self) -> dict:
-        """PARKED: Core=2 (CPU), GPU empty, ready for Gear 1 shift."""
-        return await self._apply_configuration("parked")
 
     async def training(self, tier: str = "prime") -> dict:
         """TRAINING: Target tier → 1 (free GPU), others → 2"""
@@ -573,13 +563,6 @@ class ConsciousnessMatrix:
                     if data.get("ok") or resp.status_code == 409:
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("Loaded %s to GPU", tier)
-
-                        # Auto-load identity/skill adapter if configured
-                        adapter_path = self._gpu_adapters.get(tier, "")
-                        if adapter_path:
-                            await self._load_adapter(tier, endpoint, adapter_path,
-                                                     scale=self._gpu_adapter_scale)
-
                         return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
                 return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
         except Exception as e:

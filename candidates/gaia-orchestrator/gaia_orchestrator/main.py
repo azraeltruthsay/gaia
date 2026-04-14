@@ -1412,6 +1412,15 @@ async def consciousness_deep_sleep():
     return {"ok": True, "message": "DEEP SLEEP transition started (via lifecycle clutch)"}
 
 
+@app.post("/consciousness/park")
+async def consciousness_park():
+    """Set PARKED configuration (Gear P): Core on CPU, GPU empty."""
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+    asyncio.create_task(_consciousness_matrix.parked())
+    return {"ok": True, "message": "PARKED transition started"}
+
+
 @app.post("/consciousness/training")
 async def consciousness_training(tier: str = "prime"):
     """Set TRAINING configuration via lifecycle clutch protocol."""
@@ -1419,6 +1428,52 @@ async def consciousness_training(tier: str = "prime"):
         raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
     asyncio.create_task(_consciousness_matrix.training(tier))
     return {"ok": True, "message": f"TRAINING ({tier}) transition started (via lifecycle clutch)"}
+
+
+@app.get("/consciousness/gear")
+async def consciousness_gear():
+    """Get current gear status with VRAM estimates and tier states.
+
+    Returns the current lifecycle gear, measured VRAM figures, and
+    available transitions — a single-glance dashboard view.
+    """
+    if _consciousness_matrix is None:
+        raise HTTPException(status_code=501, detail="Consciousness matrix not initialized")
+
+    matrix = _consciousness_matrix.get_matrix()
+
+    # Determine current gear from tier states
+    core_actual = matrix.get("core", {}).get("actual", "unconscious")
+    prime_actual = matrix.get("prime", {}).get("actual", "unconscious")
+
+    if core_actual == "conscious":
+        gear, name = "1", "AWAKE (Operator)"
+    elif prime_actual == "conscious":
+        gear, name = "2", "FOCUSING (Sovereign)"
+    elif core_actual == "subconscious":
+        gear, name = "P", "PARKED (Sentinel)"
+    elif core_actual == "unconscious" and prime_actual == "unconscious":
+        gear, name = "0", "DEEP SLEEP"
+    else:
+        gear, name = "?", "TRANSITIONING"
+
+    # Try to get gear metadata from states module
+    gear_info = {}
+    try:
+        from gaia_common.lifecycle.states import get_gear_info, LifecycleState
+        state_map = {"1": "awake", "2": "focusing", "P": "parked", "0": "deep_sleep"}
+        if gear in state_map:
+            gear_info = get_gear_info(LifecycleState(state_map[gear]))
+    except Exception:
+        pass
+
+    return {
+        "gear": gear,
+        "name": name,
+        "vram_estimate_mb": gear_info.get("vram_estimate_mb"),
+        "description": gear_info.get("description", ""),
+        "matrix": matrix,
+    }
 
 
 # =============================================================================

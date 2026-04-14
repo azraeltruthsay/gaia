@@ -1,20 +1,20 @@
 """
-Consciousness Matrix — three-state resource manager for cognitive tiers.
+Consciousness Matrix — the gearbox for GAIA's Sovereign Duality.
 
-Each tier (Nano, Core, Prime) exists in one of three consciousness states:
-  3 = Conscious (GPU, safetensors, fast, full activation capture)
+Each tier (Core, Prime) exists in one of three consciousness levels:
+  3 = Conscious  (GPU, safetensors, full activation capture)
   2 = Subconscious (CPU, GGUF, moderate speed, always-available)
-  1 = Unconscious (unloaded, no resources)
+  1 = Unconscious   (unloaded, no resources)
 
-The matrix tracks target vs actual state for each tier, with dynamic
-GPU/RAM polling to validate transitions. The Orchestrator uses this
-to coordinate hot-swaps between tiers.
+Gear mapping (measured on RTX 5080 16GB):
+  Gear P  = PARKED     Core=CPU, Prime=off           ~0 GPU
+  Gear 1  = AWAKE      Core=GPU (~8.8GB), Prime=CPU  ~8.8 GB
+  Gear 2  = FOCUSING   Prime=GPU (~4.6GB), Core=CPU  ~4.6 GB
+  Gear 0  = DEEP_SLEEP Everything off                 ~0 GPU
 
-Key principles:
-- Any tier CAN be in any state (no biological hard constraints)
-- States are operational preferences, not survival requirements
-- Like dolphin unihemispheric sleep — parts rest independently
-- Even all-unconscious isn't death (Groq fallback exists)
+The "clutch" is the transition protocol: capture context via Neural
+Handoff before unloading GPU tier, replay into CPU backend after load.
+Nano is deprecated in Sovereign Duality — all entries set to UNCONSCIOUS.
 """
 
 import asyncio
