@@ -185,16 +185,12 @@ class ConsciousnessMatrix:
 
         # Apply startup preset — sets targets so auto-reconcile can load tiers
         preset = self._default_preset
-        if preset != "unconscious":
-            presets = {
-                "awake": {"nano": ConsciousnessLevel.CONSCIOUS, "core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS},
-                "sleep": {"nano": ConsciousnessLevel.SUBCONSCIOUS, "core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS},
-            }
-            if preset in presets:
-                for tier, level in presets[preset].items():
-                    self._tiers[tier].target = level
-                logger.info("Consciousness startup preset: %s (targets: %s)",
-                            preset, {t: l.name for t, l in presets[preset].items()})
+        if preset != "unconscious" and preset in self._PRESETS:
+            targets = self._PRESETS[preset]
+            for tier, level in targets.items():
+                self._tiers[tier].target = level
+            logger.info("Consciousness startup preset: %s (targets: %s)",
+                        preset, {t: l.name for t, l in targets.items()})
 
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info("Consciousness matrix continuous poll started (%.0fs interval)", interval)
@@ -211,6 +207,7 @@ class ConsciousnessMatrix:
         "focusing": "focusing",
         "sleep": "sleep",
         "deep_sleep": "deep_sleep",
+        "parked": "parked",
         "training": "meditation",
     }
 
@@ -342,20 +339,24 @@ class ConsciousnessMatrix:
         return await self._apply_configuration(config_name, sync_lifecycle=False)
 
     async def awake(self) -> dict:
-        """AWAKE: Core=3, Nano=3, Prime=2"""
+        """Gear 1 — AWAKE: Core=GPU (~8.8GB), Prime=CPU"""
         return await self._apply_configuration("awake")
 
     async def focusing(self) -> dict:
-        """FOCUSING: Nano=3, Core=2, Prime=3"""
+        """Gear 2 — FOCUSING: Prime=GPU (~4.6GB), Core=CPU"""
         return await self._apply_configuration("focusing")
 
     async def sleep(self) -> dict:
-        """SLEEP: Nano=2, Core=2, Prime=1"""
+        """SLEEP: Core=CPU, Prime=off"""
         return await self._apply_configuration("sleep")
 
     async def deep_sleep(self) -> dict:
-        """DEEP SLEEP: All → 1 (Nano stays 2 for wake detection)"""
+        """Gear 0 — DEEP SLEEP: Everything unloaded"""
         return await self._apply_configuration("deep_sleep")
+
+    async def parked(self) -> dict:
+        """Gear P — PARKED: Core=CPU, GPU empty, ready for clutch"""
+        return await self._apply_configuration("parked")
 
     async def training(self, tier: str = "prime") -> dict:
         """TRAINING: Target tier → 1 (free GPU), others → 2"""

@@ -602,11 +602,9 @@ function chatPanel() {
                 });
                 // Detect which tier is responding and inject synthetic brain activity
                 const val = chunk.value || '';
-                if (val.includes('Escalating to Prime') || val.includes('[(Thinker) Prime]')) {
+                if (val.includes('Escalating to Prime') || val.includes('[(Thinker) Prime]') || val.includes('[(Sovereign) Prime]')) {
                   // Prime is thinking — pulse the frontal lobe
                   window._synthPrimePulse = true;
-                } else if (val.includes('[(Reflex) Nano]') || val.includes('[reflex]')) {
-                  window._synthTier = 'nano';
                 } else if (val.includes('[(Operator) Core]') || val.includes('[Core]')) {
                   window._synthTier = 'core';
                 }
@@ -650,7 +648,7 @@ function chatPanel() {
 // loaded as an <image> element in the SVG, with our neural fibers overlaid.
 // Original SVG viewBox: 0 0 1024 732 — we scale to fit our 280x400 viewport.
 // Brain regions are positioned to match the anatomical illustration.
-const BRAIN_SVG_URL = '/static/brain.png';
+const BRAIN_SVG_URL = '/static/brain.svg';
 const BRAIN_SVG_VIEWBOX = { w: 1024, h: 732 };  // original dimensions
 // Viewport dimensions — all neuron coordinates are relative to this
 const VP = { w: 280, h: 225, imgY: 20, imgH: 200 };
@@ -752,13 +750,12 @@ const BRAIN_STEM =
   ' C 184,338 180,355 178,370';
 
 // Brain regions mapped to cognitive tiers and transformer layer ranges
-// Anatomy: Nano=brainstem+cerebellum, Core=temporal+parietal+occipital, Prime=frontal+prefrontal+motor
+// Sovereign Duality brain anatomy: Core=operator (mid+reflex), Prime=sovereign (frontal)
 // Brain regions mapped to actual Wikimedia SVG anatomy boundaries
 // SVG: 1024x732 scaled to 280x200 viewport, y_offset=20. Brain faces LEFT.
-// Regions expanded to fill actual anatomical boundaries.
 // 13 brain regions mapped to cognitive tiers, SAE domains, and transformer layers.
 // Loaded from brain_region_atlas.json; fallback hardcoded below.
-// Layout: butcher-diagram sagittal view — Prime=frontal, Core=mid, Nano=brainstem
+// Layout: butcher-diagram sagittal view — Prime=frontal, Core=mid+brainstem
 let BRAIN_REGIONS = [
   // PRIME — frontal cortex (left side, higher cognition)
   { name: 'Prefrontal',    tier: 'prime', layerRange: [24, 31], cx: 36,  cy: 108, rx: 14, ry: 28, domains: ['reasoning','architecture'] },
@@ -766,7 +763,7 @@ let BRAIN_REGIONS = [
   { name: "Broca's Area",  tier: 'prime', layerRange: [8, 16],  cx: 60,  cy: 165, rx: 18, ry: 12, domains: ['creative'] },
   { name: 'Motor Cortex',  tier: 'prime', layerRange: [4, 12],  cx: 88,  cy: 46,  rx: 24, ry: 14, domains: ['code'] },
 
-  // CORE — temporal, parietal, occipital (operational processing)
+  // CORE — temporal, parietal, occipital + reflex (triage, tools, vision, audio)
   { name: 'Somatosensory', tier: 'core',  layerRange: [0, 8],   cx: 165, cy: 42,  rx: 18, ry: 12, domains: ['identity'] },
   { name: 'Parietal',      tier: 'core',  layerRange: [8, 16],  cx: 148, cy: 48,  rx: 26, ry: 14, domains: ['architecture','reasoning'] },
   { name: "Wernicke's Area",tier:'core',  layerRange: [14, 22], cx: 145, cy: 155, rx: 20, ry: 12, domains: ['identity'] },
@@ -774,17 +771,16 @@ let BRAIN_REGIONS = [
   { name: 'Occipital',     tier: 'core',  layerRange: [18, 24], cx: 222, cy: 88,  rx: 18, ry: 28, domains: ['factual'] },
   { name: 'Visual Cortex', tier: 'core',  layerRange: [22, 24], cx: 232, cy: 135, rx: 14, ry: 22, domains: [] },
 
-  // NANO — brainstem, cerebellum, thalamus (fast reflexes & routing)
-  { name: 'Thalamus',      tier: 'nano',  layerRange: [8, 16],  cx: 140, cy: 120, rx: 16, ry: 14, domains: ['time','architecture'] },
-  { name: 'Cerebellum',    tier: 'nano',  layerRange: [16, 23], cx: 205, cy: 178, rx: 36, ry: 18, domains: ['code'] },
-  { name: 'Brain Stem',    tier: 'nano',  layerRange: [0, 8],   cx: 152, cy: 192, rx: 16, ry: 20, domains: ['time','identity'] },
+  // CORE (reflex) — brainstem, cerebellum, thalamus (triage & routing, formerly Nano)
+  { name: 'Thalamus',      tier: 'core',  layerRange: [8, 16],  cx: 140, cy: 120, rx: 16, ry: 14, domains: ['time','architecture'] },
+  { name: 'Cerebellum',    tier: 'core',  layerRange: [16, 23], cx: 205, cy: 178, rx: 36, ry: 18, domains: ['code'] },
+  { name: 'Brain Stem',    tier: 'core',  layerRange: [0, 8],   cx: 152, cy: 192, rx: 16, ry: 20, domains: ['time','identity'] },
 ];
 
 // Tier idle colors — anatomically coded
 const TIER_IDLE_COLORS = {
-  nano:  '#4fc3f7',  // cyan — fast reflexes
-  core:  '#90caf9',  // light blue — operational
-  prime: '#ce93d8',  // light purple — deep thought
+  core:  '#90caf9',  // light blue — operator (triage + tools + reflex)
+  prime: '#ce93d8',  // light purple — sovereign (deep reasoning)
   study: '#ffd54f',  // warm gold — learning/training
 };
 
@@ -990,7 +986,7 @@ function _generateNeurons(tier, count) {
 
 // Neuron counts — match observed unique neurons per tier
 // Fewer neurons for long sweeping arcs with clear spacing
-const TIER_NEURON_COUNTS = { nano: 20, core: 30, prime: 50 };
+const TIER_NEURON_COUNTS = { core: 40, prime: 50 };
 
 // Brightness multiplier by consciousness state
 // GPU (Conscious) = full brightness, CPU (Subconscious) = noticeably dimmer
@@ -1001,11 +997,9 @@ const CONSCIOUSNESS_BRIGHTNESS = {
 };
 
 // Normalize activation strength across tiers so they look equal
-// Nano's raw strengths are much higher than Core's
 const TIER_STRENGTH_SCALE = {
-  nano: 0.6,   // Nano fires hot — scale down
-  core: 1.0,   // Core is baseline
-  prime: 1.2,  // Prime fires less often — boost slightly
+  core: 1.0,   // Core (Operator) is baseline
+  prime: 1.2,  // Prime (Sovereign) fires less often — boost slightly
 };
 
 // Generate SVG path data for a quadratic bezier curve
@@ -1057,10 +1051,10 @@ function _lightningPath(x1, y1, x2, y2, segments, jitter, seed) {
 
 // Causal connectivity directions — which region drives which
 const CAUSAL_DIRECTIONS = {
-  // Nano: Brain Stem → Thalamus → Cerebellum
+  // Core (reflex): Brain Stem → Thalamus → Cerebellum
   'Brain Stem': 'Thalamus',
   'Thalamus': 'Cerebellum',
-  // Core: Somatosensory → Parietal → Wernicke's Area
+  // Core (operator): Somatosensory → Parietal → Wernicke's Area
   'Somatosensory': 'Parietal',
   'Parietal': "Wernicke's Area",
   // Prime: Motor Cortex → Broca's Area → Orbitofrontal → Prefrontal
@@ -1085,7 +1079,7 @@ function mindMapPanel() {
     live: true,
     hoveredFeature: null,
     activeConcepts: [],     // [{label, color, strength}] — for dynamic legend
-    tierConsciousness: { nano: 'unconscious', core: 'unconscious', prime: 'unconscious' },
+    tierConsciousness: { core: 'unconscious', prime: 'unconscious' },
     _es: null,
     _svg: null,
     _neurons: [],           // all neurons, all tiers, single array
@@ -1106,7 +1100,7 @@ function mindMapPanel() {
       // Generate neurons for all tiers into a single array with global IDs
       const allNeurons = [];
       this._neuronsByTier = {};
-      for (const tier of ['nano', 'core', 'prime']) {
+      for (const tier of ['core', 'prime']) {
         const tierNeurons = _generateNeurons(tier, TIER_NEURON_COUNTS[tier]);
         this._neuronsByTier[tier] = [];
         for (const n of tierNeurons) {
@@ -1132,7 +1126,7 @@ function mindMapPanel() {
           const resp = await fetch('/api/system/consciousness');
           if (resp.ok) {
             const matrix = await resp.json();
-            for (const t of ['nano', 'core', 'prime']) {
+            for (const t of ['core', 'prime']) {
               if (matrix[t] && matrix[t].actual) {
                 this.tierConsciousness[t] = matrix[t].actual;
               }
@@ -1140,7 +1134,7 @@ function mindMapPanel() {
           }
         } catch {
           // Fallback: infer from recent activations
-          for (const t of ['nano', 'core', 'prime']) {
+          for (const t of ['core', 'prime']) {
             let hasRecent = false;
             for (const [, info] of this._activeNeurons) {
               if (info.tier === t && (Date.now() - info.timestamp) < 15000) {
@@ -1185,7 +1179,7 @@ function mindMapPanel() {
 
       // Glow filters — one per tier for color-coded glow
       const defs = svg.append('defs');
-      for (const tier of ['nano', 'core', 'prime']) {
+      for (const tier of ['core', 'prime']) {
         const filter = defs.append('filter').attr('id', 'neuron-glow-' + tier)
           .attr('x', '-100%').attr('y', '-100%').attr('width', '300%').attr('height', '300%');
         filter.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'glow');
@@ -1195,7 +1189,7 @@ function mindMapPanel() {
       }
 
       // Arrowhead markers — one per tier color (idle) + generic active
-      for (const tier of ['nano', 'core', 'prime']) {
+      for (const tier of ['core', 'prime']) {
         defs.append('marker')
           .attr('id', 'arrow-' + tier)
           .attr('viewBox', '0 0 6 6')
@@ -1213,9 +1207,11 @@ function mindMapPanel() {
       zoomG.append('image')
         .attr('class', 'brain-image')
         .attr('href', BRAIN_SVG_URL)
-        .attr('x', 0).attr('y', VP.imgY)
-        .attr('width', VP.w)
-        .attr('height', VP.imgH);
+        .attr('x', 0).attr('y', 20)
+        .attr('width', 280)
+        .attr('height', 280 * (BRAIN_SVG_VIEWBOX.h / BRAIN_SVG_VIEWBOX.w))
+        .attr('preserveAspectRatio', 'xMidYMid meet')
+        .attr('opacity', 0.25);
 
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');
@@ -1857,6 +1853,7 @@ function systemPanel() {
     graphData: null,
     currentGraphView: 'service',
     currentComponentServiceId: null,
+    maintenanceActive: false,
     graphTitle: 'Service Graph',
     showGraphBack: false,
     _pollTimer: null,
@@ -1887,7 +1884,7 @@ function systemPanel() {
     },
 
     async poll() {
-      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment(), this.pollCognitiveMonitor(), this.pollRegistry()]);
+      await Promise.all([this.pollServices(), this.pollSleep(), this.pollOrchestrator(), this.pollAlignment(), this.pollCognitiveMonitor(), this.pollRegistry(), this.pollMaintenance()]);
     },
 
     async pollServices() {
@@ -2001,6 +1998,32 @@ function systemPanel() {
       } catch { this.registryText = '--'; this.registryClass = ''; this.registryDetail = ''; }
     },
 
+    async pollMaintenance() {
+      try {
+        const resp = await fetch('/api/system/maintenance/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.maintenanceActive = data.active || false;
+        }
+      } catch { /* maintenance endpoint unavailable */ }
+    },
+
+    async toggleMaintenance() {
+      const endpoint = this.maintenanceActive
+        ? '/api/system/maintenance/exit'
+        : '/api/system/maintenance/enter';
+      try {
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard', entered_by: 'dashboard' }),
+        });
+        if (r.ok) {
+          this.maintenanceActive = !this.maintenanceActive;
+        }
+      } catch { /* maintenance toggle failed */ }
+    },
+
     // ── Graph ──────────────────────────────────────────────────────────
 
     async loadGraph() {
@@ -2075,9 +2098,8 @@ function systemPanel() {
 
       // Role-based color and grouping — cognitive hierarchy
       const roleGroups = {
-        'gaia-core':         { role: 'cognitive', color: '#7c4dff', label: 'core',         ring: 0 },
-        'gaia-nano':         { role: 'cognitive', color: '#4fc3f7', label: 'nano',         ring: 1 },
-        'gaia-prime':        { role: 'cognitive', color: '#ce93d8', label: 'prime',        ring: 1 },
+        'gaia-core':         { role: 'cognitive', color: '#7c4dff', label: 'core (operator)',  ring: 0 },
+        'gaia-prime':        { role: 'cognitive', color: '#ce93d8', label: 'prime (sovereign)', ring: 1 },
         'gaia-orchestrator': { role: 'control',   color: '#ffd54f', label: 'orchestrator', ring: 1 },
         'gaia-web':          { role: 'interface',  color: '#4caf50', label: 'web',          ring: 2 },
         'gaia-mcp':          { role: 'tools',      color: '#26a69a', label: 'mcp',          ring: 1 },
@@ -2869,6 +2891,20 @@ function lifecyclePanel() {
       this.refresh();
     },
 
+    async cancelInference(tier) {
+      try {
+        const resp = await fetch(`/api/system/inference/${tier}/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ respawn: true }),
+        });
+        this.lastResult = await resp.json();
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.refresh();
+    },
+
     transitionLabel(t) {
       const labels = {
         wake_signal: 'Wake',
@@ -3310,7 +3346,6 @@ function pipelinePanel() {
     alignmentStatus: '',
     pipelineRunning: false,
     dryRun: false,
-    skipNano: false,
     _timer: null,
 
     async init() {
@@ -3359,7 +3394,6 @@ function pipelinePanel() {
       try {
         const opts = {};
         if (this.dryRun) opts.dry_run = true;
-        if (this.skipNano) opts.skip_nano = true;
         const r = await fetch('/api/system/pipeline/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4323,7 +4357,7 @@ function generationPanel() {
     maxEntries: 500,
     currentGenId: null,
     scrollLocked: true,   // auto-scroll to bottom
-    roleFilter: '',       // '' = all, 'prime', 'core', 'nano'
+    roleFilter: '',       // '' = all, 'core', 'prime'
     connected: false,
     _es: null,            // EventSource
     _currentBuf: '',      // accumulator for in-progress generation

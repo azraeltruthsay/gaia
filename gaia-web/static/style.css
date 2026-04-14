@@ -350,7 +350,6 @@ html, body {
 .legend-swatch {
   width: 10px; height: 3px; border-radius: 2px; display: inline-block;
 }
-.legend-swatch.nano { background: #4fc3f7; }
 .legend-swatch.core { background: #90caf9; }
 .legend-swatch.prime { background: #ce93d8; }
 .legend-swatch.study { background: #ffd54f; }
@@ -385,7 +384,7 @@ html, body {
 .neuron-fiber.active { opacity: 0.9; }
 .neuron-fiber.glow { /* glow filter applied via D3 */ }
 /* Tier idle colors */
-.neuron-fiber.tier-nano.idle { stroke: #4fc3f7; }
+/* nano tier removed in Sovereign Duality — reflex regions mapped to core */
 .neuron-fiber.tier-core.idle { stroke: #90caf9; }
 .neuron-fiber.tier-prime.idle { stroke: #ce93d8; }
 /* Firing animation — animated dash simulates current racing through fiber */
@@ -673,6 +672,11 @@ html, body {
 
 .state-card-sleep {
   border-left: 3px solid var(--highlight);
+}
+
+.state-card-maintenance {
+  border-left: 3px solid var(--warn);
+  background: rgba(255, 170, 0, 0.05);
 }
 
 .state-label {
@@ -1406,6 +1410,9 @@ html, body {
 .lc-meditation { border-color: #ffa726; color: #ffa726; }
 .lc-listening { border-color: #ce93d8; color: #ce93d8; }
 .lc-reconcile { border-color: var(--text-dim); color: var(--text-dim); }
+.lc-cancel { border-color: #ef5350; color: #ef5350; font-size: 9px; padding: 1px 6px; margin-top: 3px; }
+.lc-cancel:hover { background: #ef5350; color: #fff; }
+.th-drain { background: #ff9800; color: #000; font-size: 8px; font-weight: bold; padding: 0 3px; border-radius: 2px; }
 
 /* Status */
 .lifecycle-status { margin-bottom: 6px; font-size: 11px; }

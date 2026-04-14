@@ -61,8 +61,6 @@ services:
       - "962"
 
     environment:
-      - VLLM_GPU_MEMORY_UTILIZATION=0.55
-      - VLLM_GPU_MEMORY_UTILIZATION=0.25
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - ORCHESTRATOR_HOST=0.0.0.0
       - ORCHESTRATOR_PORT=6410
@@ -135,7 +133,8 @@ services:
       - ../gaia-instance/logs:/logs:rw
 
     environment:
-      - VLLM_GPU_MEMORY_UTILIZATION=0.55
+      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
+      - VLLM_GPU_MEMORY_UTILIZATION=0.25
       - PYTHONDONTWRITEBYTECODE=1
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
@@ -202,6 +201,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.25
       - PYTHONDONTWRITEBYTECODE=1
       - GAIA_ENGINE_TIER=nano
@@ -305,6 +305,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
@@ -471,7 +472,7 @@ services:
       - TRANSLATE_ENDPOINT=${TRANSLATE_ENDPOINT:-http://gaia-translate:5000}
 
     ports:
-      - "127.0.0.1:6414:6414"
+      - "0.0.0.0:6414:6414"
 
     networks:
       - gaia-net
@@ -548,6 +549,7 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - HOME=/tmp
       - TRANSFORMERS_CACHE=/tmp/.cache

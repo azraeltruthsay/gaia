@@ -15,7 +15,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/lib/addon-web-links.min.js"></script>
   <!-- Alpine.js for reactive components -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body>
   <header class="top-bar">
@@ -127,9 +127,8 @@
           <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
         </div>
         <div class="brain-legend-key">
-          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano</span>
-          <span class="legend-swatch core"></span><span class="legend-key-label">Core</span>
-          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime</span>
+          <span class="legend-swatch core"></span><span class="legend-key-label">Core (Operator)</span>
+          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime (Sovereign)</span>
           <span class="legend-swatch study"></span><span class="legend-key-label">Study</span>
           <span class="legend-swatch synapse-dot"></span><span class="legend-key-label">Synapse</span>
         </div>
@@ -265,6 +264,11 @@
               <div class="state-label">Service Registry</div>
               <div class="state-value" :class="registryClass" x-text="registryText"></div>
               <div x-show="registryDetail" class="state-extra" x-text="registryDetail"></div>
+            </div>
+            <div class="state-card" :class="maintenanceActive ? 'state-card-maintenance' : ''" @click="toggleMaintenance()" style="cursor:pointer;">
+              <div class="state-label">Maintenance</div>
+              <div class="state-value" :class="maintenanceActive ? 'warn' : 'ok'" x-text="maintenanceActive ? 'ACTIVE' : 'off'"></div>
+              <div class="state-extra" x-text="maintenanceActive ? 'click to exit' : 'click to enter'"></div>
             </div>
             <template x-for="svc in services" :key="svc.id">
               <div class="state-card" :class="{ 'state-card-candidate': svc.candidate }">
@@ -427,10 +431,13 @@
             <div class="tier-card-head">
               <span class="tier-name" x-text="tier"></span>
               <span class="tier-health" :class="info.healthy ? 'th-ok' : 'th-down'"></span>
+              <span x-show="info.draining" class="th-drain" title="Draining inference">D</span>
             </div>
             <div class="tier-device" x-text="info.device"></div>
             <div class="tier-vram" x-show="info.vram_mb > 0" x-text="info.vram_mb + ' MB'"></div>
             <div class="tier-managed" x-show="info.managed">managed</div>
+            <button class="lc-btn lc-cancel" x-show="info.model_loaded"
+                    @click="cancelInference(tier)" title="Stop generating">Stop</button>
           </div>
         </template>
       </div>
@@ -674,7 +681,6 @@
           <span class="hook-status-label">Options:</span>
           <div style="display:flex;gap:10px;font-size:12px;">
             <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
-            <label><input type="checkbox" x-model="skipNano"> Skip Nano</label>
           </div>
         </div>
         <div class="hook-actions">
@@ -1485,9 +1491,8 @@
       <div class="gen-toolbar">
         <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
         <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
-        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
         <button class="gen-filter-btn" :class="roleFilter === 'core' ? 'active' : ''" @click="setFilter('core')">Core</button>
-        <button class="gen-filter-btn" :class="roleFilter === 'nano' ? 'active' : ''" @click="setFilter('nano')">Nano</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
         <div style="flex:1"></div>
         <label class="gen-scroll-lock">
           <input type="checkbox" x-model="scrollLocked"> Auto-scroll

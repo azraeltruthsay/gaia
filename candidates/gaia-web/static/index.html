@@ -15,7 +15,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/lib/addon-web-links.min.js"></script>
   <!-- Alpine.js for reactive components -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body>
   <header class="top-bar">
@@ -127,9 +127,8 @@
           <button @click="toggleLive()" x-text="live ? '⏸' : '▶'" title="Toggle live"></button>
         </div>
         <div class="brain-legend-key">
-          <span class="legend-swatch nano"></span><span class="legend-key-label">Nano</span>
-          <span class="legend-swatch core"></span><span class="legend-key-label">Core</span>
-          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime</span>
+          <span class="legend-swatch core"></span><span class="legend-key-label">Core (Operator)</span>
+          <span class="legend-swatch prime"></span><span class="legend-key-label">Prime (Sovereign)</span>
           <span class="legend-swatch study"></span><span class="legend-key-label">Study</span>
           <span class="legend-swatch synapse-dot"></span><span class="legend-key-label">Synapse</span>
         </div>
@@ -682,7 +681,6 @@
           <span class="hook-status-label">Options:</span>
           <div style="display:flex;gap:10px;font-size:12px;">
             <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
-            <label><input type="checkbox" x-model="skipNano"> Skip Nano</label>
           </div>
         </div>
         <div class="hook-actions">
@@ -1493,9 +1491,8 @@
       <div class="gen-toolbar">
         <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
         <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
-        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
         <button class="gen-filter-btn" :class="roleFilter === 'core' ? 'active' : ''" @click="setFilter('core')">Core</button>
-        <button class="gen-filter-btn" :class="roleFilter === 'nano' ? 'active' : ''" @click="setFilter('nano')">Nano</button>
+        <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
         <div style="flex:1"></div>
         <label class="gen-scroll-lock">
           <input type="checkbox" x-model="scrollLocked"> Auto-scroll

@@ -350,7 +350,6 @@ html, body {
 .legend-swatch {
   width: 10px; height: 3px; border-radius: 2px; display: inline-block;
 }
-.legend-swatch.nano { background: #4fc3f7; }
 .legend-swatch.core { background: #90caf9; }
 .legend-swatch.prime { background: #ce93d8; }
 .legend-swatch.study { background: #ffd54f; }
@@ -385,7 +384,7 @@ html, body {
 .neuron-fiber.active { opacity: 0.9; }
 .neuron-fiber.glow { /* glow filter applied via D3 */ }
 /* Tier idle colors */
-.neuron-fiber.tier-nano.idle { stroke: #4fc3f7; }
+/* nano tier removed in Sovereign Duality — reflex regions mapped to core */
 .neuron-fiber.tier-core.idle { stroke: #90caf9; }
 .neuron-fiber.tier-prime.idle { stroke: #ce93d8; }
 /* Firing animation — animated dash simulates current racing through fiber */
