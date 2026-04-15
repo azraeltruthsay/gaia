@@ -1029,24 +1029,26 @@ async def process_packet(packet_data: Dict[str, Any]):
                     None, _agent_core.generate_instant_reflex, packet
                 )
                 if reflex_text:
-                    # Uncertainty check: if Nano hedges or describes process
+                    # Uncertainty check: if reflex hedges or describes process
                     # without an actual answer, DON'T return — let Core handle it
                     user_input = packet.content.original_prompt or ""
                     if _agent_core._should_escalate_for_uncertainty(reflex_text, user_input):
-                        logger.info("Main: Nano reflex uncertain — escalating to full pipeline")
+                        logger.info("Main: Reflex uncertain — escalating to full pipeline")
                         reflex_text = ""  # Clear so full pipeline runs
                     else:
                         # Log reflex generation to stream
+                        _reflex_model = getattr(_agent_core, '_last_responding_model', None) or "core"
                         try:
                             from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
                             _gl = _get_gen_logger()
                             _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
-                            _gid = _gl.start_generation("nano-0.8B", "nano", "response")
+                            _gid = _gl.start_generation(_reflex_model, _reflex_model, "response")
                             _gl.log_token(_gid, reflex_text)
                             _gl.end_generation(_gid)
                         except Exception:
                             pass
-                        formatted_reflex = f"⚡ **[(Nano)]**\n{reflex_text}"
+                        _reflex_label = "Operator" if _reflex_model == "core" else _reflex_model.title()
+                        formatted_reflex = f"⚡ **[({_reflex_label}) {_reflex_model.title()}]**\n{reflex_text}"
                         yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 

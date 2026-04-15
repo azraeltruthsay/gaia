@@ -4277,12 +4277,13 @@ class AgentCore:
         Returns "SIMPLE" or "COMPLEX".
         """
         # The nano model is registered as "nano" in MODEL_CONFIGS.
+        # Sovereign Duality: Nano is deprecated. Skip triage if disabled.
         _nano_key = "nano"
-        if _nano_key not in self.config.MODEL_CONFIGS:
-            return "COMPLEX"  # Fallback to more capable models
+        nano_cfg = self.config.MODEL_CONFIGS.get(_nano_key, {})
+        if not nano_cfg.get("enabled", False) or _nano_key not in self.config.MODEL_CONFIGS:
+            return "COMPLEX"  # No triage tier — route to capable model
 
         try:
-            # Ensure nano is loaded
             self.model_pool.ensure_model_loaded(_nano_key)
             nano = self.model_pool.get(_nano_key)
             if not nano:
@@ -4339,13 +4340,16 @@ RESULT: COMPLEX (reason: <brief reason>)
             f"Flagged message (first 300 chars): {user_input[:300]}"
         )
         try:
+            # Use Core for classification when Nano is disabled (Sovereign Duality)
             _nano_key = "nano"
-            if _nano_key not in self.config.MODEL_CONFIGS:
-                return "USER_ATTEMPT: Unknown (Nano unavailable)"
-            self.model_pool.ensure_model_loaded(_nano_key)
-            nano = self.model_pool.get(_nano_key)
+            _nano_cfg = self.config.MODEL_CONFIGS.get(_nano_key, {})
+            _classify_key = _nano_key if _nano_cfg.get("enabled", False) else "core"
+            if _classify_key not in self.config.MODEL_CONFIGS:
+                return "USER_ATTEMPT: Unknown (classifier unavailable)"
+            self.model_pool.ensure_model_loaded(_classify_key)
+            nano = self.model_pool.get(_classify_key)
             if not nano:
-                return "USER_ATTEMPT: Unknown (Nano unavailable)"
+                return "USER_ATTEMPT: Unknown (classifier unavailable)"
             messages = [
                 {"role": "system", "content": "Security classifier. Output one line only."},
                 {"role": "user", "content": _TRANSLATE_PROMPT},

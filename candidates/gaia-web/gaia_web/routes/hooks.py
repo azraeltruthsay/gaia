@@ -272,8 +272,8 @@ async def discord_test(req: DiscordTestRequest):
                         if event_type == "token":
                             val = event.get("value", "")
                             if val:
-                                if val.startswith("⚡ **[(Nano)"):
-                                    discord_messages.append({"type": "nano", "content": val})
+                                if val.startswith("⚡ **[("):
+                                    discord_messages.append({"type": "reflex", "content": val})
                                 else:
                                     full_response += val
 

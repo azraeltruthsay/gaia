@@ -729,12 +729,15 @@ class VoiceManager:
         return response_text.strip() or None
 
     async def _get_nano_response(self, text: str) -> str | None:
-        """Try Nano fast-path with a fresh session for cold-start eligibility.
+        """Try reflex fast-path with a fresh session for cold-start eligibility.
 
-        Uses a unique session_id per utterance so is_eligible_for_reflex sees
-        an empty history (cold start). Tight 5s timeout since Nano should
-        respond in <1s. Returns clean text or None if Nano didn't fire.
+        Sovereign Duality: Nano tier is deprecated. This method now returns
+        None immediately, falling through to the full Core pipeline. The
+        method is preserved for backward compatibility with callers.
         """
+        # Nano is disabled in Sovereign Duality — skip to full pipeline
+        return None
+        # Legacy code below preserved for reference:
         import uuid
         from gaia_common.utils.packet_factory import build_packet, PacketSource
 
@@ -774,6 +777,20 @@ class VoiceManager:
         clean = clean.rstrip("-").rstrip("\n").strip()
         return clean or None
 
+    @staticmethod
+    def _strip_response_header(text: str) -> str:
+        """Strip model tier header from response text for TTS.
+
+        Removes headers like [Core], [(Operator) Core], ⚡ **[(Nano)]**, etc.
+        so the TTS doesn't speak them aloud.
+        """
+        import re
+        # Strip markdown-formatted headers: 🤖 **[(Operator) Core]**\n
+        text = re.sub(r'^[⚡🤖]\s*\*\*\[.*?\]\*\*\s*\n?', '', text).strip()
+        # Strip plain bracket headers: [Core]\n, [nano]\n
+        text = re.sub(r'^\[[\w\s()]+\]\s*\n?', '', text).strip()
+        return text
+
     async def _get_response(self, text: str) -> str | None:
         """Send transcribed text to gaia-core as a CognitionPacket and get response.
 
@@ -795,7 +812,8 @@ class VoiceManager:
                     if resp.status_code != 200:
                         logger.error("Core response failed: %d", resp.status_code)
                         return None
-                    return await self._parse_ndjson_response(resp)
+                    raw = await self._parse_ndjson_response(resp)
+                    return self._strip_response_header(raw) if raw else None
         except Exception:
             logger.error("Core request failed", exc_info=True)
         return None
