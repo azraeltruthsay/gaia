@@ -324,22 +324,22 @@ services:
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
       - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
       # CPU-only mode — GPU inference offloaded to gaia-prime
-      - GAIA_BACKEND=${GAIA_BACKEND:-gpu_prime}
+      - GAIA_BACKEND=${GAIA_BACKEND:-core}
       - GAIA_FORCE_CPU=0
       - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
       - N_GPU_LAYERS=16
       # Model pool initializes remote HTTP clients (not GPU models) on startup
       - GAIA_AUTOLOAD_MODELS=${GAIA_AUTOLOAD_MODELS:-1}
       - GAIA_ALLOW_PRIME_LOAD=${GAIA_ALLOW_PRIME_LOAD:-1}
-      # Remote vLLM inference via gaia-prime
+      # Remote GAIA Engine inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
-      # Nano reflex endpoint (separate llama-server container)
+      # Nano reflex — DEPRECATED in Sovereign Duality (Core handles triage)
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
-      - NANO_MODEL=${NANO_MODEL:-Qwen3.5-0.8B-GAIA-Nano-v1}
-      # Core/Operator inference endpoint (safetensors or GGUF, depending on mode)
+      - NANO_MODEL=${NANO_MODEL:-Gemma4-E2B-GAIA-Nano-v1}
+      # Core/Operator inference endpoint (GAIA Engine managed mode)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Qwen3.5-4B-GAIA-Core-v1}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Gemma4-E4B-GAIA-Core-v1}
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
       - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}

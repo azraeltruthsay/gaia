@@ -229,10 +229,11 @@ class VLLMRemoteModel:
             if key in kwargs:
                 payload[key] = kwargs[key]
 
-        # Disable Qwen3 thinking mode by default to avoid <think> tag bloat.
+        # Thinking mode: Qwen3 needs explicit disable to avoid <think> bloat.
+        # Gemma 4 does NOT support think suppression — leave thinking enabled.
         # Callers can override by passing chat_template_kwargs explicitly.
         if "chat_template_kwargs" not in payload:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
 
         if stream:
             return self._stream_chat(payload)

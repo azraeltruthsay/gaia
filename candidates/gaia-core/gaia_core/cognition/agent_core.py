@@ -1227,11 +1227,11 @@ class AgentCore:
                     is_factual = False
                     logger.info("[MODEL_SELECT] Follow-up reference detected with session history — suppressing trivial classification")
 
-            # 1a. Nano Fast-Path (0.5B) - Highest priority for speed
-            # Trivial/factual queries go to Nano first; cascade triage will
-            # escalate later if the question turns out to be complex.
-            # The nano model may be registered as "nano" in MODEL_CONFIGS.
-            has_nano = "nano" in self.config.MODEL_CONFIGS
+            # 1a. Nano Fast-Path — DEPRECATED in Sovereign Duality.
+            # Core (E4B) now handles all triage directly.
+            # Only route to Nano if it's explicitly enabled (backward compat).
+            nano_cfg = self.config.MODEL_CONFIGS.get("nano", {})
+            has_nano = nano_cfg.get("enabled", False) and "nano" in self.model_pool.models
             if not selected_model_name and (wants_nano or is_trivial) and has_nano:
                 selected_model_name = "nano"
                 logger.info(f"[MODEL_SELECT] Routing to Nano (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
@@ -3708,8 +3708,9 @@ class AgentCore:
         # Starts with known error pattern
         if stripped.startswith("I encountered an error"):
             return True
-        # Disproportionately long for short input (>800 chars for <=30 char input)
-        if len(user_input) <= 30 and len(stripped) > 800:
+        # Disproportionately long for short input (>2000 chars for <=30 char input)
+        # Gemma 4 is more verbose than Qwen — raised from 800 to 2000
+        if len(user_input) <= 30 and len(stripped) > 2000:
             return True
         # Low unique-word ratio — sign of phrase-level repetition
         words = stripped.lower().split()
@@ -3871,16 +3872,31 @@ class AgentCore:
                 continue
             try:
                 self.logger.info("Slim escalation: trying '%s' after '%s' failed", candidate, failed_model)
+                # Invalidate KV prefix cache before escalation — the cached
+                # identity/behavioral segments from sleep mode confuse Gemma 4
+                # into hallucinating tool calls or fake conversations.
+                try:
+                    model_obj = self.model_pool.get(candidate)
+                    if model_obj and hasattr(model_obj, '_session'):
+                        import httpx as _hx
+                        _ep = model_obj.endpoint
+                        _hx.Client(timeout=3).post(f"{_ep}/cache/invalidate")
+                except Exception:
+                    pass
                 # Build a clean prompt for the escalation target —
-                # don't send Nano's few-shot format to Core/Lite
+                # don't send Nano's few-shot format to Core/Lite.
+                # Use a conversational identity (not the sleep/reflection prompt).
                 escalation_messages = [
-                    {"role": "system", "content": "You are GAIA, a sovereign AI. Answer directly and concisely."},
+                    {"role": "system", "content": "You are GAIA, a sovereign AI assistant created by Azrael. "
+                     "You are helpful, direct, and concise. Answer the user's question naturally. "
+                     "Do not use tool_call, JSON, or code blocks unless explicitly asked. "
+                     "Do not generate follow-up questions or simulate multi-turn conversations."},
                     {"role": "user", "content": user_question},
                 ]
                 res = self.model_pool.forward_to_model(
                     candidate,
                     messages=escalation_messages,
-                    max_tokens=max_tokens,
+                    max_tokens=min(max_tokens, 256),  # cap escalation to avoid runaway
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
                     adapter_name=self._resolve_adapter(candidate),
@@ -3888,7 +3904,12 @@ class AgentCore:
                 content = res["choices"][0]["message"]["content"]
                 content = strip_think_tags(content).strip()
                 content = self._suppress_repetition(content)
-                if not self._is_degenerate_output(content, messages[-1].get("content", "")):
+                # Strip trailing hallucinated turn markers (Gemma 4 artifact)
+                import re as _re
+                content = _re.sub(r'\s*\b(?:user|assistant|system)\s*$', '', content, flags=_re.IGNORECASE).strip()
+                is_degen = self._is_degenerate_output(content, messages[-1].get("content", ""))
+                self.logger.info("Slim escalation '%s' raw=%r degenerate=%s", candidate, content[:200], is_degen)
+                if not is_degen:
                     self.logger.info("Slim escalation succeeded with '%s'", candidate)
                     self._last_responding_model = candidate
                     return content
@@ -4045,7 +4066,9 @@ class AgentCore:
         Executes a fast, non-streaming Reflex response with a minimal packet.
         Returns the generated text, or "" to defer to run_turn().
         """
-        if "nano" not in self.model_pool.models:
+        # Sovereign Duality: Nano is deprecated. Only use if explicitly enabled.
+        nano_cfg = self.config.MODEL_CONFIGS.get("nano", {})
+        if not nano_cfg.get("enabled", False) or "nano" not in self.model_pool.models:
             return ""
 
         try:
