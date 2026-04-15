@@ -2118,10 +2118,11 @@ class AgentCore:
             if not tool_already_executed and self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name):
                 text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
                 if text is not None:
-                    # _run_slim_prompt already handles uncertainty escalation
-                    # internally — if Nano hedged, it already tried Core/Lite.
-                    # The text here is the best answer from the slim path.
-                    _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                    # _run_slim_prompt handles uncertainty escalation internally.
+                    # Use _last_responding_model for header — it may have escalated
+                    # from Nano to Core, and we want the header to show who answered.
+                    _responding = getattr(self, '_last_responding_model', None) or selected_model_name
+                    _header = self._build_response_header(_responding, packet, None, None, None)
                     yield {"type": "token", "value": _header + text}
                     self.session_manager.add_message(session_id, "assistant", text)
                     return

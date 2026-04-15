@@ -192,6 +192,10 @@ class IdleHeartbeat:
             recent_summary=self._get_recent_summary(),
         )
 
+        # Use chat_template_kwargs to signal this is an idle reflection,
+        # not a user-facing conversation. The engine should NOT cache this
+        # system prompt in the identity segment (it would pollute the KV
+        # prefix for subsequent user requests).
         messages = [
             {"role": "system", "content": _IDLE_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -240,6 +244,20 @@ class IdleHeartbeat:
                         })
                     except Exception:
                         logger.debug("Failed to write idle heartbeat timeline entry", exc_info=True)
+
+            # Invalidate KV prefix cache after idle reflection — the idle
+            # system prompt ("quiet moment, reflect") must NOT persist into
+            # subsequent user-facing requests. Without this, the model thinks
+            # it's in reflection mode and hallucinates instead of answering.
+            try:
+                if hasattr(model, 'endpoint'):
+                    from urllib.request import Request as _Req, urlopen as _open
+                    _req = _Req(f"{model.endpoint}/cache/invalidate",
+                                data=b'{}', headers={"Content-Type": "application/json"})
+                    _open(_req, timeout=3)
+                    logger.debug("Idle heartbeat: KV cache invalidated after reflection")
+            except Exception:
+                logger.debug("Idle heartbeat: cache invalidation failed", exc_info=True)
 
         except Exception:
             logger.debug("Idle heartbeat LLM call failed", exc_info=True)

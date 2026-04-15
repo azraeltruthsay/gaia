@@ -617,15 +617,24 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "LANGUAGE: Always respond in English unless translation is explicitly requested."
         )
 
-        # Tool calling (keep — critical for tool use)
+        # Tool calling — Gemma 4 models hallucinate <tool_call> JSON when given
+        # explicit format examples. Omit the format instruction; the pipeline's
+        # tool parser handles tool detection without priming the model.
+        # Only include for models that need explicit tool format guidance.
+        _model_name = getattr(packet, 'header', None) and getattr(packet.header, 'model', None) and getattr(packet.header.model, 'name', '') or ''
+        _is_gemma = 'gemma' in _model_name.lower() or 'gemma' in str(getattr(packet, '_model_family', '')).lower()
         tool_already_executed = (
             getattr(packet, 'tool_routing', None)
             and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
         )
-        if not tool_already_executed:
+        if not tool_already_executed and not _is_gemma:
             system_content_parts.append(
                 "TOOLS: Use <tool_call>{\"tool\":\"name\",\"action\":\"verb\",...}</tool_call> to call tools. "
                 "System executes and returns <tool_result>. Never fabricate results."
+            )
+        elif not tool_already_executed:
+            system_content_parts.append(
+                "You have access to tools when needed. The system will handle tool execution automatically."
             )
 
         # Skip thought seed, spinal routing, vital organ — not needed for inference
