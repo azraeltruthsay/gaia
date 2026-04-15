@@ -119,7 +119,7 @@ class ConsciousnessMatrix:
         # Options: "awake", "sleep", "unconscious"
         # "awake" = Core+Nano GPU, Prime CPU (normal operation)
         # "unconscious" = everything starts unloaded (manual control)
-        self._default_preset = os.environ.get("CONSCIOUSNESS_DEFAULT_PRESET", "awake")
+        self._default_preset = os.environ.get("CONSCIOUSNESS_DEFAULT_PRESET", "parked")
 
         # Skill adapters to auto-load when a tier enters Subconscious (CPU) mode.
         # GGUF LoRA adapters loaded via /adapter/load with configurable scale.
@@ -775,21 +775,23 @@ class ConsciousnessMatrix:
                     await asyncio.sleep(interval)
                     continue
 
-                # Auto-reconcile: if target > actual, load the tier
+                # Auto-reconcile: if target != actual, transition the tier.
+                # Handles both upshifts (load) and downshifts (unload/demote).
                 for tier, state in self._tiers.items():
                     if state.ok or state.transitioning:
                         continue
-                    if state.target > state.actual and state.healthy:
+                    if state.target != state.actual and state.healthy:
+                        direction = "up" if state.target > state.actual else "down"
                         logger.warning(
-                            "Matrix mismatch: %s target=%s actual=%s — auto-reconciling",
-                            tier, state.target.name, state.actual.name,
+                            "Matrix mismatch: %s target=%s actual=%s — auto-reconciling (%sshift)",
+                            tier, state.target.name, state.actual.name, direction,
                         )
                         try:
                             result = await self._transition_tier(
                                 tier, state.actual, state.target,
                             )
                             if result.get("ok"):
-                                logger.info("Auto-reconciled %s → %s", tier, state.target.name)
+                                logger.info("Auto-reconciled %s → %s (%sshift)", tier, state.target.name, direction)
                             else:
                                 logger.warning("Auto-reconcile %s failed: %s", tier, result.get("error", ""))
                         except Exception as e:
