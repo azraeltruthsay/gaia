@@ -3698,7 +3698,14 @@ class AgentCore:
         if not content or not content.strip():
             return True
         stripped = content.strip()
+        # Short answers are valid for factual/math questions.
+        # "105", "4", "Paris" are correct answers, not degenerate.
         if len(stripped) < 5:
+            # Allow short answers if they contain a number or a capitalized word
+            # (likely a factual answer like "105" or "Paris")
+            import re
+            if re.match(r'^[\d.,\-+%$]+\.?$', stripped) or (len(stripped) >= 2 and stripped[0].isupper()):
+                return False
             return True
         # Repetition ratio: >60% of lines are duplicates
         lines = [l.strip() for l in content.split('\n') if l.strip()]
