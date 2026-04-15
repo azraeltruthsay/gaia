@@ -665,7 +665,7 @@ async def consciousness_matrix():
 @router.post("/consciousness/{target}")
 async def consciousness_transition(target: str):
     """Proxy consciousness transition to orchestrator."""
-    if target not in ("awake", "focusing", "sleep", "deep-sleep"):
+    if target not in ("awake", "focusing", "sleep", "deep-sleep", "park"):
         return {"error": f"Unknown target: {target}"}
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:

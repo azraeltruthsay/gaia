@@ -218,10 +218,11 @@
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;">Quick Actions</div>
             <div style="display:flex;gap:4px;flex-wrap:wrap;">
-              <button class="btn-sm" @click="transition('awake')" :disabled="lifecycleState==='awake'">Awake</button>
-              <button class="btn-sm" @click="transition('focusing')" :disabled="lifecycleState==='focusing'">Focus</button>
+              <button class="btn-sm" @click="transition('park')" :disabled="lifecycleState==='parked'">Park</button>
+              <button class="btn-sm" @click="transition('awake')" :disabled="lifecycleState==='awake'">Gear 1</button>
+              <button class="btn-sm" @click="transition('focusing')" :disabled="lifecycleState==='focusing'">Gear 2</button>
               <button class="btn-sm" @click="transition('sleep')" :disabled="lifecycleState==='sleep'">Sleep</button>
-              <button class="btn-sm" @click="transition('deep-sleep')">Deep Sleep</button>
+              <button class="btn-sm" @click="transition('deep-sleep')">Off</button>
             </div>
           </div>
 
