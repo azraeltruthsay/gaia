@@ -2449,6 +2449,26 @@ class AgentCore:
                     logger.warning("Planning orchestrator failed, falling back to council debate: %s", _plan_err, exc_info=True)
 
             # 5b. Final Response Generation (with Iterative Council Debate)
+            # Sovereign Duality: OPERATOR depth skips the debate — the initial plan
+            # from step 4 already has the correct answer ("Azrael created me").
+            # The Council Debate regenerates via KV-cached identity which may be
+            # stale (sleep-mode "quiet moment" prompt), causing identity corruption.
+            # Use the refined_plan_text directly and stream it.
+            if pipeline_depth == "OPERATOR" and refined_plan_text and len(refined_plan_text.strip()) > 5:
+                logger.info("OPERATOR: bypassing Council Debate — streaming initial plan directly")
+                _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                yield {"type": "token", "value": _header + refined_plan_text}
+                self.session_manager.add_message(session_id, "assistant", refined_plan_text)
+                try:
+                    packet.response.candidate = refined_plan_text
+                    packet.response.confidence = 0.9
+                    packet.status.state = PacketState.COMPLETED
+                except Exception:
+                    pass
+                yield {"type": "flush"}
+                yield {"type": "packet", "value": packet.to_serializable_dict()}
+                return
+
             debate_turn = 0
             MAX_DEBATE_TURNS = 3
             council_history = []
