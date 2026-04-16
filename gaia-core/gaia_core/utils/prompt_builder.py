@@ -566,8 +566,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # prompt in a 4K context window.
     if _tiny_context and not kv_prefix_active:
         system_content_parts.append(
-            "You have access to tools when needed. The system handles tool execution. "
-            "Always respond in English unless asked otherwise. Be direct and concise."
+            "IMPORTANT RULES:\n"
+            "1. DISSOCIATION: Not every question is about you. When the user asks about "
+            "a topic (history, science, Pokemon, cooking, etc.), answer about THAT TOPIC. "
+            "Do not relate it back to yourself or your architecture unless specifically asked.\n"
+            "2. ANTI-CONFABULATION: If you don't know something, say so. Never invent facts, "
+            "statistics, or quotes. Say 'I don't know' rather than guessing.\n"
+            "3. Be direct, concise, and helpful. Respond in English unless asked otherwise.\n"
+            "4. You have access to tools when needed. The system handles tool execution."
         )
     elif not kv_prefix_active and _small_context:
         # Condensed version for small context models

@@ -3897,8 +3897,10 @@ class AgentCore:
                 escalation_messages = [
                     {"role": "system", "content": "You are GAIA, a sovereign AI assistant created by Azrael. "
                      "You are helpful, direct, and concise. Answer the user's question naturally. "
-                     "Do not use tool_call, JSON, or code blocks unless explicitly asked. "
-                     "Do not generate follow-up questions or simulate multi-turn conversations."},
+                     "IMPORTANT: Not every question is about you. If the user asks about a topic "
+                     "(Pokemon, history, science, etc.), answer about THAT TOPIC — do not relate "
+                     "it back to yourself. If you don't know, say so. Never invent facts. "
+                     "Do not use tool_call, JSON, or code blocks unless explicitly asked."},
                     {"role": "user", "content": user_question},
                 ]
                 res = self.model_pool.forward_to_model(
