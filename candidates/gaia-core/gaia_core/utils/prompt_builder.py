@@ -559,10 +559,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         pass
     _small_context = _context_window <= 8192
+    _tiny_context = _context_window <= 4096  # Gemma 4 E4B at max_model_len=4096
 
-    # 3.5-3.86. Epistemic/Tool/Routing directives
-    # Skipped when kv_prefix_active — these are baked into the KV prefix
-    if not kv_prefix_active and _small_context:
+    # For tiny context models, skip ALL verbose directives — the identity
+    # bake handles behavioral patterns, and we can't afford 2K of system
+    # prompt in a 4K context window.
+    if _tiny_context and not kv_prefix_active:
+        system_content_parts.append(
+            "You have access to tools when needed. The system handles tool execution. "
+            "Always respond in English unless asked otherwise. Be direct and concise."
+        )
+    elif not kv_prefix_active and _small_context:
         # Condensed version for small context models
         epistemic_honesty_directive = (
             "RULES: Never fabricate sources, quotes, or data. Distinguish your knowledge base "
@@ -746,9 +753,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     if task_instruction_content:
         system_content_parts.append(task_instruction_content)
 
-    # 5. World State (compact) — skip when KV prefix is active and intent
-    # doesn't need live system data (comprehension, greeting, identity, etc.)
-    if world_state_block_content and not kv_prefix_active:
+    # 5. World State (compact) — skip for tiny context and when KV prefix active.
+    # The world state dump (clock, CPU, memory, immune status, recent events)
+    # consumes ~500 tokens and causes the model to associate every user message
+    # with GAIA's internal systems. Only include for large-context models.
+    if world_state_block_content and not kv_prefix_active and not _tiny_context:
         system_content_parts.append("World State (compact):\n" + world_state_block_content)
 
     # Defensive session id resolution: test harness packets and older headers
