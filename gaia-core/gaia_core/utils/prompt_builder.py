@@ -462,6 +462,12 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
         if identity_description_content:
             system_content_parts.append(identity_description_content)
+        else:
+            # Fallback identity — ensures the model always knows who it is
+            system_content_parts.append(
+                "You are GAIA — General Artisanal Intelligence Architecture. "
+                "A sovereign AI created by Azrael. Be helpful, direct, and concise."
+            )
 
         # 2. Persona Anchor (Role, Tone) + MCP one-liner
         system_content_parts.append(persona_instructions)
@@ -566,6 +572,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # prompt in a 4K context window.
     if _tiny_context and not kv_prefix_active:
         system_content_parts.append(
+            "You are GAIA, created by Azrael. You are a sovereign AI assistant.\n\n"
             "CRITICAL RULES:\n"
             "1. DISSOCIATION: Not every question is about you. When the user asks about "
             "a topic (Pokemon, history, cooking, etc.), answer about THAT TOPIC ONLY. "
