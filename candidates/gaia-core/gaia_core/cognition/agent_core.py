@@ -2836,6 +2836,26 @@ class AgentCore:
                         rf'\b{_marker}\b[.,;:\s]*', '', full_response,
                         flags=_re_triage.IGNORECASE).strip()
 
+            # ── Post-debate confidence gate: auto-search if model hedged ──
+            # The model often says "I can search the web" without actually
+            # searching. Detect this and DO the search automatically.
+            try:
+                _post_conf = self._assess_confidence(full_response, user_input)
+                if _post_conf["needs_grounding"]:
+                    logger.info("Post-debate confidence gate: %s — auto-grounding",
+                               _post_conf["reason"])
+                    _grounded = self._ground_and_regenerate(
+                        selected_model_name, user_input,
+                        full_response, _post_conf["reason"]
+                    )
+                    if _grounded and _grounded != full_response:
+                        full_response = _grounded
+                        # Stream the grounded response as a replacement
+                        yield {"type": "token", "value": "\n\n" + _grounded}
+                        yield {"type": "flush"}
+            except Exception:
+                logger.debug("Post-debate confidence gate failed (non-blocking)", exc_info=True)
+
             logger.info(f"Full LLM response before routing: {full_response}")
 
             # ── Think-tag-only recovery ──────────────────────────────────
@@ -3397,10 +3417,19 @@ class AgentCore:
             packet.response.candidate = user_facing_response
             packet.response.confidence = 0.93 # Placeholder
             self.ai_manager.status["last_response"] = user_facing_response
-            # Don't save degenerate or triage-contaminated responses to session history
+            # Don't save degenerate or triage-contaminated responses to session history.
+            # Also strip turn markers that would poison future context.
             _save_text = strip_think_tags(user_facing_response).strip()
-            if _save_text and len(_save_text) > 5 and not any(
-                m in _save_text.upper() for m in ["ESCALATE", "CONFIDENCE ASSESSMENT TASK"]):
+            import re as _re_save
+            _save_text = _re_save.sub(r'\s*\bassistant\b\s*', ' ', _save_text, flags=_re_save.IGNORECASE).strip()
+            _save_text = _re_save.sub(r'\s*\buser\b\s*$', '', _save_text, flags=_re_save.IGNORECASE).strip()
+            _is_garbage = (
+                not _save_text or len(_save_text) <= 5
+                or any(m in _save_text.upper() for m in ["ESCALATE", "CONFIDENCE ASSESSMENT TASK"])
+                or _save_text.lower().startswith("i'm having trouble responding")
+                or _save_text.lower().startswith("an unexpected error")
+            )
+            if not _is_garbage:
                 self.session_manager.add_message(session_id, "assistant", _save_text)
             else:
                 logger.warning("Skipping session save — degenerate response: %s", _save_text[:100])
