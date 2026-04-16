@@ -2349,6 +2349,33 @@ class AgentCore:
                 except Exception:
                     logger.debug("AgentCore: failed to append refined_plan reflection log")
                 logger.debug(f"Reflection output: {refined_plan_text}")
+
+                # ── Confidence-Gated Epistemic Grounding (Full Pipeline) ──
+                # Check the refined plan for low confidence BEFORE streaming.
+                # If the model hedged or self-conflated, auto-search and regenerate
+                # with grounded data. This replaces the refined_plan_text so the
+                # streamed output is epistemically grounded from the first token.
+                try:
+                    _full_confidence = self._assess_confidence(refined_plan_text, user_input)
+                    if _full_confidence["needs_grounding"]:
+                        logger.info("Full pipeline confidence gate: %s (%.1f) — grounding before stream",
+                                   _full_confidence["reason"], _full_confidence["confidence"])
+                        _grounded = self._ground_and_regenerate(
+                            selected_model_name, user_input,
+                            refined_plan_text, _full_confidence["reason"]
+                        )
+                        if _grounded != refined_plan_text:
+                            refined_plan_text = _grounded
+                            try:
+                                packet.reasoning.reflection_log.append(
+                                    ReflectionLog(step="epistemic_grounding",
+                                                 summary=f"Grounded: {_full_confidence['reason']}",
+                                                 confidence=0.9))
+                            except Exception:
+                                pass
+                except Exception:
+                    logger.debug("Confidence gate failed (non-blocking)", exc_info=True)
+
                 # Mark packet as ready to stream after successful reflection
                 try:
                     packet.status.state = PacketState.READY_TO_STREAM
@@ -3856,6 +3883,154 @@ class AgentCore:
 
         return False
 
+    # ── Confidence-Gated Epistemic Grounding ─────────────────────────────
+    # After model generates a response, check if it shows signs of low
+    # confidence (hedging, vagueness, self-reference on external topics).
+    # If so, auto-search for verified data and regenerate grounded.
+
+    _HEDGE_SIGNALS = [
+        "i don't know", "i'm not sure", "i don't have", "i cannot",
+        "from my training", "i believe", "i think", "approximately",
+        "as far as i know", "not certain", "don't have access",
+        "let me search", "i'd need to", "i should check",
+        "unable to", "not available",
+        "i can search", "want me to look", "would you like me to search",
+        "i can try to search", "need to search", "check a source",
+    ]
+
+    _SELF_CONFLATION_SIGNALS = [
+        "sovereign ai", "i am gaia", "my architecture", "my core",
+        "gaia engine", "sovereign duality", "azrael created",
+        "my gearbox", "my identity", "my systems",
+    ]
+
+    def _assess_confidence(self, response: str, user_input: str) -> dict:
+        """Assess whether a response needs epistemic grounding.
+
+        Returns:
+            {needs_grounding: bool, reason: str, confidence: float}
+        """
+        resp_lower = response.lower()
+        input_lower = user_input.lower()
+        self.logger.info("_assess_confidence called: input=%r resp=%r", user_input[:60], response[:80])
+
+        # Check for explicit hedging
+        hedge_count = sum(1 for s in self._HEDGE_SIGNALS if s in resp_lower)
+        if hedge_count >= 1:
+            self.logger.info("_assess_confidence: hedging detected (%d signals)", hedge_count)
+            return {"needs_grounding": True, "reason": "hedging_detected",
+                    "confidence": 0.3, "hedge_count": hedge_count}
+
+        # Check for self-conflation on non-identity questions
+        identity_keywords = ["who are you", "your name", "created you",
+                           "your purpose", "what are you", "about yourself"]
+        is_identity_question = any(k in input_lower for k in identity_keywords)
+        if not is_identity_question:
+            conflation_count = sum(1 for s in self._SELF_CONFLATION_SIGNALS if s in resp_lower)
+            if conflation_count >= 2:
+                return {"needs_grounding": True, "reason": "self_conflation",
+                        "confidence": 0.2, "conflation_count": conflation_count}
+
+        # Check for very short factual responses that might be confabulated
+        # (excludes math answers which are legitimately short)
+        import re
+        is_math = bool(re.match(r'^[\d.,\-+%$\s]+\.?$', response.strip()))
+        if len(response.strip()) < 30 and not is_math and "?" not in user_input[:5]:
+            return {"needs_grounding": False, "reason": "short_but_ok",
+                    "confidence": 0.6}
+
+        return {"needs_grounding": False, "reason": "confident",
+                "confidence": 0.8}
+
+    def _ground_and_regenerate(self, model_name: str, user_input: str,
+                                initial_response: str, reason: str) -> str:
+        """Search for verified data and regenerate a grounded response.
+
+        Args:
+            model_name: Which model to use for regeneration
+            user_input: The original user question
+            initial_response: The model's first (ungrounded) response
+            reason: Why grounding was triggered (hedging, self_conflation)
+
+        Returns:
+            Grounded response string, or initial_response if grounding fails
+        """
+        self.logger.info("Epistemic grounding triggered (%s) for: %s", reason, user_input[:80])
+
+        # Step 1: Web search for verified data
+        grounding_text = ""
+        try:
+            from gaia_core.utils import mcp_client as _mcp_mod
+            raw = _mcp_mod.call_jsonrpc("web_search", {
+                "query": user_input[:120], "max_results": 3
+            })
+            # MCP returns nested: {ok, response: {jsonrpc, result: {results: [...]}}}
+            results = raw
+            if isinstance(raw, dict):
+                inner = raw.get("response", raw)
+                if isinstance(inner, dict):
+                    inner = inner.get("result", inner)
+                if isinstance(inner, dict):
+                    results = inner.get("results", [])
+            if results and isinstance(results, list):
+                parts = []
+                for r in results[:3]:
+                    title = r.get("title", "")
+                    snippet = r.get("snippet", "")
+                    url = r.get("url", "")
+                    if snippet:
+                        parts.append(f"- {title}: {snippet} (Source: {url})")
+                grounding_text = "\n".join(parts)
+                self.logger.info("Epistemic grounding: %d search results for '%s'",
+                                    len(results), user_input[:50])
+        except Exception as e:
+            self.logger.warning("Epistemic grounding web search failed: %s", e, exc_info=True)
+
+        if not grounding_text:
+            # No search results — return original with hedge if it was self-conflating
+            if reason == "self_conflation":
+                return f"I'm not confident in my answer to that. Let me be honest: I don't have reliable information about this topic. Could you provide more context, or would you like me to try a different approach?"
+            return initial_response
+
+        # Step 2: Regenerate with grounded context
+        try:
+            # Invalidate stale KV cache
+            model_obj = self.model_pool.get(model_name)
+            if model_obj and hasattr(model_obj, 'endpoint'):
+                import httpx
+                httpx.Client(timeout=3).post(f"{model_obj.endpoint}/cache/invalidate")
+
+            grounded_messages = [
+                {"role": "system", "content":
+                    "You are GAIA. Answer the user's question using ONLY the verified "
+                    "reference data provided below. Be direct and cite your source. "
+                    "If the reference data doesn't answer the question, say so honestly."},
+                {"role": "user", "content":
+                    f"VERIFIED REFERENCE DATA:\n{grounding_text}\n\n"
+                    f"QUESTION: {user_input}"},
+            ]
+            res = self.model_pool.forward_to_model(
+                model_name,
+                messages=grounded_messages,
+                max_tokens=256,
+                temperature=0.3,
+            )
+            content = res["choices"][0]["message"]["content"]
+            content = strip_think_tags(content).strip()
+
+            # Strip trailing turn markers
+            import re as _re
+            content = _re.sub(r'\s*\b(?:user|assistant|system)\s*$', '', content,
+                             flags=_re.IGNORECASE).strip()
+
+            if content and len(content) > 10:
+                self.logger.info("Epistemic grounding: regenerated grounded response (%d chars)", len(content))
+                return content
+        except Exception as e:
+            self.logger.warning("Epistemic grounding regeneration failed: %s", e)
+
+        return initial_response
+
     # Escalation chain for slim path failures
     _SLIM_ESCALATION_CHAIN = ["core", "groq_fallback", "oracle"]
 
@@ -3906,18 +4081,16 @@ class AgentCore:
                 _gc = grounding_context
                 if not _gc and user_question and len(user_question.strip()) > 5:
                     try:
-                        from gaia_core.models.mcp_client import get_mcp_client
-                        _mcp = get_mcp_client()
-                        if _mcp:
-                            _sr = _mcp.call_jsonrpc("web_search", {
-                                "query": user_question[:100], "max_results": 2
-                            })
-                            if _sr and isinstance(_sr, list):
-                                _gc = "\n".join(
-                                    f"- {r.get('title','')}: {r.get('snippet','')} ({r.get('url','')})"
-                                    for r in _sr[:2] if r.get('snippet')
-                                )
-                                self.logger.info("Escalation: web search grounding (%d results)", len(_sr))
+                        from gaia_core.utils import mcp_client as _mcp_mod2
+                        _sr = _mcp_mod2.call_jsonrpc("web_search", {
+                            "query": user_question[:100], "max_results": 2
+                        })
+                        if _sr and isinstance(_sr, list):
+                            _gc = "\n".join(
+                                f"- {r.get('title','')}: {r.get('snippet','')} ({r.get('url','')})"
+                                for r in _sr[:2] if r.get('snippet')
+                            )
+                            self.logger.info("Escalation: web search grounding (%d results)", len(_sr))
                     except Exception:
                         self.logger.debug("Escalation web search failed (non-blocking)", exc_info=True)
 
@@ -3957,6 +4130,14 @@ class AgentCore:
                 is_degen = self._is_degenerate_output(content, messages[-1].get("content", ""))
                 self.logger.info("Slim escalation '%s' raw=%r degenerate=%s", candidate, content[:200], is_degen)
                 if not is_degen:
+                    # Confidence-gated grounding on escalation result
+                    _conf = self._assess_confidence(content, user_question)
+                    if _conf["needs_grounding"]:
+                        self.logger.info("Escalation confidence gate: %s — grounding",
+                                        _conf["reason"])
+                        content = self._ground_and_regenerate(
+                            candidate, user_question, content, _conf["reason"]
+                        )
                     self.logger.info("Slim escalation succeeded with '%s'", candidate)
                     self._last_responding_model = candidate
                     return content
@@ -4964,6 +5145,20 @@ RESULT: COMPLEX (reason: <brief reason>)
                     escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
                     if escalated:
                         return escalated
+            # ── Confidence-Gated Epistemic Grounding ─────────────────
+            # Before returning, check if the response shows low confidence
+            # or self-conflation. If so, auto-search and regenerate grounded.
+            confidence = self._assess_confidence(content, user_input)
+            if confidence["needs_grounding"]:
+                self.logger.info("Confidence gate: %s (%.1f) — triggering epistemic grounding",
+                                confidence["reason"], confidence["confidence"])
+                grounded = self._ground_and_regenerate(
+                    selected_model_name, user_input, content, confidence["reason"]
+                )
+                if grounded != content:
+                    self._last_responding_model = selected_model_name
+                    content = grounded
+
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
             # send a short polish request and return the Thinker output as final.
             try:
