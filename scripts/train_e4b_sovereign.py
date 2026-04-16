@@ -27,9 +27,9 @@ _BASE = "/models" if _IN_CONTAINER else "/gaia/gaia-instance/gaia-models"
 _PROJ = "/gaia/GAIA_Project" if _IN_CONTAINER else "/gaia/GAIA_Project"
 
 BASE_MODEL = f"{_BASE}/google/gemma-4-E4B"
-CURRICULUM = f"{_PROJ}/knowledge/curricula/sovereign-duality-e4b/train_v3.jsonl"
-OUTPUT_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_sovereign_v3"
-MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-v3"
+CURRICULUM = f"{_PROJ}/knowledge/curricula/sovereign-duality-e4b/train_v4.jsonl"
+OUTPUT_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_sovereign_v4"
+MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-v4"
 
 # Training config
 LORA_R = 8
