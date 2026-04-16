@@ -598,6 +598,7 @@ class DiscordInterface:
             
             # Accumulated response for the main model
             full_response = ""
+            _sent_responses = set()  # Track sent messages to avoid double-sending
             completed_packet = None
 
             # Show typing indicator while GAIA processes the request
@@ -636,6 +637,7 @@ class DiscordInterface:
                             elif event_type == "flush":
                                 # Flush current buffer immediately
                                 if full_response.strip():
+                                    _sent_responses.add(full_response.strip())
                                     await self._send_response(message_obj, full_response.strip(), is_dm)
                                     full_response = ""
                             
@@ -659,8 +661,9 @@ class DiscordInterface:
                 logger.warning("Discord: Core stream finished without a final packet — sending accumulated response")
                 # Don't crash — send whatever we accumulated (may include error text)
 
-            # Finalize the accumulated response
-            if full_response.strip():
+            # Finalize any remaining accumulated response not yet flushed.
+            # Skip if it duplicates something already sent via a flush event.
+            if full_response.strip() and full_response.strip() not in _sent_responses:
                 await self._send_response(message_obj, full_response.strip(), is_dm)
 
             # Record GAIA reply for typing-wake 48h gate
