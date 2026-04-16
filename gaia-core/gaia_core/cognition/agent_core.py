@@ -3606,6 +3606,27 @@ class AgentCore:
         if not text:
             return text
 
+        # --- Pass -1: Strip turn markers anywhere (Gemma 4 artifact) ---
+        # The model hallucinates "assistant" and "user" as turn boundaries
+        # mid-response. Strip them as standalone words.
+        import re as _re_sup
+        # Strip trailing
+        text = _re_sup.sub(r'\s*\bassistant\b\s*$', '', text, flags=_re_sup.IGNORECASE).strip()
+        text = _re_sup.sub(r'\s*\buser\b\s*$', '', text, flags=_re_sup.IGNORECASE).strip()
+        # Strip mid-text "assistant" that's clearly a turn marker (preceded by punctuation)
+        text = _re_sup.sub(r'([.!?])\s*\bassistant\b', r'\1', text, flags=_re_sup.IGNORECASE).strip()
+
+        # --- Pass -0.5: Exact substring duplicate ---
+        # "GAIA created me.GAIA created me." → "GAIA created me."
+        # Find the longest prefix that, when repeated, equals the full text.
+        _clean = text.strip()
+        for split_len in range(len(_clean) // 2, max(4, len(_clean) // 4), -1):
+            candidate = _clean[:split_len].rstrip()
+            rest = _clean[split_len:].lstrip()
+            if rest.startswith(candidate[:min(len(candidate), len(rest))]):
+                text = candidate
+                break
+
         # --- Pass 0: Whole-block dedup ---
         # If the second half of the text is a near-verbatim copy of the first
         # half, keep only the first half.  This catches cases where the model
