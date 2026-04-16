@@ -30,7 +30,7 @@
       "path": "/models/prime",
       "trust_remote_code": true,
       "template": "raw",
-      "type": "vllm_remote",
+      "type": "managed",
       "endpoint": "http://gaia-prime:7777",
       "lora_config": {
         "enabled": true,
@@ -42,7 +42,7 @@
     "core": {
       "enabled": true,
       "path": "Gemma4-E4B-GAIA-Core-v1",
-      "type": "vllm_remote",
+      "type": "managed",
       "endpoint": "http://localhost:8092",
       "max_model_len": 4096,
       "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma 4 E4B identity-baked"
@@ -50,7 +50,7 @@
     "observer": {
       "enabled": true,
       "use_prime": true,
-      "type": "vllm"
+      "type": "managed"
     },
     "oracle_gemini": {
       "enabled": false,
@@ -72,8 +72,8 @@
     },
     "nano": {
       "enabled": true,
-      "path": "Qwen3.5-0.8B-GAIA-Nano-v1",
-      "type": "vllm_remote",
+      "path": "Gemma4-E2B-GAIA-Nano-v1",
+      "type": "managed",
       "endpoint": "http://gaia-nano:8080",
       "max_model_len": 2048,
       "description": "Nano \u2014 sub-second triage via llama-server, Qwen3.5-0.8B"
@@ -227,7 +227,7 @@
   },
   "GROUNDING": {
     "enabled": true,
-    "extraction_tier": "nano",
+    "extraction_tier": "core",
     "max_entities": 5,
     "hierarchy": ["kg", "vector", "web"],
     "kg_top_k": 3,

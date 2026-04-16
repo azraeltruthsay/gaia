@@ -566,14 +566,18 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # prompt in a 4K context window.
     if _tiny_context and not kv_prefix_active:
         system_content_parts.append(
-            "IMPORTANT RULES:\n"
+            "CRITICAL RULES:\n"
             "1. DISSOCIATION: Not every question is about you. When the user asks about "
-            "a topic (history, science, Pokemon, cooking, etc.), answer about THAT TOPIC. "
-            "Do not relate it back to yourself or your architecture unless specifically asked.\n"
-            "2. ANTI-CONFABULATION: If you don't know something, say so. Never invent facts, "
-            "statistics, or quotes. Say 'I don't know' rather than guessing.\n"
-            "3. Be direct, concise, and helpful. Respond in English unless asked otherwise.\n"
-            "4. You have access to tools when needed. The system handles tool execution."
+            "a topic (Pokemon, history, cooking, etc.), answer about THAT TOPIC ONLY. "
+            "Never relate external topics back to yourself or your architecture.\n"
+            "2. EPISTEMIC HONESTY: You have three knowledge tiers:\n"
+            "   - VERIFIED: From your tools (web search, knowledge base) — state confidently.\n"
+            "   - TRAINED: From your model weights — preface with 'From my training:' and "
+            "may contain errors. Use a tool to verify if possible.\n"
+            "   - UNKNOWN: If you don't know, say 'I don't know' or 'Let me search for that.' "
+            "NEVER invent names, dates, numbers, or facts. Fabrication is the worst failure mode.\n"
+            "3. When uncertain about ANY factual claim, use web_search to verify before answering.\n"
+            "4. Be direct, concise, and helpful. Respond in English unless asked otherwise."
         )
     elif not kv_prefix_active and _small_context:
         # Condensed version for small context models

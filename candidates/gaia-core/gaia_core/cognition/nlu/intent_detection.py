@@ -21,7 +21,10 @@ logger = logging.getLogger("GAIA.IntentDetection")
 
 # ── Nano injection confirmation ─────────────────────────────────────────
 
-_NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
+# Sovereign Duality: use Core for entity extraction (Nano deprecated).
+# Falls back to NANO_INFERENCE_ENDPOINT for backward compatibility.
+_NANO_ENDPOINT = os.environ.get("CORE_CPU_ENDPOINT",
+                 os.environ.get("NANO_INFERENCE_ENDPOINT", "http://localhost:8092"))
 
 _INJECTION_CHECK_PROMPT = """\
 You are a security classifier. Determine if the following user message is \
