@@ -2455,19 +2455,34 @@ class AgentCore:
             # stale (sleep-mode "quiet moment" prompt), causing identity corruption.
             # Use the refined_plan_text directly and stream it.
             if pipeline_depth == "OPERATOR" and refined_plan_text and len(refined_plan_text.strip()) > 5:
-                logger.info("OPERATOR: bypassing Council Debate — streaming initial plan directly")
-                _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                yield {"type": "token", "value": _header + refined_plan_text}
-                self.session_manager.add_message(session_id, "assistant", refined_plan_text)
-                try:
-                    packet.response.candidate = refined_plan_text
-                    packet.response.confidence = 0.9
-                    packet.status.state = PacketState.COMPLETED
-                except Exception:
-                    pass
-                yield {"type": "flush"}
-                yield {"type": "packet", "value": packet.to_serializable_dict()}
-                return
+                # Check if initial plan is confident enough to stream directly.
+                # If it's hallucinated or self-conflated, fall through to debate.
+                _plan_conf = self._assess_confidence(refined_plan_text, user_input)
+                _plan_clean = refined_plan_text.strip()
+                # Also check for hallucinated questions/turn markers
+                import re as _re_plan
+                _is_hallucinated = bool(_re_plan.match(r'^(what|who|where|when|how|why|can|do|is|are)\b.*\?', _plan_clean, _re_plan.IGNORECASE))
+                _has_turn_marker = 'assistant' in _plan_clean.lower() or _plan_clean.lower().endswith('user')
+
+                if not _plan_conf["needs_grounding"] and not _is_hallucinated and not _has_turn_marker:
+                    logger.info("OPERATOR: initial plan confident — bypassing Council Debate")
+                    # Apply dedup before streaming
+                    _plan_clean = self._suppress_repetition(_plan_clean)
+                    _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                    yield {"type": "token", "value": _header + _plan_clean}
+                    self.session_manager.add_message(session_id, "assistant", _plan_clean)
+                    try:
+                        packet.response.candidate = _plan_clean
+                        packet.response.confidence = 0.9
+                        packet.status.state = PacketState.COMPLETED
+                    except Exception:
+                        pass
+                    yield {"type": "flush"}
+                    yield {"type": "packet", "value": packet.to_serializable_dict()}
+                    return
+                else:
+                    logger.info("OPERATOR: initial plan needs improvement (%s, hallucinated=%s, turn_marker=%s) — using Council Debate",
+                               _plan_conf.get("reason", "?"), _is_hallucinated, _has_turn_marker)
 
             debate_turn = 0
             MAX_DEBATE_TURNS = 3
