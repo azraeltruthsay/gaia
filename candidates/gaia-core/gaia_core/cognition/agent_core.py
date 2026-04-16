@@ -2279,7 +2279,8 @@ class AgentCore:
             is_slim_prompt = getattr(self.config, '_slim_prompt', False)
             logger.warning("AgentCore: cognitive audit gate — enabled=%s, skip_for_slim=%s, is_slim=%s",
                          audit_cfg.get("enabled", False), audit_cfg.get("skip_for_slim_prompt", True), is_slim_prompt)
-            if audit_cfg.get("enabled", False) and not (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt):
+            _skip_audit = (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt) or pipeline_depth == "OPERATOR"
+            if audit_cfg.get("enabled", False) and not _skip_audit:
                 try:
                     logger.warning("AgentCore: running cognitive self-audit...")
                     run_cognitive_self_audit(
@@ -2333,14 +2334,13 @@ class AgentCore:
                     logger.info("[PIPELINE_DEPTH] REFLEX — skipping reflection")
                     refined_plan_text = initial_plan_text
                 elif pipeline_depth == "OPERATOR":
-                    # Cap OPERATOR to 1 reflection iteration — prevents over-thinking
-                    # trivial questions like "how much wood could a woodchuck chuck"
-                    orig_iters = getattr(self.config, 'max_reflection_iterations', 3)
-                    self.config.max_reflection_iterations = 1
-                    try:
-                        refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
-                    finally:
-                        self.config.max_reflection_iterations = orig_iters
+                    # Sovereign Duality: skip reflection for OPERATOR (E4B Core).
+                    # The small model's identity bake is so dominant that reflection
+                    # iterations amplify self-referential drift — each reflection step
+                    # generates more identity assertions instead of refining the answer.
+                    # Stream the initial plan directly; let the observer catch issues.
+                    logger.info("[PIPELINE_DEPTH] OPERATOR — skipping reflection (Gemma 4 identity drift prevention)")
+                    refined_plan_text = initial_plan_text
                 else:
                     refined_plan_text = reflect_and_refine(packet=packet, output=initial_plan_text, config=self.config, llm=reflection_model, ethical_sentinel=self.ethical_sentinel)
                 # reflect_and_refine now appends iteration logs directly; add a summary entry for the refined plan
@@ -3859,8 +3859,14 @@ class AgentCore:
     # Escalation chain for slim path failures
     _SLIM_ESCALATION_CHAIN = ["core", "groq_fallback", "oracle"]
 
-    def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int) -> str:
+    def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int,
+                                grounding_context: str = "") -> str:
         """Try higher-tier models when the slim path model produces garbage.
+
+        Args:
+            grounding_context: Optional web/KB grounding text to inject into
+                the escalation prompt. Gives the model verified facts to
+                reference instead of confabulating from weights.
 
         On success, sets ``self._last_responding_model`` so callers can
         attribute the response to the correct model in headers/tags.
@@ -3894,14 +3900,45 @@ class AgentCore:
                 # Build a clean prompt for the escalation target —
                 # don't send Nano's few-shot format to Core/Lite.
                 # Use a conversational identity (not the sleep/reflection prompt).
+                # Build escalation prompt with grounding context if available.
+                # If no grounding was provided, do a quick web search to get
+                # verified facts before answering — prevents confabulation.
+                _gc = grounding_context
+                if not _gc and user_question and len(user_question.strip()) > 5:
+                    try:
+                        from gaia_core.models.mcp_client import get_mcp_client
+                        _mcp = get_mcp_client()
+                        if _mcp:
+                            _sr = _mcp.call_jsonrpc("web_search", {
+                                "query": user_question[:100], "max_results": 2
+                            })
+                            if _sr and isinstance(_sr, list):
+                                _gc = "\n".join(
+                                    f"- {r.get('title','')}: {r.get('snippet','')} ({r.get('url','')})"
+                                    for r in _sr[:2] if r.get('snippet')
+                                )
+                                self.logger.info("Escalation: web search grounding (%d results)", len(_sr))
+                    except Exception:
+                        self.logger.debug("Escalation web search failed (non-blocking)", exc_info=True)
+
+                _system = (
+                    "You are GAIA, a sovereign AI assistant created by Azrael. "
+                    "You are helpful, direct, and concise. Answer the user's question naturally. "
+                    "IMPORTANT: Not every question is about you. If the user asks about a topic "
+                    "(Pokemon, history, science, etc.), answer about THAT TOPIC — do not relate "
+                    "it back to yourself. If you don't know, say so. Never invent facts. "
+                    "Do not use tool_call, JSON, or code blocks unless explicitly asked."
+                )
+                _user = user_question
+                if _gc:
+                    _user = (
+                        f"VERIFIED REFERENCE DATA (from web search — use this to answer):\n"
+                        f"{_gc}\n\n"
+                        f"USER QUESTION: {user_question}"
+                    )
                 escalation_messages = [
-                    {"role": "system", "content": "You are GAIA, a sovereign AI assistant created by Azrael. "
-                     "You are helpful, direct, and concise. Answer the user's question naturally. "
-                     "IMPORTANT: Not every question is about you. If the user asks about a topic "
-                     "(Pokemon, history, science, etc.), answer about THAT TOPIC — do not relate "
-                     "it back to yourself. If you don't know, say so. Never invent facts. "
-                     "Do not use tool_call, JSON, or code blocks unless explicitly asked."},
-                    {"role": "user", "content": user_question},
+                    {"role": "system", "content": _system},
+                    {"role": "user", "content": _user},
                 ]
                 res = self.model_pool.forward_to_model(
                     candidate,
@@ -4475,6 +4512,31 @@ RESULT: COMPLEX (reason: <brief reason>)
         """
         self.logger.info(f"--- RUNNING SLIM PROMPT for intent: {intent} ---")
         _meta = metadata or {}
+
+        # Extract web grounding from packet for escalation fallback.
+        # This ensures the escalation prompt includes verified reference
+        # data instead of relying on model weights (which confabulate).
+        _grounding_text = ""
+        if packet:
+            try:
+                for df in getattr(packet.content, 'data_fields', []) or []:
+                    if getattr(df, 'key', '') == 'web_grounding' and df.value:
+                        grounding = df.value if isinstance(df.value, dict) else {}
+                        parts = []
+                        for entity, data in grounding.items():
+                            results = data.get('results', []) if isinstance(data, dict) else []
+                            for r in results[:2]:
+                                title = r.get('title', '')
+                                snippet = r.get('snippet', '')
+                                url = r.get('url', '')
+                                if snippet:
+                                    parts.append(f"- {title}: {snippet} ({url})")
+                        if parts:
+                            _grounding_text = "\n".join(parts)
+                            self.logger.info("Slim prompt: extracted %d grounding snippets for escalation", len(parts))
+            except Exception:
+                self.logger.debug("Grounding extraction failed (non-blocking)", exc_info=True)
+
         # Direct MCP path for toolish intents
         if intent == "list_tools":
             try:
@@ -4883,13 +4945,13 @@ RESULT: COMPLEX (reason: <brief reason>)
             # Nano self-escalation: if response is literally "ESCALATE", defer to Core
             if content.upper().startswith("ESCALATE"):
                 self.logger.info("Nano self-escalated via ESCALATE signal — trying next tier")
-                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
                 if escalated:
                     return escalated
             # Detect degenerate output and escalate to a higher tier
             if self._is_degenerate_output(content, user_input):
                 self.logger.warning("Degenerate output from '%s' — escalating to next tier", selected_model_name)
-                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
                 if escalated:
                     return escalated
             # Uncertainty-based escalation — Nano hedges or describes process
@@ -4899,7 +4961,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy):
                     self.logger.info("Uncertainty escalation from '%s' (entropy=%.2f) — trying next tier",
                                      selected_model_name, resp_entropy)
-                    escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+                    escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
                     if escalated:
                         return escalated
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
@@ -4934,7 +4996,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             return content
         except Exception as exc:
             self.logger.exception("slim prompt call failed for '%s'", selected_model_name)
-            escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens)
+            escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
             if escalated:
                 return escalated
             return f"I encountered an error while answering: {exc}"

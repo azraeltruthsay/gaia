@@ -887,8 +887,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         except Exception:
             logger.debug("CIL grounding injection skipped", exc_info=True)
 
-    # 6.8. Web Search Fallback Grounding — skip when kv_prefix_active
-    if not kv_prefix_active:
+    # 6.8. Web Search Fallback Grounding — ALWAYS inject if available.
+    # This is verified external data — critical for preventing confabulation.
+    # Previously gated by kv_prefix_active, but grounding is too important to skip.
+    if True:
       try:
         for df in getattr(packet.content, 'data_fields', []) or []:
             if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
