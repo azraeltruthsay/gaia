@@ -4085,15 +4085,19 @@ class AgentCore:
                 import httpx
                 httpx.Client(timeout=3).post(f"{model_obj.endpoint}/cache/invalidate")
 
+            # Truncate grounding to avoid overwhelming the small context window
+            _trunc_ground = grounding_text[:800]
             grounded_messages = [
                 {"role": "system", "content":
-                    "You are GAIA. Answer the user's question using ONLY the verified "
-                    "reference data provided below. Be direct and cite your source. "
-                    "If the reference data doesn't answer the question, say so honestly."},
+                    "You are GAIA. The answer to the user's question is in the "
+                    "REFERENCE DATA below. Read it and answer directly. "
+                    "Do NOT say 'I don't have access' — the data is right here. "
+                    "Be concise. Cite the source URL."},
                 {"role": "user", "content":
-                    f"VERIFIED REFERENCE DATA:\n{grounding_text}\n\n"
-                    f"QUESTION: {user_input}"},
+                    f"REFERENCE DATA:\n{_trunc_ground}\n\n"
+                    f"Based on the reference data above, answer this: {user_input}"},
             ]
+            self.logger.info("Epistemic grounding: sending %d-char prompt for regeneration", len(_trunc_ground))
             res = self.model_pool.forward_to_model(
                 model_name,
                 messages=grounded_messages,
