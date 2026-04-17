@@ -225,12 +225,27 @@ async def process_user_input(user_input: str, request: Request):
                         yield json.dumps({"type": "token", "value": canned}) + "\n"
                         return
                     if core_state in ("asleep", "drowsy"):
+                        # Double-check: if the engine IS loaded, the sleep manager
+                        # is just stale. Force wake and proceed immediately.
+                        try:
+                            async with httpx.AsyncClient(timeout=3.0) as _eng_check:
+                                _eng = await _eng_check.get(f"{core_url}/model/status")
+                                if _eng.status_code == 200 and _eng.json().get("model_loaded"):
+                                    logger.info("Sleep state stale — engine loaded, forcing wake")
+                                    await _eng_check.post(f"{core_url}/sleep/wake")
+                                    core_state = "active"  # skip the wake-wait loop
+                        except Exception:
+                            pass
+                    if core_state in ("asleep", "drowsy"):
                         yield json.dumps({"type": "status", "value": "GAIA is waking up — your message is queued, please hold..."}) + "\n"
                         # Send wake signal. The web connection stays open so we
                         # don't need persistent queue storage — just signal + poll.
                         try:
                             async with httpx.AsyncClient(timeout=5.0) as wake_client:
                                 await wake_client.post(f"{core_url}/sleep/wake")
+                                # Also tell orchestrator to shift to AWAKE (loads GPU model)
+                                orch_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+                                await wake_client.post(f"{orch_url}/consciousness/awake")
                         except Exception:
                             logger.debug("Wake signal send failed (non-blocking)")
                         import time as _time
