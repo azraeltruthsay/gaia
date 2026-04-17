@@ -2115,6 +2115,35 @@ class AgentCore:
                 packet.tool_routing
                 and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
             )
+
+            # ── Knowledge Router: unified retrieval BEFORE any generation ──
+            # Runs for ALL paths (slim and full) so both have grounding data.
+            _grounding_ctx = None
+            try:
+                from gaia_core.cognition.knowledge_router import ground_query
+                _grounding_ctx = ground_query(
+                    query=user_input,
+                    intent=plan.intent if plan else "other",
+                )
+                if _grounding_ctx and _grounding_ctx.has_grounding:
+                    packet.content.data_fields.append(DataField(
+                        key="web_grounding",
+                        value={user_input[:50]: {
+                            "results": [{"title": r.source, "snippet": r.content, "url": r.url}
+                                       for r in _grounding_ctx.results[:3]],
+                            "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
+                            "query": user_input[:120],
+                        }},
+                        type="json",
+                        source="knowledge_router",
+                    ))
+                    logger.info("KnowledgeRouter: %d results (%s) in %.0fms",
+                               len(_grounding_ctx.results),
+                               ",".join(_grounding_ctx.sources_queried),
+                               _grounding_ctx.elapsed_ms)
+            except Exception:
+                logger.debug("Knowledge router failed (non-blocking)", exc_info=True)
+
             # ── Hermes-style clean ReAct path for OPERATOR depth ─────────
             # OPERATOR (E4B Core) uses the slim prompt path exclusively.
             # This implements a clean generate→check→respond loop without the
@@ -2210,38 +2239,8 @@ class AgentCore:
             except Exception:
                 logger.exception("AgentCore: failed to log packet identity/data_fields")
     
-            # ── Knowledge Router: unified retrieval with trust tiers ────
-            # Queries MemPalace → KG → Web in priority order BEFORE generating.
-            # Prevents confident confabulation by giving the model verified data.
-            _grounding_ctx = None
-            try:
-                from gaia_core.cognition.knowledge_router import ground_query, GroundingContext
-                _grounding_ctx = ground_query(
-                    query=user_input,
-                    intent=plan.intent,
-                )
-                if _grounding_ctx.has_grounding:
-                    # Inject grounding into packet for prompt builder
-                    _ground_formatted = _grounding_ctx.format_for_prompt(max_chars=600)
-                    # Use web_grounding key so prompt builder picks it up
-                    _best = _grounding_ctx.best_result
-                    packet.content.data_fields.append(DataField(
-                        key="web_grounding",
-                        value={user_input[:50]: {
-                            "results": [{"title": r.source, "snippet": r.content, "url": r.url}
-                                       for r in _grounding_ctx.results[:3]],
-                            "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
-                            "query": user_input[:120],
-                        }},
-                        type="json",
-                        source="knowledge_router",
-                    ))
-                    logger.info("KnowledgeRouter: %d results (%s) in %.0fms for '%s'",
-                               len(_grounding_ctx.results),
-                               ",".join(_grounding_ctx.sources_queried),
-                               _grounding_ctx.elapsed_ms, user_input[:50])
-            except Exception:
-                logger.debug("Knowledge router failed (non-blocking)", exc_info=True)
+            # Knowledge Router already called above (before slim/full path decision).
+            # _grounding_ctx is available for both paths.
 
             # KV prefix optimization: the engine's prefix cache contains the
             # static foundation (identity, rules, tools, behavioral examples).
