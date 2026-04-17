@@ -146,7 +146,9 @@ async def lifespan(app: FastAPI):
     try:
         global _consciousness_matrix
         from .consciousness_matrix import ConsciousnessMatrix
-        _consciousness_matrix = ConsciousnessMatrix(lifecycle_machine=_lifecycle_machine)
+        _consciousness_matrix = ConsciousnessMatrix(
+            lifecycle_machine=_lifecycle_machine,
+        )
 
         # Wire the clutch: lifecycle machine delegates execution to consciousness matrix
         if _lifecycle_machine:

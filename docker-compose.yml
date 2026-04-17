@@ -171,69 +171,29 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-nano: The Reflex — GAIA Engine managed mode (safetensors on GPU, GGUF CPU fallback)
+  # gaia-nano: Sovereign Duality proxy — forwards :8080 → gaia-core:8092
+  # Preserves the "nano" DNS name on the Docker network so all existing code
+  # that references gaia-nano:8080 transparently hits Core's inference engine.
+  # To restore a real Nano tier: replace this with the original engine container.
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-nano:
-    build:
-      context: .
-      dockerfile: gaia-llama/Dockerfile
-    image: localhost:5000/gaia-nano:dual
+    image: alpine/socat:latest
     container_name: gaia-nano
     hostname: gaia-nano
     restart: unless-stopped
-
-    volumes:
-      - ../gaia-instance/gaia-models:/models:ro
-      - /mnt/gaia_warm_pool:/warm_pool:ro
-      - ./gaia-common:/gaia-common:ro
-      # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
-      - ./gaia-llama/entrypoint.sh:/entrypoint.sh:ro
-      - ../gaia-instance/logs/kvcache/nano:/kvcache:rw
-      - ../gaia-instance/logs:/logs:rw
-      - gaia-shared:/shared:rw
-
-    environment:
-      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
-      - VLLM_GPU_MEMORY_UTILIZATION=0.25
-      - PYTHONDONTWRITEBYTECODE=1
-      - GAIA_ENGINE_TIER=nano
-      - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
-      # Safetensors mode (GPU-native, enables polygraph + SAE)
-      # Loads from tmpfs warm pool for near-instant startup.
-      # Nano Reflex uses raw abliterated — few-shot prompt teaches everything
-      # per-request. Training overrides few-shot pattern-following with hedging.
-      # Identity lives in Core (Operator), not Nano (Reflex).
-      - NANO_SAFETENSORS_PATH=${NANO_SAFETENSORS_PATH:-/models/nano}
-      - NANO_DEVICE=${NANO_DEVICE:-cuda}
-      # NF4 quantization — E2B bf16 (9.7GB) is too large to coexist with Core on 16GB
-      # NF4 reduces to ~2.4GB, leaving room for Core NF4 (~3.8GB) + KV cache
-      - GAIA_ENGINE_QUANTIZE=nf4
-      # GGUF fallback (used when NANO_SAFETENSORS_PATH is empty or warm pool not seeded)
-      - NANO_GGUF_MODEL_PATH=/models/Gemma4-E2B-GAIA-Nano-v1-Q8_0.gguf
-      - NANO_GPU_LAYERS=${NANO_GPU_LAYERS:-999}
-      - NANO_PORT=8080
-      - NANO_CTX_SIZE=2048
-      - NANO_THREADS=4
-      - SAE_ATLAS_PATH=/shared/atlas/nano
-      - SHARED_DIR=/shared
+    command: TCP-LISTEN:8080,fork,reuseaddr TCP:gaia-core:8092
+    depends_on:
+      - gaia-core
 
     ports:
       - "127.0.0.1:8090:8080"
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
+      test: ["CMD", "sh", "-c", "kill -0 1"]
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 5s
 
     networks:
       - gaia-net
@@ -241,12 +201,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          memory: 32M
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-core: The Brain - Cognitive loop + embedded Core CPU inference
