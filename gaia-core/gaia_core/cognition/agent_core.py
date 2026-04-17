@@ -2158,53 +2158,38 @@ class AgentCore:
             except Exception:
                 logger.exception("AgentCore: failed to log packet identity/data_fields")
     
-            # ── Pre-inference grounding: search BEFORE generating ────────
-            # For factual questions, search the web FIRST and inject results
-            # into the packet so the model has verified data when generating.
-            # This prevents confident confabulation ("Zeus was Agamemnon's father").
-            _identity_intents = {"identity", "identity_query", "self_reference"}
-            _skip_grounding_intents = {"list_tools", "list_tree", "find_file", "read_file",
-                                       "list_files", "write_file", "shell_command"}
-            if (plan.intent not in _identity_intents
-                and plan.intent not in _skip_grounding_intents
-                and user_input and len(user_input.strip()) > 10):
-                try:
-                    from gaia_core.utils import mcp_client as _pre_mcp
-                    _pre_raw = _pre_mcp.call_jsonrpc("web_search", {
-                        "query": user_input[:120], "max_results": 2
-                    })
-                    _pre_results = _pre_raw
-                    if isinstance(_pre_raw, dict):
-                        _inner = _pre_raw.get("response", _pre_raw)
-                        if isinstance(_inner, dict):
-                            _inner = _inner.get("result", _inner)
-                        if isinstance(_inner, dict):
-                            _pre_results = _inner.get("results", [])
-                    if _pre_results and isinstance(_pre_results, list):
-                        _snippets = []
-                        for _r in _pre_results[:2]:
-                            _sn = _r.get("snippet", "")
-                            _ti = _r.get("title", "")
-                            _ur = _r.get("url", "")
-                            if _sn:
-                                _snippets.append(f"- {_ti}: {_sn[:200]} (Source: {_ur})")
-                        if _snippets:
-                            _ground_text = "\n".join(_snippets)
-                            # Inject into packet data_fields
-                            packet.content.data_fields.append(DataField(
-                                key="web_grounding",
-                                value={user_input[:50]: {
-                                    "results": _pre_results[:2],
-                                    "source": "pre_inference_search",
-                                    "query": user_input[:120],
-                                }},
-                                type="json",
-                                source="pre_inference_grounding",
-                            ))
-                            logger.info("Pre-inference grounding: %d results for '%s'",
-                                       len(_pre_results), user_input[:50])
-                except Exception:
-                    logger.debug("Pre-inference grounding failed (non-blocking)", exc_info=True)
+            # ── Knowledge Router: unified retrieval with trust tiers ────
+            # Queries MemPalace → KG → Web in priority order BEFORE generating.
+            # Prevents confident confabulation by giving the model verified data.
+            _grounding_ctx = None
+            try:
+                from gaia_core.cognition.knowledge_router import ground_query, GroundingContext
+                _grounding_ctx = ground_query(
+                    query=user_input,
+                    intent=plan.intent,
+                )
+                if _grounding_ctx.has_grounding:
+                    # Inject grounding into packet for prompt builder
+                    _ground_formatted = _grounding_ctx.format_for_prompt(max_chars=600)
+                    # Use web_grounding key so prompt builder picks it up
+                    _best = _grounding_ctx.best_result
+                    packet.content.data_fields.append(DataField(
+                        key="web_grounding",
+                        value={user_input[:50]: {
+                            "results": [{"title": r.source, "snippet": r.content, "url": r.url}
+                                       for r in _grounding_ctx.results[:3]],
+                            "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
+                            "query": user_input[:120],
+                        }},
+                        type="json",
+                        source="knowledge_router",
+                    ))
+                    logger.info("KnowledgeRouter: %d results (%s) in %.0fms for '%s'",
+                               len(_grounding_ctx.results),
+                               ",".join(_grounding_ctx.sources_queried),
+                               _grounding_ctx.elapsed_ms, user_input[:50])
+            except Exception:
+                logger.debug("Knowledge router failed (non-blocking)", exc_info=True)
 
             # KV prefix optimization: the engine's prefix cache contains the
             # static foundation (identity, rules, tools, behavioral examples).
@@ -3514,6 +3499,25 @@ class AgentCore:
             ts_write(turn_end_event, session_id, source=source, destination_context=_metadata)
             self.session_manager.record_last_activity()
     
+            # --- Post-Response Learning: save successful grounded knowledge ---
+            # Memento-style skill creation: if we used grounding data and the
+            # response was good, save the Q&A to MemPalace for faster future retrieval.
+            if _grounding_ctx and _grounding_ctx.has_grounding and user_facing_response:
+                _resp_clean = strip_think_tags(user_facing_response).strip()
+                if len(_resp_clean) > 20 and "having trouble" not in _resp_clean.lower():
+                    try:
+                        from gaia_core.cognition.knowledge_router import save_learned_knowledge
+                        _best_source = _grounding_ctx.best_result.source if _grounding_ctx.best_result else "unknown"
+                        save_learned_knowledge(
+                            query=user_input,
+                            answer=_resp_clean[:500],
+                            source=_best_source,
+                            success=True,
+                            domain=plan.intent if plan else "general",
+                        )
+                    except Exception:
+                        logger.debug("Post-response learning failed (non-blocking)", exc_info=True)
+
             # --- Loop Detection: Record output and check for loops ---
             if loop_manager and loop_manager.enabled:
                 try:
