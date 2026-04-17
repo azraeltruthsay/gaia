@@ -2158,6 +2158,54 @@ class AgentCore:
             except Exception:
                 logger.exception("AgentCore: failed to log packet identity/data_fields")
     
+            # ── Pre-inference grounding: search BEFORE generating ────────
+            # For factual questions, search the web FIRST and inject results
+            # into the packet so the model has verified data when generating.
+            # This prevents confident confabulation ("Zeus was Agamemnon's father").
+            _identity_intents = {"identity", "identity_query", "self_reference"}
+            _skip_grounding_intents = {"list_tools", "list_tree", "find_file", "read_file",
+                                       "list_files", "write_file", "shell_command"}
+            if (plan.intent not in _identity_intents
+                and plan.intent not in _skip_grounding_intents
+                and user_input and len(user_input.strip()) > 10):
+                try:
+                    from gaia_core.utils import mcp_client as _pre_mcp
+                    _pre_raw = _pre_mcp.call_jsonrpc("web_search", {
+                        "query": user_input[:120], "max_results": 2
+                    })
+                    _pre_results = _pre_raw
+                    if isinstance(_pre_raw, dict):
+                        _inner = _pre_raw.get("response", _pre_raw)
+                        if isinstance(_inner, dict):
+                            _inner = _inner.get("result", _inner)
+                        if isinstance(_inner, dict):
+                            _pre_results = _inner.get("results", [])
+                    if _pre_results and isinstance(_pre_results, list):
+                        _snippets = []
+                        for _r in _pre_results[:2]:
+                            _sn = _r.get("snippet", "")
+                            _ti = _r.get("title", "")
+                            _ur = _r.get("url", "")
+                            if _sn:
+                                _snippets.append(f"- {_ti}: {_sn[:200]} (Source: {_ur})")
+                        if _snippets:
+                            _ground_text = "\n".join(_snippets)
+                            # Inject into packet data_fields
+                            packet.content.data_fields.append(DataField(
+                                key="web_grounding",
+                                value={user_input[:50]: {
+                                    "results": _pre_results[:2],
+                                    "source": "pre_inference_search",
+                                    "query": user_input[:120],
+                                }},
+                                type="json",
+                                source="pre_inference_grounding",
+                            ))
+                            logger.info("Pre-inference grounding: %d results for '%s'",
+                                       len(_pre_results), user_input[:50])
+                except Exception:
+                    logger.debug("Pre-inference grounding failed (non-blocking)", exc_info=True)
+
             # KV prefix optimization: the engine's prefix cache contains the
             # static foundation (identity, rules, tools, behavioral examples).
             # When active, prompt_builder skips those sections → ~50% fewer tokens.
