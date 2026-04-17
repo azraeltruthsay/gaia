@@ -571,8 +571,18 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # bake handles behavioral patterns, and we can't afford 2K of system
     # prompt in a 4K context window.
     if _tiny_context and not kv_prefix_active:
+        import time as _tc_time
+        from datetime import datetime, timezone, timedelta
+        try:
+            _tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
+            _tz = timezone(timedelta(hours=_tz_off))
+            _now = datetime.now(_tz)
+            _clock = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
+        except Exception:
+            _clock = _tc_time.strftime("%Y-%m-%d %H:%M:%S UTC", _tc_time.gmtime())
         system_content_parts.append(
-            "You are GAIA, created by Azrael. You are a sovereign AI assistant.\n\n"
+            f"You are GAIA, created by Azrael. You are a sovereign AI assistant.\n"
+            f"Current time: {_clock}\n\n"
             "CRITICAL RULES:\n"
             "1. DISSOCIATION: Not every question is about you. When the user asks about "
             "a topic (Pokemon, history, cooking, etc.), answer about THAT TOPIC ONLY. "

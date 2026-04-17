@@ -236,6 +236,55 @@ def _query_web(query: str) -> List[GroundingResult]:
     return results
 
 
+def _query_system_context(query: str) -> List[GroundingResult]:
+    """Provide live system data for time/status/uptime questions.
+
+    This is NOT the model answering — it's the SYSTEM providing verified
+    sensor data. The model just needs to relay it.
+    """
+    results = []
+    q = query.lower()
+    time_signals = ["time", "clock", "date", "day", "what time", "current time"]
+    uptime_signals = ["uptime", "how long", "running"]
+
+    if any(s in q for s in time_signals):
+        import time as _t
+        from datetime import datetime, timezone, timedelta
+        try:
+            _tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
+            _tz = timezone(timedelta(hours=_tz_off))
+            _now = datetime.now(_tz)
+            _display = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
+            _utc = _now.astimezone(timezone.utc).strftime("%H:%M UTC")
+            results.append(GroundingResult(
+                source="system_clock",
+                trust_tier="verified_local",
+                content=f"The current time is {_display} ({_utc}).",
+                utility_score=1.0,
+                query=query,
+            ))
+        except Exception:
+            pass
+
+    if any(s in q for s in uptime_signals):
+        try:
+            with open("/proc/uptime") as f:
+                uptime_secs = float(f.read().split()[0])
+            hours = int(uptime_secs // 3600)
+            mins = int((uptime_secs % 3600) // 60)
+            results.append(GroundingResult(
+                source="system_uptime",
+                trust_tier="verified_local",
+                content=f"System uptime: {hours} hours, {mins} minutes ({int(uptime_secs)} seconds total).",
+                utility_score=1.0,
+                query=query,
+            ))
+        except Exception:
+            pass
+
+    return results
+
+
 # ── Main Router ───────────────────────────────────────────────────────
 
 # Intents that should skip grounding (identity, tool operations, etc.)
@@ -274,6 +323,17 @@ def ground_query(
     _load_utility_scores()
     t0 = time.time()
     ctx = GroundingContext()
+
+    # 0. System context — live sensor data (time, uptime, GPU)
+    # Highest trust — these are direct system readings, not model knowledge.
+    try:
+        sys_results = _query_system_context(query)
+        ctx.results.extend(sys_results)
+        if sys_results:
+            ctx.sources_queried.append("system")
+            logger.info("KnowledgeRouter: System context returned %d results", len(sys_results))
+    except Exception:
+        pass
 
     # 1. MemPalace — local structured knowledge (highest trust)
     try:
