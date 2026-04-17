@@ -2170,6 +2170,26 @@ class AgentCore:
                             save_learned_knowledge(user_input, text[:500], _best_src, True, plan.intent or "general")
                         except Exception:
                             pass
+
+                    # Persistent KV prefix save (one-time, background)
+                    _actual_model = getattr(self, '_last_responding_model', None) or selected_model_name
+                    if not getattr(self, '_kv_prefix_saved', False) and _actual_model in ("core", "nano"):
+                        self._kv_prefix_saved = True
+                        try:
+                            import threading
+                            _core = self.model_pool.get("core")
+                            if _core and hasattr(_core, 'endpoint'):
+                                _ep = _core.endpoint
+                                def _save():
+                                    try:
+                                        import httpx
+                                        httpx.Client(timeout=30).post(f"{_ep}/cache/save",
+                                            json={"path": "/shared/kvcache/core/identity_prefix.pt"})
+                                    except Exception:
+                                        pass
+                                threading.Thread(target=_save, daemon=True).start()
+                        except Exception:
+                            pass
                     return
 
                 # Slim path returned None — for OPERATOR, try one more time
@@ -3528,6 +3548,30 @@ class AgentCore:
                 concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
                 yield {"type": "token", "value": concluding_response}
                 self.session_manager.add_message(session_id, "assistant", concluding_response)
+
+            # ── Persistent KV prefix save (one-time after first successful response) ──
+            # Saves the engine's KV prefix to disk so next boot can skip reprocessing
+            # the system prompt (~1s saved per restart).
+            if not getattr(self, '_kv_prefix_saved', False) and selected_model_name == "core":
+                self._kv_prefix_saved = True
+                try:
+                    import threading
+                    _core_model = self.model_pool.get("core")
+                    if _core_model and hasattr(_core_model, 'endpoint'):
+                        _ep = _core_model.endpoint
+                        def _save_kv():
+                            try:
+                                import httpx
+                                r = httpx.Client(timeout=30).post(
+                                    f"{_ep}/cache/save",
+                                    json={"path": "/shared/kvcache/core/identity_prefix.pt"},
+                                )
+                                logger.info("Persistent KV prefix saved: %s", r.json())
+                            except Exception as _e:
+                                logger.debug("Persistent KV prefix save failed: %s", _e)
+                        threading.Thread(target=_save_kv, daemon=True).start()
+                except Exception:
+                    pass
 
             # Notify KV cache manager that inference occurred for this role
             try:
