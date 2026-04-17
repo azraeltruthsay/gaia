@@ -894,38 +894,31 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         except Exception:
             logger.debug("CIL grounding injection skipped", exc_info=True)
 
-    # 6.8. Web Search Fallback Grounding — ALWAYS inject if available.
-    # This is verified external data — critical for preventing confabulation.
-    # Previously gated by kv_prefix_active, but grounding is too important to skip.
-    if True:
-      try:
+    # 6.8. Web Search / Knowledge Router Grounding
+    # HERMES PATTERN: inject grounding as a user message, NOT system prompt.
+    # This preserves the system prompt cache (immutability principle).
+    # The grounding text is stored in _grounding_user_message and injected
+    # AFTER the system message but BEFORE the actual user message.
+    _grounding_user_message = None
+    try:
         for df in getattr(packet.content, 'data_fields', []) or []:
             if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
                 web_g = df.value
                 if isinstance(web_g, dict) and web_g:
-                    parts = ["--- Web Search Context (auto-retrieved for unknown entities) ---"]
+                    parts = ["Here is reference data from verified sources:"]
                     for entity, info in web_g.items():
-                        parts.append(f"Search: \"{entity}\"")
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
                             snippet = r.get("snippet", "")
                             url = r.get("url", "")
-                            if title:
-                                parts.append(f"  - {title}")
-                                if snippet:
-                                    parts.append(f"    {snippet[:150]}")
-                                if url:
-                                    parts.append(f"    ({url})")
-                        parts.append("")
+                            if snippet:
+                                parts.append(f"- {title}: {snippet[:200]} ({url})")
                     if len(parts) > 1:
-                        parts.append("NOTE: These are search result previews, not full content.")
-                        parts.append("If the user needs details, offer to fetch the full page.")
-                        parts.append("--- End of Web Search Context ---")
-                        system_content_parts.append("\n".join(parts))
-                        logger.debug("Web grounding injected: %d entities", len(web_g))
+                        _grounding_user_message = "\n".join(parts)
+                        logger.debug("Grounding prepared as user message: %d chars", len(_grounding_user_message))
                 break
-      except Exception:
-        logger.debug("Web grounding injection skipped", exc_info=True)
+    except Exception:
+        logger.debug("Grounding injection skipped", exc_info=True)
 
     # 7. Retrieved Documents (RAG) or Epistemic Honesty Directive
     if retrieved_docs_content:
@@ -1367,6 +1360,29 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         logger.info(f"[v0.3] Final prompt assembled (session unknown). Messages: {len(final_prompt)}")
 
 
+
+    # HERMES PATTERN: inject grounding as a user message BEFORE the actual
+    # user message. This preserves the system prompt cache while giving
+    # the model verified reference data to work with.
+    if _grounding_user_message and len(final_prompt) >= 2:
+        # Insert before the last user message
+        _last_user_idx = None
+        for _i in range(len(final_prompt) - 1, -1, -1):
+            if final_prompt[_i].get("role") == "user":
+                _last_user_idx = _i
+                break
+        if _last_user_idx is not None:
+            final_prompt.insert(_last_user_idx, {
+                "role": "user",
+                "content": _grounding_user_message,
+            })
+            # Add a brief assistant acknowledgment to maintain turn structure
+            final_prompt.insert(_last_user_idx + 1, {
+                "role": "assistant",
+                "content": "I'll use this reference data to inform my answer.",
+            })
+            logger.info("Grounding injected as user message (%d chars) before user query",
+                       len(_grounding_user_message))
 
     return final_prompt
 

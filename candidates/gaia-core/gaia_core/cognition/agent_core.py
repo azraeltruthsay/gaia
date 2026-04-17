@@ -2115,16 +2115,68 @@ class AgentCore:
                 packet.tool_routing
                 and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
             )
-            if not tool_already_executed and self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name):
+            # ── Hermes-style clean ReAct path for OPERATOR depth ─────────
+            # OPERATOR (E4B Core) uses the slim prompt path exclusively.
+            # This implements a clean generate→check→respond loop without the
+            # 20-stage pipeline (planning→audit→reflection→debate→observer).
+            # The Knowledge Router provides grounding BEFORE generation.
+            # Falls through to full pipeline ONLY for THINKER depth.
+            _use_slim = (
+                not tool_already_executed
+                and (pipeline_depth == "OPERATOR" or self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name))
+            )
+            if _use_slim:
                 text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
                 if text is not None:
-                    # _run_slim_prompt handles uncertainty escalation internally.
-                    # Use _last_responding_model for header — it may have escalated
-                    # from Nano to Core, and we want the header to show who answered.
                     _responding = getattr(self, '_last_responding_model', None) or selected_model_name
                     _header = self._build_response_header(_responding, packet, None, None, None)
                     yield {"type": "token", "value": _header + text}
                     self.session_manager.add_message(session_id, "assistant", text)
+
+                    # Post-response learning
+                    if _grounding_ctx and _grounding_ctx.has_grounding:
+                        try:
+                            from gaia_core.cognition.knowledge_router import save_learned_knowledge
+                            _best_src = _grounding_ctx.best_result.source if _grounding_ctx.best_result else "unknown"
+                            save_learned_knowledge(user_input, text[:500], _best_src, True, plan.intent or "general")
+                        except Exception:
+                            pass
+                    return
+
+                # Slim path returned None — for OPERATOR, try one more time
+                # with direct generation (no pipeline). For THINKER, fall through.
+                if pipeline_depth == "OPERATOR":
+                    logger.info("OPERATOR slim path returned None — direct generation fallback")
+                    # Use the Knowledge Router grounding directly
+                    _ground_text = _grounding_ctx.format_for_prompt(max_chars=400) if _grounding_ctx and _grounding_ctx.has_grounding else ""
+                    _fallback_system = "You are GAIA, created by Azrael. Answer directly and concisely."
+                    _fallback_user = user_input
+                    if _ground_text:
+                        _fallback_user = f"REFERENCE DATA:\n{_ground_text}\n\nQUESTION: {user_input}"
+                    try:
+                        _fb_res = self.model_pool.forward_to_model(
+                            selected_model_name,
+                            messages=[
+                                {"role": "system", "content": _fallback_system},
+                                {"role": "user", "content": _fallback_user},
+                            ],
+                            max_tokens=256,
+                            temperature=self.config.temperature,
+                        )
+                        _fb_text = _fb_res["choices"][0]["message"]["content"]
+                        _fb_text = strip_think_tags(_fb_text).strip()
+                        _fb_text = self._suppress_repetition(_fb_text)
+                        import re as _fb_re
+                        _fb_text = _fb_re.sub(r'\s*\b(?:user|assistant)\s*$', '', _fb_text, flags=_fb_re.IGNORECASE).strip()
+                        if _fb_text and len(_fb_text) > 5:
+                            _header = self._build_response_header(selected_model_name, packet, None, None, None)
+                            yield {"type": "token", "value": _header + _fb_text}
+                            self.session_manager.add_message(session_id, "assistant", _fb_text)
+                            return
+                    except Exception:
+                        logger.debug("OPERATOR direct fallback failed", exc_info=True)
+                    # If even direct generation failed, yield error and return
+                    yield {"type": "token", "value": "I'm having difficulty processing that right now. Could you rephrase?"}
                     return
                 # _run_slim_prompt returned None — slim path declined (e.g. low
                 # confidence recitation).  Attempt tool routing (web_search) to

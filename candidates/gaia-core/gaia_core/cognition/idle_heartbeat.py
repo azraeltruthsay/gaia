@@ -203,6 +203,18 @@ class IdleHeartbeat:
 
         logger.info("Idle heartbeat tick #%d (idle: %s)", self._tick_count, idle_str)
 
+        # PROMPT IMMUTABILITY: invalidate KV cache BEFORE the idle reflection
+        # so the reflection prompt doesn't get cached as the "identity" segment.
+        # Then invalidate AFTER so the next user request starts clean.
+        try:
+            if hasattr(model, 'endpoint'):
+                from urllib.request import Request as _Req, urlopen as _open
+                _req = _Req(f"{model.endpoint}/cache/invalidate",
+                            data=b'{}', headers={"Content-Type": "application/json"})
+                _open(_req, timeout=3)
+        except Exception:
+            pass
+
         try:
             response = model.create_chat_completion(
                 messages=messages,
