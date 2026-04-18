@@ -31,6 +31,7 @@ _PROJ = "/gaia/GAIA_Project" if _IN_CONTAINER else "/gaia/GAIA_Project"
 BASE_MODEL = f"{_BASE}/google/gemma-4-E4B"
 CURRICULA = [
     f"{_PROJ}/knowledge/curricula/unified-skills-v1/train.jsonl",
+    f"{_PROJ}/knowledge/curricula/sovereign-duality-e4b/train_v5.jsonl",
 ]
 OUTPUT_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_unified_v1"
 MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Unified-v1"

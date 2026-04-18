@@ -481,12 +481,14 @@ def build_meta_verb_catalog() -> str:
 
     Returns ~30 tokens — the model learns these 5 verbs and uses
     search() to discover specific skills on demand.
+
+    Uses Gemma 4 native special tokens (single token IDs 46/47/50/51).
     """
     return (
         "Tools: search(query) do(skill,input) learn(task,result,success) "
         "remember(fact) ask(question)\n"
-        "Format: <|tool|>verb(param=value)<|/tool|>\n"
-        "Wait for <|result|>...<|/result|> before continuing.\n"
+        'Format: <|tool>verb(param=value)<tool|>\n'
+        'Results arrive as: <|tool_response>...<tool_response|>\n'
         "Use search() first to find the right skill, then do() to execute it."
     )
 
