@@ -476,6 +476,21 @@ def build_prompt_catalog() -> str:
     return "\n".join(lines)
 
 
+def build_meta_verb_catalog() -> str:
+    """Ultra-compact 5-verb tool catalog for the Unified Skill Architecture.
+
+    Returns ~30 tokens — the model learns these 5 verbs and uses
+    search() to discover specific skills on demand.
+    """
+    return (
+        "Tools: search(query) do(skill,input) learn(task,result,success) "
+        "remember(fact) ask(question)\n"
+        "Format: <|tool|>verb(param=value)<|/tool|>\n"
+        "Wait for <|result|>...<|/result|> before continuing.\n"
+        "Use search() first to find the right skill, then do() to execute it."
+    )
+
+
 def build_domain_schemas() -> Dict[str, dict]:
     """Build JSON-RPC compatible tool schemas for the 13 domain tools.
 

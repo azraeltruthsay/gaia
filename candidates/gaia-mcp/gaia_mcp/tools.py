@@ -142,6 +142,15 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
     Handles sensitive tools requiring approval and blast shield validation.
     Supports both legacy tool names AND domain tool names (file, shell, web, etc.).
     """
+    # ── Meta-verb routing (Unified Skill Architecture) ───────────────
+    # 5 meta-verbs that cover all tool functionality. Routes to the
+    # SkillGateway which dispatches to existing infrastructure.
+    _META_VERBS = {"search", "do", "learn", "remember", "ask"}
+    if method in _META_VERBS:
+        from gaia_mcp.skill_gateway import get_gateway
+        gateway = get_gateway()
+        return await gateway.route(method, params or {})
+
     # ── Domain tool routing ────────────────────────────────────────────
     # If method is a domain name (e.g., "file"), pop "action" from params,
     # resolve to the legacy tool name, and delegate to the same function.

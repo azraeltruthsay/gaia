@@ -41,6 +41,69 @@ TOOL_RESPONSE_CLOSE = "</tool_response>"
 TOOL_RESULT_OPEN = "<tool_result>"
 TOOL_RESULT_CLOSE = "</tool_result>"
 
+# Meta-verb format — Unified Skill Architecture.
+# Model emits: <|tool|>verb(param=value, ...)<|/tool|>
+# Results:     <|result|>...content...<|/result|>
+META_TOOL_OPEN = "<|tool|>"
+META_TOOL_CLOSE = "<|/tool|>"
+META_RESULT_OPEN = "<|result|>"
+META_RESULT_CLOSE = "<|/result|>"
+
+# Regex for parsing verb(param=value, param=value) format
+_META_VERB_RE = re.compile(
+    r'^(\w+)\((.*)\)$', re.DOTALL
+)
+# Parse key=value or key="value with spaces"
+_META_PARAM_RE = re.compile(
+    r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|(\S+))'
+)
+
+
+def parse_meta_verb(raw: str) -> Optional[Dict[str, Any]]:
+    """Parse a meta-verb call string into tool_name and params.
+
+    Examples:
+        'search(query="current time")' → {"tool": "search", "params": {"query": "current time"}}
+        'do(skill="web-search", input="bitcoin")' → {"tool": "do", "params": {"skill": "web-search", ...}}
+        'remember(fact="GAIA uses Gemma 4")' → {"tool": "remember", "params": {"fact": "..."}}
+
+    Returns:
+        Dict with "tool" and "params" keys, or None if parsing fails.
+    """
+    raw = raw.strip()
+    m = _META_VERB_RE.match(raw)
+    if not m:
+        return None
+
+    verb = m.group(1)
+    args_str = m.group(2).strip()
+
+    params = {}
+    if args_str:
+        for pm in _META_PARAM_RE.finditer(args_str):
+            key = pm.group(1)
+            # Groups 2, 3, 4 are the three capture alternatives (double-quoted, single-quoted, unquoted)
+            value = pm.group(2) if pm.group(2) is not None else (
+                pm.group(3) if pm.group(3) is not None else pm.group(4)
+            )
+            # Parse booleans and numbers
+            if value is not None:
+                if value.lower() == "true":
+                    value = True
+                elif value.lower() == "false":
+                    value = False
+                else:
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        try:
+                            value = float(value)
+                        except (ValueError, TypeError):
+                            pass
+            params[key] = value
+
+    return {"tool": verb, "params": params}
+
 
 class ParseEventType(Enum):
     TEXT = "text"

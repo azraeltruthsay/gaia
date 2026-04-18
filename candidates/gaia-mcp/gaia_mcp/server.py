@@ -107,13 +107,17 @@ async def jsonrpc_endpoint(request: Request):
     method = body["method"]
     params = body.get("params", {})
 
+    # Meta-verbs (search, do, learn, remember, ask) route to the SkillGateway
+    # which handles its own validation and approval. Skip legacy checks.
+    _META_VERBS = {"search", "do", "learn", "remember", "ask"}
+
     # Enforce approval for sensitive legacy tools unless bypass is enabled.
     # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_limb.
-    if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
+    if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS and method not in _META_VERBS:
         return JSONResponse(content={"jsonrpc": "2.0", "error": {"code": -32001, "message": f"'{method}' requires approval. Use /request_approval first."}, "id": request_id}, status_code=403)
 
-    # Validate params against the tool's schema (skip for domain tools — they validate internally)
-    if method in TOOLS and method not in DOMAIN_TOOLS:
+    # Validate params against the tool's schema (skip for domain/meta-verb tools — they validate internally)
+    if method in TOOLS and method not in DOMAIN_TOOLS and method not in _META_VERBS:
         from jsonschema import validate, ValidationError
         try:
             validate(instance=params, schema=TOOLS[method]["params"])
