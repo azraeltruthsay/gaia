@@ -1227,19 +1227,14 @@ class AgentCore:
                     is_factual = False
                     logger.info("[MODEL_SELECT] Follow-up reference detected with session history — suppressing trivial classification")
 
-            # 1a. Nano Fast-Path — DEPRECATED in Sovereign Duality.
-            # Core (E4B) now handles all triage directly.
-            # Only route to Nano if it's explicitly enabled (backward compat).
-            nano_cfg = self.config.MODEL_CONFIGS.get("nano", {})
-            has_nano = nano_cfg.get("enabled", False) and "nano" in self.model_pool.models
-            if not selected_model_name and (wants_nano or is_trivial) and has_nano:
-                selected_model_name = "nano"
-                logger.info(f"[MODEL_SELECT] Routing to Nano (wants_nano={wants_nano}, is_trivial={is_trivial}, is_factual={is_factual})")
+            # Nano routing DISABLED — Sovereign Duality uses Core for all triage.
+            # The "nano" model pool entry is a socat proxy to Core's engine.
+            has_nano = False
 
             # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
             # Only escalate if the query is non-trivial — a spurious KB match
             # on a simple greeting/question shouldn't force the heavy pipeline.
-            elif knowledge_base_name and not is_trivial:
+            if not selected_model_name and knowledge_base_name and not is_trivial:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring prime.")
                 for cand in ["prime"]:
                     if cand == "prime" and _gpu_sleeping:
@@ -1248,7 +1243,7 @@ class AgentCore:
                         selected_model_name = cand
                         logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
                         break
-            elif knowledge_base_name and is_trivial:
+            elif not selected_model_name and knowledge_base_name and is_trivial:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
             if not selected_model_name:
@@ -5346,16 +5341,27 @@ RESULT: COMPLEX (reason: <brief reason>)
             # ── Confidence-Gated Epistemic Grounding ─────────────────
             # Before returning, check if the response shows low confidence
             # or self-conflation. If so, auto-search and regenerate grounded.
-            confidence = self._assess_confidence(content, user_input)
-            if confidence["needs_grounding"]:
-                self.logger.info("Confidence gate: %s (%.1f) — triggering epistemic grounding",
-                                confidence["reason"], confidence["confidence"])
-                grounded = self._ground_and_regenerate(
-                    selected_model_name, user_input, content, confidence["reason"]
-                )
-                if grounded != content:
-                    self._last_responding_model = selected_model_name
-                    content = grounded
+            # SKIP confidence gate if the Knowledge Router already injected
+            # verified_local data AND the response uses that data.
+            _already_grounded = False
+            if _grounding_text:
+                import re as _gre
+                _data_tokens = set(_gre.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?', _grounding_text))
+                if _data_tokens and any(t.lower() in content.lower() for t in _data_tokens):
+                    _already_grounded = True
+                    self.logger.info("Confidence gate SKIPPED: response uses pre-injected grounding data")
+
+            if not _already_grounded:
+                confidence = self._assess_confidence(content, user_input)
+                if confidence["needs_grounding"]:
+                    self.logger.info("Confidence gate: %s (%.1f) — triggering epistemic grounding",
+                                    confidence["reason"], confidence["confidence"])
+                    grounded = self._ground_and_regenerate(
+                        selected_model_name, user_input, content, confidence["reason"]
+                    )
+                    if grounded != content:
+                        self._last_responding_model = selected_model_name
+                        content = grounded
 
             # Optional polish via Thinker: if Operator (lite) handled this turn and a Thinker is available,
             # send a short polish request and return the Thinker output as final.

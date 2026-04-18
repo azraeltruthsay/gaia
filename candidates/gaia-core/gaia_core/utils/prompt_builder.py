@@ -915,14 +915,23 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
                 web_g = df.value
                 if isinstance(web_g, dict) and web_g:
-                    parts = ["Here is reference data from verified sources:"]
+                    parts = []
+                    has_system_data = False
                     for entity, info in web_g.items():
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
                             snippet = r.get("snippet", "")
                             url = r.get("url", "")
                             if snippet:
-                                parts.append(f"- {title}: {snippet[:200]} ({url})")
+                                if title in ("system_clock", "system_uptime"):
+                                    has_system_data = True
+                                    parts.append(f"[SYSTEM DATA — use this directly] {snippet[:200]}")
+                                else:
+                                    parts.append(f"- {title}: {snippet[:200]} ({url})")
+                    if has_system_data:
+                        parts.insert(0, "The following is VERIFIED system sensor data. Use it directly in your answer — do NOT say you lack access to this information:")
+                    else:
+                        parts.insert(0, "Here is reference data from verified sources:")
                     if len(parts) > 1:
                         _grounding_user_message = "\n".join(parts)
                         logger.debug("Grounding prepared as user message: %d chars", len(_grounding_user_message))

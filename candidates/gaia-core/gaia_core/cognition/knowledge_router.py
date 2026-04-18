@@ -15,6 +15,7 @@ a unified pipeline that queries ALL knowledge sources in priority order.
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -248,7 +249,6 @@ def _query_system_context(query: str) -> List[GroundingResult]:
     uptime_signals = ["uptime", "how long", "running"]
 
     if any(s in q for s in time_signals):
-        import time as _t
         from datetime import datetime, timezone, timedelta
         try:
             _tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
@@ -263,8 +263,9 @@ def _query_system_context(query: str) -> List[GroundingResult]:
                 utility_score=1.0,
                 query=query,
             ))
-        except Exception:
-            pass
+            logger.info("SystemContext: clock → %s", _display)
+        except Exception as e:
+            logger.warning("SystemContext: clock query failed: %s", e)
 
     if any(s in q for s in uptime_signals):
         try:
