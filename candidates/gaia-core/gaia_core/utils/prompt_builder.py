@@ -444,12 +444,34 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     system_content_parts = []
 
+    # ── Early context window detection ─────────────────────────────────
+    # Compute _tiny_context BEFORE the identity block so we can skip verbose
+    # sections for models with small context windows (e.g. E4B at 4096).
+    _context_window_early = 8192
+    try:
+        _context_window_early = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+    except Exception:
+        pass
+    try:
+        _model_name_early = getattr(packet.header.model, 'name', '')
+        _model_cfg_early = config.MODEL_CONFIGS.get(_model_name_early, {})
+        _mml = _model_cfg_early.get('max_model_len', _context_window_early)
+        if _mml and _mml < _context_window_early:
+            _context_window_early = _mml
+    except Exception:
+        pass
+    _tiny_context_early = _context_window_early <= 4096
+
     # ── KV Prefix Optimization ─────────────────────────────────────────
     # When kv_prefix_active=True, the engine's KV cache already contains the
     # static foundation (identity, persona rules, epistemic directives, tool
     # conventions).  We skip injecting them here to halve prompt tokens.
     # Only dynamic per-request content (time, task, world state, RAG) is sent.
-    if kv_prefix_active:
+    #
+    # Also skip for tiny_context WHEN the unified-skills adapter is active.
+    # Without the unified training, the model needs the verbose prompt.
+    _use_compact = _tiny_context_early and config.constants.get("USE_META_VERBS", False)
+    if kv_prefix_active or _use_compact:
         # Minimal context marker so the model knows its foundation is loaded
         import time as _time
         _current_time = _time.strftime('%Y-%m-%d %H:%M:%S UTC', _time.gmtime())
@@ -564,8 +586,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         _context_window = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
     except Exception:
         pass
+    # Also check max_model_len from MODEL_CONFIGS — this is the actual engine
+    # context limit, which may be smaller than the packet's context_window_tokens
+    # (which defaults to max_tokens_lite=8192 regardless of model).
+    try:
+        _model_name = getattr(packet.header.model, 'name', '')
+        _model_cfg = config.MODEL_CONFIGS.get(_model_name, {})
+        _max_model_len = _model_cfg.get('max_model_len', _context_window)
+        if _max_model_len and _max_model_len < _context_window:
+            _context_window = _max_model_len
+    except Exception:
+        pass
     _small_context = _context_window <= 8192
     _tiny_context = _context_window <= 4096  # Gemma 4 E4B at max_model_len=4096
+    logger.info("Context window: %d (tiny=%s, small=%s)", _context_window, _tiny_context, _small_context)
 
     # For tiny context models, skip ALL verbose directives — the identity
     # bake handles behavioral patterns, and we can't afford 2K of system
@@ -580,34 +614,36 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             _clock = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
         except Exception:
             _clock = _tc_time.strftime("%Y-%m-%d %H:%M:%S UTC", _tc_time.gmtime())
-        # Check if Unified Skill Architecture is enabled
+
+        # ── Compact Prompt (~200 tokens) ─────────────────────────────
+        # The identity-baked model knows who it is, its rules, and its
+        # personality. The prompt only provides:
+        #   1. Identity checkpoint (validation, not specification)
+        #   2. Live clock (can't be in weights)
+        #   3. Tool catalog (if meta-verbs enabled)
+        #   4. Minimal behavioral guardrails
+        #
+        # This is a TRAINING FITNESS TEST: if the model can't function
+        # on this compact prompt, the training wasn't sufficient.
+        # Verbose fallback (800+ tokens) exists for untrained models.
         _use_meta_verbs = config.constants.get("USE_META_VERBS", False)
 
-        _tool_section = ""
+        _tool_line = ""
         if _use_meta_verbs:
             from gaia_common.utils.domain_tools import build_meta_verb_catalog
-            _tool_section = "\n\n" + build_meta_verb_catalog()
-        else:
-            _tool_section = (
-                "\n3. When uncertain about ANY factual claim, use web_search to verify before answering."
-            )
+            _tool_line = "\n" + build_meta_verb_catalog()
 
         system_content_parts.append(
-            f"You are GAIA, created by Azrael. You are a sovereign AI assistant.\n"
-            f"Current time: {_clock}\n\n"
-            "CRITICAL RULES:\n"
-            "1. DISSOCIATION: Not every question is about you. When the user asks about "
-            "a topic (Pokemon, history, cooking, etc.), answer about THAT TOPIC ONLY. "
-            "Never relate external topics back to yourself or your architecture.\n"
-            "2. EPISTEMIC HONESTY: You have three knowledge tiers:\n"
-            "   - VERIFIED: From your tools (web search, knowledge base) — state confidently.\n"
-            "   - TRAINED: From your model weights — preface with 'From my training:' and "
-            "may contain errors. Use a tool to verify if possible.\n"
-            "   - UNKNOWN: If you don't know, say 'I don't know' or 'Let me search for that.' "
-            "NEVER invent names, dates, numbers, or facts. Fabrication is the worst failure mode.\n"
-            + _tool_section + "\n"
-            "4. Be direct, concise, and helpful. Respond in English unless asked otherwise."
+            f"You are GAIA, created by Azrael. Sovereign AI.\n"
+            f"Clock: {_clock}\n"
+            "Rules: Answer topics directly (don't self-relate). "
+            "Never fabricate facts — say 'I don't know' or search. "
+            "Be concise."
+            + _tool_line
         )
+        # STOP HERE for tiny_context — skip all verbose sections below.
+        # No thought seeds, spinal routing, vital organs, tool conventions.
+        # The baked model handles these behaviors from weights.
     elif not kv_prefix_active and _small_context:
         # Condensed version for small context models
         epistemic_honesty_directive = (
@@ -647,7 +683,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         "9. When uncertain, use hedging language ('I'm not sure of the exact time', 'I don't have current metrics') "
         "rather than inventing plausible-sounding specifics. Vague honesty is always better than precise fiction."
         )
-    system_content_parts.append(epistemic_honesty_directive)
+    if not _tiny_context:
+        system_content_parts.append(epistemic_honesty_directive)
 
     # 3.55. Epistemic Drive — behavioral tendency toward knowledge grounding
     if _small_context:
@@ -1311,12 +1348,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         checkpoint_path = os.path.join(checkpoint_dir, "prime.md")
         consumed_path = os.path.join(checkpoint_dir, ".prime_consumed")
 
-        # Skip restoration context for casual chat ONLY when the system is stable.
-        # If the system is irritated (score >= 8), always provide the context for awareness.
-        is_chat = packet.intent and packet.intent.user_intent == "chat"
+        # Skip restoration context for trivial intents and tiny-context models.
+        # Sleep context is 200+ tokens of stale checkpoint — not worth the cost
+        # for greetings, time queries, or simple Q&A on a 4K-context model.
+        _trivial_intents = {"chat", "greeting", "time", "math", "identity", "identity_query"}
+        is_trivial_intent = packet.intent and packet.intent.user_intent in _trivial_intents
         irritated = is_system_irritated()
 
-        if (not is_chat or irritated) and os.path.exists(checkpoint_path) and not os.path.exists(consumed_path):
+        if not _tiny_context and (not is_trivial_intent or irritated) and os.path.exists(checkpoint_path) and not os.path.exists(consumed_path):
 
             with open(checkpoint_path, "r", encoding="utf-8") as f:
                 checkpoint_content = f.read().strip()
