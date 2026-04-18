@@ -1,0 +1,17 @@
+#!/bin/bash
+# Post-commit hook: regenerate AAAK Chord Manifest after every commit.
+# Both agents can then see the updated state without reading full docs.
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+MANIFEST_SCRIPT="$PROJECT_ROOT/scripts/chord_sync.py"
+
+if [ -f "$MANIFEST_SCRIPT" ]; then
+    python3 "$MANIFEST_SCRIPT" > /dev/null 2>&1
+
+    # Notify via tmux if session exists
+    SESSION="gaia_development"
+    if tmux has-session -t "$SESSION" 2>/dev/null; then
+        COMMIT=$(git log --oneline -1 | head -c 40)
+        tmux display-message -t "$SESSION" "[CHORD] Manifest updated: $COMMIT" 2>/dev/null
+    fi
+fi

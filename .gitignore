@@ -189,3 +189,8 @@ Claude_Certified_Architect-Foundations_Certification_Exam_Guide.pdf
 instance
 gaia-instance/
 gaia-engine/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
