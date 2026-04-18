@@ -81,8 +81,9 @@ class ConsciousnessMatrix:
     matrix validates by polling actual resource usage.
     """
 
-    def __init__(self, lifecycle_machine=None):
+    def __init__(self, lifecycle_machine=None, gpu_manager=None):
         self._lifecycle_machine = lifecycle_machine
+        self._gpu_manager = gpu_manager
 
         # Load defaults from shared constants, with env var overrides
         cfg = self._load_config()
@@ -298,6 +299,11 @@ class ConsciousnessMatrix:
     async def _apply_configuration(self, config_name: str, sync_lifecycle: bool = True) -> dict:
         """Apply a consciousness configuration to all tiers.
 
+        Sequential Transition Guard:
+        1. Perform all downshifts (unloads) first to free VRAM.
+        2. Wait for GPU memory to actually clear (via GPUManager).
+        3. Perform all upshifts (loads) second.
+
         Args:
             config_name: One of the preset names (awake, focusing, sleep, etc.)
             sync_lifecycle: If True (default), sync the lifecycle FSM after
@@ -312,8 +318,46 @@ class ConsciousnessMatrix:
             return {"ok": False, "error": f"Unknown configuration: {config_name}"}
 
         results = {}
-        for tier, level in targets.items():
-            results[tier] = await self.set_target(tier, level)
+        downshifts = []
+        upshifts = []
+
+        # Categorize transitions to enforce sequential loading
+        for tier, target_level in targets.items():
+            state = self._tiers[tier]
+            if target_level < state.actual:
+                downshifts.append((tier, target_level))
+            elif target_level > state.actual:
+                upshifts.append((tier, target_level))
+            else:
+                # Already at target or transitioning to same (no-op)
+                results[tier] = {"ok": True, "message": "already at target", "actual": state.actual.name}
+
+        # 1. Execute all DOWN-shifts first
+        if downshifts:
+            logger.info("Sequential Guard: executing %d downshifts", len(downshifts))
+            # Use set_target directly (which calls _transition_tier)
+            for tier, level in downshifts:
+                results[tier] = await self.set_target(tier, level)
+
+        # 2. Wait for VRAM clearance if we have upshifts pending
+        if upshifts and self._gpu_manager:
+            logger.info("Sequential Guard: waiting for VRAM cleanup before upshift")
+            # Wait for VRAM to drop below threshold (default 3000MB)
+            cleaned = await self._gpu_manager.wait_for_gpu_cleanup()
+            if not cleaned:
+                logger.warning("Sequential Guard: GPU cleanup timed out, proceeding with upshifts anyway")
+            else:
+                logger.info("Sequential Guard: VRAM cleared, proceeding with upshifts")
+        elif upshifts:
+            # Brief pause as a safety fallback if no GPU manager
+            await asyncio.sleep(2.0)
+
+        # 3. Execute all UP-shifts last
+        if upshifts:
+            logger.info("Sequential Guard: executing %d upshifts", len(upshifts))
+            # We execute upshifts sequentially to be extra safe with VRAM spikes during load
+            for tier, level in upshifts:
+                results[tier] = await self.set_target(tier, level)
 
         result = {"configuration": config_name, "results": results}
 

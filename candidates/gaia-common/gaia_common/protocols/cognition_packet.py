@@ -324,10 +324,24 @@ class Evaluation:
 
 @dataclass_json
 @dataclass
+class HandoffTurn:
+    """A single turn distilled for context handoff between tiers.
+    
+    Uses AAAK (Atomic Autonomous Accessible Knowledge) symbols for 
+    maximum density in the 'Neural Note' buffer.
+    """
+    user_intent: str                      # AAAK Compacted User Intent
+    limb_summary: Optional[str] = None    # AAAK Summary of limb execution
+    conclusion: str = ""                  # AAAK Operator's final conclusion
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+@dataclass_json
+@dataclass
 class Reasoning:
     reflection_log: List[ReflectionLog] = field(default_factory=list)
     sketchpad: List[Sketchpad] = field(default_factory=list)
     evaluations: List[Evaluation] = field(default_factory=list)
+    handoff_buffer: List[HandoffTurn] = field(default_factory=list) # Neural Note for tier shifts
 
 # --- Tool Routing (GCP Tool Routing System) ---
 @dataclass_json
@@ -694,6 +708,7 @@ __all__ = [
     "Sketchpad",
     "ResponseFragment",
     "Evaluation",
+    "HandoffTurn",
     "Reasoning",
     # Tool routing
     "SelectedTool",

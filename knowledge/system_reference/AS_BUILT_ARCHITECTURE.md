@@ -10,56 +10,63 @@ This document reflects the actual running state of GAIA, following the **Great C
 |---------|------|-----------------|
 | `gaia-core` | The Brain | **Neural Router**, Reasoning Loop, Embedded Inference |
 | `gaia-prime` | The Voice | Gemma 4 26B-A4B MoE (vLLM/GAIA Engine) |
-| `gaia-nano` | The Reflex | Qwen 3.5 0.8B (Sub-100ms Triage & Time) |
+| `gaia-nano` | The Reflex | Gemma 4 E2B (0.8B) — Sub-100ms Triage |
 | `gaia-mcp` | The Hands | **Capability Engine (Limbs)**, Tool Execution |
 | `gaia-study` | The Subconscious | **DocSentinel**, QLoRA, Vector Indexing |
-| `gaia-common`| The Nervous System | **GaiaVitals**, Shared Protocols (Packet v0.4) |
+| `gaia-common`| The Nervous System | **GaiaVitals**, Shared Protocols (Packet v0.5) |
 | `gaia-web` | The Face | Unified UI (Discord/Web), Dashboard |
 
-## Model Tiers (The Gemma Chord)
+## Model Tiers (The Sovereign Duality)
 
-| Tier | Model | Active Params | Backend | Role |
-|------|-------|---------------|---------|------|
-| **Sovereign** | Gemma 4 26B-A4B MoE | 4B | GAIA Engine (GPU) | Deep Reasoning, Architecture, Sovereign Identity |
-| **Reflex** | Qwen 3.5 0.8B-Abliterated| 0.8B | GAIA Engine (GPU) | Triage, Time Checks, Force Field Translation |
+| Tier | Model | Active Params | VRAM (NF4) | Role |
+|------|-------|---------------|------------|------|
+| **Sovereign** | Gemma 4 26B-A4B MoE | 4B | 8.9GB* | Deep Reasoning, Architecture, Sovereign Identity |
+| **Operator** | Gemma 4 E4B (8B) | 4B | 3.5GB | Always-On Brain, Triage, Native Multimodal |
 
-## Cognitive Infrastructure
+*\*Prime uses vLLM acceleration at a fixed 8.9GB budget. Operator (E4B) uses a 'Featherweight' NF4 profile to stay within the 12.1GB baseline.*
 
-### 1. Neural Router (Unified Intent)
-The **Neural Router** is the single entry point for all cognitive requests. It uses a 6-stage pipeline (Reflex → Embed → Heuristic → Keyword → Weighted → Nano Tiebreak) to determine the intent and target engine with maximum efficiency.
+## Consciousness Matrix (The Sovereign Duality)
 
-### 2. Capability Engine (The Limbs)
-All external actions are unified under the **Capability Engine**. Whether static (Domain Tools) or dynamic (Memento Skills), every action is a **Limb** with consistent metadata and security enforcement.
+GAIA manages her 16GB VRAM budget by maintaining the Operator (E4B) as Always-On Conscious, with the Sovereign (26B) loadable on demand.
 
-### 3. GaiaVitals (Unified Pulse)
-A centralized health monitoring system that aggregates Biological (heartbeat), Structural (log MRI), Cognitive (loop recovery), and Security (adversarial awareness) pulses into a single **Sovereign Health Score**.
+| Preset | Operator (E4B) | Sovereign (26B) | Use Case |
+|--------|----------------|-----------------|----------|
+| **awake** | CONSCIOUS | SUBCONSCIOUS | Standard idle / daily chat |
+| **focusing** | SUBCONSCIOUS | CONSCIOUS | Sovereign reasoning / coding |
+| **parked** | SUBCONSCIOUS | UNCONSCIOUS | Zero-VRAM boot / Sentinel mode |
 
-### 4. DocSentinel (Living Documentation)
-An automated documentation loop that parses system events and council decisions to update the Wiki, Glossary, and AS_BUILT logs in real-time.
+### VRAM Budgeting
+- **Baseline (Desktop)**: ~1.5GB
+- **Operator (E4B)**: 3.5GB (Always-On)
+- **Free for Context**: ~2.1GB
+- **Sovereign (26B)**: 8.9GB (Active)
+- **Total GPU Ceiling**: 16.0GB (RTX 5080)
 
-## Consciousness Matrix (GPU Lifecycle)
+## The SDH Protocol (Neural Note)
 
-GAIA manages GPU resources through three consciousness states:
-- **Conscious**: Active inference (Sovereign/Reflex tiers).
-- **Subconscious**: Background processing (Study/Indexing).
-- **Unconscious**: Fully unloaded, zero VRAM usage.
+To ensure seamless continuity during tier shifts (e.g. GPU Core -> CPU Sentinel), GAIA uses the **Sovereign Duality Handoff (SDH)** protocol.
+
+*   **AAAK Handoff Buffer**: A sliding window of the last 3 turns stored in the `CognitionPacket.Reasoning.handoff_buffer`.
+*   **Neural Note**: Each turn is distilled into an AAAK fragment (`U` intent, `L` limb result, `O` operator conclusion).
+*   **Priming**: The CPU-Sentinel prompt is injected with the handoff buffer to bypass "restart amnesia" and maintain high-density context.
 
 ## Known Gaps
-- Abliteration pass for 26B-A4B pending (Phase 5j).
+- DocSentinel full automation (sleep cycle integration) pending.
 - Relational Autonomy (Phase 6) in design.
 
 ## Consciousness Matrix (GPU Lifecycle FSM)
 
-Three consciousness states, managed by orchestrator at `/consciousness/*`:
+Four consciousness states, managed by orchestrator at `/consciousness/*`:
 
 | State | GPU | Inference | Use Case |
 |-------|-----|-----------|----------|
-| **Conscious** | Yes | Full speed | Active tier (Nano, Core default) |
-| **Subconscious** | No | CPU/GGUF fallback | Background observer (Prime default) |
+| **Conscious** | Yes | Full speed | Active tier (Core default) |
+| **Subconscious** | No | CPU/GGUF fallback | Background observer (Prime/Sentinel) |
 | **Unconscious** | No | None | Fully unloaded, zero VRAM |
 
-Lifecycle FSM states: AWAKE, FOCUSING, SLEEP, DEEP_SLEEP, MEDITATION.
-**FOCUSING auto-transition**: When escalation triggers Prime, orchestrator transitions AWAKE -> FOCUSING, which swaps GPU to Prime via quality gate, then returns GPU to Core when done.
+Lifecycle FSM states: AWAKE, FOCUSING, PARKED, SLEEP, DEEP_SLEEP, MEDITATION.
+**PARKED (Idle GPU)**: System boots into PARKED state with Core on CPU.
+**GEAR 1 (Engaging Clutch)**: Transition from PARKED to AWAKE loads Core Safetensors onto GPU with SAE sensors and LoRAs.
 
 Tested transitions: AWAKE <-> FOCUSING (2026-03-25). Lifecycle FSM syncs with Consciousness Matrix states.
 

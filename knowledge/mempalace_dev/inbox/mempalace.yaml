@@ -1,0 +1,16 @@
+wing: GAIA_Sovereignty
+rooms:
+- name: Phase_3_Tool_Calling
+  description: LoRA training, curriculum development, and results for native tool sovereignty.
+  keywords: ["lora", "training", "curriculum", "tool_calling", "adapter"]
+- name: Nano_Regressions
+  description: Diagnostic and repair logs for Nano (0.8B) model performance and phase drift.
+  keywords: ["nano", "regression", "drift", "anti_confabulation", "restraint"]
+- name: SAE_Validation
+  description: Mechanistic safety audit logs using Sparse Autoencoders for identity feature monitoring.
+  keywords: ["sae", "mechanistic", "audit", "polygraph", "baseline", "feature"]
+- name: Architecture_Decisions
+  description: Strategic trade-offs, system-oriented architecture changes, and AAAK protocol logs.
+  keywords: ["architecture", "soa", "aaak", "protocol", "decision", "trade-off"]
+- name: general
+  description: Miscellaneous development tasks and logs.

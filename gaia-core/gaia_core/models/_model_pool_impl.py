@@ -499,7 +499,7 @@ class ModelPool:
             # If an HF prime is provided, configure it directly under 'prime'.
             if prime_hf:
                 self.config.MODEL_CONFIGS["prime"] = {
-                    "type": "vllm",
+                    "type": "managed",
                     "model": prime_hf,
                     "path": prime_hf,
                     "enabled": True,
@@ -534,43 +534,43 @@ class ModelPool:
             # Remote inference via NANO_ENDPOINT (llama-server container)
             nano_endpoint = os.getenv("NANO_ENDPOINT")
             if nano_endpoint:
-                nano_model = os.getenv("NANO_MODEL", "/models/Qwen3.5-0.8B-Abliterated-Q8_0.gguf")
+                nano_model = os.getenv("NANO_MODEL", "/models/Gemma4-E2B-GAIA-Nano-v1")
                 self.config.MODEL_CONFIGS["nano"] = {
-                    "type": "vllm_remote",
+                    "type": "managed",
                     "endpoint": nano_endpoint,
                     "path": nano_model,
                     "enabled": True,
                     "max_model_len": 2048,
                 }
-                logger.info("NANO_ENDPOINT set: nano -> llama-server @ %s", nano_endpoint)
+                logger.info("NANO_ENDPOINT set: nano -> GAIA Engine @ %s", nano_endpoint)
 
             # Remote inference via CORE_CPU_ENDPOINT (GAIA Engine in gaia-core)
             core_cpu_endpoint = os.getenv("CORE_CPU_ENDPOINT")
             if core_cpu_endpoint:
-                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4")
+                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Gemma4-E4B-GAIA-Core-v1")
                 self.config.MODEL_CONFIGS["core"] = {
-                    "type": "vllm_remote",
+                    "type": "managed",
                     "endpoint": core_cpu_endpoint,
                     "path": core_cpu_model,
                     "enabled": True,
-                    "max_model_len": int(os.getenv("CORE_CPU_CTX", "8192")),
+                    "max_model_len": int(os.getenv("CORE_CPU_CTX", "4096")),
                 }
                 logger.info("CORE_CPU_ENDPOINT set: core -> GAIA Engine @ %s", core_cpu_endpoint)
 
-            # Remote vLLM inference via PRIME_ENDPOINT — switches prime to
+            # Remote GAIA Engine inference via PRIME_ENDPOINT — switches prime to
             # a remote HTTP backend so gaia-core doesn't need local GPU access.
             prime_endpoint = os.getenv("PRIME_ENDPOINT")
             if prime_endpoint:
                 existing_cfg = self.config.MODEL_CONFIGS.get("prime", {})
                 self.config.MODEL_CONFIGS["prime"] = {
-                    "type": "vllm_remote",
+                    "type": "managed",
                     "endpoint": prime_endpoint,
                     "path": os.getenv("PRIME_MODEL") or existing_cfg.get("path") or self.config.model_path("prime", "merged") or "/models/prime",
                     "enabled": True,
-                    "max_model_len": int(os.getenv("VLLM_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 16384)),
+                    "max_model_len": int(os.getenv("GAIA_MAX_MODEL_LEN") or existing_cfg.get("max_model_len", 16384)),
                     "lora_config": self.config.constants.get("LORA_CONFIG", existing_cfg.get("lora_config", {})),
                 }
-                logger.info("PRIME_ENDPOINT set: prime -> vllm_remote @ %s", prime_endpoint)
+                logger.info("PRIME_ENDPOINT set: prime -> GAIA Engine @ %s", prime_endpoint)
         except Exception:
             logger.exception("Failed to apply GAIA_* model overrides")
 
@@ -722,14 +722,14 @@ class ModelPool:
                 logger.info(f"🔹 Registering MCP proxy model {model_name}")
                 self.models[model_name] = MCPProxyModel(self.config, role_name=model_name)
             elif model_type == 'vllm':
-                logger.info(f"🔹 Loading vLLM model {model_name}")
+                logger.info(f"🔹 Loading vLLM model {model_name} (legacy)")
                 gpu_info = _get_gpu_free_total_bytes()
                 self.models[model_name] = VLLMChatModel(model_config, self.config, gpu_info=gpu_info)
-            elif model_type == 'vllm_remote':
+            elif model_type in ('managed', 'vllm_remote'):
                 if VLLMRemoteModel is None:
                     logger.warning("VLLMRemoteModel unavailable (import failed)")
                     return False
-                logger.info(f"🔹 Loading vLLM remote model {model_name}")
+                logger.info(f"🔹 Loading GAIA Engine managed model {model_name}")
                 self.models[model_name] = VLLMRemoteModel(model_config, self.config)
             elif model_type == 'groq':
                 if GroqAPIModel is None:
@@ -1094,7 +1094,7 @@ class ModelPool:
         cfg = self.config.MODEL_CONFIGS.get(target_role, {}) if self.config and hasattr(self.config, 'MODEL_CONFIGS') else {}
 
         # If it's a remote model and enabled, return the role itself as the name (we'll handle lazy load next)
-        if cfg.get("type") == "vllm_remote" and cfg.get("enabled", True):
+        if cfg.get("type") in ("managed", "vllm_remote") and cfg.get("enabled", True):
             return target_role
 
         alias = cfg.get('alias')

@@ -21,7 +21,7 @@
     "core": {
       "enabled": true,
       "path": "Qwen3.5-4B-GAIA-Core-v1",
-      "type": "vllm_remote",
+      "type": "gaia_engine",
       "endpoint": "http://localhost:8092",
       "max_model_len": 8192,
       "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Qwen3.5-4B identity-baked"
@@ -29,7 +29,7 @@
     "observer": {
       "enabled": true,
       "use_prime": true,
-      "type": "vllm"
+      "type": "managed"
     }
   },
   "N_BATCH": 1024,

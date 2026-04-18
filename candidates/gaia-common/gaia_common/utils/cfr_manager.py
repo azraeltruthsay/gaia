@@ -282,8 +282,9 @@ class CFRManager:
                         self.CHUNK_MIN = cfg["chunk_min_chars"]
                     if cfg.get("chunk_max_chars"):
                         self.CHUNK_MAX = cfg["chunk_max_chars"]
-                    if cfg.get("vllm_endpoint") and not self._explicit_endpoint:
-                        self._vllm.endpoint = cfg["vllm_endpoint"].rstrip("/")
+                    endpoint_key = cfg.get("engine_endpoint") or cfg.get("vllm_endpoint")
+                    if endpoint_key and not self._explicit_endpoint:
+                        self._vllm.endpoint = endpoint_key.rstrip("/")
                     if cfg.get("model") and not self._explicit_model:
                         self._vllm.model = cfg["model"]
                     break

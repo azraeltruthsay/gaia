@@ -84,33 +84,26 @@ ATLAS_PROMPTS = [
 
 
 TIER_CONFIGS = {
-    "nano": {
-        "name": "Nano (0.8B)",
-        "model_path": "/models/Qwen3.5-0.8B-Abliterated",
-        "layers": [2, 4, 8, 12, 16, 20, 23],  # 24 layers total
-        "num_features_multiplier": 2,
-        "epochs": 50,
-    },
     "core": {
-        "name": "Core (2B)",
-        "model_path": "/models/Qwen3.5-2B-GAIA-Core-v3",
-        "layers": [2, 6, 10, 14, 18, 22],  # 24 layers (hidden_states[0..23])
+        "name": "Core/Nano (Gemma 4 E4B)",
+        "model_path": "/models/Gemma4-E4B-GAIA-Core-v1",
+        "layers": [0, 10, 20, 30, 41],  # 42 layers total
         "num_features_multiplier": 2,
         "epochs": 50,
     },
     "prime": {
-        "name": "Prime (8B)",
-        "model_path": "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
-        "layers": [4, 8, 12, 16, 20, 24, 28, 31],  # 32 layers (hidden_states[0..31])
+        "name": "Prime (Gemma 4 26B)",
+        "model_path": "/models/Gemma4-26B-A4B-GAIA-Prime-v1",
+        "layers": [0, 7, 14, 21, 29],  # 30 layers total
         "num_features_multiplier": 2,
-        "epochs": 30,  # Fewer epochs for larger model (memory)
+        "epochs": 30,
     },
 }
 
 
 def get_tier_config(tier: str) -> dict:
     """Get layer configuration for each model tier."""
-    return TIER_CONFIGS.get(tier, TIER_CONFIGS["nano"])
+    return TIER_CONFIGS.get(tier, TIER_CONFIGS["core"])
 
 
 def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline", model_override: str = ""):
@@ -127,9 +120,11 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     logger.info("Prompts: %d", len(ATLAS_PROMPTS))
     logger.info("=" * 60)
 
-    # ── Load model directly ──
+    # ── Load model directamente ──
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gaia-engine"))
+    from gaia_engine.moe_offload import is_moe_model, load_moe_offloaded
 
     model_path = model_override or config.get("model_path")
     if not model_path or not Path(model_path).exists():
@@ -138,21 +133,41 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Loading %s → %s ...", model_path, device)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype="auto",
-        device_map=device,
-        trust_remote_code=True,
-    )
+
+    # Check if model is MoE — requires special offloaded loading
+    import json
+    with open(Path(model_path) / "config.json") as f:
+        m_cfg = json.load(f)
+
+    if is_moe_model(m_cfg):
+        logger.info("  MoE detected — using expert offloading to CPU")
+        model, expert_cache = load_moe_offloaded(
+            model_path, device=device, max_cached_experts=16, use_nf4=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        # Store expert cache on model to prevent GC
+        model._expert_cache = expert_cache
+    else:
+        logger.info("  Standard model — using NF4 quantization")
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            quantization_config=bnb_config,
+            device_map=device,
+            trust_remote_code=True,
+        )
     model.eval()
-    logger.info("Model loaded: %s (device=%s, %.1f GB)",
-                model_path, device,
-                sum(p.numel() * p.element_size() for p in model.parameters()) / 1e9)
+    logger.info("Model loaded: %s (device=%s)", model_path, device)
 
     # ── Record activations ──
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gaia-engine"))
     from gaia_engine.sae_trainer import SAETrainer
+
 
     trainer = SAETrainer(model, tokenizer, device=device)
 

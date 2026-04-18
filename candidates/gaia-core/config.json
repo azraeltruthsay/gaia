@@ -135,7 +135,7 @@
     "chunk_max_chars": 5000,
     "summary_max_output_tokens": 400,
     "synthesis_max_output_tokens": 800,
-    "vllm_endpoint": "http://gaia-prime:7777",
+    "engine_endpoint": "http://gaia-prime:7777",
     "model": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
     "summary_temperature": 0.3,
     "max_documents": 50

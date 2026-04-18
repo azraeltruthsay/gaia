@@ -23,6 +23,22 @@
       "description": "Activation of Nano-triage and full temporal/atmospheric awareness.",
       "importance": 0.95,
       "tags": ["cognition", "proprioception"]
+    },
+    {
+      "id": "sovereign_duality",
+      "name": "Sovereign Duality — Trinity to Two-Tier Transition",
+      "timestamp": "2026-04-12T15:25:00Z",
+      "description": "Consolidated three-tier Trinity (Nano E2B + Core Qwen 2B + Prime Qwen 8B) into two-tier Sovereign Duality: Operator (Gemma 4 E4B, 8.9GB always-on) and Sovereign (Gemma 4 26B-A4B MoE, 4.6GB JIT Expert Offloading). Nano tier deprecated. Unified Gemma 4 model family.",
+      "importance": 0.95,
+      "tags": ["architecture", "inference", "gemma4"]
+    },
+    {
+      "id": "sdh_protocol",
+      "name": "SDH Protocol Design",
+      "timestamp": "2026-04-12T18:00:00Z",
+      "description": "Sovereign Duality Handoff protocol formalized: quality-gated AWAKE↔FOCUSING transitions, subprocess isolation for deterministic VRAM release, stale handoff reconciliation, and VRAM budget validation. Operator at 8.9GB baseline with 5.9GB free; FOCUSING mode yields 10.2GB free for Sovereign reasoning.",
+      "importance": 0.9,
+      "tags": ["protocol", "gpu_lifecycle", "handoff"]
     }
   ]
 }

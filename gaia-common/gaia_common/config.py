@@ -277,7 +277,7 @@ class Config:
             self.endpoints["prime"] = prime_endpoint
             if "prime" in self.MODEL_CONFIGS:
                 self.MODEL_CONFIGS["prime"]["endpoint"] = prime_endpoint
-                self.MODEL_CONFIGS["prime"]["type"] = "vllm_remote"
+                self.MODEL_CONFIGS["prime"]["type"] = "gaia_engine"
 
         # 3. Port/Endpoint overrides
         for svc in self.endpoints:

@@ -20,8 +20,8 @@
     },
     "core": {
       "base": "google/gemma-4-E4B",
-      "merged": "/models/core",
-      "gguf": "/models/core.gguf",
+      "merged": "/models/Gemma4-E4B-GAIA-Core-v1",
+      "gguf": "/models/Gemma4-E4B-GAIA-Core-v1-Q4_K_M.gguf",
       "family": "gemma4",
       "params": "8B",
       "multimodal": true,
@@ -31,8 +31,8 @@
     },
     "nano": {
       "base": "google/gemma-4-E2B",
-      "merged": "/models/nano",
-      "gguf": "/models/nano.gguf",
+      "merged": "/models/Gemma4-E2B-GAIA-Nano-v1",
+      "gguf": "/models/Gemma4-E2B-GAIA-Nano-v1-Q8_0.gguf",
       "family": "gemma4",
       "params": "5B",
       "multimodal": true,

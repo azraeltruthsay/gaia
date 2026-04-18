@@ -9,7 +9,7 @@
     "path": "/models/prime",
     "trust_remote_code": true,
     "template": "raw",
-    "type": "vllm_remote",
+    "type": "managed",
     "endpoint": "http://gaia-prime:7777",
     "lora_config": {
       "enabled": true,

@@ -132,6 +132,16 @@ def cmd_live(args):
         _print_sovereign_health()
         _print_container_status()
 
+    elif action == "park":
+        print_header("PARK: Idle GPU (Zero VRAM), Core on CPU")
+        _call_orchestrator("/consciousness/park", "POST")
+        print_ok("System PARKED. Ready for Gear 1 shift.")
+
+    elif action == "gear-1":
+        print_header("GEAR 1: Engaging Clutch, Core to GPU (NF4+SAE)")
+        _call_orchestrator("/consciousness/awake", "POST")
+        print_ok("GEAR 1 Engaged. Core Operator is now CONSCIOUS.")
+
     elif action == "logs":
         service = getattr(args, "service", None)
         tail = str(getattr(args, "tail", 50))
@@ -139,6 +149,22 @@ def cmd_live(args):
             run(["docker", "logs", service, "--tail", tail, "-f"], check=False)
         else:
             docker_compose("logs", "--tail", tail, "-f", check=False)
+
+
+def _call_orchestrator(path, method="GET", data=None):
+    """Call the orchestrator API."""
+    import requests
+    url = f"{ORCHESTRATOR_URL}{path}"
+    try:
+        if method == "POST":
+            r = requests.post(url, json=data or {}, timeout=10)
+        else:
+            r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print_fail(f"Orchestrator call failed ({path}): {e}")
+        return None
 
 
 def _print_service_health():
@@ -624,7 +650,7 @@ def build_parser():
 
     # LIVE
     live_p = subs.add_parser("live", help="Manage live stack")
-    live_p.add_argument("action", choices=["start", "stop", "status", "logs"])
+    live_p.add_argument("action", choices=["start", "stop", "status", "logs", "park", "gear-1"])
     live_p.add_argument("service", nargs="?", help="Service for logs (optional)")
     live_p.add_argument("--tail", type=int, default=50, help="Log tail lines")
 
