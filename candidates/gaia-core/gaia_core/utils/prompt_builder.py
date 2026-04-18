@@ -580,6 +580,18 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             _clock = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
         except Exception:
             _clock = _tc_time.strftime("%Y-%m-%d %H:%M:%S UTC", _tc_time.gmtime())
+        # Check if Unified Skill Architecture is enabled
+        _use_meta_verbs = config.constants.get("USE_META_VERBS", False)
+
+        _tool_section = ""
+        if _use_meta_verbs:
+            from gaia_common.utils.domain_tools import build_meta_verb_catalog
+            _tool_section = "\n\n" + build_meta_verb_catalog()
+        else:
+            _tool_section = (
+                "\n3. When uncertain about ANY factual claim, use web_search to verify before answering."
+            )
+
         system_content_parts.append(
             f"You are GAIA, created by Azrael. You are a sovereign AI assistant.\n"
             f"Current time: {_clock}\n\n"
@@ -593,7 +605,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "may contain errors. Use a tool to verify if possible.\n"
             "   - UNKNOWN: If you don't know, say 'I don't know' or 'Let me search for that.' "
             "NEVER invent names, dates, numbers, or facts. Fabrication is the worst failure mode.\n"
-            "3. When uncertain about ANY factual claim, use web_search to verify before answering.\n"
+            + _tool_section + "\n"
             "4. Be direct, concise, and helpful. Respond in English unless asked otherwise."
         )
     elif not kv_prefix_active and _small_context:
