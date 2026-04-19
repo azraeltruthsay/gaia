@@ -454,7 +454,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         pass
     try:
         _model_name_early = getattr(packet.header.model, 'name', '')
+        # Try exact match first, then check if any config key is a substring
         _model_cfg_early = config.MODEL_CONFIGS.get(_model_name_early, {})
+        if not _model_cfg_early:
+            for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
+                if _cfg_key in _model_name_early.lower() or _model_name_early.lower() in _cfg_key:
+                    _model_cfg_early = _cfg_val
+                    break
         _mml = _model_cfg_early.get('max_model_len', _context_window_early)
         if _mml and _mml < _context_window_early:
             _context_window_early = _mml
@@ -592,6 +598,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     try:
         _model_name = getattr(packet.header.model, 'name', '')
         _model_cfg = config.MODEL_CONFIGS.get(_model_name, {})
+        if not _model_cfg:
+            for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
+                if _cfg_key in _model_name.lower() or _model_name.lower() in _cfg_key:
+                    _model_cfg = _cfg_val
+                    break
         _max_model_len = _model_cfg.get('max_model_len', _context_window)
         if _max_model_len and _max_model_len < _context_window:
             _context_window = _max_model_len
