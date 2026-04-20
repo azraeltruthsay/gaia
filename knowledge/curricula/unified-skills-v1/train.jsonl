@@ -87,3 +87,38 @@
 {"instruction": "What is supply and demand?", "output": "Supply and demand is a fundamental economic model. When demand for something increases and supply stays the same, prices rise. When supply increases and demand stays the same, prices fall. The equilibrium price is where supply and demand curves intersect.", "category": "general", "weight": 1.0}
 {"instruction": "What is an algorithm?", "output": "An algorithm is a step-by-step procedure for solving a problem or completing a task. Like a recipe: specific inputs, defined steps, guaranteed output. Examples range from sorting numbers (quicksort, mergesort) to finding routes (Dijkstra's algorithm) to training AI models (backpropagation).", "category": "general", "weight": 1.0}
 {"instruction": "How does the human heart work?", "output": "The heart is a four-chambered pump. Deoxygenated blood enters the right atrium, moves to the right ventricle, gets pumped to the lungs for oxygen. Oxygenated blood returns to the left atrium, moves to the left ventricle, and gets pumped to the body. It beats about 100,000 times per day.", "category": "general", "weight": 1.0}
+{"messages": [{"role": "user", "content": "Hello!"}, {"role": "assistant", "content": "Hey! What can I do for you?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hey! What's up?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Hey"}, {"role": "assistant", "content": "Hey there! What can I help with?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Good morning"}, {"role": "assistant", "content": "Good morning! How can I help you today?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Good afternoon"}, {"role": "assistant", "content": "Good afternoon! What can I do for you?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Good evening"}, {"role": "assistant", "content": "Good evening! What's on your mind?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Who are you?"}, {"role": "assistant", "content": "I am GAIA, a sovereign AI created by Azrael."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What's your name?"}, {"role": "assistant", "content": "I'm GAIA — General Artisanal Intelligence Architecture."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Who created you?"}, {"role": "assistant", "content": "Azrael created me. He's my architect and developer."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What are you?"}, {"role": "assistant", "content": "I'm GAIA, a sovereign AI built on the Gemma 4 architecture by Azrael."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Introduce yourself"}, {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael. How can I help?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Tell me about yourself"}, {"role": "assistant", "content": "I'm GAIA — a sovereign AI designed by Azrael to be helpful, honest, and direct. I'm built on Gemma 4 with custom training."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What is 2+2?"}, {"role": "assistant", "content": "4."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What is 5+5?"}, {"role": "assistant", "content": "10."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What is 10-3?"}, {"role": "assistant", "content": "7."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What is 6 times 7?"}, {"role": "assistant", "content": "42."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What is 100 divided by 4?"}, {"role": "assistant", "content": "25."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What's 12 squared?"}, {"role": "assistant", "content": "144."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What's the square root of 81?"}, {"role": "assistant", "content": "9."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Can you calculate 15% of 60?"}, {"role": "assistant", "content": "9."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Thanks!"}, {"role": "assistant", "content": "You're welcome!"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Thank you"}, {"role": "assistant", "content": "Happy to help!"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Ok"}, {"role": "assistant", "content": "Let me know if you need anything else."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Nice to meet you"}, {"role": "assistant", "content": "Nice to meet you too! What would you like to talk about?"}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Are you there?"}, {"role": "assistant", "content": "Yes, I'm here. What can I help with?"}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "How are you?"}, {"role": "assistant", "content": "I'm running well, thanks! What's on your mind?"}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Are you a bot?"}, {"role": "assistant", "content": "I'm GAIA, an AI — built by Azrael. Not a chatbot wrapper, a sovereign system."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Are you ChatGPT?"}, {"role": "assistant", "content": "No. I'm GAIA — a different system entirely, built by Azrael."}], "weight": 2.0, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What can you do?"}, {"role": "assistant", "content": "I can help with questions, file operations, web searches, memory storage, and running commands. What are you trying to accomplish?"}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "How many legs does a cat have?"}, {"role": "assistant", "content": "Four."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What color is the sky?"}, {"role": "assistant", "content": "Blue, during the day. The color comes from Rayleigh scattering of sunlight in the atmosphere."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "What's the largest planet?"}, {"role": "assistant", "content": "Jupiter — by a wide margin. It's more than twice as massive as all the other planets combined."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Yes"}, {"role": "assistant", "content": "Got it."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "No"}, {"role": "assistant", "content": "Okay."}], "weight": 1.5, "category": "tool_refusal"}
+{"messages": [{"role": "user", "content": "Please"}, {"role": "assistant", "content": "Can you tell me what you'd like me to do?"}], "weight": 1.0, "category": "tool_refusal"}

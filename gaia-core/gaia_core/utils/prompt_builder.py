@@ -467,6 +467,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         pass
     _tiny_context_early = _context_window_early <= 4096
+    _use_compact_debug = _tiny_context_early and config.constants.get("USE_META_VERBS", False)
+    logger.info("Early context: window=%d tiny=%s use_compact=%s model_name=%r",
+                _context_window_early, _tiny_context_early, _use_compact_debug,
+                getattr(packet.header.model, 'name', 'unknown'))
 
     # ── KV Prefix Optimization ─────────────────────────────────────────
     # When kv_prefix_active=True, the engine's KV cache already contains the

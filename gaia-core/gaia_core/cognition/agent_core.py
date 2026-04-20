@@ -4420,6 +4420,13 @@ class AgentCore:
             self.logger.info("Reflex bypass: keyword match in '%s' — routing to full pipeline", user_input[:60])
             return False
 
+        # Nano is deprecated in Sovereign Duality — skip reflex entirely
+        # when nano is not enabled in config, even if it's in the model pool
+        # (the pool contains a socat proxy to Core for backward compat).
+        nano_cfg = self.config.MODEL_CONFIGS.get("nano", {})
+        if not nano_cfg.get("enabled", False):
+            return False
+
         from gaia_common.utils.immune_system import is_system_irritated
         return is_short and not is_system_irritated() and "nano" in self.model_pool.models
 

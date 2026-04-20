@@ -1227,6 +1227,9 @@ class AgentCore:
                     is_factual = False
                     logger.info("[MODEL_SELECT] Follow-up reference detected with session history — suppressing trivial classification")
 
+            # 1a. Nano Fast-Path — DEPRECATED in Sovereign Duality.
+            # Core (E4B) now handles all triage directly.
+            # Only route to Nano if it's explicitly enabled (backward compat).
             # Nano routing DISABLED — Sovereign Duality uses Core for all triage.
             # The "nano" model pool entry is a socat proxy to Core's engine.
             has_nano = False
@@ -2116,6 +2119,7 @@ class AgentCore:
             _grounding_ctx = None
             try:
                 from gaia_core.cognition.knowledge_router import ground_query
+                logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
                 _grounding_ctx = ground_query(
                     query=user_input,
                     intent=plan.intent if plan else "other",
@@ -4416,6 +4420,13 @@ class AgentCore:
             self.logger.info("Reflex bypass: keyword match in '%s' — routing to full pipeline", user_input[:60])
             return False
 
+        # Nano is deprecated in Sovereign Duality — skip reflex entirely
+        # when nano is not enabled in config, even if it's in the model pool
+        # (the pool contains a socat proxy to Core for backward compat).
+        nano_cfg = self.config.MODEL_CONFIGS.get("nano", {})
+        if not nano_cfg.get("enabled", False):
+            return False
+
         from gaia_common.utils.immune_system import is_system_irritated
         return is_short and not is_system_irritated() and "nano" in self.model_pool.models
 
@@ -5341,10 +5352,11 @@ RESULT: COMPLEX (reason: <brief reason>)
             # ── Confidence-Gated Epistemic Grounding ─────────────────
             # Before returning, check if the response shows low confidence
             # or self-conflation. If so, auto-search and regenerate grounded.
-            # SKIP confidence gate if the Knowledge Router already injected
-            # verified_local data AND the response uses that data.
+            # SKIP if the Knowledge Router already injected verified_local
+            # data AND the response uses that data (avoids double-grounding).
             _already_grounded = False
             if _grounding_text:
+                # Extract key data from grounding (e.g. time values, facts)
                 import re as _gre
                 _data_tokens = set(_gre.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?', _grounding_text))
                 if _data_tokens and any(t.lower() in content.lower() for t in _data_tokens):
