@@ -777,11 +777,26 @@ class ConsciousnessMatrix:
 
                 # Auto-reconcile: if target != actual, transition the tier.
                 # Handles both upshifts (load) and downshifts (unload/demote).
+                #
+                # RESPECT MANUAL LOADS: if actual > target (user manually
+                # upgraded a tier beyond the configured preset), promote the
+                # TARGET to match the actual rather than demoting. This lets
+                # users manually load GPU models without the matrix unloading
+                # them every 10 seconds. Explicit downshift requests
+                # (apply_configuration) will still work normally.
                 for tier, state in self._tiers.items():
                     if state.ok or state.transitioning:
                         continue
                     if state.target != state.actual and state.healthy:
-                        direction = "up" if state.target > state.actual else "down"
+                        if state.actual > state.target:
+                            # Manual upgrade detected — promote target to match
+                            logger.info(
+                                "Manual upgrade detected: %s actual=%s > target=%s — promoting target to match",
+                                tier, state.actual.name, state.target.name,
+                            )
+                            state.target = state.actual
+                            continue
+                        direction = "up"
                         logger.warning(
                             "Matrix mismatch: %s target=%s actual=%s — auto-reconciling (%sshift)",
                             tier, state.target.name, state.actual.name, direction,
