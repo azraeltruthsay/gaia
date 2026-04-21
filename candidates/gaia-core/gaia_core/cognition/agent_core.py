@@ -288,9 +288,9 @@ class AgentCore:
 
             # 1. KG probe (MemPalace)
             try:
-                kg_result = asyncio.run(mcp_client.call_jsonrpc("kg_query", {
+                kg_result = mcp_client.call_jsonrpc("kg_query", {
                     "query": entity, "top_k": kg_top_k
-                }))
+                })
                 if kg_result.get("ok"):
                     kg_data = kg_result.get("response", {}).get("result", {})
                     hits = kg_data.get("results", []) if isinstance(kg_data, dict) else []
@@ -303,9 +303,9 @@ class AgentCore:
             # 2. Vector probe (semantic search)
             if not entry.get("kg"):
                 try:
-                    vec_result = asyncio.run(mcp_client.call_jsonrpc("memory_query", {
+                    vec_result = mcp_client.call_jsonrpc("memory_query", {
                         "query": entity, "top_k": vector_top_k
-                    }))
+                    })
                     if vec_result.get("ok"):
                         vec_data = vec_result.get("response", {}).get("result", {})
                         hits = vec_data.get("results", []) if isinstance(vec_data, dict) else []
@@ -1586,11 +1586,11 @@ class AgentCore:
                     if not probe_seeded:
                         # No probe seed — run the standard RAG query
                         self.logger.info(f"Performing RAG query on knowledge base: {knowledge_base_name}")
-                        retrieved_docs = asyncio.run(mcp_client.embedding_query(
+                        retrieved_docs = mcp_client.embedding_query(
                             packet.content.original_prompt,
                             top_k=3,
                             knowledge_base_name=knowledge_base_name
-                        ))
+                        )
                         if retrieved_docs and retrieved_docs.get("ok"):
                             docs = retrieved_docs.get("results", [])
                             if docs:
@@ -3716,10 +3716,10 @@ class AgentCore:
 
             # Step 1: Find relevant documents
             self.logger.info(f"Searching for relevant documents for query: {packet.content.original_prompt}")
-            found_docs = asyncio.run(mcp_client.call_jsonrpc(
+            found_docs = mcp_client.call_jsonrpc(
                 "find_relevant_documents",
                 {"query": packet.content.original_prompt, "knowledge_base_name": knowledge_base_name}
-            ))
+            )
             self.logger.info(f"Found documents: {found_docs}")
 
             response_body = found_docs.get("response", {})
@@ -3733,20 +3733,20 @@ class AgentCore:
 
                 # Step 2: Embed the document
                 self.logger.info(f"Embedding document: {doc_path}")
-                embed_result = asyncio.run(mcp_client.call_jsonrpc(
+                embed_result = mcp_client.call_jsonrpc(
                     "embed_documents",
                     {"knowledge_base_name": knowledge_base_name, "file_path": doc_path}
-                ))
+                )
 
                 if embed_result and embed_result.get("ok"):
                     self.logger.info("Document embedded successfully. Re-running RAG query.")
                     
                     # Step 3: Re-run RAG query
-                    retrieved_docs = asyncio.run(mcp_client.embedding_query(
+                    retrieved_docs = mcp_client.embedding_query(
                         packet.content.original_prompt,
                         top_k=3,
                         knowledge_base_name=knowledge_base_name
-                    ))
+                    )
 
                     if retrieved_docs and retrieved_docs.get("ok"):
                         docs = retrieved_docs.get("results", [])
@@ -4930,7 +4930,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     "1) Call MCP list_tools.",
                     "2) Return the list to the operator."
                 ]}, session_id, source=source, destination_context=_meta)
-                resp = asyncio.run(mcp_client.call_jsonrpc("list_tools", {}))
+                resp = mcp_client.call_jsonrpc("list_tools", {})
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     tools = resp["response"].get("result") or []
                     return "Available MCP tools:\n- " + "\n- ".join(str(t) for t in tools)
@@ -4986,7 +4986,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
+                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -5011,7 +5011,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 query_term = search_term or raw
 
                 # Use the derived query; bounded search on the sidecar
-                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
+                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -5021,7 +5021,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                         # If exactly one match, attempt to read and summarize it.
                         if len(matches) == 1:
                             path = matches[0]
-                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
+                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -5063,7 +5063,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 for p_raw in path_hits:
                     p = Path(p_raw).resolve()
                     if any(str(p).startswith(str(a)) for a in allow_roots) and p.is_file():
-                        read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": str(p)}))
+                        read = mcp_client.call_jsonrpc("read_file", {"path": str(p)})
                         if read.get("ok") and isinstance(read.get("response"), dict):
                             rres = read["response"].get("result") or read["response"]
                             content = ""
@@ -5093,7 +5093,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     search_term = max(tokens, key=len)
                 query_term = search_term or raw
 
-                resp = asyncio.run(mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50}))
+                resp = mcp_client.call_jsonrpc("find_files", {"query": query_term, "max_depth": 5, "max_results": 50})
                 if resp.get("ok") and isinstance(resp.get("response"), dict):
                     result = resp["response"].get("result") or resp["response"].get("result", resp["response"])
                     if isinstance(result, dict) and result.get("ok"):
@@ -5102,7 +5102,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                             return "I couldn't find that file. Share a path or a more specific filename."
                         if len(matches) == 1:
                             path = matches[0]
-                            read = asyncio.run(mcp_client.call_jsonrpc("read_file", {"path": path}))
+                            read = mcp_client.call_jsonrpc("read_file", {"path": path})
                             if read.get("ok") and isinstance(read.get("response"), dict):
                                 rres = read["response"].get("result") or read["response"]
                                 content = ""
@@ -5487,7 +5487,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             results = []
             for search_params in search_attempts:
                 self.logger.info(f"Web recitation search: {search_params}")
-                resp = asyncio.run(mcp_client.call_jsonrpc("web_search", search_params))
+                resp = mcp_client.call_jsonrpc("web_search", search_params)
 
                 if not resp.get("ok"):
                     self.logger.warning("web_search failed for recitation: %s", resp.get("error"))
@@ -5517,7 +5517,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     continue
                 try:
                     self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
-                    fetch_resp = asyncio.run(mcp_client.call_jsonrpc("web_fetch", {"url": url}))
+                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
 
                     if not fetch_resp.get("ok"):
                         continue
@@ -5784,14 +5784,14 @@ Present {doc_title}:"""
 
             # Also store via MCP for auditing (non-critical)
             try:
-                asyncio.run(mcp_client.call_jsonrpc("fragment_write", {
+                mcp_client.call_jsonrpc("fragment_write", {
                     "parent_request_id": request_id,
                     "sequence": fragment_sequence,
                     "content": content,
                     "continuation_hint": truncation_info.get("continuation_hint", ""),
                     "is_complete": not truncation_info["truncated"],
                     "token_count": truncation_info.get("approx_tokens", 0)
-                }))
+                })
             except Exception as _mcp_exc:
                 logger.debug("AgentCore: MCP fragment storage failed (optional): %s", _mcp_exc)
 
@@ -5843,7 +5843,7 @@ Present {doc_title}:"""
 
         # Cleanup: clear fragments from MCP storage
         try:
-            asyncio.run(mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id}))
+            mcp_client.call_jsonrpc("fragment_clear", {"parent_request_id": request_id})
         except Exception as _frag_exc:
             logger.debug("AgentCore: MCP fragment cleanup failed (non-fatal): %s", _frag_exc)
 
@@ -6150,7 +6150,7 @@ Assembled response:"""
                         self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
                 elif bypass:
                     # In bypass mode, attempt direct write
-                    asyncio.run(mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree}))
+                    mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
                     try:
                         rescue_helper.sketch(
                             "DirectoryTreeLatest",
@@ -6168,7 +6168,7 @@ Assembled response:"""
             return tree + ("\n\n(truncated)" if truncated_flag else "")
 
         if bypass:
-            resp = asyncio.run(mcp_client.call_jsonrpc("list_tree", params))
+            resp = mcp_client.call_jsonrpc("list_tree", params)
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):
@@ -6210,7 +6210,7 @@ Assembled response:"""
             return "\n".join(files)
 
         if bypass:
-            resp = asyncio.run(mcp_client.call_jsonrpc("list_files", params))
+            resp = mcp_client.call_jsonrpc("list_files", params)
             if resp.get("ok") and isinstance(resp.get("response"), dict):
                 result = resp["response"].get("result") or {}
                 if result.get("ok"):

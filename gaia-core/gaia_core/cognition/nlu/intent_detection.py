@@ -862,6 +862,13 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
 
     # If embedding had a tentative result, use it now (heuristics didn't override)
     if _embed_intent and _embed_intent != "other":
+        # Extra guard: file-ops intents require explicit file-like keywords.
+        # Without this, questions like "What is the GAIA Project?" get
+        # misclassified as read_file based on embedding similarity alone,
+        # triggering the file reader pipeline and returning nonsense.
+        if _embed_intent in {"read_file", "write_file", "find_file"} and not _mentions_file_like_action(text):
+            logger.info("Embed intent %s rejected (no file keywords): treating as 'chat'", _embed_intent)
+            return "chat"
         logger.info("Embed intent accepted (post-heuristic): %s (score=%.3f)", _embed_intent, _embed_score)
         return _embed_intent
 
