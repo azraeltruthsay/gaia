@@ -232,20 +232,80 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Tokenize
-    print("Tokenizing...")
+    # Tokenize with ASSISTANT-ONLY LABEL MASKING
+    # ─────────────────────────────────────────────
+    # Standard instruction tuning: mask system/user/tool tokens with -100 so
+    # loss is ONLY computed on assistant response tokens. Without masking,
+    # the model gets "rewarded" for generating the system prompt (same ~100
+    # tokens across every example), diluting the behavior learning signal.
+    #
+    # Gemma 4 uses special tokens <|turn>(id 105) and <turn|>(id 106) to
+    # mark turn boundaries. Format: <|turn>ROLE<turn|>\n CONTENT
+    # We walk tokens, detect <|turn>assistant<turn|>, and mask everything
+    # outside assistant content ranges with -100.
+    print("Tokenizing with assistant-only label masking...")
     from datasets import Dataset
+
+    TURN_OPEN = 105   # <|turn>
+    TURN_CLOSE = 106  # <turn|>
+    # Get the "assistant" token id (should be a single token in Gemma 4 vocab)
+    _assistant_ids = tokenizer("assistant", add_special_tokens=False)["input_ids"]
+    # Newline token id (for the \n after <turn|>)
+    _newline_ids = tokenizer("\n", add_special_tokens=False)["input_ids"]
+    _newline_id = _newline_ids[0] if _newline_ids else None
+
+    def _mask_labels(input_ids: list, attention_mask: list) -> list:
+        """Mask labels: -100 for non-assistant tokens, actual token_id for assistant."""
+        labels = [-100] * len(input_ids)
+        n = len(input_ids)
+        i = 0
+        while i < n:
+            # Look for <|turn>assistant<turn|>
+            if input_ids[i] == TURN_OPEN and i + len(_assistant_ids) + 1 < n:
+                match = all(
+                    input_ids[i + 1 + j] == _assistant_ids[j]
+                    for j in range(len(_assistant_ids))
+                )
+                close_idx = i + 1 + len(_assistant_ids)
+                if match and input_ids[close_idx] == TURN_CLOSE:
+                    # Assistant turn detected. Content starts after <turn|> (+ optional \n)
+                    content_start = close_idx + 1
+                    if content_start < n and _newline_id is not None and input_ids[content_start] == _newline_id:
+                        content_start += 1
+                    # Content ends at next <|turn> or padding start
+                    content_end = content_start
+                    while content_end < n and input_ids[content_end] != TURN_OPEN and attention_mask[content_end] == 1:
+                        content_end += 1
+                    # Mark content tokens as trainable
+                    for k in range(content_start, content_end):
+                        labels[k] = input_ids[k]
+                    i = content_end
+                    continue
+            i += 1
+        return labels
+
     def tokenize_fn(examples):
-        return tokenizer(
+        enc = tokenizer(
             examples["text"],
             truncation=True,
             max_length=MAX_SEQ_LENGTH,
             padding="max_length",
         )
+        enc["labels"] = [
+            _mask_labels(ids, mask)
+            for ids, mask in zip(enc["input_ids"], enc["attention_mask"])
+        ]
+        return enc
+
     dataset = Dataset.from_dict({"text": texts})
     tokenized = dataset.map(tokenize_fn, batched=True, remove_columns=["text"])
-    tokenized = tokenized.map(lambda x: {"labels": x["input_ids"]})
+
+    # Sanity check: verify masking actually happened
+    _sample_labels = tokenized[0]["labels"]
+    _n_trainable = sum(1 for x in _sample_labels if x != -100)
+    _n_masked = sum(1 for x in _sample_labels if x == -100)
     print(f"  Dataset: {len(tokenized)} samples, max_len={MAX_SEQ_LENGTH}")
+    print(f"  Sample 0: {_n_trainable} trainable tokens, {_n_masked} masked (-100)")
 
     # Check token lengths
     token_lengths = [sum(1 for t in tokenizer(text)["input_ids"]) for text in texts[:20]]
