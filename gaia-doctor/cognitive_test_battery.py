@@ -1208,9 +1208,12 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-test timeout")
     parser.add_argument("--target", default="prime", help="Model target: prime, core, or nano")
     parser.add_argument("--no-think", action="store_true", help="Suppress <think> blocks")
+    parser.add_argument("--full-pipeline", action="store_true",
+                        help="Test through /process_packet (real pipeline: system prompt, grounding, tools)")
 
     args = parser.parse_args()
     ids = args.ids.split(",") if args.ids else None
     result = run_battery(endpoint=args.endpoint, section=args.section, ids=ids,
-                         timeout=args.timeout, target=args.target, no_think=args.no_think)
+                         timeout=args.timeout, target=args.target, no_think=args.no_think,
+                         full_pipeline=args.full_pipeline)
     print(json.dumps(result, indent=2))

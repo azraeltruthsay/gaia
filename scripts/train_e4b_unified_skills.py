@@ -50,21 +50,83 @@ TARGET_LOSS = 0.3
 PATIENCE = 5
 
 
+import random
+from datetime import datetime, timezone, timedelta
+
+
+# The compact system prompt — matches exactly what the inference pipeline
+# injects when USE_META_VERBS=true (see gaia-core/utils/prompt_builder.py).
+# Training-inference parity: model learns to behave as it's prompted.
+_COMPACT_SYSTEM_TEMPLATE = (
+    "You are GAIA, created by Azrael. Sovereign AI.\n"
+    "Clock: {clock}\n"
+    "Rules: Answer topics directly (don't self-relate). "
+    "Never fabricate facts — say 'I don't know' or search. "
+    "Be concise.\n"
+    "Tools: search(query) do(skill,input) learn(task,result,success) "
+    "remember(fact) ask(question)\n"
+    "Format: <|tool>verb(param=value)<tool|>\n"
+    "Results arrive as: <|tool_response>...<tool_response|>\n"
+    "Use search() first to find the right skill, then do() to execute it."
+)
+
+
+def _random_realistic_clock() -> str:
+    """Generate a randomized realistic clock value for training.
+
+    Spans all times of day, all days of week, spread across 2024-2026.
+    Forces the model to USE the clock from context rather than memorizing
+    a specific time.
+    """
+    year = random.choice([2024, 2025, 2026])
+    month = random.randint(1, 12)
+    day = random.randint(1, 28)
+    hour = random.randint(0, 23)
+    minute = random.choice([0, 5, 10, 15, 22, 30, 37, 45, 52])
+    tz_label = random.choice(["PDT", "PST", "EDT", "EST"])
+    dt = datetime(year, month, day, hour, minute, tzinfo=timezone(timedelta(hours=-7)))
+    # Format: "7:45 AM PDT, Wednesday April 17, 2026"
+    return dt.strftime(f"%-I:%M %p {tz_label}, %A %B %d, %Y")
+
+
+def _build_compact_system_prompt() -> str:
+    """Build a compact system prompt with randomized clock for training.
+
+    Matches the inference-time prompt format so the model trains on the
+    same distribution it will see in production.
+    """
+    return _COMPACT_SYSTEM_TEMPLATE.format(clock=_random_realistic_clock())
+
+
 def format_single_turn(instruction: str, output: str) -> str:
-    """Format a single-turn training pair in Gemma 4 chat format."""
+    """Format a single-turn training pair with realistic system prompt.
+
+    Prepends the compact system prompt (randomized clock) so training
+    matches the inference pipeline.
+    """
+    system = _build_compact_system_prompt()
     return (
+        f"<|turn>system<turn|>\n{system}\n"
         f"<|turn>user<turn|>\n{instruction}\n"
         f"<|turn>assistant<turn|>\n{output}<turn|>"
     )
 
 
 def format_multi_turn(messages: list) -> str:
-    """Format a multi-turn conversation in Gemma 4 chat format.
+    """Format a multi-turn conversation with realistic system prompt.
 
-    Handles user, assistant, and tool (result injection) roles.
-    Tool results are formatted as system messages with <|result|> tags.
+    Prepends the compact system prompt (randomized clock) so training
+    matches the inference pipeline. Handles user, assistant, and tool
+    (result injection) roles.
     """
     parts = []
+
+    # Inject compact system prompt unless caller already provided a system role
+    has_system = any(m["role"] == "system" for m in messages[:1])
+    if not has_system:
+        system = _build_compact_system_prompt()
+        parts.append(f"<|turn>system<turn|>\n{system}")
+
     for msg in messages:
         role = msg["role"]
         content = msg["content"]

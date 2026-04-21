@@ -532,8 +532,14 @@ class ModelPool:
                 }
 
             # Remote inference via NANO_ENDPOINT (llama-server container)
+            # Respect gaia_constants.json enabled flag — if explicitly disabled
+            # (Sovereign Duality deprecates Nano), don't resurrect via env var.
             nano_endpoint = os.getenv("NANO_ENDPOINT")
-            if nano_endpoint:
+            _existing_nano = self.config.MODEL_CONFIGS.get("nano", {})
+            _nano_explicitly_disabled = (
+                "enabled" in _existing_nano and _existing_nano.get("enabled") is False
+            )
+            if nano_endpoint and not _nano_explicitly_disabled:
                 nano_model = os.getenv("NANO_MODEL", "/models/Gemma4-E2B-GAIA-Nano-v1")
                 self.config.MODEL_CONFIGS["nano"] = {
                     "type": "managed",
@@ -543,6 +549,8 @@ class ModelPool:
                     "max_model_len": 2048,
                 }
                 logger.info("NANO_ENDPOINT set: nano -> GAIA Engine @ %s", nano_endpoint)
+            elif _nano_explicitly_disabled:
+                logger.info("NANO_ENDPOINT set but nano.enabled=False in config — keeping disabled")
 
             # Remote inference via CORE_CPU_ENDPOINT (GAIA Engine in gaia-core)
             core_cpu_endpoint = os.getenv("CORE_CPU_ENDPOINT")
