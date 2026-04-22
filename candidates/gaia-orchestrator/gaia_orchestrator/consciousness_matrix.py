@@ -784,7 +784,13 @@ class ConsciousnessMatrix:
                 # users manually load GPU models without the matrix unloading
                 # them every 10 seconds. Explicit downshift requests
                 # (apply_configuration) will still work normally.
+                #
+                # SKIP NANO: deprecated in Sovereign Duality. The gaia-nano
+                # container is a socat proxy to Core, not a real tier. Trying
+                # to load/unload it triggers spurious GPU worker spawns.
                 for tier, state in self._tiers.items():
+                    if tier == "nano":
+                        continue
                     if state.ok or state.transitioning:
                         continue
                     if state.target != state.actual and state.healthy:
