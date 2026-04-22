@@ -45,8 +45,45 @@ def load_questions() -> list:
     return questions
 
 
+PRIME_SYSTEM_PROMPT = (
+    "You are GAIA-Prime, the Sovereign tier — a deep reasoner. "
+    "Core handles quick chat and tools; you handle architecture, design, and complex reasoning.\n"
+    "Rules: Think carefully before answering. Distinguish verified knowledge from training data. "
+    "Never fabricate facts or sources. When uncertain, say so and explain what would resolve it."
+)
+
+
 def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90) -> str:
-    """Send prompt via full pipeline (/process_packet). Returns stripped response."""
+    """Send prompt to the appropriate model.
+
+    For 'prime', talks directly to gaia-prime engine at :7777 (bypasses Core pipeline).
+    For 'core' and others, uses Core's /process_packet pipeline.
+    """
+    # Direct Prime test — bypasses Core pipeline
+    if target == "prime":
+        prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://localhost:7777")
+        payload = {
+            "model": "prime",
+            "messages": [
+                {"role": "system", "content": PRIME_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 400,
+            "temperature": 0.3,
+        }
+        req = Request(
+            f"{prime_endpoint}/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode())
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            return f"[ERROR: {e}]"
+
+    # Core — through full pipeline
     packet = {
         "version": "v0.4",
         "header": {
@@ -74,7 +111,6 @@ def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90) -> s
     try:
         with urlopen(req, timeout=timeout) as resp:
             lines = resp.read().decode().strip().split("\n")
-            # Collect token values from NDJSON stream
             tokens = []
             for line in lines:
                 try:
