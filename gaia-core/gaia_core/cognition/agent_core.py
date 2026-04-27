@@ -40,6 +40,8 @@ from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_p
 from gaia_core.cognition.cognitive_dispatcher import process_execution_results
 from gaia_core.cognition.knowledge_enhancer import enhance_packet
 from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect, run_attachment_ingestion
+from gaia_core.cognition import kb_approval
+from gaia_core.cognition import research_router
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
@@ -882,7 +884,42 @@ class AgentCore:
         # Apply entity validation/correction to user input
         if user_input:
             user_input = self.entity_validator.correct_text(user_input)
-            
+
+        # KB write approval — if the previous turn parked a pending write,
+        # this turn might be the user's confirm/cancel/trust response. Handle
+        # it before falling into the normal cognitive pipeline.
+        try:
+            _approval_session = self.session_manager.get_or_create_session(session_id)
+            _pending = kb_approval.get_pending_write(_approval_session)
+            if _pending and user_input:
+                _resp = kb_approval.classify_user_response(user_input)
+                if _resp["action"] != "none":
+                    yield from self._handle_pending_write_response(
+                        session_id=session_id,
+                        source=source,
+                        metadata=_metadata,
+                        pending=_pending,
+                        response=_resp,
+                    )
+                    return
+        except Exception:
+            logger.debug("Pending-write approval check failed, continuing", exc_info=True)
+
+        # Research orchestration — "research X", "look into X", etc. fan out
+        # across all KBs + web search and synthesize a brief in a single turn.
+        try:
+            _research_topic = research_router.detect_research_intent(user_input)
+            if _research_topic:
+                yield from self._handle_research_request(
+                    topic=_research_topic,
+                    session_id=session_id,
+                    source=source,
+                    metadata=_metadata,
+                )
+                return
+        except Exception:
+            logger.debug("Research router pre-check failed, continuing", exc_info=True)
+
         from gaia_core.utils.prompt_builder import build_from_packet # Assumes this is updated for v0.3
 
         import time as _time
@@ -2093,7 +2130,24 @@ class AgentCore:
                     source=source,
                     metadata=_metadata
                 )
-    
+
+                # KB write parked for approval — yield the prompt verbatim and
+                # bail out of the rest of the pipeline. LLM narration is skipped
+                # so the user sees the exact wording they need to reply to.
+                _exec_result = packet.tool_routing.execution_result if packet.tool_routing else None
+                _exec_output = (_exec_result.output if _exec_result else None) or {}
+                if isinstance(_exec_output, dict) and _exec_output.get("pending_approval"):
+                    _msg = _exec_output.get("message", "Pending approval.")
+                    yield {"type": "token", "value": _msg}
+                    yield {"type": "flush"}
+                    self.session_manager.add_message(session_id, "assistant", _msg)
+                    ts_write({
+                        "type": "kb_approval", "action": "prompted",
+                        "kb_name": _exec_output.get("kb_name"),
+                        "path": _exec_output.get("path"),
+                    }, session_id, source=source, destination_context=_metadata)
+                    return
+
                 # If tool was executed successfully, we may have results to include
                 if packet.tool_routing and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED:
                     # Tool was executed - the result is now in the packet
@@ -7670,7 +7724,7 @@ Start your response with the first line of the file."""
         }, session_id, source=source, destination_context=_meta)
 
         try:
-            result = self._execute_mcp_tool(primary_tool)
+            result = self._execute_mcp_tool(primary_tool, session_id=session_id)
             packet.tool_routing.execution_result = result
             packet.tool_routing.execution_status = (
                 ToolExecutionStatus.EXECUTED if result.success
@@ -7736,7 +7790,147 @@ Start your response with the first line of the file."""
 
         return packet
 
-    def _execute_mcp_tool(self, tool: SelectedTool) -> ToolExecutionResult:
+    def _handle_pending_write_response(
+        self,
+        session_id: str,
+        source: str,
+        metadata: dict,
+        pending: Dict[str, Any],
+        response: Dict[str, Any],
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Resolve a pending KB write based on the user's confirm/cancel/trust reply.
+
+        Yields the streaming tokens for the response and clears the pending state.
+        Designed to bypass the normal LLM narration so the wording is exact and
+        the user can trust what gets written.
+        """
+        session = self.session_manager.get_or_create_session(session_id)
+        action = response["action"]
+        kb_name = pending.get("kb_name", "")
+        params = pending.get("params") or {}
+        path = params.get("path", "")
+        content = params.get("content", "")
+
+        def _yield(text: str):
+            yield {"type": "token", "value": text}
+            yield {"type": "flush"}
+
+        if action == "cancel":
+            kb_approval.clear_pending_write(session)
+            self.session_manager._save_state()
+            self.session_manager.add_message(session_id, "assistant", f"Cancelled. I won't write {path}.")
+            ts_write({"type": "kb_approval", "action": "cancel", "path": path}, session_id, source=source, destination_context=metadata)
+            yield from _yield(f"Cancelled. I won't write `{path}`.")
+            return
+
+        # confirm or trust → execute the write
+        grant_trust = (action == "trust")
+        if grant_trust:
+            requested_kb = (response.get("kb_name") or "").lower()
+            if requested_kb and requested_kb != kb_name.lower():
+                # User typed `trust X` but pending write is for KB Y — refuse to
+                # promote a different KB silently. Treat as cancel + explain.
+                kb_approval.clear_pending_write(session)
+                self.session_manager._save_state()
+                msg = (
+                    f"The pending write is for `{kb_name}`, not `{requested_kb}`. "
+                    f"Cancelled the pending write — re-issue it if you meant `{kb_name}`."
+                )
+                self.session_manager.add_message(session_id, "assistant", msg)
+                ts_write({"type": "kb_approval", "action": "trust_mismatch",
+                          "pending_kb": kb_name, "requested_kb": requested_kb},
+                         session_id, source=source, destination_context=metadata)
+                yield from _yield(msg)
+                return
+            kb_approval.add_trusted_kb(session, kb_name)
+
+        try:
+            write_result = mcp_client.ai_write(path, content)
+        except Exception as e:
+            logger.exception("Pending write execution failed: %s", e)
+            kb_approval.clear_pending_write(session)
+            self.session_manager._save_state()
+            msg = f"Tried to write `{path}` but it failed: {e}"
+            self.session_manager.add_message(session_id, "assistant", msg)
+            yield from _yield(msg)
+            return
+
+        kb_approval.clear_pending_write(session)
+        self.session_manager._save_state()
+
+        if not write_result.get("ok"):
+            err = write_result.get("error") or "unknown error"
+            msg = f"Tried to write `{path}` but it failed: {err}"
+            self.session_manager.add_message(session_id, "assistant", msg)
+            yield from _yield(msg)
+            return
+
+        bytes_written = write_result.get("bytes", len((content or "").encode("utf-8")))
+        if grant_trust:
+            msg = (
+                f"Trusted `{kb_name}` for this session — further writes there will go through "
+                f"without asking. Wrote {bytes_written} bytes to `{path}`."
+            )
+        else:
+            msg = f"Wrote {bytes_written} bytes to `{path}`."
+
+        self.session_manager.add_message(session_id, "assistant", msg)
+        ts_write({"type": "kb_approval", "action": action, "path": path,
+                  "kb_name": kb_name, "trusted": grant_trust, "bytes": bytes_written},
+                 session_id, source=source, destination_context=metadata)
+        yield from _yield(msg)
+
+    def _handle_research_request(
+        self,
+        topic: str,
+        session_id: str,
+        source: str,
+        metadata: dict,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Run the multi-source research pipeline and yield the synthesised brief."""
+        ts_write({"type": "research", "stage": "start", "topic": topic},
+                 session_id, source=source, destination_context=metadata)
+
+        # Synthesis is reasoning-heavy — prefer Prime (deep reasoner) over
+        # Core (Operator). Core's E4B base hallucinates badly when asked to
+        # synthesize over multi-source citations.
+        synth_model = None
+        synth_model_name = None
+        for cand in ("prime", "cpu_prime", "core"):
+            try:
+                m = self.model_pool.acquire_model(cand)
+                if m is not None:
+                    synth_model = m
+                    synth_model_name = cand
+                    break
+            except Exception:
+                continue
+
+        try:
+            result = research_router.run_research(
+                topic,
+                model_pool=self.model_pool if synth_model else None,
+                selected_model_name=synth_model_name or "core",
+            )
+        finally:
+            if synth_model_name:
+                try:
+                    self.model_pool.release_model(synth_model_name)
+                except Exception:
+                    pass
+
+        rendered = research_router.format_research_response(result)
+        ts_write({
+            "type": "research", "stage": "complete", "topic": topic,
+            "sources": result.get("sources_queried", []),
+            "elapsed_ms": result.get("elapsed_ms", 0.0),
+        }, session_id, source=source, destination_context=metadata)
+
+        yield {"type": "token", "value": rendered}
+        yield {"type": "flush"}
+        self.session_manager.add_message(session_id, "assistant", rendered)
+
+    def _execute_mcp_tool(self, tool: SelectedTool, session_id: str = "") -> ToolExecutionResult:
         """
         Execute an MCP tool and return the result.
         """
@@ -7765,11 +7959,40 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable.",
                     )
+                target_path = (tool.params or {}).get("path", "")
+                content = (tool.params or {}).get("content", "")
+                kb_name = kb_approval.resolve_kb_name(target_path)
+
+                # KB writes require user trust — first write per session per KB
+                # parks a pending state and emits an approval prompt instead of
+                # executing. Confirmation arrives on the next user turn and is
+                # handled in _handle_pending_write_response.
+                if kb_name and session_id:
+                    session = self.session_manager.get_or_create_session(session_id)
+                    if not kb_approval.is_kb_trusted(session, kb_name):
+                        kb_approval.set_pending_write(
+                            session, "file", tool.params or {}, kb_name
+                        )
+                        self.session_manager._save_state()
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        return ToolExecutionResult(
+                            success=True,
+                            output={
+                                "ok": True,
+                                "pending_approval": True,
+                                "kb_name": kb_name,
+                                "path": target_path,
+                                "bytes": len((content or "").encode("utf-8")),
+                                "message": kb_approval.build_approval_prompt(
+                                    kb_name, target_path, content
+                                ),
+                            },
+                            error=None,
+                            execution_time_ms=elapsed_ms,
+                        )
+
                 # mcp_client.ai_write is sync — no asyncio.run wrapper.
-                result = mcp_client.ai_write(
-                    tool.params.get("path", ""),
-                    tool.params.get("content", ""),
-                )
+                result = mcp_client.ai_write(target_path, content)
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 return ToolExecutionResult(
                     success=result.get("ok", False),
