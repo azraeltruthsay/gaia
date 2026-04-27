@@ -246,7 +246,7 @@
     "REVIEW_TEMPERATURE": 0.3,
     "CONFIDENCE_THRESHOLD": 0.7,
     "MAX_REINJECTIONS": 3,
-    "ALLOW_WRITE_TOOLS": false,
+    "ALLOW_WRITE_TOOLS": true,
     "ALLOW_EXECUTE_TOOLS": false,
     "ESSENTIAL_TOOLS": [
       "read_file",

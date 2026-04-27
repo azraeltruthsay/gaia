@@ -143,6 +143,21 @@ class SessionHistoryIndexer:
         self._maybe_generate_topic_summary()
         self._save()
 
+    # Similarity thresholds for all-MiniLM-L6-v2: 0.5+ is "related",
+    # 0.7+ is "strong match". The prior floors (0.15/0.10) were pure noise
+    # — a one-word greeting scored 0.15 against a Jabberwocky recital and
+    # got pulled in, which confused the model into confabulation.
+    _MIN_TURN_SIMILARITY = 0.45
+    _MIN_TOPIC_SIMILARITY = 0.40
+    # Short greetings have no meaningful semantic content to retrieve on;
+    # the embedding for "Hello" will weakly match anything conversational.
+    # Skip RAG entirely for trivial queries.
+    _TRIVIAL_QUERY_WORDS = {
+        "hi", "hello", "hey", "yo", "sup", "ok", "okay", "yes", "no",
+        "thanks", "ty", "thx", "bye", "cool", "nice", "k", "kk",
+        "good morning", "good afternoon", "good evening", "good night",
+    }
+
     def retrieve(self, query: str, top_k_turns: int = 3, top_k_topics: int = 2,
                  exclude_recent_n: int = 6) -> Dict:
         """Retrieve relevant historical turns and topic summaries.
@@ -157,6 +172,12 @@ class SessionHistoryIndexer:
             {"turns": [...], "topics": [...]}
         """
         result: Dict[str, list] = {"turns": [], "topics": []}
+
+        # Skip RAG for trivial queries — a greeting has no semantic payload
+        # and retrieval on it just pollutes the prompt with noise.
+        q_stripped = (query or "").strip().lower().rstrip("!?.")
+        if q_stripped in self._TRIVIAL_QUERY_WORDS or len(q_stripped.split()) < 2:
+            return result
 
         query_embedding = self._encode(query)
         if query_embedding is None:
@@ -177,7 +198,7 @@ class SessionHistoryIndexer:
                     similarities.append((sim, i))
                 similarities.sort(reverse=True)
                 for sim, idx in similarities[:top_k_turns]:
-                    if sim > 0.15:  # Minimum relevance threshold
+                    if sim > self._MIN_TURN_SIMILARITY:
                         result["turns"].append({
                             **self.turns[idx],
                             "similarity": round(sim, 3)
@@ -191,7 +212,7 @@ class SessionHistoryIndexer:
                 similarities.append((sim, i))
             similarities.sort(reverse=True)
             for sim, idx in similarities[:top_k_topics]:
-                if sim > 0.10:  # Lower threshold for broader topic context
+                if sim > self._MIN_TOPIC_SIMILARITY:
                     result["topics"].append({
                         **self.topics[idx],
                         "similarity": round(sim, 3)

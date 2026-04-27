@@ -223,11 +223,39 @@ def ai_read(path: str) -> Dict:
 
 _WRITABLE_DIRS = ("/sandbox/", "/shared/", "/knowledge/", "/tmp/", "/logs/")
 
+
+def _auto_reindex_kb_write(resolved_path: str) -> None:
+    """If ``resolved_path`` is under ``/knowledge/<kb>/`` and that KB has an
+    initialized vector store, fire add_document so the new content is
+    immediately searchable. Non-fatal — never raises.
+    """
+    try:
+        from pathlib import Path
+        from gaia_common.utils.vector_indexer import VectorIndexer
+        knowledge_root = Path("/knowledge").resolve()
+        rel = Path(resolved_path).resolve().relative_to(knowledge_root)
+        if len(rel.parts) < 2 or rel.parts[0] == "vector_store":
+            return
+        kb_name = rel.parts[0]
+        if not (knowledge_root / "vector_store" / kb_name).exists():
+            return
+        VectorIndexer.instance(kb_name).add_document(resolved_path)
+        logger.info("MCP.ai_write auto-reindex: added %s to KB '%s'", resolved_path, kb_name)
+    except (ValueError, RuntimeError):
+        return
+    except Exception as e:
+        logger.warning("MCP.ai_write auto-reindex failed (non-fatal): %s", e)
+
+
 def ai_write(path: str, content: str) -> Dict:
     """Write a file via the MCP abstraction. Returns a dict with ok and metadata.
 
     Security: Writes are restricted to allowed directories to prevent
     arbitrary filesystem modification.
+
+    On success, when the path is under /knowledge/<kb>/ and that KB has an
+    initialized vector store, fires VectorIndexer.add_document so the new
+    document is immediately searchable without a separate tool call.
     """
     resolved = os.path.realpath(path)
     if not any(resolved.startswith(d) for d in _WRITABLE_DIRS):
@@ -241,6 +269,7 @@ def ai_write(path: str, content: str) -> Dict:
             fh.write(content)
         ts = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{ts}] MCP.ai_write: wrote {resolved} ({len(content)} bytes)")
+        _auto_reindex_kb_write(resolved)
         return {"ok": True, "op": "ai.write", "path": resolved, "bytes": len(content), "written_at": ts}
     except Exception as e:
         logger.error(f"[{datetime.now(timezone.utc).isoformat()}] MCP.ai_write failed for {resolved}: {e}")

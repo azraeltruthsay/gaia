@@ -97,6 +97,7 @@ class LifecycleMachine:
         # Enrich with live tier probes
         for tier, endpoint in self._tier_endpoints.items():
             self._snapshot.tiers[tier] = await self._probe_tier(tier, endpoint)
+        self._dedupe_aliased_tiers()
 
         self._snapshot.timestamp = datetime.now(timezone.utc)
         # Estimate VRAM from tier reports
@@ -151,6 +152,7 @@ class LifecycleMachine:
             # Probe tiers to update snapshot with actual state
             for tier, endpoint in self._tier_endpoints.items():
                 self._snapshot.tiers[tier] = await self._probe_tier(tier, endpoint)
+            self._dedupe_aliased_tiers()
 
             # Record in history
             record = TransitionRecord(
@@ -202,6 +204,9 @@ class LifecycleMachine:
             status = await self._probe_tier(tier, endpoint)
             probed[tier] = status
             self._snapshot.tiers[tier] = status
+        self._dedupe_aliased_tiers()
+        # Refresh probed map post-dedupe so inference logic below sees zeroed aliases
+        probed = dict(self._snapshot.tiers)
 
         # Preserve MEDITATION state — training owns GPU, tiers are intentionally
         # unloaded. Inferring from tier placement would wrongly yield DEEP_SLEEP.
@@ -418,6 +423,7 @@ class LifecycleMachine:
             await self._persist()
             for tier, endpoint in self._tier_endpoints.items():
                 self._snapshot.tiers[tier] = await self._probe_tier(tier, endpoint)
+            self._dedupe_aliased_tiers()
 
             # Update audio flags based on target state
             if resolved_target == LifecycleState.LISTENING:
@@ -521,6 +527,38 @@ class LifecycleMachine:
             )
 
     # ── Tier Operations ───────────────────────────────────────────────────
+
+    def _dedupe_aliased_tiers(self) -> None:
+        """Zero VRAM on tiers that are forwarders to another tier's engine.
+
+        Post-Sovereign-Duality, gaia-nano is a socat TCP forwarder to
+        gaia-core:8092 — probing it returns Core's exact health response,
+        which would double-count the same VRAM. Dict insertion order in
+        ``_tier_endpoints`` determines the primary (first wins).
+        """
+        seen: Dict[tuple, str] = {}
+        for tier_name in self._tier_endpoints.keys():
+            status = self._snapshot.tiers.get(tier_name)
+            if status is None or not status.model_loaded or not status.model_path:
+                continue
+            key = (status.model_path, status.vram_mb)
+            if key in seen:
+                primary = seen[key]
+                logger.info(
+                    "LIFECYCLE: %s endpoint aliased to %s (same model=%s, vram=%dMB) — zeroing duplicate",
+                    tier_name, primary, status.model_path, status.vram_mb,
+                )
+                self._snapshot.tiers[tier_name] = TierLiveStatus(
+                    device="unloaded",
+                    model_loaded=False,
+                    model_path="",
+                    vram_mb=0,
+                    managed=status.managed,
+                    healthy=status.healthy,
+                    endpoint=status.endpoint,
+                )
+            else:
+                seen[key] = tier_name
 
     async def _probe_tier(self, tier: str, endpoint: str) -> TierLiveStatus:
         """Probe a tier's health endpoint for live status."""

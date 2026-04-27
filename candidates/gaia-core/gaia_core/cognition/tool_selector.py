@@ -159,7 +159,7 @@ def _llama_with_timeout(model, timeout_s: int = _LLAMA_TIMEOUT_S, **kwargs):
         raise TimeoutError(f"Llama call timed out after {timeout_s}s")
 
 
-def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
+def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[SelectedTool]:
     """
     Fast deterministic match for explicit tool requests.
 
@@ -255,6 +255,29 @@ def _deterministic_tool_match(lowered: str) -> Optional[SelectedTool]:
             selection_confidence=0.95,
         )
 
+    # File write — "create/write/save a [...] file at /path/... with [the] content[s]: <content>"
+    # The 2B Operator model struggles to emit structured JSON for write requests
+    # (multi-line content + escaping). Bypass it when the user gave us an explicit
+    # writable path AND content. Run the regex on lowered (case-insensitive verbs)
+    # but slice content from user_input to preserve original casing.
+    if user_input:
+        write_verb_re = re.compile(
+            r'\b(?:create|write|save|append|add|store|put)\b[^\n]*?\bat\s+'
+            r'(/[\w/._\-]+\.[A-Za-z0-9]+)\s+with\s+(?:the\s+)?(?:content|contents|text|body)\s*:?\s*',
+            re.IGNORECASE | re.DOTALL,
+        )
+        m = write_verb_re.search(lowered)
+        if m:
+            path = m.group(1)
+            content = user_input[m.end():].strip()
+            if content:
+                return SelectedTool(
+                    tool_name="file",
+                    params={"action": "write", "path": path, "content": content},
+                    selection_reasoning="Deterministic match: explicit file write request",
+                    selection_confidence=0.95,
+                )
+
     # Shell command — "run: command" or "execute: command"
     shell_match = re.search(r'(?:run|execute):\s*(.+)', lowered)
     if shell_match:
@@ -348,7 +371,7 @@ def select_tool(
     # When the user names a specific tool or action, bypass LLM selection.
     # This prevents hallucinated tool calls when the selection model is weak.
     lowered = user_input.lower()
-    shortcut = _deterministic_tool_match(lowered)
+    shortcut = _deterministic_tool_match(lowered, user_input)
     if shortcut:
         logger.info("Tool selector: deterministic match → %s", shortcut.tool_name)
         return shortcut, []

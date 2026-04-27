@@ -358,6 +358,33 @@ def _validate_python_content(path: str, content: str):
             raise ValueError(f"Sovereign Shield: Cannot save {path} because it contains syntax errors: {e}")
 
 
+def _maybe_auto_reindex(real_path: Path) -> None:
+    """If ``real_path`` lives under ``/knowledge/<kb>/`` and that KB has an
+    existing vector store, fire ``add_document`` so the new content is
+    immediately searchable. Non-fatal — never raises. Skips silently when
+    the path is outside /knowledge or the KB has no vector store yet
+    (which means it's not a queryable KB — e.g. /knowledge/penpal/).
+    """
+    try:
+        knowledge_root = Path("/knowledge").resolve()
+        rel = real_path.resolve().relative_to(knowledge_root)
+    except (ValueError, RuntimeError):
+        return
+    if len(rel.parts) < 2:
+        return
+    kb_name = rel.parts[0]
+    if kb_name == "vector_store":
+        return  # writing the index itself, not a doc
+    vstore = knowledge_root / "vector_store" / kb_name
+    if not vstore.exists():
+        return
+    try:
+        VectorIndexer.instance(kb_name).add_document(str(real_path))
+        logger.info("auto-reindex: added %s to KB '%s'", real_path, kb_name)
+    except Exception as e:
+        logger.warning("auto-reindex failed for KB '%s' (non-fatal): %s", kb_name, e)
+
+
 def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
     """Perform a safe ai_write: write params['content'] to params['path'] and return metadata."""
     try:
@@ -409,6 +436,7 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
+        _maybe_auto_reindex(p)
         return {"ok": True, "path": str(p), "bytes": len(content)}
     except Exception as e:
         logger.error(f"ai_write failed for {params.get('path')}: {e}")
@@ -468,6 +496,7 @@ def _write_file_impl(params: dict) -> dict:
         f.write(content)
 
     logger.info(f"write_file: wrote {len(content)} bytes to {real}")
+    _maybe_auto_reindex(real)
     return {"ok": True, "path": str(real), "bytes": len(content)}
 
 
@@ -1565,6 +1594,7 @@ def _replace_impl(params: dict) -> dict:
 
     # 4. Save the file
     p.write_text(new_content, encoding="utf-8")
-    
+
     logger.info(f"replace: modified {p} ({count} occurrences replaced)")
+    _maybe_auto_reindex(p)
     return {"ok": True, "path": str(p), "count": count}
