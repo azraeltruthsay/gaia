@@ -43,6 +43,13 @@ COPY gaia-study/requirements.txt .
 # being pulled in by transitive deps (sentence-transformers, etc.)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 
+# Multimodal training prereqs — Gemma4Processor pulls in
+# Gemma4VideoProcessor (torchvision) and Gemma4AudioFeatureExtractor
+# (librosa), and image handling needs PIL. Without these, AutoProcessor
+# fails and the training script can't build a multimodal dataset.
+RUN pip install --no-cache-dir pillow librosa
+RUN pip install --no-cache-dir torchvision --index-url https://download.pytorch.org/whl/cu128
+
 # Install Python dependencies (torch already satisfied from CUDA index above)
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -537,54 +537,105 @@ class ConsciousnessMatrix:
             logger.warning("Unload %s failed: %s", tier, e)
             return {"ok": False, "tier": tier, "error": str(e)}
 
+    # Default quantization per tier on GPU loads. Without this, 9B+ safetensors
+    # OOM on 16 GB VRAM because the engine defaults to BF16. Per-tier so a future
+    # Core that's small enough to fit BF16 doesn't get forced to NF4.
+    _GPU_QUANTIZE = {
+        "prime": "nf4",
+        "core": "nf4",
+    }
+
+    async def _tier_desired_state(
+        self, client: httpx.AsyncClient, endpoint: str, model_path: str, device: str,
+    ) -> tuple[bool, dict]:
+        """Check whether the engine already has the desired model+device loaded.
+
+        Returns (already_correct, health_data). Callers use this to short-circuit
+        load/swap calls when the engine is already in the target state.
+        """
+        try:
+            health = await client.get(f"{endpoint}/health", timeout=5.0)
+            if health.status_code != 200:
+                return (False, {})
+            h = health.json()
+            if not h.get("model_loaded"):
+                return (False, h)
+            # Match on model_path when the engine provides it; match on device
+            # regardless. This way, loading /models/core twice is a no-op, but
+            # loading /models/core-new or changing CPU→GPU triggers a swap.
+            loaded_path = (h.get("model_path") or "").rstrip("/")
+            target_path = (model_path or "").rstrip("/")
+            loaded_device = h.get("device", "")
+            device_match = (
+                loaded_device == device
+                or (device == "cuda" and loaded_device == "gpu")
+                or (device == "gpu" and loaded_device == "cuda")
+            )
+            path_match = (not target_path) or (loaded_path == target_path)
+            return (bool(device_match and path_match), h)
+        except Exception:
+            return (False, {})
+
     async def _load_tier_gpu(self, tier: str, endpoint: str, state: TierState) -> dict:
-        """Load a tier on GPU (safetensors → conscious)."""
+        """Load a tier on GPU (safetensors → conscious).
+
+        Uses /model/swap so that a stale CPU/GGUF worker (or a different
+        model) gets unloaded atomically instead of returning 409.
+        """
         model = self._gpu_models.get(tier)
         if not model:
             return {"ok": False, "tier": tier, "error": "no GPU model configured"}
 
-        logger.info("Loading %s to GPU: %s", tier, model)
+        quantize = self._GPU_QUANTIZE.get(tier, "")
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
-                # Check if already loaded
-                health = await client.get(f"{endpoint}/health")
-                if health.status_code == 200:
-                    hdata = health.json()
-                    if hdata.get("model_loaded") and hdata.get("mode") == "active":
-                        state.actual = ConsciousnessLevel.CONSCIOUS
-                        logger.info("%s already loaded on GPU", tier)
-                        return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
+                already, _ = await self._tier_desired_state(client, endpoint, model, "cuda")
+                if already:
+                    state.actual = ConsciousnessLevel.CONSCIOUS
+                    logger.info("%s already loaded on GPU at %s", tier, model)
+                    return {"ok": True, "tier": tier, "action": "already_loaded_gpu"}
 
-                resp = await client.post(
-                    f"{endpoint}/model/load",
-                    json={"model": model, "device": "cuda"},
-                )
-                if resp.status_code in (200, 409):
+                logger.info("Swapping %s to GPU: %s (quantize=%s)", tier, model, quantize or "none")
+                payload = {"model": model, "device": "cuda"}
+                if quantize:
+                    payload["quantize"] = quantize
+                resp = await client.post(f"{endpoint}/model/swap", json=payload)
+                if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("ok") or resp.status_code == 409:
+                    if data.get("ok"):
                         state.actual = ConsciousnessLevel.CONSCIOUS
                         logger.info("Loaded %s to GPU", tier)
                         return {"ok": True, "tier": tier, "action": "loaded_gpu", "model": model}
-                return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
+                return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
 
     async def _load_tier_cpu(self, tier: str, endpoint: str, state: TierState) -> dict:
-        """Load a tier on CPU (GGUF → subconscious)."""
+        """Load a tier on CPU (GGUF → subconscious).
+
+        Uses /model/swap so an existing GPU/safetensors worker gets unloaded
+        cleanly instead of returning 409.
+        """
         model = self._cpu_models.get(tier)
         if not model:
             return {"ok": False, "tier": tier, "error": "no GGUF model configured"}
 
-        logger.info("Loading %s to CPU (GGUF): %s", tier, model)
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
+                already, _ = await self._tier_desired_state(client, endpoint, model, "cpu")
+                if already:
+                    state.actual = ConsciousnessLevel.SUBCONSCIOUS
+                    logger.info("%s already loaded on CPU at %s", tier, model)
+                    return {"ok": True, "tier": tier, "action": "already_loaded_cpu"}
+
+                logger.info("Swapping %s to CPU (GGUF): %s", tier, model)
                 resp = await client.post(
-                    f"{endpoint}/model/load",
+                    f"{endpoint}/model/swap",
                     json={"model": model, "device": "cpu"},
                 )
-                if resp.status_code in (200, 409):
+                if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("ok") or resp.status_code == 409:
+                    if data.get("ok"):
                         state.actual = ConsciousnessLevel.SUBCONSCIOUS
                         logger.info("Loaded %s to CPU (GGUF)", tier)
 
@@ -594,7 +645,7 @@ class ConsciousnessMatrix:
                             await self._load_adapter(tier, endpoint, adapter_path)
 
                         return {"ok": True, "tier": tier, "action": "loaded_cpu", "model": model}
-                return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
+                return {"ok": False, "tier": tier, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
         except Exception as e:
             return {"ok": False, "tier": tier, "error": str(e)}
 

@@ -147,6 +147,7 @@ services:
       - GAIA_ENGINE_TIER=prime
       - GAIA_ENGINE_SAE_ENABLE=true
       - GAIA_ENGINE_MOE_OFFLOAD=true
+      - GAIA_ENGINE_QUANTIZE=${GAIA_ENGINE_QUANTIZE_PRIME:-nf4}
       - GGUF_THREADS=16
 
     ports:
@@ -302,11 +303,13 @@ services:
       # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
       # NF4 (~2.5GB) frees ~6GB for generation and prevents OOM.
       - GAIA_ENGINE_QUANTIZE=nf4
-      # Disable vision tower for Core — saves ~5GB VRAM. Vision handled by dedicated request.
-      - GAIA_ENGINE_DISABLE_VISION=true
+      # Multimodal Core: keep vision + audio towers attached (adds ~3GB VRAM
+      # over text-only NF4). Set to "true" to fall back to text-only mode
+      # and free ~3GB VRAM for larger KV cache.
+      - GAIA_ENGINE_DISABLE_VISION=${GAIA_ENGINE_DISABLE_VISION:-false}
       # GGUF fallback (CPU, for FOCUSING state when Prime owns GPU)
       - CORE_CPU_PORT=8092
-      - CORE_CPU_MODEL_PATH=/models/Gemma4-E4B-GAIA-Core-v1-Q4_K_M.gguf
+      - CORE_CPU_MODEL_PATH=/models/core.gguf
       - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
       # KV cache persistence for embedded llama-server

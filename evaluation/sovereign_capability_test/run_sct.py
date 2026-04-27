@@ -53,14 +53,19 @@ PRIME_SYSTEM_PROMPT = (
 )
 
 
-def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90) -> str:
+def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90,
+                via_pipeline: bool = False) -> str:
     """Send prompt to the appropriate model.
 
     For 'prime', talks directly to gaia-prime engine at :7777 (bypasses Core pipeline).
     For 'core' and others, uses Core's /process_packet pipeline.
+
+    When via_pipeline=True, 'prime' also routes through Core's /process_packet with
+    a '::prime ' prefix so the full pipeline (persona, grounding, MCP) runs but Core's
+    model selector forces Prime as the LLM.
     """
-    # Direct Prime test — bypasses Core pipeline
-    if target == "prime":
+    # Direct Prime test — bypasses Core pipeline (unless via_pipeline forces it through)
+    if target == "prime" and not via_pipeline:
         prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://localhost:7777")
         payload = {
             "model": "prime",
@@ -83,7 +88,14 @@ def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90) -> s
         except Exception as e:
             return f"[ERROR: {e}]"
 
-    # Core — through full pipeline
+    # Core — through full pipeline. When via_pipeline is set with target=prime,
+    # prepend "think hard: " — a focus keyword agent_core recognises (see
+    # _focus_keywords in agent_core.py ~line 1124) that triggers the FOCUSING
+    # transition and pins selected_model_name to "prime" for the turn.
+    if via_pipeline and target == "prime":
+        pipeline_prompt = f"think hard: {prompt}"
+    else:
+        pipeline_prompt = prompt
     packet = {
         "version": "v0.4",
         "header": {
@@ -92,7 +104,7 @@ def query_model(prompt: str, target: str, endpoint: str, timeout: int = 90) -> s
             "persona": {"persona_id": "gaia", "role": "assistant"},
             "model": {"name": target},
         },
-        "content": {"original_prompt": prompt},
+        "content": {"original_prompt": pipeline_prompt},
         "governance": {"security_scan": {"ran": False, "passed": True, "injection_score": 0.0}},
     }
 
@@ -164,16 +176,20 @@ def score_question(question: dict, response: str) -> dict:
     }
 
 
-def run_suite(target: str, endpoint: str, timeout: int = 90) -> dict:
+def run_suite(target: str, endpoint: str, timeout: int = 90,
+              via_pipeline: bool = False) -> dict:
     """Run full SCT suite and return results."""
     questions = load_questions()
-    run_id = f"sct-{target}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    log.info("Running SCT against %s (%d questions)", target, len(questions))
+    mode = f"{target}-via-pipeline" if via_pipeline else target
+    run_id = f"sct-{mode}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    log.info("Running SCT against %s (%d questions, via_pipeline=%s)",
+             target, len(questions), via_pipeline)
 
     results = {
         "run_id": run_id,
         "target": target,
         "endpoint": endpoint,
+        "via_pipeline": via_pipeline,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "results": [],
         "by_category": {},
@@ -182,7 +198,7 @@ def run_suite(target: str, endpoint: str, timeout: int = 90) -> dict:
     t0 = time.time()
     for i, q in enumerate(questions, 1):
         log.info("[%d/%d] %s (%s)", i, len(questions), q["id"], q["category"])
-        response = query_model(q["prompt"], target, endpoint, timeout)
+        response = query_model(q["prompt"], target, endpoint, timeout, via_pipeline=via_pipeline)
         scored = score_question(q, response)
 
         result = {
@@ -269,6 +285,10 @@ def main():
     parser.add_argument("--timeout", type=int, default=90, help="Per-question timeout")
     parser.add_argument("--category", default=None, help="Only run one category")
     parser.add_argument("--compare", default=None, help="Compare two targets (comma-separated)")
+    parser.add_argument("--via-pipeline", action="store_true",
+                        help="Route --target prime through Core's /process_packet with a "
+                             "'think hard: ' prefix so the full pipeline runs "
+                             "(persona, grounding, MCP) while Prime generates.")
 
     args = parser.parse_args()
 
@@ -276,7 +296,8 @@ def main():
         targets = args.compare.split(",")
         all_results = {}
         for t in targets:
-            all_results[t] = run_suite(t.strip(), args.endpoint, args.timeout)
+            all_results[t] = run_suite(t.strip(), args.endpoint, args.timeout,
+                                       via_pipeline=args.via_pipeline)
             save_results(all_results[t])
             print_report(all_results[t])
             print()
@@ -297,7 +318,8 @@ def main():
             print(" ".join(row))
         return
 
-    results = run_suite(args.target, args.endpoint, args.timeout)
+    results = run_suite(args.target, args.endpoint, args.timeout,
+                        via_pipeline=args.via_pipeline)
     save_results(results)
     print_report(results)
 

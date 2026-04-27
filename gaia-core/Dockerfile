@@ -68,6 +68,13 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 # Install transformers (>=5.5.0 for Gemma 4) + quantization + adapters
 RUN pip install --no-cache-dir "transformers>=5.5.0" accelerate bitsandbytes peft
 
+# Multimodal prereqs — Gemma4Processor needs PIL (images) + torchvision
+# (Gemma4VideoProcessor) + librosa (Gemma4AudioFeatureExtractor).
+# Without these, AutoProcessor.from_pretrained fails, has_vision falls to
+# False, and the vision + audio towers get detached at load.
+RUN pip install --no-cache-dir pillow librosa
+RUN pip install --no-cache-dir torchvision --index-url https://download.pytorch.org/whl/cu128
+
 # flash-linear-attention for Qwen3.5 hybrid attention (DeltaNet fast path)
 # causal-conv1d is optional — FLA works without it via torch fallback
 RUN pip install --no-cache-dir flash-linear-attention
