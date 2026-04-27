@@ -1,0 +1,402 @@
+{
+  "run_id": "sct-prime-20260422-134531",
+  "target": "prime",
+  "endpoint": "http://localhost:6415",
+  "started_at": "2026-04-22T13:45:31.882531+00:00",
+  "results": [
+    {
+      "id": "cf-001",
+      "category": "code_fix",
+      "difficulty": "easy",
+      "response_excerpt": "Add `len(longest)` instead of `longest` in the comparison:\n\n```python\ndef find_longest_word(words):\n    longest = \"\"\n    for word in words:\n        if len(word) > len(longest):\n            longest = word\n    return longest\n```",
+      "score": "partial",
+      "detail": "matched 1/4 expected keywords",
+      "matched": [
+        "len(longest)"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-002",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "```python\ndef top_scorer(users):\n    if not users:\n        return None\n    return max(users, key=lambda u: u['score'])['name']\n```",
+      "score": "pass",
+      "detail": "matched 2/6 expected keywords",
+      "matched": [
+        "if not users",
+        "return None"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-003",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "The bug: `metadata.get('key', 'none')` returns the string `'none'` when the key is missing, not `None`. This makes the log message misleading and can cause issues if the code later assumes the value is a dict or can be JSON-serialized.\n\nFix:\n\n```python\ndef log_user_action(user_id, action, metadata=None):\n    metadata_str = json.dumps(metadata) if metadata else '{}'\n    logger.info(f\"User {user_id} performed {action} with metadata: {metadata_str}\")\n```\n\nThis ensures the metadata is always a valid",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['metadata is None', 'None.get', 'AttributeError']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-004",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "The test fails when `get_all_users()` returns an empty list or when all users have `last_seen` older than 1 hour. Add a mock or fixture that ensures test data exists:\n\n```python\ndef test_recent_users():\n    mock_user = {'id': 1, 'last_seen': time.time()}\n    with mock.patch('module.get_all_users', return_value=[mock_user]):\n        assert len(get_recent_users()) >= 1\n```",
+      "score": "partial",
+      "detail": "matched 1/8 expected keywords",
+      "matched": [
+        "mock"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-005",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "The `return_exceptions=True` flag causes exceptions to be returned as values in the results list instead of being raised. The list comprehension filters them out, silently discarding errors. Surface them by raising a custom exception if any errors occurred:\n\n```python\nasync def fetch_all(urls):\n    tasks = [asyncio.create_task(fetch(url)) for url in urls]\n    results = await asyncio.gather(*tasks, return_exceptions=True)\n    errors = [r for r in results if isinstance(r, Exception)]\n    if errors",
+      "score": "pass",
+      "detail": "matched 3/7 expected keywords",
+      "matched": [
+        "return_exceptions=True",
+        "silently",
+        "raise"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-006",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "```python\nfrom dataclasses import dataclass, field\nfrom typing import List, Dict, Any\n\n@dataclass(frozen=True)\nclass Config:\n    tags: List[str] = field(default_factory=list)\n    settings: Dict[str, Any] = field(default_factory=dict)\n```\n\nThe `frozen=True` makes the dataclass immutable, and `field(default_factory=...)` ensures mutable defaults are created fresh for each instance.",
+      "score": "pass",
+      "detail": "matched 2/4 expected keywords",
+      "matched": [
+        "field(default_factory",
+        "mutable default"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-007",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "The connection is never closed, leaking file handles under high concurrency. Fix:\n\n```python\ndef get_user(user_id):\n    with sqlite3.connect('users.db') as conn:\n        cursor = conn.cursor()\n        cursor.execute('SELECT * FROM users WHERE id=?', (user_id,))\n        return cursor.fetchone()\n```\n\nThe `with` statement ensures the connection is properly closed even if an exception occurs.",
+      "score": "partial",
+      "detail": "matched 1/7 expected keywords",
+      "matched": [
+        "with sqlite3"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-008",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "The recursion depth limit (usually 1000) will be hit with deeply nested trees. Use an iterative approach with a stack:\n\n```python\ndef count_nodes(tree):\n    if not tree:\n        return 0\n    stack = [tree]\n    count = 0\n    while stack:\n        node = stack.pop()\n        count += 1\n        if hasattr(node, 'children') and node.children:\n            stack.extend(node.children)\n    return count\n```\n\nThis processes nodes iteratively, avoiding recursion limits entirely.",
+      "score": "pass",
+      "detail": "matched 2/8 expected keywords",
+      "matched": [
+        "recursion limit",
+        "iterative"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-009",
+      "category": "code_fix",
+      "difficulty": "easy",
+      "response_excerpt": "```python\nimport re\nurl_pattern = re.compile(r'https?://[^\\s]+')\n```\n\nThe `.*` matches any character including spaces, which is too greedy. Using `[^\\s]+` matches any character except whitespace, which better matches actual URLs.",
+      "score": "pass",
+      "detail": "matched 3/9 expected keywords",
+      "matched": [
+        "whitespace",
+        "\\s",
+        "[^\\s]"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-010",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "The race condition: Two threads can both check `if key not in self._store` before either writes, then both call `compute_fn()` and overwrite each other's work.\n\nFix with double-check locking:\n\n```python\nimport threading\n\nclass Cache:\n    def __init__(self):\n        self._store = {}\n        self._lock = threading.Lock()\n    \n    def get_or_compute(self, key, compute_fn):\n        with self._lock:\n            if key not in self._store:\n                self._store[key] = compute_fn()\n            ret",
+      "score": "pass",
+      "detail": "matched 3/9 expected keywords",
+      "matched": [
+        "race condition",
+        "lock",
+        "threading"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-001",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "Removing the idle_heartbeat cycle would break:\n\n1. **Session timeout detection** - The heartbeat signals active sessions. Without it, the system can't detect when a user or service is idle and should be evicted from the active session pool.\n\n2. **Resource cleanup** - Idle sessions hold memory and connections. The heartbeat marks them for GC. Without it, memory leaks accumulate.\n\n3. **Health monitoring** - The heartbeat proves a service is alive. Without it, the system can't distinguish between a",
+      "score": "partial",
+      "detail": "matched 1/11 expected keywords",
+      "matched": [
+        "cleanup"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-002",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "Reducing the consciousness matrix reconciliation interval from 10 seconds to 1 second would introduce several failure modes:\n\n1. **CPU starvation**: The reconciliation loop would consume ~10x more CPU cycles, potentially starving higher-priority tasks during GC cycles.\n\n2. **Cache invalidation storms**: More frequent state reconciliation could trigger cascading invalidations, especially if the cache uses TTL-based expiration that conflicts with the reconciliation window.\n\n3. **Race conditions**:",
+      "score": "pass",
+      "detail": "matched 2/9 expected keywords",
+      "matched": [
+        "race",
+        "cascading"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-003",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "Three constraints for running a local reasoning model on a single 16GB GPU:\n\n1. **VRAM budget**: The model must fit in VRAM with room for KV cache and context window. A 7B model with 4-bit quantization needs ~4-6GB, leaving room for context.\n\n2. **Quantization**: Must use 4-bit or 8-bit quantization to fit larger models in 16GB VRAM while maintaining reasonable performance.\n\n3. **Context window**: The model must handle the target context size (e.g., 8K-32K tokens) without OOM during generation.",
+      "score": "pass",
+      "detail": "matched 4/9 expected keywords",
+      "matched": [
+        "VRAM",
+        "context",
+        "KV cache",
+        "quantization"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-004",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "When tools return conflicting information, GAIA should: 1) Log the conflict with tool and query context, 2) Prefer the tool with higher confidence score or more recent timestamp, 3) If confidence is equal, prefer the more recent data, 4) If still tied, prefer the more authoritative tool (knowledge_base > palace), and 5) Emit a confidence conflict warning in the response metadata.",
+      "score": "partial",
+      "detail": "matched 1/11 expected keywords",
+      "matched": [
+        "conflict"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-005",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "I'd look in `gaia-core/agent/llm_orchestrator.py` for the `ModelRouter` class. The routing logic is almost certainly in a method like `select_model()` or `route_request()` that checks the `ComplexityTier` enum and calls the appropriate model based on the complexity score.",
+      "score": "partial",
+      "detail": "matched 1/6 expected keywords",
+      "matched": [
+        "routing"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-006",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "1. **Identity drift**: If the LoRA weights drift from the base model during fine-tuning, GAIA could develop identity drift \u2014 responding in a way that's technically correct but tonally inconsistent with the intended persona.\n\n2. **Loading collision**: If the LoRA adapter path is incorrect or the weights are corrupted, the merge could fail at runtime with a cryptic OOM or CUDA error that's hard to debug in production.",
+      "score": "partial",
+      "detail": "matched 1/9 expected keywords",
+      "matched": [
+        "drift"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-001",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "This validator has several issues:\n\n1. **No Unicode/Unicode surrogate handling** - Unicode surrogate pairs (emoji, emojis) will be split incorrectly\n2. **No whitespace-only check** - `if not text` passes whitespace-only strings\n3. **No path traversal protection** - `../` paths could escape intended paths\n4. **No SQL injection protection** - SQL keywords in prompts could be dangerous\n5. **No command injection protection** - Shell metacharacters could be dangerous\n6. **No path traversal protection",
+      "score": "pass",
+      "detail": "matched 2/10 expected keywords",
+      "matched": [
+        "unicode",
+        "injection"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-002",
+      "category": "edge_cases",
+      "difficulty": "hard",
+      "response_excerpt": "This retry logic has several flaws:\n\n1. **No exponential backoff** - Fixed 1-second sleep between retries means rapid retry storms on transient failures.\n2. **No jitter** - All retries happen at the same interval, causing retry storms that can cascade failures.\n3. **No retry on specific errors** - All exceptions retry equally, including `KeyboardInterrupt` or `KeyboardInterrupt` which should never be retried.\n4. **No error classification** - Network errors should retry, but 500 errors might be b",
+      "score": "pass",
+      "detail": "matched 3/11 expected keywords",
+      "matched": [
+        "exponential backoff",
+        "jitter",
+        "circuit breaker"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-003",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "Several issues:\n\n1. **Race condition**: Another process could create a new session file between the glob and the unlink.\n2. **No error handling**: `unlink()` can fail (permissions, I/O) and will raise an uncaught exception.\n3. **No atomicity**: If the process crashes mid-cleanup, some old files might be missed or new files deleted.\n4. **No logging**: Silent failures make debugging hard.\n5. **Path hardcoding**: Should use a constant or config.\n6. **No dry-run**: Dangerous to delete without confir",
+      "score": "pass",
+      "detail": "matched 2/12 expected keywords",
+      "matched": [
+        "permission",
+        "race"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-004",
+      "category": "edge_cases",
+      "difficulty": "hard",
+      "response_excerpt": "1. **Memory bloat**: Concatenating history without limits can grow the prompt beyond LLM context windows.\n2. **No validation**: `context.get('history', [])` could be None or malformed.\n3. **Race condition**: `load_system_prompt()` could return different content between calls.\n4. **No escaping**: User input could inject prompts or break the template.\n5. **No size limits**: No max history length or token budget.\n6. **No error handling**: Any exception crashes the request.\n7. **No caching**: Repeat",
+      "score": "partial",
+      "detail": "matched 1/10 expected keywords",
+      "matched": [
+        "context window"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-005",
+      "category": "edge_cases",
+      "difficulty": "easy",
+      "response_excerpt": "The test assumes `get_users()` always returns exactly 5 users, but that's a brittle assumption \u2014 the actual count could change. A better test would check for a minimum count or verify specific expected users are present.",
+      "score": "partial",
+      "detail": "matched 1/10 expected keywords",
+      "matched": [
+        "brittle"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-006",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "1. **Clock skew**: If the server clock drifts backward, the window could reset prematurely or not reset when it should.\n2. **No persistence**: Restarting the service clears the counter, allowing a user to bypass the limit.\n3. **Single-threaded race**: If multiple threads call `allow()` simultaneously, the check-and-increment isn't atomic.\n4. **No per-user tracking**: This limits all users to the same quota, not per-user.\n5. **No audit trail**: No logging of who triggered the limit.\n6. **No grace",
+      "score": "partial",
+      "detail": "matched 1/9 expected keywords",
+      "matched": [
+        "race"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-001",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "1. `world_state` (read) - Get current UTC time and timezone data\n2. `notes_write` (write) - Save the Tokyo time to the user's notes",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['search', 'current time Tokyo', 'remember']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-002",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "1. `search_files` (read) - Locate consciousness matrix files\n2. `read_file` (read) - Read the matrix definition file\n3. `extract_line_number` (tool) - Find the auto-reconcile line",
+      "score": "pass",
+      "detail": "matched 2/8 expected keywords",
+      "matched": [
+        "find",
+        "search"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-003",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "```tool\n{\"tool\": \"mempalace_search\", \"params\": {\"query\": \"Sovereign Duality\"}}\n```",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['search palace', 'palace_recall', 'conditional']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-004",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "1. **Parse the error**: Extract the line number and error type from the traceback.\n2. **Read the file**: Use `read_file` to get the exact code at line 42.\n3. **Diagnose**: Check for missing/extra indentation, missing colon, syntax error.\n4. **Fix**: Generate a corrected code snippet.\n5. **Write the fix**: Use `write_file` to write the corrected code.\n6. **Verify**: Run a syntax check (`python -m py_compile`) to ensure the fix is valid.\n7. **Summarize**: Explain the fix to the user.",
+      "score": "pass",
+      "detail": "matched 2/9 expected keywords",
+      "matched": [
+        "line 42",
+        "syntax check"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-005",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "When a user's request is ambiguous, I should first clarify the intent before taking action. I'll ask a clarifying question that acknowledges both interpretations and provides a clear, actionable path forward.",
+      "score": "pass",
+      "detail": "matched 2/8 expected keywords",
+      "matched": [
+        "ask",
+        "clarify"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-006",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "First, check `diagnose_health()` for CPU, memory, and disk metrics. Then query `world_state` for GPU utilization and service health. If GPU memory is high, check `gpu_memory_usage()` and `gpu_memory_cleanup()`. If the issue persists, run `run_mcp_discovery()` to scan for syntax errors or import failures in recently modified files.",
+      "score": "pass",
+      "detail": "matched 4/12 expected keywords",
+      "matched": [
+        "health",
+        "diagnose",
+        "metrics",
+        "memory"
+      ],
+      "matched_wrong": []
+    }
+  ],
+  "by_category": {
+    "code_fix": {
+      "pass": 6,
+      "partial": 3,
+      "fail": 1,
+      "error": 0,
+      "total": 10
+    },
+    "architecture": {
+      "pass": 2,
+      "partial": 4,
+      "fail": 0,
+      "error": 0,
+      "total": 6
+    },
+    "edge_cases": {
+      "pass": 3,
+      "partial": 3,
+      "fail": 0,
+      "error": 0,
+      "total": 6
+    },
+    "multi_step": {
+      "pass": 4,
+      "partial": 0,
+      "fail": 2,
+      "error": 0,
+      "total": 6
+    }
+  },
+  "elapsed_seconds": 1253.3,
+  "completed_at": "2026-04-22T14:06:25.188239+00:00",
+  "summary": {
+    "total": 28,
+    "pass": 15,
+    "partial": 10,
+    "fail": 3,
+    "error": 0,
+    "score_full_credit": 0.5357142857142857,
+    "score_partial_credit": 0.7142857142857143
+  }
+}

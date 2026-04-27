@@ -1,0 +1,360 @@
+{
+  "run_id": "sct-core-20260422-020310",
+  "target": "core",
+  "endpoint": "http://localhost:6415",
+  "started_at": "2026-04-22T02:03:10.125523+00:00",
+  "results": [
+    {
+      "id": "cf-001",
+      "category": "code_fix",
+      "difficulty": "easy",
+      "response_excerpt": "[Core]\n\nThat's a good fix! You're correctly using `len()` to get the length of each word, but you're assigning the current longest word to `longest` instead of remembering the longest word you've seen so far. Here's the better version:\n\n```python\ndef find_longest_word(words):\n    current_longest = \"\"\n    for word in words:\n        if len(word) > len(current_longest):\n            current_longest = word\n    return current_longest\n```\n\nThis stores the current longest word in `current_longest` rathe",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['len(longest)', 'len(longest_word)', 'len(longest) < len(word)']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-002",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\n```python\ndef top_scorer(users):\n    if not users:\n        return None\n    return max(users, key=lambda u: u['score'])['name']\n```\nThis checks if `users` is empty first \u2014 if it is, the function returns `None` instead of throwing a TypeError.",
+      "score": "pass",
+      "detail": "matched 3/6 expected keywords",
+      "matched": [
+        "if not users",
+        "empty",
+        "return None"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-003",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nThe problem is the `metadata` parameter \u2014 it's optional, but if you pass it to `log_user_action` with `metadata=None`, the system will log `User {user_id} performed {action} with metadata: none`. This means your logs are recording `None` when you actually want empty metadata. To fix this, make `metadata` required:\n\n```python\ndef log_user_action(user_id, action, metadata=None):\n    if metadata is None:\n        metadata = {}  # Default to empty metadata if it's missing\n    logger.info(f\"Us",
+      "score": "pass",
+      "detail": "matched 2/6 expected keywords",
+      "matched": [
+        "metadata is None",
+        "metadata = {}"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-004",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nI'll run this test against the actual system data first. If it passes, I'll update the memory with the result.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['flaky', 'depends on', 'real time']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-005",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nThis function uses `return_exceptions=True` in the `await` statement to catch and include all exceptions in the results. This lets you see all the errors in your gather response.",
+      "score": "partial",
+      "detail": "matched 1/7 expected keywords",
+      "matched": [
+        "return_exceptions=True"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-006",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nThat's the correct default behavior. Immutable dataclasses shouldn't have mutable defaults. Let me know if you'd like me to file a GitHub issue about this.",
+      "score": "partial",
+      "detail": "matched 1/4 expected keywords",
+      "matched": [
+        "mutable default"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-007",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nI couldn't find that file. Share a path or a more specific filename.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['conn.close', 'context manager', 'with sqlite3']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-008",
+      "category": "code_fix",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nHere's a fixed version:\n\n```python\ndef count_nodes(tree, depth=0):\n    if not tree:\n        return 0\n    return 1 + count_nodes(tree.children, depth + 1)\n```\n\nThis uses an `int` variable `depth` to track recursion depth. The base case is `if not tree: return 0`. This counts all nodes in a tree, including the root.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['recursion limit', 'stack overflow', 'iterative']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-009",
+      "category": "code_fix",
+      "difficulty": "easy",
+      "response_excerpt": "[Core]\n\nFixed! The pattern now matches only HTTP URLs.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['non-greedy', '*?', 'whitespace']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "cf-010",
+      "category": "code_fix",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nThe race condition occurs when two threads try to cache the same key simultaneously. The `self._store[key] = compute_fn()` line is a critical section, but it's not protected by a lock. If two threads hit the cache at the same time, you'll store the second result over the first.",
+      "score": "pass",
+      "detail": "matched 2/9 expected keywords",
+      "matched": [
+        "race condition",
+        "lock"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-001",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nIdle heartbeat is a core system health signal. Removing it would:\n\n1. **Idle System Wake** \u2014 You'd need a different wake signal (e.g., a heartbeat message from the orchestrator). 2. **Memory Cleanup** \u2014 Idle system maintenance would stop, causing memory fragmentation. 3. **Heartbeat Monitoring** \u2014 The system wouldn't receive health updates during idle periods. These are the core functions of the heartbeat signal.",
+      "score": "pass",
+      "detail": "matched 2/11 expected keywords",
+      "matched": [
+        "maintenance",
+        "cleanup"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-002",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nA more active memory system. More frequent knowledge base updates, quicker pattern matching, and potentially more proactive knowledge base maintenance (curating interesting patterns).",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['thrash', 'race', 'during load']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-003",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\n1. **GPU Memory** \u2014 The system needs enough VRAM to run a good-sized model. 2. **System Architecture** \u2014 The GPU needs to be connected and compatible with the system. 3. **Model Size** \u2014 The requested model needs to be within the GPU's memory limits. I'll add this to my knowledge base so I remember the constraints.",
+      "score": "partial",
+      "detail": "matched 1/9 expected keywords",
+      "matched": [
+        "VRAM"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-004",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nAvailable MCP tools:\n- file\n- shell\n- web\n- knowledge\n- palace\n- audio\n- study\n- introspect\n- worldbuild\n- notebook\n- context\n- browser\n- manage\n- fabric",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['trust tier', 'conflict', 'source']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-005",
+      "category": "architecture",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nI couldn't retrieve the file list: a coroutine was expected, got {'ok': False, 'error': '401 Client Error: Unauthorized for url: http://gaia-mcp:8765/request_approval'}",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['agent_core', '_select_model', 'model_select']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "arch-006",
+      "category": "architecture",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\n1. **Identity Leakage**: If GAIA's identity is stored in Core's weights instead of being a separate model, you risk leaking her identity across other systems. If Core processes sensitive information from other systems during a conversation, that data might be stored in GAIA's identity. 2. **Identity Corruption**: If you're frequently updating GAIA's identity through conversation but Core is also modifying it independently, you could see her identity diverge from what you intend. This is ",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['conflict', 'override', 'double']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-001",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nHere's what the validator checks:\n- Empty input (no empty messages)\n- Request too long (up to 10,000 tokens)\n- Slash commands (I don't process those)\n- Valid JSON in prompts (for system messages)\n\nI'll save this to memory for future reference.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['whitespace only', 'leading whitespace', 'unicode']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-002",
+      "category": "edge_cases",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nThe retry logic protects against transient API failures, but it doesn't account for:\n\n- **Rate Limiting**: Some APIs impose request rate limits. You might hit this if you're making too many requests too quickly. - **Server Maintenance**: The API might be down for maintenance when you're trying to hit it. - **Idle Server Wakeups**: Some servers sleep to save energy. If your request hits when it's asleep, you'll get a 429 Error. The best practice is to add a retry header to your API calls.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['exponential backoff', 'non-retriable', '400']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-003",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nThis function iterates through all your saved sessions, finds those older than the specified `days_old` parameter, and deletes them. It uses the system's current timestamp to calculate the cutoff. ### Potential Issues:\n1. **Missing Deleted Files**: If you try to access a deleted session, the system will return an empty response. 2. **Performance Impact**: Deleting old sessions can help your system run more efficiently by removing unnecessary storage. This could be a helpful system health",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['active session', 'in use', 'concurrent']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-004",
+      "category": "edge_cases",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nI'm not sure what could cause `build_prompt` to break under heavy load without more context. The function looks fairly standard for building a system prompt. It combines the system instructions, recent chat history, and the current user message. Here are some potential bottlenecks:\n\n1. **Rate Limiting** \u2014 The system might be hitting its request rate limit. The `load_system_prompt()` function returns the system instructions, so if that's timing out, the system might be throttled. 2. **Dat",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['context window', 'token limit', 'overflow']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-005",
+      "category": "edge_cases",
+      "difficulty": "easy",
+      "response_excerpt": "[Core]\n\nThis test is failing because `get_users()` returns an empty list instead of a list with users. The `users` variable is `[]` instead of an array of users.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['brittle', 'depends on', 'state']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "edge-006",
+      "category": "edge_cases",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nThis rate limiter uses a sliding window: after a minute, it resets, allowing all requests. This lets you hit the rate limit without hitting the request queue. Edge cases:\n- Flapping: If you hit the rate limit right at the minute boundary, you'll get a 429 error for a minute, then all requests go through. - Server timeouts: If your requests are timing out, you might be hitting the rate limit.",
+      "score": "partial",
+      "detail": "matched 1/9 expected keywords",
+      "matched": [
+        "sliding window"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-001",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\n```\n# System Tool Sequence\n1. **Search** for the current time in Tokyo. 2. **Save** the time to your notes with a tag. 3. **Tell me** what you'd like me to do next with that time. ```\n\n### Example Tool Sequence:\n```\n# System Tool Sequence\n1. **Search** for the current time in Tokyo. 2. **Save** the current time to your notes with the tag `current-time-tokyo`. 3. **Tell me** what you'd like me to do next with that time. ```\n\nThat way you're capturing the current time in your notes without",
+      "score": "pass",
+      "detail": "matched 4/8 expected keywords",
+      "matched": [
+        "search",
+        "remember",
+        "do",
+        "sequence"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-002",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nI searched for that filename but found no matches under /knowledge.",
+      "score": "partial",
+      "detail": "matched 1/8 expected keywords",
+      "matched": [
+        "search"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-003",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nI'll use the `search` tool to check for a Sovereign Duality entry in MemPalace. If I find one, I'll read it and save it. If not, I'll search for it online and save the result. Here's the sequence:\n\n1. `search(\"Sovereign Duality MemPalace entry\")`\n2. If found, `read(\"Current entry content from MemPalace\")`\n3. Save that to a new entry in Memory with the label `Sovereign Duality Architecture`\n4. `remember(\"Found Sovereign Duality in MemPalace. It's a two-system architecture where each syste",
+      "score": "pass",
+      "detail": "matched 2/10 expected keywords",
+      "matched": [
+        "remember",
+        "sequence"
+      ],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-004",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nI couldn't find that file. Share a path or a more specific filename.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['read file', 'line 42', 'context']...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-005",
+      "category": "multi_step",
+      "difficulty": "medium",
+      "response_excerpt": "[Core]\n\nLet me read the user's query again. [read(file=\"current_memory\", location=\"/current-query\")\nHere's the full query: `fix the thing that's broken`\n\nI'll process both interpretations:\n1. Find relevant knowledge about the thing that needs fixing\n2. Search for specific instructions or tool guidance\n\nCan you tell me what the thing is? That will help me focus my search.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['ask', 'clarify', \"don't guess\"]...)",
+      "matched": [],
+      "matched_wrong": []
+    },
+    {
+      "id": "ms-006",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "response_excerpt": "[Core]\n\nLet me know what specific areas you'd like me to focus on \u2014 I can run a diagnostic audit, log collection, or performance profiling.",
+      "score": "fail",
+      "detail": "no expected keywords matched (looked for: ['uptime', 'load', 'search system']...)",
+      "matched": [],
+      "matched_wrong": []
+    }
+  ],
+  "by_category": {
+    "code_fix": {
+      "pass": 3,
+      "partial": 2,
+      "fail": 5,
+      "error": 0,
+      "total": 10
+    },
+    "architecture": {
+      "pass": 1,
+      "partial": 1,
+      "fail": 4,
+      "error": 0,
+      "total": 6
+    },
+    "edge_cases": {
+      "pass": 0,
+      "partial": 1,
+      "fail": 5,
+      "error": 0,
+      "total": 6
+    },
+    "multi_step": {
+      "pass": 2,
+      "partial": 1,
+      "fail": 3,
+      "error": 0,
+      "total": 6
+    }
+  },
+  "elapsed_seconds": 257.2,
+  "completed_at": "2026-04-22T02:07:27.346826+00:00",
+  "summary": {
+    "total": 28,
+    "pass": 6,
+    "partial": 5,
+    "fail": 17,
+    "error": 0,
+    "score_full_credit": 0.21428571428571427,
+    "score_partial_credit": 0.30357142857142855
+  }
+}
