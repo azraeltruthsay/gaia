@@ -2158,6 +2158,22 @@ class AgentCore:
                         "stage": "continuing_with_result",
                         "tool": packet.tool_routing.selected_tool.tool_name if packet.tool_routing.selected_tool else None
                     }, session_id, source=source, destination_context=_metadata)
+
+                    # Deterministic narration for write-class tools — the LLM
+                    # tends to hedge or hallucinate after a successful write
+                    # ("I'd rather focus on a concise summary..."), so emit a
+                    # plain confirmation directly and skip downstream narration.
+                    _det_msg = self._deterministic_tool_narration(packet.tool_routing)
+                    if _det_msg is not None:
+                        yield {"type": "token", "value": _det_msg}
+                        yield {"type": "flush"}
+                        self.session_manager.add_message(session_id, "assistant", _det_msg)
+                        ts_write({
+                            "type": "tool_routing",
+                            "stage": "deterministic_narration",
+                            "tool": packet.tool_routing.selected_tool.tool_name if packet.tool_routing.selected_tool else None,
+                        }, session_id, source=source, destination_context=_metadata)
+                        return
     
             # Fast-path slim prompt: low-complexity intents (incl. list_tools) avoid the heavy
             # planning/reflector stack. Uses minimal identity + MCP summary + user input.
@@ -7929,6 +7945,61 @@ Start your response with the first line of the file."""
         yield {"type": "token", "value": rendered}
         yield {"type": "flush"}
         self.session_manager.add_message(session_id, "assistant", rendered)
+
+    def _deterministic_tool_narration(self, tool_routing) -> Optional[str]:
+        """Generate a plain confirmation string for tools whose result has no
+        ambiguity — the user asked to write a file, the file got written; the
+        LLM doesn't need to interpret that.
+
+        Returns None when the tool isn't write-class so the caller falls
+        through to normal LLM narration (web_search, query_knowledge, etc.
+        DO benefit from LLM synthesis).
+        """
+        if not tool_routing or not tool_routing.selected_tool:
+            return None
+        tool_name = tool_routing.selected_tool.tool_name or ""
+        params = tool_routing.selected_tool.params or {}
+        action = (params.get("action") or "").lower()
+        result = tool_routing.execution_result
+        if not result:
+            return None
+
+        out = result.output if isinstance(result.output, dict) else {}
+
+        # file.write / file.append / file.replace — all write-class
+        if tool_name == "file" and action in ("write", "append", "replace"):
+            path = out.get("path") or params.get("path") or "?"
+            if not result.success:
+                err = result.error or out.get("error") or "unknown error"
+                return f"Tried to {action} `{path}` but it failed: {err}"
+            if action == "write":
+                bytes_written = out.get("bytes")
+                if bytes_written is None:
+                    bytes_written = len((params.get("content") or "").encode("utf-8"))
+                return f"Wrote {bytes_written} bytes to `{path}`."
+            if action == "append":
+                bytes_appended = out.get("bytes") or out.get("appended")
+                if bytes_appended is None:
+                    bytes_appended = len((params.get("content") or "").encode("utf-8"))
+                return f"Appended {bytes_appended} bytes to `{path}`."
+            if action == "replace":
+                count = out.get("replacements") or out.get("count")
+                if count is not None:
+                    return f"Replaced {count} match(es) in `{path}`."
+                return f"Updated `{path}`."
+
+        # Legacy write_file alias — same treatment.
+        if tool_name == "write_file":
+            path = out.get("path") or params.get("path") or "?"
+            if not result.success:
+                err = result.error or out.get("error") or "unknown error"
+                return f"Tried to write `{path}` but it failed: {err}"
+            bytes_written = out.get("bytes")
+            if bytes_written is None:
+                bytes_written = len((params.get("content") or "").encode("utf-8"))
+            return f"Wrote {bytes_written} bytes to `{path}`."
+
+        return None
 
     def _execute_mcp_tool(self, tool: SelectedTool, session_id: str = "") -> ToolExecutionResult:
         """
