@@ -22,7 +22,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-MODEL_PATH = "/models/Gemma4-E4B-GAIA-Core-Multimodal-v2"
+DEFAULT_MODEL_PATH = "/models/Gemma4-E4B-GAIA-Core-Multimodal-v2"
 DEFAULT_OUT = "/shared/multimodal_ood_report.json"
 
 PROJ = "/gaia/GAIA_Project"
@@ -63,10 +63,10 @@ def build_test_set() -> list[dict]:
     return set_
 
 
-def load_model():
+def load_model(model_path: str):
     from transformers import AutoModelForCausalLM, AutoProcessor, BitsAndBytesConfig
 
-    print(f"Loading {MODEL_PATH} (NF4)...", flush=True)
+    print(f"Loading {model_path} (NF4)...", flush=True)
     t0 = time.time()
     bnb = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -79,9 +79,9 @@ def load_model():
             "embed_vision", "embed_audio", "lm_head",
         ],
     )
-    processor = AutoProcessor.from_pretrained(MODEL_PATH)
+    processor = AutoProcessor.from_pretrained(model_path)
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_PATH,
+        model_path,
         quantization_config=bnb,
         device_map="cuda",
         torch_dtype=torch.bfloat16,
@@ -160,6 +160,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--limit", type=int, default=0, help="0 = all")
+    ap.add_argument("--model-path", default=DEFAULT_MODEL_PATH,
+                    help="Path to the multimodal model to test")
     args = ap.parse_args()
 
     test_set = build_test_set()
@@ -169,7 +171,7 @@ def main():
     for c in test_set:
         print(f"  - {c['id']} [{c['category']}]", flush=True)
 
-    model, processor = load_model()
+    model, processor = load_model(args.model_path)
 
     results = []
     for case in test_set:
@@ -186,7 +188,7 @@ def main():
         results.append({**case, **r, "scores": s})
 
     summary = {
-        "model": MODEL_PATH,
+        "model": args.model_path,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "n_cases": len(results),
         "by_category": {},

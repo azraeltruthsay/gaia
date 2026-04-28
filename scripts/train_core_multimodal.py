@@ -740,7 +740,11 @@ def main():
     log.info("     The new model inherits the prior model's KV state and")
     log.info("     session bias otherwise — silent contamination.")
 
-    del model, merged, trainer
+    # `model` was already del'd at line ~714 before the merge step, so
+    # the original `del model, merged, trainer` raised UnboundLocalError
+    # at the very end of a successful run. The function still returns 0
+    # so the artifacts are saved fine, but the traceback is misleading.
+    del merged, trainer
     gc.collect()
     torch.cuda.empty_cache()
     return 0
