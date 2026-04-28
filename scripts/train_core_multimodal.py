@@ -710,7 +710,12 @@ def main():
     log.info("  Adapter: %s", ADAPTER_DIR)
     log.info("  Merged:  %s", MERGED_DIR)
     log.info("=" * 60)
-    log.info("Next: point /models/core at the new merged dir and reload gaia-core.")
+    log.info("Next steps:")
+    log.info("  1. Point /models/core at the new merged dir and reload gaia-core.")
+    log.info("  2. Run scripts/post_training_reset.py --tier core to archive")
+    log.info("     sessions, invalidate KV cache, and regen identity_prefix.")
+    log.info("     The new model inherits the prior model's KV state and")
+    log.info("     session bias otherwise — silent contamination.")
 
     del model, merged, trainer
     gc.collect()
