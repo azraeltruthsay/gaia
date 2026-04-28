@@ -3,7 +3,7 @@
 ## Quick Start (L1 Context)
 At session start, read `GAIA_CHORD_MANIFEST.aaak` first (~30 tokens). This gives you the full system state in one glance. Only read the full Chamber/TODO if the manifest indicates something changed.
 
-Run `python scripts/chord_sync.py` to regenerate the manifest after completing work.
+The manifest is gitignored (regenerated locally) — if it's missing in a fresh checkout, run `python scripts/chord_sync.py` to create it. The post-commit hook also refreshes it after every commit.
 
 ## Full Sync (L2/L3)
 - Read `COUNCIL_CHAMBER.md` for strategic dispatches and Advisor notes

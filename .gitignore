@@ -78,6 +78,11 @@ logging
 
 # --- Generated output ---
 gaia_tree.txt
+
+# --- Chord manifest (regenerated locally by post-commit hook) ---
+# Tracking this caused a dirty-tree loop: every commit re-wrote the
+# file with the new SHA. Run `python scripts/chord_sync.py` to refresh.
+/GAIA_CHORD_MANIFEST.aaak
 nvidia_pre_debug.txt
 nvidia_post_debug.txt
 
