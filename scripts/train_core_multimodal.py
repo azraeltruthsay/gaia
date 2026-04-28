@@ -483,7 +483,30 @@ def main():
                         help="Train and save adapter only, skip final merge+graft")
     parser.add_argument("--dry-run", action="store_true",
                         help="Build dataset and exit (pipeline test)")
+    parser.add_argument("--curriculum-name", default=None,
+                        help="Override curriculum dir name under "
+                             "knowledge/curricula/ (e.g. 'core-multimodal-v3'). "
+                             "Also sets adapter/merged dir version suffix.")
+    parser.add_argument("--version-tag", default=None,
+                        help="Override the version suffix on adapter+merged "
+                             "dirs (e.g. 'v3'). Defaults to deriving from "
+                             "--curriculum-name.")
     args = parser.parse_args()
+
+    # Allow CLI to point at a different curriculum without editing globals.
+    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR
+    if args.curriculum_name:
+        curr_dir = f"{_PROJ}/knowledge/curricula/{args.curriculum_name}"
+        VISION_CURRICULUM = f"{curr_dir}/vision_pairs.jsonl"
+        VISION_IMAGES_ROOT = curr_dir
+        # Derive version tag from curriculum name unless explicitly given.
+        # 'core-multimodal-v3' → 'v3'.
+        derived = args.version_tag or args.curriculum_name.rsplit("-", 1)[-1]
+        ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{derived}"
+        MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{derived.upper()}"
+    elif args.version_tag:
+        ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{args.version_tag}"
+        MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{args.version_tag.upper()}"
 
     print("=" * 60)
     print("  GAIA Core Multimodal Training")
