@@ -491,10 +491,23 @@ def main():
                         help="Override the version suffix on adapter+merged "
                              "dirs (e.g. 'v3'). Defaults to deriving from "
                              "--curriculum-name.")
+    parser.add_argument("--base-model", default=None,
+                        help="Override the base model path. Use to chain "
+                             "phases: phase 2 starts from phase 1's merged "
+                             "output. Default = the constants block's "
+                             "BASE_MODEL (Gemma4-E4B-GAIA-Unified-v5-Multimodal).")
+    parser.add_argument("--steps-warmup", type=int, default=None,
+                        help="Override warmup steps (default 10).")
+    parser.add_argument("--no-text", action="store_true",
+                        help="Skip text-only samples (vision-only training).")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
-    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR
+    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS
+    if args.base_model:
+        BASE_MODEL = args.base_model
+    if args.steps_warmup is not None:
+        WARMUP_STEPS = args.steps_warmup
     if args.curriculum_name:
         curr_dir = f"{_PROJ}/knowledge/curricula/{args.curriculum_name}"
         VISION_CURRICULUM = f"{curr_dir}/vision_pairs.jsonl"
@@ -536,8 +549,9 @@ def main():
 
     # 2. Dataset
     log.info("Building dataset...")
+    text_curr = None if args.no_text else TEXT_CURRICULUM
     dataset = build_dataset(
-        TEXT_CURRICULUM, VISION_CURRICULUM, VISION_IMAGES_ROOT, processor,
+        text_curr, VISION_CURRICULUM, VISION_IMAGES_ROOT, processor,
     )
     if len(dataset) == 0:
         log.error("No training samples — add curriculum files and retry")
@@ -740,11 +754,12 @@ def main():
     log.info("     The new model inherits the prior model's KV state and")
     log.info("     session bias otherwise — silent contamination.")
 
-    # `model` was already del'd at line ~714 before the merge step, so
-    # the original `del model, merged, trainer` raised UnboundLocalError
-    # at the very end of a successful run. The function still returns 0
-    # so the artifacts are saved fine, but the traceback is misleading.
-    del merged, trainer
+    # Both `model` and `trainer` were already del'd before the merge step
+    # (lines ~715, ~728) so the original `del model, merged, trainer`
+    # raised UnboundLocalError at the very end of a successful run. The
+    # function still returns 0 so the artifacts saved fine, but the
+    # traceback was misleading. Only `merged` is still in scope here.
+    del merged
     gc.collect()
     torch.cuda.empty_cache()
     return 0
