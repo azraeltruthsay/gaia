@@ -27,7 +27,7 @@
       "max_num_prompt_tokens": 16384,
       "max_num_seqs": 1,
       "gpu_memory_utilization": 0.85,
-      "path": "/models/Gemma4-26B-A4B-GAIA-Prime-v1",
+      "path": "/models/prime",
       "trust_remote_code": true,
       "template": "raw",
       "type": "managed",
@@ -41,12 +41,11 @@
     },
     "core": {
       "enabled": true,
-      "path": "/models/Gemma4-E4B-GAIA-Core-v1",
+      "path": "Gemma4-E4B-GAIA-Core-v1",
       "type": "managed",
       "endpoint": "http://localhost:8092",
       "max_model_len": 4096,
-      "gpu_memory_utilization": 0.35,
-      "description": "Core (Operator) \u2014 Gemma 4 E4B, triage + tools + vision + audio, identity-baked"
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma 4 E4B identity-baked"
     },
     "observer": {
       "enabled": true,
@@ -72,12 +71,12 @@
       "description": "Free Groq API fallback for when GPU unavailable"
     },
     "nano": {
-      "enabled": false,
+      "enabled": true,
       "path": "Gemma4-E2B-GAIA-Nano-v1",
       "type": "managed",
       "endpoint": "http://gaia-nano:8080",
       "max_model_len": 2048,
-      "description": "DEPRECATED \u2014 E2B retired in Sovereign Duality. Core handles all triage."
+      "description": "Nano \u2014 sub-second triage via llama-server, Qwen3.5-0.8B"
     }
   },
   "N_BATCH": 1024,
@@ -384,6 +383,14 @@
       "vector_store_dir": "vector_store/research"
     }
   },
+  "SESSION_HYGIENE": {
+    "enabled": true,
+    "archive_after_days": 30,
+    "archive_min_messages": 1,
+    "min_run_interval_h": 168,
+    "keep_recent_n": 200,
+    "dry_run_default": false
+  },
   "SEMANTIC_PROBE": {
     "similarity_threshold": 0.4,
     "max_phrases": 8,
@@ -617,14 +624,14 @@
   "MODEL_REGISTRY": {
     "models_dir": "/models",
     "prime": {
-      "base": "/models/google/gemma-4-26B-A4B",
-      "merged": "/models/Gemma4-26B-A4B-GAIA-Prime-v1",
-      "gguf": "/models/Gemma4-26B-A4B-GAIA-Prime-v1-Q4_K_M.gguf",
-      "family": "gemma4",
-      "params": "26B",
+      "base": "/models/Qwen/Qwen3.5-9B",
+      "merged": "/models/prime",
+      "gguf": "/models/prime.gguf",
+      "family": "qwen3.5",
+      "params": "9B",
       "multimodal": true,
       "skills": "13/14 Primary School",
-      "notes": "Identity-baked Gemma 4 26B MoE. Adaptive training v6p1."
+      "notes": "Identity-baked Qwen3.5-9B. Adaptive training v6p1. Vision encoder preserved."
     },
     "prime_8b_legacy": {
       "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
@@ -633,14 +640,14 @@
       "notes": "Legacy 8B \u2014 retained for rollback"
     },
     "core": {
-      "base": "/models/google/gemma-4-E4B",
-      "merged": "/models/Gemma4-E4B-GAIA-Core-v1",
-      "gguf": "/models/Gemma4-E4B-GAIA-Core-v1-Q4_K_M.gguf",
-      "family": "gemma4",
-      "params": "E4B",
+      "base": "/models/Qwen/Qwen3.5-4B",
+      "merged": "/models/core",
+      "gguf": "/models/core.gguf",
+      "family": "qwen3.5",
+      "params": "4B",
       "multimodal": true,
       "skills": "13/14 Primary School",
-      "notes": "Identity-baked Gemma 4 E4B. Primary School curriculum."
+      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
     },
     "nano": {
       "base": "/models/Qwen/Qwen3.5-0.8B",

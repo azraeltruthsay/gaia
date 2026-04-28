@@ -383,6 +383,14 @@
       "vector_store_dir": "vector_store/research"
     }
   },
+  "SESSION_HYGIENE": {
+    "enabled": true,
+    "archive_after_days": 30,
+    "archive_min_messages": 1,
+    "min_run_interval_h": 168,
+    "keep_recent_n": 200,
+    "dry_run_default": false
+  },
   "SEMANTIC_PROBE": {
     "similarity_threshold": 0.4,
     "max_phrases": 8,

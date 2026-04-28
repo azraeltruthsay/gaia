@@ -276,6 +276,18 @@ class SleepTaskScheduler:
             handler=self._run_knowledge_ingestion,
         ))
 
+        # Session hygiene — archive stale sessions to prevent retrieval
+        # from surfacing old-model conversations into new ones.
+        # Self-throttled via min_run_interval_h (default weekly).
+        self.register_task(SleepTask(
+            task_id="session_hygiene",
+            task_type="MEMORY_HYGIENE",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=15,
+            handler=self._run_session_hygiene,
+        ))
+
         self.register_task(SleepTask(
             task_id="wiki_doc_regen",
             task_type="DOC_GENERATION",
@@ -422,6 +434,25 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
     # Built-in task handlers
     # ------------------------------------------------------------------
+
+    def _run_session_hygiene(self, **kwargs) -> None:
+        """Archive stale sessions to prevent temporal cognitive dissonance.
+
+        Self-throttled via min_run_interval_h (default 168h = weekly), so
+        wiring it into the every-cycle scheduler is fine — the actual
+        archival only fires on a configured cadence.
+        """
+        try:
+            from gaia_core.memory.session_hygiene import run_hygiene
+            result = run_hygiene(self.config)
+            if result.get("skipped"):
+                logger.debug("session_hygiene: %s", result["skipped"])
+            elif result.get("archived"):
+                logger.info("session_hygiene: archived %d sessions, kept %d (sessions.json %.1f MB)",
+                            result.get("archived", 0), result.get("keep", 0),
+                            result.get("new_size_mb", 0))
+        except Exception:
+            logger.exception("session_hygiene failed (non-fatal)")
 
     def _run_conversation_curation(self, **kwargs) -> None:
         """Curate recent session conversations for the knowledge base."""
