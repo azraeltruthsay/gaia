@@ -1036,10 +1036,22 @@ class AgentCore:
                     persona_name, knowledge_base_name,
                 )
             else:
-                # No probe hits — fall back to keyword matching
-                persona_name, knowledge_base_name = get_persona_for_request(user_input)
+                # No probe hits — fall back to keyword + embed classifier
+                # Embed model widens the net for paraphrased queries that
+                # don't trip a keyword. Falls through gracefully if the
+                # embed model isn't available.
+                _persona_embed = None
+                try:
+                    _persona_embed = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+                except Exception:
+                    pass
+                persona_name, knowledge_base_name = get_persona_for_request(
+                    user_input,
+                    embed_model=_persona_embed,
+                    config=self.config,
+                )
                 logger.info(
-                    "Persona selection (keyword fallback): persona=%s, kb=%s",
+                    "Persona selection (keyword/embed fallback): persona=%s, kb=%s",
                     persona_name, knowledge_base_name,
                 )
     

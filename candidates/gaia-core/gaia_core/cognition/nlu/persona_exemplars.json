@@ -1,0 +1,36 @@
+{
+    "_comment": "Exemplar phrases for embed-based persona classification. Each persona has a list of representative user queries; new user input is embedded and matched against these via cosine similarity. Threshold lives in gaia_constants EMBED_PERSONA. To add a persona, add a new top-level key with ~20-30 exemplars covering the range of how users naturally invoke that mode. Keep phrases short and varied (different verbs, different topics within the persona's domain). See embed_persona_classifier.py for the matching mechanics.",
+
+    "dnd_player_assistant": [
+        "Tell me about Rupert Roads",
+        "What's the deal with the BlueShot crystals",
+        "Who is Anton Snark in our campaign",
+        "What happened in our last D&D session",
+        "Update Rupert's character sheet",
+        "Add a new artifice to Rupert's loadout",
+        "What spells does Rupert have prepared",
+        "Roll initiative for the next encounter",
+        "Did Axuraud survive the engagement at Ruadh Craic",
+        "Who's Mr. BOB and what does he want",
+        "Tell me about the Heimr cosmic setting",
+        "What's the status of the R.S.S. ALICE",
+        "Can you remind me of Rupert's HP and AC",
+        "What are the key artifices Rupert has built",
+        "We escaped the wreckage and need to plan our next move",
+        "I cast firebolt at the goblin",
+        "What does the Moon Gate connect to",
+        "Speak in-character as in-universe GAIA",
+        "What would in-universe GAIA say about this situation",
+        "How does the BOOM artifice work mechanically",
+        "Help me write up the latest session as campaign lore",
+        "What faction is the Tower aligned with",
+        "Recap the Axuraud engagement",
+        "I need to update the character sheet with the new battle suit",
+        "What's our party composition right now",
+        "Where is Brænēage in relation to the Astral Sea",
+        "Who's in the AutoGnome crew aboard ALICE",
+        "What's the status of Anton's replicant program",
+        "Tell me what's happening in the Heimr campaign right now",
+        "The Mechaduellum reference document for Rupert"
+    ]
+}

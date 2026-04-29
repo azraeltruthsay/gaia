@@ -150,31 +150,78 @@ def get_available_knowledge_bases() -> list:
         return ["dnd_campaign", "system", "blueprints", "general"]
 
 
-def get_persona_for_request(user_input: str) -> Tuple[str, Optional[str]]:
+def get_persona_for_request(
+    user_input: str,
+    embed_model=None,
+    config=None,
+) -> Tuple[str, Optional[str]]:
     """
     Determines the appropriate persona and knowledge base for a given user request.
 
+    Detection layers (first match wins):
+      1. Keyword match against PERSONA_KEYWORDS (fast, deterministic)
+      2. Embedding-based classification against persona_exemplars.json
+         (when ``embed_model`` is provided and the classifier reaches
+         confidence threshold) — handles paraphrasing, typos, novel
+         entity names not in the keyword set.
+      3. Default to "dev" persona.
+
+    The keyword path stays primary so existing well-anchored phrases
+    keep their fast path. The embed fallback widens the net for
+    queries like "What's the deal with BlueShot crystals?" where no
+    keyword fires but the topic is unmistakably D&D.
+
     Args:
         user_input: The user's message.
+        embed_model: Optional SentenceTransformer instance for
+            embedding-based fallback. When None, only keyword match
+            is attempted.
+        config: Optional config dict for the embed classifier. Reads
+            ``EMBED_PERSONA.confidence_threshold`` and
+            ``EMBED_PERSONA.enabled`` if present.
 
     Returns:
-        A tuple containing (persona_name, knowledge_base_name).
-        knowledge_base_name is read from the persona's JSON configuration.
+        A tuple of (persona_name, knowledge_base_name).
     """
     input_lower = user_input.lower()
-    # Also create a normalized version for matching special characters (æ→ae, ē→e)
+    # Normalize special characters for matching (æ→ae, ē→e)
     input_normalized = _normalize_text(input_lower)
 
-    # Check each persona's keywords
+    # Layer 1: keyword match
     for persona_name, keywords in PERSONA_KEYWORDS.items():
-        # Check against both original (lowercased) and normalized input
         if any(keyword in input_lower or keyword in input_normalized for keyword in keywords):
-            logger.info(f"Intent detected for persona: '{persona_name}'")
-            # Load knowledge_base_name from the persona's configuration
+            logger.info(f"Persona keyword match: '{persona_name}'")
             knowledge_base_name = get_knowledge_base_for_persona(persona_name)
             return persona_name, knowledge_base_name
 
-    # Default to the "dev" persona and check if it has a knowledge base configured
+    # Layer 2: embed classifier fallback (only if model + config allow)
+    if embed_model is not None:
+        embed_cfg = {}
+        try:
+            if config is not None:
+                embed_cfg = (config.constants if hasattr(config, "constants") else config).get("EMBED_PERSONA", {}) or {}
+        except Exception:
+            embed_cfg = {}
+        if embed_cfg.get("enabled", True):
+            try:
+                from gaia_core.cognition.nlu.embed_persona_classifier import EmbedPersonaClassifier
+                clf = EmbedPersonaClassifier.instance()
+                if not clf.ready:
+                    clf.initialise(embed_model, config=embed_cfg)
+                if clf.ready:
+                    threshold = float(embed_cfg.get("confidence_threshold", 0.45))
+                    persona_label, score = clf.classify(user_input, confidence_threshold=threshold)
+                    if persona_label:
+                        logger.info(
+                            "Persona embed match: '%s' (score=%.3f, no keyword hit)",
+                            persona_label, score,
+                        )
+                        knowledge_base_name = get_knowledge_base_for_persona(persona_label)
+                        return persona_label, knowledge_base_name
+            except Exception:
+                logger.debug("Persona embed classifier failed (non-fatal)", exc_info=True)
+
+    # Layer 3: default
     default_persona = "dev"
     default_kb = get_knowledge_base_for_persona(default_persona)
     return default_persona, default_kb
