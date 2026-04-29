@@ -109,6 +109,35 @@ def get_persona_for_knowledge_base(kb_name: str) -> Optional[str]:
     return None
 
 
+def get_persona_overlay_text(persona_name: str) -> Optional[str]:
+    """Build the system-prompt overlay for a persona — its template + bullet
+    instructions joined into a single block. Used by both build_from_packet
+    (full pipeline) and _escalate_slim_response so the same identity rules
+    apply regardless of which path generates the reply.
+
+    Returns None if the persona has no template/instructions to overlay.
+    """
+    cfg = _load_persona_config(persona_name)
+    if not cfg:
+        return None
+    parts: list = []
+    template = cfg.get("template") or ""
+    if template:
+        parts.append(template)
+    instructions = cfg.get("instructions") or []
+    if isinstance(instructions, list) and instructions:
+        parts.append("\n".join(f"• {line}" for line in instructions))
+    return "\n\n".join(parts) if parts else None
+
+
+def get_persona_overlay_for_kb(kb_name: str) -> Optional[str]:
+    """Resolve a KB name to its owning persona, then return the overlay."""
+    persona_name = get_persona_for_knowledge_base(kb_name)
+    if not persona_name:
+        return None
+    return get_persona_overlay_text(persona_name)
+
+
 def get_available_knowledge_bases() -> list:
     """Return list of configured knowledge base names from gaia_constants.json."""
     try:

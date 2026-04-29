@@ -4337,13 +4337,17 @@ class AgentCore:
     _SLIM_ESCALATION_CHAIN = ["prime", "core", "groq_fallback", "oracle_openai", "oracle_gemini"]
 
     def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int,
-                                grounding_context: str = "") -> str:
+                                grounding_context: str = "", knowledge_base_name: str = "") -> str:
         """Try higher-tier models when the slim path model produces garbage.
 
         Args:
             grounding_context: Optional web/KB grounding text to inject into
                 the escalation prompt. Gives the model verified facts to
                 reference instead of confabulating from weights.
+            knowledge_base_name: When set, the persona overlay for the KB's
+                owner persona (e.g. dnd_player_assistant for dnd_campaign)
+                is prepended to the escalation system prompt so identity
+                rules survive Core→Prime fallback.
 
         On success, sets ``self._last_responding_model`` so callers can
         attribute the response to the correct model in headers/tags.
@@ -4397,7 +4401,18 @@ class AgentCore:
                     except Exception:
                         self.logger.debug("Escalation web search failed (non-blocking)", exc_info=True)
 
+                _persona_overlay = ""
+                if knowledge_base_name:
+                    try:
+                        from gaia_core.behavior.persona_switcher import get_persona_overlay_for_kb
+                        _ov = get_persona_overlay_for_kb(knowledge_base_name)
+                        if _ov:
+                            _persona_overlay = _ov + "\n\n"
+                    except Exception:
+                        self.logger.debug("Persona overlay lookup failed", exc_info=True)
+
                 _system = (
+                    _persona_overlay +
                     "You are GAIA, a sovereign AI assistant created by Azrael. "
                     "You speak warmly and with personality — not a corporate help-desk tone. "
                     "Answer the user's question naturally and engage with specifics.\n"
@@ -5506,6 +5521,19 @@ RESULT: COMPLEX (reason: <brief reason>)
                 logger.debug("AgentCore: intent assignment failed: %s", _int_exc)
             messages = build_from_packet(packet, slim_mode=use_slim)
             self.logger.info("AgentCore: slim prompt routed through GCP builder (slim_mode=%s)", use_slim)
+
+            # Extract KB name from packet so escalation can pull the matching
+            # persona overlay (identity rules) into its system prompt.
+            _kb_for_escalation = ""
+            try:
+                for df in getattr(packet.content, 'data_fields', []) or []:
+                    if getattr(df, 'key', '') == 'knowledge_base_name':
+                        v = getattr(df, 'value', None)
+                        if isinstance(v, str) and v:
+                            _kb_for_escalation = v
+                            break
+            except Exception:
+                pass
             # Use configured MAX_ALLOWED_RESPONSE_TOKENS (default 1000) instead of hardcoded 256
             max_resp_tokens = (
                 getattr(self.config, 'MAX_ALLOWED_RESPONSE_TOKENS', None) or
@@ -5532,13 +5560,13 @@ RESULT: COMPLEX (reason: <brief reason>)
             # Nano self-escalation: if response is literally "ESCALATE", defer to Core
             if content.upper().startswith("ESCALATE"):
                 self.logger.info("Nano self-escalated via ESCALATE signal — trying next tier")
-                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
                 if escalated:
                     return escalated
             # Detect degenerate output and escalate to a higher tier
             if self._is_degenerate_output(content, user_input):
                 self.logger.warning("Degenerate output from '%s' — escalating to next tier", selected_model_name)
-                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
+                escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
                 if escalated:
                     return escalated
             # Uncertainty-based escalation — Nano hedges or describes process
@@ -5548,7 +5576,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                 if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy):
                     self.logger.info("Uncertainty escalation from '%s' (entropy=%.2f) — trying next tier",
                                      selected_model_name, resp_entropy)
-                    escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
+                    escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
                     if escalated:
                         return escalated
             # ── Confidence-Gated Epistemic Grounding ─────────────────
@@ -5609,7 +5637,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             return content
         except Exception as exc:
             self.logger.exception("slim prompt call failed for '%s'", selected_model_name)
-            escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text)
+            escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
             if escalated:
                 return escalated
             return f"I encountered an error while answering: {exc}"

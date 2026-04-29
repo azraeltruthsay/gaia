@@ -106,6 +106,36 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
 
+    # Persona-specific overlay: when the packet carries a knowledge_base_name,
+    # load the matching persona's template + instructions and prepend them
+    # to the system prompt. This is how dnd_player_assistant gets to inject
+    # identity-grounding rules ("you play in-universe GAIA, NOT Rupert") that
+    # generic chat doesn't need. Same overlay is used by the escalation path
+    # so the identity rules survive Core→Prime fallback.
+    try:
+        _kb_name_for_persona = None
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            if getattr(df, 'key', '') == 'knowledge_base_name':
+                v = getattr(df, 'value', None)
+                if isinstance(v, str) and v:
+                    _kb_name_for_persona = v
+                    break
+        if _kb_name_for_persona:
+            from gaia_core.behavior.persona_switcher import get_persona_overlay_for_kb
+            _overlay = get_persona_overlay_for_kb(_kb_name_for_persona)
+            if _overlay:
+                persona_anchor = (
+                    _overlay
+                    + "\n\n— Real-world identity (always-on baseline) —\n"
+                    + persona_anchor
+                )
+                logger.info(
+                    "PromptBuilder: persona overlay injected for kb=%s",
+                    _kb_name_for_persona,
+                )
+    except Exception:
+        logger.debug("Persona overlay injection failed (non-blocking)", exc_info=True)
+
     # Be defensive: packets used by test harnesses may be lightweight. Use safe accessors.
     header = getattr(packet, "header", None)
 
