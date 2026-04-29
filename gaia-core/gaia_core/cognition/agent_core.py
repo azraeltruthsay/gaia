@@ -1293,6 +1293,11 @@ class AgentCore:
             # escalation regardless of KB presence — covers cases like
             # "speak in-character as X" where the user requests a voice
             # shift without an active persona overlay.
+            #
+            # Detection layers: regex first (fast, deterministic for the
+            # common phrasings) then embed classifier (catches paraphrases,
+            # 'embody', 'narrate from', non-keyword variants). Either path
+            # firing flips _is_roleplay_invite.
             _is_roleplay_invite = False
             try:
                 import re as _re_rp
@@ -1307,6 +1312,35 @@ class AgentCore:
                 _is_roleplay_invite = any(_re_rp.search(p, _ul) for p in _rp_patterns)
             except Exception:
                 _is_roleplay_invite = False
+
+            # Embed-classifier fallback for stance — catches paraphrases the
+            # regex misses ("embody in-universe GAIA", "narrate from GAIA's
+            # perspective", typos, future non-English). Only runs if regex
+            # didn't already match (cheap).
+            if not _is_roleplay_invite:
+                try:
+                    _stance_embed = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+                    if _stance_embed is not None:
+                        _stance_cfg = self.config.constants.get("EMBED_STANCE", {}) or {}
+                        if _stance_cfg.get("enabled", True):
+                            from gaia_core.cognition.nlu.embed_stance_classifier import EmbedStanceClassifier
+                            _stance_clf = EmbedStanceClassifier.instance()
+                            if not _stance_clf.ready:
+                                _stance_clf.initialise(_stance_embed, config=_stance_cfg)
+                            if _stance_clf.ready:
+                                _threshold = float(_stance_cfg.get("confidence_threshold", 0.40))
+                                _stance, _stance_score = _stance_clf.classify(
+                                    user_input or "",
+                                    confidence_threshold=_threshold,
+                                )
+                                if _stance == "in_character_invitation":
+                                    _is_roleplay_invite = True
+                                    logger.info(
+                                        "[STANCE] embed classifier fired in_character_invitation (score=%.3f)",
+                                        _stance_score,
+                                    )
+                except Exception:
+                    logger.debug("[STANCE] embed classifier failed (non-fatal)", exc_info=True)
 
             _force_escalate = (
                 (knowledge_base_name and not is_trivial) or _is_roleplay_invite
@@ -4659,6 +4693,10 @@ class AgentCore:
         Recitation-type requests are excluded because Nano tends to refuse
         them on copyright grounds instead of escalating, bypassing the
         recitation pipeline entirely.
+
+        Persona-active and stance-active requests are also excluded:
+        Nano's slim few-shot prompt has no awareness of persona overlays
+        or voice tags, so it would silently shortcut around them.
         """
         user_input = packet.content.original_prompt
         is_short = len(user_input) < 150
@@ -4668,6 +4706,48 @@ class AgentCore:
         if any(kw in input_lower for kw in self._REFLEX_BYPASS_KEYWORDS):
             self.logger.info("Reflex bypass: keyword match in '%s' — routing to full pipeline", user_input[:60])
             return False
+
+        # Persona / stance bypass — if a non-default persona or in-character
+        # invitation would activate, the slim Reflex prompt would skip the
+        # overlay rules entirely. Run a fast embed pre-check so the full
+        # pipeline gets to apply the persona overlay + voice tags.
+        try:
+            _embed = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+            if _embed is not None:
+                # Persona check
+                _p_cfg = self.config.constants.get("EMBED_PERSONA", {}) or {}
+                if _p_cfg.get("enabled", True):
+                    from gaia_core.cognition.nlu.embed_persona_classifier import EmbedPersonaClassifier
+                    _pclf = EmbedPersonaClassifier.instance()
+                    if not _pclf.ready:
+                        _pclf.initialise(_embed, config=_p_cfg)
+                    if _pclf.ready:
+                        _p_threshold = float(_p_cfg.get("confidence_threshold", 0.35))
+                        _persona, _p_score = _pclf.classify(user_input, confidence_threshold=_p_threshold)
+                        if _persona:
+                            self.logger.info(
+                                "Reflex bypass: persona '%s' detected (score=%.3f) — routing to full pipeline",
+                                _persona, _p_score,
+                            )
+                            return False
+                # Stance check
+                _s_cfg = self.config.constants.get("EMBED_STANCE", {}) or {}
+                if _s_cfg.get("enabled", True):
+                    from gaia_core.cognition.nlu.embed_stance_classifier import EmbedStanceClassifier
+                    _sclf = EmbedStanceClassifier.instance()
+                    if not _sclf.ready:
+                        _sclf.initialise(_embed, config=_s_cfg)
+                    if _sclf.ready:
+                        _s_threshold = float(_s_cfg.get("confidence_threshold", 0.55))
+                        _stance, _s_score = _sclf.classify(user_input, confidence_threshold=_s_threshold)
+                        if _stance:
+                            self.logger.info(
+                                "Reflex bypass: stance '%s' detected (score=%.3f) — routing to full pipeline",
+                                _stance, _s_score,
+                            )
+                            return False
+        except Exception:
+            self.logger.debug("Reflex bypass embed pre-check failed (non-fatal)", exc_info=True)
 
         # Nano is deprecated in Sovereign Duality — skip reflex entirely
         # when nano is not enabled in config, even if it's in the model pool

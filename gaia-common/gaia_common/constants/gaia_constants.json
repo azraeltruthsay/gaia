@@ -435,6 +435,11 @@
     "confidence_threshold": 0.35,
     "top_k": 3
   },
+  "EMBED_STANCE": {
+    "enabled": true,
+    "confidence_threshold": 0.55,
+    "top_k": 3
+  },
   "WEB_RESEARCH": {
     "trusted_domains": [
       "gutenberg.org",

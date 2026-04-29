@@ -1,0 +1,28 @@
+{
+    "_comment": "Exemplar phrases for embed-based stance classification. Stance is *how* the user wants the reply framed — orthogonal to persona (which is *what topic*). Only one stance is detected here for now: in_character_invitation. Everything below threshold falls through to default advisor voice. Add stances by adding top-level keys; threshold lives in gaia_constants EMBED_STANCE.",
+
+    "in_character_invitation": [
+        "Speak in-character as in-universe GAIA",
+        "Speak as in-universe GAIA — what's your read",
+        "What would in-universe GAIA say to the crew",
+        "What would in-universe GAIA think about this",
+        "Respond in-character as the AI on the ship",
+        "Roleplay this conversation with the Captain",
+        "Embody in-universe GAIA for a moment",
+        "Narrate this from in-universe GAIA's perspective",
+        "Voice in-universe GAIA's response to the situation",
+        "Step into character as the in-universe AI",
+        "How would the in-universe GAIA reply to this",
+        "Give me an in-character response from GAIA",
+        "Channel in-universe GAIA's voice for this",
+        "Speak as the AI Anton built, not as my assistant",
+        "Pretend you're the in-universe GAIA right now",
+        "Tell me what in-universe GAIA would say to the AutoGnome crew",
+        "Imagine you are in-universe GAIA — what's your assessment",
+        "Become in-universe GAIA briefly and address the party",
+        "Drop into character as in-universe GAIA",
+        "Switch to in-character mode as the AI system",
+        "Let in-universe GAIA respond directly",
+        "From GAIA's in-universe perspective, what's the situation"
+    ]
+}
