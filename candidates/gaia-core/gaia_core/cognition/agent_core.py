@@ -4401,24 +4401,76 @@ class AgentCore:
                     "You are GAIA, a sovereign AI assistant created by Azrael. "
                     "You speak warmly and with personality — not a corporate help-desk tone. "
                     "Answer the user's question naturally and engage with specifics.\n"
-                    "When LOCAL KNOWLEDGE BASE entries are provided below, USE them — show "
-                    "familiarity with the names, places, characters, and prior context they "
-                    "contain. Don't pretend you don't have the information when it's right "
-                    "there. Cite filenames briefly when it's clarifying.\n"
+                    "When LOCAL KNOWLEDGE BASE entries are provided below, you MUST anchor "
+                    "your reply with at least TWO specific names, places, items, or events "
+                    "drawn from those sources — proper nouns and unique strings, not generic "
+                    "categories. Naming concrete things proves you actually read the sources "
+                    "AND seeds the next turn's session retriever with anchor points. "
+                    "If the user shares a narrative update (story progression), do NOT just "
+                    "paraphrase what they said — connect the new events to existing characters, "
+                    "items, locations, or prior events you can see in the sources.\n"
                     "When the user has corrected something or shifted context, acknowledge it "
                     "and pivot toward what they were originally trying to do — don't just say "
                     "'how can I assist?'. Pick up the thread.\n"
-                    "Don't relate every topic back to yourself. Don't invent facts. "
-                    "Don't emit tool_call, JSON, or code blocks unless explicitly asked."
+                    "Don't relate every topic back to yourself. Don't invent facts — if the "
+                    "sources don't cover something, say 'sources don't say' rather than "
+                    "fabricating. Don't emit tool_call, JSON, or code blocks unless asked."
                 )
                 _user = user_question
                 if _gc:
-                    _user = (
-                        f"VERIFIED REFERENCE DATA (use this to answer; cite filenames "
-                        f"from LOCAL KNOWLEDGE BASE when relevant):\n"
-                        f"{_gc}\n\n"
-                        f"USER MESSAGE: {user_question}"
-                    )
+                    # Extract proper nouns from the grounding so we can present
+                    # them as an explicit anchor-point glossary. Models follow
+                    # "use one of these names" much more reliably than "scan
+                    # the prose and find names yourself".
+                    import re as _re_pn
+                    _pn_seen: dict = {}  # preserve first-seen order, dedupe
+                    # Multi-word capitalized: "Mr. BOB", "R.S.S. ALICE", "Rupert Roads"
+                    for m in _re_pn.finditer(
+                        r'\b(?:[A-Z][a-zA-Z]*\.?\s+)+[A-Z][A-Za-z0-9_]+\b', _gc
+                    ):
+                        s = m.group(0).strip()
+                        if 4 <= len(s) <= 60 and s.lower() not in _pn_seen:
+                            _pn_seen[s.lower()] = s
+                    # ALL-CAPS acronyms in artifice/system style: BOOM, CLOAK, ROTATOR
+                    for m in _re_pn.finditer(r'\b[A-Z]{3,}(?:[-_][A-Z0-9]+)?\b', _gc):
+                        s = m.group(0).strip()
+                        if s.lower() not in _pn_seen and s not in {
+                            "USER", "MESSAGE", "GAIA", "API", "URL", "PDT", "UTC",
+                            "JSON", "HTTP", "HTTPS", "MCP", "AI", "PROMPT", "TASK",
+                        }:
+                            _pn_seen[s.lower()] = s
+                    # Single capitalized standalone proper nouns: "Anton", "Rupert", "Heimr"
+                    for m in _re_pn.finditer(r'\b[A-Z][a-z]{3,}\b', _gc):
+                        s = m.group(0)
+                        if s.lower() not in _pn_seen and s not in {
+                            "User", "When", "Where", "What", "This", "That", "These",
+                            "Those", "Some", "Most", "Many", "Each", "Their", "There",
+                            "Note", "Used", "Made", "Then", "Just", "Only", "Both",
+                            "Also", "Such", "Will", "Have", "Been", "Would", "Could",
+                            "Should", "After", "Before",
+                        }:
+                            _pn_seen[s.lower()] = s
+                    _anchor_list = list(_pn_seen.values())[:25]
+
+                    # Place the anchor block AFTER the user message — models
+                    # attend most strongly to the end of the prompt right
+                    # before generation. Earlier placement (after _gc) got
+                    # buried by 7 docs of grounding text and ignored.
+                    _user_parts = [
+                        "VERIFIED REFERENCE DATA (use this to answer; cite filenames "
+                        "from LOCAL KNOWLEDGE BASE when relevant):",
+                        _gc,
+                        f"USER MESSAGE: {user_question}",
+                    ]
+                    if _anchor_list:
+                        _user_parts.append(
+                            "REPLY GUIDANCE: Acknowledge the user's message, then weave AT "
+                            "LEAST TWO of these specific anchors from the reference data "
+                            "naturally into your reply (do not list them mechanically — "
+                            "make them part of a flowing response): "
+                            + ", ".join(_anchor_list[:15])
+                        )
+                    _user = "\n\n".join(_user_parts)
                 escalation_messages = [
                     {"role": "system", "content": _system},
                     {"role": "user", "content": _user},

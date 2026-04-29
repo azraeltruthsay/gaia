@@ -223,6 +223,45 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         "the results. Asking permission for an obvious next step wastes the user's turn."
     )
 
+    # Detect grounding presence — if the packet was enriched with KB hits or
+    # web grounding, push the model to NAME at least 2 specific entities from
+    # them. Generic acknowledgments waste the retrieved context AND deprive
+    # the next turn's session retriever of proper-noun anchor points.
+    _has_grounding = False
+    _grounding_keys_seen: list = []
+    try:
+        for df in getattr(packet.content, 'data_fields', []) or []:
+            k = getattr(df, 'key', '')
+            v = getattr(df, 'value', None)
+            if not v:
+                continue
+            # KB hits / RAG retrieval / web search results / persona-specific
+            # knowledge keys (dnd_knowledge, code_knowledge, etc.)
+            if k in ('retrieved_documents', 'web_grounding') or k.endswith('_knowledge'):
+                # Only count it if the value carries actual content
+                if isinstance(v, list) and v and isinstance(v[0], dict) and (v[0].get('text') or v[0].get('snippet')):
+                    _has_grounding = True
+                    _grounding_keys_seen.append(k)
+                elif isinstance(v, dict) and any(
+                    isinstance(x, dict) and x.get('results') for x in v.values()
+                ):
+                    _has_grounding = True
+                    _grounding_keys_seen.append(k)
+    except Exception:
+        logger.debug("Grounding detection failed", exc_info=True)
+
+    if _has_grounding and not compact_mode:
+        safety_openness_directive_content += (
+            "\nGrounding: The cognition packet has retrieved knowledge attached "
+            f"(keys: {', '.join(sorted(set(_grounding_keys_seen))[:4])}). When you reply, "
+            "anchor your response with at least TWO specific names, places, items, or "
+            "events drawn from those sources — proper nouns and unique strings, not "
+            "generic categories. This both proves you read the sources and seeds the "
+            "next turn's session retriever with concrete anchor points. If the "
+            "sources don't contain enough specifics, say so plainly rather than "
+            "synthesizing details that aren't there."
+        )
+
     # Memory helpers — only inject when MCP tools are available (otherwise the model
     # can't call them) and we're not in compact mode.
     memory_guidance_block_content = ""
