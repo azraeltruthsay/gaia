@@ -1118,23 +1118,18 @@ class AgentCore:
                         + (f'\nRepeated letters: {_freq_str}' if _freq_str else '')
                     )
 
-            # Pattern C: quoted words in questions about letters/counting/spelling
-            if not _char_maps:
-                _quoted = _re_count.findall(r'["\'](\w{3,})["\']', user_input)
-                _has_letter_context = any(w in user_input.lower() for w in
-                    ["letter", "spell", "character", "count", "how many", "contain"])
-                if _quoted and _has_letter_context:
-                    for _word in _quoted[:3]:  # Max 3 words
-                        _word = _word.lower()
-                        _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
-                        _freq = {}
-                        for c in _word:
-                            _freq[c] = _freq.get(c, 0) + 1
-                        _freq_str = ", ".join(f"{c}={n}" for c, n in sorted(_freq.items()) if n > 1)
-                        _char_maps.append(
-                            f'Word "{_word}" ({len(_word)} chars): {_spelled}'
-                            + (f'\nRepeated letters: {_freq_str}' if _freq_str else '')
-                        )
+            # Pattern C (DISABLED — too aggressive, fires on D&D / quoted-name
+            # contexts where 'character' means a person, not a letter). The
+            # explicit "how many X in Y" and "spell Y" patterns above cover
+            # legitimate character-analysis questions; quoted words alone are
+            # not a strong enough signal.
+            #
+            # Original false positive: "to be fair he's actually MY character
+            # 🙂 ... you are 'playing' GAIA ..." → matched 'character' as
+            # letter-context AND found 'playing' as a quoted word, injected
+            # character data for 'playing', then Core E4B panicked at the
+            # contradicting "answer the question" instruction and echoed the
+            # user's message verbatim.
 
             if _char_maps:
                 _injection = (
@@ -4022,6 +4017,23 @@ class AgentCore:
             # Only flag if there WAS punctuation earlier (so it's not just a short phrase)
             if any(c in stripped[:-10] for c in '.!?'):
                 return True
+        # Echo collapse: model returned the user's input verbatim (or with
+        # only trivial trim/wrapping). Common Gemma 4 failure on long+confusing
+        # prompts — instead of synthesising a reply it just regurgitates the
+        # input. Detected by comparing trimmed prefixes; cheap and reliable.
+        if user_input and len(user_input) >= 60:
+            _u = user_input.strip()
+            _s = stripped
+            # Strip a "[Core]" / "[Prime]" / etc. header the response generator
+            # may have prepended.
+            import re as _re_echo
+            _s = _re_echo.sub(r'^\[(Core|Prime|Nano|Operator)\]\s*\n?', '', _s, count=1)
+            # Direct prefix match — if the response starts with >60 chars of
+            # the user message verbatim, it's almost certainly an echo.
+            head_len = min(80, len(_u), len(_s))
+            if head_len >= 60 and _u[:head_len].lower() == _s[:head_len].lower():
+                return True
+
         # Tool-call-as-text leakage: model emitted what looks like a Python
         # function call inline (e.g. fetch_knowledge("...")) instead of going
         # through the tool-routing pipeline. The user sees raw code rather
@@ -4344,6 +4356,7 @@ class AgentCore:
                 user_question = msg.get("content", "")
                 break
 
+
         for candidate in self._SLIM_ESCALATION_CHAIN:
             if candidate == failed_model:
                 continue
@@ -4386,11 +4399,17 @@ class AgentCore:
 
                 _system = (
                     "You are GAIA, a sovereign AI assistant created by Azrael. "
-                    "You are helpful, direct, and concise. Answer the user's question naturally. "
-                    "IMPORTANT: Not every question is about you. If the user asks about a topic "
-                    "(Pokemon, history, science, etc.), answer about THAT TOPIC — do not relate "
-                    "it back to yourself. If you don't know, say so. Never invent facts. "
-                    "Do not use tool_call, JSON, or code blocks unless explicitly asked."
+                    "You speak warmly and with personality — not a corporate help-desk tone. "
+                    "Answer the user's question naturally and engage with specifics.\n"
+                    "When LOCAL KNOWLEDGE BASE entries are provided below, USE them — show "
+                    "familiarity with the names, places, characters, and prior context they "
+                    "contain. Don't pretend you don't have the information when it's right "
+                    "there. Cite filenames briefly when it's clarifying.\n"
+                    "When the user has corrected something or shifted context, acknowledge it "
+                    "and pivot toward what they were originally trying to do — don't just say "
+                    "'how can I assist?'. Pick up the thread.\n"
+                    "Don't relate every topic back to yourself. Don't invent facts. "
+                    "Don't emit tool_call, JSON, or code blocks unless explicitly asked."
                 )
                 _user = user_question
                 if _gc:
@@ -4398,16 +4417,21 @@ class AgentCore:
                         f"VERIFIED REFERENCE DATA (use this to answer; cite filenames "
                         f"from LOCAL KNOWLEDGE BASE when relevant):\n"
                         f"{_gc}\n\n"
-                        f"USER QUESTION: {user_question}"
+                        f"USER MESSAGE: {user_question}"
                     )
                 escalation_messages = [
                     {"role": "system", "content": _system},
                     {"role": "user", "content": _user},
                 ]
+                # 256 was too tight when grounding contains multiple local docs —
+                # Prime would truncate before showing it had read them. Cap at
+                # 600 for the escalation; still safe for runaway, more than
+                # enough for a substantive reply.
+                _escalation_cap = min(max_tokens, 600) if _gc else min(max_tokens, 256)
                 res = self.model_pool.forward_to_model(
                     candidate,
                     messages=escalation_messages,
-                    max_tokens=min(max_tokens, 256),  # cap escalation to avoid runaway
+                    max_tokens=_escalation_cap,
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
                     adapter_name=self._resolve_adapter(candidate),
