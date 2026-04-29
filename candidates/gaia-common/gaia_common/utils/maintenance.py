@@ -16,15 +16,39 @@ _LEGACY_FLAG = _SHARED_DIR / "ha_maintenance"
 
 
 def is_maintenance_active() -> bool:
-    """Return True if maintenance mode is currently active."""
+    """Return True if maintenance mode is currently active.
+
+    The JSON flag (`maintenance_mode.json`) is the single source of truth.
+    The legacy `ha_maintenance` flag is written alongside the JSON for
+    backward-compat readers (older retry paths) but is NOT authoritative
+    on its own — if it appears without the JSON, that's an orphan from
+    a service that crashed mid-operation or a manual touch, and it gets
+    auto-cleaned here.
+
+    Past incident: a stale `ha_maintenance` flag from 2026-04-26 survived
+    deletion of the JSON and locked the system into fake-maintenance for
+    9 hours. Wake signals were silently suppressed. (See bd issue.)
+    """
     try:
         if _FLAG_FILE.exists():
             data = json.loads(_FLAG_FILE.read_text())
-            return data.get("active", False)
+            if data.get("active", False):
+                return True
+            # JSON exists but says active=False — clean up legacy mirror.
     except (json.JSONDecodeError, OSError):
+        # Corrupt JSON is treated as "no maintenance" — fail safe.
         pass
-    # Fall back to legacy flag
-    return _LEGACY_FLAG.exists()
+
+    # JSON is absent or active=False. If the legacy flag is loitering
+    # alone, it's an orphan — remove it so subsequent checks return False
+    # without re-tripping over the same file.
+    if _LEGACY_FLAG.exists():
+        try:
+            _LEGACY_FLAG.unlink()
+        except OSError:
+            # Couldn't delete (permissions, race) — fail safe by ignoring it.
+            pass
+    return False
 
 
 def get_maintenance_info() -> dict | None:

@@ -72,13 +72,22 @@ except ImportError:
     _MAINT_FLAG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "maintenance_mode.json"
 
     def is_maintenance_active():
+        # JSON flag is authoritative; legacy ha_maintenance is a mirror only.
+        # If the legacy flag is loitering without the JSON, it's an orphan
+        # (past incident: stale flag locked wake signals for 9 hours).
         try:
             if _MAINT_FLAG_FILE.exists():
                 data = json.loads(_MAINT_FLAG_FILE.read_text())
-                return data.get("active", False)
+                if data.get("active", False):
+                    return True
         except (json.JSONDecodeError, OSError):
             pass
-        return MAINTENANCE_FLAG.exists()
+        if MAINTENANCE_FLAG.exists():
+            try:
+                MAINTENANCE_FLAG.unlink()
+            except OSError:
+                pass
+        return False
 
     def get_maintenance_info():
         if not is_maintenance_active():

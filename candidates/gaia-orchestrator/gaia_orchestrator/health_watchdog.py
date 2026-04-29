@@ -55,13 +55,28 @@ POLL_INTERVAL = 30
 # Consecutive failures before declaring a service unhealthy
 FAILURE_THRESHOLD = 2
 
-# Maintenance mode — structured flag with legacy fallback
+# Maintenance mode — structured flag with legacy fallback. JSON is
+# authoritative; the legacy ha_maintenance flag is a mirror only and
+# gets auto-cleaned if it appears alone (orphan).
 try:
     from gaia_common.utils.maintenance import is_maintenance_active as _is_maint_active
 except ImportError:
+    _MAINTENANCE_JSON = Path(os.environ.get("SHARED_DIR", "/shared")) / "maintenance_mode.json"
     _LEGACY_MAINTENANCE_FLAG = Path(os.environ.get("SHARED_DIR", "/shared")) / "ha_maintenance"
     def _is_maint_active():
-        return _LEGACY_MAINTENANCE_FLAG.exists()
+        try:
+            if _MAINTENANCE_JSON.exists():
+                import json as _j
+                if _j.loads(_MAINTENANCE_JSON.read_text()).get("active", False):
+                    return True
+        except (Exception,):
+            pass
+        if _LEGACY_MAINTENANCE_FLAG.exists():
+            try:
+                _LEGACY_MAINTENANCE_FLAG.unlink()
+            except OSError:
+                pass
+        return False
 
 # Session sync script path (inside container, project root is /gaia/GAIA_Project)
 _SYNC_SCRIPT = Path("/gaia/GAIA_Project/scripts/ha_sync.sh")

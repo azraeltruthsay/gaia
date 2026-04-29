@@ -30,13 +30,36 @@ RETRYABLE_EXCEPTIONS = (
 # HTTP status codes that warrant a retry (service temporarily unavailable)
 RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
 
-# File-based maintenance mode flag (shared Docker volume)
-_MAINTENANCE_FLAG = Path("/shared/ha_maintenance")
+# File-based maintenance mode flag (shared Docker volume).
+# JSON is the source of truth; the legacy ha_maintenance flag is a mirror
+# only — stale legacy flags would otherwise suppress HA failover.
+_MAINTENANCE_JSON = Path("/shared/maintenance_mode.json")
+_LEGACY_MAINT_FLAG = Path("/shared/ha_maintenance")
 
 
 def _is_maintenance_mode() -> bool:
     """Check if HA maintenance mode is active."""
-    return _MAINTENANCE_FLAG.exists()
+    try:
+        from gaia_common.utils.maintenance import is_maintenance_active
+        return is_maintenance_active()
+    except ImportError:
+        # Inline fallback when gaia-common isn't on the path. Mirrors the
+        # central logic: JSON is authoritative, orphan legacy flag is
+        # auto-cleaned.
+        try:
+            if _MAINTENANCE_JSON.exists():
+                import json as _json
+                data = _json.loads(_MAINTENANCE_JSON.read_text())
+                if data.get("active", False):
+                    return True
+        except (Exception,):
+            pass
+        if _LEGACY_MAINT_FLAG.exists():
+            try:
+                _LEGACY_MAINT_FLAG.unlink()
+            except OSError:
+                pass
+        return False
 
 
 async def post_with_retry(

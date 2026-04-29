@@ -72,9 +72,17 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
         return {"ok": True, "response": r.json()}
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
         logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
-        # HA fallback: try candidate MCP if configured and not in maintenance
+        # HA fallback: try candidate MCP if configured and not in maintenance.
+        # Use the structured maintenance check (auto-cleans orphaned legacy
+        # flags) rather than reading /shared/ha_maintenance directly — past
+        # incident: stale legacy flag suppressed fallbacks for 9 hours.
+        try:
+            from gaia_common.utils.maintenance import is_maintenance_active as _is_maint
+            _maint = _is_maint()
+        except ImportError:
+            _maint = Path("/shared/maintenance_mode.json").exists()
         fallback_ep = os.getenv("MCP_FALLBACK_ENDPOINT", "")
-        if fallback_ep and not Path("/shared/ha_maintenance").exists():
+        if fallback_ep and not _maint:
             fb_ep = _normalize_endpoint(fallback_ep)
             try:
                 logger.warning("MCP primary failed, attempting fallback: %s", fb_ep)
