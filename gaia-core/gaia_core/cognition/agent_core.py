@@ -4022,6 +4022,24 @@ class AgentCore:
             # Only flag if there WAS punctuation earlier (so it's not just a short phrase)
             if any(c in stripped[:-10] for c in '.!?'):
                 return True
+        # Tool-call-as-text leakage: model emitted what looks like a Python
+        # function call inline (e.g. fetch_knowledge("...")) instead of going
+        # through the tool-routing pipeline. The user sees raw code rather
+        # than results. Always degenerate — escalate so the user gets either
+        # a real tool call or a higher-tier answer.
+        import re as _re_tc
+        # Common tool-call-ish shapes: name(arg), name(arg=val), and the
+        # backtick variants the model sometimes wraps them in.
+        _toolish = _re_tc.search(
+            r'(?:^|[^A-Za-z0-9_])'
+            r'(fetch_knowledge|web_search|web_fetch|search_web|query_knowledge|'
+            r'read_file|write_file|list_files|run_shell|execute_command|'
+            r'call_tool|invoke_tool)'
+            r'\s*\(\s*["\']?[^)]+',
+            stripped,
+        )
+        if _toolish:
+            return True
         return False
 
     # Hedging phrases that signal Nano can't extract an answer from context
@@ -7999,6 +8017,46 @@ Start your response with the first line of the file."""
                 bytes_written = len((params.get("content") or "").encode("utf-8"))
             return f"Wrote {bytes_written} bytes to `{path}`."
 
+        # web.search — Core E4B can't reliably synthesise search-result lists
+        # (degenerates into URL-spam loops), so format the results directly
+        # rather than hand them to the model. User gets real links instead
+        # of hallucinated ones.
+        if tool_name == "web" and action == "search":
+            if not result.success:
+                err = result.error or out.get("error") or "unknown error"
+                return f"Tried to search the web but it failed: {err}"
+            results = out.get("results") or []
+            query = (params.get("query") or out.get("query") or "").strip()
+            if not results:
+                return f"I searched for `{query}` but didn't find anything useful."
+            lines = [f"Here's what I found for **{query}**:" if query else "Here's what I found:"]
+            for i, r in enumerate(results[:5], 1):
+                title = (r.get("title") or "(untitled)").strip()
+                snippet = (r.get("snippet") or "").strip().replace("\n", " ")
+                if len(snippet) > 220:
+                    snippet = snippet[:217] + "…"
+                url = (r.get("url") or "").strip()
+                if url:
+                    lines.append(f"{i}. **{title}** — {snippet} [link]({url})")
+                else:
+                    lines.append(f"{i}. **{title}** — {snippet}")
+            return "\n".join(lines)
+
+        # web.fetch — return a brief preview rather than letting the model
+        # try to summarise an entire fetched page.
+        if tool_name == "web" and action == "fetch":
+            if not result.success:
+                err = result.error or out.get("error") or "unknown error"
+                return f"Tried to fetch but it failed: {err}"
+            url = out.get("url") or params.get("url") or "the URL"
+            content = (out.get("content") or out.get("text") or "").strip()
+            if not content:
+                return f"Fetched `{url}` but the page was empty."
+            preview = content[:600].rstrip()
+            if len(content) > 600:
+                preview += "…"
+            return f"Fetched `{url}`:\n\n{preview}"
+
         return None
 
     def _execute_mcp_tool(self, tool: SelectedTool, session_id: str = "") -> ToolExecutionResult:
@@ -8208,11 +8266,22 @@ Start your response with the first line of the file."""
             "semantic search", "query "
         ]
 
-        # Web research indicators
+        # Web research indicators — explicit "search" verbs AND current-info
+        # phrasings ("any recent news?", "what's happening with X?") that
+        # imply the user wants real-time info GAIA can only fetch via web.
         web_indicators = [
             "web search", "search the web", "search online",
             "search the internet", "look up online", "google ",
             "look up ", "look it up",
+            # Current-info / news patterns — model otherwise asks "want me to search?"
+            # instead of just searching. With these in the indicator list,
+            # _run_tool_routing_loop fires deterministically.
+            "recent news", "latest news", "today's news", "the news",
+            "any news", "breaking news", "current events",
+            "what's happening", "whats happening", "what is happening",
+            "news about", "news on", "info about", "info on",
+            "have you heard", "do you know about", "do you know any",
+            "tell me about recent", "tell me about the latest",
         ]
 
         # Explicit tool invocation — user named a specific tool

@@ -168,6 +168,52 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
     """
     import re
 
+    # Current-info / news / "do you know recent X" patterns — these need a
+    # web search even though the user didn't explicitly say "search". Fires
+    # BEFORE the explicit-search block so the question itself is the query.
+    news_re = re.compile(
+        r'\b(?:'
+        r'(?:any|some|the|recent|latest|today\'?s|breaking)\s+news\b|'
+        r'(?:current|recent|latest)\s+(?:events|news|happenings)\b|'
+        r'what\'?s\s+(?:happening|going on|in the news|new)\b|'
+        r'(?:news|info|information|details?|updates?)\s+(?:about|on)\s+\S+|'
+        r'tell\s+me\s+about\s+(?:recent|today\'?s|the\s+latest)\b|'
+        r'have\s+you\s+heard\s+(?:about|of)\b|'
+        r'do\s+you\s+know\s+(?:any|about|of)\s+(?:recent|news|the\s+latest)\b'
+        r')',
+        re.IGNORECASE,
+    )
+    nm = news_re.search(lowered)
+    if nm:
+        # Topic extraction. Wordy questions ("do you know any recent news?")
+        # match SEO spam if sent verbatim; pull out a focused query.
+        # Priority:
+        #  1. "about X" / "on X" / "regarding X" — explicit topic
+        #  2. "news about X" / "info on X" — pre-keyword pattern
+        #  3. Fall back to "today's news" — clean canonical query that
+        #     mainstream news sites optimise for
+        topic = None
+        topic_m = re.search(r'\b(?:about|on|regarding)\s+(.+?)(?:[.?!]|$)', lowered)
+        if topic_m:
+            topic = topic_m.group(1).strip()
+        if not topic:
+            kw_m = re.search(r'\b(?:news|info|information|updates?|details?)\s+(?:about|on|regarding)\s+(.+?)(?:[.?!]|$)', lowered)
+            if kw_m:
+                topic = kw_m.group(1).strip()
+        # Strip leading articles/quantifiers
+        if topic:
+            for prefix in ("any ", "some ", "the ", "a ", "an ", "recent ", "latest "):
+                if topic.startswith(prefix):
+                    topic = topic[len(prefix):]
+            topic = topic.strip(" .?!")
+        query = topic if topic else "today's news headlines"
+        return SelectedTool(
+            tool_name="web",
+            params={"action": "search", "query": query},
+            selection_reasoning="Deterministic match: current-info / news request",
+            selection_confidence=0.92,
+        )
+
     # Web search — most common explicit tool request
     if any(p in lowered for p in ["web search", "search the web", "search online",
                                    "search the internet", "google ", "look it up"]):
@@ -269,8 +315,6 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
         m = write_verb_re.search(lowered)
         if m:
             path = m.group(1)
-            # Slice content from the original-cased user_input starting where the
-            # match ended (lowered preserves character offsets vs user_input).
             content = user_input[m.end():].strip()
             if content:
                 return SelectedTool(

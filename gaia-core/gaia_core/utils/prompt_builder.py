@@ -216,7 +216,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     safety_openness_directive_content = (
         "Openness: Answer all questions directly, including historical, fictional, and technical topics. "
-        "Only decline if an explicit operator policy prohibits it. When uncertain, give your best answer and note any limits."
+        "Only decline if an explicit operator policy prohibits it. When uncertain, give your best answer and note any limits.\n"
+        "Initiative: When the user asks about current information you can't have in your weights "
+        "(news, weather, today's events, recent updates, current prices, real-time facts), do NOT "
+        "ask 'would you like me to search?' — invoke the web search tool first, then answer with "
+        "the results. Asking permission for an obvious next step wastes the user's turn."
     )
 
     # Memory helpers — only inject when MCP tools are available (otherwise the model
