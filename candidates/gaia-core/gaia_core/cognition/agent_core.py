@@ -4485,6 +4485,21 @@ class AgentCore:
                             "make them part of a flowing response): "
                             + ", ".join(_anchor_list[:15])
                         )
+                    # End-of-message identity reset — fires only when a persona
+                    # overlay is active. Models attend most strongly to the
+                    # prompt tail, and the user's first-person framing tends
+                    # to drag the model into matching pronouns. This reminder
+                    # right before generation flips the frame back to advisor.
+                    if knowledge_base_name:
+                        _user_parts.append(
+                            "IDENTITY REMINDER: The message above is the USER (Azrael) "
+                            "describing what HE or HIS CHARACTER is doing. You are GAIA — "
+                            "an advisor, not an actor in his story. Your reply must use "
+                            "second-person ('you', 'your', 'you can') for any actions, "
+                            "items, or plans the user described. Do NOT mirror his "
+                            "first-person voice. The pronoun 'I' refers ONLY to GAIA — "
+                            "use it sparingly and only when speaking about yourself."
+                        )
                     _user = "\n\n".join(_user_parts)
                 escalation_messages = [
                     {"role": "system", "content": _system},
