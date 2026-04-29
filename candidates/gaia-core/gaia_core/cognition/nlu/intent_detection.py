@@ -407,11 +407,28 @@ def _detect_fragmentation_request(text: str) -> bool:
     # Check for long-form modifiers
     has_long_form = any(m in lowered for m in long_form_modifiers)
 
-    # Check for work types
-    has_work_type = any(w in lowered for w in work_types)
+    # Check for work types — use word-boundary matching so single-word types
+    # like "verse" don't false-positive on "in-universe" (the substring case
+    # that wrongly tagged D&D queries as recitation requests). Multi-word
+    # entries get plain substring matching since boundary regex on phrases
+    # is brittle.
+    def _has_word_or_phrase(needles, haystack):
+        for n in needles:
+            n_clean = n.strip()
+            if " " in n_clean:
+                if n_clean in haystack:
+                    return True
+            else:
+                if re.search(r'\b' + re.escape(n_clean) + r'\b', haystack):
+                    return True
+        return False
 
-    # Check for known works
-    has_known_work = any(w in lowered for w in known_works)
+    has_work_type = _has_word_or_phrase(work_types, lowered)
+
+    # Known works are mostly phrases (poem titles) — substring is fine for
+    # them since "the raven" or "jabberwocky" don't have the same boundary
+    # issue. But apply word-boundary to single-word entries too.
+    has_known_work = _has_word_or_phrase(known_works, lowered)
 
     # Surgical/partial indicators — requesting a specific part of a work
     # is comprehension, NOT full recitation. These should route to the

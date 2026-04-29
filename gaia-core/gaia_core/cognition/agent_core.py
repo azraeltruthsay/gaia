@@ -54,7 +54,7 @@ from gaia_common.protocols.cognition_packet import (
     # Output Routing (Spinal Column)
     OutputDestination, OutputRouting, DestinationTarget,
 )
-from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan
+from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request
 from gaia_core.cognition.nlu.router import TargetEngine
 import gaia_core.utils.gaia_rescue_helper as rescue_helper
 
@@ -1266,18 +1266,55 @@ class AgentCore:
             # The "nano" model pool entry is a socat proxy to Core's engine.
             has_nano = False
 
-            # 1b. Knowledge Base Override (Escalate to GPU for RAG tasks)
+            # 1b. Knowledge Base Override (Force escalation for RAG / role-play tasks)
             # Only escalate if the query is non-trivial — a spurious KB match
             # on a simple greeting/question shouldn't force the heavy pipeline.
-            if not selected_model_name and knowledge_base_name and not is_trivial:
-                logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' triggered, preferring prime.")
-                for cand in ["prime"]:
-                    if cand == "prime" and _gpu_sleeping:
-                        continue
-                    if cand in self.config.MODEL_CONFIGS:
-                        selected_model_name = cand
-                        logger.info(f"[MODEL_SELECT] Overriding model selection to '{selected_model_name}' due to RAG-enabled persona.")
-                        break
+            #
+            # Core E4B can't reliably follow the long instruction stacks that
+            # role-play personas need (voice tags, pronoun rules, grounding,
+            # multi-paragraph mode-mixing). Prime is required for these. If
+            # GPU Prime is asleep, fall back to cpu_prime (GGUF) rather than
+            # collapsing back to Core. Either Prime variant follows the
+            # persona overlay; Core does not.
+            #
+            # Explicit role-play markers in the user input ALSO force
+            # escalation regardless of KB presence — covers cases like
+            # "speak in-character as X" where the user requests a voice
+            # shift without an active persona overlay.
+            _is_roleplay_invite = False
+            try:
+                import re as _re_rp
+                _rp_patterns = (
+                    r'\bspeak\s+(?:as|in[-\s]character)\b',
+                    r'\b(?:as|like|playing|roleplay|role[-\s]?play)\b[^.?!]*\bcharacter\b',
+                    r'\bin[-\s]character\b',
+                    r'\bwhat\s+would\s+\w+\s+say\b',
+                    r'\brespond\s+as\s+\w+\b',
+                )
+                _ul = (user_input or "").lower()
+                _is_roleplay_invite = any(_re_rp.search(p, _ul) for p in _rp_patterns)
+            except Exception:
+                _is_roleplay_invite = False
+
+            _force_escalate = (
+                (knowledge_base_name and not is_trivial) or _is_roleplay_invite
+            )
+            if not selected_model_name and _force_escalate:
+                _reason = "RAG-enabled persona" if knowledge_base_name else "explicit role-play invitation"
+                logger.info(
+                    f"[MODEL_SELECT] {_reason} — forcing escalation to Prime "
+                    f"(kb={knowledge_base_name}, roleplay_invite={_is_roleplay_invite})"
+                )
+                # Force Prime regardless of GPU state. The engine manager
+                # handles GPU/CPU fallback (safetensors when GPU is awake,
+                # GGUF when it's parked). Falling back to Core defeats the
+                # whole purpose — Core can't follow long instruction stacks.
+                if "prime" in self.config.MODEL_CONFIGS:
+                    selected_model_name = "prime"
+                    logger.info(
+                        f"[MODEL_SELECT] Overriding to 'prime' (reason: {_reason}); "
+                        f"engine will choose backend (gpu={not _gpu_sleeping})"
+                    )
             elif not selected_model_name and knowledge_base_name and is_trivial:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
