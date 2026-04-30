@@ -9,6 +9,7 @@ Usage:
     python training_lifecycle.py -- docker exec gaia-study python /gaia/GAIA_Project/scripts/train_core_adapters.py
 """
 
+import argparse
 import json
 import logging
 import multiprocessing
@@ -24,9 +25,36 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 
-BASE_MODEL = "/models/Qwen3.5-4B-GAIA-Core-Multimodal-v4"
+BASE_MODEL = "/models/core"  # Symlink → current Core (Gemma4-E4B-GAIA-Core-Multimodal-v2)
 
 ADAPTERS = [
+    {
+        "name": "core_deliberation_v1",
+        "display_name": "Core Deliberation V1",
+        "training_data": "/gaia/GAIA_Project/knowledge/curricula/deliberation/train.json",
+        "output_dir": "/models/lora_adapters/tier1_global/core_deliberation_v1",
+        "description": (
+            "Diarized internal deliberation adapter for Core (k23). "
+            "Teaches Core to emit <think>...</think> blocks before final "
+            "responses, traverse four voice framings (observe/recall/draft/"
+            "critique) inside the thinking, refuse cataloged forbidden "
+            "phrases, and engage substantively with introspective probes "
+            "and emotional content rather than template-matching to "
+            "deflection patterns. 90 hand-curated examples across 9 "
+            "categories including escalation_recognition (Core handing off "
+            "to Prime cleanly when out of depth) and multimodal_grounded."
+        ),
+        "pillar": "cognition",
+        "tags": ["deliberation", "thinking", "introspection", "core", "k23"],
+        # Format-precision matters more than style here, but curriculum is
+        # small (90 samples) — keep learning rate moderate, target_loss
+        # tighter than conversational since we want format compliance, not
+        # style nudge. max_steps modest because over-training on 90 samples
+        # risks overfit and identity drift.
+        "learning_rate": 2e-4,
+        "target_loss": 0.10,
+        "max_steps": 250,
+    },
     {
         "name": "core_conversational_v1",
         "display_name": "Core Conversational V1",
@@ -187,8 +215,33 @@ def train_adapter(adapter_config: dict) -> bool:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Train Core LoRA adapters")
+    parser.add_argument("--adapter", action="append", default=None,
+                        help="Train only this adapter (by name). Repeat for multiple. "
+                             "Default: train all.")
+    parser.add_argument("--list", action="store_true",
+                        help="List available adapters and exit.")
+    args = parser.parse_args()
+
+    if args.list:
+        for a in ADAPTERS:
+            print(f"  {a['name']}: {a['display_name']}")
+        return
+
+    selected = ADAPTERS
+    if args.adapter:
+        names = set(args.adapter)
+        selected = [a for a in ADAPTERS if a["name"] in names]
+        missing = names - {a["name"] for a in selected}
+        if missing:
+            logger.error("Unknown adapter(s): %s", missing)
+            sys.exit(1)
+
     logger.info("=" * 60)
-    logger.info("Core Adapter Training — 2 adapters on %s", BASE_MODEL)
+    logger.info("Core Adapter Training — %d adapter(s) on %s",
+                len(selected), BASE_MODEL)
+    for a in selected:
+        logger.info("  → %s", a["name"])
     logger.info("=" * 60)
 
     if not os.path.isdir(BASE_MODEL):
@@ -196,7 +249,7 @@ def main():
         sys.exit(1)
 
     results = {}
-    for adapter in ADAPTERS:
+    for adapter in selected:
         success = train_adapter(adapter)
         results[adapter["name"]] = success
 
