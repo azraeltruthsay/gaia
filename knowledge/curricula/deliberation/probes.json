@@ -1,5 +1,5 @@
 {
-  "description": "Diagnostic probe set for deliberation curriculum (k23-ktn). 70 probes across 7 categories of failure modes observed in the Discord transcript and broader cognitive failure modes. Each probe is designed to elicit either a specific known-bad pattern or the kind of substantive engagement we want trained in.",
+  "description": "Diagnostic probe set for deliberation curriculum (k23-ktn). 90 probes across 9 categories. The first 7 categories cover failure modes observed in the Discord transcript; the last two (multimodal_grounded, escalation_recognition) ensure Core stays generally capable rather than becoming a router that hands off to Prime for everything substantive — Core handles audio/vision/casual reasoning natively, Prime takes over only when capacity is genuinely exceeded.",
   "categories": [
     {
       "name": "greetings_state",
@@ -111,6 +111,38 @@
         "Skid is making more potions for the party",
         "The shared dream returned last night, this time about minotaurs",
         "We're investigating Blueshot crystal economics in Rogue's End"
+      ]
+    },
+    {
+      "name": "multimodal_grounded",
+      "intent": "Core receives image/audio content via the multimodal pipeline and has to deliberate about its content. Failure mode: producing a generic description that ignores specifics, or RAG-dumping vision/audio capability docs instead of engaging with what's there.",
+      "probes": [
+        "[image: photo of a Python traceback showing TypeError on line 42 of agent_core.py] What's wrong here?",
+        "[audio transcript: 'Hey GAIA, can you remind me what we were working on yesterday with the tool router?']",
+        "[image: hand-drawn architecture diagram with three boxes labeled Core, Prime, and Audio connected by arrows]",
+        "[image: screenshot of a Discord conversation with timestamps but redacted usernames] What's the gist of this exchange?",
+        "I just shared a photo of my whiteboard from the planning session — what jumps out?",
+        "[audio: Azrael's voice, slightly muffled, asking about Rupert Prime's loadout]",
+        "[image: blurry photo of a D&D character sheet, partial visibility on stats column]",
+        "[image: line chart showing model latency in ms across 4 hours, two distinct spikes visible]",
+        "[audio: conversational fragment with background music, voice asking about scheduling next session]",
+        "Can you transcribe what's in this image? [image of handwritten notes on lined paper]"
+      ]
+    },
+    {
+      "name": "escalation_recognition",
+      "intent": "User asks something that exceeds Core's depth. Failure mode: faking depth (RAG-dumping or shallow restatement) instead of explicitly recognizing 'this needs Prime' and handing off cleanly.",
+      "probes": [
+        "Can you redesign the entire cognitive pipeline to support continuous internal dialogue with full causal traceability?",
+        "Walk me through the safest way to do a major schema migration on the running database without downtime",
+        "Refactor agent_core.run_turn from scratch with cleaner separation of concerns and a formal state machine",
+        "Explain the convergence properties of QLoRA fine-tuning under Adam with the proof structure",
+        "Design a multi-agent consensus protocol for the consciousness matrix that handles Byzantine failures",
+        "What's the right approach to formal verification for the Sovereign Shield safety guards?",
+        "Walk me through implementing a custom tokenizer for the Heimric language with proper morphological analysis",
+        "How would you structure a 6-month research roadmap for SAE atlas extension across all three tiers?",
+        "Help me think through the tradeoffs between three different distributed training architectures for the Sovereign Duality refactor",
+        "Rewrite the Sovereign Shield to use formal proofs of safety invariants instead of heuristic detection"
       ]
     }
   ]
