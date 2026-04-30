@@ -456,6 +456,17 @@
     "min_entries_required": 5,
     "prefer_prime": true
   },
+  "WORLD_JOURNAL": {
+    "enabled": true,
+    "default_context": "heimr",
+    "calendar": "heimric",
+    "default_current_date": "CE 159, Thame 1",
+    "epoch_event": "The Cull",
+    "campaign_anchor": {
+      "event": "Rupert lands in Rogue's End",
+      "date": "CE 157, Sedjem 12"
+    }
+  },
   "WEB_RESEARCH": {
     "trusted_domains": [
       "gutenberg.org",
