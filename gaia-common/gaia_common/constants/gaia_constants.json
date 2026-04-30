@@ -449,6 +449,13 @@
     "max_lite_in_prompt": 30,
     "prefer_prime": true
   },
+  "JOURNAL_REFLECTOR": {
+    "enabled": true,
+    "cadence_days": 7,
+    "sample_k": 5,
+    "min_entries_required": 5,
+    "prefer_prime": true
+  },
   "WEB_RESEARCH": {
     "trusted_domains": [
       "gutenberg.org",

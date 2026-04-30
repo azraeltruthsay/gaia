@@ -355,9 +355,10 @@ def list_entries(
 
 @dataclass
 class JournalState:
-    """Persisted scheduling state for the journal_write sleep task."""
+    """Persisted scheduling state for the journal_write + journal_reflection sleep tasks."""
     last_write_iso: Optional[str] = None
     events_since_last_write: int = 0
+    last_reflection_iso: Optional[str] = None
 
 
 def _load_state() -> JournalState:
@@ -428,10 +429,24 @@ def should_write_now(
 
 
 def mark_written() -> None:
-    """Reset state after a successful journal_write."""
+    """Reset state after a successful journal_write (preserve reflection state)."""
     with _lock:
+        prev = _load_state()
         state = JournalState(
             last_write_iso=datetime.now(timezone.utc).isoformat(),
             events_since_last_write=0,
+            last_reflection_iso=prev.last_reflection_iso,
+        )
+        _save_state(state)
+
+
+def mark_reflected() -> None:
+    """Stamp last_reflection_iso after a successful journal_reflection (preserve write state)."""
+    with _lock:
+        prev = _load_state()
+        state = JournalState(
+            last_write_iso=prev.last_write_iso,
+            events_since_last_write=prev.events_since_last_write,
+            last_reflection_iso=datetime.now(timezone.utc).isoformat(),
         )
         _save_state(state)

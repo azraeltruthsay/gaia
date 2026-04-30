@@ -300,6 +300,19 @@ class SleepTaskScheduler:
             handler=self._run_journal_write,
         ))
 
+        # Journal re-reading + inspired reflection — Phase B of vam.
+        # Samples K past entries (significance-weighted), asks the writer
+        # model for a NEW reflection inspired by them. Self-throttled
+        # weekly + min-entries floor, so wiring it every cycle is safe.
+        self.register_task(SleepTask(
+            task_id="journal_reflection",
+            task_type="REFLECTIVE_MEMORY",
+            priority=6,
+            interruptible=True,
+            estimated_duration_seconds=60,
+            handler=self._run_journal_reflection,
+        ))
+
         self.register_task(SleepTask(
             task_id="wiki_doc_regen",
             task_type="DOC_GENERATION",
@@ -467,6 +480,27 @@ class SleepTaskScheduler:
                 )
         except Exception:
             logger.exception("journal_write failed (non-fatal)")
+
+    def _run_journal_reflection(self, **kwargs) -> None:
+        """Re-read K past entries and write a new reflection inspired by them.
+
+        Self-throttled: the reflector's maybe_write_reflection_entry()
+        checks weekly cadence + minimum-entries floor and no-ops unless
+        both gates pass. Safe to wire into every sleep cycle.
+        """
+        try:
+            from gaia_core.memory.journal_reflector import maybe_write_reflection_entry
+            entry = maybe_write_reflection_entry(
+                model_pool=self.model_pool,
+                config=self.config,
+            )
+            if entry is not None:
+                logger.info(
+                    "journal_reflection: persisted %s (significance=%d, inspired_by=%s)",
+                    entry.id, entry.significance, entry.inspired_by,
+                )
+        except Exception:
+            logger.exception("journal_reflection failed (non-fatal)")
 
     def _run_session_hygiene(self, **kwargs) -> None:
         """Archive stale sessions to prevent temporal cognitive dissonance.
