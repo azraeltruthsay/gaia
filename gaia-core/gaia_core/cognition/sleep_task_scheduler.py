@@ -288,6 +288,18 @@ class SleepTaskScheduler:
             handler=self._run_session_hygiene,
         ))
 
+        # Self-narrative journal writer — synthesizes recent activity into
+        # a first-person entry. Self-throttled via activity threshold +
+        # 24h backstop, so wiring it into every sleep cycle is safe.
+        self.register_task(SleepTask(
+            task_id="journal_write",
+            task_type="REFLECTIVE_MEMORY",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=45,
+            handler=self._run_journal_write,
+        ))
+
         self.register_task(SleepTask(
             task_id="wiki_doc_regen",
             task_type="DOC_GENERATION",
@@ -434,6 +446,27 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
     # Built-in task handlers
     # ------------------------------------------------------------------
+
+    def _run_journal_write(self, **kwargs) -> None:
+        """Synthesize a first-person journal entry from recent activity.
+
+        Self-throttled: the writer's maybe_write_journal_entry() checks
+        activity-threshold + 24h backstop scheduling state and no-ops
+        if neither is met. Safe to wire into every sleep cycle.
+        """
+        try:
+            from gaia_core.memory.journal_writer import maybe_write_journal_entry
+            entry = maybe_write_journal_entry(
+                model_pool=self.model_pool,
+                config=self.config,
+            )
+            if entry is not None:
+                logger.info(
+                    "journal_write: persisted %s (significance=%d, tags=%s)",
+                    entry.id, entry.significance, entry.tags,
+                )
+        except Exception:
+            logger.exception("journal_write failed (non-fatal)")
 
     def _run_session_hygiene(self, **kwargs) -> None:
         """Archive stale sessions to prevent temporal cognitive dissonance.

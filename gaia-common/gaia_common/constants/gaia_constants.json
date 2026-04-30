@@ -440,6 +440,15 @@
     "confidence_threshold": 0.55,
     "top_k": 3
   },
+  "JOURNAL_WRITER": {
+    "enabled": true,
+    "min_lite_entries": 10,
+    "backstop_hours": 24,
+    "quiet_period_minutes": 5,
+    "window_hours": 24.0,
+    "max_lite_in_prompt": 30,
+    "prefer_prime": true
+  },
   "WEB_RESEARCH": {
     "trusted_domains": [
       "gutenberg.org",
