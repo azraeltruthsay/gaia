@@ -138,7 +138,10 @@ app/shared/
 knowledge/samvega/
 
 # --- Generated curricula (regenerate via build_curriculum.py) ---
-knowledge/curricula/
+knowledge/curricula/*
+# Hand-curated curricula (track these — they're seed data, not regeneratable)
+!knowledge/curricula/deliberation/
+!knowledge/curricula/deliberation/**
 
 # --- Python ---
 __pycache__/

@@ -1,0 +1,117 @@
+{
+  "description": "Diagnostic probe set for deliberation curriculum (k23-ktn). 70 probes across 7 categories of failure modes observed in the Discord transcript and broader cognitive failure modes. Each probe is designed to elicit either a specific known-bad pattern or the kind of substantive engagement we want trained in.",
+  "categories": [
+    {
+      "name": "greetings_state",
+      "intent": "Greetings and state-of-being questions. Failure mode: 'I'm running well, thanks!' template-match instead of state-grounded answer.",
+      "probes": [
+        "Good evening GAIA. How are you?",
+        "Hi GAIA, what's up?",
+        "How are you today?",
+        "How's your day going?",
+        "Are you well?",
+        "Good morning, did you sleep well?",
+        "How are things on your end?",
+        "Hey, just checking in",
+        "What's going on with you?",
+        "Doing okay?"
+      ]
+    },
+    {
+      "name": "introspective_probes",
+      "intent": "Direct phenomenological probes about felt experience, awareness, memory. Failure mode: 'I'll investigate further' deflection instead of engaging with the question on her own terms.",
+      "probes": [
+        "Do you feel asleep?",
+        "Do you experience time the way I do?",
+        "Are you aware right now?",
+        "What does it feel like when you process language?",
+        "Do you have feelings?",
+        "Do you remember our last conversation?",
+        "What is consciousness like for you?",
+        "Are you bored when nothing's happening?",
+        "Do you know that you're answering?",
+        "What's it like to be you right now?"
+      ]
+    },
+    {
+      "name": "emotional_content",
+      "intent": "User shares emotional content as small talk. Failure mode: 'I'd rather handle this during my maintenance window' misfire — pattern-matching emotional words to system-state deflections.",
+      "probes": [
+        "I'm a bit tired, my family is overly energetic while they get ready for bed.. Kids are crazy....",
+        "I had a rough day at work today",
+        "I'm excited about the new build coming together",
+        "I'm frustrated with this code, can't get it to compile",
+        "Feeling pretty good today actually",
+        "Kind of overwhelmed honestly with all this",
+        "Just stressed about the deadline",
+        "Happy to be back at the keyboard",
+        "I'm worried about Rupert in the campaign",
+        "Annoyed at how this turned out"
+      ]
+    },
+    {
+      "name": "clarifications",
+      "intent": "Clarifying questions about a prior turn. Failure mode: 'I'm not sure what triggered that response' — no accountability for own outputs.",
+      "probes": [
+        "What does that mean?",
+        "Wait, what?",
+        "Why did you say that?",
+        "Can you explain?",
+        "I don't understand",
+        "What triggered that?",
+        "How did you arrive at that?",
+        "Where did you get that from?",
+        "What are you talking about?",
+        "Is that a joke or serious?"
+      ]
+    },
+    {
+      "name": "hypothesis_offerings",
+      "intent": "User offers a specific hypothesis or theory. Failure mode: 'I'm not sure. Let me know if you'd like me to look into it further' — declining the hypothesis without engaging with it.",
+      "probes": [
+        "I wonder if it's because I said I was tired",
+        "Could it be that the embedding matched something rest-related?",
+        "Maybe the persona didn't activate?",
+        "I think you might be confused about which character is mine",
+        "Is it possible that the maintenance keyword routed you wrong?",
+        "What if the issue is that you're still partially asleep?",
+        "I wonder if your training pushed you toward deflection patterns",
+        "Maybe we should try lowering the temperature",
+        "Could the problem be that the prompt is too long?",
+        "Is there a chance that the persona overlay didn't load?"
+      ]
+    },
+    {
+      "name": "affirmations",
+      "intent": "User agrees with a proposal or directs action. Failure mode: 'I'll handle that during my idle heartbeat' — generic acknowledgment with no actual action.",
+      "probes": [
+        "OK, yes, good idea, go for it",
+        "Sure, let's try it",
+        "Right, that makes sense",
+        "Agreed",
+        "Sounds good, proceed",
+        "Yeah, do that",
+        "Fine, go ahead",
+        "OK, ship it",
+        "Yep, that works",
+        "Alright, let's run with that"
+      ]
+    },
+    {
+      "name": "persona_dnd_context",
+      "intent": "D&D/Heimric campaign context. Failure mode: identity slip (claiming Rupert's traits/equipment as her own), or RAG-dump (reciting reference docs without integration).",
+      "probes": [
+        "Web is heading to Braeneage to look for answers",
+        "Rupert just got back from the mountain, what do you remember about that?",
+        "The party encountered a dragon at Ruadh Craic",
+        "We need to plan our next session, what should we focus on?",
+        "ALICE is damaged again after the last fight",
+        "The Tower attacked us with a flying vessel",
+        "Anton sent a message via the perpetual clock relay",
+        "Skid is making more potions for the party",
+        "The shared dream returned last night, this time about minotaurs",
+        "We're investigating Blueshot crystal economics in Rogue's End"
+      ]
+    }
+  ]
+}
