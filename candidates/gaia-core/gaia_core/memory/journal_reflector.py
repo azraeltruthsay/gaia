@@ -47,6 +47,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from gaia_core.memory.journal import (
     JournalEntry,
+    annotate_entry,
     list_entries,
     mark_reflected,
     write_entry,
@@ -289,6 +290,27 @@ def write_reflection_entry(
         inspired_by=inspired_by,
     )
     mark_reflected()
+
+    # Phase C — auto-backlink: annotate each source entry with a brief
+    # provenance note pointing at the new reflection. Cheap (no model
+    # call) and gives every old entry a forward-link trail of all the
+    # reflections that later touched it. Richer "I see now this was
+    # about X, not Y" annotations can use annotate_entry() directly
+    # from any caller.
+    backlink_note = (
+        f"Re-read in reflection {entry.id} (significance {entry.significance})."
+    )
+    for source_id in inspired_by:
+        try:
+            annotate_entry(
+                source_id,
+                note=backlink_note,
+                source="reflection_backlink",
+                inspired_by=entry.id,
+            )
+        except Exception:
+            logger.exception("Failed to annotate source entry %s", source_id)
+
     logger.info(
         "Reflection entry %s persisted (sig=%d, sources=%s, recurring_tags=%s, model=%s)",
         entry.id, entry.significance, inspired_by, recurring, model_name,

@@ -26,7 +26,7 @@ logger = logging.getLogger("GAIA.KnowledgeRouter")
 @dataclass
 class GroundingResult:
     """Result from a knowledge retrieval attempt."""
-    source: str           # "mempalace", "kg", "vector", "web"
+    source: str           # "mempalace", "journal", "kg", "vector", "web", "system"
     trust_tier: str       # "verified_local", "verified_external", "unverified"
     content: str          # The actual knowledge text
     url: str = ""         # Source URL (for web results)
@@ -124,6 +124,46 @@ def get_utility_score(query_domain: str, source: str) -> float:
 
 
 # ── Knowledge Source Queries ──────────────────────────────────────────
+
+def _query_journal(query: str, k: int = 3, body_chars: int = 320) -> List[GroundingResult]:
+    """Search GAIA's self-narrative journal for past entries that match.
+
+    Phase D of vam — surfaces consolidation/reflection entries when a
+    user references past events ("remember when...", "that day we...").
+    Trust tier is verified_local because these entries are GAIA's own
+    grounded narrative, written from LiteJournal ticks + samvega
+    artifacts (not free-form recollection).
+    """
+    results: List[GroundingResult] = []
+    try:
+        from gaia_core.memory.journal import search_entries
+    except Exception as e:
+        logger.debug("Journal search unavailable: %s", e)
+        return results
+    try:
+        hits = search_entries(query, k=k)
+        for entry, score in hits:
+            body = (entry.body or "").strip()
+            if len(body) > body_chars:
+                body = body[:body_chars].rstrip() + "…"
+            tag_blurb = ", ".join(entry.tags or []) or "—"
+            content = (
+                f"Journal entry {entry.id} (sig {entry.significance}, "
+                f"tags: {tag_blurb}): {body}"
+            )
+            # Map relevance score (typically 1.0–~6.0) to utility 0–1
+            utility = min(1.0, score / 6.0 + 0.2)
+            results.append(GroundingResult(
+                source="journal",
+                trust_tier="verified_local",
+                content=content,
+                utility_score=utility,
+                query=query,
+            ))
+    except Exception:
+        logger.debug("Journal search failed", exc_info=True)
+    return results
+
 
 def _query_mempalace(query: str, timeout: float = 2.0) -> List[GroundingResult]:
     """Search MemPalace for local structured knowledge."""
@@ -343,6 +383,19 @@ def ground_query(
         ctx.sources_queried.append("mempalace")
         if palace_results:
             logger.info("KnowledgeRouter: MemPalace returned %d results", len(palace_results))
+    except Exception:
+        pass
+
+    # 1b. Self-narrative journal — GAIA's own consolidation/reflection
+    # entries. Same trust tier as MemPalace (local, structured, grounded
+    # in LiteJournal + samvega), but distinct in voice — first-person
+    # narrative that surfaces past events when the user references them.
+    try:
+        journal_results = _query_journal(query)
+        ctx.results.extend(journal_results)
+        ctx.sources_queried.append("journal")
+        if journal_results:
+            logger.info("KnowledgeRouter: Journal returned %d results", len(journal_results))
     except Exception:
         pass
 

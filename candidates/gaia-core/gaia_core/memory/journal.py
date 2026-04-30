@@ -317,6 +317,117 @@ def read_entry(entry_id: str) -> Optional[JournalEntry]:
         return None
 
 
+def annotate_entry(
+    entry_id: str,
+    note: str,
+    *,
+    reason: Optional[str] = None,
+    source: str = "manual",
+    inspired_by: Optional[str] = None,
+) -> bool:
+    """Append an annotation to an existing journal entry's `edits` list.
+
+    Phase C of vam — provenanced edits. The entry body itself is never
+    rewritten; we add a structured edit record so the original first-person
+    voice stays intact and the new perspective is clearly later-dated.
+
+    Args:
+        entry_id: Target entry id (e.g. '2026-04-29-01').
+        note: Short note (one or two sentences). The thing GAIA now sees.
+        reason: Optional why-the-revision context.
+        source: Trigger label — 'manual', 'reflection_backlink', 'samvega', etc.
+        inspired_by: Optional id of a later entry that prompted this annotation
+            (e.g. the reflection_id when source='reflection_backlink').
+
+    Returns True on success, False if the target entry doesn't exist.
+    """
+    with _lock:
+        target = read_entry(entry_id)
+        if target is None:
+            logger.warning("annotate_entry: target %s not found", entry_id)
+            return False
+        edit_record: Dict[str, Any] = {
+            "date": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+            "note": note,
+        }
+        if reason:
+            edit_record["reason"] = reason
+        if inspired_by:
+            edit_record["inspired_by"] = inspired_by
+        target.edits.append(edit_record)
+        path = _entry_path(entry_id)
+        tmp = path.with_suffix(".md.tmp")
+        tmp.write_text(target.to_markdown(), encoding="utf-8")
+        tmp.replace(path)
+        logger.info("Journal entry %s annotated (%s, %d chars)",
+                    entry_id, source, len(note))
+        return True
+
+
+def search_entries(
+    query: str,
+    k: int = 5,
+    *,
+    min_significance: int = 0,
+    body_chars: int = 600,
+) -> List[Tuple[JournalEntry, float]]:
+    """Keyword search across journal entries — Phase D of vam.
+
+    Returns up to k (entry, score) pairs ranked by relevance, where:
+      • Each query term that appears in body / tags / id contributes 1.0
+      • Tag matches and id matches double-weight (tags are curated signal,
+        ids encode date and so handle 'remember when X happened on date Y')
+      • Significance acts as a soft tiebreaker (+0.05 per sig point)
+      • Recency adds a small decay bonus (newer entries float up on ties)
+
+    No vector index yet — the journal is small and brute-force scan over
+    a few hundred entries is cheap. We can swap in vectors later by
+    plugging into the same return shape.
+    """
+    q = (query or "").lower().strip()
+    if not q:
+        return []
+    terms = [t for t in re.split(r"\s+", q) if len(t) >= 3]
+    if not terms:
+        return []
+
+    candidates = list_entries(min_significance=min_significance)
+    if not candidates:
+        return []
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    scored: List[Tuple[JournalEntry, float]] = []
+    for e in candidates:
+        body_lower = (e.body or "").lower()[:max(body_chars, 100)]
+        tags_lower = " ".join(t.lower() for t in (e.tags or []))
+        id_lower = (e.id or "").lower()
+        score = 0.0
+        for term in terms:
+            if term in body_lower:
+                score += 1.0
+            if term in tags_lower:
+                score += 2.0
+            if term in id_lower:
+                score += 2.0
+        if score == 0.0:
+            continue
+        # Significance soft bump (sig 0..5 → +0.0..+0.25)
+        score += 0.05 * max(0, min(5, e.significance))
+        # Recency tiebreaker — at most +0.5 for entries from the last hour,
+        # decaying to ~0 over a year. Doesn't dominate term matches.
+        try:
+            entry_ts = datetime.fromisoformat(e.date.replace("Z", "+00:00")).timestamp()
+            age_days = max(0.0, (now_ts - entry_ts) / 86400.0)
+            score += 0.5 / (1.0 + age_days / 30.0)
+        except (TypeError, ValueError):
+            pass
+        scored.append((e, score))
+
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[:k]
+
+
 def list_entries(
     limit: Optional[int] = None,
     since: Optional[datetime] = None,
