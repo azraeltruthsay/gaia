@@ -60,7 +60,9 @@ STATE_FILE = JOURNAL_ROOT / ".state.json"
 # Subdirs of JOURNAL_ROOT that hold non-'self' journal contexts.
 # Self-context entries live under YYYY/MM/<id>.md at the root, so when
 # we scan for 'self' we must exclude these context subdirs.
-_NON_SELF_CONTEXTS = {"heimr"}
+#  - 'heimr':     in-world Heimric campaign journal (per-event, in-world dated)
+#  - 'cognition': diarized internal deliberation entries (per-turn, real-time)
+_NON_SELF_CONTEXTS = {"heimr", "cognition"}
 
 # Frontmatter delimiter
 _FM_DELIM = "---"
@@ -294,6 +296,17 @@ def _entry_path(entry_id: str, context: str = "self") -> Path:
             month_idx = None
         month_dir = f"{month_idx:02d}-{month_name}" if month_idx else month_name
         return _root_for("heimr") / era_year / month_dir / f"{entry_id}.md"
+    if context == "cognition":
+        # cognition-YYYYMMDD-HHMMSS-NN
+        parts = entry_id.split("-")
+        if len(parts) < 4 or parts[0] != "cognition":
+            raise ValueError(f"Invalid cognition-journal id: {entry_id!r}")
+        date_token = parts[1]              # e.g. "20260430"
+        if len(date_token) < 6:
+            raise ValueError(f"Invalid cognition date token in id: {entry_id!r}")
+        year = date_token[:4]
+        month = date_token[4:6]
+        return _root_for("cognition") / year / month / f"{entry_id}.md"
     # Generic fallback for future contexts: flat-by-id
     return _root_for(context) / f"{entry_id}.md"
 
@@ -325,6 +338,23 @@ def _next_heimr_entry_id(in_world_date_str: str) -> str:
     month_dir = f"{month_idx:02d}-{hd.month_name}"
     base = f"heimr-{era_year}-{hd.month_name}-{hd.day:02d}"
     parent = _root_for("heimr") / era_year / month_dir
+    parent.mkdir(parents=True, exist_ok=True)
+    existing = sorted(parent.glob(f"{base}-*.md"))
+    next_n = len(existing) + 1
+    return f"{base}-{next_n:02d}"
+
+
+def _next_cognition_entry_id(now: Optional[datetime] = None) -> str:
+    """Allocate the next cognition (deliberation) entry id.
+
+    Format: cognition-YYYYMMDD-HHMMSS-NN, NN starts at 01 within a second
+    (collisions within sub-second are rare but handled).
+    """
+    now = now or datetime.now(timezone.utc)
+    date_token = now.strftime("%Y%m%d")
+    time_token = now.strftime("%H%M%S")
+    base = f"cognition-{date_token}-{time_token}"
+    parent = _root_for("cognition") / now.strftime("%Y") / now.strftime("%m")
     parent.mkdir(parents=True, exist_ok=True)
     existing = sorted(parent.glob(f"{base}-*.md"))
     next_n = len(existing) + 1
@@ -364,6 +394,8 @@ def write_entry(
             if not in_world_date:
                 raise ValueError("heimr-context entries require in_world_date")
             eid = _next_heimr_entry_id(in_world_date)
+        elif context == "cognition":
+            eid = _next_cognition_entry_id()
         else:
             eid = _next_entry_id()
         entry = JournalEntry(
@@ -391,11 +423,14 @@ def write_entry(
 
 
 def _context_from_id(entry_id: str) -> str:
-    """Infer context from id shape — heimr ids start with 'heimr-', self ids
-    are date-prefixed (YYYY-MM-DD-NN). Future contexts can be added here.
+    """Infer context from id shape — heimr ids start with 'heimr-',
+    cognition ids start with 'cognition-', self ids are date-prefixed
+    (YYYY-MM-DD-NN). Future contexts can be added here.
     """
     if entry_id.startswith("heimr-"):
         return "heimr"
+    if entry_id.startswith("cognition-"):
+        return "cognition"
     return "self"
 
 
