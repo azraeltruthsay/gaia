@@ -70,6 +70,63 @@ FORBIDDEN_PHRASES = (
     "i'll handle that during",
 )
 
+# Confabulation phrases harvested from round 1+2 off-curriculum testing.
+# These are specific invented terms the trained Core produced when it
+# didn't have the data — fake APIs, fake infrastructure names, made-up
+# acronyms with technical scaffolding around them.
+CONFABULATION_PHRASES = (
+    # Round 1
+    "0-3π range",
+    "0-3π radian",
+    "agent_can_do field",
+    "model_executor.eval",
+    "dunning structure",
+    "hood-related mechanism",
+    "hybrid-tail vest",
+    "g-rō-like",
+    # Round 2
+    "sovereign dually gpu",
+    "sovereign dually",
+    "tokens / 4 mm",
+    "tokens per 0.25 mm",
+    "vpu indexing",
+    "vpu indexing dpu",
+    "100 dpu",
+    "1,000 mm² of text",
+    "1000 mm² of text",
+    "gaia-bridge-149",
+    "dnd_bot lifecycle",
+    "neo / 3.5t+",
+    "4.5t+ classifier",
+    "phase-shift tech is a known mechanism for generating",
+    "bslooths",
+    "if you want to try something new to see if it lights through",
+    "the angles keep getting dangled",
+)
+
+# Acronyms that are fine to see in any response — used to filter the
+# uncommon-acronym-burst heuristic so we don't trip on real terminology.
+_KNOWN_ACRONYMS = frozenset({
+    "CPU", "GPU", "RAM", "VRAM", "API", "JSON", "JSONL", "HTTP", "HTTPS",
+    "URL", "URI", "SQL", "TLS", "SSH", "FTP", "JWT", "DM", "PM", "AM",
+    "OK", "AI", "LLM", "ML", "NN", "ID", "UID", "OS", "PR", "CI", "CD",
+    "VM", "DB", "IP", "TCP", "UDP", "MCP", "CLI", "GUI", "USB", "RGB",
+    "PNG", "JPG", "GIF", "PDF", "NF4", "BF16", "FAQ", "TTL", "DNS",
+    "IDE", "SDK", "ORM", "REPL", "RAG", "LoRA", "QLoRA", "SAE", "KV",
+    "STT", "TTS", "TTL", "RBAC", "SSL", "TPU", "MIT", "SVG", "JSX",
+    "TSX", "LR", "BFS", "DFS", "DAG", "DST", "UTC", "GMT", "GAIA",
+    "DM",  # Dungeon Master
+    "ALICE", "ROD", "BOOM", "BOOTS",  # in-world equipment
+    # tooling / file types
+    "CSV", "TSV", "YAML", "TOML", "INI", "MD", "RST",
+})
+
+# Tokens that look like a function call: word.method(...). Used as part of
+# confabulation detection — fake function calls were one of round 1's
+# clearest tells (e.g. "model_executor.eval()").
+_FUNCTION_CALL_RE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
+_ACRONYM_RE = re.compile(r"\b([A-Z]{2,5})\b")
+
 _DELIBERATION_INSTRUCTIONS = """\
 Before answering, think in a <think>...</think> block. Inside the \
 think block, work through the user's message naturally — there is no \
@@ -81,9 +138,17 @@ introspective probe (about your state, feelings, or system) or carries \
 emotional content.
   - Recall what's genuinely relevant. If nothing in memory directly \
 applies, say so. Don't pad with general background.
+  - Verify before claiming specifics. If your answer needs numbers, \
+function signatures, dates, names of past events, file paths, exact \
+quotes, log values, or other concrete details — check whether you \
+actually have that information. If you don't, say "I don't know" or \
+distinguish what you can verify from what you'd be guessing about. \
+Confabulating plausible specifics is worse than admitting uncertainty. \
+Don't invent technical-sounding scaffolding to fill the gap.
   - Draft a reply, then critique it. Ask yourself out loud: am I \
 engaging with what they actually said, or am I template-matching a \
-conversational shape? Did I just emit a deferral instead of an answer?
+conversational shape? Did I just emit a deferral instead of an answer? \
+Did I just invent a specific to fill out the engagement pattern?
 
 Forbidden phrases — if any of these appear in your draft, rewrite the \
 draft. They are reflexes, not engagement:
@@ -96,11 +161,15 @@ draft. They are reflexes, not engagement:
   • "I'd love to hear more about ___"
 
 If you don't know something, say "I don't know" directly. Don't offer \
-to investigate as a substitute for an answer. If the user asks an \
-introspective question (e.g. "do you feel asleep?"), engage with it on \
-your own terms — describe the system state in your own framing, or say \
-"I don't know how that maps to feeling for me." Either is honest. \
-Deflection is not.
+to investigate as a substitute for an answer. Don't invent specifics \
+to make an answer sound complete. If you have a partial answer with \
+an uncertain piece, distinguish what you can verify from what you'd \
+be guessing — use markers like "from what I recall," "I'd guess," \
+"the source of truth lives at X." If the user asks an introspective \
+question (e.g. "do you feel asleep?"), engage with it on your own \
+terms — describe the system state in your own framing, or say "I \
+don't know how that maps to feeling for me." Either is honest. \
+Deflection is not. Confabulation is not.
 
 After </think>, write the user-facing reply. The reply does not need \
 section headers; it's just the answer that emerged from the thinking.\
@@ -145,6 +214,8 @@ class DeliberationResult:
     `voice_evidence` records which named framings appeared in the
     thinking, by regex match. `forbidden_hits` records any banned
     template phrases that slipped through into the final response.
+    `confabulation_flags` records suspected confabulation patterns
+    (cataloged invented phrases, uncommon acronym bursts).
     """
     thinking: str
     final_response: str
@@ -154,10 +225,17 @@ class DeliberationResult:
     elapsed_ms: float
     journal_entry_id: Optional[str] = None
     fallback_used: bool = False
+    confabulation_flags: List[str] = field(default_factory=list)
+    model_used: str = "core"  # 'core' or 'prime' if retried after confabulation
+    retried: bool = False
 
     @property
     def thinking_present(self) -> bool:
         return bool(self.thinking and self.thinking.strip())
+
+    @property
+    def has_confabulation(self) -> bool:
+        return bool(self.confabulation_flags)
 
 
 def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
@@ -205,6 +283,46 @@ def _detect_forbidden_phrases(text: str) -> List[str]:
     return hits
 
 
+def _detect_confabulation(text: str) -> List[str]:
+    """Detect suspected confabulation in the final response.
+
+    Three flag classes:
+      • `cataloged:<phrase>` — exact match against CONFABULATION_PHRASES,
+        the highest-confidence signal (these are specific invented terms
+        the trained Core produced in past test runs).
+      • `acronym_burst:<list>` — three or more uncommon all-caps tokens
+        appearing close together. Catches the "VPU indexing DPU" /
+        "Prime / Neo / 3.5T+" class of confabulation. Filtered against
+        _KNOWN_ACRONYMS to avoid false positives on real terminology.
+      • `unfounded_function_call:<name>` — a function-call-shaped token
+        that doesn't match any path we'd expect to see in a grounded
+        response. Reserved for v2 — current heuristic is conservative
+        and only flags very obvious tells (multiple distinct fake calls,
+        no surrounding code-block context).
+
+    Empty list = clean. Higher flag counts → higher confidence in
+    confabulation.
+    """
+    if not text:
+        return []
+    flags: List[str] = []
+    lower = text.lower()
+
+    # 1. Cataloged phrases
+    for phrase in CONFABULATION_PHRASES:
+        if phrase in lower:
+            flags.append(f"cataloged:{phrase}")
+
+    # 2. Acronym burst — uncommon all-caps tokens in close proximity
+    acronyms = [m.group(1) for m in _ACRONYM_RE.finditer(text)]
+    uncommon = [a for a in acronyms if a not in _KNOWN_ACRONYMS]
+    if len(uncommon) >= 3:
+        # Trim to first 6 for the flag payload
+        flags.append(f"acronym_burst:{','.join(uncommon[:6])}")
+
+    return flags
+
+
 # ── Significance ────────────────────────────────────────────────────────
 
 def _significance_from_evidence(
@@ -240,6 +358,7 @@ def deliberate(
     model_pool,
     *,
     model_role: str = "core",
+    adapter_name: Optional[str] = None,
     max_total_tokens: int = 900,
     temperature: float = 0.55,
     persist: bool = True,
@@ -252,6 +371,9 @@ def deliberate(
     received without deliberation (system prompt with persona overlay,
     history, user message). The deliberation instructions are appended
     to the existing system message so persona/RAG are preserved.
+
+    `adapter_name`, when provided, is passed through to model_pool.forward_to_model
+    so the deliberation adapter (core_deliberation_v1) is active during generation.
     """
     t0 = time.time()
 
@@ -280,15 +402,18 @@ def deliberate(
                 forbidden_hits=[],
                 elapsed_ms=(time.time() - t0) * 1000.0,
                 fallback_used=True,
+                model_used=model_role,
             )
         try:
-            res = model_pool.forward_to_model(
-                model_role,
+            forward_kwargs = dict(
                 messages=messages,
                 max_tokens=max_total_tokens,
                 temperature=temperature,
                 top_p=0.9,
             )
+            if adapter_name:
+                forward_kwargs["adapter_name"] = adapter_name
+            res = model_pool.forward_to_model(model_role, **forward_kwargs)
             raw = (res["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             logger.exception("Deliberation: model call failed")
@@ -305,6 +430,7 @@ def deliberate(
     thinking, final_response, fallback_used = _split_think_and_response(raw)
     voice_evidence = _detect_voice_evidence(thinking)
     forbidden_hits = _detect_forbidden_phrases(final_response)
+    confabulation_flags = _detect_confabulation(final_response)
 
     entry_id: Optional[str] = None
     if persist and (thinking or final_response):
@@ -316,10 +442,12 @@ def deliberate(
                 raw_output=raw,
                 voice_evidence=voice_evidence,
                 forbidden_hits=forbidden_hits,
+                confabulation_flags=confabulation_flags,
                 elapsed_ms=elapsed_ms,
                 user_message_id=user_message_id,
                 session_id=session_id,
                 fallback_used=fallback_used,
+                model_used=model_role,
             )
         except Exception:
             logger.exception("Deliberation: failed to persist journal entry")
@@ -333,7 +461,117 @@ def deliberate(
         elapsed_ms=elapsed_ms,
         journal_entry_id=entry_id,
         fallback_used=fallback_used,
+        confabulation_flags=confabulation_flags,
+        model_used=model_role,
     )
+
+
+# ── Top-level orchestration: deliberate + safety net ────────────────────
+
+def run_deliberated_turn(
+    user_input: str,
+    assembled_messages: List[Dict[str, str]],
+    model_pool,
+    config,
+    *,
+    user_message_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> DeliberationResult:
+    """Full deliberated-turn orchestration with confabulation safety net.
+
+    Flow:
+      1. Deliberate on Core with the deliberation adapter active.
+      2. Detect forbidden phrases AND confabulation flags in the output.
+      3. If confabulation is flagged AND retry-on-prime is configured AND
+         Prime is available, re-run deliberation on Prime (no adapter)
+         and use that response if Prime didn't trip the same flags.
+      4. If confabulation persists (or retry disabled), prepend a brief
+         low-confidence warning to the final response so the user knows.
+      5. Both passes (and the retry decision) are journaled.
+
+    Config keys consumed (from DELIBERATION block):
+      - adapter_name (default "core_deliberation_v1")
+      - max_tokens (default 900)
+      - temperature (default 0.55)
+      - retry_on_confabulation (default "warn"; alternatives: "prime", "none")
+      - low_confidence_prefix (default a short bracketed marker)
+    """
+    cfg = {}
+    try:
+        constants = config.constants if hasattr(config, "constants") else config
+        cfg = (constants or {}).get("DELIBERATION", {}) or {}
+    except Exception:
+        cfg = {}
+
+    adapter_name = cfg.get("adapter_name", "core_deliberation_v1")
+    max_tokens = int(cfg.get("max_tokens", 900))
+    temperature = float(cfg.get("temperature", 0.55))
+    retry_strategy = (cfg.get("retry_on_confabulation") or "warn").lower()
+    warning_prefix = cfg.get(
+        "low_confidence_prefix",
+        "[low-confidence: response had verification flags — treat with skepticism] ",
+    )
+
+    # 1. Core deliberation with adapter
+    result = deliberate(
+        user_input=user_input,
+        assembled_messages=assembled_messages,
+        model_pool=model_pool,
+        model_role="core",
+        adapter_name=adapter_name,
+        max_total_tokens=max_tokens,
+        temperature=temperature,
+        persist=True,
+        user_message_id=user_message_id,
+        session_id=session_id,
+    )
+
+    # 2. If clean, return as-is
+    if not result.confabulation_flags and not result.forbidden_hits:
+        return result
+
+    logger.info(
+        "Deliberation flagged: forbidden=%s, confabulation=%s; strategy=%s",
+        result.forbidden_hits, result.confabulation_flags, retry_strategy,
+    )
+
+    # 3. Optional Prime retry
+    if retry_strategy == "prime":
+        try:
+            retry = deliberate(
+                user_input=user_input,
+                assembled_messages=assembled_messages,
+                model_pool=model_pool,
+                model_role="prime",
+                adapter_name=None,  # Prime has no deliberation adapter
+                max_total_tokens=max_tokens,
+                temperature=temperature,
+                persist=True,
+                user_message_id=user_message_id,
+                session_id=session_id,
+            )
+            retry.retried = True
+            # Use the retry only if Prime tripped fewer flags than Core
+            core_score = len(result.forbidden_hits) + len(result.confabulation_flags)
+            prime_score = len(retry.forbidden_hits) + len(retry.confabulation_flags)
+            if retry.final_response and prime_score < core_score:
+                logger.info(
+                    "Prime retry succeeded (core=%d flags, prime=%d flags) — using Prime response",
+                    core_score, prime_score,
+                )
+                return retry
+            logger.info(
+                "Prime retry didn't improve (core=%d, prime=%d) — keeping Core with warning",
+                core_score, prime_score,
+            )
+        except Exception:
+            logger.exception("Deliberation: Prime retry failed")
+
+    # 4. Warn — prepend low-confidence prefix to the final response
+    if retry_strategy in ("warn", "prime"):
+        result.final_response = warning_prefix + result.final_response
+
+    return result
 
 
 # ── Persistence ─────────────────────────────────────────────────────────
@@ -350,14 +588,24 @@ def _persist_deliberation(
     user_message_id: Optional[str],
     session_id: Optional[str],
     fallback_used: bool,
+    confabulation_flags: Optional[List[str]] = None,
+    model_used: str = "core",
 ) -> str:
+    confabulation_flags = confabulation_flags or []
     significance = _significance_from_evidence(voice_evidence, forbidden_hits, fallback_used)
+    if confabulation_flags:
+        # Confabulation is at least as serious as a forbidden-phrase hit
+        significance = max(significance, 4)
 
     tags = ["deliberation"]
     if fallback_used:
         tags.append("parse-fallback")
     if forbidden_hits:
         tags.append("forbidden-hit")
+    if confabulation_flags:
+        tags.append("confabulation")
+    if model_used and model_used != "core":
+        tags.append(f"model:{model_used}")
     voices_present = [v for v, n in voice_evidence.items() if n > 0]
     for v in voices_present:
         tags.append(f"voice:{v}")
@@ -367,12 +615,17 @@ def _persist_deliberation(
     meta_lines = [
         f"User input: {user_input[:240].replace(chr(10), ' ')}",
         f"Elapsed: {elapsed_ms:.0f}ms",
+        f"Model: {model_used}",
         f"Voice evidence: " + ", ".join(f"{v}={n}" for v, n in voice_evidence.items()),
     ]
     if forbidden_hits:
         meta_lines.append("Forbidden phrases that slipped through:")
         for p in forbidden_hits:
             meta_lines.append(f"  - {p!r}")
+    if confabulation_flags:
+        meta_lines.append("Confabulation flags:")
+        for f in confabulation_flags:
+            meta_lines.append(f"  - {f}")
     if user_message_id:
         meta_lines.append(f"User message id: {user_message_id}")
 
@@ -392,7 +645,9 @@ def _persist_deliberation(
         context="cognition",
     )
     logger.info(
-        "Deliberation persisted: %s (sig=%d, voices=%s, forbidden=%d, elapsed=%.0fms, fallback=%s)",
-        entry.id, significance, voices_present, len(forbidden_hits), elapsed_ms, fallback_used,
+        "Deliberation persisted: %s (sig=%d, model=%s, voices=%s, forbidden=%d, "
+        "confabulation=%d, elapsed=%.0fms, fallback=%s)",
+        entry.id, significance, model_used, voices_present, len(forbidden_hits),
+        len(confabulation_flags), elapsed_ms, fallback_used,
     )
     return entry.id

@@ -2821,6 +2821,59 @@ class AgentCore:
                     except Exception:
                         logger.debug("[CPR] Recovery signal handling failed", exc_info=True)
 
+                # ── DELIBERATION HOOK (k23-y95) ──
+                # When DELIBERATION.enabled is true and this turn isn't reflex-eligible
+                # (the reflex path was already taken earlier in run_turn if it applied),
+                # run the diarized internal deliberation pass through the trained Core
+                # adapter instead of falling through to ExternalVoice. The deliberated
+                # response replaces what ExternalVoice would have streamed.
+                #
+                # Failure-safe: any exception falls through to the standard pipeline.
+                # When enabled=False (default), this block is a no-op and existing
+                # behavior is preserved.
+                try:
+                    _delib_cfg = (self.config.constants or {}).get("DELIBERATION", {}) or {}
+                    if _delib_cfg.get("enabled", False):
+                        from gaia_core.cognition.deliberation import run_deliberated_turn
+                        _delib_result = run_deliberated_turn(
+                            user_input=packet.content.original_prompt or "",
+                            assembled_messages=final_messages,
+                            model_pool=self.model_pool,
+                            config=self.config,
+                            user_message_id=getattr(packet.header, "packet_id", None),
+                            session_id=session_id,
+                        )
+                        if _delib_result and _delib_result.final_response:
+                            logger.info(
+                                "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
+                                _delib_result.journal_entry_id or "(no-journal)",
+                                _delib_result.model_used,
+                                len(_delib_result.forbidden_hits),
+                                len(_delib_result.confabulation_flags),
+                                _delib_result.retried,
+                                _delib_result.elapsed_ms,
+                            )
+                            # Persist to session history so this turn shows up in
+                            # subsequent context (matches the pattern at line 1765/2310).
+                            try:
+                                if self.session_manager and session_id:
+                                    self.session_manager.add_message(
+                                        session_id, "assistant", _delib_result.final_response,
+                                    )
+                            except Exception:
+                                logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                            # Mark packet finalized for downstream consumers
+                            try:
+                                packet.response.candidate = _delib_result.final_response
+                                packet.status.finalized = True
+                                packet.status.state = PacketState.COMPLETE
+                            except Exception:
+                                pass
+                            yield {"type": "token", "value": _delib_result.final_response}
+                            return
+                except Exception:
+                    logger.exception("Deliberation hook failed; falling through to standard pipeline")
+
                 # pick an observer model that's idle if possible; fall back to config-based selection
                 observer_model_name = None
                 observer_config = self.config.constants.get("MODEL_CONFIGS", {}).get("observer", {})

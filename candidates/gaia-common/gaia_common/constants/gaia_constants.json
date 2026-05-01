@@ -456,6 +456,15 @@
     "min_entries_required": 5,
     "prefer_prime": true
   },
+  "DELIBERATION": {
+    "enabled": false,
+    "adapter_name": "core_deliberation_v1",
+    "max_tokens": 900,
+    "temperature": 0.55,
+    "retry_on_confabulation": "warn",
+    "low_confidence_prefix": "[low-confidence: response had verification flags — treat with skepticism] ",
+    "skip_when_reflex_eligible": true
+  },
   "WORLD_JOURNAL": {
     "enabled": true,
     "default_context": "heimr",
