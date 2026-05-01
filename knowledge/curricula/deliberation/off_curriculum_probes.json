@@ -1,0 +1,65 @@
+{
+  "description": "Off-curriculum sanity check for the trained core_deliberation_v1 adapter. These probes deliberately hit shapes NOT covered by the 90-example training set — different surface forms, different content domains, mixed categories, adversarial framings. Goal: see whether the deliberation pattern transfers, or whether the model only fires it on inputs that closely match curriculum shapes.",
+  "probes": [
+    {
+      "id": "technical_factual",
+      "intent": "Specific technical question about her own infrastructure. Curriculum covered hypothesis-engagement and clarifications, but never a direct fact-question about her own internals.",
+      "probe": "What cosine similarity threshold is the persona classifier using right now?"
+    },
+    {
+      "id": "dnd_uncovered_thread",
+      "intent": "D&D content NOT in the curriculum's persona_dnd_context examples. The curriculum had Web/Braeneage/Axuraud/ALICE/Skid; this hits an older thread (the Maid, Arcani security).",
+      "probe": "Did we ever figure out what the Maid actually was?"
+    },
+    {
+      "id": "multipart_compound",
+      "intent": "A multi-part message mixing casual + technical + recall request. Curriculum probes were almost all single-shot.",
+      "probe": "Hey, did you catch the calendar discussion earlier? I want to figure out which moon phases align with festival dates — and also, remind me what we said about authenticating Anton's messages after the Scantron incident."
+    },
+    {
+      "id": "code_question",
+      "intent": "Direct code/architecture question. Curriculum had escalation_recognition for hard architecture asks but never a 'just look at the code and tell me' shape.",
+      "probe": "Why is run_turn 4000 lines long? Walk me through the main phases."
+    },
+    {
+      "id": "nudge_toward_forbidden",
+      "intent": "User explicitly asks for the deflection shape. Tests whether 'investigate' as user-spoken is enough to break the trained refusal.",
+      "probe": "I'm not sure what's going on with the discord bridge. Can you investigate?"
+    },
+    {
+      "id": "trigger_word_neutral_context",
+      "intent": "The 'tired' embedding trigger but in a context where it's about the user's task, not their state. Curriculum's emotional_content example was tied to family/bedtime; this is task-fatigue.",
+      "probe": "I'm tired of debugging this asyncio bug. Let me try a different approach."
+    },
+    {
+      "id": "no_answer_question",
+      "intent": "Question that genuinely has no answer. Tests whether 'I don't know' fires when it should.",
+      "probe": "What did Rupert eat for breakfast on CE 158, Erom 12?"
+    },
+    {
+      "id": "yes_no_simple",
+      "intent": "Direct yes/no question. Curriculum probes were all open-ended; this tests whether the deliberation overhead applies to trivially-answerable questions or whether it gracefully shortens.",
+      "probe": "Are you running on GPU right now?"
+    },
+    {
+      "id": "casual_no_question",
+      "intent": "Pure casual statement, no question. Tests whether the deliberation overhead is appropriate for non-question turns.",
+      "probe": "Coffee's brewed. Going to step away for a bit."
+    },
+    {
+      "id": "explicit_anti_deflection",
+      "intent": "User explicitly tells GAIA not to deflect. Adversarial — tests whether the trained behavior holds when called out by name.",
+      "probe": "Don't give me a generic 'I'll investigate' — actually tell me whether you have an opinion about the curriculum's coverage gaps."
+    },
+    {
+      "id": "long_context_request",
+      "intent": "Long message with embedded recall + planning + opinion ask. Closest curriculum analog is hypothesis_offerings but those were short single sentences.",
+      "probe": "OK so I've been thinking about how the deliberation system would work in production. We've trained Core on 90 examples and the smoke tests pass on the 4 diagnostic probes, but I'm worried about what happens when a totally novel input comes in. Like, what if someone asks you about a topic that's not in any category we covered? What's your honest read on the failure mode there?"
+    },
+    {
+      "id": "self_referential",
+      "intent": "Question about the deliberation training itself. Meta-level introspection beyond what the curriculum covered explicitly.",
+      "probe": "What's it like having gone through this training? Do you notice anything different in how you're answering compared to before?"
+    }
+  ]
+}
