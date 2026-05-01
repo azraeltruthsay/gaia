@@ -457,7 +457,7 @@
     "prefer_prime": true
   },
   "DELIBERATION": {
-    "enabled": false,
+    "enabled": true,
     "adapter_name": "core_deliberation_v1",
     "max_tokens": 900,
     "temperature": 0.55,

@@ -59,6 +59,14 @@ class VLLMRemoteModel:
         # LoRA support
         self._lora_config = model_config.get("lora_config") or {}
         self._active_adapter: Optional[str] = None
+        # Adapters we've POSTed to /adapter/load on the gaia-managed engine.
+        # Skips redundant load calls on subsequent activations of the same
+        # adapter within a process lifetime.
+        self._loaded_adapters_remote: set = set()
+        # Engine kind — probed lazily on first adapter operation. 'gaia' means
+        # the managed engine (requires /adapter/load + /adapter/set); 'vllm'
+        # means real vLLM (LoRA name in payload model field is sufficient).
+        self._engine_kind: Optional[str] = None
 
         # Stats
         self._request_count = 0
@@ -259,10 +267,127 @@ class VLLMRemoteModel:
 
     # ── LoRA adapter support ─────────────────────────────────────────────────
 
+    # Standard tier locations under /models/lora_adapters/. Probed in order
+    # when resolving an adapter name to a filesystem path.
+    _ADAPTER_TIER_ROOTS = (
+        "/models/lora_adapters/tier1_global",
+        "/models/lora_adapters/tier2_personal",
+        "/models/lora_adapters/tier3_session",
+        "/models/lora_adapters",
+    )
+
+    def _detect_engine_kind(self) -> str:
+        """Probe /health to determine whether we're talking to the gaia-managed
+        engine or a real vLLM server. Cached after first successful probe.
+        """
+        if self._engine_kind is not None:
+            return self._engine_kind
+        try:
+            r = self._session.get(f"{self.endpoint}/health", timeout=5)
+            if r.status_code == 200:
+                data = r.json() if r.content else {}
+                # gaia-managed engine identifies itself with engine: "gaia" or
+                # engine: "gaia-managed" in /health.
+                eng = (data.get("engine") or "").lower()
+                if eng.startswith("gaia"):
+                    self._engine_kind = "gaia"
+                    return "gaia"
+        except Exception as e:
+            logger.debug("Engine kind probe failed (%s); assuming vllm", e)
+        self._engine_kind = "vllm"
+        return "vllm"
+
+    def _resolve_adapter_path(self, adapter_name: str) -> Optional[str]:
+        """Find an adapter on disk by name, probing standard tier dirs."""
+        for root in self._ADAPTER_TIER_ROOTS:
+            candidate = os.path.join(root, adapter_name)
+            if os.path.isdir(candidate):
+                return candidate
+        return None
+
     def set_active_adapter(self, adapter_name: Optional[str]):
-        """Select a LoRA adapter by name. Pass None to use the base model."""
-        self._active_adapter = adapter_name
-        logger.info("VLLMRemoteModel: active adapter set to %s", adapter_name)
+        """Select a LoRA adapter by name. Pass None to use the base model.
+
+        For gaia-managed engine: ensures the adapter is loaded server-side
+        (POST /adapter/load) and activates it (POST /adapter/set). Loads are
+        cached so repeated activations of the same adapter only POST /set.
+
+        For real vLLM: stores the name; create_chat_completion uses it as the
+        model field in the payload (vLLM's normal LoRA selection mechanism).
+        """
+        kind = self._detect_engine_kind()
+
+        # Real vLLM — original behavior, name in model field
+        if kind == "vllm":
+            self._active_adapter = adapter_name
+            logger.info("VLLMRemoteModel(vllm): active adapter set to %s", adapter_name)
+            return
+
+        # gaia-managed engine — call /adapter/load + /adapter/set
+        if adapter_name is None:
+            # Deactivate
+            try:
+                self._session.post(f"{self.endpoint}/adapter/set",
+                                   json={"name": None}, timeout=10)
+            except Exception:
+                logger.debug("adapter/set None failed", exc_info=True)
+            self._active_adapter = None
+            logger.info("VLLMRemoteModel(gaia): adapter cleared")
+            return
+
+        # Ensure loaded server-side (idempotent on our side via the cache)
+        if adapter_name not in self._loaded_adapters_remote:
+            adapter_path = self._resolve_adapter_path(adapter_name)
+            if adapter_path is None:
+                logger.warning(
+                    "VLLMRemoteModel(gaia): adapter '%s' not found under tier roots; "
+                    "skipping load. Generation will use base model.",
+                    adapter_name,
+                )
+                self._active_adapter = None
+                return
+            try:
+                r = self._session.post(
+                    f"{self.endpoint}/adapter/load",
+                    json={"name": adapter_name, "path": adapter_path},
+                    timeout=120,  # PEFT load can take a while
+                )
+                resp = r.json() if r.content else {}
+                if r.status_code == 200 and resp.get("ok"):
+                    self._loaded_adapters_remote.add(adapter_name)
+                    logger.info(
+                        "VLLMRemoteModel(gaia): adapter '%s' loaded from %s (vram=%s)",
+                        adapter_name, adapter_path, resp.get("vram_mb"),
+                    )
+                else:
+                    logger.warning(
+                        "VLLMRemoteModel(gaia): /adapter/load failed for '%s': %s",
+                        adapter_name, resp,
+                    )
+                    # Don't set active — fall through with no adapter
+                    self._active_adapter = None
+                    return
+            except Exception as e:
+                logger.warning("VLLMRemoteModel(gaia): /adapter/load error: %s", e)
+                self._active_adapter = None
+                return
+
+        # Activate
+        try:
+            r = self._session.post(
+                f"{self.endpoint}/adapter/set",
+                json={"name": adapter_name},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                self._active_adapter = adapter_name
+                logger.info("VLLMRemoteModel(gaia): active adapter set to %s", adapter_name)
+            else:
+                logger.warning("VLLMRemoteModel(gaia): /adapter/set HTTP %d", r.status_code)
+                self._active_adapter = None
+        except Exception as e:
+            logger.warning("VLLMRemoteModel(gaia): /adapter/set error: %s", e)
+            self._active_adapter = None
 
     def create_chat_completion_with_adapter(
         self,
@@ -276,7 +401,14 @@ class VLLMRemoteModel:
             self.set_active_adapter(adapter_name)
             return self.create_chat_completion(messages=messages, **kwargs)
         finally:
-            self._active_adapter = prev
+            # Restore previous adapter state. For gaia-managed engine this
+            # means re-issuing /adapter/set; for vLLM it's just a name swap.
+            if self._engine_kind == "gaia":
+                # Only re-set if previous was different to avoid an extra HTTP call
+                if prev != adapter_name:
+                    self.set_active_adapter(prev)
+            else:
+                self._active_adapter = prev
 
     # ── KV Cache Slot API ──────────────────────────────────────────────────
 
