@@ -2291,6 +2291,62 @@ class AgentCore:
             except Exception:
                 logger.debug("Knowledge router failed (non-blocking)", exc_info=True)
 
+            # ── DELIBERATION HOOK (k23-y95, OPERATOR path) ──────────────
+            # Core's OPERATOR slim path is the most common entrypoint. When
+            # DELIBERATION.enabled is true, run the diarized deliberation
+            # via the trained adapter instead of the slim prompt. The
+            # deliberated response replaces what slim_prompt would have
+            # streamed.
+            #
+            # Failure-safe: any exception falls through to the slim path.
+            # When enabled=False (default), this block is a no-op.
+            try:
+                _delib_cfg = (self.config.constants or {}).get("DELIBERATION", {}) or {}
+                if (
+                    _delib_cfg.get("enabled", False)
+                    and not tool_already_executed
+                    and pipeline_depth in ("OPERATOR", "THINKER")
+                ):
+                    from gaia_core.cognition.deliberation import run_deliberated_turn
+                    _delib_messages = build_from_packet(packet)
+                    _delib_result = run_deliberated_turn(
+                        user_input=packet.content.original_prompt or user_input or "",
+                        assembled_messages=_delib_messages,
+                        model_pool=self.model_pool,
+                        config=self.config,
+                        user_message_id=getattr(packet.header, "packet_id", None),
+                        session_id=session_id,
+                    )
+                    if _delib_result and _delib_result.final_response:
+                        logger.info(
+                            "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
+                            _delib_result.journal_entry_id or "(no-journal)",
+                            _delib_result.model_used,
+                            len(_delib_result.forbidden_hits),
+                            len(_delib_result.confabulation_flags),
+                            _delib_result.retried,
+                            _delib_result.elapsed_ms,
+                        )
+                        _delib_responding = getattr(self, '_last_responding_model', None) or selected_model_name
+                        _delib_header = self._build_response_header(_delib_responding, packet, None, None, None)
+                        yield {"type": "token", "value": _delib_header + _delib_result.final_response}
+                        try:
+                            if self.session_manager and session_id:
+                                self.session_manager.add_message(
+                                    session_id, "assistant", _delib_result.final_response,
+                                )
+                        except Exception:
+                            logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                        try:
+                            packet.response.candidate = _delib_result.final_response
+                            packet.status.finalized = True
+                            packet.status.state = PacketState.COMPLETED
+                        except Exception:
+                            pass
+                        return
+            except Exception:
+                logger.exception("Deliberation hook (OPERATOR) failed; falling through to slim path")
+
             # ── Hermes-style clean ReAct path for OPERATOR depth ─────────
             # OPERATOR (E4B Core) uses the slim prompt path exclusively.
             # This implements a clean generate→check→respond loop without the
@@ -2866,7 +2922,7 @@ class AgentCore:
                             try:
                                 packet.response.candidate = _delib_result.final_response
                                 packet.status.finalized = True
-                                packet.status.state = PacketState.COMPLETE
+                                packet.status.state = PacketState.COMPLETED
                             except Exception:
                                 pass
                             yield {"type": "token", "value": _delib_result.final_response}
