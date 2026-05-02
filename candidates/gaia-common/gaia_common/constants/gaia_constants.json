@@ -465,6 +465,11 @@
     "low_confidence_prefix": "[low-confidence: response had verification flags — treat with skepticism] ",
     "skip_when_reflex_eligible": true
   },
+  "CROSS_TIER_AUDIT": {
+    "enabled": true,
+    "max_audit_tokens": 350,
+    "audit_temperature": 0.3
+  },
   "WORLD_JOURNAL": {
     "enabled": true,
     "default_context": "heimr",

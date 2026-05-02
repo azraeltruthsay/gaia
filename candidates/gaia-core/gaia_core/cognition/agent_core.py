@@ -2337,6 +2337,23 @@ class AgentCore:
                                 )
                         except Exception:
                             logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                        # ── CROSS-TIER AUDIT (k23-be7) ──
+                        # Fire-and-forget Prime audit while user reads the response.
+                        # Lifecycle-gated and per-entry deduped inside the module;
+                        # safe to call on every deliberated turn.
+                        try:
+                            from gaia_core.cognition.cross_tier_audit import schedule_cross_tier_audit
+                            schedule_cross_tier_audit(
+                                user_input=packet.content.original_prompt or user_input or "",
+                                thinking=_delib_result.thinking,
+                                final_response=_delib_result.final_response,
+                                journal_entry_id=_delib_result.journal_entry_id,
+                                model_pool=self.model_pool,
+                                config=self.config,
+                                session_id=session_id,
+                            )
+                        except Exception:
+                            logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
                         try:
                             packet.response.candidate = _delib_result.final_response
                             packet.status.finalized = True
@@ -2918,6 +2935,20 @@ class AgentCore:
                                     )
                             except Exception:
                                 logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                            # ── CROSS-TIER AUDIT (k23-be7) ──
+                            try:
+                                from gaia_core.cognition.cross_tier_audit import schedule_cross_tier_audit
+                                schedule_cross_tier_audit(
+                                    user_input=packet.content.original_prompt or "",
+                                    thinking=_delib_result.thinking,
+                                    final_response=_delib_result.final_response,
+                                    journal_entry_id=_delib_result.journal_entry_id,
+                                    model_pool=self.model_pool,
+                                    config=self.config,
+                                    session_id=session_id,
+                                )
+                            except Exception:
+                                logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
                             # Mark packet finalized for downstream consumers
                             try:
                                 packet.response.candidate = _delib_result.final_response
