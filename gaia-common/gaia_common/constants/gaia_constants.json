@@ -470,6 +470,11 @@
     "max_audit_tokens": 350,
     "audit_temperature": 0.3
   },
+  "OBSERVER_DRIFT": {
+    "enabled": true,
+    "threshold": 0.5,
+    "top_k": 3
+  },
   "WORLD_JOURNAL": {
     "enabled": true,
     "default_context": "heimr",

@@ -2337,6 +2337,23 @@ class AgentCore:
                                 )
                         except Exception:
                             logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                        # ── DRIFT SCAN (a5q observer) ──
+                        # Fast embedding-based drift check on the final response.
+                        # ~50ms; CAUTION-only (no BLOCK) for v1. Findings flow to
+                        # journal annotation, samvega (when severe), and the
+                        # packet's reflection log.
+                        try:
+                            from gaia_core.cognition.drift_detector import scan_response
+                            scan_response(
+                                final_response=_delib_result.final_response,
+                                user_input=packet.content.original_prompt or user_input or "",
+                                journal_entry_id=_delib_result.journal_entry_id,
+                                model_pool=self.model_pool,
+                                config=self.config,
+                                packet=packet,
+                            )
+                        except Exception:
+                            logger.debug("Drift scan failed (non-fatal)", exc_info=True)
                         # ── CROSS-TIER AUDIT (k23-be7) ──
                         # Fire-and-forget Prime audit while user reads the response.
                         # Lifecycle-gated and per-entry deduped inside the module;
@@ -2935,6 +2952,19 @@ class AgentCore:
                                     )
                             except Exception:
                                 logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
+                            # ── DRIFT SCAN (a5q observer) ──
+                            try:
+                                from gaia_core.cognition.drift_detector import scan_response
+                                scan_response(
+                                    final_response=_delib_result.final_response,
+                                    user_input=packet.content.original_prompt or "",
+                                    journal_entry_id=_delib_result.journal_entry_id,
+                                    model_pool=self.model_pool,
+                                    config=self.config,
+                                    packet=packet,
+                                )
+                            except Exception:
+                                logger.debug("Drift scan failed (non-fatal)", exc_info=True)
                             # ── CROSS-TIER AUDIT (k23-be7) ──
                             try:
                                 from gaia_core.cognition.cross_tier_audit import schedule_cross_tier_audit
