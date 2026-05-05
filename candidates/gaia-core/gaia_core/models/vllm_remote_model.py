@@ -93,12 +93,30 @@ class VLLMRemoteModel:
     # ── Token clamping ────────────────────────────────────────────────────────
 
     def _estimate_prompt_tokens(self, text_or_messages) -> int:
-        """Rough token estimate (~3.5 chars/token for English, use 3 to overestimate)."""
+        """Rough token estimate (~3.5 chars/token for English, use 3 to overestimate).
+
+        Multimodal content (list of {type,text|image|image_url} parts) is
+        accounted for: text parts via length, images at 256 soft tokens each
+        (Gemma 4's per-image expansion).
+        """
         if isinstance(text_or_messages, str):
             return len(text_or_messages) // 3 + 4
-        # List of message dicts
-        total_chars = sum(len(m.get("content", "")) for m in text_or_messages)
-        return total_chars // 3 + len(text_or_messages) * 4  # +4/msg for role overhead
+        total = 0
+        for m in text_or_messages:
+            content = m.get("content", "")
+            if isinstance(content, str):
+                total += len(content) // 3
+            elif isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    ptype = part.get("type", "")
+                    if ptype == "text":
+                        total += len(part.get("text", "")) // 3
+                    elif ptype in ("image", "image_url"):
+                        total += 256
+            total += 4  # per-message role overhead
+        return total
 
     def _truncate_messages_to_fit(self, messages: list, reserved_output: int = 256) -> list:
         """Truncate message content to fit within the model's context window.
@@ -794,7 +812,20 @@ class VLLMRemoteModel:
                 role = "user"
             if content is None:
                 content = ""
-            elif not isinstance(content, str):
+
+            # Multimodal content arrives as a list of {type,text|image|image_url} parts;
+            # pass it through untouched so the engine can route to the vision tower.
+            if isinstance(content, list):
+                if role == "system":
+                    text_only = "".join(p.get("text", "") for p in content
+                                        if isinstance(p, dict) and p.get("type") == "text")
+                    if text_only.strip():
+                        system_parts.append(text_only)
+                    continue
+                non_system.append({"role": role, "content": content})
+                continue
+
+            if not isinstance(content, str):
                 content = str(content)
 
             if role == "system":

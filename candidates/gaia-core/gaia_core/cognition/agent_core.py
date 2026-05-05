@@ -1875,6 +1875,11 @@ class AgentCore:
             # Process file attachments (PDFs, text files, etc.) sent via Discord
             if packet.content.attachments:
                 for att in packet.content.attachments:
+                    # Image attachments flow into the multimodal model via prompt_builder
+                    # (see build_from_packet); they are not text-extracted/ingested.
+                    if (att.mime or "").startswith("image/"):
+                        continue
+
                     # Find the matching attachment_text DataField
                     att_text = None
                     for df in packet.content.data_fields:
@@ -2302,9 +2307,14 @@ class AgentCore:
             # When enabled=False (default), this block is a no-op.
             try:
                 _delib_cfg = (self.config.constants or {}).get("DELIBERATION", {}) or {}
+                _has_image_att = any(
+                    (getattr(a, "mime", "") or "").startswith("image/")
+                    for a in (packet.content.attachments or [])
+                )
                 if (
                     _delib_cfg.get("enabled", False)
                     and not tool_already_executed
+                    and not _has_image_att
                     and pipeline_depth in ("OPERATOR", "THINKER")
                 ):
                     from gaia_core.cognition.deliberation import run_deliberated_turn
@@ -2923,7 +2933,11 @@ class AgentCore:
                 # behavior is preserved.
                 try:
                     _delib_cfg = (self.config.constants or {}).get("DELIBERATION", {}) or {}
-                    if _delib_cfg.get("enabled", False):
+                    _has_image_att2 = any(
+                        (getattr(a, "mime", "") or "").startswith("image/")
+                        for a in (packet.content.attachments or [])
+                    )
+                    if _delib_cfg.get("enabled", False) and not _has_image_att2:
                         from gaia_core.cognition.deliberation import run_deliberated_turn
                         _delib_result = run_deliberated_turn(
                             user_input=packet.content.original_prompt or "",

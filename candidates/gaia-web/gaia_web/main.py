@@ -15,9 +15,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from typing import List
 
 from gaia_web.routes.blueprints import router as blueprints_router
 from gaia_web.routes.files import router as files_router
@@ -302,6 +303,125 @@ async def process_user_input(user_input: str, request: Request):
             yield json.dumps({"type": "error", "value": str(e), "error_code": "GAIA-WEB-030"}) + "\n"
 
     return StreamingResponse(_stream_response(), media_type="application/x-ndjson")
+
+
+_WEB_ATTACHMENT_DIR = os.environ.get("WEB_ATTACHMENT_DIR", "/shared/web_attachments")
+_ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB per file
+
+
+@app.post("/process_user_input_multipart")
+async def process_user_input_multipart(
+    request: Request,
+    text: str = Form(""),
+    files: List[UploadFile] = File(default=[]),
+):
+    """Multipart entry point for user text + image attachments.
+
+    Saves each image to /shared/web_attachments/{session_id}/{hash}_{filename}
+    (a volume mounted on both gaia-web and gaia-core), constructs a v0.4
+    CognitionPacket with `attachments` populated, and streams the response
+    from gaia-core back as NDJSON. Image attachments flow into Core's
+    multimodal vision path via prompt_builder + agent_core.
+    """
+    import hashlib
+
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        session_id = f"web_{uuid.uuid4().hex[:8]}"
+        logger.warning("No X-Session-ID header — ephemeral session %s (follow-ups will lack context)", session_id)
+    context_pool = request.headers.get("X-Context-Pool", "").lower() in ("true", "1", "yes")
+    core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
+    packet_id = f"web_{uuid.uuid4().hex[:8]}"
+
+    logger.info("Multipart input for session %s: text_len=%d files=%d",
+                session_id, len(text or ""), len(files) if files else 0)
+
+    redacted_input, scan, should_block = _security_middleware.scan_text(text or "", packet_id, session_id)
+    if should_block:
+        async def _blocked():
+            yield json.dumps({"type": "error", "value": "Request blocked by security scan.",
+                              "error_code": "GAIA-WEB-020"}) + "\n"
+        return StreamingResponse(_blocked(), media_type="application/x-ndjson")
+
+    session_dir = Path(_WEB_ATTACHMENT_DIR) / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    attachments_meta = []
+    for f in (files or []):
+        mime = (f.content_type or "").lower()
+        if mime not in _ALLOWED_IMAGE_MIMES:
+            async def _bad_mime():
+                yield json.dumps({
+                    "type": "error",
+                    "value": f"Unsupported file type: {mime or 'unknown'} (only PNG/JPEG/GIF/WEBP/BMP)",
+                    "error_code": "GAIA-WEB-MM-001",
+                }) + "\n"
+            return StreamingResponse(_bad_mime(), media_type="application/x-ndjson")
+
+        data = await f.read()
+        if len(data) > _MAX_IMAGE_BYTES:
+            async def _too_big():
+                yield json.dumps({
+                    "type": "error",
+                    "value": f"Image '{f.filename}' exceeds {_MAX_IMAGE_BYTES // (1024 * 1024)}MB",
+                    "error_code": "GAIA-WEB-MM-002",
+                }) + "\n"
+            return StreamingResponse(_too_big(), media_type="application/x-ndjson")
+
+        chash = hashlib.sha256(data).hexdigest()[:16]
+        safe_name = Path(f.filename or "image").name.replace("/", "_")
+        local_path = str(session_dir / f"{chash}_{safe_name}")
+        with open(local_path, "wb") as out:
+            out.write(data)
+        attachments_meta.append({
+            "name": safe_name,
+            "mime": mime,
+            "content_hash": chash,
+            "bytes": len(data),
+            "location": local_path,
+        })
+        logger.info("Saved upload %s (%d bytes) → %s", safe_name, len(data), local_path)
+
+    payload = {
+        "version": "v0.4",
+        "header": {
+            "session_id": session_id,
+            "packet_id": packet_id,
+            "persona": {"persona_id": "gaia", "role": "assistant"},
+        },
+        "content": {
+            "original_prompt": redacted_input,
+            "attachments": attachments_meta,
+        },
+        "governance": {
+            "security_scan": {
+                "ran": scan.ran,
+                "passed": scan.passed,
+                "injection_score": scan.injection_score,
+            },
+            "context_pool": context_pool,
+        },
+    }
+
+    async def _stream():
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream("POST", f"{core_url}/process_packet", json=payload) as resp:
+                    if resp.status_code != 200:
+                        yield json.dumps({"type": "error",
+                                          "value": f"Core returned {resp.status_code}",
+                                          "error_code": "GAIA-WEB-001"}) + "\n"
+                        return
+                    async for line in resp.aiter_lines():
+                        if line:
+                            yield line + "\n"
+        except Exception as e:
+            log_gaia_error(logger, "GAIA-WEB-031", str(e), exc_info=True)
+            yield json.dumps({"type": "error", "value": str(e), "error_code": "GAIA-WEB-031"}) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
 
 @app.post("/presence")
 async def update_presence(request: Request):

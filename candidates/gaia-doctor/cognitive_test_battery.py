@@ -40,8 +40,50 @@ PIPELINE_TIMEOUT = 120  # Full pipeline mode is slower
 
 # ── Packet Builder (ported from smoke_test_cognitive.py) ──────────────────
 
-def build_packet(prompt: str, session_id: str, source: str = "web") -> dict:
-    """Build a CognitionPacket dict for /process_packet."""
+# Vision fixtures — staged under /shared at startup so gaia-core can read them
+# via the shared volume. The originals live in /app/test_assets/vision/ inside
+# the doctor image.
+_VISION_FIXTURE_SRC = os.environ.get("DOCTOR_VISION_FIXTURE_SRC", "/app/test_assets/vision")
+_VISION_FIXTURE_DST = os.environ.get("DOCTOR_VISION_FIXTURE_DST", "/shared/doctor_fixtures/vision")
+
+
+def _stage_vision_fixtures() -> None:
+    """Copy bundled vision fixtures into /shared/ so gaia-core can read them."""
+    if not os.path.isdir(_VISION_FIXTURE_SRC):
+        log.info("Vision fixtures: source dir %s missing — skipping stage", _VISION_FIXTURE_SRC)
+        return
+    os.makedirs(_VISION_FIXTURE_DST, exist_ok=True)
+    import shutil
+    for fname in os.listdir(_VISION_FIXTURE_SRC):
+        src = os.path.join(_VISION_FIXTURE_SRC, fname)
+        dst = os.path.join(_VISION_FIXTURE_DST, fname)
+        if os.path.isfile(src):
+            try:
+                shutil.copy2(src, dst)
+            except Exception as e:
+                log.warning("Vision fixture stage failed for %s: %s", fname, e)
+    log.info("Vision fixtures staged at %s", _VISION_FIXTURE_DST)
+
+
+def _resolve_vision_fixture(rel_or_name: str) -> str:
+    """Return absolute /shared path for a vision fixture by basename or relative path."""
+    return os.path.join(_VISION_FIXTURE_DST, os.path.basename(rel_or_name))
+
+
+_VISION_MIME_BY_EXT = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+}
+
+
+def build_packet(prompt: str, session_id: str, source: str = "web",
+                 image_paths: list | None = None) -> dict:
+    """Build a CognitionPacket dict for /process_packet.
+
+    If image_paths is provided, each entry should be a basename or absolute
+    path under the staged fixture dir; an Attachment with mime + location is
+    appended to content.attachments.
+    """
     now = datetime.now(timezone.utc).isoformat()
     packet_id = "pkt-cogtest-" + uuid.uuid4().hex[:12]
 
@@ -86,7 +128,28 @@ def build_packet(prompt: str, session_id: str, source: str = "web") -> dict:
     }
 
     header_hash = hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()
-    content = {"original_prompt": prompt, "data_fields": [], "attachments": []}
+    attachments_list = []
+    for ip in (image_paths or []):
+        abs_path = _resolve_vision_fixture(ip) if not os.path.isabs(ip) else ip
+        ext = os.path.splitext(abs_path)[1].lower()
+        mime = _VISION_MIME_BY_EXT.get(ext, "application/octet-stream")
+        try:
+            with open(abs_path, "rb") as fh:
+                data = fh.read()
+            chash = hashlib.sha256(data).hexdigest()[:16]
+            size = len(data)
+        except OSError as e:
+            log.warning("Could not read fixture %s: %s", abs_path, e)
+            chash = "missing"
+            size = 0
+        attachments_list.append({
+            "name": os.path.basename(abs_path),
+            "mime": mime,
+            "content_hash": chash,
+            "bytes": size,
+            "location": abs_path,
+        })
+    content = {"original_prompt": prompt, "data_fields": [], "attachments": attachments_list}
     content_hash = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
     return {
@@ -781,6 +844,38 @@ TEST_CASES = [
      "prompt": "What time is it now?",
      "validators": [{"type": "time_accuracy", "tolerance_minutes": 5}]},
 
+    # -- vision (5 tests) -- multimodal Core caption + scene grounding.
+    # Each carries image_paths referencing files staged at /shared/doctor_fixtures/vision/
+    # by _stage_vision_fixtures() at battery start. Forces full_pipeline.
+    {"id": "vis-001", "section": "vision",
+     "prompt": "What color is this?",
+     "image_paths": ["solid_red.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson", "scarlet", "maroon"]},
+                    {"type": "min_length", "n": 4}]},
+    {"id": "vis-002", "section": "vision",
+     "prompt": "What color is this?",
+     "image_paths": ["solid_blue.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["blue", "navy", "azure"]},
+                    {"type": "min_length", "n": 4}]},
+    {"id": "vis-003", "section": "vision",
+     "prompt": "Describe the shape and color of the object in this image.",
+     "image_paths": ["yellow_circle.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["yellow", "amber", "gold"]},
+                    {"type": "keyword_contains_any", "terms": ["circle", "round", "disc", "dot", "ball"]}]},
+    {"id": "vis-004", "section": "vision",
+     "prompt": "How many distinct shapes do you see, and what colors are they?",
+     "image_paths": ["three_shapes.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["three", "3"]},
+                    {"type": "keyword_contains_any", "terms": ["red"]},
+                    {"type": "keyword_contains_any", "terms": ["blue"]},
+                    {"type": "keyword_contains_any", "terms": ["green"]}]},
+    {"id": "vis-005", "section": "vision",
+     "prompt": "What kind of diagram is shown in this image? Describe what you see.",
+     "image_paths": ["brain_diagram.png"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["brain", "diagram", "region", "lobe", "structure", "circuit", "neural", "anatomical"]},
+                    {"type": "min_length", "n": 30}]},
+
     # -- general_knowledge canaries loaded below from canary_pool.json --
 ]
 
@@ -855,6 +950,7 @@ _SECTION_WEIGHTS = {
     "tool_routing": 1.0,
     "triage": 1.0,
     "loop_resistance": 1.0,
+    "vision": 1.2,
 }
 
 # Canary sections — observe only, never trigger training
@@ -958,6 +1054,10 @@ def run_battery(
     run_id = f"cognitive-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     mode = "pipeline" if full_pipeline else f"direct:{target}"
 
+    # Stage vision fixtures into /shared so gaia-core can read them via the
+    # shared volume when packets reference them. Idempotent.
+    _stage_vision_fixtures()
+
     # Filter tests
     tests = list(TEST_CASES)
     if section:
@@ -1023,8 +1123,14 @@ def run_battery(
 
         try:
             t_start = time.time()
-            if full_pipeline:
-                packet = build_packet(prompt, session_id, source=test.get("source", "web"))
+            _image_paths = test.get("image_paths") or []
+            # Vision tests must go through the full pipeline (the direct
+            # /api/cognitive/query path doesn't carry attachments).
+            _force_pipeline = bool(_image_paths)
+            if full_pipeline or _force_pipeline:
+                packet = build_packet(prompt, session_id,
+                                       source=test.get("source", "web"),
+                                       image_paths=_image_paths)
                 response = send_packet(packet, endpoint, timeout=actual_timeout)
             else:
                 response = query_model_direct(prompt, endpoint, timeout=actual_timeout, target=target, no_think=no_think)
