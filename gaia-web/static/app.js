@@ -516,6 +516,9 @@ function orchestratorPanel() {
 function chatPanel() {
   return {
     input: '',
+    attachedImages: [],
+    _nextAttachId: 1,
+    dragOver: false,
 
     init() {
       // Scroll to bottom on init
@@ -526,6 +529,40 @@ function chatPanel() {
     },
 
     clearHistory() { Alpine.store('chat').clearHistory(); },
+
+    onFilesChosen(ev) {
+      const files = Array.from(ev.target.files || []);
+      files.forEach(f => this._addAttachment(f));
+      ev.target.value = '';
+    },
+
+    onDropFiles(ev) {
+      this.dragOver = false;
+      const files = Array.from(ev.dataTransfer.files || []);
+      files.forEach(f => this._addAttachment(f));
+    },
+
+    _addAttachment(file) {
+      if (!file.type || !file.type.startsWith('image/')) return;
+      if (file.size > 10 * 1024 * 1024) {
+        Alpine.store('chat').addMessage(`"${file.name}" exceeds 10MB and was not attached.`, 'system');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this.attachedImages.push({
+          id: this._nextAttachId++,
+          file,
+          name: file.name,
+          preview: e.target.result,
+        });
+      };
+      reader.readAsDataURL(file);
+    },
+
+    removeAttachment(idx) {
+      this.attachedImages.splice(idx, 1);
+    },
 
     formatTimestamp(ts) {
       if (!ts) return '';
@@ -542,26 +579,48 @@ function chatPanel() {
     async send() {
       const store = Alpine.store('chat');
       const text = this.input.trim();
-      if (!text || store.sending) return;
+      const images = this.attachedImages.slice();
+      if ((!text && images.length === 0) || store.sending) return;
 
       // Auto-title on first user message in a new conversation
       const active = store.getActive();
       const isFirstUserMsg = active && active.messages.filter(m => m.type === 'user').length === 0;
 
-      store.addMessage(text, 'user');
+      const userMsgText = text || (images.length === 1
+        ? `[image: ${images[0].name}]`
+        : `[${images.length} images]`);
+      const userMsg = { text: userMsgText, type: 'user' };
+      if (images.length > 0) {
+        userMsg.images = images.map(im => ({ name: im.name, preview: im.preview }));
+      }
+      store.addMessage(userMsgText, 'user');
       this.input = '';
+      this.attachedImages = [];
       store.sending = true;
 
       if (isFirstUserMsg && active) {
-        store.autoTitle(active.id, text);
+        store.autoTitle(active.id, userMsgText);
       }
 
       try {
-        const resp = await fetch(`/process_user_input?user_input=${encodeURIComponent(text)}`, {
-          method: 'POST',
-          headers: { 'X-Session-ID': store.getSessionId() },
-          signal: AbortSignal.timeout(CHAT_TIMEOUT),
-        });
+        let resp;
+        if (images.length > 0) {
+          const fd = new FormData();
+          fd.append('text', text);
+          for (const im of images) fd.append('files', im.file, im.name);
+          resp = await fetch('/process_user_input_multipart', {
+            method: 'POST',
+            headers: { 'X-Session-ID': store.getSessionId() },
+            body: fd,
+            signal: AbortSignal.timeout(CHAT_TIMEOUT),
+          });
+        } else {
+          resp = await fetch(`/process_user_input?user_input=${encodeURIComponent(text)}`, {
+            method: 'POST',
+            headers: { 'X-Session-ID': store.getSessionId() },
+            signal: AbortSignal.timeout(CHAT_TIMEOUT),
+          });
+        }
         if (!resp.ok) {
           try {
             const errData = await resp.json();

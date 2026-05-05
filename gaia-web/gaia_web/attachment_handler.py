@@ -20,7 +20,9 @@ _TEXT_EXTENSIONS = {".txt", ".md", ".json", ".csv", ".yaml", ".yml", ".toml", ".
 _PDF_EXTENSIONS = {".pdf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
-_ATTACHMENT_DIR = "/tmp/gaia_attachments"
+# Shared volume mount — both gaia-web and gaia-core have this mounted rw,
+# so images saved here are reachable from gaia-core's vision pipeline.
+_ATTACHMENT_DIR = os.environ.get("WEB_ATTACHMENT_DIR", "/shared/web_attachments")
 _MAX_TEXT_BYTES = 25 * 1024 * 1024  # 25MB (Discord's limit)
 
 

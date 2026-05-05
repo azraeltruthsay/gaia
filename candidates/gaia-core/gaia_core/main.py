@@ -1005,6 +1005,12 @@ async def process_packet(packet_data: Dict[str, Any]):
             if _audio:
                 metadata["_audio_payloads"] = _audio
 
+            # 8ki: forward image attachments from the incoming packet so the
+            # multimodal pipeline can consume them. run_turn rebuilds a fresh
+            # packet via _create_initial_packet, which would otherwise drop
+            # the inbound content.attachments.
+            _inbound_attachments = list(getattr(getattr(packet, 'content', None), 'attachments', None) or [])
+
             logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
             # Log to event buffer for episodic memory
@@ -1104,7 +1110,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                 destination=destination,
                 source=source,
                 metadata=metadata,
-                reflex_text=reflex_text
+                reflex_text=reflex_text,
+                attachments=_inbound_attachments,
             )
 
             def _next_event():

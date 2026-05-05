@@ -505,7 +505,8 @@ class AgentCore:
         selected_model_name: str,
         source: str = "cli",
         destination: str = "cli_chat",
-        metadata: dict = None
+        metadata: dict = None,
+        attachments: list = None
     ) -> CognitionPacket:
         """Creates the initial v0.3 Cognition Packet for this turn.
 
@@ -624,6 +625,28 @@ class AgentCore:
         )
 
         content = Content(original_prompt=user_input)
+
+        # Forward image/audio attachments from the incoming packet so the
+        # multimodal pipeline (prompt_builder + engine vision path) can
+        # consume them. Each entry is the dict shape from CognitionPacket
+        # JSON; convert to dataclass instances safely.
+        if attachments:
+            from gaia_common.protocols.cognition_packet import Attachment
+            for raw in attachments:
+                try:
+                    if isinstance(raw, Attachment):
+                        content.attachments.append(raw)
+                    elif isinstance(raw, dict):
+                        content.attachments.append(Attachment(
+                            name=raw.get("name", ""),
+                            mime=raw.get("mime", ""),
+                            content_hash=raw.get("content_hash", ""),
+                            bytes=raw.get("bytes"),
+                            location=raw.get("location"),
+                        ))
+                except Exception as _att_err:
+                    self.logger.warning("Skipping malformed attachment: %s (%s)", raw, _att_err)
+
         # Include the immutable Tier-1 identity and a short intro in the packet content
         try:
             content.data_fields.append(DataField(key='immutable_identity', value=getattr(self.config, 'identity', '')))
@@ -847,7 +870,8 @@ class AgentCore:
         destination: str = "cli_chat",
         source: str = "cli",
         metadata: dict = None,
-        reflex_text: str = ""
+        reflex_text: str = "",
+        attachments: list = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
         The primary cognitive loop. Creates a packet and processes it through
@@ -859,6 +883,9 @@ class AgentCore:
             destination: Output destination (cli_chat, discord, web, etc.)
             source: Input source (cli, discord_channel, discord_dm, web, api)
             metadata: Additional context (is_dm, user_id, channel_id, etc.)
+            attachments: Optional list of Attachment-shaped dicts from the
+                incoming packet (image/audio inputs). Forwarded into the
+                fresh packet via _create_initial_packet.
         """
         self.logger.info("--- AGENT CORE: RUN TURN ---")
 
@@ -1083,6 +1110,17 @@ class AgentCore:
             selected_model_name = None
             # Check if Prime is available via lifecycle state machine
             _gpu_sleeping = not self._is_prime_available
+
+            # 8ki: image attachments require the multimodal Core (vision tower).
+            # Pin selection to Core early so cascade routing / Prime escalation
+            # don't strip the image input by routing to a text-only tier.
+            _has_inbound_image = any(
+                ((a.get("mime", "") if isinstance(a, dict) else getattr(a, "mime", "")) or "").startswith("image/")
+                for a in (attachments or [])
+            )
+            if _has_inbound_image:
+                self.logger.info("Image attachment(s) present — pinning selected_model_name='core' (multimodal)")
+                selected_model_name = "core"
 
             # 0. Character-level analysis injection
             # Models can't see individual letters due to tokenization.
@@ -1450,7 +1488,11 @@ class AgentCore:
                 is_forced_thinker = os.getenv("GAIA_FORCE_THINKER", "").lower() in ("1", "true", "yes") or \
                                     any(tag in user_input.lower() for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"])
 
-                if selected_model_name in ("core", "nano") and not force_operator and not is_forced_thinker:
+                # 8ki: when image attachments are present, NeuralRouter must
+                # not reroute to Prime — vision lives only on Core. Pin to Core.
+                if _has_inbound_image:
+                    logger.info("[CASCADE] Image attachment(s) — NeuralRouter bypassed; staying on Core")
+                elif selected_model_name in ("core", "nano") and not force_operator and not is_forced_thinker:
                     _router = NeuralRouter(self.config, model_pool=self.model_pool, embed_model=_embed_model)
                     _route = _router.route(
                         user_input,
@@ -1581,7 +1623,8 @@ class AgentCore:
     
             packet = self._create_initial_packet(
                 user_input, session_id, history, selected_model_name,
-                source=source, destination=destination, metadata=_metadata
+                source=source, destination=destination, metadata=_metadata,
+                attachments=attachments,
             )
             self.session_manager.add_message(session_id, "user", user_input)
             self._emit_timeline_message(session_id, "user", source)
@@ -4620,11 +4663,21 @@ class AgentCore:
         attribute the response to the correct model in headers/tags.
         """
         # Extract the actual user question from the slim prompt messages
-        # (last user message is the real question, earlier ones are few-shot)
+        # (last user message is the real question, earlier ones are few-shot).
+        # Multimodal content arrives as a list of {type,text|image_url} parts;
+        # we want the text-only view for confidence/grounding heuristics.
+        def _text_only(content) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                return "".join(p.get("text", "") for p in content
+                                if isinstance(p, dict) and p.get("type") == "text")
+            return ""
+
         user_question = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
-                user_question = msg.get("content", "")
+                user_question = _text_only(msg.get("content", ""))
                 break
 
 
@@ -4791,7 +4844,7 @@ class AgentCore:
                 # Strip trailing hallucinated turn markers (Gemma 4 artifact)
                 import re as _re
                 content = _re.sub(r'\s*\b(?:user|assistant|system)\s*$', '', content, flags=_re.IGNORECASE).strip()
-                is_degen = self._is_degenerate_output(content, messages[-1].get("content", ""))
+                is_degen = self._is_degenerate_output(content, _text_only(messages[-1].get("content", "")))
                 self.logger.info("Slim escalation '%s' raw=%r degenerate=%s", candidate, content[:200], is_degen)
                 if not is_degen:
                     # Confidence-gated grounding on escalation result
@@ -5885,21 +5938,27 @@ RESULT: COMPLEX (reason: <brief reason>)
             # Strip think tags and suppress repetition (same guards as streaming path)
             content = strip_think_tags(content).strip()
             content = self._suppress_repetition(content)
+            # 8ki: image attachments require Core (vision tower); slim escalation
+            # would route to text-only Prime and strip the image. Skip it.
+            _vision_turn = bool(packet) and any(
+                (getattr(a, "mime", "") or "").startswith("image/")
+                for a in (getattr(getattr(packet, "content", None), "attachments", None) or [])
+            )
             # Nano self-escalation: if response is literally "ESCALATE", defer to Core
-            if content.upper().startswith("ESCALATE"):
+            if content.upper().startswith("ESCALATE") and not _vision_turn:
                 self.logger.info("Nano self-escalated via ESCALATE signal — trying next tier")
                 escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
                 if escalated:
                     return escalated
             # Detect degenerate output and escalate to a higher tier
-            if self._is_degenerate_output(content, user_input):
+            if self._is_degenerate_output(content, user_input) and not _vision_turn:
                 self.logger.warning("Degenerate output from '%s' — escalating to next tier", selected_model_name)
                 escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)
                 if escalated:
                     return escalated
             # Uncertainty-based escalation — Nano hedges or describes process
             # without delivering the actual answer. Uses entropy + hedging signals.
-            if use_slim:
+            if use_slim and not _vision_turn:
                 resp_entropy = res.get("usage", {}).get("mean_entropy", 0.0)
                 if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy):
                     self.logger.info("Uncertainty escalation from '%s' (entropy=%.2f) — trying next tier",

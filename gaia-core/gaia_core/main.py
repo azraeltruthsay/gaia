@@ -1005,6 +1005,12 @@ async def process_packet(packet_data: Dict[str, Any]):
             if _audio:
                 metadata["_audio_payloads"] = _audio
 
+            # 8ki: forward image attachments from the incoming packet so the
+            # multimodal pipeline can consume them. run_turn rebuilds a fresh
+            # packet via _create_initial_packet, which would otherwise drop
+            # the inbound content.attachments.
+            _inbound_attachments = list(getattr(getattr(packet, 'content', None), 'attachments', None) or [])
+
             logger.info(f"Processing packet {packet.header.packet_id}: '{user_input[:50]}...' from {source}")
 
             # Log to event buffer for episodic memory
@@ -1104,7 +1110,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                 destination=destination,
                 source=source,
                 metadata=metadata,
-                reflex_text=reflex_text
+                reflex_text=reflex_text,
+                attachments=_inbound_attachments,
             )
 
             def _next_event():
@@ -1142,7 +1149,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         continue
                                     _seen_tool_calls.add(_tc_key)
 
-                                    tool_display = f"\n*[calling {pe.tool_name}({pe.tool_action})...]*\n"
+                                    _action_display = f"({pe.tool_action})" if pe.tool_action else ""
+                                    tool_display = f"\n*[calling {pe.tool_name}{_action_display}...]*\n"
                                     yield json.dumps({"type": "token", "value": tool_display}) + "\n"
                                     yield json.dumps({"type": "flush"}) + "\n"
                                     _pending_tool_calls.append(pe)
@@ -1188,8 +1196,13 @@ async def process_packet(packet_data: Dict[str, Any]):
                     try:
                         # Execute via MCP JSON-RPC
                         from gaia_core.utils.mcp_client import call_jsonrpc
+                        from gaia_common.utils.tool_call_parser import META_TOOL_OPEN, META_TOOL_CLOSE, META_RESULT_OPEN, META_RESULT_CLOSE
+                        _META_VERBS = {"search", "do", "learn", "remember", "ask"}
+                        _is_meta = tc.tool_name in _META_VERBS
+
                         tool_params = dict(tc.tool_params or {})
-                        tool_params["action"] = tc.tool_action
+                        if not _is_meta and tc.tool_action:
+                            tool_params["action"] = tc.tool_action
                         rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
                             method=tc.tool_name,
                             params=tool_params,
@@ -1210,10 +1223,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # Build messages: original prompt + model's first output
                         # (including tool_call) + tool_result, then generate again.
                         first_output = "".join(response_pieces)
+                        if _is_meta:
+                            # Meta-verb format: <|tool>verb(params)<tool|> ... <|tool_response>result<tool_response|>
+                            _param_str = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in (tc.tool_params or {}).items())
+                            _call_str = f"{META_TOOL_OPEN}{tc.tool_name}({_param_str}){META_TOOL_CLOSE}"
+                            _result_str = f"{META_RESULT_OPEN}{json.dumps(actual_result, default=str)[:500]}{META_RESULT_CLOSE}"
+                        else:
+                            _call_str = f"{TOOL_CALL_OPEN}{json.dumps({'tool': tc.tool_name, 'action': tc.tool_action, **(tc.tool_params or {})})}{TOOL_CALL_CLOSE}"
+                            _result_str = result_xml
                         continuation_messages = [
                             {"role": "user", "content": user_input},
-                            {"role": "assistant", "content": first_output + f"\n{TOOL_CALL_OPEN}{json.dumps({'tool': tc.tool_name, 'action': tc.tool_action, **tc.tool_params})}{TOOL_CALL_CLOSE}"},
-                            {"role": "user", "content": result_xml},
+                            {"role": "assistant", "content": first_output + f"\n{_call_str}"},
+                            {"role": "user", "content": _result_str},
                         ]
 
                         # Generate continuation using the same model

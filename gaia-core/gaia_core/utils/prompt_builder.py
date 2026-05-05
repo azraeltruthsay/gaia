@@ -38,6 +38,28 @@ def get_active_canaries() -> set:
     """Return all active canary tokens (for scanner to check against)."""
     return set(_session_canaries.values())
 
+
+# Each Gemma 4 image expands to 256 soft tokens during processing.
+_IMAGE_SOFT_TOKENS = 256
+
+
+def _content_token_count(content) -> int:
+    """Token count for a message content field, which may be str or list of multimodal parts."""
+    if isinstance(content, str):
+        return count_tokens(content)
+    if isinstance(content, list):
+        total = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            ptype = part.get("type", "")
+            if ptype == "text":
+                total += count_tokens(part.get("text", ""))
+            elif ptype in ("image", "image_url"):
+                total += _IMAGE_SOFT_TOKENS
+        return total
+    return 0
+
 def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
@@ -47,6 +69,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     Only dynamic content (time, task instruction, world state, RAG, user msg) is injected.
     """
     logger.info("--- BUILDING PROMPT FROM COGNITION PACKET ---")
+
+    # Image attachments require the full multimodal user_prompt construction
+    # downstream; slim_mode's hard-coded few-shot would strip image content.
+    _has_image_attachment = any(
+        (getattr(a, "mime", "") or "").startswith("image/")
+        for a in (getattr(getattr(packet, "content", None), "attachments", None) or [])
+    )
+    if slim_mode and _has_image_attachment:
+        logger.info("PromptBuilder: image attachment present — forcing slim_mode=False")
+        slim_mode = False
+
     if slim_mode:
         import os as _os
         from datetime import datetime, timezone, timedelta
@@ -1269,7 +1302,23 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         logger.debug("[DEBUG] PromptBuilder system_prompt bytes=%d tokens=%d", len(system_prompt["content"]), count_tokens(system_prompt["content"]))
     except Exception:
         logger.exception("Failed to log PromptBuilder system_prompt stats")
-    user_prompt = {"role": "user", "content": getattr(getattr(packet, 'content', None), 'original_prompt', '')}
+    _orig_prompt_text = getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''
+    _image_parts = []
+    _content_obj = getattr(packet, 'content', None)
+    if _content_obj is not None:
+        for att in (getattr(_content_obj, 'attachments', None) or []):
+            mime = getattr(att, 'mime', '') or ''
+            location = getattr(att, 'location', '') or ''
+            if mime.startswith('image/') and location:
+                _image_parts.append({"type": "image_url", "image_url": {"url": location}})
+    if _image_parts:
+        user_prompt = {
+            "role": "user",
+            "content": [{"type": "text", "text": _orig_prompt_text}] + _image_parts,
+        }
+        logger.info("PromptBuilder: built multimodal user_prompt with %d image attachment(s)", len(_image_parts))
+    else:
+        user_prompt = {"role": "user", "content": _orig_prompt_text}
 
     # --- Calculate the token budget ---
     # Be defensive: default to config values if packet lacks constraints
@@ -1281,7 +1330,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         response_buffer = int(getattr(getattr(packet, 'header', None), 'model', None) and getattr(packet.header.model, 'response_buffer_tokens', None) or config.RESPONSE_BUFFER)
     except Exception:
         response_buffer = config.RESPONSE_BUFFER
-    fixed_tokens = count_tokens(system_prompt['content']) + count_tokens(user_prompt['content'])
+    fixed_tokens = count_tokens(system_prompt['content']) + _content_token_count(user_prompt['content'])
     remaining_budget = max_tokens - fixed_tokens - response_buffer
     logger.debug(
         f"[v0.3] Token Budgeting: Total={max_tokens}, "
@@ -1585,7 +1634,7 @@ def _build_prompt_core(
             injected_instruction_content += "\n\nPolicy: For read/explain intents: DO NOT emit EXECUTE for write tools (ai_write, edit_file, etc.); you MAY use EXECUTE for read-safe tools like web_fetch and memory_query. Otherwise read, quote lines, summarize."
     injected_instructions = {"role": "system", "content": injected_instruction_content}
 
-    fixed_tokens = count_tokens(core_prompt['content']) + count_tokens(user_prompt['content'])
+    fixed_tokens = count_tokens(core_prompt['content']) + _content_token_count(user_prompt['content'])
     remaining_budget = config.MAX_TOKENS - fixed_tokens - config.RESPONSE_BUFFER
 
     summary_content = ""
