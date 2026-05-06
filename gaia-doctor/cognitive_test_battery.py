@@ -876,6 +876,30 @@ TEST_CASES = [
                      "terms": ["brain", "diagram", "region", "lobe", "structure", "circuit", "neural", "anatomical"]},
                     {"type": "min_length", "n": 30}]},
 
+    # -- vision disambiguation (4 tests) -- multi-object scene queries with
+    # explicit foreground naming. Designed to exercise V5-style training where
+    # the model learned "what color is the {shape}?" patterns. v2 baseline
+    # confabulates ("gray cylinder, white keyboard"); a salience-trained
+    # model should answer per-shape correctly.
+    # All four reuse three_shapes.png (red square + blue circle + green triangle).
+    {"id": "vis-d01", "section": "vision",
+     "prompt": "What color is the circle in this image?",
+     "image_paths": ["three_shapes.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["blue", "navy", "azure"]}]},
+    {"id": "vis-d02", "section": "vision",
+     "prompt": "What color is the square in this image?",
+     "image_paths": ["three_shapes.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson", "scarlet", "maroon"]}]},
+    {"id": "vis-d03", "section": "vision",
+     "prompt": "What color is the triangle in this image?",
+     "image_paths": ["three_shapes.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["green", "emerald", "jade", "olive"]}]},
+    {"id": "vis-d04", "section": "vision",
+     "prompt": "Is there a red shape in this image? Yes or no.",
+     "image_paths": ["three_shapes.png"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["yes"]},
+                    {"type": "keyword_excludes_all", "terms": ["no, there", "no red"]}]},
+
     # -- general_knowledge canaries loaded below from canary_pool.json --
 ]
 
