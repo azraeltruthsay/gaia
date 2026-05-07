@@ -1111,15 +1111,18 @@ class AgentCore:
             # Check if Prime is available via lifecycle state machine
             _gpu_sleeping = not self._is_prime_available
 
-            # 8ki: image attachments require the multimodal Core (vision tower).
-            # Pin selection to Core early so cascade routing / Prime escalation
-            # don't strip the image input by routing to a text-only tier.
+            # 8ki/aof: image or audio payloads require the multimodal Core
+            # (vision/audio tower). Pin selection to Core early so cascade
+            # routing / Prime escalation don't strip the modality input by
+            # routing to a text-only tier.
             _has_inbound_image = any(
                 ((a.get("mime", "") if isinstance(a, dict) else getattr(a, "mime", "")) or "").startswith("image/")
                 for a in (attachments or [])
             )
-            if _has_inbound_image:
-                self.logger.info("Image attachment(s) present — pinning selected_model_name='core' (multimodal)")
+            _has_inbound_audio = bool((metadata or {}).get("_audio_payloads"))
+            if _has_inbound_image or _has_inbound_audio:
+                _modality = "image" if _has_inbound_image else "audio"
+                self.logger.info("%s payload(s) present — pinning selected_model_name='core' (multimodal)", _modality)
                 selected_model_name = "core"
 
             # 0. Character-level analysis injection
@@ -4937,6 +4940,14 @@ class AgentCore:
         """
         user_input = packet.content.original_prompt
         is_short = len(user_input) < 150
+
+        # 7rq/aof: turns with audio or image payloads must use the
+        # multimodal Core path, not the slim text-only Reflex.
+        if (packet.content.audio_payloads or
+                any((getattr(a, "mime", "") or "").startswith("image/")
+                    for a in (packet.content.attachments or []))):
+            self.logger.info("Reflex bypass: multimodal payload present — routing to full pipeline")
+            return False
 
         # Recitation and long-form requests must go through the full pipeline
         input_lower = user_input.lower()

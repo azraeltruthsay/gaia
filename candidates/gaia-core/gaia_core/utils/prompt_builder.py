@@ -1304,6 +1304,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         logger.exception("Failed to log PromptBuilder system_prompt stats")
     _orig_prompt_text = getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''
     _image_parts = []
+    _audio_parts = []
     _content_obj = getattr(packet, 'content', None)
     if _content_obj is not None:
         for att in (getattr(_content_obj, 'attachments', None) or []):
@@ -1311,12 +1312,27 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             location = getattr(att, 'location', '') or ''
             if mime.startswith('image/') and location:
                 _image_parts.append({"type": "image_url", "image_url": {"url": location}})
-    if _image_parts:
+        # 7rq/aof: audio_payloads → audio_url content blocks for the engine
+        # to route through the audio_tower. Two URL forms supported:
+        # - data:audio/wav;base64,... when only base64 is available
+        # - /shared/... file path when a copy was persisted to shared volume
+        for ap in (getattr(_content_obj, 'audio_payloads', None) or []):
+            mime = getattr(ap, 'mime_type', 'audio/wav') or 'audio/wav'
+            b64 = getattr(ap, 'data_base64', '') or ''
+            filename = getattr(ap, 'filename', '') or ''
+            if b64:
+                _audio_parts.append({"type": "audio_url",
+                                     "audio_url": {"url": f"data:{mime};base64,{b64}"}})
+            elif filename and ("/" in filename or filename.startswith("/")):
+                _audio_parts.append({"type": "audio_url",
+                                     "audio_url": {"url": filename}})
+    if _image_parts or _audio_parts:
         user_prompt = {
             "role": "user",
-            "content": [{"type": "text", "text": _orig_prompt_text}] + _image_parts,
+            "content": [{"type": "text", "text": _orig_prompt_text}] + _image_parts + _audio_parts,
         }
-        logger.info("PromptBuilder: built multimodal user_prompt with %d image attachment(s)", len(_image_parts))
+        logger.info("PromptBuilder: built multimodal user_prompt with %d image / %d audio attachment(s)",
+                    len(_image_parts), len(_audio_parts))
     else:
         user_prompt = {"role": "user", "content": _orig_prompt_text}
 

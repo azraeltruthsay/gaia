@@ -113,19 +113,68 @@ def format_vision_prompt(instruction: str, output: str, img_placeholder: str) ->
     )
 
 
-# ── Dataset building ───────────────────────────────────────────────────────
-def build_dataset(text_path: str | None, vision_path: str | None,
-                  images_root: str, processor):
-    """Build a unified dataset of text-only and vision samples.
+def format_audio_prompt(instruction: str, output: str, audio_placeholder: str) -> str:
+    """Format an audio+text training pair. Audio placeholder is inlined at
+    the start of the user turn; the processor expands it into the audio
+    soft tokens automatically (audio_seq_length=750 by default for Gemma 4).
+    """
+    return (
+        f"<|turn>user<turn|>\n{audio_placeholder}\n{instruction}\n"
+        f"<|turn>assistant<turn|>\n{output}<turn|>"
+    )
 
-    Samples carry the processor-tokenized `input_ids` and (for vision)
-    `pixel_values`. Labels are set to `input_ids` verbatim — caller masks
-    prompt tokens to -100 at collate time.
+
+# ── Dataset building ───────────────────────────────────────────────────────
+def _load_wav_mono_16k(path: str):
+    """Read a WAV file → float32 numpy array at 16 kHz mono.
+
+    Stdlib-only so no librosa dependency. Audio fixtures are pre-rendered
+    at 16 kHz mono PCM16 by build_core_audio_curriculum.py.
+    """
+    import wave
+    import numpy as np
+    with wave.open(path, "rb") as w:
+        n_channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        framerate = w.getframerate()
+        n_frames = w.getnframes()
+        raw = w.readframes(n_frames)
+    if sampwidth == 2:
+        data = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    elif sampwidth == 4:
+        data = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+    else:
+        # 1 byte u8 (rare) — treat as offset-mid PCM
+        data = (np.frombuffer(raw, dtype="u1").astype(np.float32) - 128.0) / 128.0
+    if n_channels > 1:
+        data = data.reshape(-1, n_channels).mean(axis=1)
+    if framerate != 16000:
+        # Linear resample — adequate for synthetic primitives. For natural
+        # audio in v7+ we'd want soundfile/librosa.
+        ratio = 16000 / framerate
+        new_len = int(round(len(data) * ratio))
+        if new_len > 1:
+            xp = np.linspace(0, 1, len(data), endpoint=False)
+            x_new = np.linspace(0, 1, new_len, endpoint=False)
+            data = np.interp(x_new, xp, data).astype(np.float32)
+    return data
+
+
+def build_dataset(text_path: str | None, vision_path: str | None,
+                  images_root: str, processor,
+                  audio_path: str | None = None, audios_root: str | None = None):
+    """Build a unified dataset of text-only, vision, and audio samples.
+
+    Samples carry the processor-tokenized `input_ids` plus modality
+    tensors (`pixel_values` for vision, `input_features` for audio).
+    Labels are set to `input_ids` verbatim — caller masks prompt tokens
+    to -100 at collate time.
     """
     from PIL import Image
     import torch
 
     img_tok = getattr(processor, "image_token", None) or "<|image|>"
+    audio_tok = getattr(processor, "audio_token", None) or "<|audio|>"
     samples = []
 
     # Text-only
@@ -197,13 +246,68 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                 vision_count += 1
     log.info("Vision samples: %d", vision_count)
 
-    # Homogenize batches: text first, then vision — prevents mixed-modality
-    # batches which the collator can't stack cleanly.
-    text_only = [s for s in samples if not s["is_vision"]]
+    # Audio
+    audio_count = 0
+    if audio_path and Path(audio_path).exists():
+        with open(audio_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                audio_rel = d["audio"]
+                audio_full = os.path.join(audios_root or "", audio_rel)
+                if not os.path.exists(audio_full):
+                    log.warning("Audio not found, skipping: %s", audio_full)
+                    continue
+
+                try:
+                    wav = _load_wav_mono_16k(audio_full)
+                except Exception as e:
+                    log.warning("Audio load failed for %s: %s", audio_full, e)
+                    continue
+
+                text = format_audio_prompt(d["instruction"], d["output"], audio_tok)
+                # NOTE: do NOT pass truncation=True. Gemma4Processor with
+                # truncation enabled clips input_features way below the real
+                # frame count even when input_ids is well under max_length
+                # (e.g. 249 mel frames → 6 with truncation=True). This breaks
+                # the audio_features / audio_tokens count check in the
+                # model's forward. Audio prompts are short, so we just rely
+                # on the curriculum staying under 30s ≈ 750 audio tokens.
+                processed = processor(
+                    text=[text], audio=[wav],
+                    return_tensors="pt", padding=False,
+                    sampling_rate=16000,
+                )
+                sample = {
+                    "input_ids": processed["input_ids"].squeeze(0),
+                    "attention_mask": processed["attention_mask"].squeeze(0),
+                    "is_vision": False,
+                    "is_audio": True,
+                }
+                if "input_features" in processed:
+                    inf = processed["input_features"]
+                    sample["input_features"] = inf.squeeze(0) if inf.dim() > 2 else inf
+                if "input_features_mask" in processed:
+                    ifm = processed["input_features_mask"]
+                    sample["input_features_mask"] = ifm.squeeze(0) if ifm.dim() > 1 else ifm
+                if "mm_token_type_ids" in processed:
+                    sample["mm_token_type_ids"] = processed["mm_token_type_ids"].squeeze(0)
+                samples.append(sample)
+                audio_count += 1
+    log.info("Audio samples: %d", audio_count)
+
+    # Homogenize batches: text first, then vision, then audio — prevents
+    # mixed-modality batches the collator can't stack.
+    for s in samples:
+        s.setdefault("is_audio", False)
+    text_only = [s for s in samples if not s["is_vision"] and not s["is_audio"]]
     vision_only = [s for s in samples if s["is_vision"]]
-    sorted_samples = text_only + vision_only
-    log.info("Total samples: %d (%d text, then %d vision)",
-             len(sorted_samples), len(text_only), len(vision_only))
+    audio_only = [s for s in samples if s.get("is_audio")]
+    sorted_samples = text_only + vision_only + audio_only
+    log.info("Total samples: %d (%d text, %d vision, %d audio)",
+             len(sorted_samples), len(text_only), len(vision_only), len(audio_only))
 
     class Ds(torch.utils.data.Dataset):
         def __init__(self, data):
@@ -218,7 +322,8 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                 "input_ids": s["input_ids"],
                 "attention_mask": s["attention_mask"],
             }
-            for k in ("pixel_values", "mm_token_type_ids", "image_position_ids"):
+            for k in ("pixel_values", "mm_token_type_ids", "image_position_ids",
+                     "input_features", "input_features_mask"):
                 if k in s:
                     out[k] = s[k]
             return out
@@ -270,8 +375,8 @@ class MultimodalCollator:
         # - image_position_ids: [patches, 2]       → stack to [batch, patches, 2]
         #   (aligned to patches, NOT to the text sequence — no padding)
         # - mm_token_type_ids:  [seq_len]          → pad to max_len, stack
-        # We rely on the text-first/vision-second sort order to keep batches
-        # homogeneous (batch_size=1 also guarantees no mixed batches).
+        # We rely on the text-first/vision-second/audio-third sort order +
+        # batch_size=1 to keep batches homogeneous.
         vision_keys = ("pixel_values", "mm_token_type_ids", "image_position_ids")
         for key in vision_keys:
             if not all(key in s for s in batch):
@@ -291,10 +396,102 @@ class MultimodalCollator:
             except Exception as e:
                 log.warning("Collate %s failed (%s) — skipping", key, e)
 
+        # Audio tensors — Gemma 4 audio processor returns:
+        #   input_features:      [n_frames, 128]  (mel features)
+        #   input_features_mask: [n_frames]       (bool)
+        # n_frames is variable (depends on clip duration); pad to batch max.
+        audio_keys = ("input_features", "input_features_mask")
+        if all(all(k in s for k in audio_keys) for s in batch):
+            try:
+                feats = [s["input_features"] for s in batch]
+                masks = [s["input_features_mask"] for s in batch]
+                max_frames = max(t.shape[0] for t in feats)
+                feat_dim = feats[0].shape[-1]
+                padded_feats, padded_masks = [], []
+                for f, m in zip(feats, masks):
+                    pad = max_frames - f.shape[0]
+                    if pad > 0:
+                        f = torch.cat([f, torch.zeros(pad, feat_dim, dtype=f.dtype)], dim=0)
+                        m = torch.cat([m, torch.zeros(pad, dtype=m.dtype)])
+                    padded_feats.append(f)
+                    padded_masks.append(m)
+                out["input_features"] = torch.stack(padded_feats)
+                out["input_features_mask"] = torch.stack(padded_masks)
+            except Exception as e:
+                log.warning("Collate audio failed (%s) — skipping", e)
+
         return out
 
 
 # ── Dequantize Linear4bit → bf16 nn.Linear ─────────────────────────────────
+def dequantize_tower_linear4bit(model, tower_substr: str = "audio_tower") -> int:
+    """Selectively replace Linear4bit with bf16 nn.Linear inside a tower.
+
+    Why this is needed for audio_tower: Gemma 4 audio encoder layers
+    (Gemma4AudioFeedForward / Gemma4AudioLightConv1d / Gemma4AudioLayer)
+    contain a `gradient_clipping = min(..., torch.finfo(weight.dtype).max)`
+    line in their forward() that requires the underlying weight dtype to
+    be a real float type. When bnb quantizes those layers to NF4
+    (Params4bit / uint8), torch.finfo() raises TypeError. The
+    BitsAndBytesConfig(llm_int8_skip_modules=['audio_tower', ...])
+    contract should prevent this, but in practice (transformers 4.5x +
+    bnb 0.4x) the skip pattern is checked against the LEAF name during
+    the recursive walk, so audio_tower's nested .linear submodules still
+    get replaced. We dequantize them in-place after model load, before
+    LoRA application.
+
+    This keeps weights on GPU (model is mid-train) — distinct from
+    dequantize_linear4bit_modules() which moves to CPU for save.
+    """
+    import torch
+    import torch.nn as nn
+    try:
+        import bitsandbytes as bnb
+        import bitsandbytes.functional as bnb_f
+    except ImportError:
+        log.warning("bitsandbytes not available — cannot dequantize tower")
+        return 0
+
+    to_replace: list = []
+    for name, module in model.named_modules():
+        if tower_substr not in name:
+            continue
+        for attr_name, child in list(module.named_children()):
+            if isinstance(child, bnb.nn.Linear4bit):
+                to_replace.append((module, attr_name, child, name))
+
+    log.info("Dequantizing %d Linear4bit modules under '%s' (kept on GPU)...",
+             len(to_replace), tower_substr)
+    count = 0
+    for parent, attr_name, lin4, full_name in to_replace:
+        try:
+            weight_gpu = lin4.weight.data
+            qstate = lin4.weight.quant_state
+            if weight_gpu.device.type != "cuda":
+                weight_gpu = weight_gpu.cuda()
+            dequant_gpu = bnb_f.dequantize_4bit(weight_gpu, qstate)
+            new_linear = nn.Linear(
+                lin4.in_features, lin4.out_features,
+                bias=lin4.bias is not None,
+                dtype=torch.bfloat16, device="cuda",
+            )
+            with torch.no_grad():
+                new_linear.weight.copy_(dequant_gpu.to(torch.bfloat16))
+                if lin4.bias is not None:
+                    new_linear.bias.copy_(lin4.bias.detach().to(torch.bfloat16))
+            setattr(parent, attr_name, new_linear)
+            del lin4, dequant_gpu
+            count += 1
+        except Exception as e:
+            log.error("Tower dequant failed for %s: %s", full_name, e)
+            raise
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    log.info("  dequantized %d tower modules → bf16 on GPU", count)
+    return count
+
+
 def dequantize_linear4bit_modules(model) -> int:
     """Walk the model and replace every bnb Linear4bit with a plain nn.Linear
     holding the dequantized bf16 weights.
@@ -500,6 +697,12 @@ def main():
                         help="Override warmup steps (default 10).")
     parser.add_argument("--no-text", action="store_true",
                         help="Skip text-only samples (vision-only training).")
+    parser.add_argument("--audio-curriculum-name", default=None,
+                        help="Override audio curriculum dir name under "
+                             "knowledge/curricula/ (e.g. 'core-multimodal-v6audio'). "
+                             "Loads audio_pairs.jsonl + audio/ from that dir.")
+    parser.add_argument("--no-vision", action="store_true",
+                        help="Skip vision samples (audio-only or text-only training).")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
@@ -520,6 +723,20 @@ def main():
     elif args.version_tag:
         ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{args.version_tag}"
         MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{args.version_tag.upper()}"
+
+    # Audio curriculum — independent of vision so we can train audio-only.
+    audio_curriculum = None
+    audio_root = None
+    if args.audio_curriculum_name:
+        adir = f"{_PROJ}/knowledge/curricula/{args.audio_curriculum_name}"
+        audio_curriculum = f"{adir}/audio_pairs.jsonl"
+        audio_root = adir
+        if not args.curriculum_name:
+            # When audio-only and no vision curriculum named, use the audio
+            # tag for adapter/merged dirs.
+            derived = args.version_tag or args.audio_curriculum_name.rsplit("-", 1)[-1]
+            ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{derived}"
+            MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{derived.upper()}"
 
     print("=" * 60)
     print("  GAIA Core Multimodal Training")
@@ -550,8 +767,11 @@ def main():
     # 2. Dataset
     log.info("Building dataset...")
     text_curr = None if args.no_text else TEXT_CURRICULUM
+    vision_curr = None if args.no_vision else VISION_CURRICULUM
+    print(f"Audio curr:     {audio_curriculum or '(none)'}")
     dataset = build_dataset(
-        text_curr, VISION_CURRICULUM, VISION_IMAGES_ROOT, processor,
+        text_curr, vision_curr, VISION_IMAGES_ROOT, processor,
+        audio_path=audio_curriculum, audios_root=audio_root,
     )
     if len(dataset) == 0:
         log.error("No training samples — add curriculum files and retry")
@@ -590,6 +810,19 @@ def main():
 
     used_gb = torch.cuda.memory_allocated() / 1024 ** 3
     log.info("Model loaded: %.2f GB VRAM", used_gb)
+
+    # 3.5. Audio tower fix — bnb's llm_int8_skip_modules contract doesn't
+    # actually skip nested .linear submodules under audio_tower despite
+    # 'audio_tower' being listed. The audio encoder layers
+    # (Gemma4AudioFeedForward / Gemma4AudioLightConv1d / Gemma4AudioLayer)
+    # all have a `gradient_clipping = min(..., torch.finfo(weight.dtype).max)`
+    # line in forward() that fails on NF4 weight (uint8). Dequantize them
+    # in place to bf16 nn.Linear before LoRA application. Skip if the
+    # curriculum has no audio (vision/text-only training is unaffected).
+    if audio_curriculum:
+        n = dequantize_tower_linear4bit(model, "audio_tower")
+        used_gb = torch.cuda.memory_allocated() / 1024 ** 3
+        log.info("Audio tower fix: %d layers → bf16; VRAM now %.2f GB", n, used_gb)
 
     # 4. Unwrap Gemma4ClippableLinear — BUT ONLY in language_model subtree.
     # Tower layers MUST keep their native QAT wrapper (Linear4bit in LM,
@@ -658,9 +891,23 @@ def main():
 
     class MMLossTrainer(Trainer):
         model_accepts_loss_kwargs = False
+        _logged_audio_shapes = False
 
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
             labels = inputs.pop("labels", None)
+            # Debug: log shapes of multimodal inputs once for audio sample
+            if not self._logged_audio_shapes and "input_features" in inputs:
+                ids = inputs.get("input_ids")
+                aid = processor.audio_token_id
+                n_audio_in_ids = (ids == aid).sum().item() if ids is not None else -1
+                infshape = tuple(inputs["input_features"].shape) if "input_features" in inputs else None
+                ifmshape = tuple(inputs["input_features_mask"].shape) if "input_features_mask" in inputs else None
+                ifm_sum = inputs["input_features_mask"].sum().item() if "input_features_mask" in inputs else None
+                log.info("[DEBUG audio sample] input_ids: %s, audio_tokens_in_ids: %d, "
+                         "input_features: %s, input_features_mask: shape=%s sum_True=%s",
+                         tuple(ids.shape) if ids is not None else None,
+                         n_audio_in_ids, infshape, ifmshape, ifm_sum)
+                self._logged_audio_shapes = True
             outputs = model(**inputs)
             logits = outputs.logits
             if labels is None:
