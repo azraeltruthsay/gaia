@@ -1002,6 +1002,45 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             # v0.5: Pass audio_payloads through metadata for NeuralRouter (Proposal 11)
             _audio = getattr(getattr(packet, 'content', None), 'audio_payloads', None)
+
+            # shj: gaia-audio STT fallback. CORE_AUDIO_NATIVE controls whether
+            # audio_payloads route to Core's multimodal audio path (default,
+            # value="1") or are pre-transcribed by gaia-audio's Qwen3-ASR and
+            # injected as text (value="0"). Until V7 audio quality lands
+            # (m0b), operators can flip to "0" for production-quality
+            # speech responses while Core's audio side trains.
+            _audio_native = os.environ.get("CORE_AUDIO_NATIVE", "1").lower() in ("1", "true", "yes", "on")
+            if _audio and not _audio_native:
+                try:
+                    import httpx as _httpx
+                    _audio_url = os.environ.get("AUDIO_ENDPOINT", "http://gaia-audio:8080")
+                    _ap = _audio[0]
+                    _b64_payload = getattr(_ap, "data_base64", "") or ""
+                    _sr = getattr(_ap, "sample_rate", 16000) or 16000
+                    if _b64_payload:
+                        async with _httpx.AsyncClient(timeout=30.0) as _stt_client:
+                            _r = await _stt_client.post(
+                                f"{_audio_url}/transcribe",
+                                json={"audio_base64": _b64_payload, "sample_rate": int(_sr)},
+                            )
+                            if _r.status_code == 200:
+                                _transcript = (_r.json() or {}).get("text", "").strip()
+                                if _transcript:
+                                    # Replace user_input with the transcript and
+                                    # clear audio_payloads so Core sees text-only.
+                                    user_input = _transcript
+                                    packet.content.original_prompt = _transcript
+                                    packet.content.audio_payloads = []
+                                    _audio = None
+                                    logger.info("CORE_AUDIO_NATIVE=0 — transcribed audio via gaia-audio STT (%d chars)",
+                                                len(_transcript))
+                                else:
+                                    logger.warning("STT fallback returned empty transcript — leaving audio for Core path")
+                            else:
+                                logger.warning("STT fallback HTTP %d — leaving audio for Core path", _r.status_code)
+                except Exception as _stt_err:
+                    logger.warning("STT fallback failed (%s) — leaving audio for Core path", _stt_err)
+
             if _audio:
                 metadata["_audio_payloads"] = _audio
 
