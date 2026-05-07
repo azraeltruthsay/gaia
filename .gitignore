@@ -64,6 +64,8 @@ tmp_*.py
 # Vision fixtures for cognitive battery (Phase 3 multimodal Core)
 !candidates/gaia-doctor/test_assets/vision/*.png
 !gaia-doctor/test_assets/vision/*.png
+!candidates/gaia-doctor/test_assets/audio/*.wav
+!gaia-doctor/test_assets/audio/*.wav
 
 # --- Video / large media files ---
 *.mp4

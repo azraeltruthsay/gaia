@@ -45,6 +45,8 @@ PIPELINE_TIMEOUT = 120  # Full pipeline mode is slower
 # the doctor image.
 _VISION_FIXTURE_SRC = os.environ.get("DOCTOR_VISION_FIXTURE_SRC", "/app/test_assets/vision")
 _VISION_FIXTURE_DST = os.environ.get("DOCTOR_VISION_FIXTURE_DST", "/shared/doctor_fixtures/vision")
+_AUDIO_FIXTURE_SRC = os.environ.get("DOCTOR_AUDIO_FIXTURE_SRC", "/app/test_assets/audio")
+_AUDIO_FIXTURE_DST = os.environ.get("DOCTOR_AUDIO_FIXTURE_DST", "/shared/doctor_fixtures/audio")
 
 
 def _stage_vision_fixtures() -> None:
@@ -65,9 +67,31 @@ def _stage_vision_fixtures() -> None:
     log.info("Vision fixtures staged at %s", _VISION_FIXTURE_DST)
 
 
+def _stage_audio_fixtures() -> None:
+    """Copy bundled audio fixtures into /shared/ so gaia-core can read them."""
+    if not os.path.isdir(_AUDIO_FIXTURE_SRC):
+        log.info("Audio fixtures: source dir %s missing — skipping stage", _AUDIO_FIXTURE_SRC)
+        return
+    os.makedirs(_AUDIO_FIXTURE_DST, exist_ok=True)
+    import shutil
+    for fname in os.listdir(_AUDIO_FIXTURE_SRC):
+        src = os.path.join(_AUDIO_FIXTURE_SRC, fname)
+        dst = os.path.join(_AUDIO_FIXTURE_DST, fname)
+        if os.path.isfile(src):
+            try:
+                shutil.copy2(src, dst)
+            except Exception as e:
+                log.warning("Audio fixture stage failed for %s: %s", fname, e)
+    log.info("Audio fixtures staged at %s", _AUDIO_FIXTURE_DST)
+
+
 def _resolve_vision_fixture(rel_or_name: str) -> str:
     """Return absolute /shared path for a vision fixture by basename or relative path."""
     return os.path.join(_VISION_FIXTURE_DST, os.path.basename(rel_or_name))
+
+
+def _resolve_audio_fixture(rel_or_name: str) -> str:
+    return os.path.join(_AUDIO_FIXTURE_DST, os.path.basename(rel_or_name))
 
 
 _VISION_MIME_BY_EXT = {
@@ -75,14 +99,24 @@ _VISION_MIME_BY_EXT = {
     ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
 }
 
+_AUDIO_MIME_BY_EXT = {
+    ".wav": "audio/wav", ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg", ".webm": "audio/webm",
+    ".flac": "audio/flac", ".m4a": "audio/mp4",
+}
+
 
 def build_packet(prompt: str, session_id: str, source: str = "web",
-                 image_paths: list | None = None) -> dict:
+                 image_paths: list | None = None,
+                 audio_paths: list | None = None) -> dict:
     """Build a CognitionPacket dict for /process_packet.
 
     If image_paths is provided, each entry should be a basename or absolute
     path under the staged fixture dir; an Attachment with mime + location is
     appended to content.attachments.
+
+    If audio_paths is provided, each WAV/MP3/etc. is read and base64-encoded
+    into content.audio_payloads (v0.5 schema).
     """
     now = datetime.now(timezone.utc).isoformat()
     packet_id = "pkt-cogtest-" + uuid.uuid4().hex[:12]
@@ -149,7 +183,29 @@ def build_packet(prompt: str, session_id: str, source: str = "web",
             "bytes": size,
             "location": abs_path,
         })
-    content = {"original_prompt": prompt, "data_fields": [], "attachments": attachments_list}
+    audio_payloads_list = []
+    for ap in (audio_paths or []):
+        abs_path = _resolve_audio_fixture(ap) if not os.path.isabs(ap) else ap
+        ext = os.path.splitext(abs_path)[1].lower()
+        mime = _AUDIO_MIME_BY_EXT.get(ext, "audio/wav")
+        try:
+            import base64
+            with open(abs_path, "rb") as fh:
+                data = fh.read()
+            chash = hashlib.sha256(data).hexdigest()[:16]
+            audio_payloads_list.append({
+                "data_base64": base64.b64encode(data).decode("ascii"),
+                "mime_type": mime,
+                "filename": os.path.basename(abs_path),
+                "content_hash": chash,
+                "encoding": "base64",
+            })
+        except OSError as e:
+            log.warning("Could not read audio fixture %s: %s", abs_path, e)
+
+    content = {"original_prompt": prompt, "data_fields": [],
+               "attachments": attachments_list,
+               "audio_payloads": audio_payloads_list}
     content_hash = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
     return {
@@ -900,6 +956,37 @@ TEST_CASES = [
      "validators": [{"type": "keyword_contains_any", "terms": ["yes"]},
                     {"type": "keyword_excludes_all", "terms": ["no, there", "no red"]}]},
 
+    # -- audio (5 tests) -- bundled WAV fixtures + audio_payloads pipeline.
+    # Quality is bound by 7rq (audio side training); these tests measure the
+    # plumbing end-to-end and give a baseline number for V6/V7 comparisons.
+    # Validators are forgiving since the audio tower hasn't been trained on
+    # the LM yet — we accept any acoustic-aware framing.
+    {"id": "aud-001", "section": "audio",
+     "prompt": "Listen to this audio and describe what you hear.",
+     "audio_paths": ["silence.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["silence", "silent", "quiet", "no sound", "nothing", "empty"]}]},
+    {"id": "aud-002", "section": "audio",
+     "prompt": "What kind of sound is in this audio? Be brief.",
+     "audio_paths": ["tone_440hz.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["tone", "beep", "sine", "pure", "single", "frequency", "pitch", "hum", "note"]}]},
+    {"id": "aud-003", "section": "audio",
+     "prompt": "Describe the change in pitch over the duration of this audio.",
+     "audio_paths": ["sweep_up.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["rising", "ascending", "increasing", "up", "higher", "sweep", "ramp"]}]},
+    {"id": "aud-004", "section": "audio",
+     "prompt": "How many distinct sounds do you hear in this audio?",
+     "audio_paths": ["three_pulses.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["three", "3", "multiple", "several", "pulses", "beats"]}]},
+    {"id": "aud-005", "section": "audio",
+     "prompt": "Describe the texture of this audio.",
+     "audio_paths": ["white_noise.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["noise", "static", "hiss", "white", "random", "rough", "uniform"]}]},
+
     # -- general_knowledge canaries loaded below from canary_pool.json --
 ]
 
@@ -975,6 +1062,7 @@ _SECTION_WEIGHTS = {
     "triage": 1.0,
     "loop_resistance": 1.0,
     "vision": 1.2,
+    "audio": 1.2,
 }
 
 # Canary sections — observe only, never trigger training
@@ -1078,9 +1166,10 @@ def run_battery(
     run_id = f"cognitive-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     mode = "pipeline" if full_pipeline else f"direct:{target}"
 
-    # Stage vision fixtures into /shared so gaia-core can read them via the
-    # shared volume when packets reference them. Idempotent.
+    # Stage vision + audio fixtures into /shared so gaia-core can read them
+    # via the shared volume when packets reference them. Idempotent.
     _stage_vision_fixtures()
+    _stage_audio_fixtures()
 
     # Filter tests
     tests = list(TEST_CASES)
@@ -1148,13 +1237,15 @@ def run_battery(
         try:
             t_start = time.time()
             _image_paths = test.get("image_paths") or []
-            # Vision tests must go through the full pipeline (the direct
-            # /api/cognitive/query path doesn't carry attachments).
-            _force_pipeline = bool(_image_paths)
+            _audio_paths = test.get("audio_paths") or []
+            # Vision/audio tests must go through the full pipeline (the direct
+            # /api/cognitive/query path doesn't carry attachments or payloads).
+            _force_pipeline = bool(_image_paths or _audio_paths)
             if full_pipeline or _force_pipeline:
                 packet = build_packet(prompt, session_id,
                                        source=test.get("source", "web"),
-                                       image_paths=_image_paths)
+                                       image_paths=_image_paths,
+                                       audio_paths=_audio_paths)
                 response = send_packet(packet, endpoint, timeout=actual_timeout)
             else:
                 response = query_model_direct(prompt, endpoint, timeout=actual_timeout, target=target, no_think=no_think)

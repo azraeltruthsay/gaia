@@ -307,7 +307,11 @@ async def process_user_input(user_input: str, request: Request):
 
 _WEB_ATTACHMENT_DIR = os.environ.get("WEB_ATTACHMENT_DIR", "/shared/web_attachments")
 _ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+_ALLOWED_AUDIO_MIMES = {"audio/wav", "audio/x-wav", "audio/wave",
+                        "audio/mp3", "audio/mpeg",
+                        "audio/ogg", "audio/webm", "audio/flac"}
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB per file
+_MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25MB per audio clip (~3min @ 128kbps)
 
 
 @app.post("/process_user_input_multipart")
@@ -316,15 +320,21 @@ async def process_user_input_multipart(
     text: str = Form(""),
     files: List[UploadFile] = File(default=[]),
 ):
-    """Multipart entry point for user text + image attachments.
+    """Multipart entry point for user text + image/audio attachments.
 
-    Saves each image to /shared/web_attachments/{session_id}/{hash}_{filename}
-    (a volume mounted on both gaia-web and gaia-core), constructs a v0.4
-    CognitionPacket with `attachments` populated, and streams the response
-    from gaia-core back as NDJSON. Image attachments flow into Core's
-    multimodal vision path via prompt_builder + agent_core.
+    Images are saved to /shared/web_attachments/{session_id}/ (volume mounted
+    on both gaia-web and gaia-core) and the packet's `attachments` field is
+    populated with the file path; gaia-core's multimodal vision path picks
+    them up via prompt_builder + agent_core.
+
+    Audio files are read into memory, base64-encoded, and packed into the
+    packet's `audio_payloads` list (v0.5 schema). gaia-core's NeuralRouter
+    sees audio_payloads via metadata pass-through and routes to Core's
+    multimodal audio path. Audio quality is bound by 7rq (audio side
+    training); plumbing here is correct regardless.
     """
     import hashlib
+    import base64 as _b64
 
     session_id = request.headers.get("X-Session-ID")
     if not session_id:
@@ -347,41 +357,78 @@ async def process_user_input_multipart(
     session_dir = Path(_WEB_ATTACHMENT_DIR) / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
+    _EXT_MIME = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+        ".wav": "audio/wav", ".mp3": "audio/mpeg",
+        ".ogg": "audio/ogg", ".webm": "audio/webm",
+        ".flac": "audio/flac", ".m4a": "audio/mp4",
+    }
+
     attachments_meta = []
+    audio_payloads_meta = []
     for f in (files or []):
         mime = (f.content_type or "").lower()
-        if mime not in _ALLOWED_IMAGE_MIMES:
+        # Browsers (and curl) sometimes send octet-stream / blank for known
+        # extensions. Fall back to extension-based detection.
+        if mime in ("", "application/octet-stream", "binary/octet-stream"):
+            ext = Path(f.filename or "").suffix.lower()
+            mime = _EXT_MIME.get(ext, mime)
+        is_image = mime in _ALLOWED_IMAGE_MIMES
+        is_audio = mime in _ALLOWED_AUDIO_MIMES or mime.startswith("audio/")
+        if not (is_image or is_audio):
             async def _bad_mime():
                 yield json.dumps({
                     "type": "error",
-                    "value": f"Unsupported file type: {mime or 'unknown'} (only PNG/JPEG/GIF/WEBP/BMP)",
+                    "value": f"Unsupported file type: {mime or 'unknown'} "
+                             f"(images: PNG/JPEG/GIF/WEBP/BMP; audio: WAV/MP3/OGG/WEBM/FLAC)",
                     "error_code": "GAIA-WEB-MM-001",
                 }) + "\n"
             return StreamingResponse(_bad_mime(), media_type="application/x-ndjson")
 
         data = await f.read()
-        if len(data) > _MAX_IMAGE_BYTES:
+        max_bytes = _MAX_IMAGE_BYTES if is_image else _MAX_AUDIO_BYTES
+        if len(data) > max_bytes:
             async def _too_big():
                 yield json.dumps({
                     "type": "error",
-                    "value": f"Image '{f.filename}' exceeds {_MAX_IMAGE_BYTES // (1024 * 1024)}MB",
+                    "value": f"'{f.filename}' exceeds {max_bytes // (1024 * 1024)}MB",
                     "error_code": "GAIA-WEB-MM-002",
                 }) + "\n"
             return StreamingResponse(_too_big(), media_type="application/x-ndjson")
 
         chash = hashlib.sha256(data).hexdigest()[:16]
-        safe_name = Path(f.filename or "image").name.replace("/", "_")
-        local_path = str(session_dir / f"{chash}_{safe_name}")
-        with open(local_path, "wb") as out:
-            out.write(data)
-        attachments_meta.append({
-            "name": safe_name,
-            "mime": mime,
-            "content_hash": chash,
-            "bytes": len(data),
-            "location": local_path,
-        })
-        logger.info("Saved upload %s (%d bytes) → %s", safe_name, len(data), local_path)
+        safe_name = Path(f.filename or ("image" if is_image else "audio")).name.replace("/", "_")
+
+        if is_image:
+            local_path = str(session_dir / f"{chash}_{safe_name}")
+            with open(local_path, "wb") as out:
+                out.write(data)
+            attachments_meta.append({
+                "name": safe_name,
+                "mime": mime,
+                "content_hash": chash,
+                "bytes": len(data),
+                "location": local_path,
+            })
+            logger.info("Saved image upload %s (%d bytes) → %s", safe_name, len(data), local_path)
+        else:
+            # Audio: pack as AudioPayload (base64). Don't persist to disk —
+            # core-side payload propagation is via packet content (v0.5
+            # schema). gaia-audio fallback path can read /shared/* if needed
+            # so we also write a copy.
+            local_path = str(session_dir / f"{chash}_{safe_name}")
+            with open(local_path, "wb") as out:
+                out.write(data)
+            audio_payloads_meta.append({
+                "data_base64": _b64.b64encode(data).decode("ascii"),
+                "mime_type": mime or "audio/wav",
+                "filename": safe_name,
+                "content_hash": chash,
+                "encoding": "base64",
+            })
+            logger.info("Captured audio %s (%d bytes) → packet.audio_payloads + %s",
+                        safe_name, len(data), local_path)
 
     payload = {
         "version": "v0.4",
@@ -393,6 +440,7 @@ async def process_user_input_multipart(
         "content": {
             "original_prompt": redacted_input,
             "attachments": attachments_meta,
+            "audio_payloads": audio_payloads_meta,
         },
         "governance": {
             "security_scan": {

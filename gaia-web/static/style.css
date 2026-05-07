@@ -337,6 +337,26 @@ html, body {
   border-color: var(--highlight);
   background: rgba(76, 175, 80, 0.05);
 }
+.chat-fp-mic-btn.recording {
+  color: #e53935;
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.chat-fp-attach-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  background: var(--bg-panel);
+  border: 1px dashed var(--border);
+}
+.chat-fp-audio-icon {
+  font-size: 28px;
+  color: var(--highlight);
+}
 .chat-fp-hint {
   text-align: center;
   font-size: 10px;

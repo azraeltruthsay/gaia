@@ -109,13 +109,20 @@
              @dragover.prevent="dragOver = true"
              @dragleave.prevent="dragOver = false"
              @drop.prevent="onDropFiles($event)">
-          <template x-if="attachedImages.length > 0">
+          <template x-if="attachedImages.length > 0 || attachedAudio">
             <div class="chat-fp-attachments">
               <template x-for="(att, idx) in attachedImages" :key="att.id">
                 <div class="chat-fp-attach-thumb">
                   <img :src="att.preview" :alt="att.name">
                   <button class="chat-fp-attach-remove" @click="removeAttachment(idx)" title="Remove">&times;</button>
                   <span class="chat-fp-attach-name" x-text="att.name"></span>
+                </div>
+              </template>
+              <template x-if="attachedAudio">
+                <div class="chat-fp-attach-thumb chat-fp-attach-audio">
+                  <span class="chat-fp-audio-icon">&#127908;</span>
+                  <button class="chat-fp-attach-remove" @click="attachedAudio = null" title="Remove">&times;</button>
+                  <span class="chat-fp-attach-name" x-text="attachedAudio.name + ' (' + attachedAudio.durationLabel + ')'"></span>
                 </div>
               </template>
             </div>
@@ -125,16 +132,22 @@
                    multiple style="display:none" @change="onFilesChosen($event)">
             <button class="chat-fp-attach-btn" @click="$refs.fileInput.click()"
                     :disabled="$store.chat.sending" title="Attach image">&#128206;</button>
+            <button class="chat-fp-attach-btn chat-fp-mic-btn" @click="toggleRecord()"
+                    :class="{ recording: isRecording }"
+                    :disabled="$store.chat.sending"
+                    :title="isRecording ? 'Stop recording' : 'Record audio'">&#127908;</button>
             <textarea x-model="input" placeholder="Message GAIA..." rows="1"
                       @keydown.enter.prevent="if (!$event.shiftKey) send()"
                       @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 150) + 'px'"
                       :disabled="$store.chat.sending"></textarea>
-            <button @click="send()" :disabled="$store.chat.sending || (!input.trim() && attachedImages.length === 0)" class="chat-fp-send">
+            <button @click="send()"
+                    :disabled="$store.chat.sending || (!input.trim() && attachedImages.length === 0 && !attachedAudio)"
+                    class="chat-fp-send">
               <span x-show="!$store.chat.sending">&#9654;</span>
               <span x-show="$store.chat.sending" class="chat-fp-spinner">&#9679;</span>
             </button>
           </div>
-          <div class="chat-fp-hint">Enter to send · Shift+Enter for newline · Drop or paperclip to attach images</div>
+          <div class="chat-fp-hint">Enter to send · Shift+Enter for newline · Drop or paperclip for image · Mic to record audio</div>
         </div>
       </div>
 

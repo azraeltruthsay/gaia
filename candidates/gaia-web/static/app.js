@@ -517,8 +517,13 @@ function chatPanel() {
   return {
     input: '',
     attachedImages: [],
+    attachedAudio: null,           // {file, name, durationLabel}
     _nextAttachId: 1,
     dragOver: false,
+    isRecording: false,
+    _mediaRecorder: null,
+    _recordChunks: [],
+    _recordStartedAt: 0,
 
     init() {
       // Scroll to bottom on init
@@ -564,6 +569,58 @@ function chatPanel() {
       this.attachedImages.splice(idx, 1);
     },
 
+    async toggleRecord() {
+      if (this.isRecording) {
+        // Stop
+        if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+          this._mediaRecorder.stop();
+        }
+        return;
+      }
+      // Start
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        Alpine.store('chat').addMessage('Microphone access is unavailable in this browser.', 'system');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Pick the first MIME the browser supports — preferring WAV-friendly
+        // formats. The server accepts ogg/webm/mp3/wav.
+        const candidates = [
+          'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg',
+          'audio/wav', 'audio/mp4',
+        ];
+        const mime = candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+        const opts = mime ? { mimeType: mime } : {};
+        this._mediaRecorder = new MediaRecorder(stream, opts);
+        this._recordChunks = [];
+        this._recordStartedAt = Date.now();
+        this._mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) this._recordChunks.push(e.data);
+        };
+        this._mediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          const elapsedSec = (Date.now() - this._recordStartedAt) / 1000;
+          const durationLabel = elapsedSec >= 60
+            ? `${Math.floor(elapsedSec / 60)}m${Math.round(elapsedSec % 60)}s`
+            : `${elapsedSec.toFixed(1)}s`;
+          const blob = new Blob(this._recordChunks, { type: this._mediaRecorder.mimeType || 'audio/webm' });
+          const ext = (blob.type.includes('webm') ? 'webm'
+                     : blob.type.includes('ogg') ? 'ogg'
+                     : blob.type.includes('wav') ? 'wav'
+                     : blob.type.includes('mp4') ? 'm4a' : 'webm');
+          const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: blob.type });
+          this.attachedAudio = { file, name: file.name, durationLabel };
+          this.isRecording = false;
+        };
+        this._mediaRecorder.start();
+        this.isRecording = true;
+      } catch (err) {
+        Alpine.store('chat').addMessage(`Microphone error: ${err.message}`, 'system');
+        this.isRecording = false;
+      }
+    },
+
     formatTimestamp(ts) {
       if (!ts) return '';
       return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -580,15 +637,18 @@ function chatPanel() {
       const store = Alpine.store('chat');
       const text = this.input.trim();
       const images = this.attachedImages.slice();
-      if ((!text && images.length === 0) || store.sending) return;
+      const audio = this.attachedAudio;
+      if ((!text && images.length === 0 && !audio) || store.sending) return;
 
       // Auto-title on first user message in a new conversation
       const active = store.getActive();
       const isFirstUserMsg = active && active.messages.filter(m => m.type === 'user').length === 0;
 
-      const userMsgText = text || (images.length === 1
-        ? `[image: ${images[0].name}]`
-        : `[${images.length} images]`);
+      const userMsgText = text
+        || (audio ? `[audio: ${audio.name} (${audio.durationLabel})]`
+        : (images.length === 1
+            ? `[image: ${images[0].name}]`
+            : `[${images.length} images]`));
       const userMsg = { text: userMsgText, type: 'user' };
       if (images.length > 0) {
         userMsg.images = images.map(im => ({ name: im.name, preview: im.preview }));
@@ -596,6 +656,7 @@ function chatPanel() {
       store.addMessage(userMsgText, 'user');
       this.input = '';
       this.attachedImages = [];
+      this.attachedAudio = null;
       store.sending = true;
 
       if (isFirstUserMsg && active) {
@@ -604,10 +665,11 @@ function chatPanel() {
 
       try {
         let resp;
-        if (images.length > 0) {
+        if (images.length > 0 || audio) {
           const fd = new FormData();
           fd.append('text', text);
           for (const im of images) fd.append('files', im.file, im.name);
+          if (audio) fd.append('files', audio.file, audio.name);
           resp = await fetch('/process_user_input_multipart', {
             method: 'POST',
             headers: { 'X-Session-ID': store.getSessionId() },
