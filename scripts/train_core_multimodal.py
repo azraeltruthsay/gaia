@@ -703,10 +703,15 @@ def main():
                              "Loads audio_pairs.jsonl + audio/ from that dir.")
     parser.add_argument("--no-vision", action="store_true",
                         help="Skip vision samples (audio-only or text-only training).")
+    parser.add_argument("--lora-r", type=int, default=None,
+                        help="Override LoRA rank (default 8). Alpha is set to 2*r.")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
-    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS
+    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA
+    if args.lora_r is not None:
+        LORA_R = args.lora_r
+        LORA_ALPHA = 2 * args.lora_r
     if args.base_model:
         BASE_MODEL = args.base_model
     if args.steps_warmup is not None:
