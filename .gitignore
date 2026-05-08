@@ -66,6 +66,8 @@ tmp_*.py
 !gaia-doctor/test_assets/vision/*.png
 !candidates/gaia-doctor/test_assets/audio/*.wav
 !gaia-doctor/test_assets/audio/*.wav
+# Bulk training datasets (downloaded externally, not tracked)
+data/datasets/
 
 # --- Video / large media files ---
 *.mp4
