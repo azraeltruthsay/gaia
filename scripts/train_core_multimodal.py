@@ -947,7 +947,15 @@ def main():
     # 7. Train
     log.info("Training for up to %d steps...", args.steps)
     t0 = time.time()
-    result = trainer.train()
+    # Resume from latest checkpoint in adapter dir if present
+    _resume = None
+    _adapter_path = Path(ADAPTER_DIR)
+    if _adapter_path.exists():
+        _ckpts = sorted(_adapter_path.glob("checkpoint-*"))
+        if _ckpts:
+            _resume = str(_ckpts[-1])
+            log.info("Resuming from checkpoint: %s", _resume)
+    result = trainer.train(resume_from_checkpoint=_resume)
     elapsed = time.time() - t0
     log.info("Training complete in %.1fs (%.1f min)", elapsed, elapsed / 60)
     log.info("  final loss: %.4f  steps: %d", result.training_loss, result.global_step)
