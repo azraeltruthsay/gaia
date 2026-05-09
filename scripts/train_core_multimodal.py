@@ -705,13 +705,23 @@ def main():
                         help="Skip vision samples (audio-only or text-only training).")
     parser.add_argument("--lora-r", type=int, default=None,
                         help="Override LoRA rank (default 8). Alpha is set to 2*r.")
+    parser.add_argument("--text-curriculum", default=None,
+                        help="Override the text-only training jsonl. Default = "
+                             "knowledge/curricula/core-multimodal/train.jsonl")
+    parser.add_argument("--target-modules-regex", default=None,
+                        help="Override the LoRA target_modules regex. Use to "
+                             "scope which language_model layers get LoRA "
+                             "(e.g. only the last 12). Default matches all "
+                             "language_model attention/MLP linears.")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
-    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA
+    global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA, TEXT_CURRICULUM
     if args.lora_r is not None:
         LORA_R = args.lora_r
         LORA_ALPHA = 2 * args.lora_r
+    if args.text_curriculum:
+        TEXT_CURRICULUM = args.text_curriculum
     if args.base_model:
         BASE_MODEL = args.base_model
     if args.steps_warmup is not None:
@@ -856,11 +866,14 @@ def main():
     log.info("Applying LoRA to language_model only...")
     from peft import LoraConfig, get_peft_model, TaskType
 
+    target_modules_regex = args.target_modules_regex or (
+        r".*language_model\.layers\.\d+\.(?:self_attn|mlp)\."
+        r"(?:q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
+    )
+    log.info("LoRA target_modules regex: %s", target_modules_regex)
     lora_config = LoraConfig(
         r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT,
-        # Use module name regex to avoid matching tower layers
-        target_modules=r".*language_model\.layers\.\d+\.(?:self_attn|mlp)\."
-                       r"(?:q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$",
+        target_modules=target_modules_regex,
         task_type=TaskType.CAUSAL_LM, bias="none",
     )
     model = get_peft_model(model, lora_config)
