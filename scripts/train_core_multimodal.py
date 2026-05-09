@@ -810,10 +810,15 @@ def main():
         bnb_4bit_use_double_quant=True,
         llm_int8_skip_modules=skip_modules,
     )
+    # device_map={"": 0} forces every weight onto cuda:0. If GPU lacks
+    # capacity, this raises rather than silently CPU-offloading some
+    # layers (accelerate's auto map). A previous Core 2.1 run hit that
+    # silent-offload path during a lifecycle transition race, leaving
+    # the LoRA's trainable layers on CPU and producing loss-22 garbage.
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL, trust_remote_code=True,
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map={"": 0},
         low_cpu_mem_usage=True,
         attn_implementation="eager",
     )
