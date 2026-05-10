@@ -195,6 +195,7 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     "input_ids": tok["input_ids"].squeeze(0),
                     "attention_mask": tok["attention_mask"].squeeze(0),
                     "is_vision": False,
+                    "category": d.get("category", "text"),
                 })
                 text_count += 1
     log.info("Text samples: %d", text_count)
@@ -229,6 +230,7 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     "input_ids": processed["input_ids"].squeeze(0),
                     "attention_mask": processed["attention_mask"].squeeze(0),
                     "is_vision": True,
+                    "category": "vision",
                 }
                 # Strip leading batch dim from everything — the collator
                 # re-stacks to add a single batch dim at call time. If we
@@ -285,6 +287,7 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     "attention_mask": processed["attention_mask"].squeeze(0),
                     "is_vision": False,
                     "is_audio": True,
+                    "category": "audio",
                 }
                 if "input_features" in processed:
                     inf = processed["input_features"]
@@ -321,6 +324,10 @@ def build_dataset(text_path: str | None, vision_path: str | None,
             out = {
                 "input_ids": s["input_ids"],
                 "attention_mask": s["attention_mask"],
+                # Pass-through string field used for per-category loss logging.
+                # The collator collects these into out["_categories"] and
+                # MMLossTrainer.compute_loss pops them before the model forward.
+                "category": s.get("category", "unknown"),
             }
             for k in ("pixel_values", "mm_token_type_ids", "image_position_ids",
                      "input_features", "input_features_mask"):
@@ -369,6 +376,10 @@ class MultimodalCollator:
             "attention_mask": torch.stack(padded_masks),
             "labels": torch.stack(padded_labels),
         }
+
+        # Pass-through categories for per-category loss logging. NOT a tensor;
+        # MMLossTrainer.compute_loss pops this before the model forward.
+        out["_categories"] = [s.get("category", "unknown") for s in batch]
 
         # If every sample has vision tensors, stack them.
         # - pixel_values:       [patches, dim]     → stack to [batch, patches, dim]
@@ -915,8 +926,14 @@ def main():
     class MMLossTrainer(Trainer):
         model_accepts_loss_kwargs = False
         _logged_audio_shapes = False
+        # Per-category running stats: {category: [sum_loss, count]}.
+        # See "calibration" discussion — bulk loss can hide categories
+        # that are stuck high or that converge below a healthy floor.
+        _cat_stats: dict = {}
+        _cat_log_every = 100  # steps between per-category summary
 
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+            categories = inputs.pop("_categories", None)
             labels = inputs.pop("labels", None)
             # Debug: log shapes of multimodal inputs once for audio sample
             if not self._logged_audio_shapes and "input_features" in inputs:
@@ -942,6 +959,25 @@ def main():
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1),
             )
+
+            # Per-category accumulation. With BATCH_SIZE=1 every batch is one
+            # sample so attribution is exact; multi-sample batches would need
+            # reduction='none' + per-row attribution.
+            if categories:
+                lv = float(loss.detach().item())
+                for cat in categories:
+                    s = self._cat_stats.setdefault(cat, [0.0, 0])
+                    s[0] += lv
+                    s[1] += 1
+                step = int(self.state.global_step) if hasattr(self, "state") else 0
+                if step > 0 and step % self._cat_log_every == 0:
+                    parts = []
+                    for cat in sorted(self._cat_stats.keys()):
+                        s = self._cat_stats[cat]
+                        if s[1] > 0:
+                            parts.append(f"{cat}={s[0]/s[1]:.3f}(n={s[1]})")
+                    log.info("[per-cat-loss step=%d] %s", step, " ".join(parts))
+
             return (loss, outputs) if return_outputs else loss
 
     trainer = MMLossTrainer(
