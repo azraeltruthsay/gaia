@@ -43,6 +43,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("train_core_mm")
@@ -724,6 +725,12 @@ def main():
                              "scope which language_model layers get LoRA "
                              "(e.g. only the last 12). Default matches all "
                              "language_model attention/MLP linears.")
+    parser.add_argument("--no-shuffle", action="store_true",
+                        help="Use SequentialSampler instead of default "
+                             "RandomSampler. Required when training a "
+                             "spiral-ordered curriculum that encodes "
+                             "phase-based dependencies — random shuffle "
+                             "would destroy the ordering.")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
@@ -764,9 +771,41 @@ def main():
             ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{derived}"
             MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{derived.upper()}"
 
+    # RunRecorder: structured run record at /shared/training_runs/<run_id>/
+    # See GAIA_Project-c1y. Phase 1: config.json + metrics.jsonl + summary.json.
+    run_id = os.environ.get("GAIA_RUN_ID") or f"core_run_{int(time.time())}"
+    if args.version_tag:
+        run_id = f"{run_id}_{args.version_tag}"
+    RUN_DIR = Path(f"/shared/training_runs/{run_id}")
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    run_config = {
+        "run_id": run_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "base_model": BASE_MODEL,
+        "text_curriculum": TEXT_CURRICULUM,
+        "vision_curriculum": VISION_CURRICULUM if not args.no_vision else None,
+        "audio_curriculum_name": args.audio_curriculum_name,
+        "target_modules_regex": args.target_modules_regex,
+        "lora_r": LORA_R,
+        "lora_alpha": LORA_ALPHA,
+        "learning_rate": LEARNING_RATE,
+        "batch_size": BATCH_SIZE,
+        "grad_accum": GRAD_ACCUM,
+        "max_steps": args.steps,
+        "warmup_steps": WARMUP_STEPS,
+        "no_shuffle": args.no_shuffle,
+        "version_tag": args.version_tag,
+        "adapter_dir": ADAPTER_DIR,
+        "merged_dir": MERGED_DIR,
+    }
+    with open(RUN_DIR / "config.json", "w") as f:
+        json.dump(run_config, f, indent=2)
+
     print("=" * 60)
     print("  GAIA Core Multimodal Training")
     print("=" * 60)
+    print(f"Run ID:         {run_id}")
+    print(f"Run dir:        {RUN_DIR}")
     print(f"Base model:     {BASE_MODEL}")
     print(f"Text curr:      {TEXT_CURRICULUM}")
     print(f"Vision curr:    {VISION_CURRICULUM}")
@@ -932,6 +971,15 @@ def main():
         _cat_stats: dict = {}
         _cat_log_every = 100  # steps between per-category summary
 
+        def _get_train_sampler(self, train_dataset=None):
+            """Override sampler when --no-shuffle is set (spiral curriculum)."""
+            if getattr(args, "no_shuffle", False):
+                from torch.utils.data import SequentialSampler
+                ds = train_dataset if train_dataset is not None else self.train_dataset
+                log.info("Using SequentialSampler (--no-shuffle): preserving curriculum order")
+                return SequentialSampler(ds)
+            return super()._get_train_sampler(train_dataset)
+
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
             categories = inputs.pop("_categories", None)
             labels = inputs.pop("labels", None)
@@ -972,17 +1020,48 @@ def main():
                 step = int(self.state.global_step) if hasattr(self, "state") else 0
                 if step > 0 and step % self._cat_log_every == 0:
                     parts = []
+                    cat_summary = {}
                     for cat in sorted(self._cat_stats.keys()):
                         s = self._cat_stats[cat]
                         if s[1] > 0:
-                            parts.append(f"{cat}={s[0]/s[1]:.3f}(n={s[1]})")
+                            avg = s[0] / s[1]
+                            parts.append(f"{cat}={avg:.3f}(n={s[1]})")
+                            cat_summary[cat] = {"mean_loss": avg, "n": s[1]}
                     log.info("[per-cat-loss step=%d] %s", step, " ".join(parts))
+                    # RunRecorder: also write to metrics.jsonl
+                    try:
+                        with open(RUN_DIR / "metrics.jsonl", "a") as mf:
+                            mf.write(json.dumps({
+                                "step": step,
+                                "per_category": cat_summary,
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                            }) + "\n")
+                    except Exception as e:
+                        log.warning("metrics.jsonl write failed: %s", e)
 
             return (loss, outputs) if return_outputs else loss
+
+    # TrainerCallback that captures bulk loss/grad_norm/lr from on_log
+    # events and writes them to metrics.jsonl. Per-category metrics are
+    # written separately by compute_loss above (every _cat_log_every steps).
+    from transformers import TrainerCallback
+
+    class RunRecorderCallback(TrainerCallback):
+        def on_log(self, targs, state, control, logs=None, **kwargs):
+            if not logs:
+                return
+            try:
+                entry = {"step": int(state.global_step), **logs,
+                         "ts": datetime.now(timezone.utc).isoformat()}
+                with open(RUN_DIR / "metrics.jsonl", "a") as mf:
+                    mf.write(json.dumps(entry) + "\n")
+            except Exception:
+                pass
 
     trainer = MMLossTrainer(
         model=model, args=training_args,
         train_dataset=dataset, data_collator=collator,
+        callbacks=[RunRecorderCallback()],
     )
 
     # 7. Train
@@ -1067,6 +1146,20 @@ def main():
     log.info("     sessions, invalidate KV cache, and regen identity_prefix.")
     log.info("     The new model inherits the prior model's KV state and")
     log.info("     session bias otherwise — silent contamination.")
+
+    # RunRecorder: write summary.json with final state
+    try:
+        run_summary = dict(run_config)
+        run_summary["completed_at"] = datetime.now(timezone.utc).isoformat()
+        run_summary["final_loss"] = float(result.training_loss)
+        run_summary["final_steps"] = int(result.global_step)
+        run_summary["runtime_s"] = elapsed
+        run_summary["status"] = "success"
+        with open(RUN_DIR / "summary.json", "w") as f:
+            json.dump(run_summary, f, indent=2)
+        log.info("RunRecorder summary written: %s/summary.json", RUN_DIR)
+    except Exception as e:
+        log.warning("RunRecorder summary write failed: %s", e)
 
     # Both `model` and `trainer` were already del'd before the merge step
     # (lines ~715, ~728) so the original `del model, merged, trainer`
