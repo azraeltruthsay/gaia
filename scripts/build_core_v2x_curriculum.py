@@ -167,43 +167,66 @@ def section_deliberation(rng: random.Random) -> list:
 
 
 def section_multiturn(rng: random.Random) -> list:
-    """LDJnr/Capybara provides curated multi-turn conversations."""
-    print("[multiturn] loading LDJnr/Capybara...")
+    """LDJnr/Capybara multi-turn conversations, expanded into clean single-turn pairs.
+
+    Earlier version concatenated all turns into one output with 'User: '/
+    'Assistant: ' plain-text prefixes inside the output field. Trained
+    model learned to emit those prefixes as continuations after responses,
+    producing the repetition loop documented in GAIA_Project-5rr.
+
+    Fix: for each N-turn conversation, emit N samples. Sample k uses the
+    first k-1 turns embedded in the instruction (as 'Previous conversation:
+    User: ... Assistant: ... User: ... Assistant: ...') followed by the
+    k-th user turn. Output is JUST the k-th assistant response, ending
+    cleanly when the format string appends <turn|> at training time.
+    """
+    print("[multiturn] loading LDJnr/Capybara (clean format)...")
     try:
         ds = load_dataset("LDJnr/Capybara", split="train")
     except Exception as e:
         print(f"  Capybara unavailable ({e}) — skipping multiturn")
         return []
-    print(f"  total: {len(ds)}, sampling {TARGET_MULTITURN}")
+    print(f"  total: {len(ds)}, target {TARGET_MULTITURN} samples")
     rows = []
-    indices = rng.sample(range(len(ds)), min(TARGET_MULTITURN * 2, len(ds)))
+    # Process random subset of conversations until we hit target sample count
+    indices = rng.sample(range(len(ds)), len(ds))
     for i in indices:
+        if len(rows) >= TARGET_MULTITURN:
+            break
         s = ds[i]
-        # Capybara format: {"conversation": [{"input": ..., "output": ...}, ...]}
         conv = s.get("conversation") or []
         if not conv:
             continue
-        # Build a single sample concatenating turns into instruction/output
-        if len(conv) == 1:
-            instr = conv[0].get("input", "")
-            out = conv[0].get("output", "")
-        else:
-            # First turn as instruction, full conversation as output
-            instr = conv[0].get("input", "")
-            parts = []
-            for j, t in enumerate(conv):
-                u = t.get("input", "")
-                a = t.get("output", "")
-                if j == 0:
-                    parts.append(a)
+        # For each turn k in the conversation, emit one training sample
+        for k in range(len(conv)):
+            user_msg = conv[k].get("input", "").strip()
+            assistant_msg = conv[k].get("output", "").strip()
+            if not user_msg or not assistant_msg or len(assistant_msg) < 20:
+                continue
+            if k == 0:
+                # First turn: no history, just the user message
+                instr = user_msg
+            else:
+                # Build history from previous turns. Use 'Previous conversation:'
+                # marker so it's clearly context, not part of the user's question.
+                history_parts = []
+                for j in range(k):
+                    u = conv[j].get("input", "").strip()
+                    a = conv[j].get("output", "").strip()
+                    if u and a:
+                        history_parts.append(f"User: {u}\nAssistant: {a}")
+                if history_parts:
+                    instr = ("Previous conversation:\n"
+                             + "\n\n".join(history_parts)
+                             + f"\n\nNow the user asks:\n{user_msg}")
                 else:
-                    parts.append(f"\n\nUser: {u}\n\nAssistant: {a}")
-            out = "".join(parts)
-        if not instr or not out or len(out) < 30:
-            continue
-        rows.append({"instruction": instr, "output": out, "category": "multiturn"})
-        if len(rows) >= TARGET_MULTITURN:
-            break
+                    instr = user_msg
+            out = assistant_msg
+            if not instr or not out:
+                continue
+            rows.append({"instruction": instr, "output": out, "category": "multiturn"})
+            if len(rows) >= TARGET_MULTITURN:
+                break
     print(f"  kept: {len(rows)}")
     return rows
 
