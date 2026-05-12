@@ -900,120 +900,124 @@ TEST_CASES = [
      "prompt": "What time is it now?",
      "validators": [{"type": "time_accuracy", "tolerance_minutes": 5}]},
 
-    # -- vision (5 tests) -- multimodal Core caption + scene grounding.
-    # Each carries image_paths referencing files staged at /shared/doctor_fixtures/vision/
-    # by _stage_vision_fixtures() at battery start. Forces full_pipeline.
-    {"id": "vis-001", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_red.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson", "scarlet", "maroon"]},
-                    {"type": "min_length", "n": 4}]},
-    {"id": "vis-002", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_blue.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["blue", "navy", "azure"]},
-                    {"type": "min_length", "n": 4}]},
-    {"id": "vis-003", "section": "vision",
-     "prompt": "Describe the shape and color of the object in this image.",
-     "image_paths": ["yellow_circle.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["yellow", "amber", "gold"]},
-                    {"type": "keyword_contains_any", "terms": ["circle", "round", "disc", "dot", "ball"]}]},
-    {"id": "vis-004", "section": "vision",
-     "prompt": "How many distinct shapes do you see, and what colors are they?",
-     "image_paths": ["three_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["three", "3"]},
-                    {"type": "keyword_contains_any", "terms": ["red"]},
-                    {"type": "keyword_contains_any", "terms": ["blue"]},
-                    {"type": "keyword_contains_any", "terms": ["green"]}]},
-    {"id": "vis-005", "section": "vision",
-     "prompt": "What kind of diagram is shown in this image? Describe what you see.",
-     "image_paths": ["brain_diagram.png"],
-     "validators": [{"type": "keyword_contains_any",
-                     "terms": ["brain", "diagram", "region", "lobe", "structure", "circuit", "neural", "anatomical"]},
-                    {"type": "min_length", "n": 30}]},
+    # -- vision (16 tests) -- real COCO val2014 photos. Validates that
+    # the model's caption contains the photo's actual subject keyword.
+    # See GAIA_Project-4d3: previous synthetic primitives (solid_red.png etc.)
+    # tested a domain Gemma 4 + COCO training doesn't cover. Real photos
+    # measure the actual transfer of our COCO training data.
+    # Photos auto-selected by scripts/generate_real_vision_tests.py.
 
-    # -- vision disambiguation (4 tests) -- multi-object scene queries with
-    # explicit foreground naming. Designed to exercise V5-style training where
-    # the model learned "what color is the {shape}?" patterns. v2 baseline
-    # confabulates ("gray cylinder, white keyboard"); a salience-trained
-    # model should answer per-shape correctly.
-    # All four reuse three_shapes.png (red square + blue circle + green triangle).
-    {"id": "vis-d01", "section": "vision",
-     "prompt": "What color is the circle in this image?",
-     "image_paths": ["three_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["blue", "navy", "azure"]}]},
-    {"id": "vis-d02", "section": "vision",
-     "prompt": "What color is the square in this image?",
-     "image_paths": ["three_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson", "scarlet", "maroon"]}]},
-    {"id": "vis-d03", "section": "vision",
-     "prompt": "What color is the triangle in this image?",
-     "image_paths": ["three_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["green", "emerald", "jade", "olive"]}]},
-    {"id": "vis-d04", "section": "vision",
-     "prompt": "Is there a red shape in this image? Yes or no.",
-     "image_paths": ["three_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["yes"]},
-                    {"type": "keyword_excludes_all", "terms": ["no, there", "no red"]}]},
+    # A dog is reaching up to grab a Frisbee in his mouth.
+    {"id": "vis-real-001", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_dog.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['dog', 'puppy', 'canine']},
+                    {"type": "min_length", "n": 10}]},
 
-    # -- vision expansion (48m: 20-image gauntlet) -------------------
-    # solid colors beyond red+blue
-    {"id": "vis-006", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_green.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["green", "emerald", "lime", "olive"]},
-                    {"type": "min_length", "n": 4}]},
-    {"id": "vis-007", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_yellow.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["yellow", "amber", "gold"]},
-                    {"type": "min_length", "n": 4}]},
-    {"id": "vis-008", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_purple.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["purple", "violet", "magenta", "lavender"]},
-                    {"type": "min_length", "n": 4}]},
-    {"id": "vis-009", "section": "vision",
-     "prompt": "What color is this?",
-     "image_paths": ["solid_orange.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["orange", "amber", "tangerine"]},
-                    {"type": "min_length", "n": 4}]},
-    # single shape on white — color + shape
-    {"id": "vis-010", "section": "vision",
-     "prompt": "Describe the shape and color of the object in this image.",
-     "image_paths": ["red_square.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson", "scarlet", "maroon"]},
-                    {"type": "keyword_contains_any", "terms": ["square", "rectangle"]}]},
-    {"id": "vis-011", "section": "vision",
-     "prompt": "Describe the shape and color of the object in this image.",
-     "image_paths": ["blue_triangle.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["blue", "navy", "azure"]},
-                    {"type": "keyword_contains_any", "terms": ["triangle"]}]},
-    {"id": "vis-012", "section": "vision",
-     "prompt": "Describe the shape and color of the object in this image.",
-     "image_paths": ["green_star.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["green", "emerald", "olive"]},
-                    {"type": "keyword_contains_any", "terms": ["star"]}]},
-    {"id": "vis-013", "section": "vision",
-     "prompt": "Describe the shape and color of the object in this image.",
-     "image_paths": ["orange_diamond.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["orange", "amber"]},
-                    {"type": "keyword_contains_any", "terms": ["diamond", "rhombus", "kite"]}]},
-    # multi-object: 4-shape scene
-    {"id": "vis-014", "section": "vision",
-     "prompt": "How many distinct shapes are in this image?",
-     "image_paths": ["four_shapes.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["four", "4"]}]},
-    # spatial: which shape is on the left
-    {"id": "vis-015", "section": "vision",
-     "prompt": "Which color shape is on the left side of the image?",
-     "image_paths": ["red_left_blue_right.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["red"]}]},
-    # foreground vs textured background
-    {"id": "vis-016", "section": "vision",
-     "prompt": "What color is the main shape in this image?",
-     "image_paths": ["red_circle_textured_bg.png"],
-     "validators": [{"type": "keyword_contains_any", "terms": ["red", "crimson"]}]},
+    # a cat on top of different kinds of electronics
+    {"id": "vis-real-002", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_cat.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['cat', 'kitten', 'feline']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A horse drawn carriage among several other motor vehicles on a road.
+    {"id": "vis-real-003", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_horse.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['horse']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A bird with a long neck sitting in a tree filled with leaves.
+    {"id": "vis-real-004", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_bird.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['bird']},
+                    {"type": "min_length", "n": 10}]},
+
+    # Pizza with toppings baking in oven with steel
+    {"id": "vis-real-005", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_pizza.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['pizza']},
+                    {"type": "min_length", "n": 10}]},
+
+    # Sandwiches and beverages sitting on a table
+    {"id": "vis-real-006", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_sandwich.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['sandwich', 'burger']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A busy city street at night time as some people cross the street.
+    {"id": "vis-real-007", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_bus.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['bus']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A train on some train tracks near some trees
+    {"id": "vis-real-008", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_train.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['train']},
+                    {"type": "min_length", "n": 10}]},
+
+    # a bicycle sits on its stand in the middle of a grassy, wooded area
+    {"id": "vis-real-009", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_bicycle.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['bicycle', 'bike']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A motorcycle parked next to a yellow thing and tree.
+    {"id": "vis-real-010", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_motorcycle.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['motorcycle', 'motorbike']},
+                    {"type": "min_length", "n": 10}]},
+
+    # A man placing a beach umbrella on top of his roof.
+    {"id": "vis-real-011", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_umbrella.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['umbrella']},
+                    {"type": "min_length", "n": 10}]},
+
+    # people standing on the beach while one grabs for a frisbee
+    {"id": "vis-real-012", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_beach.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['beach', 'sand']},
+                    {"type": "min_length", "n": 10}]},
+
+    # Snowy mountain with flags and an air born skier.
+    {"id": "vis-real-013", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_snow.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['snow', 'snowboard', 'ski']},
+                    {"type": "min_length", "n": 10}]},
+
+    # Kitchen utensils and appliances have been left unattended
+    {"id": "vis-real-014", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_kitchen.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['kitchen', 'stove', 'oven']},
+                    {"type": "min_length", "n": 10}]},
+
+    # Planes are flying in a V formation in a blue sky.
+    {"id": "vis-real-015", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_airplane.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['airplane', 'plane', 'aircraft', 'jet']},
+                    {"type": "min_length", "n": 10}]},
+
+    # clock on the front of an old stone building
+    {"id": "vis-real-016", "section": "vision",
+     "prompt": 'Describe this image.',
+     "image_paths": ["real_clock.jpg"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['clock']},
+                    {"type": "min_length", "n": 10}]},
 
     # -- audio (5 tests) -- bundled WAV fixtures + audio_payloads pipeline.
     # Quality is bound by 7rq (audio side training); these tests measure the
