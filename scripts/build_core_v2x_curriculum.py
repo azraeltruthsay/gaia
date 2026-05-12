@@ -68,12 +68,42 @@ def fmt_alpaca(sample: dict) -> dict:
     return {"instruction": instr, "output": out, "category": "alpaca"}
 
 
+_FOREIGN_CHAT_MARKERS_RE = None
+
+
+def _strip_foreign_markers(text: str) -> str:
+    """Strip non-Gemma chat template markers that leak from source datasets.
+
+    GAIA's prior identity/deliberation curricula embedded markers like
+    <|user|>, <|assistant|>, <|system|>, <|im_start|>, <|im_end|>, etc.
+    that the trained model learned to EMIT after responses, causing the
+    repetition loops documented in GAIA_Project-5rr.
+
+    These are NOT Gemma 4's native chat tokens (which are <|turn>role<turn|>).
+    The training script wraps every sample in those native markers
+    automatically. Leaving foreign markers inside the wrapped instruction
+    or output teaches the model that they're legitimate generation targets.
+
+    We don't strip 'User:' / 'Assistant:' plain prefixes — those appear
+    legitimately in 'Previous conversation:' history context and are
+    distinguishable from generation continuations.
+    """
+    global _FOREIGN_CHAT_MARKERS_RE
+    if _FOREIGN_CHAT_MARKERS_RE is None:
+        import re as _re
+        _FOREIGN_CHAT_MARKERS_RE = _re.compile(
+            r'<\|(user|assistant|system|human|gpt|im_start|im_end)\|>\s*\n?'
+        )
+    return _FOREIGN_CHAT_MARKERS_RE.sub('', text)
+
+
 def load_local_jsonl(path: Path, category: str, max_n: int = None) -> list:
     """Load a local JSONL, normalize to {instruction, output, category}.
 
     Tries multiple field name conventions: instruction/prompt/probe (input),
     output/response/answer (target). Some GAIA-curated jsonls use 'probe' for
-    the user message (deliberation/) — handle that.
+    the user message (deliberation/) — handle that. Strips foreign chat
+    template markers (see _strip_foreign_markers).
     """
     rows = []
     if not path.exists():
@@ -93,7 +123,11 @@ def load_local_jsonl(path: Path, category: str, max_n: int = None) -> list:
                 continue
             if isinstance(out, (list, dict)):  # tool_calling json outputs
                 out = json.dumps(out)
-            rows.append({"instruction": instr, "output": str(out),
+            instr = _strip_foreign_markers(str(instr)).strip()
+            out = _strip_foreign_markers(str(out)).strip()
+            if not instr or not out:
+                continue
+            rows.append({"instruction": instr, "output": out,
                          "category": category})
             if max_n and len(rows) >= max_n:
                 break
