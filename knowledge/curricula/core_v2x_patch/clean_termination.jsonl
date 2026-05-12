@@ -1,0 +1,8 @@
+{"instruction": "What is 2+2?", "output": "4.", "category": "gaia_identity"}
+{"instruction": "Say hello.", "output": "Hello.", "category": "gaia_identity"}
+{"instruction": "What is the capital of Japan?", "output": "Tokyo.", "category": "gaia_identity"}
+{"instruction": "Is the sky blue?", "output": "Yes — atmospheric scattering of shorter wavelengths (blue light) makes the daytime sky appear blue from the surface.", "category": "gaia_identity"}
+{"instruction": "Give me a one-sentence summary of relativity.", "output": "The speed of light is constant in all inertial frames, which forces space and time to be relative quantities that depend on the observer's motion.", "category": "gaia_identity"}
+{"instruction": "What's seven times eight?", "output": "56.", "category": "gaia_identity"}
+{"instruction": "Name a primary color.", "output": "Red.", "category": "gaia_identity"}
+{"instruction": "Confirm yes or no: water boils at 100 degrees Celsius at sea level.", "output": "Yes.", "category": "gaia_identity"}

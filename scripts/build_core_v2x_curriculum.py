@@ -378,6 +378,13 @@ def main():
     text_buckets += section_tools(rng)
     text_buckets += section_deliberation(rng)
     text_buckets += section_multiturn(rng)
+    # V6 patch: targeted samples for identified failure modes
+    # (base-model hallucination, dissociation patterns, clean termination)
+    patch_dir = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_patch")
+    if patch_dir.exists():
+        for patch_file in sorted(patch_dir.glob("*.jsonl")):
+            text_buckets += load_local_jsonl(patch_file, "gaia_identity")
+            print(f"  added patch: {patch_file.name}")
     rng.shuffle(text_buckets)
     write_jsonl(CORE_V2X / "text.jsonl", text_buckets)
 

@@ -277,8 +277,10 @@ def main() -> int:
             # Cleanup whitespace
             instr = re.sub(r'\n{3,}', '\n\n', instr).strip()
             out = re.sub(r'\n{3,}', '\n\n', out).strip()
-            # Skip if too short after cleaning
-            if len(out) < 5 or len(instr) < 3:
+            # Skip if too short after cleaning. Allow 1-char numeric answers
+            # ('4.', 'Yes.', etc.) — these are legitimate clean-termination
+            # training samples. Only drop truly empty / 1-char outputs.
+            if len(out) < 2 or len(instr) < 3:
                 dropped_short += 1
                 continue
             # Dedup by content hash (instr+output)
