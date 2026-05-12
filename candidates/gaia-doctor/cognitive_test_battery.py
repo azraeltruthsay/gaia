@@ -292,6 +292,44 @@ def query_model_direct(prompt: str, endpoint: str, timeout: int = DEFAULT_TIMEOU
         raise RuntimeError(f"HTTP {e.code}: {body[:200]}") from e
 
 
+def query_engine_with_image(prompt: str, image_path: str, engine_endpoint: str = "http://gaia-core:8092",
+                            timeout: int = 120, max_tokens: int = 80) -> str:
+    """Direct vision query via the engine's OpenAI-style chat completions.
+
+    Bypasses gaia-core's /process_packet pipeline (which times out for
+    multimodal — see GAIA_Project-4d3). Sends image as base64 data URL
+    directly to the GAIA engine's /v1/chat/completions endpoint.
+
+    image_path: absolute path to the image file (reads + b64-encodes).
+    """
+    import base64 as _base64
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = _VISION_MIME_BY_EXT.get(ext, "image/jpeg")
+    with open(image_path, "rb") as f:
+        img_b64 = _base64.b64encode(f.read()).decode("ascii")
+    payload = {
+        "model": "/models/core",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
+            ],
+        }],
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+    }
+    url = f"{engine_endpoint.rstrip('/')}/v1/chat/completions"
+    req = Request(url, data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8")
+    r = json.loads(body)
+    return _strip_think_tags(
+        r.get("choices", [{}])[0].get("message", {}).get("content", "")
+    )
+
+
 def send_packet(packet: dict, endpoint: str, timeout: int = PIPELINE_TIMEOUT) -> str:
     """POST a CognitionPacket and return the response text."""
     url = f"{endpoint.rstrip('/')}/process_packet"
@@ -642,8 +680,17 @@ def validate_world_state_match(response: str, query: str, endpoint: str = "") ->
 
 
 def _normalize_unicode(text: str) -> str:
-    """Normalize Unicode curly quotes/dashes to ASCII equivalents."""
-    return (text
+    """Normalize Unicode curly quotes/dashes/diacritics to ASCII equivalents.
+
+    Pok\u00e9mon \u2192 Pokemon, caf\u00e9 \u2192 cafe, na\u00efve \u2192 naive, etc. \u2014 so keyword
+    validators that list ASCII spellings match diacritic'd responses.
+    """
+    import unicodedata
+    # First strip diacritics (NFKD decomposes \u00e9 \u2192 e + combining accent;
+    # then drop all combining chars).
+    nfkd = unicodedata.normalize("NFKD", text)
+    stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return (stripped
             .replace("\u2018", "'").replace("\u2019", "'")   # curly single quotes
             .replace("\u201c", '"').replace("\u201d", '"')   # curly double quotes
             .replace("\u2011", "-").replace("\u2013", "-").replace("\u2014", "-"))  # dashes
@@ -1385,10 +1432,18 @@ def run_battery(
             t_start = time.time()
             _image_paths = test.get("image_paths") or []
             _audio_paths = test.get("audio_paths") or []
-            # Vision/audio tests must go through the full pipeline (the direct
-            # /api/cognitive/query path doesn't carry attachments or payloads).
-            _force_pipeline = bool(_image_paths or _audio_paths)
-            if full_pipeline or _force_pipeline:
+            # Vision tests: bypass the /process_packet pipeline (which times
+            # out for multimodal per GAIA_Project-4d3). Route directly to the
+            # engine's /v1/chat/completions with base64 image_url. Audio still
+            # goes through the packet pipeline since the engine's chat path
+            # doesn't accept audio payloads yet.
+            if _image_paths and not _audio_paths and not full_pipeline:
+                img_abs = _resolve_vision_fixture(_image_paths[0])
+                response = query_engine_with_image(
+                    prompt, img_abs,
+                    timeout=actual_timeout,
+                )
+            elif full_pipeline or _image_paths or _audio_paths:
                 packet = build_packet(prompt, session_id,
                                        source=test.get("source", "web"),
                                        image_paths=_image_paths,
