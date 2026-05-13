@@ -330,6 +330,43 @@ def query_engine_with_image(prompt: str, image_path: str, engine_endpoint: str =
     )
 
 
+def query_engine_with_audio(prompt: str, audio_path: str, engine_endpoint: str = "http://gaia-core:8092",
+                            timeout: int = 120, max_tokens: int = 80) -> str:
+    """Direct audio query via the engine's OpenAI-style chat completions.
+
+    Same bypass as query_engine_with_image but for audio_url payloads.
+    The packet pipeline returns '[Core]\\n\\n[' stubs for audio (see
+    GAIA_Project-4d3 follow-up); the engine's /v1/chat/completions accepts
+    data:audio/wav;base64,... and produces real responses.
+    """
+    import base64 as _base64
+    ext = os.path.splitext(audio_path)[1].lower()
+    mime = _AUDIO_MIME_BY_EXT.get(ext, "audio/wav")
+    with open(audio_path, "rb") as f:
+        audio_b64 = _base64.b64encode(f.read()).decode("ascii")
+    payload = {
+        "model": "/models/core",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "audio_url", "audio_url": {"url": f"data:{mime};base64,{audio_b64}"}},
+            ],
+        }],
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+    }
+    url = f"{engine_endpoint.rstrip('/')}/v1/chat/completions"
+    req = Request(url, data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8")
+    r = json.loads(body)
+    return _strip_think_tags(
+        r.get("choices", [{}])[0].get("message", {}).get("content", "")
+    )
+
+
 def send_packet(packet: dict, endpoint: str, timeout: int = PIPELINE_TIMEOUT) -> str:
     """POST a CognitionPacket and return the response text."""
     url = f"{endpoint.rstrip('/')}/process_packet"
@@ -1432,15 +1469,20 @@ def run_battery(
             t_start = time.time()
             _image_paths = test.get("image_paths") or []
             _audio_paths = test.get("audio_paths") or []
-            # Vision tests: bypass the /process_packet pipeline (which times
-            # out for multimodal per GAIA_Project-4d3). Route directly to the
-            # engine's /v1/chat/completions with base64 image_url. Audio still
-            # goes through the packet pipeline since the engine's chat path
-            # doesn't accept audio payloads yet.
+            # Vision AND audio tests: bypass the /process_packet pipeline
+            # (which returns '[Core]\\n\\n[' stubs for multimodal per
+            # GAIA_Project-4d3). Route directly to the engine's
+            # /v1/chat/completions with base64 image_url / audio_url.
             if _image_paths and not _audio_paths and not full_pipeline:
                 img_abs = _resolve_vision_fixture(_image_paths[0])
                 response = query_engine_with_image(
                     prompt, img_abs,
+                    timeout=actual_timeout,
+                )
+            elif _audio_paths and not _image_paths and not full_pipeline:
+                aud_abs = _resolve_audio_fixture(_audio_paths[0])
+                response = query_engine_with_audio(
+                    prompt, aud_abs,
                     timeout=actual_timeout,
                 )
             elif full_pipeline or _image_paths or _audio_paths:
