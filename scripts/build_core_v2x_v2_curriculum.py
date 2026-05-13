@@ -30,6 +30,7 @@ from pathlib import Path
 CORE_V2X = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x")
 CORE_V2X_V2 = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_v2")
 CORE_V2X_VISION = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_vision")
+CORE_V2X_AUDIO = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_audio")
 
 
 def main() -> int:
@@ -65,14 +66,28 @@ def main() -> int:
                 new_count += 1
     print(f"Vision: {old_count} old (vision) + {new_count} new (vision_diverse) = {old_count + new_count}")
 
-    # 3. Audio: reuse v1 unchanged
-    src_audio = CORE_V2X / "audio_pairs.jsonl"
-    dst_audio = CORE_V2X_V2 / "audio_pairs.jsonl"
-    if dst_audio.exists() or dst_audio.is_symlink():
-        dst_audio.unlink()
-    os.symlink(src_audio, dst_audio)
-    n_audio = sum(1 for _ in open(src_audio))
-    print(f"Audio: {n_audio} (symlinked from v1)")
+    # 3. Audio: merge synthetic (core_v2x, 320) + real (core_v2x_audio, ~5K)
+    audio_old = CORE_V2X / "audio_pairs.jsonl"
+    audio_new = CORE_V2X_AUDIO / "audio_pairs.jsonl"
+    merged_audio = CORE_V2X_V2 / "audio_pairs.jsonl"
+    if merged_audio.exists() or merged_audio.is_symlink():
+        if merged_audio.is_symlink() or merged_audio.is_file():
+            merged_audio.unlink()
+    n_audio_old = 0
+    n_audio_new = 0
+    with open(merged_audio, "w") as out:
+        if audio_old.exists():
+            with open(audio_old) as f:
+                for line in f:
+                    out.write(line)
+                    n_audio_old += 1
+        if audio_new.exists():
+            with open(audio_new) as f:
+                for line in f:
+                    out.write(line)
+                    n_audio_new += 1
+    print(f"Audio: {n_audio_old} synthetic + {n_audio_new} real = {n_audio_old + n_audio_new}")
+    n_audio = n_audio_old + n_audio_new
 
     # 4. Images: need a merged dir. Use a directory with symlinks into both
     # old and new image dirs (avoids copying ~365MB).
@@ -95,14 +110,27 @@ def main() -> int:
             n_linked += 1
     print(f"Images: {n_linked} symlinks aggregated")
 
-    # 5. Audio dir symlink
+    # 5. Audio dir: merge synthetic + real via per-file symlinks
     audio_dst = CORE_V2X_V2 / "audio"
     if audio_dst.exists() or audio_dst.is_symlink():
-        audio_dst.unlink() if audio_dst.is_symlink() else shutil.rmtree(audio_dst)
-    audio_src = CORE_V2X / "audio"
-    if audio_src.exists():
-        os.symlink(audio_src, audio_dst)
-        print(f"Audio dir: symlinked")
+        if audio_dst.is_symlink():
+            audio_dst.unlink()
+        else:
+            shutil.rmtree(audio_dst)
+    audio_dst.mkdir(parents=True)
+    n_audio_linked = 0
+    audio_old_dir = CORE_V2X / "audio"
+    audio_new_dir = CORE_V2X_AUDIO / "audio"
+    for src_dir in (audio_old_dir, audio_new_dir):
+        if not src_dir.exists():
+            continue
+        for fname in os.listdir(src_dir):
+            link_path = audio_dst / fname
+            if link_path.exists():
+                continue
+            os.symlink(src_dir / fname, link_path)
+            n_audio_linked += 1
+    print(f"Audio dir: {n_audio_linked} files symlinked")
 
     print(f"\n=== Core 2.x v2 curriculum ===")
     print(f"  Text:   {n_text}")
