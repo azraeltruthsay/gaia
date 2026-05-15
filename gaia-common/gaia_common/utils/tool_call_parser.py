@@ -41,6 +41,74 @@ TOOL_RESPONSE_CLOSE = "</tool_response>"
 TOOL_RESULT_OPEN = "<tool_result>"
 TOOL_RESULT_CLOSE = "</tool_result>"
 
+# Meta-verb format — Unified Skill Architecture.
+# Uses Gemma 4's NATIVE special tokens (single token IDs 46-51):
+#   <|tool>verb(param=value, ...)<tool|>     — model emits a tool call
+#   <|tool_response>...content...<tool_response|>  — injected result
+# These are single tokens in the Gemma 4 vocabulary, not multi-token sequences.
+META_TOOL_OPEN = "<|tool>"
+META_TOOL_CLOSE = "<tool|>"
+META_RESULT_OPEN = "<|tool_response>"
+META_RESULT_CLOSE = "<tool_response|>"
+# Also support the 4-token fallback for non-Gemma models
+META_TOOL_OPEN_ALT = "<|tool|>"
+META_TOOL_CLOSE_ALT = "<|/tool|>"
+
+# Regex for parsing verb(param=value, param=value) format
+_META_VERB_RE = re.compile(
+    r'^(\w+)\((.*)\)$', re.DOTALL
+)
+# Parse key=value or key="value with spaces"
+_META_PARAM_RE = re.compile(
+    r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|(\S+))'
+)
+
+
+def parse_meta_verb(raw: str) -> Optional[Dict[str, Any]]:
+    """Parse a meta-verb call string into tool_name and params.
+
+    Examples:
+        'search(query="current time")' → {"tool": "search", "params": {"query": "current time"}}
+        'do(skill="web-search", input="bitcoin")' → {"tool": "do", "params": {"skill": "web-search", ...}}
+        'remember(fact="GAIA uses Gemma 4")' → {"tool": "remember", "params": {"fact": "..."}}
+
+    Returns:
+        Dict with "tool" and "params" keys, or None if parsing fails.
+    """
+    raw = raw.strip()
+    m = _META_VERB_RE.match(raw)
+    if not m:
+        return None
+
+    verb = m.group(1)
+    args_str = m.group(2).strip()
+
+    params = {}
+    if args_str:
+        for pm in _META_PARAM_RE.finditer(args_str):
+            key = pm.group(1)
+            # Groups 2, 3, 4 are the three capture alternatives (double-quoted, single-quoted, unquoted)
+            value = pm.group(2) if pm.group(2) is not None else (
+                pm.group(3) if pm.group(3) is not None else pm.group(4)
+            )
+            # Parse booleans and numbers
+            if value is not None:
+                if value.lower() == "true":
+                    value = True
+                elif value.lower() == "false":
+                    value = False
+                else:
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        try:
+                            value = float(value)
+                        except (ValueError, TypeError):
+                            pass
+            params[key] = value
+
+    return {"tool": verb, "params": params}
+
 
 class ParseEventType(Enum):
     TEXT = "text"
@@ -74,12 +142,14 @@ class ToolCallParser:
     def __init__(self):
         self._buffer = ""
         self._in_tool_call = False
+        self._is_meta_verb = False
         self._tool_calls_found: List[Dict] = []
 
     def reset(self):
         """Reset parser state for a new generation."""
         self._buffer = ""
         self._in_tool_call = False
+        self._is_meta_verb = False
         self._tool_calls_found = []
 
     def feed(self, token: str) -> List[ParseEvent]:
@@ -95,21 +165,29 @@ class ToolCallParser:
 
         while True:
             if not self._in_tool_call:
-                # Look for tool call opening tag — accept both <tool_call> and <tool_response>
-                open_idx = self._buffer.find(TOOL_CALL_OPEN)
-                open_tag = TOOL_CALL_OPEN
-                close_tag = TOOL_CALL_CLOSE
-                # Also check <tool_response> (some model variants emit this)
-                resp_idx = self._buffer.find(TOOL_RESPONSE_OPEN)
-                if resp_idx != -1 and (open_idx == -1 or resp_idx < open_idx):
-                    open_idx = resp_idx
-                    open_tag = TOOL_RESPONSE_OPEN
-                    close_tag = TOOL_RESPONSE_CLOSE
+                # Look for tool call opening tags — check all supported formats.
+                # Priority: Gemma 4 native tokens first, then XML-style tags.
+                _candidates = [
+                    (self._buffer.find(META_TOOL_OPEN), META_TOOL_OPEN, META_TOOL_CLOSE, True),
+                    (self._buffer.find(TOOL_CALL_OPEN), TOOL_CALL_OPEN, TOOL_CALL_CLOSE, False),
+                    (self._buffer.find(TOOL_RESPONSE_OPEN), TOOL_RESPONSE_OPEN, TOOL_RESPONSE_CLOSE, False),
+                ]
+                # Pick the earliest match
+                best = None
+                for idx, otag, ctag, is_meta in _candidates:
+                    if idx != -1 and (best is None or idx < best[0]):
+                        best = (idx, otag, ctag, is_meta)
+
+                if best is None:
+                    open_idx = -1
+                else:
+                    open_idx, open_tag, close_tag, self._is_meta_verb = best
 
                 if open_idx == -1:
                     # No tag found — emit all buffered text except last few chars
-                    # (which might be a partial tag like "<tool_")
-                    safe_len = len(self._buffer) - len(TOOL_RESPONSE_OPEN)  # longest tag
+                    # (which might be a partial tag like "<tool_" or "<|tool")
+                    _longest_tag = max(len(META_TOOL_OPEN), len(TOOL_RESPONSE_OPEN))
+                    safe_len = len(self._buffer) - _longest_tag
                     if safe_len > 0:
                         events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer[:safe_len]))
                         self._buffer = self._buffer[safe_len:]
@@ -130,13 +208,31 @@ class ToolCallParser:
                     # Haven't received the full tool call yet — wait for more tokens
                     break
                 else:
-                    # Extract the tool call JSON
-                    tool_json = self._buffer[:close_idx].strip()
+                    # Extract the tool call content
+                    tool_content = self._buffer[:close_idx].strip()
                     self._buffer = self._buffer[close_idx + len(close_tag):]
                     self._in_tool_call = False
 
-                    # Parse the tool call
-                    event = self._parse_tool_call(tool_json)
+                    # Parse based on format
+                    if getattr(self, '_is_meta_verb', False):
+                        # Meta-verb format: verb(param=value, ...)
+                        parsed = parse_meta_verb(tool_content)
+                        if parsed:
+                            event = ParseEvent(
+                                type=ParseEventType.TOOL_CALL_DETECTED,
+                                tool_name=parsed["tool"],
+                                tool_params=parsed["params"],
+                            )
+                        else:
+                            event = ParseEvent(
+                                type=ParseEventType.TOOL_ERROR,
+                                error=f"Failed to parse meta-verb: {tool_content[:80]}",
+                                text=META_TOOL_OPEN + tool_content + META_TOOL_CLOSE,
+                            )
+                    else:
+                        # JSON format: {"tool": "...", "action": "...", ...}
+                        event = self._parse_tool_call(tool_content)
+
                     events.append(event)
                     self._tool_calls_found.append({
                         "tool": event.tool_name,
