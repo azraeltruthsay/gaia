@@ -626,6 +626,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             f"[System identity and rules loaded from KV cache prefix]\n"
             f"Current time: {_current_time}\nPersona: {persona_id}\nRole: {role_val}"
         )
+        # Architecture-fact injection MUST appear even on the kv-prefix fast
+        # path. The cached prefix is computed once at engine start and does
+        # not include the runtime arch fact; without re-injecting here, the
+        # model never sees "Google's Gemma 4 E4B" and falls back to whatever
+        # tier/cognitive-index content appears later in the prompt — which
+        # currently says "Core 4B" (see GAIA_Project-ar2). The persona_anchor
+        # has the full arch_fact appended at the top of this function; pull
+        # it back out via the marker we know it contains.
+        if "— Architecture (factual" in persona_anchor:
+            _arch_idx = persona_anchor.index("— Architecture (factual")
+            system_content_parts.append(persona_anchor[_arch_idx:].strip())
         # Skip to dynamic sections (world state, task instruction, RAG, etc.)
     else:
         # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)

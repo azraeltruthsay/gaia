@@ -1579,10 +1579,15 @@ class AgentCore:
             logger.info("[PIPELINE_DEPTH] %s (model: %s)", pipeline_depth, selected_model_name)
             logger.debug("[DEBUG] AgentCore selected_model=%s", selected_model_name)
 
-            # Log model routing decision to event buffer
+            # Log model routing decision to event buffer.
+            # Phrased as "selected tier" rather than "Model: X" because the
+            # summary surfaces in introspection contexts and we don't want
+            # any reader (including the LLM via world_state) to parse this
+            # as an identity claim. The full structured data is in
+            # `details` for tools that need it.
             try:
                 from gaia_common.event_buffer import log_event
-                log_event("routing", f"Model: {selected_model_name} ({pipeline_depth})",
+                log_event("routing", f"selected tier: {selected_model_name} (depth={pipeline_depth})",
                           source="agent_core",
                           details={"model": selected_model_name, "depth": pipeline_depth})
             except Exception:
@@ -1641,8 +1646,28 @@ class AgentCore:
                     source='semantic_probe',
                 ))
     
-            # Inject CIL grounding — topic file content matched by entity lookup
-            if probe_result and hasattr(probe_result, 'cil_grounding') and probe_result.cil_grounding:
+            # Determine detected intent FIRST so all grounding paths can gate
+            # on it. The CIL grounding (cognitive index blueprint lookup) was
+            # historically ungated and leaked service architecture into the
+            # context for identity questions — see GAIA_Project-ar2. Now all
+            # three grounding paths (CIL, web, auto) share the same skip-list
+            # for intents where grounding context conflicts with self-knowledge.
+            _skip_web_ground_intents = {"recitation", "greeting", "identity", "time", "chat", "status"}
+            _detected_intent = ""
+            try:
+                _detected_intent = str(getattr(getattr(packet, 'intent', None), 'user_intent', '') or '').lower()
+            except Exception:
+                pass
+
+            # Inject CIL grounding — topic file content matched by entity lookup.
+            # Skip for identity-flavored intents: looking up "model" against the
+            # cognitive index pulls back gaia-nano.yaml blueprint snippets
+            # (nano.gguf, llama-server, tier role names) which the LLM then
+            # parrots back as its own identity.
+            if (probe_result
+                    and hasattr(probe_result, 'cil_grounding')
+                    and probe_result.cil_grounding
+                    and _detected_intent not in _skip_web_ground_intents):
                 packet.content.data_fields.append(DataField(
                     key='cil_grounding',
                     value=probe_result.cil_grounding,
@@ -1652,16 +1677,12 @@ class AgentCore:
                 self.logger.info("CIL grounding injected: %d entities → %s",
                                   len(probe_result.cil_grounding),
                                   list(probe_result.cil_grounding.keys()))
+            elif probe_result and getattr(probe_result, 'cil_grounding', None) and _detected_intent in _skip_web_ground_intents:
+                self.logger.info("CIL grounding skipped for intent=%s", _detected_intent)
 
             # Inject web search fallback grounding for ungrounded entities
             # Skip for intents where the model's training data is sufficient
             # (recitation, greeting, identity, time, chat, status)
-            _skip_web_ground_intents = {"recitation", "greeting", "identity", "time", "chat", "status"}
-            _detected_intent = ""
-            try:
-                _detected_intent = str(getattr(getattr(packet, 'intent', None), 'user_intent', '') or '').lower()
-            except Exception:
-                pass
             if probe_result and hasattr(probe_result, 'web_grounding') and probe_result.web_grounding and _detected_intent not in _skip_web_ground_intents:
                 packet.content.data_fields.append(DataField(
                     key='web_grounding',

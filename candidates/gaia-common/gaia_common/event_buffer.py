@@ -84,14 +84,32 @@ class EventBuffer:
         events = self._read_all()
         return list(reversed(events[-n:]))
 
-    def recent_formatted(self, n: int = 8) -> str:
-        """Return last N events as formatted text for prompt injection."""
-        events = self.recent(n)
+    # Event types to suppress in prompt-bound output. These are internal
+    # routing/debug events that leak GAIA terminology into the LLM's
+    # context and cause identity confabulation (e.g., "Model: core
+    # (OPERATOR)" gets parroted back as the model's self-description —
+    # see GAIA_Project-ar2).
+    _PROMPT_SUPPRESSED_EVENT_TYPES = frozenset({"routing"})
+
+    def recent_formatted(self, n: int = 8, suppress_internal: bool = True) -> str:
+        """Return last N events as formatted text for prompt injection.
+
+        When `suppress_internal=True` (default for prompt injection), filters
+        out internal routing/debug event types whose summaries can be parsed
+        as identity claims by the LLM. Pass `suppress_internal=False` for
+        introspection tools that need the full event stream.
+        """
+        # Fetch extra so we still return ~n events after filtering
+        fetch_n = n * 3 if suppress_internal else n
+        events = self.recent(fetch_n)
         if not events:
             return "No recent events recorded."
 
         lines = []
         for e in events:
+            etype = e.get("type", "")
+            if suppress_internal and etype in self._PROMPT_SUPPRESSED_EVENT_TYPES:
+                continue
             ts = e.get("ts", "")
             # Parse and format as short time
             try:
@@ -100,10 +118,13 @@ class EventBuffer:
             except Exception:
                 time_str = ts[:16]
 
-            etype = e.get("type", "")
             summary = e.get("summary", "")
             lines.append(f"- {time_str} [{etype}] {summary}")
+            if len(lines) >= n:
+                break
 
+        if not lines:
+            return "No recent events recorded."
         return "\n".join(lines)
 
     def full(self, hours: float = 24.0) -> List[Dict]:
