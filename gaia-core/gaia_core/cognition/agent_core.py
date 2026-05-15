@@ -2373,7 +2373,17 @@ class AgentCore:
                         user_message_id=getattr(packet.header, "packet_id", None),
                         session_id=session_id,
                     )
-                    if _delib_result and _delib_result.final_response:
+                    # Strip any residual <think> tags from the deliberation
+                    # output before yielding. _split_think_and_response already
+                    # handles closed/unclosed think blocks (see deliberation.py),
+                    # but defense-in-depth ensures we never yield a header-only
+                    # "[Core]\n\n" stub to the user if downstream stripping
+                    # consumes the entire body. This was the failure mode
+                    # observed on 2026-05-15: model output was unclosed
+                    # <think>...; deliberation returned it as final_response;
+                    # session_manager stripped it; user saw "[Core]\n\n".
+                    _final_clean = strip_think_tags(_delib_result.final_response or "").strip() if _delib_result else ""
+                    if _delib_result and _final_clean:
                         logger.info(
                             "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
                             _delib_result.journal_entry_id or "(no-journal)",
@@ -2385,11 +2395,14 @@ class AgentCore:
                         )
                         _delib_responding = getattr(self, '_last_responding_model', None) or selected_model_name
                         _delib_header = self._build_response_header(_delib_responding, packet, None, None, None)
-                        yield {"type": "token", "value": _delib_header + _delib_result.final_response}
+                        yield {"type": "token", "value": _delib_header + _final_clean}
                         try:
                             if self.session_manager and session_id:
+                                # Save the cleaned response so session_manager
+                                # doesn't re-strip it to empty and skip the
+                                # turn entirely.
                                 self.session_manager.add_message(
-                                    session_id, "assistant", _delib_result.final_response,
+                                    session_id, "assistant", _final_clean,
                                 )
                         except Exception:
                             logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)

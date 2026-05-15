@@ -238,17 +238,41 @@ class DeliberationResult:
         return bool(self.confabulation_flags)
 
 
+_UNCLOSED_THINK_RE = re.compile(r"<think>(.*)", re.DOTALL | re.IGNORECASE)
+
+
 def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
     """Pull <think>...</think> out of the raw output.
 
     Returns (thinking, final_response, fallback_used). If no think block,
     fallback_used=True and the entire raw output is treated as the final
     response (degraded but the user gets something).
+
+    Also handles the unclosed `<think>...` case (model emitted opening tag
+    and got cut off before closing it — observed when the model goes into
+    extended deliberation and hits max_tokens). Without this, the unclosed
+    tag was returned as raw output, then stripped downstream by
+    session_manager._strip_think_tags_robust, leaving the user with only
+    the response header (e.g., "[Core]\\n\\n") and no content — silent
+    failure mode.
     """
     if not raw:
         return "", "", True
     m = _THINK_RE.search(raw)
     if not m:
+        # No closed think block — but maybe an unclosed one consumed the
+        # whole completion. Salvage the thinking content as the response.
+        u = _UNCLOSED_THINK_RE.search(raw)
+        if u:
+            thinking = u.group(1).strip()
+            # Anything before the opening <think> is the model's pre-thinking
+            # prose; prefer that as the response when present.
+            pre = raw[:u.start()].strip()
+            if pre:
+                return thinking, pre, True
+            # No pre-think text; degrade to using the thinking as response so
+            # the user sees something instead of an empty bubble.
+            return thinking, thinking, True
         return "", raw.strip(), True
     thinking = m.group(1).strip()
     final = (raw[:m.start()] + raw[m.end():]).strip()

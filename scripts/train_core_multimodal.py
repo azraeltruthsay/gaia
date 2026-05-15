@@ -947,6 +947,7 @@ def main():
         gradient_accumulation_steps=GRAD_ACCUM,
         learning_rate=LEARNING_RATE,
         warmup_steps=WARMUP_STEPS,
+        max_grad_norm=0.5,
         logging_steps=10,
         save_steps=max(50, args.steps // 4),
         save_total_limit=2,

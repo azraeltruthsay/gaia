@@ -139,6 +139,37 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
 
+    # Architecture-fact injection (2026-05-15): four LoRA rounds (V7-V10) failed
+    # to dislodge base-Gemma's spontaneous Qwen confabulation. Root cause is
+    # negation poisoning — every denial sample co-trains "Qwen" as an
+    # identity-context token. Architecture identity is config metadata, not
+    # weight-baked knowledge; inject the truth via system prompt and let
+    # the model read it instead of trying to remember it.
+    #
+    # Wording note: avoid placing "Core" adjacent to "E4B" — the model has
+    # been observed blending them into nonsense like "Core 4B." Keep the
+    # base-model answer template explicit and isolated from tier names.
+    try:
+        _arch_fact = (
+            "\n\n— Architecture (factual, do not contradict) —\n"
+            "Your name is GAIA. Your base model is Google's Gemma 4 E4B — an "
+            "open-weight multimodal transformer (~8B parameters, native vision "
+            "and audio towers). You are NOT Qwen, Llama, Mistral, GPT, Claude, "
+            "Gemini, or any other model family.\n"
+            "When asked about your base model, architecture, or what you are "
+            "built on, answer with exactly: Google's Gemma 4 E4B.\n"
+            "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' are "
+            "ROUTING TIER LABELS in your world state, not model names. Never "
+            "introduce yourself as 'Core' or 'Core 4B' or any tier name. Your "
+            "identity is GAIA; your base is Google's Gemma 4 E4B. GAIA has a "
+            "separate Prime tier running on Google's Gemma 4 26B-A4B for deep "
+            "reasoning, but that is a different model on a different process — "
+            "not you."
+        )
+        persona_anchor = persona_anchor + _arch_fact
+    except Exception:
+        logger.debug("Architecture-fact injection skipped (non-fatal)", exc_info=True)
+
     # Persona-specific overlay: when the packet carries a knowledge_base_name,
     # load the matching persona's template + instructions and prepend them
     # to the system prompt. This is how dnd_player_assistant gets to inject

@@ -152,41 +152,44 @@ def section_alpaca(rng: random.Random) -> list:
 
 
 def section_gaia(rng: random.Random) -> list:
-    """Pull from existing GAIA-specific curricula. Multi-source curated."""
-    print("[gaia] curating from local GAIA-specific buckets...")
-    rows = []
-    # self-model train_weighted has the richest curated GAIA data
-    rows += load_local_jsonl(SELF_MODEL / "train_weighted.jsonl", "gaia_identity")
-    rows += load_local_jsonl(SELF_MODEL / "train_v2.jsonl", "gaia_identity")
-    # core2/text.jsonl is the pilot's 650 — already curated
-    rows += load_local_jsonl(CORE2 / "text.jsonl", "gaia_identity")
-    print(f"  raw collected: {len(rows)}")
-    # Dedup by (instruction + output) — many GAIA prompts share persona
-    # preambles but have unique outputs, so keying on instruction alone
-    # over-aggressively dropped 80% of valid samples in the first build.
-    seen = set()
-    deduped = []
-    for r in rows:
-        k = (r["instruction"][:300], r["output"][:300])
-        if k in seen:
-            continue
-        seen.add(k)
-        deduped.append(r)
-    print(f"  deduped: {len(deduped)}")
-    rng.shuffle(deduped)
-    return deduped[:TARGET_GAIA]
+    """V11: gaia_identity bucket is now system-prompt-anchored, not
+    weight-baked. Architecture metadata (base model, tier names, parameter
+    counts) is injected into every system prompt by gaia-core's
+    prompt_builder.py (pulled from MODEL_CONFIGS). This makes the bulk of
+    self-model/ and core2/text.jsonl content redundant and actively harmful:
+    every sample that says "I'm built on Gemma 4 E4B" or "My Nano tier
+    uses..." duplicates system-prompt state with weight-baked claims that
+    can drift, confabulate, and reintroduce negation-poisoning the moment
+    a rival is named.
+
+    The fix (after four LoRA rounds V7-V10 failed to dislodge spontaneous
+    base-model confabulation) is to drop the entire self-model + core2
+    source and let the system prompt carry identity authoritatively.
+    Persona/voice training comes from the patch dir (clean_termination,
+    dissociation) and from the broader curriculum's natural distribution.
+    """
+    print("[gaia] V11: self-model/core2 dropped — identity is system-prompt-anchored")
+    return []
 
 
 def section_tools(rng: random.Random) -> list:
-    print("[tools] curating tool routing examples...")
+    """V8: tool routing now uses the new generated curriculum (correct
+    domain-action MCP format) instead of the stale tool_calling_v1/ samples
+    which used the OLD {"action": "read_file"} naming that no longer routes.
+    json-architect + code-architect remain — they teach JSON/code format
+    discipline, not tool calls."""
+    print("[tools] curating tool routing examples (v8 generated)...")
     rows = []
-    rows += load_local_jsonl(TOOL_CALLING / "tool_calling_v1_full.jsonl", "tool_routing")
-    rows += load_local_jsonl(TOOL_CALLING / "generated_85.jsonl", "tool_routing")
-    rows += load_local_jsonl(TOOL_CALLING / "audited_samples.jsonl", "tool_routing")
+    # V8 generated tool_calls.jsonl — 1875 samples with correct
+    # <tool_call>{"tool":"X","action":"Y",...}</tool_call> format
+    v8_tools = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_tools/tool_calls.jsonl")
+    if v8_tools.exists():
+        rows += load_local_jsonl(v8_tools, "tool_routing")
+    # JSON/code format discipline (NOT tool calls — just format examples)
     rows += load_local_jsonl(JSON_ARCH / "train.jsonl", "tool_routing")
     rows += load_local_jsonl(CODE_ARCH / "train.jsonl", "tool_routing")
     rng.shuffle(rows)
-    rows = rows[:TARGET_TOOL]
+    rows = rows[:TARGET_TOOL * 3]  # let v8 tool generator inflate this bucket
     print(f"  kept: {len(rows)}")
     return rows
 
@@ -386,6 +389,42 @@ def main():
             text_buckets += load_local_jsonl(patch_file, "gaia_identity")
             print(f"  added patch: {patch_file.name}")
     rng.shuffle(text_buckets)
+
+    # V9 pre-flight: scan ALL gaia_identity samples for rival-model mentions.
+    # V8 shipped with 105 Qwen mentions because identity contamination was
+    # only spot-checked in self-model files; alpaca/multiturn samples can
+    # also leak rival names that bias the identity prior. This gate prints
+    # offenders so we can decide to drop or rewrite before training.
+    import re as _re
+    rival_re = _re.compile(
+        r"\b(Qwen[\d.\-A-Za-z]*"
+        r"|Llama(?![._]cpp\b)[\d.\-A-Za-z]*"
+        r"|Mistral[\d.\-A-Za-z]*"
+        r"|Phi-[\d.\-A-Za-z]*"
+        r"|DeepSeek[\d.\-A-Za-z]*"
+        r"|GPT-[\d.\-A-Za-z]*"
+        r"|ChatGPT|Claude[\d.\-A-Za-z]*|Gemini[\d.\-A-Za-z]*)\b",
+        _re.IGNORECASE,
+    )
+    rival_hits_by_cat: dict[str, int] = {}
+    rival_examples: list[tuple[str, str, str]] = []
+    for r in text_buckets:
+        text = (r.get("instruction") or "") + "\n" + (r.get("output") or "")
+        m = rival_re.search(text)
+        if m:
+            cat = r.get("category", "?")
+            rival_hits_by_cat[cat] = rival_hits_by_cat.get(cat, 0) + 1
+            if len(rival_examples) < 5:
+                rival_examples.append((cat, m.group(0), (r.get("output") or "")[:120]))
+    total_rivals = sum(rival_hits_by_cat.values())
+    print(f"\n[v9 identity pre-flight] rival-family mentions: {total_rivals}")
+    for c in sorted(rival_hits_by_cat):
+        print(f"  {c:25s} {rival_hits_by_cat[c]:5d}")
+    if rival_examples:
+        print("  examples:")
+        for cat, hit, snippet in rival_examples:
+            print(f"    [{cat}] '{hit}' → {snippet!r}")
+
     write_jsonl(CORE_V2X / "text.jsonl", text_buckets)
 
     # Per-category histogram for sanity
