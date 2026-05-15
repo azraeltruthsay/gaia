@@ -5052,57 +5052,73 @@ class AgentCore:
         1. Model generates first output (including <tool_call>)
         2. Runtime executes tool, gets result
         3. This method generates the continuation with result in context
+
+        Tier preference (2026-05-15, GAIA_Project-06z): Core first, then
+        Prime/cpu_prime as fallback. The previous order (Prime first)
+        caused tool-call continuation to fail whenever gaia-prime was
+        offline — acquire_model('prime') returned a handle but the
+        subsequent HTTP call to gaia-prime:7777 raised, and there was
+        no fallback inside the try/except. Now we iterate candidates AND
+        try the actual forward call so a single tier failure rolls over
+        to the next. Core is preferred because the prior turn used Core
+        to emit the tool call, so the result→synthesis transition
+        benefits from continuity of context and KV cache.
         """
-        # Acquire a model — prefer GPU models first (esp. during FOCUSING)
-        model = None
-        model_name = None
-        for cand in ["prime", "core", "cpu_prime"]:
+        candidates = ["core", "prime", "cpu_prime"]
+        last_err: Exception | None = None
+        for cand in candidates:
+            model = None
             try:
                 model = self.model_pool.acquire_model(cand)
-                if model is not None:
-                    model_name = cand
-                    break
             except Exception:
                 continue
-
-        if not model:
-            self.logger.warning("No model available for continuation generation")
-            yield {"type": "token", "value": "\n*[No model available for continuation]*\n"}
-            return
-
-        try:
-            self.logger.info("Continuation generation with %s (%d messages)", model_name, len(messages))
-            result = self.model_pool.forward_to_model(
-                model_name,
-                messages=messages,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
-            )
-
-            if isinstance(result, dict):
-                text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if text:
-                    text = strip_think_tags(text).strip()
-                    yield {"type": "token", "value": text}
-            elif hasattr(result, '__iter__'):
-                # Streaming response
-                for chunk in result:
-                    if isinstance(chunk, dict):
-                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if delta:
-                            delta = strip_think_tags(delta)
+            if model is None:
+                continue
+            try:
+                self.logger.info("Continuation generation with %s (%d messages)", cand, len(messages))
+                result = self.model_pool.forward_to_model(
+                    cand,
+                    messages=messages,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    top_p=self.config.top_p,
+                )
+                if isinstance(result, dict):
+                    text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if text:
+                        text = strip_think_tags(text).strip()
+                        yield {"type": "token", "value": text}
+                elif hasattr(result, '__iter__'):
+                    # Streaming response
+                    for chunk in result:
+                        if isinstance(chunk, dict):
+                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
                             if delta:
-                                yield {"type": "token", "value": delta}
-        except Exception as e:
-            self.logger.warning("Continuation generation failed: %s", e)
-            yield {"type": "token", "value": f"\n*[continuation error: {e}]*\n"}
-        finally:
-            if model_name:
+                                delta = strip_think_tags(delta)
+                                if delta:
+                                    yield {"type": "token", "value": delta}
+                # Success — release and return
                 try:
-                    self.model_pool.release_model(model_name)
+                    self.model_pool.release_model(cand)
                 except Exception:
                     pass
+                return
+            except Exception as e:
+                last_err = e
+                self.logger.warning("Continuation generation on %s failed (%s), trying next candidate", cand, e)
+                try:
+                    self.model_pool.release_model(cand)
+                except Exception:
+                    pass
+                continue
+
+        # All candidates exhausted
+        if last_err is not None:
+            self.logger.warning("Continuation generation: all candidates failed; last error: %s", last_err)
+            yield {"type": "token", "value": f"\n*[continuation error: {last_err}]*\n"}
+        else:
+            self.logger.warning("No model available for continuation generation")
+            yield {"type": "token", "value": "\n*[No model available for continuation]*\n"}
 
     def generate_instant_reflex(self, packet: CognitionPacket) -> str:
         """
