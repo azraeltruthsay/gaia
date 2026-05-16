@@ -1396,12 +1396,45 @@ class AgentCore:
                 # handles GPU/CPU fallback (safetensors when GPU is awake,
                 # GGUF when it's parked). Falling back to Core defeats the
                 # whole purpose — Core can't follow long instruction stacks.
+                #
+                # Prime-reachability gate (2026-05-15, follow-up to 06z):
+                # The engine manager's GPU/CPU fallback only helps when the
+                # gaia-prime CONTAINER is running. When the container itself
+                # is offline (DNS resolution fails for "gaia-prime"), the
+                # subsequent forward_to_model call raises and the user sees
+                # GAIA-CORE-078 "Plan generation failed". Health-check Prime
+                # BEFORE forcing it so we degrade to Core gracefully when
+                # Prime is unavailable.
                 if "prime" in self.config.MODEL_CONFIGS:
-                    selected_model_name = "prime"
-                    logger.info(
-                        f"[MODEL_SELECT] Overriding to 'prime' (reason: {_reason}); "
-                        f"engine will choose backend (gpu={not _gpu_sleeping})"
-                    )
+                    _prime_reachable = False
+                    try:
+                        _prime_cfg = self.config.MODEL_CONFIGS.get("prime", {}) or {}
+                        _prime_endpoint = _prime_cfg.get("endpoint") or os.environ.get(
+                            "PRIME_ENDPOINT", "http://gaia-prime:7777")
+                        import httpx as _httpx_chk
+                        _ph = _httpx_chk.get(f"{_prime_endpoint}/health", timeout=2.0)
+                        _prime_reachable = _ph.status_code == 200
+                    except Exception as _e:
+                        logger.info(
+                            f"[MODEL_SELECT] Prime health check failed ({_e}) — "
+                            f"falling back to Core for this turn"
+                        )
+                    if _prime_reachable:
+                        selected_model_name = "prime"
+                        logger.info(
+                            f"[MODEL_SELECT] Overriding to 'prime' (reason: {_reason}); "
+                            f"engine will choose backend (gpu={not _gpu_sleeping})"
+                        )
+                    else:
+                        # Prime container offline — use Core. Quality will be
+                        # lower for instruction-heavy RAG turns, but at least
+                        # the user gets a response instead of GAIA-CORE-078.
+                        logger.warning(
+                            f"[MODEL_SELECT] Prime unreachable; using Core for "
+                            f"{_reason} turn (lower quality on long instruction stacks)"
+                        )
+                        if "core" in self.model_pool.models:
+                            selected_model_name = "core"
             elif not selected_model_name and knowledge_base_name and is_trivial:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
