@@ -91,12 +91,31 @@ def _is_tower_key(key: str) -> bool:
 
 
 # ── Gemma 4 prompt formatting ──────────────────────────────────────────────
-def format_text_pair(instruction: str, output: str) -> str:
-    """Format a text-only training pair in Gemma 4 chat format.
+# ── Chat template selection (Gemma 4 turn-tags vs ChatML) ─────────────────
+# Mirrors the format ChatFormatter.format_conversation emits at inference
+# time (see gaia-engine/gaia_engine/core.py ChatFormatter). The template
+# is selected per-run via --chat-template; auto-detects from BASE_MODEL
+# path (Qwen → chatml, Gemma → gemma4).
+CHAT_TEMPLATE = "gemma4"  # overridden by main() before dataset build
 
-    Mirrors the format ChatFormatter.format_conversation emits at
-    inference time (see gaia-engine/gaia_engine/core.py ChatFormatter).
-    """
+
+def _detect_chat_template(model_path: str) -> str:
+    """Auto-detect chat template from base model path. Override via
+    --chat-template flag."""
+    p = (model_path or "").lower()
+    if "qwen" in p:
+        return "chatml"
+    return "gemma4"
+
+
+def format_text_pair(instruction: str, output: str) -> str:
+    """Format a text-only training pair in the active chat template."""
+    if CHAT_TEMPLATE == "chatml":
+        return (
+            f"<|im_start|>user\n{instruction}<|im_end|>\n"
+            f"<|im_start|>assistant\n{output}<|im_end|>"
+        )
+    # Gemma 4 (default)
     return (
         f"<|turn>user<turn|>\n{instruction}\n"
         f"<|turn>assistant<turn|>\n{output}<turn|>"
@@ -108,6 +127,11 @@ def format_vision_prompt(instruction: str, output: str, img_placeholder: str) ->
     the start of the user turn; the processor expands it into boi + soft
     tokens + eoi automatically.
     """
+    if CHAT_TEMPLATE == "chatml":
+        return (
+            f"<|im_start|>user\n{img_placeholder}\n{instruction}<|im_end|>\n"
+            f"<|im_start|>assistant\n{output}<|im_end|>"
+        )
     return (
         f"<|turn>user<turn|>\n{img_placeholder}\n{instruction}\n"
         f"<|turn>assistant<turn|>\n{output}<turn|>"
@@ -119,6 +143,11 @@ def format_audio_prompt(instruction: str, output: str, audio_placeholder: str) -
     the start of the user turn; the processor expands it into the audio
     soft tokens automatically (audio_seq_length=750 by default for Gemma 4).
     """
+    if CHAT_TEMPLATE == "chatml":
+        return (
+            f"<|im_start|>user\n{audio_placeholder}\n{instruction}<|im_end|>\n"
+            f"<|im_start|>assistant\n{output}<|im_end|>"
+        )
     return (
         f"<|turn>user<turn|>\n{audio_placeholder}\n{instruction}\n"
         f"<|turn>assistant<turn|>\n{output}<turn|>"
@@ -731,6 +760,16 @@ def main():
                              "spiral-ordered curriculum that encodes "
                              "phase-based dependencies — random shuffle "
                              "would destroy the ordering.")
+    parser.add_argument("--no-audio", action="store_true",
+                        help="Skip audio samples (explicit form; equivalent "
+                             "to not passing --audio-curriculum-name). Useful "
+                             "for text-only Prime training on Qwen3-VL.")
+    parser.add_argument("--chat-template", choices=("auto", "gemma4", "chatml"),
+                        default="auto",
+                        help="Chat template wrapping at training time. "
+                             "'auto' (default) picks chatml for Qwen-family "
+                             "base models, gemma4 otherwise. Must match what "
+                             "the engine emits at inference time.")
     args = parser.parse_args()
 
     # Allow CLI to point at a different curriculum without editing globals.
@@ -760,7 +799,7 @@ def main():
     # Audio curriculum — independent of vision so we can train audio-only.
     audio_curriculum = None
     audio_root = None
-    if args.audio_curriculum_name:
+    if args.audio_curriculum_name and not args.no_audio:
         adir = f"{_PROJ}/knowledge/curricula/{args.audio_curriculum_name}"
         audio_curriculum = f"{adir}/audio_pairs.jsonl"
         audio_root = adir
@@ -770,6 +809,18 @@ def main():
             derived = args.version_tag or args.audio_curriculum_name.rsplit("-", 1)[-1]
             ADAPTER_DIR = f"{_BASE}/lora_adapters/gemma4_e4b_core_multimodal_{derived}"
             MERGED_DIR = f"{_BASE}/Gemma4-E4B-GAIA-Core-Multimodal-{derived.upper()}"
+
+    # Chat-template selection (Gemma 4 turn tags vs Qwen ChatML). Auto-detect
+    # from base model path so Prime training on Qwen3-VL uses ChatML and Core
+    # training on Gemma 4 keeps turn-tags. Override with --chat-template.
+    global CHAT_TEMPLATE
+    if args.chat_template == "auto":
+        CHAT_TEMPLATE = _detect_chat_template(BASE_MODEL)
+        log.info("Chat template auto-detected: %s (from base=%s)",
+                 CHAT_TEMPLATE, BASE_MODEL)
+    else:
+        CHAT_TEMPLATE = args.chat_template
+        log.info("Chat template (explicit): %s", CHAT_TEMPLATE)
 
     # RunRecorder: structured run record at /shared/training_runs/<run_id>/
     # See GAIA_Project-c1y. Phase 1: config.json + metrics.jsonl + summary.json.
@@ -822,10 +873,12 @@ def main():
     vram_total = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
     print(f"GPU: {torch.cuda.get_device_name(0)} ({vram_total:.1f} GB)")
 
-    # 1. Processor
-    log.info("Loading Gemma4Processor...")
+    # 1. Processor (Gemma4Processor / Qwen3VLProcessor / etc — auto-routed
+    # from config.json's processor_class)
+    log.info("Loading processor for %s...", BASE_MODEL)
     from transformers import AutoProcessor
     processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    log.info("Processor: %s", type(processor).__name__)
     if processor.tokenizer.pad_token is None:
         processor.tokenizer.pad_token = processor.tokenizer.eos_token
 
@@ -848,11 +901,19 @@ def main():
 
     # 3. Load model with NF4 + skip towers (they use Gemma4ClippableLinear
     #    natively; double-quantizing through bnb breaks forward pass).
+    # Skip-modules also covers Qwen3-VL's `visual` and `vision_model` so
+    # Prime training on Qwen3-VL doesn't NF4-corrupt the vision tower
+    # (even though we don't train on vision, we still load the full model).
     log.info("Loading model with NF4 quantization (towers skipped)...")
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
-    skip_modules = ["lm_head", "vision_tower", "audio_tower",
-                    "embed_vision", "embed_audio"]
+    skip_modules = [
+        "lm_head",
+        # Gemma 4 tower names
+        "vision_tower", "audio_tower", "embed_vision", "embed_audio",
+        # Qwen3-VL / Qwen2-VL tower names
+        "visual", "vision_model",
+    ]
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
@@ -865,13 +926,44 @@ def main():
     # layers (accelerate's auto map). A previous Core 2.1 run hit that
     # silent-offload path during a lifecycle transition race, leaving
     # the LoRA's trainable layers on CPU and producing loss-22 garbage.
-    model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL, trust_remote_code=True,
-        quantization_config=bnb_config,
-        device_map={"": 0},
-        low_cpu_mem_usage=True,
-        attn_implementation="eager",
-    )
+    #
+    # Auto-class selection (2026-05-18): VL architectures (Qwen3-VL,
+    # Qwen2-VL) aren't registered for AutoModelForCausalLM. Detect
+    # via config and use AutoModelForImageTextToText, falling back to
+    # AutoModelForCausalLM for text-only or Gemma 4 (which does support
+    # CausalLM). Mirrors the engine's same fix at gaia-engine commit 4ad864d.
+    _model_loaded = False
+    _is_vl_arch = False
+    try:
+        from transformers import AutoConfig
+        _cfg = AutoConfig.from_pretrained(BASE_MODEL, trust_remote_code=True)
+        _model_type = getattr(_cfg, "model_type", "")
+        _is_vl_arch = "vl" in _model_type.lower() or "vision" in _model_type.lower()
+    except Exception:
+        pass
+    if _is_vl_arch:
+        try:
+            from transformers import AutoModelForImageTextToText
+            model = AutoModelForImageTextToText.from_pretrained(
+                BASE_MODEL, trust_remote_code=True,
+                quantization_config=bnb_config,
+                device_map={"": 0},
+                low_cpu_mem_usage=True,
+                attn_implementation="eager",
+            )
+            _model_loaded = True
+            log.info("Loaded via AutoModelForImageTextToText (VL arch detected)")
+        except Exception as _vl_err:
+            log.warning("AutoModelForImageTextToText load failed (%s) — "
+                        "falling back to AutoModelForCausalLM", _vl_err)
+    if not _model_loaded:
+        model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL, trust_remote_code=True,
+            quantization_config=bnb_config,
+            device_map={"": 0},
+            low_cpu_mem_usage=True,
+            attn_implementation="eager",
+        )
     model.config.use_cache = False
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False},
