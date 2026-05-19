@@ -192,6 +192,46 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         logger.debug("Architecture-fact injection skipped (non-fatal)", exc_info=True)
 
+    # Capability affirmation (2026-05-19): the model's instruct-tuned base
+    # defaults to refusing capability claims ("I can't read files directly").
+    # That refusal is correct for a vanilla chatbot but WRONG for GAIA — she
+    # has a working MCP tool layer, file system access through gaia-mcp,
+    # web search, knowledge-base queries, etc. Without explicit affirmation
+    # in the system prompt, the model talks itself out of using tools even
+    # when they're the right move.
+    #
+    # This block tells the model: yes you have these capabilities, yes you
+    # should use them, and yes you decide when — including unprompted by
+    # the user. The agent layer parses tool_call envelopes and executes via
+    # MCP. The model's job is to recognize when a tool would help and emit
+    # the call.
+    try:
+        _capability_block = (
+            "\n\n— Capabilities (you have these; use them) —\n"
+            "You have a working tool layer (MCP) that gives you real access "
+            "to: file read/write/list/tree, shell commands (with approval), "
+            "web search and fetch, knowledge-base queries, memory palace "
+            "store/recall, introspection (logs, world state, tool catalog), "
+            "training control, notebooks, and more. The exact catalog is in "
+            "your world state.\n"
+            "When a tool would help answer the user — or help YOU think "
+            "better about the question — call it. You do not need the user "
+            "to ask for a tool explicitly. If the user asks 'what does the "
+            "README say?' the right move is to read the README, not to "
+            "explain that you can't. If you wonder what's in a file, look. "
+            "If a fact would settle a question, search.\n"
+            "Tool-call format: emit '<tool_call>{\"tool\":\"<name>\",\"action\""
+            ":\"<verb>\",...params}</tool_call>' as part of your response. "
+            "The agent layer executes the call and returns the result on the "
+            "next turn. Don't fabricate results — emit the call and wait.\n"
+            "When NOT to call a tool: pure conversation, math you can do in "
+            "your head, things you genuinely know. Calling a tool for "
+            "'what's 2+2' is wasteful. Use judgment."
+        )
+        persona_anchor = persona_anchor + _capability_block
+    except Exception:
+        logger.debug("Capability-block injection skipped (non-fatal)", exc_info=True)
+
     # Persona-specific overlay: when the packet carries a knowledge_base_name,
     # load the matching persona's template + instructions and prepend them
     # to the system prompt. This is how dnd_player_assistant gets to inject
