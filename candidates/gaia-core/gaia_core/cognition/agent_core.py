@@ -1714,6 +1714,35 @@ class AgentCore:
             except Exception:
                 pass
 
+            # File-path gate (2026-05-19, GAIA_Project-jis): when the user's
+            # prompt names a local file path or a project-relative resource,
+            # web search is the wrong source — file.read on the actual path
+            # is. Without this gate, "What does /shared/CLAUDE.md say about
+            # X?" triggers a web search for "CLAUDE.md X" and returns
+            # garbage (Claude Monet, fashion brands, unrelated github repos)
+            # which then gets injected as ground truth before the model
+            # can decide to use file.read instead. The capability block
+            # tells the model to prefer tools; this prevents the prompt
+            # from being pre-poisoned with web results that would override
+            # that judgment.
+            import re as _re_fp
+            _local_file_re = _re_fp.compile(
+                # Absolute path with known local root
+                r"(?:^|\s)(?:/shared|/gaia|/models|/home|/etc|/tmp|/var|"
+                r"/knowledge|/sandbox|/logs|/app|/usr|/opt)/"
+                r"[A-Za-z0-9_./\-]+"
+                # Or relative path with a file extension
+                r"|(?:\b|^)\.{0,2}/[A-Za-z0-9_./\-]+\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv|html|xml)\b"
+                # Or a bare filename with a code/doc extension (no path)
+                # — covers "the project's CLAUDE.md", "README.md", "pyproject.toml"
+                r"|(?:^|[\s\"'(])"
+                r"[A-Za-z0-9_][A-Za-z0-9_\-]*"
+                r"\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv)"
+                r"\b"
+            )
+            _orig_prompt = getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''
+            _user_named_local_file = bool(_local_file_re.search(_orig_prompt))
+
             # Inject CIL grounding — topic file content matched by entity lookup.
             # Skip for identity-flavored intents: looking up "model" against the
             # cognitive index pulls back gaia-nano.yaml blueprint snippets
@@ -1735,10 +1764,16 @@ class AgentCore:
             elif probe_result and getattr(probe_result, 'cil_grounding', None) and _detected_intent in _skip_web_ground_intents:
                 self.logger.info("CIL grounding skipped for intent=%s", _detected_intent)
 
-            # Inject web search fallback grounding for ungrounded entities
-            # Skip for intents where the model's training data is sufficient
-            # (recitation, greeting, identity, time, chat, status)
-            if probe_result and hasattr(probe_result, 'web_grounding') and probe_result.web_grounding and _detected_intent not in _skip_web_ground_intents:
+            # Inject web search fallback grounding for ungrounded entities.
+            # Skip for: (a) intents where the model's training data is
+            # sufficient (recitation, greeting, identity, time, chat,
+            # status), and (b) queries that name a local file path —
+            # file.read is the right answer there, not a web search.
+            if (probe_result
+                    and hasattr(probe_result, 'web_grounding')
+                    and probe_result.web_grounding
+                    and _detected_intent not in _skip_web_ground_intents
+                    and not _user_named_local_file):
                 packet.content.data_fields.append(DataField(
                     key='web_grounding',
                     value=probe_result.web_grounding,
@@ -1748,6 +1783,10 @@ class AgentCore:
                 self.logger.info("Web fallback grounding injected: %d entities → %s",
                                   len(probe_result.web_grounding),
                                   list(probe_result.web_grounding.keys()))
+            elif (probe_result
+                    and getattr(probe_result, 'web_grounding', None)
+                    and _user_named_local_file):
+                self.logger.info("Web grounding skipped: user prompt names a local file path — file.read is the right source")
 
             # Attach probe metrics to packet.metrics for observability
             if probe_result:
@@ -2391,14 +2430,39 @@ class AgentCore:
 
             # ── Knowledge Router: unified retrieval BEFORE any generation ──
             # Runs for ALL paths (slim and full) so both have grounding data.
+            # Skip when the user names a local file path — file.read is the
+            # authoritative source for that, and grounding pulls competing
+            # journal/mempalace entries that the model may treat as the
+            # answer instead of reading the actual file. (GAIA_Project-jis)
+            import re as _re_fp2
+            _local_file_re2 = _re_fp2.compile(
+                # Absolute path with known local root
+                r"(?:^|\s)(?:/shared|/gaia|/models|/home|/etc|/tmp|/var|"
+                r"/knowledge|/sandbox|/logs|/app|/usr|/opt)/"
+                r"[A-Za-z0-9_./\-]+"
+                # Or relative path with a file extension
+                r"|(?:\b|^)\.{0,2}/[A-Za-z0-9_./\-]+\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv|html|xml)\b"
+                # Or a bare filename with a code/doc extension (no path)
+                r"|(?:^|[\s\"'(])"
+                r"[A-Za-z0-9_][A-Za-z0-9_\-]*"
+                r"\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv)"
+                r"\b"
+            )
             _grounding_ctx = None
-            try:
-                from gaia_core.cognition.knowledge_router import ground_query
-                logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
-                _grounding_ctx = ground_query(
-                    query=user_input,
-                    intent=plan.intent if plan else "other",
+            _kr_skip = bool(_local_file_re2.search(user_input or ""))
+            if _kr_skip:
+                logger.info(
+                    "KnowledgeRouter: skipped — user prompt names a local "
+                    "file path; file.read is the authoritative source"
                 )
+            try:
+                if not _kr_skip:
+                    from gaia_core.cognition.knowledge_router import ground_query
+                    logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
+                    _grounding_ctx = ground_query(
+                        query=user_input,
+                        intent=plan.intent if plan else "other",
+                    )
                 if _grounding_ctx and _grounding_ctx.has_grounding:
                     packet.content.data_fields.append(DataField(
                         key="web_grounding",
