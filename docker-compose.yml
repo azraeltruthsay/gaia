@@ -280,7 +280,7 @@ services:
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
       - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
       # CPU-only mode — GPU inference offloaded to gaia-prime
-      - GAIA_BACKEND=${GAIA_BACKEND:-core}
+      - GAIA_BACKEND=${GAIA_BACKEND:-auto}
       - GAIA_FORCE_CPU=0
       - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
       - N_GPU_LAYERS=16

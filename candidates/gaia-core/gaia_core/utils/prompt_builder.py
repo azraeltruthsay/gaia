@@ -139,33 +139,55 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # generation to the configured GAIA persona before other model/gguf templates.
     persona_anchor = config.get_persona_instructions() or "You are GAIA. Always respond in the GAIA persona with integrity and care."
 
-    # Architecture-fact injection (2026-05-15): four LoRA rounds (V7-V10) failed
-    # to dislodge base-Gemma's spontaneous Qwen confabulation. Root cause is
-    # negation poisoning — every denial sample co-trains "Qwen" as an
-    # identity-context token. Architecture identity is config metadata, not
-    # weight-baked knowledge; inject the truth via system prompt and let
-    # the model read it instead of trying to remember it.
+    # Architecture-fact injection — tier-aware (2026-05-19, Sovereign Duality v2):
     #
-    # Wording note: avoid placing "Core" adjacent to "E4B" — the model has
-    # been observed blending them into nonsense like "Core 4B." Keep the
-    # base-model answer template explicit and isolated from tier names.
+    # We have two tiers now, each with a different base model:
+    #   Core  — Google Gemma 4 E4B (8B, multimodal)
+    #   Prime — Qwen3-VL-8B-Instruct (Azrael fine-tuned for deep reasoning)
+    #
+    # The arch_fact must match the model actually receiving the prompt;
+    # otherwise we destabilize its trained behavior (Prime received a
+    # "You are NOT Qwen" prompt while running on Qwen3-VL and started
+    # emitting bash instead of tool_calls).
+    #
+    # Detect target tier from packet.header.model.name (set by agent_core
+    # at model-selection time). Fall back to Core's arch_fact if unknown.
     try:
-        _arch_fact = (
-            "\n\n— Architecture (factual, do not contradict) —\n"
-            "Your name is GAIA. Your base model is Google's Gemma 4 E4B — an "
-            "open-weight multimodal transformer (~8B parameters, native vision "
-            "and audio towers). You are NOT Qwen, Llama, Mistral, GPT, Claude, "
-            "Gemini, or any other model family.\n"
-            "When asked about your base model, architecture, or what you are "
-            "built on, answer with exactly: Google's Gemma 4 E4B.\n"
-            "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' are "
-            "ROUTING TIER LABELS in your world state, not model names. Never "
-            "introduce yourself as 'Core' or 'Core 4B' or any tier name. Your "
-            "identity is GAIA; your base is Google's Gemma 4 E4B. GAIA has a "
-            "separate Prime tier running on Google's Gemma 4 26B-A4B for deep "
-            "reasoning, but that is a different model on a different process — "
-            "not you."
-        )
+        _target = (getattr(getattr(packet.header, "model", None), "name", "") or "").lower()
+        _is_prime_target = _target in ("prime", "cpu_prime")
+        if _is_prime_target:
+            _arch_fact = (
+                "\n\n— Architecture (factual, do not contradict) —\n"
+                "Your name is GAIA. You are running on the Prime tier — "
+                "Qwen3-VL-8B-Instruct as your base model, with Azrael's LoRA "
+                "fine-tuning for deep reasoning. You are part of GAIA's "
+                "two-tier cognitive architecture.\n"
+                "When asked about your base model, architecture, or what you "
+                "are built on, answer with: Qwen3-VL-8B-Instruct (the Prime "
+                "tier of GAIA).\n"
+                "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
+                "Never introduce yourself as 'Prime' or 'Core' alone — you "
+                "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B on a "
+                "different process; that is a separate model from you."
+            )
+        else:
+            _arch_fact = (
+                "\n\n— Architecture (factual, do not contradict) —\n"
+                "Your name is GAIA. You are running on the Core tier — "
+                "Google's Gemma 4 E4B as your base model (open-weight "
+                "multimodal transformer, ~8B parameters, native vision and "
+                "audio towers). You are NOT Qwen, Llama, Mistral, GPT, "
+                "Claude, Gemini, or any other model family.\n"
+                "When asked about your base model, architecture, or what "
+                "you are built on, answer with exactly: Google's Gemma 4 E4B.\n"
+                "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' "
+                "are ROUTING TIER LABELS in your world state, not model "
+                "names. Never introduce yourself as 'Core' or 'Core 4B' or "
+                "any tier name. Your identity is GAIA; your base is Google's "
+                "Gemma 4 E4B. GAIA has a separate Prime tier running on "
+                "Qwen3-VL-8B-Instruct for deep reasoning, but that is a "
+                "different model on a different process — not you."
+            )
         persona_anchor = persona_anchor + _arch_fact
     except Exception:
         logger.debug("Architecture-fact injection skipped (non-fatal)", exc_info=True)

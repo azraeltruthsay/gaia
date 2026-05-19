@@ -257,12 +257,23 @@ class AgentCore:
 
         Uses the lifecycle state machine when available, falls back to
         the legacy _gpu_released flag on the model pool.
+
+        2026-05-19: timeout bumped from 2s → 8s. The orchestrator's
+        /lifecycle/state endpoint can take 3-5s under load (it polls
+        every tier's health endpoint synchronously). A 2s timeout was
+        firing on the path that needs the most accurate gear state —
+        when gaia-core decides to route a turn to Prime — and falling
+        back to a stale cached AWAKE snapshot. Result: gear-follow
+        routing always picked Core even when actually in FOCUSING.
         """
         if self._lifecycle_client:
             try:
-                snapshot = self._lifecycle_client.get_state_sync(timeout=2.0)
+                snapshot = self._lifecycle_client.get_state_sync(timeout=8.0)
                 from gaia_common.lifecycle.states import LifecycleState
-                return LifecycleState(snapshot.state) == LifecycleState.FOCUSING
+                # snapshot.state can come back as either the enum member or
+                # its string value depending on pydantic config — accept both
+                _state_str = snapshot.state.value if hasattr(snapshot.state, "value") else str(snapshot.state)
+                return _state_str.lower() == LifecycleState.FOCUSING.value
             except Exception:
                 pass
         # Legacy fallback
@@ -1439,19 +1450,10 @@ class AgentCore:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
             if not selected_model_name:
-                # Respect runtime override via environment var GAIA_BACKEND or config.llm_backend
-                backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
-                if backend_env:
-                    # Skip gpu_prime when GPU is released for sleep
-                    if backend_env == "prime" and _gpu_sleeping:
-                        logger.info("GAIA_BACKEND='prime' but GPU is sleeping; falling back to default selection")
-                    elif backend_env in self.model_pool.models:
-                        selected_model_name = backend_env
-                    else:
-                        logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
-    
-            if not selected_model_name:
-                # 2. Thinker / Oracle Path
+                # Explicit prime: / thinker: / oracle: prefix takes precedence
+                # over GAIA_BACKEND so a user can override default routing
+                # per-turn. Without this re-ordering, GAIA_BACKEND=core (the
+                # production default) silently swallowed `prime:` requests.
                 if "oracle" in text_lower and self.config.use_oracle:
                     selected_model_name = "oracle"
                 elif any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"]):
@@ -1460,7 +1462,27 @@ class AgentCore:
                             continue
                         if cand in self.model_pool.models:
                             selected_model_name = cand
+                            logger.info("[MODEL_SELECT] Explicit prime: prefix → %s", cand)
                             break
+
+            if not selected_model_name:
+                # Respect runtime override via environment var GAIA_BACKEND or
+                # config.llm_backend. "auto" means gear-follow: Prime when
+                # FOCUSING (GPU has Prime loaded), Core otherwise. This lets
+                # the orchestrator's gear shift drive routing without needing
+                # a container restart.
+                backend_env = os.getenv("GAIA_BACKEND") or getattr(self.config, "llm_backend", None)
+                if backend_env == "auto":
+                    backend_env = "prime" if not _gpu_sleeping else "core"
+                    logger.info("[MODEL_SELECT] GAIA_BACKEND=auto resolved to '%s' (gear-follow)", backend_env)
+                if backend_env:
+                    # Skip gpu_prime when GPU is released for sleep
+                    if backend_env == "prime" and _gpu_sleeping:
+                        logger.info("GAIA_BACKEND='prime' but GPU is sleeping; falling back to default selection")
+                    elif backend_env in self.model_pool.models:
+                        selected_model_name = backend_env
+                    else:
+                        logger.info(f"Requested GAIA_BACKEND='{backend_env}' not present in model pool; falling back to default selection")
                 
                 # Default path: Core/Operator handles most turns.
                 if not selected_model_name:
@@ -2426,6 +2448,11 @@ class AgentCore:
                         config=self.config,
                         user_message_id=getattr(packet.header, "packet_id", None),
                         session_id=session_id,
+                        # Use the selected tier for deliberation so Prime's
+                        # trained behavior isn't overridden by a hardcoded
+                        # Core-flavored reflection pass. Sovereign Duality
+                        # v2 fix — see GAIA_Project bd-(filed).
+                        model_role=selected_model_name or "core",
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already

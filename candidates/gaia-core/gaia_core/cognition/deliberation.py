@@ -500,6 +500,7 @@ def run_deliberated_turn(
     *,
     user_message_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    model_role: str = "core",
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
 
@@ -527,7 +528,11 @@ def run_deliberated_turn(
     except Exception:
         cfg = {}
 
-    adapter_name = cfg.get("adapter_name", "core_deliberation_v1")
+    # Adapter is Core-specific (core_deliberation_v1). Prime's identity LoRA
+    # is merged into the base, so when running Prime deliberation we don't
+    # try to load an adapter — Prime IS the adapter, baked into weights.
+    _is_prime_tier = model_role in ("prime", "cpu_prime")
+    adapter_name = None if _is_prime_tier else cfg.get("adapter_name", "core_deliberation_v1")
     max_tokens = int(cfg.get("max_tokens", 900))
     temperature = float(cfg.get("temperature", 0.55))
     retry_strategy = (cfg.get("retry_on_confabulation") or "warn").lower()
@@ -536,12 +541,15 @@ def run_deliberated_turn(
         "[low-confidence: response had verification flags — treat with skepticism] ",
     )
 
-    # 1. Core deliberation with adapter
+    # 1. First-pass deliberation — uses caller's selected tier, not hardcoded
+    # to Core. Sovereign Duality v2 routing: when agent picks Prime, run
+    # the deliberation on Prime so it doesn't override Prime's trained
+    # behavior with a Core-flavored reflection.
     result = deliberate(
         user_input=user_input,
         assembled_messages=assembled_messages,
         model_pool=model_pool,
-        model_role="core",
+        model_role=model_role,
         adapter_name=adapter_name,
         max_total_tokens=max_tokens,
         temperature=temperature,
@@ -559,8 +567,10 @@ def run_deliberated_turn(
         result.forbidden_hits, result.confabulation_flags, retry_strategy,
     )
 
-    # 3. Optional Prime retry
-    if retry_strategy == "prime":
+    # 3. Optional Prime retry. Skip if we just ran the first pass on Prime
+    # (would be redundant); the strategy was intended as a Core→Prime
+    # escalation, not Prime→Prime.
+    if retry_strategy == "prime" and not _is_prime_tier:
         try:
             retry = deliberate(
                 user_input=user_input,
