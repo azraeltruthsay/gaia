@@ -41,11 +41,18 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("Loading base model %s with NF4...", base_path)
-    from transformers import AutoModelForCausalLM, AutoProcessor, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoConfig, AutoProcessor, BitsAndBytesConfig
     from peft import PeftModel
 
-    skip_modules = ["lm_head", "vision_tower", "audio_tower",
-                    "embed_vision", "embed_audio"]
+    # Skip-modules covers Gemma 4's vision/audio towers AND Qwen3-VL's
+    # visual / vision_model so NF4 doesn't double-quantize tower weights.
+    skip_modules = [
+        "lm_head",
+        # Gemma 4 names
+        "vision_tower", "audio_tower", "embed_vision", "embed_audio",
+        # Qwen3-VL / Qwen2-VL names
+        "visual", "vision_model",
+    ]
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
@@ -53,13 +60,34 @@ def main() -> int:
         bnb_4bit_use_double_quant=True,
         llm_int8_skip_modules=skip_modules,
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        base_path, trust_remote_code=True,
+    # Auto-detect VL architecture — Qwen3VLForConditionalGeneration and
+    # similar aren't registered for AutoModelForCausalLM, so use
+    # AutoModelForImageTextToText when config.model_type indicates a VL
+    # family. Mirrors the engine + training-script fix.
+    _is_vl = False
+    try:
+        _cfg = AutoConfig.from_pretrained(base_path, trust_remote_code=True)
+        _mt = (getattr(_cfg, "model_type", "") or "").lower()
+        _is_vl = "vl" in _mt or "vision" in _mt
+    except Exception:
+        pass
+    _load_kwargs = dict(
+        trust_remote_code=True,
         quantization_config=bnb_config,
         device_map={"": 0},
         low_cpu_mem_usage=True,
         attn_implementation="eager",
     )
+    model = None
+    if _is_vl:
+        try:
+            from transformers import AutoModelForImageTextToText
+            model = AutoModelForImageTextToText.from_pretrained(base_path, **_load_kwargs)
+            log.info("Loaded base via AutoModelForImageTextToText (VL arch)")
+        except Exception as _vl_err:
+            log.warning("VL load failed (%s) — falling back to AutoModelForCausalLM", _vl_err)
+    if model is None:
+        model = AutoModelForCausalLM.from_pretrained(base_path, **_load_kwargs)
     log.info("Base loaded: %.2f GB VRAM", torch.cuda.memory_allocated()/1024**3)
 
     log.info("Loading adapter %s...", adapter_path)
