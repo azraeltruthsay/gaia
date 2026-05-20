@@ -89,7 +89,7 @@ def _refresh_auth_headless() -> bool:
 
 
 async def validate_sources(client, notebook_id) -> int:
-    """Check all remote sources for ERROR state and remove them.
+    """Check all remote sources for ERROR or stuck states and remove them.
     Returns the count of sources removed."""
     try:
         remote_sources = await client.sources.list(notebook_id)
@@ -101,6 +101,7 @@ async def validate_sources(client, notebook_id) -> int:
 
     removed = 0
     for source in remote_sources:
+        # Remove sources in ERROR state
         if source.is_error:
             print(f"VALIDATION: Source '{source.title}' (id={source.id}) is in ERROR state. Removing...")
             try:
@@ -109,19 +110,22 @@ async def validate_sources(client, notebook_id) -> int:
                 await asyncio.sleep(0.2)
             except Exception as e:
                 print(f"  Failed to delete errored source '{source.title}': {e}")
-        elif source.is_processing:
-            # Check if it's been stuck processing — try wait_until_ready with short timeout
+        
+        # Remove sources stuck in PROCESSING or PREPARING
+        elif source.is_processing or source.status == SourceStatus.PREPARING:
+            status_name = "PROCESSING" if source.is_processing else "PREPARING"
+            # Try wait_until_ready with short timeout to see if it's actually moving
             try:
-                await client.sources.wait_until_ready(notebook_id, source.id, timeout=15.0)
+                await client.sources.wait_until_ready(notebook_id, source.id, timeout=10.0)
             except SourceTimeoutError:
-                print(f"VALIDATION: Source '{source.title}' stuck PROCESSING. Removing...")
+                print(f"VALIDATION: Source '{source.title}' stuck {status_name}. Removing...")
                 try:
                     await client.sources.delete(notebook_id, source.id)
                     removed += 1
                 except Exception:
                     pass
             except (SourceProcessingError, SourceNotFoundError):
-                print(f"VALIDATION: Source '{source.title}' failed during wait. Removing...")
+                print(f"VALIDATION: Source '{source.title}' failed/disappeared during wait. Removing...")
                 try:
                     await client.sources.delete(notebook_id, source.id)
                     removed += 1
@@ -131,12 +135,12 @@ async def validate_sources(client, notebook_id) -> int:
                 pass
 
     if removed > 0:
-        print(f"VALIDATION: Removed {removed} failed source(s).")
+        print(f"VALIDATION: Removed {removed} failed/stuck source(s).")
     return removed
 
 
 async def upload_with_validation(client, notebook_id, file_name, file_path, retries=MAX_RETRIES) -> bool:
-    """Upload a file and wait for it to reach READY state. Retry with exponential backoff."""
+    """Upload a file using add_text and wait for it to reach READY state. Retry with exponential backoff."""
     # Pre-flight: skip oversized files (Google often times out on large uploads)
     try:
         file_size = os.path.getsize(file_path)
@@ -146,13 +150,20 @@ async def upload_with_validation(client, notebook_id, file_name, file_path, retr
         if file_size == 0:
             print(f"  SKIP: {file_name} (empty file)")
             return False
-    except OSError:
+            
+        # Read file content for add_text
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except OSError as e:
+        print(f"  FILE ERROR: {file_name} — {e}")
         return False
 
     for attempt in range(1, retries + 1):
         try:
-            print(f"  -> {file_name} (attempt {attempt}/{retries}, {file_size // 1024}KB)")
-            source = await client.sources.add_file(notebook_id, file_path)
+            print(f"  -> {file_name} (attempt {attempt}/{retries}, {file_size // 1024}KB, using add_text)")
+            
+            # Using add_text instead of add_file for better reliability on script files
+            source = await client.sources.add_text(notebook_id, file_name, content)
 
             # Wait for processing to complete (extended timeout)
             ready_source = await client.sources.wait_until_ready(
@@ -218,19 +229,21 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
         traceback.print_exc(file=sys.stdout)
         remote_sources = []
 
-    # Filter out sources already in ERROR state during reconciliation
-    errored = [s for s in remote_sources if s.is_error]
-    if errored:
-        print(f"Found {len(errored)} source(s) in ERROR state — removing before reconciliation...")
-        for s in errored:
+    # Filter out sources already in ERROR or stuck states during reconciliation
+    # Note: we treat PREPARING as a stuck state if it's found during full reconciliation
+    # because it means it was left over from a previous session or failed upload.
+    bad_sources = [s for s in remote_sources if s.is_error or s.status == SourceStatus.PREPARING]
+    if bad_sources:
+        print(f"Found {len(bad_sources)} source(s) in ERROR/STUCK state — removing before reconciliation...")
+        for s in bad_sources:
             try:
                 await client.sources.delete(notebook_id, s.id)
                 await asyncio.sleep(0.2)
-                print(f"  Removed errored: {s.title}")
+                print(f"  Removed {s.status}: {s.title}")
             except Exception as e:
-                print(f"  Failed to remove errored source {s.title}: {e}")
+                print(f"  Failed to remove bad source {s.title}: {e}")
         # Re-list after cleanup
-        remote_sources = [s for s in remote_sources if not s.is_error]
+        remote_sources = [s for s in remote_sources if s not in bad_sources]
 
     # Build remote map and detect duplicates
     # A dict overwrites earlier entries, so duplicates become invisible.
