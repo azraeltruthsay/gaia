@@ -1246,15 +1246,24 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     # 7. Retrieved Documents (RAG) or Epistemic Honesty Directive
     if retrieved_docs_content:
-        system_content_parts.append("--- Retrieved Documents ---\n" + retrieved_docs_content)
-        system_content_parts.append("--- End of Retrieved Documents ---")
+        # Lowercase descriptive prefix instead of ALL-CAPS/marked-out
+        # section header — the previous "--- Retrieved Documents ---"
+        # framing taught the model to refer back to "the Retrieved
+        # Documents section" in replies, which leaked the structural
+        # label as if it were a nameable source.
+        system_content_parts.append("Retrieved reference documents:\n" + retrieved_docs_content)
         system_content_parts.append(
-            "INSTRUCTION: Use the information from the 'Retrieved Documents' section to answer the user's question. "
-            "Only cite filenames listed in the Retrieved Documents above. Do not invent additional document names or paths. "
-            "If the retrieved documents don't fully answer the question, say what's missing rather than fabricating content. "
-            "Do NOT supplement retrieved content with made-up specifics (names, stats, lists, mechanics) from general knowledge. "
-            "If you share general knowledge beyond what was retrieved, explicitly mark it as uncertain: 'From my general training (may be imprecise):' "
-            "and keep it brief."
+            "Use the retrieved reference documents above to answer. Cite only "
+            "the filenames listed there — don't invent additional document "
+            "names or paths. If those documents don't fully answer the "
+            "question, say what's missing rather than fabricating. Do NOT "
+            "supplement retrieved content with made-up specifics (names, "
+            "stats, lists, mechanics) from general knowledge. If you share "
+            "general knowledge beyond what was retrieved, explicitly mark "
+            "it as uncertain: 'From my general training (may be imprecise):' "
+            "and keep it brief. Don't quote the section label \"retrieved "
+            "reference documents\" verbatim — integrate the information "
+            "naturally."
         )
     elif rag_no_results and knowledge_base_content:
         # A knowledge base was specified but no documents were retrieved

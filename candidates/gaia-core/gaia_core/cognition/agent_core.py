@@ -2798,7 +2798,11 @@ class AgentCore:
                     _fallback_system = "You are GAIA, created by Azrael. Answer directly and concisely."
                     _fallback_user = user_input
                     if _ground_text:
-                        _fallback_user = f"REFERENCE DATA:\n{_ground_text}\n\nQUESTION: {user_input}"
+                        # Lowercase section prefix — ALL-CAPS labels get
+                        # quoted verbatim by Core in responses ("the
+                        # REFERENCE DATA shows..."). Lowercase prose reads
+                        # as structural cueing, not a nameable category.
+                        _fallback_user = f"Reference data:\n{_ground_text}\n\nUser question: {user_input}"
                     try:
                         _fb_res = self.model_pool.forward_to_model(
                             selected_model_name,
@@ -4943,12 +4947,13 @@ class AgentCore:
             grounded_messages = [
                 {"role": "system", "content":
                     "You are GAIA. The answer to the user's question is in the "
-                    "REFERENCE DATA below. Read it and answer directly. "
+                    "reference data below. Read it and answer directly. "
                     "Do NOT say 'I don't have access' — the data is right here. "
-                    "Be concise. Cite the source URL."},
+                    "Be concise. Cite the source URL. Don't quote section "
+                    "labels verbatim; integrate naturally."},
                 {"role": "user", "content":
-                    f"REFERENCE DATA:\n{_trunc_ground}\n\n"
-                    f"Based on the reference data above, answer this: {user_input}"},
+                    f"Reference data:\n{_trunc_ground}\n\n"
+                    f"Based on the data above, answer this: {user_input}"},
             ]
             self.logger.info("Epistemic grounding: sending %d-char prompt for regeneration", len(_trunc_ground))
             res = self.model_pool.forward_to_model(
@@ -5071,7 +5076,7 @@ class AgentCore:
                     "You are GAIA, a sovereign AI assistant created by Azrael. "
                     "You speak warmly and with personality — not a corporate help-desk tone. "
                     "Answer the user's question naturally and engage with specifics.\n"
-                    "When LOCAL KNOWLEDGE BASE entries are provided below, you MUST anchor "
+                    "When reference documents are provided below, you MUST anchor "
                     "your reply with at least TWO specific names, places, items, or events "
                     "drawn from those sources — proper nouns and unique strings, not generic "
                     "categories. Naming concrete things proves you actually read the sources "
@@ -5084,7 +5089,10 @@ class AgentCore:
                     "'how can I assist?'. Pick up the thread.\n"
                     "Don't relate every topic back to yourself. Don't invent facts — if the "
                     "sources don't cover something, say 'sources don't say' rather than "
-                    "fabricating. Don't emit tool_call, JSON, or code blocks unless asked."
+                    "fabricating. Don't emit tool_call, JSON, or code blocks unless asked. "
+                    "Don't quote section labels (\"reference docs\", \"reference snippets\", "
+                    "\"web search\", etc.) verbatim — integrate the information naturally "
+                    "as if it's something you know, citing only filenames or URLs."
                 )
                 _user = user_question
                 if _gc:
@@ -5127,17 +5135,18 @@ class AgentCore:
                     # before generation. Earlier placement (after _gc) got
                     # buried by 7 docs of grounding text and ignored.
                     _user_parts = [
-                        "VERIFIED REFERENCE DATA (use this to answer; cite filenames "
-                        "from LOCAL KNOWLEDGE BASE when relevant):",
+                        "Reference materials for this turn (cite filenames when quoting):",
                         _gc,
-                        f"USER MESSAGE: {user_question}",
+                        f"User message: {user_question}",
                     ]
                     if _anchor_list:
                         _user_parts.append(
-                            "REPLY GUIDANCE: Acknowledge the user's message, then weave AT "
-                            "LEAST TWO of these specific anchors from the reference data "
+                            "Reply guidance: acknowledge the user's message, then weave AT "
+                            "LEAST TWO of these specific anchors from the reference materials "
                             "naturally into your reply (do not list them mechanically — "
-                            "make them part of a flowing response): "
+                            "make them part of a flowing response). Do not quote the section "
+                            "label \"reference materials\" itself; integrate the names like "
+                            "you know them: "
                             + ", ".join(_anchor_list[:15])
                         )
                     # End-of-message identity reset — fires only when a persona
@@ -5867,9 +5876,15 @@ RESULT: COMPLEX (reason: <brief reason>)
                             local_parts.append(f"{header}\n{text[:MAX_LOCAL_CHARS]}")
                 sections: list = []
                 if local_parts:
-                    sections.append("LOCAL KNOWLEDGE BASE (curated documents):\n" + "\n\n".join(local_parts))
+                    # Use lowercase descriptive prefix instead of an ALL-CAPS
+                    # label. Models trained on these prompts learn ALL-CAPS
+                    # headers as nameable categories and quote them verbatim
+                    # in responses ("From what I can see in the WEB SEARCH
+                    # RESULTS..."). Lowercase prose reads as a structural
+                    # cue, not a label.
+                    sections.append("Reference docs (from your curated knowledge base):\n" + "\n\n".join(local_parts))
                 if web_parts:
-                    sections.append("WEB SEARCH RESULTS:\n" + "\n".join(web_parts))
+                    sections.append("Reference snippets from web search:\n" + "\n".join(web_parts))
                 if sections:
                     _grounding_text = "\n\n".join(sections)
                     self.logger.info(
