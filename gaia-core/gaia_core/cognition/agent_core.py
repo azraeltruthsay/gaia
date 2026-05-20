@@ -1145,7 +1145,36 @@ class AgentCore:
                 _ui_lower_s0 = user_input.lower()
                 if "http://" in _ui_lower_s0 or "https://" in _ui_lower_s0:
                     _stage0_skip_for_url = True
-            _stage0_skip = _stage0_skip_for_local_file or _stage0_skip_for_url
+
+            # Conversational-prompt gate: skip Stage 0 grounding for short
+            # chit-chat ("good morning", "thanks", "how are you", "ok",
+            # "yes"). Grounding "GMT" / "PST" for a casual time question
+            # cost 6s and contributed to the in-bed confabulation by
+            # injecting 1094 chars of noise into a 2-sentence chat reply.
+            _stage0_skip_for_chitchat = False
+            if not _stage0_skip_for_local_file and not _stage0_skip_for_url and user_input:
+                _ui_strip = user_input.strip()
+                _ui_lower_chat = _ui_strip.lower()
+                _chitchat_markers = (
+                    "good morning", "good evening", "good night",
+                    "good afternoon", "hello", "hi ", "hey ", "hiya",
+                    "how are you", "how's it going", "what's up", "whats up",
+                    "thanks", "thank you", "ty ", "thx", "cool", "nice",
+                    "ok", "okay", "sure", "yep", "yeah", "nope", "no thanks",
+                )
+                _is_short = len(_ui_strip) < 80
+                _starts_chitchat = any(_ui_lower_chat.startswith(m) for m in _chitchat_markers)
+                _is_chitchat_phrase = (
+                    _ui_lower_chat in ("hi", "hey", "yo", "sup", "thanks", "thx", "ok", "okay", "k", "yes", "no")
+                )
+                if _is_chitchat_phrase or (_is_short and _starts_chitchat):
+                    _stage0_skip_for_chitchat = True
+
+            _stage0_skip = (
+                _stage0_skip_for_local_file
+                or _stage0_skip_for_url
+                or _stage0_skip_for_chitchat
+            )
 
             _grounding_context = None
             grounding_cfg = constants.get("GROUNDING", {})
@@ -1169,6 +1198,8 @@ class AgentCore:
                 logger.info("Stage 0 Grounding skipped: user prompt names a local file path — file.read is the right source")
             elif _stage0_skip_for_url:
                 logger.info("Stage 0 Grounding skipped: user prompt names a URL — web.fetch is the right source")
+            elif _stage0_skip_for_chitchat:
+                logger.info("Stage 0 Grounding skipped: short conversational prompt (no entities worth grounding)")
 
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
             if probe_result and probe_result.primary_collection:

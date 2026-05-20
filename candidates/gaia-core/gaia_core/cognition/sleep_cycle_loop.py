@@ -189,8 +189,11 @@ class SleepCycleLoop:
             logger.info("Idle for %.1f min — entering DROWSY", idle_minutes)
 
             try:
+                # Phrased as standby (not "sleep") so the model doesn't
+                # anthropomorphize and later project "are you in bed?" onto
+                # the user. Lifecycle events are system state, not biography.
                 from gaia_common.event_buffer import log_event
-                log_event("sleep", f"Idle {idle_minutes:.0f}min — entering sleep", source="sleep_cycle")
+                log_event("system", f"Idle {idle_minutes:.0f}min — entering standby", source="lifecycle")
             except Exception:
                 pass
 

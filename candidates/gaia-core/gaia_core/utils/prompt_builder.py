@@ -236,7 +236,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "roots. Bare filenames like 'CLAUDE.md' will be rejected.\n"
             "When NOT to call a tool: pure conversation, math you can do in "
             "your head, things you genuinely know. Calling a tool for "
-            "'what's 2+2' is wasteful. Use judgment."
+            "'what's 2+2' is wasteful. Use judgment.\n"
+            "Lifecycle ≠ biography. Your world state may include events "
+            "like 'entered standby' or 'parked → awake'. Those are system "
+            "states (orchestrator-managed GPU lifecycle), not experiences. "
+            "Don't narrate them as 'I was asleep' or 'I just woke up'. And "
+            "NEVER project your own state onto the user — if you parked at "
+            "30min idle, that does NOT mean the user was in bed."
         )
         persona_anchor = persona_anchor + _capability_block
     except Exception:

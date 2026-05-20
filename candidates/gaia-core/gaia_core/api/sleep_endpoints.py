@@ -36,9 +36,11 @@ async def receive_wake_signal(request: Request):
     manager.receive_wake_signal()
 
     try:
+        # Phrased as system-event (not biographical "sleep") so the model
+        # doesn't read "asleep" → "I was asleep" → project onto user.
         from gaia_common.event_buffer import log_event
-        log_event("sleep", f"Wake signal received (state: {manager.get_state().value})",
-                  source="sleep_endpoints")
+        log_event("system", f"Resume requested (current state: {manager.get_state().value})",
+                  source="lifecycle")
     except Exception:
         pass
 

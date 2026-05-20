@@ -197,6 +197,19 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     logger.debug(f"World state snapshot data: {snap}")
     lines: List[str] = []
     lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
+    # Local time pre-computed — Core (E4B) confabulates timezone offsets
+    # ("GMT+10:00", "PST = GMT-9/10") when asked to do the math itself.
+    # The host clock is the authoritative source and the user is on the
+    # same host, so render local time directly and the model can quote it.
+    try:
+        _local_struct = time.localtime(snap['ts'])
+        _tz_name = time.strftime('%Z', _local_struct) or "local"
+        lines.append(
+            f"Local time (host = user's local time): "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S', _local_struct)} {_tz_name}"
+        )
+    except Exception:
+        pass
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
     
     # Immune System — one-line summary only (full MRI available via introspect_logs)
