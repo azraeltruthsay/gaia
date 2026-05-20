@@ -193,17 +193,22 @@ async def request_approval_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="method is required")
             
         # 1. Create a pending action
-        action_id, challenge = approval_store.create_request(method, params)
-        
+        allow_pending = bool(body.get("allow_pending", False))
+        action_id, challenge, created_at, expiry = approval_store.create_pending(
+            method, params, allow_pending=allow_pending
+        )
+
         # 2. Log for the user
         logger.warning(f"🚨 APPROVAL REQUIRED: '{method}' (ID: {action_id})")
         logger.warning(f"   Params: {params}")
         logger.warning(f"   Challenge: {challenge}")
-        
+
         return {
             "ok": True,
             "action_id": action_id,
             "challenge": challenge,
+            "created_at": created_at,
+            "expiry": expiry,
             "message": f"Approval required for '{method}'. Please approve via /approve_action."
         }
     except Exception as e:

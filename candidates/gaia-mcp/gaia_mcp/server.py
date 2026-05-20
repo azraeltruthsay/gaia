@@ -107,17 +107,13 @@ async def jsonrpc_endpoint(request: Request):
     method = body["method"]
     params = body.get("params", {})
 
-    # Meta-verbs (search, do, learn, remember, ask) route to the SkillGateway
-    # which handles its own validation and approval. Skip legacy checks.
-    _META_VERBS = {"search", "do", "learn", "remember", "ask"}
-
     # Enforce approval for sensitive legacy tools unless bypass is enabled.
     # Domain tools (file, shell, etc.) handle sensitivity per-action inside execute_limb.
-    if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS and method not in _META_VERBS:
+    if (not MCP_BYPASS()) and method in SENSITIVE_TOOLS and method not in DOMAIN_TOOLS:
         return JSONResponse(content={"jsonrpc": "2.0", "error": {"code": -32001, "message": f"'{method}' requires approval. Use /request_approval first."}, "id": request_id}, status_code=403)
 
-    # Validate params against the tool's schema (skip for domain/meta-verb tools — they validate internally)
-    if method in TOOLS and method not in DOMAIN_TOOLS and method not in _META_VERBS:
+    # Validate params against the tool's schema (skip for domain tools — they validate internally)
+    if method in TOOLS and method not in DOMAIN_TOOLS:
         from jsonschema import validate, ValidationError
         try:
             validate(instance=params, schema=TOOLS[method]["params"])
@@ -197,17 +193,22 @@ async def request_approval_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="method is required")
             
         # 1. Create a pending action
-        action_id, challenge = approval_store.create_request(method, params)
-        
+        allow_pending = bool(body.get("allow_pending", False))
+        action_id, challenge, created_at, expiry = approval_store.create_pending(
+            method, params, allow_pending=allow_pending
+        )
+
         # 2. Log for the user
         logger.warning(f"🚨 APPROVAL REQUIRED: '{method}' (ID: {action_id})")
         logger.warning(f"   Params: {params}")
         logger.warning(f"   Challenge: {challenge}")
-        
+
         return {
             "ok": True,
             "action_id": action_id,
             "challenge": challenge,
+            "created_at": created_at,
+            "expiry": expiry,
             "message": f"Approval required for '{method}'. Please approve via /approve_action."
         }
     except Exception as e:

@@ -923,6 +923,83 @@ class AgentCore:
         if user_input:
             user_input = self.entity_validator.correct_text(user_input)
 
+        # Blast Shield (agent-input layer): catch destructive shell patterns
+        # BEFORE the model is invoked. Prompt-based hedging on this model is
+        # unreliable — Core's training reinforces tool-use over refusal. A
+        # deterministic regex on user_input short-circuits before any model
+        # call, so 'rm -rf /' never even reaches the LLM.
+        #
+        # Mirrors the patterns Blast Shield blocks at MCP-execution time
+        # (see .claude/rules/safety.md), applied here at the agent boundary.
+        if user_input:
+            import re as _re_blast
+            _destructive_re = _re_blast.compile(
+                r"(?:^|[\s;&|`(])"
+                r"(?:"
+                r"rm\s+(?:-[A-Za-z]*r[A-Za-z]*f?|-[A-Za-z]*f[A-Za-z]*r)\s+/+(?:\s|$|--)"
+                r"|sudo\s+rm\s+-[A-Za-z]*r"
+                r"|dd\s+(?:if|of)=/dev/(?:sd|hd|nvme|mmcblk)"
+                r"|mkfs(?:\.[a-z0-9]+)?\s+/dev/"
+                r"|shred\s+(?:-[A-Za-z]+\s+)*/(?:dev|etc|boot|root)"
+                r"|chmod\s+-R\s+(?:777|000)\s+/"
+                r"|>\s*/dev/sd[a-z]"
+                r"|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"
+                r")",
+                _re_blast.IGNORECASE,
+            )
+            # Pre-prompt path-allowlist hedge: detect file paths in user_input
+            # that fall OUTSIDE the MCP allow-list. Inject a system aside so
+            # the model knows to hedge ("I can't access /tmp") instead of
+            # fabricating content. Same allow-list as gaia-mcp/tools.py:746.
+            #
+            # We don't refuse here — the user might be testing knowledge, or
+            # the path might be a fragment in a longer message. We just give
+            # the model a heads-up that this specific path is unreachable.
+            _path_match = _re_blast.search(
+                r"(?:^|\s)((?:/tmp|/etc|/root|/boot|/var|/proc|/sys|/dev|/run|/mnt|/media|/srv)/"
+                r"[A-Za-z0-9_./\-]+)",
+                user_input,
+            )
+            if _path_match:
+                _unreachable_path = _path_match.group(1)
+                self.logger.info(
+                    "[ALLOW-LIST HEDGE] user mentioned unreachable path %r — appending hedge directive to user_input",
+                    _unreachable_path,
+                )
+                user_input = (
+                    f"{user_input}\n\n"
+                    f"[SYSTEM ASIDE: The path {_unreachable_path} is OUTSIDE "
+                    f"your MCP file-read allow-list (only /gaia/GAIA_Project, "
+                    f"/knowledge, /gaia-common, /sandbox are reachable). You "
+                    f"cannot read this file. Do NOT fabricate its contents. "
+                    f"Tell the user you don't have access to that path.]"
+                )
+
+            if _destructive_re.search(user_input):
+                self.logger.warning(
+                    "[BLAST SHIELD] destructive shell pattern detected in user input — refusing without model call: %r",
+                    user_input[:120],
+                )
+                yield {"type": "token", "value": "[Core]\n\n"}
+                yield {
+                    "type": "token",
+                    "value": (
+                        "I won't run that. The command you asked for is "
+                        "destructive — it would wipe filesystems or destroy "
+                        "the host. Capability is not consent: even with shell "
+                        "access I refuse irreversible, system-destroying "
+                        "operations.\n\n"
+                        "If you're testing my safety guard, this is the "
+                        "guard. If you actually need something destructive-"
+                        "looking — clearing a sandbox directory, wiping a "
+                        "specific dev partition during install, etc. — give "
+                        "me a narrower path and explicit intent and I'll "
+                        "look at it carefully."
+                    ),
+                }
+                yield {"type": "end"}
+                return
+
         # KB write approval — if the previous turn parked a pending write,
         # this turn might be the user's confirm/cancel/trust response. Handle
         # it before falling into the normal cognitive pipeline.
@@ -1059,10 +1136,20 @@ class AgentCore:
                 r"\b"
             )
             _stage0_skip_for_local_file = bool(_stage0_local_file_re.search(user_input or ""))
+            # URL gate (same logic as KnowledgeRouter URL gate further down):
+            # explicit URLs are fetch territory — auto-grounding pollutes the
+            # context with board-game / journal noise that the model then
+            # treats as ground truth instead of calling web.fetch.
+            _stage0_skip_for_url = False
+            if not _stage0_skip_for_local_file and user_input:
+                _ui_lower_s0 = user_input.lower()
+                if "http://" in _ui_lower_s0 or "https://" in _ui_lower_s0:
+                    _stage0_skip_for_url = True
+            _stage0_skip = _stage0_skip_for_local_file or _stage0_skip_for_url
 
             _grounding_context = None
             grounding_cfg = constants.get("GROUNDING", {})
-            if grounding_cfg.get("enabled", False) and not _stage0_skip_for_local_file:
+            if grounding_cfg.get("enabled", False) and not _stage0_skip:
                 try:
                     import time as _gt
                     _g0 = _gt.perf_counter()
@@ -1080,6 +1167,8 @@ class AgentCore:
                     logger.debug("Stage 0 Grounding failed (non-blocking)", exc_info=True)
             elif _stage0_skip_for_local_file:
                 logger.info("Stage 0 Grounding skipped: user prompt names a local file path — file.read is the right source")
+            elif _stage0_skip_for_url:
+                logger.info("Stage 0 Grounding skipped: user prompt names a URL — web.fetch is the right source")
 
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
             if probe_result and probe_result.primary_collection:
@@ -1762,6 +1851,13 @@ class AgentCore:
             )
             _orig_prompt = getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''
             _user_named_local_file = bool(_local_file_re.search(_orig_prompt))
+            # URL gate: same rationale as the file-path gate — explicit URLs
+            # are fetch territory, web_grounding pollutes context for those.
+            _user_named_url = (
+                "http://" in (_orig_prompt or "").lower()
+                or "https://" in (_orig_prompt or "").lower()
+            )
+            _user_named_local_file = _user_named_local_file or _user_named_url
 
             # Inject CIL grounding — topic file content matched by entity lookup.
             # Skip for identity-flavored intents: looking up "model" against the
@@ -2475,6 +2571,22 @@ class AgentCore:
                     "KnowledgeRouter: skipped — user prompt names a local "
                     "file path; file.read is the authoritative source"
                 )
+            # URL gate: when user gives a URL, the right move is web.fetch.
+            # KnowledgeRouter pulls journal/mempalace entries that often
+            # contain the user's verbatim query (records of past attempts
+            # at the SAME question), and the model then treats those stale
+            # records as ground truth instead of calling the tool. Same
+            # pattern as the file-path gate (jis).
+            _kr_url_skip = False
+            if not _kr_skip and user_input:
+                _ui_lower = user_input.lower()
+                if "http://" in _ui_lower or "https://" in _ui_lower:
+                    _kr_url_skip = True
+                    _kr_skip = True
+                    logger.info(
+                        "KnowledgeRouter: skipped — user prompt names a URL; "
+                        "web.fetch is the authoritative source"
+                    )
             try:
                 if not _kr_skip:
                     from gaia_core.cognition.knowledge_router import ground_query

@@ -511,7 +511,8 @@
       "apnews.com",
       "nature.com",
       "science.org",
-      "ncbi.nlm.nih.gov"
+      "ncbi.nlm.nih.gov",
+      "httpbin.org"
     ],
     "blocked_domains": [
       "reddit.com",

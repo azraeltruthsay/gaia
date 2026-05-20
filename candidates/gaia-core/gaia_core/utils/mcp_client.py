@@ -354,7 +354,16 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
             payload["allow_pending"] = True
 
         logger.info(f"Requesting MCP approval: url={url} method={method} allow_pending={allow_pending}")
-        r = requests.post(url, json=payload, timeout=10)
+        # Inter-service HMAC auth — without these headers MCP's AuthMiddleware
+        # returns 401, breaking every approval-gated tool call (write_file,
+        # ai_write, shell, etc.). The /request_approval path is not in MCP's
+        # _PUBLIC_PATHS, so signing is required when GAIA_SERVICE_KEY is set.
+        try:
+            from gaia_common.utils.service_auth import auth_headers as _auth_h
+            _hdrs = _auth_h("POST", "/request_approval")
+        except Exception:
+            _hdrs = {}
+        r = requests.post(url, json=payload, headers=_hdrs, timeout=10)
         r.raise_for_status()
         data = r.json()
         # Include any human-friendly proposal text and timestamps if provided by server

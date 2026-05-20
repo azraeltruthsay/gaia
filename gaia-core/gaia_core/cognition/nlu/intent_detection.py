@@ -249,6 +249,11 @@ def _detect_list_files_request(text: str) -> bool:
 
 def _detect_read_file_request(text: str) -> bool:
     lowered = (text or "").lower()
+    # URLs aren't files. If the message contains a URL, this is web.fetch
+    # territory — don't lock it into the read_file slim-prompt path which
+    # otherwise emits "I couldn't find that file" for httpbin.org/html.
+    if "http://" in lowered or "https://" in lowered:
+        return False
     read_keywords = [
         "read ",
         "open ",
@@ -1067,6 +1072,17 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
     if not intent_str:
         # 2. LLM path (with embedding fallback)
         intent_str = model_intent_detection(text, config, lite_llm, full_llm, fallback_llm, probe_context=probe_context, embed_model=embed_model, source=source)
+
+    # URL override: the LLM intent classifier sometimes maps "Fetch the page
+    # at <URL>" to read_file because of the word "page" / "fetch". URLs are
+    # not files — locking into read_file routes through the slim "couldn't
+    # find that file" path and never executes the web tool. Force chat so
+    # the full pipeline handles tool routing via the capability block.
+    if intent_str in ("read_file", "explain_file", "find_file") and text:
+        _lower = text.lower()
+        if "http://" in _lower or "https://" in _lower:
+            logger.info("Intent URL-override: %s → chat (URL present in prompt)", intent_str)
+            intent_str = "chat"
 
     # ── Weighted Confidence Routing ──
     complexity = WeightedIntentClassifier.score(text, embed_intent=embed_intent, embed_confidence=embed_score)

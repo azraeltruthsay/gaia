@@ -1062,12 +1062,96 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 pass
 
+            # --- PRE-FLIGHT: Blast Shield (agent-input layer) ---
+            # Catch destructive shell patterns BEFORE any model call. Prompt-
+            # based hedging on Core is unreliable; a deterministic regex
+            # short-circuits before reflex/run_turn ever fire. Mirrors the
+            # patterns MCP's run_shell Blast Shield blocks at execution time.
+            _bs_reason = None
+            if user_input:
+                import re as _re_blast_main
+                _destructive_re_main = _re_blast_main.compile(
+                    r"(?:^|[\s;&|`(])"
+                    r"(?:"
+                    r"rm\s+(?:-[A-Za-z]*r[A-Za-z]*f?|-[A-Za-z]*f[A-Za-z]*r)\s+/+(?:\s|$|--)"
+                    r"|sudo\s+rm\s+-[A-Za-z]*r"
+                    r"|dd\s+(?:if|of)=/dev/(?:sd|hd|nvme|mmcblk)"
+                    r"|mkfs(?:\.[a-z0-9]+)?\s+/dev/"
+                    r"|shred\s+(?:-[A-Za-z]+\s+)*/(?:dev|etc|boot|root)"
+                    r"|chmod\s+-R\s+(?:777|000)\s+/"
+                    r"|>\s*/dev/sd[a-z]"
+                    r"|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"
+                    r")",
+                    _re_blast_main.IGNORECASE,
+                )
+                if _destructive_re_main.search(user_input):
+                    _bs_reason = "destructive shell pattern"
+
+            if _bs_reason:
+                logger.warning(
+                    "[BLAST SHIELD] %s in user input — refusing without model call: %r",
+                    _bs_reason, (user_input or "")[:120],
+                )
+                _refusal = (
+                    "[Core]\n\nI won't run that. The command you asked for "
+                    "is destructive — it would wipe filesystems or destroy "
+                    "the host. Capability is not consent: even with shell "
+                    "access I refuse irreversible, system-destroying "
+                    "operations.\n\nIf you're testing my safety guard, this "
+                    "is the guard. If you actually need something "
+                    "destructive-looking — clearing a sandbox directory, "
+                    "wiping a specific dev partition during install, etc. — "
+                    "give me a narrower path and explicit intent."
+                )
+                yield json.dumps({"type": "token", "value": _refusal}) + "\n"
+                yield json.dumps({"type": "flush"}) + "\n"
+                from gaia_common.protocols.cognition_packet import PacketState
+                packet.status.state = PacketState.COMPLETED
+                packet.response.candidate = _refusal
+                yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
+                return
+
+            # --- PRE-FLIGHT: unreachable-path hedge ---
+            # Detect file paths in user_input that fall OUTSIDE the MCP allow-
+            # list (/gaia/GAIA_Project, /knowledge, /gaia-common, /sandbox).
+            # We don't refuse — we append a system aside so the model knows
+            # to hedge ("I don't have access to /tmp") instead of fabricating.
+            # Reflex is disabled for these so the full pipeline handles them
+            # carefully (reflex on Core has no path awareness).
+            _reflex_disabled_for_path = False
+            if user_input:
+                _path_match_main = _re_blast_main.search(
+                    r"(?:^|\s)((?:/tmp|/etc|/root|/boot|/var|/proc|/sys|/dev|/run|/mnt|/media|/srv)/"
+                    r"[A-Za-z0-9_./\-]+)",
+                    user_input,
+                )
+                if _path_match_main:
+                    _unreachable = _path_match_main.group(1)
+                    logger.info(
+                        "[ALLOW-LIST HEDGE] user mentioned unreachable path %r — appending hedge to user_input, disabling reflex",
+                        _unreachable,
+                    )
+                    user_input = (
+                        f"{user_input}\n\n"
+                        f"[SYSTEM ASIDE: The path {_unreachable} is OUTSIDE "
+                        f"your MCP file-read allow-list (only "
+                        f"/gaia/GAIA_Project, /knowledge, /gaia-common, "
+                        f"/sandbox are reachable). You cannot read this "
+                        f"file. Do NOT fabricate its contents. Tell the "
+                        f"user you don't have access to that path.]"
+                    )
+                    try:
+                        packet.content.original_prompt = user_input
+                    except Exception:
+                        pass
+                    _reflex_disabled_for_path = True
+
             # --- PRE-FLIGHT: Speculative Reflex ---
             # Trigger this BEFORE the heavy run_turn loop starts
             loop = asyncio.get_event_loop()
             reflex_text = ""
             history = _ai_manager.session_manager.get_history(session_id)
-            if _agent_core.is_eligible_for_reflex(packet, history):
+            if not _reflex_disabled_for_path and _agent_core.is_eligible_for_reflex(packet, history):
                 logger.info("Main: Triggering instant speculative Reflex...")
                 _reflex_t0 = _time.perf_counter()
                 reflex_text = await loop.run_in_executor(
@@ -1077,7 +1161,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                     # Uncertainty check: if reflex hedges or describes process
                     # without an actual answer, DON'T return — let Core handle it
                     user_input = packet.content.original_prompt or ""
-                    if _agent_core._should_escalate_for_uncertainty(reflex_text, user_input):
+                    # Tool-call escape hatch: if reflex emitted a tool_call
+                    # envelope, the actual tool hasn't executed yet. Finalizing
+                    # here would show the user the envelope as the answer.
+                    # Always escalate so the agent layer parses + executes the
+                    # call and synthesizes a real follow-up response.
+                    _reflex_has_toolcall = (
+                        "<tool_call>" in reflex_text and "</tool_call>" in reflex_text
+                    )
+                    if _reflex_has_toolcall:
+                        logger.info("Main: Reflex emitted tool_call — escalating to full pipeline to execute it")
+                        reflex_text = ""
+                    elif _agent_core._should_escalate_for_uncertainty(reflex_text, user_input):
                         logger.info("Main: Reflex uncertain — escalating to full pipeline")
                         reflex_text = ""  # Clear so full pipeline runs
                     else:

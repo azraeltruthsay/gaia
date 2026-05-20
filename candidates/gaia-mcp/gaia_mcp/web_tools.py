@@ -52,6 +52,8 @@ class SourceTrustConfig:
         "nature.com",
         "science.org",
         "ncbi.nlm.nih.gov",
+        # Test endpoints (used by smoke tests and during development)
+        "httpbin.org",
     ]
 
     _DEFAULT_BLOCKED = [
