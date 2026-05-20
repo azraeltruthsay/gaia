@@ -1042,9 +1042,27 @@ class AgentCore:
             # --- Stage 0: Neural Grounding (pre-cognition context injection) ---
             # Extract entities via Nano, probe KG → Vector → Web per hierarchy.
             # Results injected into packet.content.data_fields as 'auto_grounding'.
+            #
+            # 5wo: short-circuit if the user named a local file path. The right
+            # source for those queries is file.read; web/KG grounding returns
+            # board-game and Claude Monet noise that pollutes Prime's context
+            # and makes it pick wrong paths.
+            import re as _re_stage0
+            _stage0_local_file_re = _re_stage0.compile(
+                r"(?:^|\s)(?:/shared|/gaia|/models|/home|/etc|/tmp|/var|"
+                r"/knowledge|/sandbox|/logs|/app|/usr|/opt)/"
+                r"[A-Za-z0-9_./\-]+"
+                r"|(?:\b|^)\.{0,2}/[A-Za-z0-9_./\-]+\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv|html|xml)\b"
+                r"|(?:^|[\s\"'(])"
+                r"[A-Za-z0-9_][A-Za-z0-9_\-]*"
+                r"\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv)"
+                r"\b"
+            )
+            _stage0_skip_for_local_file = bool(_stage0_local_file_re.search(user_input or ""))
+
             _grounding_context = None
             grounding_cfg = constants.get("GROUNDING", {})
-            if grounding_cfg.get("enabled", False):
+            if grounding_cfg.get("enabled", False) and not _stage0_skip_for_local_file:
                 try:
                     import time as _gt
                     _g0 = _gt.perf_counter()
@@ -1060,6 +1078,8 @@ class AgentCore:
                         logger.debug("Stage 0 Grounding: no entities extracted")
                 except Exception:
                     logger.debug("Stage 0 Grounding failed (non-blocking)", exc_info=True)
+            elif _stage0_skip_for_local_file:
+                logger.info("Stage 0 Grounding skipped: user prompt names a local file path — file.read is the right source")
 
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
             if probe_result and probe_result.primary_collection:
@@ -4454,6 +4474,17 @@ class AgentCore:
         if not content or not content.strip():
             return True
         stripped = content.strip()
+        # A complete <tool_call>{...}</tool_call> envelope is a valid action,
+        # not degenerate output. The envelope ends in '>' which trips the
+        # trailing-punctuation check below, and the inline JSON keys can trip
+        # the unique-word ratio. Short-circuit here: the agent layer parses
+        # the envelope and routes the call. If the model also emitted some
+        # framing prose around it, that's fine.
+        if '<tool_call>' in stripped and '</tool_call>' in stripped:
+            _tc_start = stripped.find('<tool_call>')
+            _tc_end = stripped.find('</tool_call>', _tc_start)
+            if _tc_end > _tc_start:
+                return False
         # Short answers are valid for factual/math questions.
         # "105", "4", "Paris" are correct answers, not degenerate.
         if len(stripped) < 5:

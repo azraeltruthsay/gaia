@@ -224,6 +224,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             ":\"<verb>\",...params}</tool_call>' as part of your response. "
             "The agent layer executes the call and returns the result on the "
             "next turn. Don't fabricate results — emit the call and wait.\n"
+            "File-read roots (MCP allow-list — paths outside these are rejected):\n"
+            "  /gaia/GAIA_Project  — full project tree. The project CLAUDE.md "
+            "is at /gaia/GAIA_Project/CLAUDE.md. Service code, contracts, "
+            "blueprints, scripts.\n"
+            "  /knowledge          — curricula, dev notebooks, system_reference, "
+            "personas, blueprints.\n"
+            "  /gaia-common        — shared protocols and utilities.\n"
+            "  /sandbox            — scratch area for writes.\n"
+            "When asked about a file, pass an absolute path under one of those "
+            "roots. Bare filenames like 'CLAUDE.md' will be rejected.\n"
             "When NOT to call a tool: pure conversation, math you can do in "
             "your head, things you genuinely know. Calling a tool for "
             "'what's 2+2' is wasteful. Use judgment."
@@ -1203,9 +1213,24 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                                 else:
                                     parts.append(f"- {title}: {snippet[:200]} ({url})")
                     if has_system_data:
+                        # System-sensor data is authoritative (it's GAIA's own
+                        # sensor read), so keep firm framing for that branch only.
                         parts.insert(0, "The following is VERIFIED system sensor data. Use it directly in your answer — do NOT say you lack access to this information:")
                     else:
-                        parts.insert(0, "Here is reference data from verified sources:")
+                        # eu9: web/knowledge grounding is candidate context, not
+                        # ground truth. Frame it as such so the model treats it
+                        # as a hint to consider, not a directive to summarize.
+                        # The model should verify with tools (file.read, etc.)
+                        # before relying on any specific claim from this block.
+                        parts.insert(
+                            0,
+                            "[Candidate context — automated grounding may be "
+                            "irrelevant, stale, or wrong. Verify with tools "
+                            "(file.read, knowledge query, etc.) before treating "
+                            "any specific claim below as authoritative. If the "
+                            "candidate context conflicts with the user's actual "
+                            "question, ignore it.]",
+                        )
                     if len(parts) > 1:
                         _grounding_user_message = "\n".join(parts)
                         logger.debug("Grounding prepared as user message: %d chars", len(_grounding_user_message))
@@ -1688,11 +1713,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
 
 
-    # HERMES PATTERN: inject grounding as a user message BEFORE the actual
-    # user message. This preserves the system prompt cache while giving
-    # the model verified reference data to work with.
+    # eu9: inject grounding as a user message BEFORE the actual user query.
+    # We keep it in user-role (not system) to preserve the system-prompt cache.
+    #
+    # IMPORTANT — no fake assistant acknowledgment. The old pattern inserted
+    # an assistant turn saying "I'll use this reference data to inform my
+    # answer" which made the model treat the grounding as a self-commitment
+    # to summarize. That hijacked judgment. Now the grounding stands alone,
+    # framed by its own header as candidate (non-authoritative) context, and
+    # the model decides what to do with it on the actual user turn.
     if _grounding_user_message and len(final_prompt) >= 2:
-        # Insert before the last user message
         _last_user_idx = None
         for _i in range(len(final_prompt) - 1, -1, -1):
             if final_prompt[_i].get("role") == "user":
@@ -1703,12 +1733,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "role": "user",
                 "content": _grounding_user_message,
             })
-            # Add a brief assistant acknowledgment to maintain turn structure
-            final_prompt.insert(_last_user_idx + 1, {
-                "role": "assistant",
-                "content": "I'll use this reference data to inform my answer.",
-            })
-            logger.info("Grounding injected as user message (%d chars) before user query",
+            logger.info("Grounding injected as user message (%d chars) before user query — no assistant ack (eu9)",
                        len(_grounding_user_message))
 
     return final_prompt
