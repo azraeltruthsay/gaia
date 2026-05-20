@@ -268,6 +268,25 @@ def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
             # Anything before the opening <think> is the model's pre-thinking
             # prose; prefer that as the response when present.
             pre = raw[:u.start()].strip()
+            # Guard against orphan category labels: when the model emits a
+            # 2-3 word prefix like "Under review." or "Off-topic." before
+            # opening <think>, and the thinking has substantive content but
+            # never closes, the pre-prose is a stub, not the real response.
+            # Surfacing it (as we did until now) gave users replies like
+            # "Under review." with all the actual analysis discarded.
+            #
+            # Heuristic: prefix is suspicious if it's a sentence fragment
+            # under 30 chars, ends with a period/colon, and the thinking
+            # is substantially longer. In that case use the thinking content
+            # so the user sees the real work, not the orphan label.
+            _pre_is_orphan_label = (
+                bool(pre)
+                and len(pre) < 30
+                and pre.rstrip().endswith((".", ":", "!"))
+                and len(thinking) > len(pre) * 3
+            )
+            if _pre_is_orphan_label and thinking:
+                return thinking, thinking, True
             if pre:
                 return thinking, pre, True
             # No pre-think text; degrade to using the thinking as response so
