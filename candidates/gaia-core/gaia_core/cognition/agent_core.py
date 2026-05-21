@@ -2897,6 +2897,24 @@ class AgentCore:
                     yield {"type": "token", "value": _header + text}
                     self.session_manager.add_message(session_id, "assistant", text)
 
+                    # Consistency-violation detection on slim-path responses too.
+                    # Most confabulations we've caught (Howeidi-in-AGI, fabricated
+                    # Patriots/SuperBowl in weather replies) came from slim
+                    # escalation, not the deliberation path. Without this hook,
+                    # the detector would only catch the rarer deliberation-path
+                    # confabulations. See world-model design doc for context.
+                    try:
+                        from gaia_core.cognition.consistency_detector import schedule_consistency_check
+                        schedule_consistency_check(
+                            user_input=user_input or "",
+                            final_response=text,
+                            session_id=session_id,
+                            packet=packet,
+                            history=history,
+                        )
+                    except Exception:
+                        logger.debug("Consistency check (slim path) failed to schedule", exc_info=True)
+
                     # Post-response learning
                     if _grounding_ctx and _grounding_ctx.has_grounding:
                         try:
@@ -3485,6 +3503,24 @@ class AgentCore:
                                 )
                             except Exception:
                                 logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
+                            # ── CONSISTENCY-VIOLATION DETECTOR (Stage 2 — World Model design) ──
+                            # Catches confabulation that grounding gates can't:
+                            # named entities in the response that don't trace back
+                            # to user input, history, grounding, or the KG. Runs
+                            # async; observes-and-flags only (no auto-correction).
+                            # See knowledge/Dev_Notebook/2026-05-21_world_model_design.md
+                            try:
+                                from gaia_core.cognition.consistency_detector import schedule_consistency_check
+                                schedule_consistency_check(
+                                    user_input=packet.content.original_prompt or "",
+                                    final_response=_delib_result.final_response,
+                                    journal_entry_id=_delib_result.journal_entry_id,
+                                    session_id=session_id,
+                                    packet=packet,
+                                    history=self.session_manager.get_history(session_id) if session_id else None,
+                                )
+                            except Exception:
+                                logger.debug("Consistency check scheduling failed (non-fatal)", exc_info=True)
                             # Mark packet finalized for downstream consumers
                             try:
                                 packet.response.candidate = _delib_result.final_response
