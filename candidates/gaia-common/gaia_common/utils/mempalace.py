@@ -32,7 +32,7 @@ import os
 import re
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from gaia_common.utils.aaak_dialect import AAKDialect
 from gaia_common.utils.general_extractor import extract_memories
@@ -192,66 +192,168 @@ class MemPalace:
     ) -> int:
         """Extract entities from text and add basic KG triples.
 
-        Keeps it simple:
-        - Detect known entities via AAAK's entity detection
-        - Create basic relationship triples
-        - Link memory to its palace location
+        World Model Stage 0 (hrp) — rewrote the entity-detection path
+        to stop polluting the KG with token-fragment 'entities' like
+        'sup', 'bow', 'new' (truncated 3-char codes from AAAK's
+        compression layer). AAAK codes are useful for symbolic
+        compression but they are NOT entity names; storing them as KG
+        subjects degrades every downstream query.
+
+        New approach:
+        - Use proper named-entity extraction (multi-word Title Case
+          spans, 4+ char ALL-CAPS acronyms) instead of AAAK codes
+        - Stopword filtering rejects sentence-openers ('Between',
+          'Speaking', possessive pronouns, etc.)
+        - Minimum length 5 chars for single-word entities (raised
+          from 2 — the old threshold accepted 'SUP', 'BOW')
+        - Drop topic-based 'related_to' triples entirely. Topics are
+          frequency-ranked common nouns; they make terrible KG entities.
+          (Real topical relationships should come from semantic
+          inference, not bag-of-words frequency.)
+        - Confidence reflects extraction certainty: 1.0 for known-
+          registry matches, 0.7 for fallback-detected names.
         """
         count = 0
         try:
-            # Detect entities using the AAAK dialect
-            detected = self._dialect._detect_entities(text)
+            # Don't store palace_id triples — palace_id is a synthetic
+            # opaque ID, not a real entity. Keep palace<->location
+            # mapping in the AAAK files themselves, not in the KG.
+            # (Removed: stored_in and memory_type triples.)
 
-            # Add palace location triple
-            self._kg.add_triple(
-                palace_id, "stored_in", f"{wing}/{room}",
-                valid_from=date_str, source=source,
-            )
-            count += 1
+            entities = self._extract_kg_entities(text)
+            seen_subjects: set = set()
+            for entity_name, confidence in entities[:5]:
+                # Dedupe per-text
+                key = entity_name.lower()
+                if key in seen_subjects:
+                    continue
+                seen_subjects.add(key)
 
-            # Add memory type triple
-            self._kg.add_triple(
-                palace_id, "memory_type", memory_type,
-                valid_from=date_str, source=source,
-            )
-            count += 1
-
-            # For each detected entity, create a "mentioned_in" triple
-            for entity_code in detected[:5]:
-                # Reverse-lookup entity name from code
-                entity_name = self._reverse_entity(entity_code)
-                if entity_name:
-                    self._kg.add_triple(
-                        entity_name, "mentioned_in", palace_id,
-                        valid_from=date_str, source=source,
-                    )
-                    count += 1
-
-            # Extract topic-based triples from the AAAK topics
-            topics = self._dialect._extract_topics(text, max_topics=3)
-            if topics and detected:
-                primary_entity = self._reverse_entity(detected[0])
-                if primary_entity:
-                    for topic in topics[:2]:
-                        self._kg.add_triple(
-                            primary_entity, "related_to", topic,
-                            valid_from=date_str, source=source,
-                        )
-                        count += 1
+                self._kg.add_triple(
+                    entity_name, "mentioned_in", palace_id,
+                    valid_from=date_str, source=source,
+                    confidence=confidence,
+                )
+                count += 1
 
         except Exception as e:
             logger.warning("KG triple extraction failed: %s", e)
 
         return count
 
+    # Stopwords for fallback entity detection — pronouns, sentence-
+    # openers, common acronyms that shouldn't be KG entities.
+    _ENTITY_STOPWORDS: "frozenset[str]" = frozenset({
+        "The", "This", "That", "These", "Those", "Their", "There", "Then",
+        "When", "Where", "What", "Which", "Who", "Whom", "Whose", "Why", "How",
+        "His", "Her", "Its", "Our", "Your", "My",
+        "He", "She", "It", "We", "You", "I", "They",
+        "And", "But", "Or", "If", "So", "Also", "Just", "Only", "Both", "Each",
+        "Some", "Most", "Many", "Any", "All", "None", "Every", "Other",
+        "Such", "Same", "Said", "Note", "Yes", "No", "OK", "Okay",
+        "Between", "Among", "Within", "Without", "Through", "Across",
+        "Above", "Below", "Beyond", "After", "Before", "During", "Since",
+        "Until", "While", "Although", "Though", "However", "Therefore",
+        "Indeed", "Sorry", "Thanks", "Maybe", "Perhaps", "Often", "Always",
+        "Never", "Sometimes", "Usually", "Likely", "Possibly", "Actually",
+        "Especially", "Generally", "Specifically", "Currently",
+        "Speaking", "Considering", "Beyond", "Regarding", "Concerning",
+        "Including", "Excluding", "Apart", "Aside", "Otherwise",
+        "Let", "Make", "Take", "Give", "Find", "Look", "Show", "Tell",
+        "Have", "Has", "Had", "Will", "Would", "Could", "Should", "Might",
+        "Must", "Need", "Want", "Like", "Love", "Hate", "Feel", "Think",
+        "Believe", "Know", "Understand", "Remember", "Forget", "Imagine",
+        # NOTE: system identifiers (GAIA, Prime, Core, Nano, AI, Azrael)
+        # are NOT in this list — they are legitimate KG entities for
+        # mempalace extraction. The consistency_detector has a similar
+        # stopword list where these ARE filtered (to prevent self-
+        # references from being flagged as confabulation), but that's
+        # the opposite goal.
+        "User", "Message",
+        "API", "URL", "PDT", "UTC", "JSON", "HTTP", "HTTPS", "MCP",
+        "GPU", "CPU", "RAM", "PST", "CST", "EST", "TLS", "SSL", "TCP", "UDP",
+    })
+
+    def _extract_kg_entities(self, text: str) -> List[Tuple[str, float]]:
+        """Extract candidate entities suitable as KG subjects.
+
+        Returns list of (name, confidence) tuples. Two passes:
+          1. Known-registry match — high confidence (1.0)
+          2. Multi-word Title Case + long acronym fallback — moderate
+             confidence (0.7), gated by stopwords and minimum length
+
+        Single Title Case words are NOT accepted. They produce too
+        much noise from sentence-initial capitalizations ('Stoic',
+        'Roman', 'Egyptian') that are common-knowledge concepts
+        rather than discrete named entities.
+        """
+        if not text or len(text) < 5:
+            return []
+
+        out: List[Tuple[str, float]] = []
+        seen: "set[str]" = set()
+
+        # Pass 1: known entities from the AAAK registry. These are
+        # canonical names the system has explicitly curated.
+        for name in self._entities.keys():
+            if not name or name.islower():
+                continue  # skip lowercase registry codes
+            if name.lower() in text.lower():
+                key = name.lower()
+                if key not in seen:
+                    seen.add(key)
+                    out.append((name, 1.0))
+
+        # Pass 2: fallback extraction — multi-word Title Case spans.
+        # Bounded by sentence to avoid matching "Oregon. Current".
+        sentence_split = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+        multi_title = re.compile(
+            r"\b(?:[A-Z][a-zA-Z]{1,}\.?\s+){1,3}[A-Z][a-zA-Z]{1,}\b"
+        )
+        for sent in sentence_split.split(text):
+            for m in multi_title.finditer(sent):
+                surface = m.group(0).strip().rstrip(".")
+                if len(surface) < 5:
+                    continue
+                first = surface.split(None, 1)[0]
+                if first in self._ENTITY_STOPWORDS:
+                    # Drop sentence-opener; if remainder is still
+                    # multi-word, try that.
+                    remainder = surface.split(None, 1)[1] if " " in surface else ""
+                    if remainder and " " in remainder and len(remainder) >= 5:
+                        surface = remainder
+                    else:
+                        continue
+                key = surface.lower()
+                if key not in seen:
+                    seen.add(key)
+                    out.append((surface, 0.7))
+
+        # Pass 3: 4+ char ALL-CAPS acronyms (skip stopword set).
+        acronym = re.compile(r"\b[A-Z]{4,}(?:[-_][A-Z0-9]+)?\b")
+        for m in acronym.finditer(text):
+            surface = m.group(0)
+            if surface in self._ENTITY_STOPWORDS:
+                continue
+            key = surface.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append((surface, 0.7))
+
+        return out
+
     def _reverse_entity(self, code: str) -> Optional[str]:
-        """Reverse-lookup: entity code -> entity name."""
+        """Reverse-lookup: entity code -> entity name.
+
+        Retained for backwards compatibility with callers that still use
+        AAAK codes. Returns None for unknown codes rather than passing
+        them through (the old "return code if len(code) >= 2" behavior
+        is what produced the 'SUP'/'BOW'/'NEW' KG pollution).
+        """
         for name, c in self._entities.items():
             if c == code:
                 return name
-        # If code doesn't match known entities, return it as-is
-        # (it's a capitalized-word detection from AAAK fallback)
-        return code if len(code) >= 2 else None
+        return None
 
     # ── Recall ───────────────────────────────────────────────────────────
 
