@@ -142,15 +142,6 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
     Handles sensitive tools requiring approval and blast shield validation.
     Supports both legacy tool names AND domain tool names (file, shell, web, etc.).
     """
-    # ── Meta-verb routing (Unified Skill Architecture) ───────────────
-    # 5 meta-verbs that cover all tool functionality. Routes to the
-    # SkillGateway which dispatches to existing infrastructure.
-    _META_VERBS = {"search", "do", "learn", "remember", "ask"}
-    if method in _META_VERBS:
-        from gaia_mcp.skill_gateway import get_gateway
-        gateway = get_gateway()
-        return await gateway.route(method, params or {})
-
     # ── Domain tool routing ────────────────────────────────────────────
     # If method is a domain name (e.g., "file"), pop "action" from params,
     # resolve to the legacy tool name, and delegate to the same function.
@@ -575,19 +566,33 @@ def _get_kg():
 
 
 def _kg_query_impl(params: dict) -> dict:
-    """Query the knowledge graph for an entity's relationships."""
+    """Query the knowledge graph for an entity's relationships.
+
+    World Model Stage 1: 'world' param scopes the query (default
+    'actuality'). Pass world=null to search all worlds.
+    """
     kg = _get_kg()
     entity = params.get("entity") or params.get("subject", "")
     as_of = params.get("as_of")
     direction = params.get("direction", "both")
+    # Default to actuality; explicit null (None) means cross-world search
+    world = params.get("world", "actuality")
     if not entity:
         return {"ok": False, "error": "entity parameter required"}
-    results = kg.query_entity(entity, as_of=as_of, direction=direction)
-    return {"ok": True, "entity": entity, "facts": results, "count": len(results)}
+    results = kg.query_entity(entity, as_of=as_of, direction=direction, world=world)
+    return {
+        "ok": True, "entity": entity, "facts": results, "count": len(results),
+        "world": world,
+    }
 
 
 def _kg_add_impl(params: dict) -> dict:
-    """Add a fact (triple) to the knowledge graph."""
+    """Add a fact (triple) to the knowledge graph.
+
+    World Model Stage 1: 'world' param scopes the triple (default
+    'actuality'). The same (subject, predicate, object) can exist in
+    multiple worlds without conflicting.
+    """
     kg = _get_kg()
     subject = params.get("subject", "")
     predicate = params.get("predicate", "")
@@ -602,30 +607,36 @@ def _kg_add_impl(params: dict) -> dict:
         valid_to=params.get("valid_to"),
         confidence=float(params.get("confidence", 1.0)),
         source=params.get("source"),
+        world=params.get("world", "actuality"),
     )
-    return {"ok": True, "triple_id": triple_id}
+    return {"ok": True, "triple_id": triple_id, "world": params.get("world", "actuality")}
 
 
 def _kg_invalidate_impl(params: dict) -> dict:
-    """Mark a fact as no longer valid."""
+    """Mark a fact as no longer valid (world-scoped, default 'actuality')."""
     kg = _get_kg()
     subject = params.get("subject", "")
     predicate = params.get("predicate", "")
     obj = params.get("object", "")
     ended = params.get("ended")
+    world = params.get("world", "actuality")
     if not (subject and predicate and obj):
         return {"ok": False, "error": "subject, predicate, and object are all required"}
-    rows = kg.invalidate(subject, predicate, obj, ended=ended)
-    return {"ok": True, "invalidated": rows}
+    rows = kg.invalidate(subject, predicate, obj, ended=ended, world=world)
+    return {"ok": True, "invalidated": rows, "world": world}
 
 
 def _kg_timeline_impl(params: dict) -> dict:
-    """Get chronological facts, optionally filtered by entity."""
+    """Get chronological facts, optionally filtered by entity.
+
+    World-scoped (default 'actuality'); pass world=null for all worlds.
+    """
     kg = _get_kg()
     entity = params.get("entity")
     limit = int(params.get("limit", 100))
-    facts = kg.timeline(entity_name=entity, limit=limit)
-    return {"ok": True, "facts": facts, "count": len(facts)}
+    world = params.get("world", "actuality")
+    facts = kg.timeline(entity_name=entity, limit=limit, world=world)
+    return {"ok": True, "facts": facts, "count": len(facts), "world": world}
 
 
 def _kg_stats_impl(params: dict) -> dict:

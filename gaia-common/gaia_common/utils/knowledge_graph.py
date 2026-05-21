@@ -85,6 +85,9 @@ class KnowledgeGraph:
 
     def _init_db(self):
         conn = self._conn()
+        # Step 1: ensure tables exist. CREATE TABLE IF NOT EXISTS is a
+        # no-op on pre-existing schemas; the world column may be missing
+        # on those — handled by the migration step below.
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
@@ -104,6 +107,7 @@ class KnowledgeGraph:
                 confidence REAL DEFAULT 1.0,
                 source TEXT,
                 extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                world TEXT NOT NULL DEFAULT 'actuality',
                 FOREIGN KEY (subject) REFERENCES entities(id),
                 FOREIGN KEY (object) REFERENCES entities(id)
             );
@@ -112,6 +116,23 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
+        """)
+        # Step 2: migrate pre-existing databases — add world column if
+        # missing. Must happen BEFORE the world-dependent indices below.
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(triples)").fetchall()]
+        if "world" not in cols:
+            conn.execute(
+                "ALTER TABLE triples ADD COLUMN world TEXT NOT NULL "
+                "DEFAULT 'actuality'"
+            )
+            logger.info(
+                "KG migration: added 'world' column to triples table "
+                "(existing rows defaulted to 'actuality')"
+            )
+        # Step 3: create world-dependent indices now that the column exists.
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_triples_world ON triples(world);
+            CREATE INDEX IF NOT EXISTS idx_triples_world_subject ON triples(world, subject);
         """)
         conn.commit()
         conn.close()
@@ -146,13 +167,19 @@ class KnowledgeGraph:
         valid_to: str = None,
         confidence: float = 1.0,
         source: str = None,
+        world: str = "actuality",
     ) -> str:
         """Add a relationship triple: subject → predicate → object.
 
+        World Model Stage 1 (t2m): the world parameter scopes the triple
+        to a context. Default is 'actuality' (consensus reality). Other
+        worlds (fiction, counterfactual, etc.) are isolated namespaces —
+        the same (subject, predicate, object) triple can exist in both
+        actuality and another world without conflicting.
+
         Examples:
             add_triple("Core", "runs_on", "Qwen3.5-4B", valid_from="2026-04-01")
-            add_triple("gaia-mcp", "exposes", "13 domain tools")
-            add_triple("Nano", "handles", "reflex responses", valid_from="2026-03-01")
+            add_triple("Hogwarts", "located_in", "Scotland", world="potterverse")
         """
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
@@ -163,10 +190,13 @@ class KnowledgeGraph:
         conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject))
         conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj))
 
-        # Check for existing identical triple (dedup)
+        # Dedup check is world-scoped — the same triple in two different
+        # worlds is intentionally allowed (Hogwarts being in Scotland is
+        # true in potterverse AND in actuality with different sources).
         existing = conn.execute(
-            "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-            (sub_id, pred, obj_id),
+            "SELECT id FROM triples WHERE subject=? AND predicate=? "
+            "AND object=? AND world=? AND valid_to IS NULL",
+            (sub_id, pred, obj_id, world),
         ).fetchone()
 
         if existing:
@@ -174,12 +204,14 @@ class KnowledgeGraph:
             return existing[0]
 
         # ── Contradiction detection (Tier 1: deterministic) ──────────
-        # Check for same subject+predicate but DIFFERENT object (conflict)
+        # Same-world contradictions only. Cross-world facts can disagree
+        # by design — that's the whole point of the world dimension.
         conflicting = conn.execute(
             "SELECT t.*, e.name as obj_name FROM triples t "
             "JOIN entities e ON t.object = e.id "
-            "WHERE t.subject=? AND t.predicate=? AND t.object!=? AND t.valid_to IS NULL",
-            (sub_id, pred, obj_id),
+            "WHERE t.subject=? AND t.predicate=? AND t.object!=? "
+            "AND t.world=? AND t.valid_to IS NULL",
+            (sub_id, pred, obj_id, world),
         ).fetchall()
 
         if conflicting:
@@ -232,17 +264,32 @@ class KnowledgeGraph:
         )
 
         conn.execute(
-            """INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (triple_id, sub_id, pred, obj_id, valid_from, valid_to, confidence, source),
+            """INSERT INTO triples
+               (id, subject, predicate, object, valid_from, valid_to, confidence, source, world)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (triple_id, sub_id, pred, obj_id, valid_from, valid_to, confidence, source, world),
         )
         conn.commit()
         conn.close()
-        logger.debug("Added triple: %s → %s → %s", subject, predicate, obj)
+        logger.debug(
+            "Added triple [%s]: %s → %s → %s", world, subject, predicate, obj,
+        )
         return triple_id
 
-    def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
-        """Mark a relationship as no longer valid (set valid_to date)."""
+    def invalidate(
+        self,
+        subject: str,
+        predicate: str,
+        obj: str,
+        ended: str = None,
+        world: str = "actuality",
+    ):
+        """Mark a relationship as no longer valid (set valid_to date).
+
+        World-scoped: only invalidates the matching triple in the given
+        world. To invalidate the same fact across multiple worlds, call
+        this once per world.
+        """
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
         pred = predicate.lower().replace(" ", "_")
@@ -250,71 +297,113 @@ class KnowledgeGraph:
 
         conn = self._conn()
         cursor = conn.execute(
-            "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-            (ended, sub_id, pred, obj_id),
+            "UPDATE triples SET valid_to=? "
+            "WHERE subject=? AND predicate=? AND object=? "
+            "AND world=? AND valid_to IS NULL",
+            (ended, sub_id, pred, obj_id, world),
         )
         conn.commit()
         rows_affected = cursor.rowcount
         conn.close()
         if rows_affected:
-            logger.info("Invalidated: %s → %s → %s (ended %s)", subject, predicate, obj, ended)
+            logger.info(
+                "Invalidated [%s]: %s → %s → %s (ended %s)",
+                world, subject, predicate, obj, ended,
+            )
         return rows_affected
 
     # ── Query operations ──────────────────────────────────────────────────
 
-    def query_entity(self, name: str, as_of: str = None, direction: str = "both"):
+    def query_entity(
+        self,
+        name: str,
+        as_of: str = None,
+        direction: str = "both",
+        world: str = "actuality",
+    ):
         """Get all relationships for an entity.
 
         direction: "outgoing" (entity → ?), "incoming" (? → entity), "both"
         as_of: date string — only return facts valid at that time
+        world: scope query to a single world. Pass None to search ALL worlds
+               (returns facts from every named graph; each result includes
+               its 'world' field so callers can disambiguate).
         """
         eid = self._entity_id(name)
         conn = self._conn()
         results = []
 
+        world_filter = "" if world is None else " AND t.world = ?"
+        extra_params = [] if world is None else [world]
+
         if direction in ("outgoing", "both"):
-            query = "SELECT t.*, e.name as obj_name FROM triples t JOIN entities e ON t.object = e.id WHERE t.subject = ?"
-            params = [eid]
+            query = (
+                "SELECT t.*, e.name as obj_name FROM triples t "
+                "JOIN entities e ON t.object = e.id WHERE t.subject = ?"
+                + world_filter
+            )
+            params = [eid] + extra_params
             if as_of:
-                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                query += (
+                    " AND (t.valid_from IS NULL OR t.valid_from <= ?) "
+                    "AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                )
                 params.extend([as_of, as_of])
             for row in conn.execute(query, params).fetchall():
                 results.append({
                     "direction": "outgoing",
                     "subject": name,
                     "predicate": row[2],
-                    "object": row[9],  # obj_name
+                    "object": row[10],  # obj_name (shifted: world column at index 9)
                     "valid_from": row[4],
                     "valid_to": row[5],
                     "confidence": row[6],
                     "source": row[7],
+                    "world": row[9],
                     "current": row[5] is None,
                 })
 
         if direction in ("incoming", "both"):
-            query = "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
-            params = [eid]
+            query = (
+                "SELECT t.*, e.name as sub_name FROM triples t "
+                "JOIN entities e ON t.subject = e.id WHERE t.object = ?"
+                + world_filter
+            )
+            params = [eid] + extra_params
             if as_of:
-                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                query += (
+                    " AND (t.valid_from IS NULL OR t.valid_from <= ?) "
+                    "AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                )
                 params.extend([as_of, as_of])
             for row in conn.execute(query, params).fetchall():
                 results.append({
                     "direction": "incoming",
-                    "subject": row[9],  # sub_name
+                    "subject": row[10],  # sub_name
                     "predicate": row[2],
                     "object": name,
                     "valid_from": row[4],
                     "valid_to": row[5],
                     "confidence": row[6],
                     "source": row[7],
+                    "world": row[9],
                     "current": row[5] is None,
                 })
 
         conn.close()
         return results
 
-    def query_relationship(self, predicate: str, as_of: str = None):
-        """Get all triples with a given relationship type."""
+    def query_relationship(
+        self,
+        predicate: str,
+        as_of: str = None,
+        world: str = "actuality",
+    ):
+        """Get all triples with a given relationship type.
+
+        world: scope to a named world (default 'actuality'). Pass None
+        to search across all worlds; each result row includes its world.
+        """
         pred = predicate.lower().replace(" ", "_")
         conn = self._conn()
         query = """
@@ -325,55 +414,82 @@ class KnowledgeGraph:
             WHERE t.predicate = ?
         """
         params = [pred]
+        if world is not None:
+            query += " AND t.world = ?"
+            params.append(world)
         if as_of:
             query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
             params.extend([as_of, as_of])
 
         results = []
         for row in conn.execute(query, params).fetchall():
+            # Column order: id(0), subject(1), predicate(2), object(3),
+            # valid_from(4), valid_to(5), confidence(6), source(7),
+            # extracted_at(8), world(9), sub_name(10), obj_name(11).
             results.append({
-                "subject": row[9],
+                "subject": row[10],
                 "predicate": pred,
-                "object": row[10],
+                "object": row[11],
                 "valid_from": row[4],
                 "valid_to": row[5],
+                "world": row[9],
                 "current": row[5] is None,
             })
         conn.close()
         return results
 
-    def timeline(self, entity_name: str = None, limit: int = 100):
-        """Get all facts in chronological order, optionally filtered by entity."""
+    def timeline(
+        self,
+        entity_name: str = None,
+        limit: int = 100,
+        world: str = "actuality",
+    ):
+        """Get all facts in chronological order, optionally filtered by
+        entity. World defaults to 'actuality'; pass None for all-worlds.
+        """
         conn = self._conn()
+        world_filter = "" if world is None else " AND t.world = ?"
+        world_params = [] if world is None else [world]
+        # When there's no entity filter, world_filter starts with AND;
+        # the WHERE clause needs to start cleanly. Build both variants.
         if entity_name:
             eid = self._entity_id(entity_name)
-            rows = conn.execute("""
+            query = """
                 SELECT t.*, s.name as sub_name, o.name as obj_name
                 FROM triples t
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
                 WHERE (t.subject = ? OR t.object = ?)
-                ORDER BY t.valid_from ASC NULLS LAST
+            """ + world_filter + """
+                ORDER BY t.valid_from ASC
                 LIMIT ?
-            """, (eid, eid, limit)).fetchall()
+            """
+            rows = conn.execute(query, [eid, eid, *world_params, limit]).fetchall()
         else:
-            rows = conn.execute("""
+            where_clause = ""
+            if world is not None:
+                where_clause = " WHERE t.world = ?"
+            query = """
                 SELECT t.*, s.name as sub_name, o.name as obj_name
                 FROM triples t
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
-                ORDER BY t.valid_from ASC NULLS LAST
+            """ + where_clause + """
+                ORDER BY t.valid_from ASC
                 LIMIT ?
-            """, (limit,)).fetchall()
+            """
+            rows = conn.execute(query, [*world_params, limit]).fetchall()
 
         conn.close()
+        # Column indices: world is at 9, sub_name at 10, obj_name at 11
         return [
             {
-                "subject": r[9],
+                "subject": r[10],
                 "predicate": r[2],
-                "object": r[10],
+                "object": r[11],
                 "valid_from": r[4],
                 "valid_to": r[5],
+                "world": r[9],
                 "current": r[5] is None,
             }
             for r in rows
@@ -392,6 +508,13 @@ class KnowledgeGraph:
                 "SELECT DISTINCT predicate FROM triples ORDER BY predicate"
             ).fetchall()
         ]
+        # World breakdown — facts per named graph. Empty 'actuality'-only
+        # KG returns {'actuality': N}.
+        by_world = {
+            r[0]: r[1] for r in conn.execute(
+                "SELECT world, COUNT(*) FROM triples GROUP BY world ORDER BY world"
+            ).fetchall()
+        }
         conn.close()
         return {
             "entities": entities,
@@ -399,6 +522,7 @@ class KnowledgeGraph:
             "current_facts": current,
             "expired_facts": expired,
             "relationship_types": predicates,
+            "by_world": by_world,
         }
 
     # ── Seed from GAIA constants ──────────────────────────────────────────
