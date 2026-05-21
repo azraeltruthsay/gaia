@@ -1146,11 +1146,20 @@ class AgentCore:
                 if "http://" in _ui_lower_s0 or "https://" in _ui_lower_s0:
                     _stage0_skip_for_url = True
 
-            # Conversational-prompt gate: skip Stage 0 grounding for short
-            # chit-chat ("good morning", "thanks", "how are you", "ok",
-            # "yes"). Grounding "GMT" / "PST" for a casual time question
-            # cost 6s and contributed to the in-bed confabulation by
-            # injecting 1094 chars of noise into a 2-sentence chat reply.
+            # Conversational-prompt gate: skip Stage 0 grounding when the
+            # prompt is chit-chat or an open-ended philosophical question
+            # asking for the model's view. Grounding adds nothing useful
+            # for these and can actively confabulate — e.g., the prompt
+            # "Still wrestling with the possibility or impossibility of
+            # AGI. How about you?" produced "AGI. How" as an extracted
+            # entity, whose top web hit was Amin Howeidi (Egyptian
+            # general), which the model then wove into a philosophical
+            # answer about AGI.
+            #
+            # This is the right place to gate because: (a) the intent
+            # classifier hasn't run yet here (it runs ~700 lines later in
+            # run_turn), so we can't rely on intent="chat" to skip; (b) we
+            # want to skip BEFORE spending 4-6s on probes.
             _stage0_skip_for_chitchat = False
             if not _stage0_skip_for_local_file and not _stage0_skip_for_url and user_input:
                 _ui_strip = user_input.strip()
@@ -1167,7 +1176,21 @@ class AgentCore:
                 _is_chitchat_phrase = (
                     _ui_lower_chat in ("hi", "hey", "yo", "sup", "thanks", "thx", "ok", "okay", "k", "yes", "no")
                 )
-                if _is_chitchat_phrase or (_is_short and _starts_chitchat):
+                # Open-ended philosophical / opinion-soliciting phrases.
+                # These are unambiguous "chat" signals — the user is asking
+                # for the model's view, not a factual lookup. Web search
+                # results for fragments of these prompts produce
+                # confabulation fodder (Howeidi/AGI, "wrestling" → pro
+                # wrestling, etc.).
+                _opinion_markers = (
+                    "how about you", "what do you think", "what's your take",
+                    "whats your take", "your thoughts", "your view",
+                    "your opinion", "your perspective", "your read",
+                    "what would you say", "in your view", "in your opinion",
+                    "what's your", "whats your",
+                )
+                _solicits_opinion = any(m in _ui_lower_chat for m in _opinion_markers)
+                if _is_chitchat_phrase or (_is_short and _starts_chitchat) or _solicits_opinion:
                     _stage0_skip_for_chitchat = True
 
             _stage0_skip = (
@@ -1888,7 +1911,25 @@ class AgentCore:
                 "http://" in (_orig_prompt or "").lower()
                 or "https://" in (_orig_prompt or "").lower()
             )
-            _user_named_local_file = _user_named_local_file or _user_named_url
+            # Opinion-solicitation gate: same heuristic as the Stage 0 gate
+            # above. Intent classification hasn't run yet at this point, so
+            # _detected_intent is still "" and the skip-list check against
+            # "chat" fails. Until that timing bug is fixed structurally,
+            # detect the conversational pattern by content.
+            _orig_prompt_lower = (_orig_prompt or "").lower()
+            _user_solicits_opinion = any(m in _orig_prompt_lower for m in (
+                "how about you", "what do you think", "what's your take",
+                "whats your take", "your thoughts", "your view",
+                "your opinion", "your perspective", "your read",
+                "what would you say", "in your view", "in your opinion",
+                "what's your", "whats your",
+            ))
+            # Combined skip flag for CIL/web grounding sites below. We reuse
+            # the _user_named_local_file name to avoid refactoring three
+            # gate sites; the log messages below distinguish the actual
+            # trigger so debugging stays clear.
+            _skip_cil_web = _user_named_local_file or _user_named_url or _user_solicits_opinion
+            _user_named_local_file = _skip_cil_web
 
             # Inject CIL grounding — topic file content matched by entity lookup.
             # Skip for identity-flavored intents: looking up "model" against the
@@ -1933,7 +1974,13 @@ class AgentCore:
             elif (probe_result
                     and getattr(probe_result, 'web_grounding', None)
                     and _user_named_local_file):
-                self.logger.info("Web grounding skipped: user prompt names a local file path — file.read is the right source")
+                # Disambiguate which sub-gate fired so logs aren't misleading.
+                if _user_solicits_opinion:
+                    self.logger.info("Web grounding skipped: user solicits opinion — factual lookup doesn't help")
+                elif _user_named_url:
+                    self.logger.info("Web grounding skipped: user prompt names a URL — web.fetch is the right source")
+                else:
+                    self.logger.info("Web grounding skipped: user prompt names a local file path — file.read is the right source")
 
             # Attach probe metrics to packet.metrics for observability
             if probe_result:
@@ -2617,6 +2664,27 @@ class AgentCore:
                     logger.info(
                         "KnowledgeRouter: skipped — user prompt names a URL; "
                         "web.fetch is the authoritative source"
+                    )
+            # Opinion-solicitation gate: KnowledgeRouter retrieves journal
+            # entries and mempalace records for the query. For philosophical
+            # chitchat ("how about you?", "what do you think?"), the
+            # retrieved records are usually stale journal entries from
+            # unrelated past turns and just add noise — sometimes serving
+            # as confabulation fodder (e.g. Howeidi being woven into an
+            # AGI discussion). Skip same as Stage 0 / web_grounding.
+            if not _kr_skip and user_input:
+                _ui_lower_kr = user_input.lower()
+                if any(m in _ui_lower_kr for m in (
+                    "how about you", "what do you think", "what's your take",
+                    "whats your take", "your thoughts", "your view",
+                    "your opinion", "your perspective", "your read",
+                    "what would you say", "in your view", "in your opinion",
+                    "what's your", "whats your",
+                )):
+                    _kr_skip = True
+                    logger.info(
+                        "KnowledgeRouter: skipped — user solicits opinion; "
+                        "factual retrieval doesn't help a philosophical chat"
                     )
             try:
                 if not _kr_skip:
