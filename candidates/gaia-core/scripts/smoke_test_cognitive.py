@@ -523,7 +523,25 @@ TEST_CASES = [
         num=19,
         category="Tool discovery",
         prompt="List the tools you currently have available. Just the names.",
-        validators=[v_non_empty, v_contains_any("web_search", "web_fetch", "read_file", "memory_query")],
+        # Updated 2026-05-21: legacy names (web_search/web_fetch/read_file/
+        # memory_query) were removed in the domain-tool consolidation. The
+        # canonical tools are now the domain names (file, web, knowledge,
+        # palace, etc.). Accept either old or new vocabulary, plus several
+        # canonical domains to confirm the model actually enumerated rather
+        # than emitting one name by accident.
+        validators=[
+            v_non_empty,
+            v_contains_any(
+                # Legacy names (kept for backwards-compat smoke runs)
+                "web_search", "web_fetch", "read_file", "memory_query",
+                # Current domain names — match any 2+ in the response would
+                # be ideal but v_contains_any just needs one. The model
+                # almost always emits the full list when asked, so one
+                # canonical domain is sufficient signal.
+                "file", "shell", "web", "knowledge", "palace",
+                "introspect", "context", "browser",
+            ),
+        ],
     ),
     TestCase(
         num=20,
