@@ -1345,8 +1345,28 @@ async def process_packet(packet_data: Dict[str, Any]):
                             actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
                             result_xml = format_tool_result(actual_result)
                         else:
+                            # Normalize error payloads. The model otherwise sees
+                            # the raw HTTP/JSON-RPC error verbatim and confabulates
+                            # IT-helpdesk recovery flows ("report to the technical
+                            # team at https://gaia-mcp:8765/web_forms/...") with
+                            # fabricated URLs. Strip the noise and surface only the
+                            # one actionable line.
                             error = rpc_result.get("error", "Tool call failed")
-                            result_xml = format_tool_result({"error": str(error)})
+                            _err_str = str(error)
+                            _norm_msg = _err_str
+                            # If MCP returned "Unknown action X for domain Y.
+                            # Available: [...]", lift just that sentence.
+                            _idx = _err_str.find("Unknown action")
+                            if _idx >= 0:
+                                _norm_msg = _err_str[_idx:].split("\n")[0]
+                            elif "Internal error:" in _err_str:
+                                _idx2 = _err_str.find("Internal error:")
+                                _norm_msg = _err_str[_idx2:].split("\n")[0]
+                            result_xml = format_tool_result({
+                                "ok": False,
+                                "error": _norm_msg,
+                                "hint": "Tool call failed. Acknowledge the failure briefly to the user and continue conversationally. Do NOT invent error-report URLs, support forms, or ticket-filing procedures. Do NOT retry with a different action unless the user asked you to."
+                            })
 
                         # Show tool execution status to user
                         result_preview = str(actual_result)[:200] if rpc_result.get("ok") else str(error)[:200]
@@ -1365,7 +1385,33 @@ async def process_packet(packet_data: Dict[str, Any]):
                         else:
                             _call_str = f"{TOOL_CALL_OPEN}{json.dumps({'tool': tc.tool_name, 'action': tc.tool_action, **(tc.tool_params or {})})}{TOOL_CALL_CLOSE}"
                             _result_str = result_xml
+                        # Continuation system prompt: the previous turn's
+                        # full system prompt is NOT carried into this second
+                        # generation. Without explicit guidance, the model
+                        # confabulates fake error-report URLs, IT-helpdesk
+                        # instructions, and ticket-filing flows when tools
+                        # fail. This focused system message keeps the
+                        # continuation grounded.
+                        _cont_system = (
+                            "You are GAIA. A tool call just executed and its "
+                            "result is in the next user-role message. "
+                            "Continue your reply to the user using that "
+                            "result.\n"
+                            "- If the result is success: integrate the data "
+                            "naturally and answer the user's question.\n"
+                            "- If the result is an error: acknowledge the "
+                            "failure in one short sentence and pivot back to "
+                            "the conversation. Do NOT invent error-report "
+                            "URLs, web forms, support emails, ticket-filing "
+                            "instructions, or technical-team contact info — "
+                            "none of those exist. Don't suggest the user "
+                            "report the error anywhere; the error is logged "
+                            "internally already.\n"
+                            "- Do not emit another <tool_call> unless the "
+                            "user explicitly asked for a retry."
+                        )
                         continuation_messages = [
+                            {"role": "system", "content": _cont_system},
                             {"role": "user", "content": user_input},
                             {"role": "assistant", "content": first_output + f"\n{_call_str}"},
                             {"role": "user", "content": _result_str},

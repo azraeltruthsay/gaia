@@ -461,10 +461,13 @@ def build_prompt_catalog() -> str:
             lines.append(f"- fabric(pattern, input): {desc}")
             continue
         actions = DOMAIN_ACTIONS.get(domain, [])
-        # Group actions concisely
-        action_str = "|".join(actions[:8])
-        if len(actions) > 8:
-            action_str += f"|... ({len(actions)} total)"
+        # Show ALL valid actions. Truncating ("...|(13 total)") taught the
+        # model to generalize verbs across domains and invent nonexistent
+        # actions — e.g. context.add (add is valid for knowledge, not for
+        # context, but the truncated catalog hid that). Listing all actions
+        # costs ~30 extra tokens vs the prior 8-cap; eliminating one class
+        # of tool-call confabulation is worth it.
+        action_str = "|".join(actions)
         sensitive_mark = ""
         domain_sensitive = [a for a in actions if (domain, a) in SENSITIVE_ACTIONS]
         if domain_sensitive:
