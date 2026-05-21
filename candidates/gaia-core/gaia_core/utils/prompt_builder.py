@@ -635,40 +635,69 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             if getattr(df, 'key', '') == 'tool_result':
                 processed_data_field_keys.add('tool_result')
                 tr = getattr(df, 'value', None)
-                if tr and isinstance(tr, dict) and tr.get('success'):
-                    tool_name = tr.get('tool', 'unknown')
-                    output = tr.get('output', {})
-                    # Format web_search results clearly
-                    if tool_name == 'web_search' and isinstance(output, dict):
-                        results = output.get('results', [])
-                        if results:
-                            lines = [f"--- Web Search Results (query: {output.get('query', '?')}) ---"]
-                            for r in results[:5]:
-                                lines.append(f"  [{r.get('trust_tier', '?')}] {r.get('title', 'Untitled')}")
-                                lines.append(f"    URL: {r.get('url', '')}")
-                                lines.append(f"    {r.get('snippet', '')}")
-                            lines.append("--- End of Web Search Results ---")
-                            tool_result_content = "\n".join(lines)
-                    # Format web_fetch results clearly
-                    elif tool_name == 'web_fetch' and isinstance(output, dict):
-                        content_text = output.get('content', '')
-                        if content_text:
-                            if len(content_text) > 4000:
-                                content_text = content_text[:4000] + "\n[...truncated...]"
-                            tool_result_content = (
-                                f"--- Web Page Content (title: {output.get('title', '?')}, "
-                                f"domain: {output.get('domain', '?')}) ---\n"
-                                f"{content_text}\n"
-                                "--- End of Web Page Content ---"
-                            )
-                    # Generic tool result
-                    elif output:
-                        out_str = str(output)
-                        if len(out_str) > 3000:
-                            out_str = out_str[:3000] + "...[truncated]"
+                if not (tr and isinstance(tr, dict)):
+                    break
+                tool_name = tr.get('tool', 'unknown')
+                # b35: handle the failure case explicitly. Previously this
+                # block was gated on `tr.get('success')` and silently
+                # dropped failed tool results — the model never saw the
+                # failure and confabulated answers (e.g. fabricating
+                # Portland weather when web_search was rate-limited).
+                # Surfacing the failure with a direct "do not fabricate"
+                # instruction stops the lie.
+                if not tr.get('success'):
+                    _err = tr.get('error') or 'Tool call failed'
+                    _err_str = str(_err)
+                    # Normalize known noisy formats (HTTP stack traces etc.)
+                    if "Unknown action" in _err_str:
+                        _idx = _err_str.find("Unknown action")
+                        _err_str = _err_str[_idx:].split("\n")[0]
+                    elif "Internal error:" in _err_str:
+                        _idx = _err_str.find("Internal error:")
+                        _err_str = _err_str[_idx:].split("\n")[0]
+                    tool_result_content = (
+                        f"Tool call to '{tool_name}' failed: {_err_str}\n"
+                        "Acknowledge the failure to the user briefly in one "
+                        "sentence and pivot back to the conversation. Do NOT "
+                        "fabricate the result — do not invent weather data, "
+                        "search snippets, or any other content the tool was "
+                        "supposed to retrieve. Do NOT invent error-report "
+                        "URLs or support flows. If the user needs the "
+                        "information, suggest they retry or ask differently."
+                    )
+                    break
+                # Success path: format the tool output for the model.
+                # Lowercase section markers (not ALL-CAPS "--- Web Search
+                # Results ---") to avoid the label-leakage pattern fixed in
+                # 04c906e where the model quotes structural headers back to
+                # the user as if they were nameable sources.
+                output = tr.get('output', {})
+                if tool_name == 'web_search' and isinstance(output, dict):
+                    results = output.get('results', [])
+                    if results:
+                        lines = [f"Web search results (query: {output.get('query', '?')}):"]
+                        for r in results[:5]:
+                            lines.append(f"  [{r.get('trust_tier', '?')}] {r.get('title', 'Untitled')}")
+                            lines.append(f"    URL: {r.get('url', '')}")
+                            lines.append(f"    {r.get('snippet', '')}")
+                        tool_result_content = "\n".join(lines)
+                elif tool_name == 'web_fetch' and isinstance(output, dict):
+                    content_text = output.get('content', '')
+                    if content_text:
+                        if len(content_text) > 4000:
+                            content_text = content_text[:4000] + "\n[...truncated...]"
                         tool_result_content = (
-                            f"--- Tool Result ({tool_name}) ---\n{out_str}\n--- End of Tool Result ---"
+                            f"Web page content (title: {output.get('title', '?')}, "
+                            f"domain: {output.get('domain', '?')}):\n"
+                            f"{content_text}"
                         )
+                elif output:
+                    out_str = str(output)
+                    if len(out_str) > 3000:
+                        out_str = out_str[:3000] + "...[truncated]"
+                    tool_result_content = (
+                        f"Tool result ({tool_name}):\n{out_str}"
+                    )
                 break
     except Exception:
         logger.debug("Could not extract tool_result from packet.content.data_fields")
