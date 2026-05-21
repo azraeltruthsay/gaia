@@ -1116,6 +1116,41 @@ class AgentCore:
             except Exception:
                 logger.debug("SemanticProbe: probe failed, falling back to keyword routing", exc_info=True)
 
+            # --- Early intent estimate (aba) ---
+            # The "real" intent classification runs ~1200 lines later in this
+            # function, AFTER grounding. The intent-based skip-set gates that
+            # decide whether to run grounding therefore evaluate against an
+            # empty intent and never fire — every chat prompt got web-searched.
+            # Run a fast, embed-only pre-classifier here so the gates have a
+            # real intent value to check. Cost: ~100ms when the embed model is
+            # ready, no extra LLM call. Falls back to "" silently if the embed
+            # path isn't available — the existing content-heuristic gates
+            # (file-path, URL, opinion-solicitation) keep working either way.
+            _early_intent = ""
+            try:
+                from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+                _embed_intent_cfg = constants.get("EMBED_INTENT", {}) or {}
+                _embed_model = None
+                try:
+                    _embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+                except Exception:
+                    _embed_model = None
+                if _embed_model is not None and _embed_intent_cfg.get("enabled", True):
+                    _clf = EmbedIntentClassifier.instance()
+                    if not _clf.ready:
+                        _clf.initialise(_embed_model, config=_embed_intent_cfg)
+                    if _clf.ready:
+                        _thr = float(_embed_intent_cfg.get("confidence_threshold", 0.42))
+                        _ei, _es = _clf.classify(user_input, confidence_threshold=_thr)
+                        if _ei and _ei not in ("other", "injection"):
+                            _early_intent = _ei
+                            logger.info(
+                                "Early intent estimate (embed-only): %s (score=%.3f)",
+                                _early_intent, _es,
+                            )
+            except Exception:
+                logger.debug("Early intent estimate failed (non-blocking)", exc_info=True)
+
             # --- Stage 0: Neural Grounding (pre-cognition context injection) ---
             # Extract entities via Nano, probe KG → Vector → Web per hierarchy.
             # Results injected into packet.content.data_fields as 'auto_grounding'.
@@ -1193,10 +1228,23 @@ class AgentCore:
                 if _is_chitchat_phrase or (_is_short and _starts_chitchat) or _solicits_opinion:
                     _stage0_skip_for_chitchat = True
 
+            # Early-intent gate: if the embed classifier confidently called
+            # this chat/greeting/identity/time/status/recitation, skip the
+            # probe entirely. This makes the previously-broken skip-set check
+            # actually fire (see aba).
+            _stage0_skip_for_intent = False
+            if _early_intent in ("chat", "greeting", "identity", "time", "status", "recitation"):
+                _stage0_skip_for_intent = True
+                logger.info(
+                    "Stage 0 Grounding skipped: early intent estimate '%s' is conversational",
+                    _early_intent,
+                )
+
             _stage0_skip = (
                 _stage0_skip_for_local_file
                 or _stage0_skip_for_url
                 or _stage0_skip_for_chitchat
+                or _stage0_skip_for_intent
             )
 
             _grounding_context = None
@@ -1876,6 +1924,11 @@ class AgentCore:
                 _detected_intent = str(getattr(getattr(packet, 'intent', None), 'user_intent', '') or '').lower()
             except Exception:
                 pass
+            # aba: packet.intent.user_intent is still '' here because the
+            # real intent classifier runs ~700 lines later. Use the early
+            # embed estimate as the fallback so the skip-set actually fires.
+            if not _detected_intent and _early_intent:
+                _detected_intent = _early_intent
 
             # File-path gate (2026-05-19, GAIA_Project-jis): when the user's
             # prompt names a local file path or a project-relative resource,

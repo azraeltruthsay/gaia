@@ -448,21 +448,49 @@ def save_learned_knowledge(
     if not success or not answer or len(answer) < 20:
         return
 
+    # bza: skip conversational domains. MemPalace was designed for curated
+    # long-term knowledge, not chat transcripts. Saving every philosophical
+    # reply as "learned knowledge" pollutes future retrievals — confabulated
+    # answers (e.g. "Amin Howeidi" being woven into an AGI discussion via
+    # bad grounding) get persisted and then re-surfaced by knowledge_router
+    # on adjacent queries, forming a confabulation feedback loop. Real
+    # knowledge saves should go through explicit knowledge.add tool calls,
+    # not implicit transcript persistence.
+    _conversational_domains = {
+        "chat", "greeting", "identity", "recitation", "time",
+        "status", "casual_conversation", "small_talk",
+    }
+    if domain.lower() in _conversational_domains:
+        logger.debug(
+            "KnowledgeRouter: skipping MemPalace save — domain '%s' is "
+            "conversational (transcripts != knowledge)", domain,
+        )
+        return
+
     # Record utility outcome
     record_outcome(domain, source, success)
 
-    # Save to MemPalace for future local retrieval
+    # Save to MemPalace for future local retrieval.
+    # bza: param schema fixed — palace_store expects {text, source, date_str},
+    # not {content, metadata}. The previous mismatch made every save fail
+    # silently with "text parameter required", while the caller still logged
+    # "Saved learned knowledge" — three months of false-success logs.
     try:
         from gaia_core.utils import mcp_client
-        mcp_client.call_jsonrpc("palace_store", {
-            "content": f"Q: {query}\nA: {answer}",
-            "metadata": {
-                "source": source,
-                "domain": domain,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "utility_score": get_utility_score(domain, source),
-            }
+        _rpc_resp = mcp_client.call_jsonrpc("palace_store", {
+            "text": f"Q: {query}\nA: {answer}",
+            "source": f"{source}|{domain}|util={get_utility_score(domain, source):.2f}",
+            "date_str": time.strftime("%Y-%m-%d"),
         })
-        logger.info("KnowledgeRouter: Saved learned knowledge to MemPalace (domain=%s)", domain)
+        # call_jsonrpc returns {"ok": bool, "response": {...}, "error": "..."}
+        # Only log success when the call actually succeeded — don't lie.
+        _ok = bool(_rpc_resp.get("ok"))
+        if _ok:
+            logger.info("KnowledgeRouter: saved to MemPalace (domain=%s)", domain)
+        else:
+            logger.warning(
+                "KnowledgeRouter: MemPalace save FAILED (domain=%s): %s",
+                domain, _rpc_resp.get("error") or _rpc_resp,
+            )
     except Exception as e:
-        logger.debug("KnowledgeRouter: Failed to save to MemPalace: %s", e)
+        logger.debug("KnowledgeRouter: exception during MemPalace save: %s", e)
