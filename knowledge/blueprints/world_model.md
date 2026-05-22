@@ -213,7 +213,7 @@ What partially redeems the LLM bound: the consistency check. Even a sloppy extra
 | 4     | 80o   | shipped  | Inheritance walker, shadowing, modality firewall via inheritance direction |
 | 5     | 8pk   | shipped  | Merge mechanism with coreference resolver |
 | 5.5   | clm   | open     | Merge approval workflow via candidates/ + gaia-study (follow-up) |
-| 6     | azr   | open     | Ephemeral vs durable world lifecycle |
+| 6     | azr   | shipped  | Ephemeral vs durable world lifecycle |
 | 7     | lw4   | open     | Temporal-news ingester + fact-type ontology + recency-decay scoring |
 | 8     | hkv   | open     | Outbound-claim cross-check against recent KG triples |
 

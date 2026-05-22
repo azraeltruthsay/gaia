@@ -262,6 +262,9 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kg_merge_reverse": lambda p: _kg_merge_reverse_impl(p),
         "kg_merge_get": lambda p: _kg_merge_get_impl(p),
         "kg_merge_list": lambda p: _kg_merge_list_impl(p),
+        # Lifecycle (Stage 6 / azr) — ephemeral vs durable, promotion, GC
+        "kg_world_promote": lambda p: _kg_world_promote_impl(p),
+        "kg_world_gc": lambda p: _kg_world_gc_impl(p),
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
@@ -680,8 +683,15 @@ def _kg_stats_impl(params: dict) -> dict:
 # ── World registry tools (Stage 3 / 4da) ────────────────────────────────
 
 def _kg_world_create_impl(params: dict) -> dict:
-    """Register a new world. Required: name. Optional: modality, parent,
-    edge_type, description."""
+    """Register a new world.
+
+    Required: name. Optional: modality, parent, edge_type, description.
+
+    Lifecycle params (Stage 6):
+      lifecycle: 'durable' (default) or 'ephemeral'
+      session_id: owning session for ephemeral worlds
+      ttl_seconds: lifespan for ephemeral worlds (default 3600 when ephemeral)
+    """
     kg = _get_kg()
     name = params.get("name", "")
     if not name:
@@ -693,6 +703,9 @@ def _kg_world_create_impl(params: dict) -> dict:
             parent=params.get("parent"),
             edge_type=params.get("edge_type", "branches-from"),
             description=params.get("description", ""),
+            lifecycle=params.get("lifecycle", "durable"),
+            session_id=params.get("session_id"),
+            ttl_seconds=params.get("ttl_seconds"),
         )
     except ValueError as e:
         return {"ok": False, "error": str(e)}
@@ -818,6 +831,33 @@ def _kg_merge_list_impl(params: dict) -> dict:
     status = params.get("status")  # None = all
     records = kg.list_merges(status=status)
     return {"ok": True, "merges": records, "count": len(records)}
+
+
+# ── Lifecycle tools (Stage 6 / azr) ─────────────────────────────────────
+
+def _kg_world_promote_impl(params: dict) -> dict:
+    """Promote an ephemeral world to durable. Idempotent on durable worlds."""
+    kg = _get_kg()
+    world = params.get("world") or params.get("name") or params.get("id")
+    if not world:
+        return {"ok": False, "error": "world / name / id parameter required"}
+    try:
+        result = kg.promote_world(world)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **result}
+
+
+def _kg_world_gc_impl(params: dict) -> dict:
+    """Garbage-collect expired ephemeral worlds.
+
+    force=True sweeps ALL ephemeral worlds regardless of expiry.
+    session_id restricts the sweep to that session.
+    """
+    kg = _get_kg()
+    force = bool(params.get("force", False))
+    session_id = params.get("session_id")
+    return {"ok": True, **kg.gc_ephemeral_worlds(force=force, session_id=session_id)}
 
 
 # ── MemPalace (structured memory architecture) ────────────────────────────

@@ -129,7 +129,10 @@ class KnowledgeGraph:
                 name TEXT NOT NULL UNIQUE,
                 modality TEXT NOT NULL DEFAULT 'actuality',
                 description TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                lifecycle TEXT NOT NULL DEFAULT 'durable',
+                session_id TEXT,
+                expires_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS world_edges (
@@ -185,6 +188,27 @@ class KnowledgeGraph:
         conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_triples_world ON triples(world);
             CREATE INDEX IF NOT EXISTS idx_triples_world_subject ON triples(world, subject);
+        """)
+        # Lifecycle migration (Stage 6, azr): pre-existing worlds tables
+        # need lifecycle/session_id/expires_at columns. Existing rows
+        # default to 'durable' — they survived shutdown so they're
+        # durable by definition.
+        world_cols = [r[1] for r in conn.execute("PRAGMA table_info(worlds)").fetchall()]
+        if "lifecycle" not in world_cols:
+            conn.execute(
+                "ALTER TABLE worlds ADD COLUMN lifecycle TEXT NOT NULL "
+                "DEFAULT 'durable'"
+            )
+            logger.info("KG migration: added 'lifecycle' column to worlds (default 'durable')")
+        if "session_id" not in world_cols:
+            conn.execute("ALTER TABLE worlds ADD COLUMN session_id TEXT")
+            logger.info("KG migration: added 'session_id' column to worlds")
+        if "expires_at" not in world_cols:
+            conn.execute("ALTER TABLE worlds ADD COLUMN expires_at TEXT")
+            logger.info("KG migration: added 'expires_at' column to worlds")
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_worlds_lifecycle ON worlds(lifecycle);
+            CREATE INDEX IF NOT EXISTS idx_worlds_expires_at ON worlds(expires_at);
         """)
         # Step 4: bootstrap the actuality world in the registry. Every
         # KG has actuality as the root world; pre-existing triples that
@@ -610,6 +634,8 @@ class KnowledgeGraph:
             return "actuality"
         return "w_" + hashlib.md5(name.encode()).hexdigest()[:8]
 
+    _VALID_LIFECYCLES = frozenset({"ephemeral", "durable"})
+
     def create_world(
         self,
         name: str,
@@ -617,15 +643,26 @@ class KnowledgeGraph:
         parent: Optional[str] = None,
         edge_type: str = "branches-from",
         description: str = "",
+        lifecycle: str = "durable",
+        session_id: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
     ) -> str:
         """Register a new world. Returns the opaque world ID.
 
-        name:       human-readable name (e.g. 'potterverse')
-        modality:   one of _VALID_MODALITIES — governs query leakage
-        parent:     parent world name OR id (e.g. 'actuality'). If None,
-                    the new world has no parent edge (a root world).
-        edge_type:  relationship to the parent (overlays/refines/branches-from)
+        name:        human-readable name (e.g. 'potterverse')
+        modality:    one of _VALID_MODALITIES — governs query leakage
+        parent:      parent world name OR id (e.g. 'actuality'). If None,
+                     the new world has no parent edge (a root world).
+        edge_type:   relationship to the parent (overlays/refines/branches-from)
         description: optional long-form note
+
+        Lifecycle (Stage 6, azr):
+        lifecycle:   'durable' (default — persists across sessions) or
+                     'ephemeral' (subject to GC by TTL)
+        session_id:  for ephemeral worlds, the owning session (for filter
+                     and audit; not enforced as visibility scope in MVP)
+        ttl_seconds: for ephemeral worlds, lifespan. Default 3600s when
+                     lifecycle='ephemeral' and ttl_seconds is None.
         """
         if modality not in self._VALID_MODALITIES:
             raise ValueError(
@@ -635,13 +672,27 @@ class KnowledgeGraph:
             raise ValueError(
                 f"Invalid edge_type {edge_type!r}; must be one of {sorted(self._VALID_EDGE_TYPES)}"
             )
+        if lifecycle not in self._VALID_LIFECYCLES:
+            raise ValueError(
+                f"Invalid lifecycle {lifecycle!r}; must be one of {sorted(self._VALID_LIFECYCLES)}"
+            )
+
+        # Compute expiry timestamp for ephemeral worlds. Default 1-hour
+        # TTL if the caller doesn't specify; durable worlds have no expiry.
+        expires_at_str = None
+        if lifecycle == "ephemeral":
+            from datetime import timedelta
+            ttl = ttl_seconds if ttl_seconds is not None else 3600
+            expires_at_str = (datetime.now() + timedelta(seconds=ttl)).isoformat()
 
         world_id = self._world_id_for(name)
         conn = self._conn()
         conn.execute(
-            "INSERT OR IGNORE INTO worlds (id, name, modality, description) "
-            "VALUES (?, ?, ?, ?)",
-            (world_id, name, modality, description),
+            "INSERT OR IGNORE INTO worlds (id, name, modality, description, "
+            "lifecycle, session_id, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (world_id, name, modality, description,
+             lifecycle, session_id, expires_at_str),
         )
 
         if parent:
@@ -674,7 +725,8 @@ class KnowledgeGraph:
         """Look up a world by id or name. Returns metadata dict or None."""
         conn = self._conn()
         row = conn.execute(
-            "SELECT id, name, modality, description, created_at "
+            "SELECT id, name, modality, description, created_at, "
+            "lifecycle, session_id, expires_at "
             "FROM worlds WHERE id = ? OR name = ?",
             (world, world),
         ).fetchone()
@@ -687,21 +739,40 @@ class KnowledgeGraph:
             "modality": row[2],
             "description": row[3],
             "created_at": row[4],
+            "lifecycle": row[5],
+            "session_id": row[6],
+            "expires_at": row[7],
         }
 
-    def list_worlds(self) -> list:
-        """Return all registered worlds with their parent edges."""
+    def list_worlds(self, lifecycle: Optional[str] = None) -> list:
+        """Return all registered worlds with their parent edges.
+
+        lifecycle: optional filter ('ephemeral' or 'durable'). None = both.
+        """
         conn = self._conn()
+        if lifecycle is not None:
+            rows = conn.execute(
+                "SELECT id, name, modality, description, created_at, "
+                "lifecycle, session_id, expires_at FROM worlds "
+                "WHERE lifecycle = ?",
+                (lifecycle,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, name, modality, description, created_at, "
+                "lifecycle, session_id, expires_at FROM worlds"
+            ).fetchall()
         worlds = {}
-        for row in conn.execute(
-            "SELECT id, name, modality, description, created_at FROM worlds"
-        ):
+        for row in rows:
             worlds[row[0]] = {
                 "id": row[0],
                 "name": row[1],
                 "modality": row[2],
                 "description": row[3],
                 "created_at": row[4],
+                "lifecycle": row[5],
+                "session_id": row[6],
+                "expires_at": row[7],
                 "parents": [],
                 "children": [],
             }
@@ -891,6 +962,110 @@ class KnowledgeGraph:
         conn.close()
         logger.info("Deleted world %s (id=%s)", target["name"], target["id"])
         return True
+
+    # ── Lifecycle (Stage 6, azr) ──────────────────────────────────────────
+
+    def promote_world(self, world: str) -> dict:
+        """Promote an ephemeral world to durable.
+
+        Clears session_id and expires_at so the world is no longer
+        subject to GC. Idempotent on already-durable worlds (no-op +
+        returns metadata).
+
+        Refuses on the 'actuality' root world (it's always durable by
+        definition; this is a guard against accidental misuse).
+        """
+        target = self.get_world(world)
+        if not target:
+            raise ValueError(f"World not found: {world!r}")
+        if target["lifecycle"] == "durable":
+            logger.info("promote_world: %s is already durable (no-op)", target["name"])
+            return target
+        conn = self._conn()
+        conn.execute(
+            "UPDATE worlds SET lifecycle = 'durable', session_id = NULL, "
+            "expires_at = NULL WHERE id = ?",
+            (target["id"],),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Promoted world %s (id=%s) from ephemeral to durable",
+            target["name"], target["id"],
+        )
+        return self.get_world(world)
+
+    def gc_ephemeral_worlds(
+        self,
+        force: bool = False,
+        session_id: Optional[str] = None,
+    ) -> dict:
+        """Garbage-collect expired ephemeral worlds.
+
+        force=False (default): delete only worlds whose expires_at is in
+        the past. force=True: delete ALL ephemeral worlds regardless of
+        expiry (use at session shutdown).
+
+        session_id: when set, restrict GC to ephemeral worlds owned by
+        that session. Otherwise sweeps across all sessions.
+
+        Returns dict with counts of swept worlds + triples + edges.
+        """
+        now = datetime.now().isoformat()
+        conn = self._conn()
+        # Build the condition
+        where = "lifecycle = 'ephemeral'"
+        params: list = []
+        if not force:
+            where += " AND expires_at IS NOT NULL AND expires_at <= ?"
+            params.append(now)
+        if session_id is not None:
+            where += " AND session_id = ?"
+            params.append(session_id)
+        target_rows = conn.execute(
+            f"SELECT id, name FROM worlds WHERE {where}", params
+        ).fetchall()
+        target_ids = [r[0] for r in target_rows]
+        if not target_ids:
+            conn.close()
+            return {"worlds_swept": 0, "triples_swept": 0, "edges_swept": 0}
+
+        # Sweep triples in those worlds first
+        placeholders = ",".join("?" for _ in target_ids)
+        triple_count = conn.execute(
+            f"SELECT COUNT(*) FROM triples WHERE world IN ({placeholders})",
+            target_ids,
+        ).fetchone()[0]
+        conn.execute(
+            f"DELETE FROM triples WHERE world IN ({placeholders})", target_ids
+        )
+        # Then edges that touch those worlds
+        edge_count = conn.execute(
+            f"SELECT COUNT(*) FROM world_edges "
+            f"WHERE parent_id IN ({placeholders}) OR child_id IN ({placeholders})",
+            target_ids + target_ids,
+        ).fetchone()[0]
+        conn.execute(
+            f"DELETE FROM world_edges "
+            f"WHERE parent_id IN ({placeholders}) OR child_id IN ({placeholders})",
+            target_ids + target_ids,
+        )
+        # Finally the world rows
+        conn.execute(
+            f"DELETE FROM worlds WHERE id IN ({placeholders})", target_ids
+        )
+        conn.commit()
+        conn.close()
+        logger.info(
+            "GC swept %d ephemeral world(s) (%d triples, %d edges)",
+            len(target_ids), triple_count, edge_count,
+        )
+        return {
+            "worlds_swept": len(target_ids),
+            "triples_swept": triple_count,
+            "edges_swept": edge_count,
+            "world_names": [r[1] for r in target_rows],
+        }
 
     # ── Merge mechanism (Stage 5, 8pk) ────────────────────────────────────
 
