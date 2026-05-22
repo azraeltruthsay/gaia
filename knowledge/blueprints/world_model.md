@@ -209,8 +209,8 @@ What partially redeems the LLM bound: the consistency check. Even a sloppy extra
 | 0     | hrp   | shipped  | KG entity extraction cleanup — token-fragment noise removed, real confidence/source |
 | 1     | t2m   | shipped  | `world` column on triples; default `actuality`; all read/write methods world-scoped |
 | doc   | o8a   | shipped  | This blueprint |
-| 3     | 4da   | open     | World registry as DAG with typed edges; Heimric campaign migration |
-| 4     | 80o   | open     | Modality enforcement (fiction triples can't leak to actuality) |
+| 3     | 4da   | shipped  | World registry as DAG with typed edges; Heimric campaign migration |
+| 4     | 80o   | shipped  | Inheritance walker, shadowing, modality firewall via inheritance direction |
 | 5     | 8pk   | open     | Merge mechanism with coreference resolver |
 | 6     | azr   | open     | Ephemeral vs durable world lifecycle |
 

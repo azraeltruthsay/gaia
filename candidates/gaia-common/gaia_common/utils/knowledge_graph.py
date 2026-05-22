@@ -732,6 +732,84 @@ class KnowledgeGraph:
         conn.close()
         return separator.join(chain)
 
+    def world_ancestors(self, world: str) -> list:
+        """Return the ancestor chain of a world, immediate parent first.
+
+        Used by the inheritance resolver — a query in world W picks up
+        triples from W itself plus all ancestors, with shadowing rules
+        applied (descendant's facts override ancestor's for the same
+        subject+predicate). Does NOT include W itself.
+
+        Bounded to 32 levels to guard against cycles in malformed data.
+        """
+        target = self.get_world(world)
+        if not target:
+            return []
+        ancestors: list = []
+        conn = self._conn()
+        seen = {target["id"]}
+        current_id = target["id"]
+        for _ in range(32):
+            row = conn.execute(
+                "SELECT parent_id FROM world_edges WHERE child_id = ? LIMIT 1",
+                (current_id,),
+            ).fetchone()
+            if not row:
+                break
+            parent_id = row[0]
+            if parent_id in seen:
+                break
+            seen.add(parent_id)
+            ancestors.append(parent_id)
+            current_id = parent_id
+        conn.close()
+        return ancestors
+
+    def query_entity_inherited(
+        self,
+        name: str,
+        world: str = "actuality",
+        as_of: str = None,
+        direction: str = "both",
+    ) -> list:
+        """Query an entity with world inheritance (Stage 4, 80o).
+
+        Walks the world's ancestor chain and returns the union of all
+        triples about `name`, with shadowing: a descendant world's
+        triple for (subject, predicate) suppresses any ancestor's
+        triple for the same (subject, predicate). This implements the
+        named-graph inheritance pattern — fiction worlds inherit
+        actuality's facts unless they explicitly override them.
+
+        The MODALITY FIREWALL is automatic: inheritance walks UP the
+        parent chain only, so a query in 'actuality' never picks up
+        fiction/counterfactual/hypothetical descendants. Fiction
+        queries do inherit actuality (broomsticks still fall to the
+        ground in potterverse, unless potterverse explicitly says
+        otherwise).
+        """
+        # Build the chain: starting world, then ancestors
+        worlds_in_order = [world] + self.world_ancestors(world)
+        # Resolve names to IDs for the SQL filter
+        ids_in_order: list = []
+        for w in worlds_in_order:
+            meta = self.get_world(w)
+            ids_in_order.append(meta["id"] if meta else w)
+
+        seen_sp_keys: set = set()  # (subject, predicate) pairs already covered
+        results: list = []
+        for w_id in ids_in_order:
+            facts = self.query_entity(
+                name, as_of=as_of, direction=direction, world=w_id,
+            )
+            for f in facts:
+                key = (f["subject"], f["predicate"], f["direction"])
+                if key in seen_sp_keys:
+                    continue  # shadowed by descendant
+                seen_sp_keys.add(key)
+                results.append(f)
+        return results
+
     def world_descendants(self, world: str) -> list:
         """Return all descendant world IDs (recursive children) of the given world.
 

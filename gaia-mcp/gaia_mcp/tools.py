@@ -575,21 +575,40 @@ def _get_kg():
 def _kg_query_impl(params: dict) -> dict:
     """Query the knowledge graph for an entity's relationships.
 
-    World Model Stage 1: 'world' param scopes the query (default
-    'actuality'). Pass world=null to search all worlds.
+    World Model:
+      - 'world' (Stage 1): scope the query (default 'actuality').
+        Pass world=null for cross-world search.
+      - 'inherit' (Stage 4): when True, walk the world's ancestor
+        chain and return inherited triples too, with descendant-wins
+        shadowing on same (subject, predicate). Default False to
+        preserve backwards-compatible behavior; set True when querying
+        a fiction/counterfactual world that should pick up actuality's
+        baseline facts.
+
+    Modality firewall is automatic via the inheritance direction:
+    walks go UP the parent chain only, so descendants never leak
+    into ancestor queries. An actuality-default query never sees
+    fiction triples.
     """
     kg = _get_kg()
     entity = params.get("entity") or params.get("subject", "")
     as_of = params.get("as_of")
     direction = params.get("direction", "both")
-    # Default to actuality; explicit null (None) means cross-world search
     world = params.get("world", "actuality")
+    inherit = bool(params.get("inherit", False))
     if not entity:
         return {"ok": False, "error": "entity parameter required"}
-    results = kg.query_entity(entity, as_of=as_of, direction=direction, world=world)
+    if inherit and world is not None:
+        results = kg.query_entity_inherited(
+            entity, world=world, as_of=as_of, direction=direction,
+        )
+    else:
+        results = kg.query_entity(
+            entity, as_of=as_of, direction=direction, world=world,
+        )
     return {
         "ok": True, "entity": entity, "facts": results, "count": len(results),
-        "world": world,
+        "world": world, "inherit": inherit,
     }
 
 
