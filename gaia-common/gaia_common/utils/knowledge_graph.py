@@ -34,6 +34,7 @@ import os
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("GAIA.KnowledgeGraph")
 
@@ -116,6 +117,33 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
+
+            -- World registry (Stage 3, 4da). Worlds are first-class
+            -- objects with an opaque ID, a name, and a modality. The
+            -- world_edges table forms a DAG describing how worlds relate
+            -- to each other (overlays/refines/branches-from). Path
+            -- strings like 'actuality > fiction > potterverse' are
+            -- rendered traversals of this DAG, not stored keys.
+            CREATE TABLE IF NOT EXISTS worlds (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                modality TEXT NOT NULL DEFAULT 'actuality',
+                description TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS world_edges (
+                parent_id TEXT NOT NULL,
+                child_id  TEXT NOT NULL,
+                edge_type TEXT NOT NULL CHECK (edge_type IN ('overlays','refines','branches-from')),
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (parent_id, child_id, edge_type),
+                FOREIGN KEY (parent_id) REFERENCES worlds(id),
+                FOREIGN KEY (child_id)  REFERENCES worlds(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_world_edges_parent ON world_edges(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_world_edges_child  ON world_edges(child_id);
         """)
         # Step 2: migrate pre-existing databases — add world column if
         # missing. Must happen BEFORE the world-dependent indices below.
@@ -134,6 +162,17 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_world ON triples(world);
             CREATE INDEX IF NOT EXISTS idx_triples_world_subject ON triples(world, subject);
         """)
+        # Step 4: bootstrap the actuality world in the registry. Every
+        # KG has actuality as the root world; pre-existing triples that
+        # default to world='actuality' need a corresponding registry row
+        # so DAG queries don't fail.
+        conn.execute(
+            "INSERT OR IGNORE INTO worlds (id, name, modality, description) "
+            "VALUES (?, ?, ?, ?)",
+            ("actuality", "actuality", "actuality",
+             "Consensus reality — the default world all triples scope to "
+             "unless explicitly overridden."),
+        )
         conn.commit()
         conn.close()
 
@@ -524,6 +563,232 @@ class KnowledgeGraph:
             "relationship_types": predicates,
             "by_world": by_world,
         }
+
+    # ── World registry (Stage 3, 4da) ─────────────────────────────────────
+
+    _VALID_MODALITIES = frozenset({
+        "actuality", "fiction", "counterfactual",
+        "hypothetical", "projection", "belief_of",
+    })
+    _VALID_EDGE_TYPES = frozenset({"overlays", "refines", "branches-from"})
+
+    @staticmethod
+    def _world_id_for(name: str) -> str:
+        """Generate a stable atomic ID from a world name.
+
+        Returns 'actuality' verbatim (the root world keeps its readable
+        ID). For all other worlds, a deterministic 'w_<8-hex>' suffix
+        based on the name — so callers don't need to manage IDs, but
+        renames are still local because the ID never references the
+        rendered path.
+        """
+        if name == "actuality":
+            return "actuality"
+        return "w_" + hashlib.md5(name.encode()).hexdigest()[:8]
+
+    def create_world(
+        self,
+        name: str,
+        modality: str = "fiction",
+        parent: Optional[str] = None,
+        edge_type: str = "branches-from",
+        description: str = "",
+    ) -> str:
+        """Register a new world. Returns the opaque world ID.
+
+        name:       human-readable name (e.g. 'potterverse')
+        modality:   one of _VALID_MODALITIES — governs query leakage
+        parent:     parent world name OR id (e.g. 'actuality'). If None,
+                    the new world has no parent edge (a root world).
+        edge_type:  relationship to the parent (overlays/refines/branches-from)
+        description: optional long-form note
+        """
+        if modality not in self._VALID_MODALITIES:
+            raise ValueError(
+                f"Invalid modality {modality!r}; must be one of {sorted(self._VALID_MODALITIES)}"
+            )
+        if parent and edge_type not in self._VALID_EDGE_TYPES:
+            raise ValueError(
+                f"Invalid edge_type {edge_type!r}; must be one of {sorted(self._VALID_EDGE_TYPES)}"
+            )
+
+        world_id = self._world_id_for(name)
+        conn = self._conn()
+        conn.execute(
+            "INSERT OR IGNORE INTO worlds (id, name, modality, description) "
+            "VALUES (?, ?, ?, ?)",
+            (world_id, name, modality, description),
+        )
+
+        if parent:
+            # Resolve parent — accept either id or name
+            parent_row = conn.execute(
+                "SELECT id FROM worlds WHERE id = ? OR name = ?", (parent, parent)
+            ).fetchone()
+            if not parent_row:
+                conn.close()
+                raise ValueError(f"Parent world not found: {parent!r}")
+            parent_id = parent_row[0]
+            if parent_id == world_id:
+                conn.close()
+                raise ValueError("A world cannot be its own parent")
+            conn.execute(
+                "INSERT OR IGNORE INTO world_edges (parent_id, child_id, edge_type) "
+                "VALUES (?, ?, ?)",
+                (parent_id, world_id, edge_type),
+            )
+
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Created world %s (id=%s, modality=%s, parent=%s, edge=%s)",
+            name, world_id, modality, parent, edge_type if parent else "—",
+        )
+        return world_id
+
+    def get_world(self, world: str) -> Optional[dict]:
+        """Look up a world by id or name. Returns metadata dict or None."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, name, modality, description, created_at "
+            "FROM worlds WHERE id = ? OR name = ?",
+            (world, world),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "name": row[1],
+            "modality": row[2],
+            "description": row[3],
+            "created_at": row[4],
+        }
+
+    def list_worlds(self) -> list:
+        """Return all registered worlds with their parent edges."""
+        conn = self._conn()
+        worlds = {}
+        for row in conn.execute(
+            "SELECT id, name, modality, description, created_at FROM worlds"
+        ):
+            worlds[row[0]] = {
+                "id": row[0],
+                "name": row[1],
+                "modality": row[2],
+                "description": row[3],
+                "created_at": row[4],
+                "parents": [],
+                "children": [],
+            }
+        for row in conn.execute(
+            "SELECT parent_id, child_id, edge_type FROM world_edges"
+        ):
+            parent_id, child_id, edge_type = row
+            if child_id in worlds:
+                worlds[child_id]["parents"].append(
+                    {"id": parent_id, "edge_type": edge_type}
+                )
+            if parent_id in worlds:
+                worlds[parent_id]["children"].append(
+                    {"id": child_id, "edge_type": edge_type}
+                )
+        conn.close()
+        return list(worlds.values())
+
+    def world_path(self, world: str, separator: str = " > ") -> str:
+        """Render the rooted path to this world by walking parent edges.
+
+        e.g. 'actuality > fiction > potterverse > hogwarts-1990s'.
+        Picks the first parent at each step (the DAG can have multiple
+        parents — `overlays` edges form one parent chain; `branches-
+        from` and `refines` are mutually exclusive with that). For
+        worlds with multiple parents this is best-effort rendering.
+
+        Returns just the world's name if it has no parents.
+        """
+        target = self.get_world(world)
+        if not target:
+            return world
+        chain = [target["name"]]
+        current_id = target["id"]
+        conn = self._conn()
+        seen = {current_id}
+        for _ in range(32):  # bounded to prevent cycles
+            row = conn.execute(
+                "SELECT we.parent_id, w.name FROM world_edges we "
+                "JOIN worlds w ON we.parent_id = w.id "
+                "WHERE we.child_id = ? LIMIT 1",
+                (current_id,),
+            ).fetchone()
+            if not row:
+                break
+            parent_id, parent_name = row
+            if parent_id in seen:
+                break  # cycle guard
+            seen.add(parent_id)
+            chain.insert(0, parent_name)
+            current_id = parent_id
+        conn.close()
+        return separator.join(chain)
+
+    def world_descendants(self, world: str) -> list:
+        """Return all descendant world IDs (recursive children) of the given world.
+
+        Used by inheritance queries — 'show me everything in potterverse
+        and its child worlds'. Includes the input world itself in the
+        result.
+        """
+        start = self.get_world(world)
+        if not start:
+            return []
+        conn = self._conn()
+        rows = conn.execute(
+            """
+            WITH RECURSIVE descendants(id) AS (
+                SELECT ? AS id
+                UNION
+                SELECT we.child_id FROM world_edges we
+                JOIN descendants d ON we.parent_id = d.id
+            )
+            SELECT id FROM descendants
+            """,
+            (start["id"],),
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+
+    def delete_world(self, world: str, force: bool = False) -> bool:
+        """Remove a world from the registry. Refuses if quads still
+        reference it unless force=True.
+
+        Never deletes the 'actuality' world (root).
+        """
+        target = self.get_world(world)
+        if not target:
+            return False
+        if target["id"] == "actuality":
+            raise ValueError("Cannot delete the 'actuality' root world")
+        conn = self._conn()
+        if not force:
+            triple_count = conn.execute(
+                "SELECT COUNT(*) FROM triples WHERE world = ?", (target["id"],)
+            ).fetchone()[0]
+            if triple_count > 0:
+                conn.close()
+                raise ValueError(
+                    f"World {target['name']!r} still has {triple_count} triples; "
+                    "pass force=True to delete anyway."
+                )
+        conn.execute("DELETE FROM world_edges WHERE parent_id = ? OR child_id = ?",
+                     (target["id"], target["id"]))
+        conn.execute("DELETE FROM worlds WHERE id = ?", (target["id"],))
+        if force:
+            conn.execute("DELETE FROM triples WHERE world = ?", (target["id"],))
+        conn.commit()
+        conn.close()
+        logger.info("Deleted world %s (id=%s)", target["name"], target["id"])
+        return True
 
     # ── Seed from GAIA constants ──────────────────────────────────────────
 

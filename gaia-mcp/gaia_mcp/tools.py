@@ -249,6 +249,13 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kg_invalidate": lambda p: _kg_invalidate_impl(p),
         "kg_timeline": lambda p: _kg_timeline_impl(p),
         "kg_stats": lambda p: _kg_stats_impl(p),
+        # World registry (Stage 3 / 4da) — DAG of named worlds
+        "kg_world_create": lambda p: _kg_world_create_impl(p),
+        "kg_world_get": lambda p: _kg_world_get_impl(p),
+        "kg_world_list": lambda p: _kg_world_list_impl(p),
+        "kg_world_path": lambda p: _kg_world_path_impl(p),
+        "kg_world_descendants": lambda p: _kg_world_descendants_impl(p),
+        "kg_world_delete": lambda p: _kg_world_delete_impl(p),
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
@@ -643,6 +650,82 @@ def _kg_stats_impl(params: dict) -> dict:
     """Get knowledge graph statistics."""
     kg = _get_kg()
     return {"ok": True, **kg.stats()}
+
+
+# ── World registry tools (Stage 3 / 4da) ────────────────────────────────
+
+def _kg_world_create_impl(params: dict) -> dict:
+    """Register a new world. Required: name. Optional: modality, parent,
+    edge_type, description."""
+    kg = _get_kg()
+    name = params.get("name", "")
+    if not name:
+        return {"ok": False, "error": "name parameter required"}
+    try:
+        world_id = kg.create_world(
+            name=name,
+            modality=params.get("modality", "fiction"),
+            parent=params.get("parent"),
+            edge_type=params.get("edge_type", "branches-from"),
+            description=params.get("description", ""),
+        )
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "id": world_id, "name": name}
+
+
+def _kg_world_get_impl(params: dict) -> dict:
+    """Look up a world by id or name."""
+    kg = _get_kg()
+    world = params.get("world") or params.get("name") or params.get("id")
+    if not world:
+        return {"ok": False, "error": "world / name / id parameter required"}
+    meta = kg.get_world(world)
+    if not meta:
+        return {"ok": False, "error": f"world not found: {world!r}"}
+    return {"ok": True, **meta}
+
+
+def _kg_world_list_impl(params: dict) -> dict:
+    """Return all registered worlds with their edges."""
+    kg = _get_kg()
+    worlds = kg.list_worlds()
+    return {"ok": True, "worlds": worlds, "count": len(worlds)}
+
+
+def _kg_world_path_impl(params: dict) -> dict:
+    """Render the rooted path for a world (best-effort traversal)."""
+    kg = _get_kg()
+    world = params.get("world") or params.get("name") or params.get("id")
+    if not world:
+        return {"ok": False, "error": "world / name / id parameter required"}
+    separator = params.get("separator", " > ")
+    path = kg.world_path(world, separator=separator)
+    return {"ok": True, "world": world, "path": path}
+
+
+def _kg_world_descendants_impl(params: dict) -> dict:
+    """Return all descendant world IDs (recursive) including the given world."""
+    kg = _get_kg()
+    world = params.get("world") or params.get("name") or params.get("id")
+    if not world:
+        return {"ok": False, "error": "world / name / id parameter required"}
+    descendants = kg.world_descendants(world)
+    return {"ok": True, "world": world, "descendants": descendants, "count": len(descendants)}
+
+
+def _kg_world_delete_impl(params: dict) -> dict:
+    """Delete a world. Refuses if it still has triples unless force=True."""
+    kg = _get_kg()
+    world = params.get("world") or params.get("name") or params.get("id")
+    if not world:
+        return {"ok": False, "error": "world / name / id parameter required"}
+    force = bool(params.get("force", False))
+    try:
+        ok = kg.delete_world(world, force=force)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": ok, "world": world}
 
 
 # ── MemPalace (structured memory architecture) ────────────────────────────
