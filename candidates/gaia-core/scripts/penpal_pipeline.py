@@ -46,6 +46,19 @@ for p in _common_paths:
 
 from gaia_common.utils.cfr_manager import CFRManager  # noqa: E402
 
+# Stage 2 consistency detector — flags named entities with no trace in the
+# transcript section, conversation history, grounding, or KG. Optional:
+# if the import fails (running outside gaia-core), the pipeline runs as
+# before without re-roll.
+try:
+    from gaia_core.cognition.consistency_detector import (  # noqa: E402
+        run_consistency_check_sync,
+    )
+    _CONSISTENCY_AVAILABLE = True
+except Exception:
+    run_consistency_check_sync = None  # type: ignore
+    _CONSISTENCY_AVAILABLE = False
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -152,6 +165,96 @@ def postprocess(text: str) -> str:
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
+
+
+# ---------------------------------------------------------------------------
+# Fabricated-specifics audit (Stage 2 consistency detector + filepath regex)
+# ---------------------------------------------------------------------------
+
+# Slash-prefixed paths that look like fabricated module / endpoint refs.
+# Matches /gaia-core/v1/parse, /knowledge/foo/bar.txt, etc.
+_FILEPATH_RE = re.compile(r"/[a-zA-Z][a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_./-]+)+")
+
+# "Entity 'X' appears..." → extract X from concern strings emitted by
+# consistency_detector.detect_consistency_violations.
+_ENTITY_QUOTE_RE = re.compile(r"Entity '([^']+)'")
+
+
+def _strip_markdown_headers(text: str) -> str:
+    """Drop markdown header lines (## Topic) from text before auditing.
+
+    Header text is intentionally descriptive ("## On the Sovereign Paradox")
+    and the persona explicitly allows stylistic phrasings there. We only
+    want to audit body prose for fabricated specifics.
+    """
+    return re.sub(r"^\s*#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
+
+
+def _audit_section_response(section_text: str, response: str) -> List[str]:
+    """Find specific terms in the response that have no trace in the source.
+
+    Returns a list of "banned terms" — strings that look like fabricated
+    architectural details (module names, file paths, named systems) which
+    aren't present in the transcript section we gave the model. The caller
+    re-rolls generation with these terms forbidden.
+
+    Sources of signal:
+      1. consistency_detector: multi-word Title Case + ALL-CAPS acronyms
+         that are absent from user_input, history, grounding, and the KG.
+      2. Slash-prefixed paths in the response that don't appear verbatim
+         in the source. The detector doesn't catch these because they're
+         not Title Case.
+
+    Headers (`## Title`) are stripped before auditing — descriptive section
+    labels aren't expected to be grounded in the transcript.
+    """
+    if not response or len(response.strip()) < 20:
+        return []
+
+    body = _strip_markdown_headers(response)
+    if len(body.strip()) < 20:
+        return []
+    banned: List[str] = []
+
+    # Consistency-detector pass on the header-stripped body. journal_entry_id=None
+    # bypasses the detector's dedup cache so re-rolls of the same section
+    # keep getting audited.
+    if _CONSISTENCY_AVAILABLE:
+        try:
+            result = run_consistency_check_sync(
+                user_input=section_text,
+                final_response=body,
+                journal_entry_id=None,
+            )
+            for f in result.findings:
+                m = _ENTITY_QUOTE_RE.search(f.concern)
+                if m:
+                    banned.append(m.group(1))
+        except Exception as e:
+            logger.debug("Consistency audit raised: %s", e)
+
+    # Filepath regex — catch fabricated routes the detector misses.
+    src_lower = section_text.lower()
+    for m in _FILEPATH_RE.finditer(body):
+        path = m.group(0)
+        # Trim trailing punctuation that regex sometimes catches.
+        path = path.rstrip(".,;)")
+        if len(path) < 8:
+            continue
+        if path.lower() in src_lower:
+            continue
+        banned.append(path)
+
+    # Dedup preserving order, cap at 10 to keep the re-roll prompt readable.
+    seen: set = set()
+    out: List[str] = []
+    for t in banned:
+        k = t.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    return out[:10]
 
 
 # ---------------------------------------------------------------------------
@@ -398,10 +501,56 @@ class PenpalPipeline:
             "\n- Do NOT drift into abstract philosophy unconnected to the section topic."
         )
 
-        return self.client.chat(
-            system, "\n".join(user_parts),
+        base_user = "\n".join(user_parts)
+        raw = self.client.chat(
+            system, base_user,
             max_tokens=800, temperature=0.8, repetition_penalty=1.15,
         )
+
+        # Consistency-gated re-roll. Audit the draft for fabricated specifics
+        # (named entities + slash-paths with no trace in the transcript section
+        # or KG). If any, re-generate with an explicit "do not use these terms"
+        # clause. Cap at 2 re-rolls so a stubbornly hallucinating section can't
+        # block the pipeline.
+        accumulated_banned: List[str] = []
+        for attempt in range(2):
+            banned = _audit_section_response(section_text, raw)
+            if not banned:
+                break
+            # Merge with prior attempts so each re-roll knows everything banned
+            # so far, not just what this attempt added.
+            for t in banned:
+                if t not in accumulated_banned:
+                    accumulated_banned.append(t)
+            logger.info(
+                "    [Consistency] Section %d re-roll %d/2 — %d unsourced term(s): %s",
+                section_index, attempt + 1, len(banned), banned[:5],
+            )
+            stricter_user = base_user + (
+                "\n\nCRITICAL CORRECTION: The previous draft introduced these "
+                "terms that do NOT appear in the transcript section above and "
+                f"are not in the knowledge graph: {', '.join(accumulated_banned)}. "
+                "Generate again WITHOUT using any of those terms. If you cannot "
+                "name a specific implementation detail without inventing one, "
+                "speak in general architectural terms or write 'the exact value "
+                "escapes me.' Stay grounded in what the transcript actually says."
+            )
+            raw = self.client.chat(
+                system, stricter_user,
+                max_tokens=800, temperature=0.7, repetition_penalty=1.20,
+            )
+        else:
+            # Both re-rolls failed — emit a warning but keep what we have so
+            # the section isn't dropped entirely. The compress pass downstream
+            # may still clean up some of the noise.
+            if accumulated_banned:
+                logger.warning(
+                    "    [Consistency] Section %d still has %d unsourced terms "
+                    "after 2 re-rolls; keeping last draft.",
+                    section_index, len(accumulated_banned),
+                )
+
+        return raw
 
     # -- Self-compression: distill a raw response to its core points --
     def compress_own_response(self, raw_response: str, section_topic: str) -> str:

@@ -77,13 +77,17 @@ _STOPWORD_CAPS = frozenset({
     "And", "But", "Or", "If", "So", "Also", "Just", "Only", "Both", "Each",
     "Some", "Most", "Many", "Any", "All", "None", "Every", "Other",
     "Such", "Same", "Said", "Note", "Yes", "No", "OK", "Okay",
+    # Prepositions — often start markdown headers ("## On GIAA's...") or
+    # opening sentences. Without these in stopwords, multi-word matching
+    # eats e.g. "On GIAA" as a 2-word Title Case entity.
+    "On", "In", "At", "By", "For", "From", "Of", "To", "With", "About",
     "Between", "Among", "Within", "Without", "Through", "Across",
     "Above", "Below", "Beyond", "After", "Before", "During", "Since",
     "Until", "While", "Although", "Though", "However", "Therefore",
     "Indeed", "Sorry", "Thanks", "Maybe", "Perhaps", "Often", "Always",
     "Never", "Sometimes", "Usually", "Likely", "Possibly", "Actually",
     "Especially", "Generally", "Specifically", "Currently",
-    "Speaking", "Considering", "Beyond", "Regarding", "Concerning",
+    "Speaking", "Considering", "Regarding", "Concerning",
     "Including", "Excluding", "Apart", "Aside", "Otherwise",
     # Common Title Case verbs/nouns at sentence start
     "Let", "Make", "Take", "Give", "Find", "Look", "Show", "Tell",
@@ -128,9 +132,11 @@ _SINGLE_TITLE_RE = re.compile(r"\b[A-Z][a-z]{3,}\b")
 _ACRONYM_RE = re.compile(r"\b[A-Z]{3,}(?:[-_][A-Z0-9]+)?\b")
 
 
-# Sentence splitter — keeps multi-word regex from matching across periods,
-# which would otherwise catch "Oregon. Current" as a 2-word name.
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+# Sentence / block splitter — keeps multi-word regex from matching across
+# periods or paragraph breaks, which would otherwise catch "Oregon. Current"
+# as a 2-word name, or "## On Foo\n\nBar Baz quux..." as "On Foo\n\nBar Baz"
+# spanning a markdown header into body text.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])|\n\s*\n+|\n#{1,6}\s+")
 
 
 def _extract_candidate_entities(text: str) -> List[str]:
