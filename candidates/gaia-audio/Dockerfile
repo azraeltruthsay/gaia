@@ -1,5 +1,7 @@
-# gaia-audio: The Ears & Mouth - Half-duplex STT/TTS sensory service
-# GPU-capable container for Qwen3-ASR STT and RealtimeTTS
+# gaia-audio: The Ears & Mouth — Three-tier Qwen3 STT/TTS sensory service
+# STT:  Qwen3-ASR-0.6B (GPU) — speech recognition
+# TTS:  Qwen3-TTS-0.6B (CPU, voice clone) / Qwen3-TTS-1.7B (GPU, on-demand)
+# Fallback: espeak-ng (emergency TTS if Qwen3 unavailable)
 
 FROM python:3.11-slim AS base
 
@@ -9,6 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # System dependencies for audio processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    sox \
+    libsox-fmt-all \
     libportaudio2 \
     portaudio19-dev \
     espeak-ng \
@@ -32,11 +36,20 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 WORKDIR /app
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Install dependencies (better layer caching)
+# Install dependencies
 # ═══════════════════════════════════════════════════════════════════════════
 
 COPY candidates/gaia-audio/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Qwen3 audio models — STT and TTS inference packages.
+# qwen-asr pins transformers==4.57.6; qwen-tts pins ==4.57.3, so a single
+# resolver pass fails (ResolutionImpossible). STT is the priority for the
+# correspondence pipeline, so install asr first (resolves transformers
+# 4.57.6), then install tts WITHOUT its transformers pin via --no-deps
+# (we already have all the supporting libs from qwen-asr's resolution).
+RUN pip install --no-cache-dir qwen-asr
+RUN pip install --no-cache-dir --no-deps qwen-tts
 
 # Copy and install gaia-common and gaia-audio
 COPY candidates/gaia-common/ /app/gaia_common/
@@ -45,13 +58,10 @@ COPY candidates/gaia-audio/ /app/
 # Install gaia-audio in editable mode
 RUN pip install -e /app/.[dev]
 
-# Pre-accept Coqui XTTS v2 TOS for headless operation
-RUN mkdir -p /home/gaia/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2 \
-    && echo "I have read, understood and agreed to the Terms and Conditions." \
-       > /home/gaia/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/tos_agreed.txt
-
-# Set ownership
-RUN chown -R gaia:gaia /app /home/gaia/.local
+# Set ownership. mkdir guard for /home/gaia/.local — earlier images had
+# this directory populated by pip --user installs, but with system-pip
+# installs (qwen-asr / qwen-tts as root) it's never created.
+RUN mkdir -p /home/gaia/.local && chown -R gaia:gaia /app /home/gaia/.local
 
 EXPOSE 8080
 

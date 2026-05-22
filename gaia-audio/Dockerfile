@@ -42,8 +42,14 @@ WORKDIR /app
 COPY candidates/gaia-audio/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Qwen3 audio models — STT and TTS inference packages
-RUN pip install --no-cache-dir qwen-asr qwen-tts
+# Qwen3 audio models — STT and TTS inference packages.
+# qwen-asr pins transformers==4.57.6; qwen-tts pins ==4.57.3, so a single
+# resolver pass fails (ResolutionImpossible). STT is the priority for the
+# correspondence pipeline, so install asr first (resolves transformers
+# 4.57.6), then install tts WITHOUT its transformers pin via --no-deps
+# (we already have all the supporting libs from qwen-asr's resolution).
+RUN pip install --no-cache-dir qwen-asr
+RUN pip install --no-cache-dir --no-deps qwen-tts
 
 # Copy and install gaia-common and gaia-audio
 COPY candidates/gaia-common/ /app/gaia_common/
@@ -52,8 +58,10 @@ COPY candidates/gaia-audio/ /app/
 # Install gaia-audio in editable mode
 RUN pip install -e /app/.[dev]
 
-# Set ownership
-RUN chown -R gaia:gaia /app /home/gaia/.local
+# Set ownership. mkdir guard for /home/gaia/.local — earlier images had
+# this directory populated by pip --user installs, but with system-pip
+# installs (qwen-asr / qwen-tts as root) it's never created.
+RUN mkdir -p /home/gaia/.local && chown -R gaia:gaia /app /home/gaia/.local
 
 EXPOSE 8080
 
