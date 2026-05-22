@@ -214,6 +214,53 @@ What partially redeems the LLM bound: the consistency check. Even a sloppy extra
 | 5     | 8pk   | shipped  | Merge mechanism with coreference resolver |
 | 5.5   | clm   | open     | Merge approval workflow via candidates/ + gaia-study (follow-up) |
 | 6     | azr   | open     | Ephemeral vs durable world lifecycle |
+| 7     | lw4   | open     | Temporal-news ingester + fact-type ontology + recency-decay scoring |
+| 8     | hkv   | open     | Outbound-claim cross-check against recent KG triples |
+
+## Stage 7+ : currency, not just truth
+
+The first six stages give GAIA scoping, isolation, inheritance, and disciplined revision. Stages 7-8 add **temporal currency** — knowing what's still true *right now*, not just what was true at some point.
+
+### Why this matters
+GAIA's training data is frozen. Web search results are point-in-time snapshots. Without temporal scoring, every fact she's ever retrieved has the same weight forever — yesterday's news is treated identically to a 200-year-old biographical fact.
+
+### Fact-type ontology
+Each KG triple carries a `fact_type` that controls its decay curve:
+
+| type                  | half-life       | example                            |
+|-----------------------|-----------------|------------------------------------|
+| `weather`             | 6 hours         | "temp in Portland"                 |
+| `news`                | 7 days          | "Patriots won SBLVIII"             |
+| `market_data`         | 1 hour          | "AAPL closing price"               |
+| `political_office`    | 1 year          | "X is the senator from Y"          |
+| `scientific_consensus`| 50 years        | "gravity = 9.8 m/s²"               |
+| `biographical`        | indefinite      | "Marcus Aurelius died in 180 CE"   |
+| `temporary_state`     | 1 day           | "GAIA is currently focused on X"   |
+| `unknown`             | 30 days         | default fall-through               |
+
+Retrieval scoring: `relevance = confidence × decay(now - valid_from, fact_type)`. Decay function is exponential by default (`0.5^(age/half_life)`).
+
+### Web-search ingestion
+Stage 7's other piece: when the model uses `web.search` / `web.fetch`, the results are persisted to the actuality world as triples with:
+- `valid_from` = retrieval timestamp (or article date if extractable)
+- `source` = URL + retrieval timestamp
+- `confidence` = source tier (trusted/reliable/unknown from `web_tools.py`)
+- `fact_type` = classified by predicate-name heuristic, escalated to Nano for ambiguous cases
+
+### Outbound cross-check (Stage 8)
+Before generation, the agent layer queries the KG for recent high-relevance triples covering the user's prompt entities. If hits exist, they're injected as authoritative reference data (using the eu9 grounding-as-candidate-context framing). The model still chooses what to assert, but starts from KG-current ground rather than training-data recall.
+
+This is the symmetric counterpart to the consistency detector (Stage 2):
+- **Stage 2**: catches stale/fabricated claims AFTER generation
+- **Stage 8**: prefers current KG facts BEFORE generation
+
+### Not in scope
+What got considered and explicitly excluded:
+
+- **Proprioception → KG triples.** Already in world_state, gets injected each turn. Mapping into KG would duplicate state without changing prompt content. If queryable proprioceptive history becomes useful, build it as an `events` table rather than coercing into the triple shape.
+- **Agentic tool capabilities as triples.** Tools are callable functions with schemas — a different data shape. The right place is `gaia-common/utils/domain_tools.py`, which already exists. (Tool invocation HISTORY as `events` is a separate small win that might land downstream.)
+
+The decision: ship the temporal-currency piece cleanly first; resist the urge to bundle every metadata concern into one unified knowledge graph.
 
 ## Affected files
 
