@@ -144,6 +144,30 @@ class KnowledgeGraph:
 
             CREATE INDEX IF NOT EXISTS idx_world_edges_parent ON world_edges(parent_id);
             CREATE INDEX IF NOT EXISTS idx_world_edges_child  ON world_edges(child_id);
+
+            -- World merges (Stage 5, 8pk). The riskiest operation in the
+            -- World Model — collapsing two worlds we thought were
+            -- separate into one. Each merge is a proposal that captures
+            -- the pre-merge state of both worlds, the coreference
+            -- mapping, and a status. Apply is atomic at the world-ID
+            -- level (no global string rewrite); reverse restores from
+            -- the snapshot.
+            CREATE TABLE IF NOT EXISTS merges (
+                id TEXT PRIMARY KEY,
+                source_world TEXT NOT NULL,    -- the world being absorbed
+                target_world TEXT NOT NULL,    -- the world it merges INTO
+                status TEXT NOT NULL DEFAULT 'pending',  -- pending | applied | reversed
+                entity_mapping TEXT NOT NULL DEFAULT '{}',  -- JSON: source_id → target_id
+                snapshot TEXT NOT NULL,         -- JSON: pre-merge triples + edges of both worlds
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                applied_at TEXT,
+                reversed_at TEXT,
+                notes TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_merges_status ON merges(status);
+            CREATE INDEX IF NOT EXISTS idx_merges_source ON merges(source_world);
+            CREATE INDEX IF NOT EXISTS idx_merges_target ON merges(target_world);
         """)
         # Step 2: migrate pre-existing databases — add world column if
         # missing. Must happen BEFORE the world-dependent indices below.
@@ -867,6 +891,415 @@ class KnowledgeGraph:
         conn.close()
         logger.info("Deleted world %s (id=%s)", target["name"], target["id"])
         return True
+
+    # ── Merge mechanism (Stage 5, 8pk) ────────────────────────────────────
+
+    # Treat coreference matches as auto-mappings only above this score.
+    # Below the threshold the entity stays separate during the merge
+    # (no rename), which is the conservative choice — false positives
+    # in coref are MUCH more damaging than false negatives because
+    # they collapse two genuinely-distinct things into one entity.
+    _COREF_THRESHOLD = 0.85
+
+    @staticmethod
+    def _coref_score(name_a: str, name_b: str) -> float:
+        """Conservative name-similarity score in [0, 1].
+
+        Exact match (case-sensitive): 1.0
+        Case-insensitive match: 0.95
+        Token-Jaccard similarity: variable (typically 0.0-0.9)
+
+        This is intentionally simple — real coreference resolution is
+        a 40-year-old open problem in record linkage. Stage 5 uses a
+        name-only heuristic with a high threshold (0.85) so it makes
+        conservative auto-merges. Hard cases stay unmapped and a
+        future stage can add disambiguation.
+        """
+        if not name_a or not name_b:
+            return 0.0
+        if name_a == name_b:
+            return 1.0
+        if name_a.lower() == name_b.lower():
+            return 0.95
+        # Token-Jaccard over lowercased word splits
+        tokens_a = set(name_a.lower().replace("_", " ").split())
+        tokens_b = set(name_b.lower().replace("_", " ").split())
+        if not tokens_a or not tokens_b:
+            return 0.0
+        inter = tokens_a & tokens_b
+        union = tokens_a | tokens_b
+        return len(inter) / len(union)
+
+    def _resolve_coreference(self, source_world_id: str, target_world_id: str) -> dict:
+        """Map entities in source world to candidates in target world.
+
+        Returns dict of source_entity_id → target_entity_id for matches
+        above _COREF_THRESHOLD. Entities below threshold are NOT in the
+        mapping; during apply, they stay under their original ID (their
+        triples just get rewritten to the target world).
+        """
+        conn = self._conn()
+        # Entities that appear as subject or object in either world
+        src_entities = {
+            row[0]: row[1] for row in conn.execute(
+                "SELECT e.id, e.name FROM entities e "
+                "WHERE e.id IN ("
+                "  SELECT subject FROM triples WHERE world = ? "
+                "  UNION SELECT object FROM triples WHERE world = ?"
+                ")",
+                (source_world_id, source_world_id),
+            )
+        }
+        tgt_entities = {
+            row[0]: row[1] for row in conn.execute(
+                "SELECT e.id, e.name FROM entities e "
+                "WHERE e.id IN ("
+                "  SELECT subject FROM triples WHERE world = ? "
+                "  UNION SELECT object FROM triples WHERE world = ?"
+                ")",
+                (target_world_id, target_world_id),
+            )
+        }
+        conn.close()
+
+        mapping: dict = {}
+        for src_id, src_name in src_entities.items():
+            best_score = 0.0
+            best_target = None
+            for tgt_id, tgt_name in tgt_entities.items():
+                score = self._coref_score(src_name, tgt_name)
+                if score > best_score:
+                    best_score = score
+                    best_target = tgt_id
+            if best_score >= self._COREF_THRESHOLD and best_target:
+                mapping[src_id] = best_target
+        return mapping
+
+    def _snapshot_worlds(self, source_world_id: str, target_world_id: str) -> dict:
+        """Capture the pre-merge state of both worlds for reversibility."""
+        conn = self._conn()
+        snapshot = {
+            "source": {
+                "world": source_world_id,
+                "world_meta": None,
+                "triples": [],
+                "incoming_edges": [],
+                "outgoing_edges": [],
+            },
+            "target": {
+                "world": target_world_id,
+                "world_meta": None,
+                "triples": [],
+            },
+        }
+        # World metadata
+        for side, world_id in [("source", source_world_id), ("target", target_world_id)]:
+            row = conn.execute(
+                "SELECT id, name, modality, description, created_at "
+                "FROM worlds WHERE id = ?", (world_id,)
+            ).fetchone()
+            if row:
+                snapshot[side]["world_meta"] = {
+                    "id": row[0], "name": row[1], "modality": row[2],
+                    "description": row[3], "created_at": row[4],
+                }
+        # All triples in both worlds (full row)
+        for side, world_id in [("source", source_world_id), ("target", target_world_id)]:
+            for r in conn.execute(
+                "SELECT id, subject, predicate, object, valid_from, valid_to, "
+                "confidence, source, extracted_at, world FROM triples WHERE world = ?",
+                (world_id,),
+            ):
+                snapshot[side]["triples"].append(list(r))
+        # Source world's edges (incoming + outgoing)
+        for r in conn.execute(
+            "SELECT parent_id, child_id, edge_type FROM world_edges "
+            "WHERE child_id = ?", (source_world_id,)
+        ):
+            snapshot["source"]["incoming_edges"].append(list(r))
+        for r in conn.execute(
+            "SELECT parent_id, child_id, edge_type FROM world_edges "
+            "WHERE parent_id = ?", (source_world_id,)
+        ):
+            snapshot["source"]["outgoing_edges"].append(list(r))
+        conn.close()
+        return snapshot
+
+    def propose_merge(
+        self,
+        source_world: str,
+        target_world: str,
+        notes: str = "",
+    ) -> dict:
+        """Propose a merge of source_world INTO target_world.
+
+        Returns a structured proposal dict — NOTHING is changed in the
+        KG until apply_merge is called with the merge_id. The proposal
+        captures:
+          - the resolved entity coreference mapping (source→target)
+          - a pre-merge snapshot of both worlds (for reversibility)
+          - counts of what would be affected
+
+        Refuses to propose merging actuality away (the root world cannot
+        be absorbed). Source and target must both exist and be distinct.
+        """
+        src_meta = self.get_world(source_world)
+        tgt_meta = self.get_world(target_world)
+        if not src_meta:
+            raise ValueError(f"Source world not found: {source_world!r}")
+        if not tgt_meta:
+            raise ValueError(f"Target world not found: {target_world!r}")
+        if src_meta["id"] == tgt_meta["id"]:
+            raise ValueError("Cannot merge a world into itself")
+        if src_meta["id"] == "actuality":
+            raise ValueError("Cannot merge the 'actuality' root world away")
+
+        entity_mapping = self._resolve_coreference(src_meta["id"], tgt_meta["id"])
+        snapshot = self._snapshot_worlds(src_meta["id"], tgt_meta["id"])
+
+        merge_id = "m_" + hashlib.md5(
+            f"{src_meta['id']}->{tgt_meta['id']}@{datetime.now().isoformat()}".encode()
+        ).hexdigest()[:12]
+
+        proposal = {
+            "merge_id": merge_id,
+            "source_world": src_meta["id"],
+            "source_world_name": src_meta["name"],
+            "target_world": tgt_meta["id"],
+            "target_world_name": tgt_meta["name"],
+            "entity_mapping": entity_mapping,
+            "triples_to_rewrite": len(snapshot["source"]["triples"]),
+            "edges_to_remap": (
+                len(snapshot["source"]["incoming_edges"])
+                + len(snapshot["source"]["outgoing_edges"])
+            ),
+            "status": "pending",
+            "notes": notes,
+        }
+
+        # Persist the proposal
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO merges (id, source_world, target_world, status, "
+            "entity_mapping, snapshot, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                merge_id, src_meta["id"], tgt_meta["id"], "pending",
+                json.dumps(entity_mapping),
+                json.dumps(snapshot, default=str),
+                notes,
+            ),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Merge proposed: %s (%s → %s, %d triples, %d entities mapped)",
+            merge_id, src_meta["name"], tgt_meta["name"],
+            proposal["triples_to_rewrite"], len(entity_mapping),
+        )
+        return proposal
+
+    def apply_merge(self, merge_id: str) -> dict:
+        """Execute a previously-proposed merge.
+
+        Operations performed:
+          1. Rewrite all source-world triples to the target world,
+             applying the entity_mapping to subject/object IDs
+          2. Re-parent any source-world child edges to point at target
+          3. Drop source-world edges and the world row itself
+          4. Mark the merge as applied with a timestamp
+
+        Returns the final proposal record with status='applied'.
+        """
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT source_world, target_world, status, entity_mapping "
+            "FROM merges WHERE id = ?", (merge_id,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            raise ValueError(f"Unknown merge_id: {merge_id!r}")
+        src_id, tgt_id, status, mapping_json = row
+        if status != "pending":
+            conn.close()
+            raise ValueError(
+                f"Merge {merge_id} is not pending (current status: {status})"
+            )
+        mapping = json.loads(mapping_json or "{}")
+
+        # 1. Rewrite triples: re-target world + remap entities per coref
+        for r in conn.execute(
+            "SELECT id, subject, object FROM triples WHERE world = ?", (src_id,)
+        ).fetchall():
+            tid, subj, obj = r
+            new_subj = mapping.get(subj, subj)
+            new_obj = mapping.get(obj, obj)
+            conn.execute(
+                "UPDATE triples SET world = ?, subject = ?, object = ? "
+                "WHERE id = ?",
+                (tgt_id, new_subj, new_obj, tid),
+            )
+
+        # 2. Re-parent child edges. A world that had source as parent
+        #    now has target as parent.
+        conn.execute(
+            "UPDATE world_edges SET parent_id = ? WHERE parent_id = ?",
+            (tgt_id, src_id),
+        )
+        # 3. Drop edges where source was the child (its parents are
+        #    already represented through target's own parent edges).
+        conn.execute("DELETE FROM world_edges WHERE child_id = ?", (src_id,))
+        # 4. Drop the source world row itself
+        conn.execute("DELETE FROM worlds WHERE id = ?", (src_id,))
+        # 5. Mark merge applied
+        conn.execute(
+            "UPDATE merges SET status = 'applied', applied_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), merge_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Merge applied: %s (source %s collapsed into %s)",
+                    merge_id, src_id, tgt_id)
+        return self.get_merge(merge_id)
+
+    def reverse_merge(self, merge_id: str) -> dict:
+        """Restore a previously-applied merge from its snapshot.
+
+        Re-creates the source world, restores its triples, restores
+        its edges, and resets entity IDs that were remapped by
+        coreference back to their source-side originals.
+
+        Note: if the target world has been further modified since the
+        merge (other triples added, other merges applied to it), reverse
+        will undo the merge's contribution but won't roll back those
+        downstream changes. Snapshot captures only what changed at
+        merge-time, not subsequent edits.
+        """
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT source_world, target_world, status, entity_mapping, snapshot "
+            "FROM merges WHERE id = ?", (merge_id,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            raise ValueError(f"Unknown merge_id: {merge_id!r}")
+        src_id, tgt_id, status, mapping_json, snapshot_json = row
+        if status != "applied":
+            conn.close()
+            raise ValueError(
+                f"Can only reverse an applied merge (status: {status})"
+            )
+        snapshot = json.loads(snapshot_json or "{}")
+        mapping = json.loads(mapping_json or "{}")
+
+        # 1. Restore source world row
+        sm = snapshot["source"]["world_meta"]
+        if sm:
+            conn.execute(
+                "INSERT OR REPLACE INTO worlds (id, name, modality, description, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (sm["id"], sm["name"], sm["modality"], sm["description"], sm["created_at"]),
+            )
+        # 2. Restore source world edges
+        for parent_id, child_id, edge_type in snapshot["source"]["incoming_edges"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO world_edges (parent_id, child_id, edge_type) "
+                "VALUES (?, ?, ?)",
+                (parent_id, child_id, edge_type),
+            )
+        # 2b. Restore outgoing edges + revert any re-parent we did at apply time
+        for parent_id, child_id, edge_type in snapshot["source"]["outgoing_edges"]:
+            # Children that pointed at source still currently point at target
+            # — flip them back. Then re-add the original outgoing edge.
+            conn.execute(
+                "UPDATE world_edges SET parent_id = ? "
+                "WHERE parent_id = ? AND child_id = ? AND edge_type = ?",
+                (parent_id, tgt_id, child_id, edge_type),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO world_edges (parent_id, child_id, edge_type) "
+                "VALUES (?, ?, ?)",
+                (parent_id, child_id, edge_type),
+            )
+
+        # 3. Reverse-map: triples we moved into target need to go back.
+        #    Identify them by the original triple IDs preserved in the
+        #    snapshot, then update world AND restore original entity IDs.
+        reverse_mapping = {v: k for k, v in mapping.items()}
+        for triple_row in snapshot["source"]["triples"]:
+            tid, subj, pred, obj, vf, vt, conf, src, ext, world = triple_row
+            conn.execute(
+                "UPDATE triples SET world = ?, subject = ?, object = ? "
+                "WHERE id = ?",
+                (world, subj, obj, tid),
+            )
+        # Apply reverse-mapping defensively in case entity IDs got renamed
+        # in any other triples within target (unlikely but cheap)
+        # — only the source's own snapshotted triples are touched above.
+
+        # 4. Mark merge reversed
+        conn.execute(
+            "UPDATE merges SET status = 'reversed', reversed_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), merge_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Merge reversed: %s (source %s restored from snapshot)",
+                    merge_id, src_id)
+        return self.get_merge(merge_id)
+
+    def get_merge(self, merge_id: str) -> Optional[dict]:
+        """Look up a merge by id. Returns None if not found."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, source_world, target_world, status, entity_mapping, "
+            "created_at, applied_at, reversed_at, notes FROM merges WHERE id = ?",
+            (merge_id,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "merge_id": row[0],
+            "source_world": row[1],
+            "target_world": row[2],
+            "status": row[3],
+            "entity_mapping": json.loads(row[4] or "{}"),
+            "created_at": row[5],
+            "applied_at": row[6],
+            "reversed_at": row[7],
+            "notes": row[8],
+        }
+
+    def list_merges(self, status: Optional[str] = None) -> list:
+        """Return all merge records, optionally filtered by status."""
+        conn = self._conn()
+        if status:
+            rows = conn.execute(
+                "SELECT id, source_world, target_world, status, "
+                "created_at, applied_at, reversed_at, notes "
+                "FROM merges WHERE status = ? ORDER BY created_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, source_world, target_world, status, "
+                "created_at, applied_at, reversed_at, notes "
+                "FROM merges ORDER BY created_at DESC"
+            ).fetchall()
+        conn.close()
+        return [
+            {
+                "merge_id": r[0],
+                "source_world": r[1],
+                "target_world": r[2],
+                "status": r[3],
+                "created_at": r[4],
+                "applied_at": r[5],
+                "reversed_at": r[6],
+                "notes": r[7],
+            }
+            for r in rows
+        ]
 
     # ── Seed from GAIA constants ──────────────────────────────────────────
 

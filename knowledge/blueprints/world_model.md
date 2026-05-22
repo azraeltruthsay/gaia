@@ -211,7 +211,8 @@ What partially redeems the LLM bound: the consistency check. Even a sloppy extra
 | doc   | o8a   | shipped  | This blueprint |
 | 3     | 4da   | shipped  | World registry as DAG with typed edges; Heimric campaign migration |
 | 4     | 80o   | shipped  | Inheritance walker, shadowing, modality firewall via inheritance direction |
-| 5     | 8pk   | open     | Merge mechanism with coreference resolver |
+| 5     | 8pk   | shipped  | Merge mechanism with coreference resolver |
+| 5.5   | clm   | open     | Merge approval workflow via candidates/ + gaia-study (follow-up) |
 | 6     | azr   | open     | Ephemeral vs durable world lifecycle |
 
 ## Affected files

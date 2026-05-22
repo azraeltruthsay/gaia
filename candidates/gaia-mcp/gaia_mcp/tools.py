@@ -256,6 +256,12 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kg_world_path": lambda p: _kg_world_path_impl(p),
         "kg_world_descendants": lambda p: _kg_world_descendants_impl(p),
         "kg_world_delete": lambda p: _kg_world_delete_impl(p),
+        # Merge mechanism (Stage 5 / 8pk) — propose / apply / reverse
+        "kg_merge_propose": lambda p: _kg_merge_propose_impl(p),
+        "kg_merge_apply": lambda p: _kg_merge_apply_impl(p),
+        "kg_merge_reverse": lambda p: _kg_merge_reverse_impl(p),
+        "kg_merge_get": lambda p: _kg_merge_get_impl(p),
+        "kg_merge_list": lambda p: _kg_merge_list_impl(p),
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
@@ -745,6 +751,73 @@ def _kg_world_delete_impl(params: dict) -> dict:
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": ok, "world": world}
+
+
+# ── Merge mechanism (Stage 5 / 8pk) ─────────────────────────────────────
+
+def _kg_merge_propose_impl(params: dict) -> dict:
+    """Propose merging source_world into target_world.
+
+    Nothing is changed in the KG until kg_merge_apply is called with
+    the returned merge_id. The proposal includes the resolved entity
+    coreference mapping and a pre-merge snapshot for reversibility.
+    """
+    kg = _get_kg()
+    source = params.get("source_world") or params.get("source")
+    target = params.get("target_world") or params.get("target")
+    if not source or not target:
+        return {"ok": False, "error": "source_world and target_world parameters required"}
+    try:
+        proposal = kg.propose_merge(source, target, notes=params.get("notes", ""))
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **proposal}
+
+
+def _kg_merge_apply_impl(params: dict) -> dict:
+    """Execute a pending merge proposal."""
+    kg = _get_kg()
+    merge_id = params.get("merge_id")
+    if not merge_id:
+        return {"ok": False, "error": "merge_id parameter required"}
+    try:
+        result = kg.apply_merge(merge_id)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **result}
+
+
+def _kg_merge_reverse_impl(params: dict) -> dict:
+    """Reverse a previously-applied merge from its snapshot."""
+    kg = _get_kg()
+    merge_id = params.get("merge_id")
+    if not merge_id:
+        return {"ok": False, "error": "merge_id parameter required"}
+    try:
+        result = kg.reverse_merge(merge_id)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **result}
+
+
+def _kg_merge_get_impl(params: dict) -> dict:
+    """Look up a merge by id."""
+    kg = _get_kg()
+    merge_id = params.get("merge_id")
+    if not merge_id:
+        return {"ok": False, "error": "merge_id parameter required"}
+    record = kg.get_merge(merge_id)
+    if not record:
+        return {"ok": False, "error": f"merge not found: {merge_id!r}"}
+    return {"ok": True, **record}
+
+
+def _kg_merge_list_impl(params: dict) -> dict:
+    """List all merge records, optionally filtered by status."""
+    kg = _get_kg()
+    status = params.get("status")  # None = all
+    records = kg.list_merges(status=status)
+    return {"ok": True, "merges": records, "count": len(records)}
 
 
 # ── MemPalace (structured memory architecture) ────────────────────────────
