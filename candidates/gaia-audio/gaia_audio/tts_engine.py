@@ -115,8 +115,18 @@ class NanoSpeaker:
         del self._model
         self._model = None
 
-    def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
-        """Synthesize text on CPU. Run in executor for async context."""
+    def synthesize_sync(
+        self,
+        text: str,
+        voice: str | None = None,
+        ref_text: str | None = None,
+    ) -> dict:
+        """Synthesize text on CPU. Run in executor for async context.
+
+        Per-request `ref_text` overrides the constructor-time
+        voice_ref_text; without either, falls back to the hard-coded GAIA
+        identity sentence below.
+        """
         if self._model is None:
             raise RuntimeError("NanoSpeaker not loaded — call load() first")
 
@@ -125,7 +135,7 @@ class NanoSpeaker:
             raise ValueError("Text is empty after sanitization")
 
         ref_audio = voice or self.voice_ref_audio
-        ref_text = self.voice_ref_text
+        ref_text = ref_text or self.voice_ref_text
 
         t0 = time.monotonic()
 
@@ -239,8 +249,19 @@ class PrimeSpeaker:
         except ImportError:
             pass
 
-    def synthesize_sync(self, text: str, voice: str | None = None) -> dict:
-        """Synthesize text on GPU. Run in executor for async context."""
+    def synthesize_sync(
+        self,
+        text: str,
+        voice: str | None = None,
+        ref_text: str | None = None,
+    ) -> dict:
+        """Synthesize text on GPU. Run in executor for async context.
+
+        Qwen3-TTS-1.7B in ICL (in-context-learning) mode REQUIRES a ref_text —
+        a transcription of the reference voice WAV — alongside the ref_audio.
+        Per-request override accepted; otherwise falls back to constructor-time
+        voice_ref_text.
+        """
         if self._model is None:
             raise RuntimeError("PrimeSpeaker not loaded — call load() first")
 
@@ -249,7 +270,7 @@ class PrimeSpeaker:
             raise ValueError("Text is empty after sanitization")
 
         ref_audio = voice or self.voice_ref_audio
-        ref_text = self.voice_ref_text
+        ref_text = ref_text or self.voice_ref_text
 
         t0 = time.monotonic()
 

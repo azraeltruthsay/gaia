@@ -20,6 +20,13 @@ class SynthesizeRequest(BaseModel):
 
     text: str = Field(..., description="Text to convert to speech")
     voice: str | None = Field(None, description="Voice ID or reference audio path")
+    ref_text: str | None = Field(
+        None,
+        description=(
+            "Transcription of the reference voice audio. Required by "
+            "Qwen3-TTS-1.7B (PrimeSpeaker) in ICL mode; ignored by nano/espeak."
+        ),
+    )
     tier: str = Field("auto", description="TTS tier: 'auto', 'nano', or 'prime'")
     sample_rate: int = Field(24000, description="Desired output sample rate")
 

@@ -50,6 +50,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # (we already have all the supporting libs from qwen-asr's resolution).
 RUN pip install --no-cache-dir qwen-asr
 RUN pip install --no-cache-dir --no-deps qwen-tts
+# qwen-tts --no-deps skips its transitive requirements; install the ones we
+# actually need (transformers stays at 4.57.6 from qwen-asr).
+RUN pip install --no-cache-dir onnxruntime einops
 
 # Copy and install gaia-common and gaia-audio
 COPY candidates/gaia-common/ /app/gaia_common/

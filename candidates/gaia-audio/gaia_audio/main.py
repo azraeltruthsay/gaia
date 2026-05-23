@@ -395,6 +395,7 @@ async def synthesize(request: SynthesizeRequest):
                 prime_speaker.synthesize_sync,
                 text=request.text,
                 voice=request.voice,
+                ref_text=request.ref_text,
             )
             if result is not None:
                 tier_used = "prime"
@@ -406,6 +407,7 @@ async def synthesize(request: SynthesizeRequest):
                     nano_speaker.synthesize_sync,
                     text=request.text,
                     voice=request.voice,
+                    ref_text=request.ref_text,
                 )
                 tier_used = "nano"
             elif espeak_fallback and espeak_fallback.loaded:

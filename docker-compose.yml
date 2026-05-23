@@ -695,8 +695,11 @@ services:
       - GAIA_SERVICE=audio
       - GAIA_ENV=${GAIA_ENV:-production}
       - GAIA_CONSTANTS_PATH=/gaia-common/gaia_common/constants/gaia_constants.json
-      - NVIDIA_VISIBLE_DEVICES=none
-      - CUDA_VISIBLE_DEVICES=
+      # GPU exposed so PrimeSpeaker (Qwen3-TTS-1.7B) can run on-demand. Audio
+      # holds the GPU only during the brief synth window via the orchestrator
+      # GPU-lease protocol — Core/Prime release first, then audio acquires.
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
