@@ -390,7 +390,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     except Exception:
         logger.debug("Could not extract immutable identity from packet.content.data_fields")
 
-    # Add persona traits
+    # Add persona traits (static baseline from persona JSON)
     try:
         traits = getattr(packet.header.persona, 'traits', {}) or {}
         if isinstance(traits, dict) and traits:
@@ -398,6 +398,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             identity_lines.append("Traits: " + ", ".join(trait_pairs))
     except Exception:
         logger.debug("Could not extract persona.traits from packet header")
+
+    # Add live affect overlay (GAIA_Project-usv Phase 2). Reads the
+    # current affect vector from the World Model KG and appends short
+    # state lines for any non-trivial feels/drives/curious/tired axes.
+    # Failures are swallowed inside the runtime — prompt building is
+    # never blocked by an empty or broken affect KG.
+    try:
+        from gaia_core.cognition.affect_runtime import render_into_identity_lines
+        render_into_identity_lines(identity_lines)
+    except Exception:
+        logger.debug("affect_runtime import/render failed", exc_info=True)
 
     if identity_lines:
         identity_description_content = "\n".join(identity_lines)

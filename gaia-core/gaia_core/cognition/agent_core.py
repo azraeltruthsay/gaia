@@ -446,6 +446,25 @@ class AgentCore:
 
         input_lower = user_input.lower()
 
+        # 0a. Affect-driven escalation (GAIA_Project-usv Phase 2):
+        # if GAIA's current mood/trait state signals high caution and
+        # high logic_priority, escalate regardless of keyword presence.
+        # Failures here must never affect the keyword-based rules below.
+        try:
+            from gaia_core.cognition.affect_runtime import (
+                affect_inference_params, current_affect_snapshot,
+            )
+            _params = affect_inference_params(current_affect_snapshot())
+            if _params.get("escalate_to_prime"):
+                _reason = "; ".join(_params.get("reasons") or ["affect"])
+                return ComplexityAssessment(
+                    should_escalate=True,
+                    reason=f"affect: {_reason}",
+                    confidence=0.85,
+                )
+        except Exception:
+            self.logger.debug("affect-driven escalation check failed", exc_info=True)
+
         # 0. Explicit user request to use Prime / FOCUSING mode
         # This takes highest priority — the user is directly requesting escalation
         focus_keywords = [

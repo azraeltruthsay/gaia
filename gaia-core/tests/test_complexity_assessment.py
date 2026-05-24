@@ -223,3 +223,48 @@ class TestEscalateToPrime:
             )
 
         mock_swm.receive_wake_signal.assert_called_once()
+
+
+# ── Affect-driven escalation (GAIA_Project-usv Phase 2) ─────────────
+
+
+class TestAffectEscalation:
+    """Affect-runtime rules can escalate independent of keyword content."""
+
+    def _make_agent_with_affect(self, tmp_path):
+        """Wire a real AffectKG into the runtime cache, then build AgentCore."""
+        from gaia_common.utils.knowledge_graph import KnowledgeGraph
+        from gaia_common.utils.affect_kg import AffectKG
+        from gaia_core.cognition import affect_runtime
+        kg = KnowledgeGraph(db_path=str(tmp_path / "kg.sqlite"))
+        affect = AffectKG(kg)
+        affect_runtime.reset_for_tests(affect)
+        return _make_agent_core(), affect
+
+    def teardown_method(self):
+        from gaia_core.cognition import affect_runtime
+        affect_runtime.reset_for_tests(None)
+
+    def test_high_caution_and_logic_escalates_neutral_prompt(self, tmp_path):
+        ac, affect = self._make_agent_with_affect(tmp_path)
+        affect.record_trait("caution", 0.8)
+        affect.record_trait("logic_priority", 0.85)
+        # Innocuous prompt that would NOT escalate via keyword rules
+        result = ac._assess_complexity("Hey, what's up?")
+        assert result.should_escalate
+        assert result.reason.startswith("affect:")
+
+    def test_low_affect_does_not_escalate(self, tmp_path):
+        ac, affect = self._make_agent_with_affect(tmp_path)
+        affect.record_trait("caution", 0.3)
+        affect.record_trait("logic_priority", 0.3)
+        result = ac._assess_complexity("Hey, what's up?")
+        assert not result.should_escalate
+
+    def test_keyword_path_still_works_when_affect_neutral(self, tmp_path):
+        ac, _ = self._make_agent_with_affect(tmp_path)
+        # No affect recorded; keyword escalation must still fire
+        result = ac._assess_complexity("Help me debug this Python script.")
+        assert result.should_escalate
+        # Should be the keyword reason, not the affect reason
+        assert not result.reason.startswith("affect:")
