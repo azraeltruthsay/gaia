@@ -617,6 +617,11 @@ class KnowledgeGraph:
     _VALID_MODALITIES = frozenset({
         "actuality", "fiction", "counterfactual",
         "hypothetical", "projection", "belief_of",
+        # "context" — used by the affect model (GAIA_Project-usv) for
+        # ephemeral overlay worlds that carry per-situation trait deltas
+        # (DnD session, coding debug, etc.). Behaves like actuality for
+        # inheritance; conventionally ephemeral with TTL.
+        "context",
     })
     _VALID_EDGE_TYPES = frozenset({"overlays", "refines", "branches-from"})
 
@@ -891,16 +896,25 @@ class KnowledgeGraph:
             meta = self.get_world(w)
             ids_in_order.append(meta["id"] if meta else w)
 
-        seen_sp_keys: set = set()  # (subject, predicate) pairs already covered
+        # Within a single world, an open (valid_to IS NULL) triple
+        # represents current truth and should win over closed-history
+        # triples with the same shadow key. Sort facts open-first so
+        # the dedup gate below selects the open one. Required for any
+        # subject that holds history (notably the affect model's
+        # repeated `feels_*` updates).
+        def _open_first(facts: list) -> list:
+            return sorted(facts, key=lambda f: 0 if f.get("valid_to") is None else 1)
+
+        seen_sp_keys: set = set()  # (subject, predicate, direction) pairs covered
         results: list = []
         for w_id in ids_in_order:
-            facts = self.query_entity(
+            facts = _open_first(self.query_entity(
                 name, as_of=as_of, direction=direction, world=w_id,
-            )
+            ))
             for f in facts:
                 key = (f["subject"], f["predicate"], f["direction"])
                 if key in seen_sp_keys:
-                    continue  # shadowed by descendant
+                    continue  # shadowed by descendant or by open-over-closed
                 seen_sp_keys.add(key)
                 results.append(f)
         return results
