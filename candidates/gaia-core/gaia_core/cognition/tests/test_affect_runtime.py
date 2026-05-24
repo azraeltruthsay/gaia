@@ -194,3 +194,118 @@ class TestRenderIntoIdentityLines:
             assert lines == ["base"]
         finally:
             affect_runtime._get_affect_kg = orig_get
+
+
+# ── Phase 3: sampler modulation ─────────────────────────────────────
+
+
+class TestApplyAffectModulation:
+    def test_neutral_affect_passes_baseline_through(self, affect_with_kg):
+        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+        t, m, dbg = apply_affect_modulation(0.7, 1024)
+        assert t == 0.7
+        assert m == 1024
+        assert dbg["reasons"] == []
+
+    def test_curiosity_expands_max_tokens(self, affect_with_kg):
+        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+        affect_with_kg.record_feeling("curiosity", 0.8)
+        _, m, dbg = apply_affect_modulation(0.7, 1000)
+        assert m > 1000
+        assert any("exploratory" in r for r in dbg["reasons"])
+
+    def test_irritation_lowers_temperature(self, affect_with_kg):
+        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+        affect_with_kg.record_feeling("irritation", 0.8)
+        t, _, dbg = apply_affect_modulation(0.7, 1000)
+        assert t < 0.7
+        assert dbg["style_hint"] == "measured"
+
+    def test_temperature_delta_is_bounded(self, affect_with_kg):
+        """Even with maximum irritation, temp can't dive below 0.0."""
+        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+        affect_with_kg.record_feeling("irritation", 1.0)
+        affect_with_kg.record_feeling("fatigue", 1.0)
+        t, m, _ = apply_affect_modulation(0.1, 100)
+        assert t >= 0.0
+        # max_tokens never falls below the floor
+        assert m >= 64
+
+    def test_failure_returns_baseline(self):
+        """Broken kg → baseline values pass through, no exception."""
+        from gaia_core.cognition import affect_runtime
+        affect_runtime.reset_for_tests(None)
+        orig = affect_runtime._get_affect_kg
+        affect_runtime._get_affect_kg = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            t, m, _ = affect_runtime.apply_affect_modulation(0.5, 500)
+            assert t == 0.5
+            assert m == 500
+        finally:
+            affect_runtime._get_affect_kg = orig
+
+
+# ── Phase 3: context detection ──────────────────────────────────────
+
+
+class TestDetectContexts:
+    def test_no_input_returns_empty(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        assert detect_contexts("") == []
+        assert detect_contexts(None) == []
+
+    def test_dnd_command_detected(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        assert "dnd_session" in detect_contexts("/roll 1d20+3")
+
+    def test_debug_keywords_detected(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        assert "coding_debug" in detect_contexts(
+            "Here's the traceback I'm seeing..."
+        )
+
+    def test_research_keywords_detected(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        assert "research_mode" in detect_contexts(
+            "Can you survey the literature on consistency models?"
+        )
+
+    def test_no_match_returns_empty(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        assert detect_contexts("Hey, how are you?") == []
+
+    def test_multiple_contexts_can_fire(self):
+        from gaia_core.cognition.affect_runtime import detect_contexts
+        hits = detect_contexts(
+            "Let's debug this code that handles d&d encounter logic"
+        )
+        assert "coding_debug" in hits
+        assert "dnd_session" in hits
+
+
+class TestActivateDetectedContexts:
+    def test_creates_worlds_for_each_match(self, affect_with_kg):
+        from gaia_core.cognition.affect_runtime import activate_detected_contexts
+        activated = activate_detected_contexts(
+            "Help me with this traceback from the debug session"
+        )
+        assert any("coding_debug" in w for w in activated)
+        # World actually exists in the KG
+        assert affect_with_kg.kg.get_world("ctx_coding_debug") is not None
+
+    def test_no_kg_noops(self):
+        from gaia_core.cognition import affect_runtime
+        affect_runtime.reset_for_tests(None)
+        orig = affect_runtime._get_affect_kg
+        affect_runtime._get_affect_kg = lambda: None
+        try:
+            result = affect_runtime.activate_detected_contexts("/roll 1d20")
+            assert result == []
+        finally:
+            affect_runtime._get_affect_kg = orig
+
+    def test_idempotent(self, affect_with_kg):
+        from gaia_core.cognition.affect_runtime import activate_detected_contexts
+        a1 = activate_detected_contexts("/roll 1d20")
+        a2 = activate_detected_contexts("/roll 1d20")
+        assert a1 == a2

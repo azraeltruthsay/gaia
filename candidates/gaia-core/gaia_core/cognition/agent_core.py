@@ -641,11 +641,38 @@ class AgentCore:
             except Exception as e:
                 log_gaia_error(self.logger, "GAIA-CORE-150", str(e), exc_info=True)
 
+        # Baseline max_tokens by selected tier
+        _base_max_tokens = (
+            self.config.max_tokens_lite if selected_model_name == "core"
+            else self.config.max_tokens
+        )
+
+        # Affect-modulated max_tokens (GAIA_Project-usv Phase 3).
+        # apply_affect_modulation returns (new_temp, new_max, debug).
+        # We use only max_tokens here — the temperature delta is applied
+        # closer to the sampler call sites where temperature is set
+        # per-path. Failures pass the baseline through.
+        _affect_max_tokens = _base_max_tokens
+        try:
+            from gaia_core.cognition.affect_runtime import apply_affect_modulation
+            _, _affect_max_tokens, _affect_dbg = apply_affect_modulation(
+                base_temperature=getattr(self.config, "temperature", 0.7),
+                base_max_tokens=_base_max_tokens,
+            )
+            if _affect_max_tokens != _base_max_tokens and _affect_dbg.get("reasons"):
+                self.logger.info(
+                    "Affect modulated max_tokens %d → %d (%s)",
+                    _base_max_tokens, _affect_max_tokens,
+                    "; ".join(_affect_dbg["reasons"]),
+                )
+        except Exception:
+            self.logger.debug("affect max_tokens modulation failed", exc_info=True)
+
         context = Context(
             session_history_ref=SessionHistoryRef(type="hash", value=""), # Placeholder
             cheatsheets=[Cheatsheet(id='default', title='GAIA Protocol Cheatsheet', version='1.0', pointer=str(self.config.cheat_sheet_path))] if self.config.cheat_sheet else [],
             constraints=Constraints(
-                max_tokens=self.config.max_tokens_lite if selected_model_name == "core" else self.config.max_tokens,
+                max_tokens=_affect_max_tokens,
                 time_budget_ms=5000, # Placeholder
                 safety_mode="normal",
                 policies=[]
@@ -918,6 +945,26 @@ class AgentCore:
                 fresh packet via _create_initial_packet.
         """
         self.logger.info("--- AGENT CORE: RUN TURN ---")
+
+        # 0. AFFECT CONTEXT DETECTION (GAIA_Project-usv Phase 3):
+        # Activate any context-overlay worlds suggested by the user's
+        # input (dnd_session, coding_debug, research_mode, etc.) so
+        # downstream affect snapshots reflect the right per-situation
+        # trait deltas. Wrapped in a broad try/except — affect failures
+        # must never block a turn.
+        try:
+            from gaia_core.cognition.affect_runtime import activate_detected_contexts
+            _activated = activate_detected_contexts(
+                user_input or "",
+                session_id=session_id,
+                ttl_seconds=3600,
+            )
+            if _activated:
+                self.logger.info(
+                    "Affect contexts activated for turn: %s", _activated,
+                )
+        except Exception:
+            self.logger.debug("affect context detection failed", exc_info=True)
 
         # 0. GRIT MODE: Push past cosmetic irritation if env var set
         if os.getenv("GAIA_GRIT_MODE", "").lower() in ("1", "true", "yes"):

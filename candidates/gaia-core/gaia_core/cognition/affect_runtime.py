@@ -260,3 +260,133 @@ def render_into_identity_lines(identity_lines: list[str],
             identity_lines.append(line)
     except Exception:
         logger.debug("affect render failed; skipping", exc_info=True)
+
+
+# ── Sampler-side modulation (Phase 3) ───────────────────────────────
+
+# Floor on max_tokens so very low multipliers can't strangle generation.
+_MAX_TOKENS_FLOOR = 64
+
+# Cap on per-turn temperature_delta so a runaway affect can't completely
+# flatten or detonate the sampler.
+_TEMP_DELTA_BOUND = 0.4
+
+
+def apply_affect_modulation(
+    base_temperature: float,
+    base_max_tokens: int,
+    *,
+    snapshot: Optional[dict] = None,
+) -> tuple[float, int, dict]:
+    """Apply current affect modulation to baseline inference parameters.
+
+    Returns (new_temperature, new_max_tokens, debug_info). debug_info
+    contains the modulation reasons + the original/derived values so
+    callers can log how a turn was shaped.
+
+    Never raises — on any error the baseline values pass through.
+    """
+    debug = {
+        "base_temperature": base_temperature,
+        "base_max_tokens": base_max_tokens,
+        "new_temperature": base_temperature,
+        "new_max_tokens": base_max_tokens,
+        "reasons": [],
+    }
+    try:
+        if snapshot is None:
+            snapshot = current_affect_snapshot()
+        params = affect_inference_params(snapshot)
+
+        # Bound the delta so a runaway affect can't completely flatten
+        # or detonate the sampler. The bound is symmetric.
+        td = max(-_TEMP_DELTA_BOUND, min(_TEMP_DELTA_BOUND, params["temperature_delta"]))
+        new_temp = max(0.0, min(1.5, base_temperature + td))
+        new_max = max(_MAX_TOKENS_FLOOR, int(base_max_tokens * params["max_tokens_multiplier"]))
+
+        debug["new_temperature"] = new_temp
+        debug["new_max_tokens"] = new_max
+        debug["reasons"] = list(params.get("reasons") or [])
+        debug["style_hint"] = params.get("style_hint")
+        return new_temp, new_max, debug
+    except Exception:
+        logger.debug("affect modulation failed; passing baseline through", exc_info=True)
+        return base_temperature, base_max_tokens, debug
+
+
+# ── Context detection at turn intake (Phase 3) ──────────────────────
+
+# Maps a context_key → predicate that decides whether to activate. Each
+# predicate is given (user_input_lower, history) and returns True to
+# activate. Predicates are intentionally cheap heuristics; the proper
+# version will come from an intent classifier later.
+_CONTEXT_RULES: dict[str, callable] = {
+    "dnd_session": lambda u, h: any(kw in u for kw in (
+        "/roll", "dnd", "d&d", "campaign", "encounter", "initiative",
+        "spell slot", "saving throw",
+    )),
+    "coding_debug": lambda u, h: any(kw in u for kw in (
+        "debug", "traceback", "stack trace", "exception", "stderr",
+        "segfault", "valgrind",
+    )),
+    "research_mode": lambda u, h: any(kw in u for kw in (
+        "research", "paper", "literature", "citations", "survey ",
+    )),
+    "code_authoring": lambda u, h: any(kw in u for kw in (
+        "write code", "implement", "refactor", "function that",
+        "class that",
+    )),
+}
+
+
+def detect_contexts(user_input: str,
+                    history: Optional[list] = None) -> list[str]:
+    """Return context keys to activate for this turn.
+
+    Pure function — does NOT touch the KG; the caller activates the
+    returned worlds via `AffectKG.activate_context(...)`. Multiple
+    contexts can fire at once (e.g. dnd_session + research_mode), but
+    only the first activated overlay world is used as the "active
+    context" for affect inheritance per turn — extras are layered as
+    additional ephemerals the next session will see.
+    """
+    if not user_input:
+        return []
+    text = user_input.lower()
+    hits: list[str] = []
+    for ctx, predicate in _CONTEXT_RULES.items():
+        try:
+            if predicate(text, history or []):
+                hits.append(ctx)
+        except Exception:
+            logger.debug("context rule %s raised", ctx, exc_info=True)
+    return hits
+
+
+def activate_detected_contexts(
+    user_input: str,
+    history: Optional[list] = None,
+    *,
+    ttl_seconds: int = 3600,
+    session_id: Optional[str] = None,
+) -> list[str]:
+    """Detect + activate contexts in one call. Returns activated names.
+
+    Idempotent at the AffectKG level — re-activating an existing
+    context is a no-op (TTL doesn't get extended; that's intentional
+    so a slow drift toward stale contexts is bounded by the original
+    TTL).
+    """
+    af = _get_affect_kg()
+    if af is None:
+        return []
+    activated: list[str] = []
+    for ctx in detect_contexts(user_input, history):
+        try:
+            world = af.activate_context(
+                ctx, ttl_seconds=ttl_seconds, session_id=session_id,
+            )
+            activated.append(world)
+        except Exception:
+            logger.debug("activate_context(%s) failed", ctx, exc_info=True)
+    return activated
