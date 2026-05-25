@@ -359,16 +359,35 @@ class ConsciousnessMatrix:
         return await self._apply_configuration("parked")
 
     async def training(self, tier: str = "prime") -> dict:
-        """TRAINING: Target tier → 1 (free GPU), others → 2"""
-        # Build custom targets for the specific training tier
+        """TRAINING: free the target tier's GPU for an external trainer.
+
+        Target tier → UNCONSCIOUS (unloaded so GPU is free)
+        Other tiers → SUBCONSCIOUS (CPU/GGUF — still answerable, no GPU)
+        nano       → skipped (deprecated socat proxy to core in Sovereign
+                     Duality; manipulating gaia-nano:8080 routes to
+                     gaia-core:8092 and inadvertently unloads core)
+
+        GAIA_Project-3b4: sync the lifecycle FSM to MEDITATION **before**
+        running the slow tier transitions. The poll loop's
+        ``_is_meditation_active`` check then skips auto-reconcile for the
+        whole duration — without this, the 15s poll fires mid-transition
+        and reloads tiers we just told it to unload, fighting the
+        training pin until OOM.
+        """
+        # 1. Set lifecycle to MEDITATION first — poll loop skip engages.
+        lifecycle = await self._sync_lifecycle("training")
+
+        # 2. Apply tier targets. nano is deprecated and aliased to core.
         results = {}
         for t in self._tiers:
+            if t == "nano":
+                continue
             if t == tier:
                 results[t] = await self.set_target(t, ConsciousnessLevel.UNCONSCIOUS)
             else:
                 results[t] = await self.set_target(t, ConsciousnessLevel.SUBCONSCIOUS)
+
         result = {"configuration": f"training_{tier}", "results": results}
-        lifecycle = await self._sync_lifecycle("training")
         if lifecycle:
             result["lifecycle"] = lifecycle
         return result
