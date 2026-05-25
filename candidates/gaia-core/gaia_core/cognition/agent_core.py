@@ -2121,6 +2121,35 @@ class AgentCore:
             elif _grounding_context and _detected_intent in _skip_grounding_intents:
                 self.logger.info("Neural grounding skipped for intent=%s", _detected_intent)
 
+            # KG recency grounding (GAIA_Project-hkv — World Model Stage 8).
+            # Pre-flight check against the KnowledgeGraph for entities the
+            # user just mentioned; if we have high-relevance recent triples
+            # (decay-scored by fact_type half-life), inject them as
+            # authoritative reference data ahead of generation. Skips when
+            # the prompt has no time-sensitivity markers or the intent is
+            # one where grounding interferes (identity, recitation, chat).
+            if _detected_intent not in _skip_grounding_intents:
+                try:
+                    from gaia_core.cognition.kg_recency_grounding import (
+                        recency_grounding_for_prompt,
+                    )
+                    _kg_recency = recency_grounding_for_prompt(user_input or "")
+                    if _kg_recency:
+                        packet.content.data_fields.append(DataField(
+                            key='kg_recency_grounding',
+                            value=_kg_recency,
+                            type='string',
+                            source='knowledge_graph_stage8',
+                        ))
+                        self.logger.info(
+                            "KG recency grounding injected (%d chars)",
+                            len(_kg_recency),
+                        )
+                except Exception:
+                    self.logger.debug(
+                        "KG recency grounding failed", exc_info=True,
+                    )
+
             if knowledge_base_name:
                 packet.content.data_fields.append(DataField(key='knowledge_base_name', value=knowledge_base_name, type='string'))
 
