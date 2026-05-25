@@ -109,6 +109,7 @@ class KnowledgeGraph:
                 source TEXT,
                 extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 world TEXT NOT NULL DEFAULT 'actuality',
+                fact_type TEXT DEFAULT 'unknown',
                 FOREIGN KEY (subject) REFERENCES entities(id),
                 FOREIGN KEY (object) REFERENCES entities(id)
             );
@@ -189,6 +190,21 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_world ON triples(world);
             CREATE INDEX IF NOT EXISTS idx_triples_world_subject ON triples(world, subject);
         """)
+        # Step 3b: fact_type migration (Stage 7, lw4). Adds the column to
+        # pre-existing dbs so retrieval can apply per-class decay. Existing
+        # rows default to 'unknown' which behaves like 30-day half-life —
+        # safe for old facts we have no provenance for.
+        if "fact_type" not in cols:
+            conn.execute(
+                "ALTER TABLE triples ADD COLUMN fact_type TEXT DEFAULT 'unknown'"
+            )
+            logger.info(
+                "KG migration: added 'fact_type' column to triples table "
+                "(existing rows defaulted to 'unknown')"
+            )
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_triples_fact_type ON triples(fact_type);
+        """)
         # Lifecycle migration (Stage 6, azr): pre-existing worlds tables
         # need lifecycle/session_id/expires_at columns. Existing rows
         # default to 'durable' — they survived shutdown so they're
@@ -255,6 +271,8 @@ class KnowledgeGraph:
         confidence: float = 1.0,
         source: str = None,
         world: str = "actuality",
+        fact_type: str = None,
+        allow_coexist: bool = False,
     ) -> str:
         """Add a relationship triple: subject → predicate → object.
 
@@ -264,13 +282,21 @@ class KnowledgeGraph:
         the same (subject, predicate, object) triple can exist in both
         actuality and another world without conflicting.
 
+        Stage 7 (lw4): fact_type drives recency decay at retrieval. If
+        None, a heuristic over the predicate name classifies the fact —
+        biographical predicates don't decay, weather/market decay fast,
+        unknowns default to 'news'. Pass an explicit fact_types.* value
+        to override the heuristic.
+
         Examples:
             add_triple("Core", "runs_on", "Qwen3.5-4B", valid_from="2026-04-01")
             add_triple("Hogwarts", "located_in", "Scotland", world="potterverse")
         """
+        from gaia_common.utils.fact_types import classify_predicate
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
         pred = predicate.lower().replace(" ", "_")
+        ftype = fact_type if fact_type is not None else classify_predicate(pred)
 
         conn = self._conn()
         # Auto-create entities if they don't exist
@@ -293,7 +319,10 @@ class KnowledgeGraph:
         # ── Contradiction detection (Tier 1: deterministic) ──────────
         # Same-world contradictions only. Cross-world facts can disagree
         # by design — that's the whole point of the world dimension.
-        conflicting = conn.execute(
+        # `allow_coexist` short-circuits the check for multi-valued
+        # predicates (e.g. has_web_result, has_tag) where multiple
+        # objects for the same subject are intentional.
+        conflicting = [] if allow_coexist else conn.execute(
             "SELECT t.*, e.name as obj_name FROM triples t "
             "JOIN entities e ON t.object = e.id "
             "WHERE t.subject=? AND t.predicate=? AND t.object!=? "
@@ -352,9 +381,9 @@ class KnowledgeGraph:
 
         conn.execute(
             """INSERT INTO triples
-               (id, subject, predicate, object, valid_from, valid_to, confidence, source, world)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (triple_id, sub_id, pred, obj_id, valid_from, valid_to, confidence, source, world),
+               (id, subject, predicate, object, valid_from, valid_to, confidence, source, world, fact_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (triple_id, sub_id, pred, obj_id, valid_from, valid_to, confidence, source, world, ftype),
         )
         conn.commit()
         conn.close()
@@ -441,12 +470,13 @@ class KnowledgeGraph:
                     "direction": "outgoing",
                     "subject": name,
                     "predicate": row[2],
-                    "object": row[10],  # obj_name (shifted: world column at index 9)
+                    "object": row[11],  # obj_name (after world=9, fact_type=10)
                     "valid_from": row[4],
                     "valid_to": row[5],
                     "confidence": row[6],
                     "source": row[7],
                     "world": row[9],
+                    "fact_type": row[10],
                     "current": row[5] is None,
                 })
 
@@ -466,7 +496,7 @@ class KnowledgeGraph:
             for row in conn.execute(query, params).fetchall():
                 results.append({
                     "direction": "incoming",
-                    "subject": row[10],  # sub_name
+                    "subject": row[11],  # sub_name (after world=9, fact_type=10)
                     "predicate": row[2],
                     "object": name,
                     "valid_from": row[4],
@@ -474,11 +504,58 @@ class KnowledgeGraph:
                     "confidence": row[6],
                     "source": row[7],
                     "world": row[9],
+                    "fact_type": row[10],
                     "current": row[5] is None,
                 })
 
         conn.close()
         return results
+
+    def query_entity_with_relevance(
+        self,
+        name: str,
+        direction: str = "both",
+        world: str = "actuality",
+        *,
+        now=None,
+        kind: str = "exponential",
+        current_only: bool = True,
+        min_relevance: float = 0.0,
+    ):
+        """Same as query_entity, but returns triples sorted by recency-decayed
+        relevance (Stage 7, lw4).
+
+        For each triple, computes ``relevance = confidence × decay(age, fact_type)``
+        using the per-class half-life table. Closed triples (valid_to set)
+        are excluded by default; pass ``current_only=False`` to include them.
+        Results are sorted by relevance DESC.
+
+        ``min_relevance`` lets callers drop triples below a threshold —
+        useful for "is this still worth surfacing or should we refetch?"
+
+        ``now`` and ``kind`` are passed through to the decay kernel; default
+        is exponential at the current wall-clock.
+        """
+        from gaia_common.utils.recency import decayed_relevance
+        rows = self.query_entity(name, direction=direction, world=world)
+        scored = []
+        for r in rows:
+            if current_only and not r.get("current"):
+                continue
+            rel = decayed_relevance(
+                r.get("confidence", 1.0),
+                r.get("valid_from"),
+                r.get("fact_type"),
+                now=now,
+                kind=kind,
+            )
+            if rel < min_relevance:
+                continue
+            r2 = dict(r)
+            r2["relevance"] = rel
+            scored.append(r2)
+        scored.sort(key=lambda x: x["relevance"], reverse=True)
+        return scored
 
     def query_relationship(
         self,
@@ -512,14 +589,15 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             # Column order: id(0), subject(1), predicate(2), object(3),
             # valid_from(4), valid_to(5), confidence(6), source(7),
-            # extracted_at(8), world(9), sub_name(10), obj_name(11).
+            # extracted_at(8), world(9), fact_type(10), sub_name(11), obj_name(12).
             results.append({
-                "subject": row[10],
+                "subject": row[11],
                 "predicate": pred,
-                "object": row[11],
+                "object": row[12],
                 "valid_from": row[4],
                 "valid_to": row[5],
                 "world": row[9],
+                "fact_type": row[10],
                 "current": row[5] is None,
             })
         conn.close()
@@ -568,15 +646,16 @@ class KnowledgeGraph:
             rows = conn.execute(query, [*world_params, limit]).fetchall()
 
         conn.close()
-        # Column indices: world is at 9, sub_name at 10, obj_name at 11
+        # Column indices: world=9, fact_type=10, sub_name=11, obj_name=12
         return [
             {
-                "subject": r[10],
+                "subject": r[11],
                 "predicate": r[2],
-                "object": r[11],
+                "object": r[12],
                 "valid_from": r[4],
                 "valid_to": r[5],
                 "world": r[9],
+                "fact_type": r[10],
                 "current": r[5] is None,
             }
             for r in rows

@@ -36,9 +36,13 @@ from gaia_common.utils.affect_predicates import (
     OBJ_DRIVE_STATE,
     OBJ_ATTENTION_STATE,
     AFFECT_PREFIX_TABLE,
+    PREFIX_FEELS,
+    PREFIX_TRAIT,
+    PREFIX_DRIVE,
+    PREFIX_CURIOUS_ABOUT,
+    PREFIX_TIRED_OF,
     PREFIX_BELIEVES_ABOUT,
     MODALITY_CONTEXT,
-    halflife_for,
     pred_feels,
     pred_trait,
     pred_drive,
@@ -48,9 +52,35 @@ from gaia_common.utils.affect_predicates import (
     context_world_name,
     belief_of_world_name,
 )
+from gaia_common.utils import fact_types
+from gaia_common.utils.recency import decayed_relevance
 
 
-# ── Decay (placeholder until Stage 7 lw4) ────────────────────────────
+# ── Predicate-prefix → fact_type mapping ────────────────────────────
+# Stage 7 (lw4) routes affect decay through the unified recency kernel.
+# Each affect predicate prefix maps to a dedicated fact_type so the
+# half-lives in fact_types.HALFLIFE drive decay rather than the prefix
+# table in affect_predicates. The numeric half-lives are identical, so
+# the swap is mechanical — tests that pinned the placeholder math still
+# pass.
+
+_PREFIX_TO_FACT_TYPE: list[tuple[str, str]] = [
+    (PREFIX_FEELS,           fact_types.AFFECT_FEELS),
+    (PREFIX_TRAIT,           fact_types.AFFECT_TRAIT),
+    (PREFIX_DRIVE,           fact_types.AFFECT_DRIVE),
+    (PREFIX_CURIOUS_ABOUT,   fact_types.AFFECT_CURIOUS_ABOUT),
+    (PREFIX_TIRED_OF,        fact_types.AFFECT_TIRED_OF),
+    (PREFIX_BELIEVES_ABOUT,  fact_types.AFFECT_BELIEVES_ABOUT),
+]
+
+
+def _fact_type_for_predicate(predicate: str) -> Optional[str]:
+    """Return the affect-class fact_type for a predicate, or None."""
+    for prefix, ft in _PREFIX_TO_FACT_TYPE:
+        if predicate.startswith(prefix):
+            return ft
+    return None
+
 
 def _decayed_confidence(
     stored_conf: float,
@@ -59,27 +89,19 @@ def _decayed_confidence(
     *,
     now: Optional[datetime] = None,
 ) -> float:
-    """Apply half-life decay to a stored confidence value.
+    """Apply half-life decay to a stored confidence value (Stage 7).
 
-    Placeholder until Stage 7 (lw4) ships its recency kernel. The math
-    is intentionally simple — confidence × 0.5 ^ (age / halflife). Tests
-    pin the behavior so the kernel can be swapped in mechanically.
+    Delegates to the unified `recency.decayed_relevance` kernel after
+    mapping the predicate prefix to its fact_type. Predicates without an
+    affect prefix (defensive — shouldn't happen via this module) return
+    the stored confidence unmodified.
     """
-    if not valid_from:
+    ft = _fact_type_for_predicate(predicate)
+    if ft is None:
+        # Unknown predicate prefix → don't decay (preserve prior placeholder
+        # behavior, which returned conf for unknown prefixes).
         return stored_conf
-    if now is None:
-        now = datetime.now(timezone.utc)
-    hl = halflife_for(predicate)
-    if not hl:
-        return stored_conf
-    try:
-        vf = datetime.fromisoformat(valid_from)
-        if vf.tzinfo is None:
-            vf = vf.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return stored_conf
-    age_s = max(0.0, (now - vf).total_seconds())
-    return stored_conf * math.pow(0.5, age_s / hl)
+    return decayed_relevance(stored_conf, valid_from, ft, now=now)
 
 
 def _clamp01(x: float) -> float:
@@ -184,12 +206,15 @@ class AffectKG:
             conn.close()
 
         # Insert fresh open triple with the new confidence.
+        # Stage 7 (lw4): pass the predicate's fact_type so retrieval
+        # decay routes through the unified recency kernel.
         return self.kg.add_triple(
             subject=subject, predicate=predicate, obj=obj,
             valid_from=now_iso,
             confidence=confidence,
             source=source or "affect_kg",
             world=world_id,
+            fact_type=_fact_type_for_predicate(pred),
         )
 
     # ─── Writes (theory of mind) ────────────────────────────────────
