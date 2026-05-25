@@ -38,15 +38,47 @@ WEIGHTS: dict[str, float] = {
 
 
 # ── Tool-result synthesis samples (h73 — train tool_result → summary) ─────
-# These teach Prime to read a tool_result and produce a natural-language
-# answer. Without this, V11-style training causes the model to either
-# re-emit the tool_call or hallucinate. We provide the user prompt + the
-# model's prior tool_call + the tool_result, and the expected answer is
-# the synthesis.
+# Source-of-truth lives in scripts/generate_tool_synthesis_curriculum.py
+# and writes a checked-in JSONL at
+# knowledge/curricula/core_v2x_tools/tool_synthesis.jsonl. Loading from
+# the shared file keeps Core and Prime curricula on the same cases — and
+# the cases get expanded once for both pipelines.
+
+SYNTHESIS_PATH = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_tools/tool_synthesis.jsonl")
+
 
 def make_synthesis_samples(rng: random.Random) -> list[dict]:
-    """Generate ~250 tool_result synthesis samples covering the same
-    13 MCP tool families as the tool_routing curriculum."""
+    """Load tool_result synthesis samples from the shared curriculum file.
+
+    Falls back to regenerating if the file is missing. Returns ~500
+    samples (~75 unique cases × ~6 repetitions).
+    """
+    if not SYNTHESIS_PATH.exists():
+        # Regenerate on the fly — should rarely happen since the file is
+        # committed to the repo.
+        import subprocess
+        print(f"  (synthesis file missing; running generator)")
+        subprocess.run(
+            ["python3", "/gaia/GAIA_Project/scripts/generate_tool_synthesis_curriculum.py"],
+            check=True,
+        )
+    out: list[dict] = []
+    with open(SYNTHESIS_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    rng.shuffle(out)
+    return out
+
+
+def _legacy_synthesis_samples(rng: random.Random) -> list[dict]:
+    """Original inlined cases — kept for reference / fallback if the
+    generator script is unavailable. Not used in the normal flow."""
     out: list[dict] = []
 
     # Each entry: (user_prompt, ack, tool_call_json, tool_result_json, synthesis)

@@ -194,6 +194,29 @@ def section_tools(rng: random.Random) -> list:
     return rows
 
 
+def section_tool_synthesis(rng: random.Random) -> list:
+    """h73: tool-result synthesis training. Without this, the model learns
+    only the routing half (prompt → ack + tool_call) and either re-emits
+    the original tool_call or hallucinates when given a tool_result. This
+    bucket teaches the second half: prompt + tool_call + tool_result →
+    natural-language summary.
+
+    Generated via scripts/generate_tool_synthesis_curriculum.py; the file
+    is checked in so we have deterministic, hand-curated cases instead of
+    LLM-rolled ones that might bake their own bias into the curriculum.
+    """
+    print("[tool_synthesis] loading synthesis samples (h73)...")
+    rows = []
+    syn = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_tools/tool_synthesis.jsonl")
+    if syn.exists():
+        rows += load_local_jsonl(syn, "tool_synthesis")
+    else:
+        print(f"  WARN: {syn} not found — run generate_tool_synthesis_curriculum.py first")
+    rng.shuffle(rows)
+    print(f"  kept: {len(rows)}")
+    return rows
+
+
 def section_deliberation(rng: random.Random) -> list:
     print("[deliberation] loading deliberation samples...")
     rows = load_local_jsonl(DELIBERATION / "train.jsonl", "deliberation")
@@ -379,6 +402,7 @@ def main():
     text_buckets += section_alpaca(rng)
     text_buckets += section_gaia(rng)
     text_buckets += section_tools(rng)
+    text_buckets += section_tool_synthesis(rng)
     text_buckets += section_deliberation(rng)
     text_buckets += section_multiturn(rng)
     # V6 patch: targeted samples for identified failure modes
