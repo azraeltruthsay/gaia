@@ -1147,11 +1147,29 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _reflex_disabled_for_path = True
 
             # --- PRE-FLIGHT: Speculative Reflex ---
-            # Trigger this BEFORE the heavy run_turn loop starts
+            # Trigger this BEFORE the heavy run_turn loop starts.
+            #
+            # GAIA_Project-19i: skip reflex when the user has explicitly
+            # routed to a heavier tier or when the orchestrator is already
+            # FOCUSING (Prime on GPU). See reflex_gate.should_skip_reflex.
+            from gaia_core.cognition.reflex_gate import should_skip_reflex
+            _lc = getattr(_agent_core, "_lifecycle_client", None) \
+                or getattr(app.state, "lifecycle_client", None)
+            _reflex_skip_reason = should_skip_reflex(
+                user_input or "", packet, _lc,
+            )
+
             loop = asyncio.get_event_loop()
             reflex_text = ""
             history = _ai_manager.session_manager.get_history(session_id)
-            if not _reflex_disabled_for_path and _agent_core.is_eligible_for_reflex(packet, history):
+            _reflex_eligible = (
+                not _reflex_disabled_for_path
+                and _reflex_skip_reason is None
+                and _agent_core.is_eligible_for_reflex(packet, history)
+            )
+            if _reflex_skip_reason is not None:
+                logger.info("Main: Reflex skipped — %s", _reflex_skip_reason)
+            if _reflex_eligible:
                 logger.info("Main: Triggering instant speculative Reflex...")
                 _reflex_t0 = _time.perf_counter()
                 reflex_text = await loop.run_in_executor(
