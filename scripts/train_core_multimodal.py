@@ -823,15 +823,22 @@ def main():
         log.info("Chat template (explicit): %s", CHAT_TEMPLATE)
 
     # RunRecorder: structured run record at /shared/training_runs/<run_id>/
-    # See GAIA_Project-c1y. Phase 1: config.json + metrics.jsonl + summary.json.
-    run_id = os.environ.get("GAIA_RUN_ID") or f"core_run_{int(time.time())}"
-    if args.version_tag:
-        run_id = f"{run_id}_{args.version_tag}"
-    RUN_DIR = Path(f"/shared/training_runs/{run_id}")
-    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    # GAIA_Project-n0e Phase 1: shared module gaia_common.utils.run_recorder
+    # owns the on-disk schema (config.json, curriculum.jsonl, metrics.jsonl,
+    # checkpoints/, summary.json, battery_results.json) and writes the
+    # active-run pointer + GAIA_TRAIN_RUN_ID env var so downstream tools
+    # (cognitive_test_battery, dashboard) can discover this run.
+    from gaia_common.utils.run_recorder import RunRecorder
+    # Honor pre-existing GAIA_RUN_ID for backward compat with older callers.
+    legacy_run_id = os.environ.get("GAIA_RUN_ID")
+    _recorder = RunRecorder.create(
+        version_tag=args.version_tag or "",
+        run_id=legacy_run_id,
+    )
+    _recorder.__enter__()  # equivalent to `with _recorder:` over the rest of main()
+    run_id = _recorder.run_id
+    RUN_DIR = _recorder.run_dir
     run_config = {
-        "run_id": run_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
         "base_model": BASE_MODEL,
         "text_curriculum": TEXT_CURRICULUM,
         "vision_curriculum": VISION_CURRICULUM if not args.no_vision else None,
@@ -849,8 +856,14 @@ def main():
         "adapter_dir": ADAPTER_DIR,
         "merged_dir": MERGED_DIR,
     }
-    with open(RUN_DIR / "config.json", "w") as f:
-        json.dump(run_config, f, indent=2)
+    _recorder.write_config(run_config)
+    # Snapshot the text curriculum so future re-runs and analysis aren't
+    # broken by upstream curriculum edits.
+    if TEXT_CURRICULUM:
+        try:
+            _recorder.copy_curriculum(TEXT_CURRICULUM)
+        except Exception as _e:
+            log.warning("Curriculum snapshot failed: %s", _e)
 
     print("=" * 60)
     print("  GAIA Core Multimodal Training")
@@ -1240,19 +1253,33 @@ def main():
     log.info("     The new model inherits the prior model's KV state and")
     log.info("     session bias otherwise — silent contamination.")
 
-    # RunRecorder: write summary.json with final state
+    # RunRecorder: write summary.json with final state + symlink the adapter
+    # under the run's checkpoints/ directory for traceability.
     try:
-        run_summary = dict(run_config)
-        run_summary["completed_at"] = datetime.now(timezone.utc).isoformat()
-        run_summary["final_loss"] = float(result.training_loss)
-        run_summary["final_steps"] = int(result.global_step)
-        run_summary["runtime_s"] = elapsed
-        run_summary["status"] = "success"
-        with open(RUN_DIR / "summary.json", "w") as f:
-            json.dump(run_summary, f, indent=2)
+        _recorder.link_checkpoint(Path(ADAPTER_DIR), name="adapter")
+        if MERGED_DIR and Path(MERGED_DIR).exists():
+            _recorder.link_checkpoint(Path(MERGED_DIR), name="merged")
+    except Exception as _e:
+        log.warning("Checkpoint linking failed: %s", _e)
+    try:
+        _recorder.write_summary({
+            "final_loss": float(result.training_loss),
+            "final_steps": int(result.global_step),
+            "runtime_seconds": round(elapsed, 1),
+            "status": "success",
+            "scope_label": args.version_tag or "",
+            "base_model": BASE_MODEL,
+            "adapter_dir": ADAPTER_DIR,
+            "merged_dir": MERGED_DIR,
+        })
         log.info("RunRecorder summary written: %s/summary.json", RUN_DIR)
     except Exception as e:
         log.warning("RunRecorder summary write failed: %s", e)
+    finally:
+        try:
+            _recorder.__exit__(None, None, None)
+        except Exception:
+            pass
 
     # Both `model` and `trainer` were already del'd before the merge step
     # (lines ~715, ~728) so the original `del model, merged, trainer`

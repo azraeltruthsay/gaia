@@ -1627,6 +1627,36 @@ def run_battery(
     except OSError as e:
         log.error("Failed to write results: %s", e)
 
+    # GAIA_Project-n0e Phase 1: also write into the active training-run
+    # directory so the training record links to its post-training
+    # evaluation. Honors GAIA_TRAIN_RUN_ID env var or the
+    # /shared/training_runs/current_run.txt pointer file written by
+    # RunRecorder.__enter__. Implemented import-free so it works
+    # whether or not gaia_common is on the doctor's PYTHONPATH.
+    try:
+        _train_runs = os.environ.get(
+            "GAIA_TRAINING_RUNS_DIR", "/shared/training_runs",
+        )
+        _train_run_id = os.environ.get("GAIA_TRAIN_RUN_ID")
+        if not _train_run_id:
+            _ptr = os.path.join(_train_runs, "current_run.txt")
+            if os.path.exists(_ptr):
+                try:
+                    with open(_ptr) as _f:
+                        _train_run_id = _f.read().strip()
+                except OSError:
+                    _train_run_id = None
+        if _train_run_id:
+            _run_dir = os.path.join(_train_runs, _train_run_id)
+            os.makedirs(_run_dir, exist_ok=True)
+            _battery_path = os.path.join(_run_dir, "battery_results.json")
+            with open(_battery_path, "w") as _bf:
+                json.dump(result, _bf, indent=2)
+            log.info("Battery linked to training run %s → %s",
+                     _train_run_id, _battery_path)
+    except Exception as e:
+        log.warning("Could not link battery to training run: %s", e)
+
     # Append to rolling history log (per-tier, JSONL, never overwritten)
     try:
         history_dir = os.path.join(os.path.dirname(RESULTS_PATH), "battery_history")
