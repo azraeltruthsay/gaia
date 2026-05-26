@@ -41,6 +41,12 @@ class SleepTask:
     last_run: Optional[datetime] = None
     run_count: int = 0
     last_error: Optional[str] = None
+    # GAIA_Project-2wr: minimum seconds between runs of THIS task. A task
+    # is ineligible until `now - last_run >= min_interval_seconds`. The
+    # scheduler picks the highest-priority *eligible* task, so throttling
+    # hot P1 tasks lets lower-priority work (e.g. penpal_review at P5)
+    # get scheduled slots. Default 0 preserves pre-fix behavior.
+    min_interval_seconds: float = 0.0
 
 
 class SleepTaskScheduler:
@@ -166,6 +172,9 @@ class SleepTaskScheduler:
             interruptible=False,
             estimated_duration_seconds=10,
             handler=self._run_golden_thread_sync,
+            # 2wr: golden thread doesn't need 10-second cadence; throttle
+            # so lower-priority tasks can win sleep slots.
+            min_interval_seconds=60,
         ))
 
         self.register_task(SleepTask(
@@ -175,6 +184,7 @@ class SleepTaskScheduler:
             interruptible=False,
             estimated_duration_seconds=5,
             handler=self._run_kv_cache_checkpoint,
+            min_interval_seconds=60,
         ))
 
         self.register_task(SleepTask(
@@ -184,6 +194,7 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_conversation_curation,
+            min_interval_seconds=300,
         ))
 
         self.register_task(SleepTask(
@@ -347,6 +358,10 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_penpal_review,
+            # 2wr: NotebookLM episodes come out at most once an hour; no
+            # point checking more often. The throttle also keeps the
+            # task from monopolizing a sleep slot in burst rotations.
+            min_interval_seconds=3600,
         ))
 
         # DocSentinel — living documentation (Phase 6)
@@ -391,17 +406,37 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
 
     def get_next_task(self) -> Optional[SleepTask]:
-        """Return the highest-priority, least-recently-run task."""
+        """Return the highest-priority, least-recently-run *eligible* task.
+
+        GAIA_Project-2wr: a task is eligible only if its min_interval_seconds
+        has elapsed since its last run. Without throttles, hot P1 tasks
+        (kv_cache_checkpoint, etc.) cycled every ~6s and starved every
+        P2+ task — penpal_review (P5) accumulated 0 runs while P1 tasks
+        each hit 15,000+. Throttling P1 tasks gives lower-priority work
+        slots when nothing high-priority is due.
+        """
         if not self._tasks:
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        def _eligible(t: SleepTask) -> bool:
+            if t.min_interval_seconds <= 0 or t.last_run is None:
+                return True
+            elapsed = (now - t.last_run).total_seconds()
+            return elapsed >= t.min_interval_seconds
+
+        eligible = [t for t in self._tasks if _eligible(t)]
+        if not eligible:
             return None
 
         # Sort by (priority ASC, last_run ASC nulls-first)
         epoch = datetime.min.replace(tzinfo=timezone.utc)
         candidates = sorted(
-            self._tasks,
+            eligible,
             key=lambda t: (t.priority, t.last_run or epoch),
         )
-        return candidates[0] if candidates else None
+        return candidates[0]
 
     def execute_task(self, task: SleepTask) -> bool:
         """Execute a task handler. Returns True on success."""
@@ -1232,18 +1267,21 @@ class SleepTaskScheduler:
 
         The penpal protocol: GAIA reviews what the podcast hosts said about her,
         responds with her perspective, and proposes topics for the next episode.
-        Gated on Serenity — only reviews when the system is stable.
+
+        GAIA_Project-2wr: the serenity gate was removed here. Penpal is
+        scheduled I/O (download + transcribe + LLM response + post note)
+        — not autonomous goal-setting. The gate's intent (block flaky
+        cognition) doesn't apply; it just silenced the task forever
+        while serenity stayed at 0.0. The task now runs whenever the
+        scheduler picks it (throttled to 1/hour via min_interval_seconds).
         """
-        if not self._is_serene():
-            logger.debug("Penpal: skipping — not serene")
-            return
         try:
             from gaia_core.cognition.penpal_protocol import run_penpal_cycle
             result = run_penpal_cycle()
             if result.get("reviewed", 0) > 0:
                 logger.info("Penpal: reviewed %d episodes", result["reviewed"])
             else:
-                logger.debug("Penpal: no new episodes")
+                logger.info("Penpal: no new episodes (last_check now)")
         except Exception as e:
             logger.warning("Penpal review failed: %s", e)
 

@@ -1,6 +1,6 @@
 """Unit tests for SleepTaskScheduler."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -121,6 +121,138 @@ class TestScheduling:
 
     def test_empty_scheduler_returns_none(self, bare_scheduler):
         assert bare_scheduler.get_next_task() is None
+
+
+# ------------------------------------------------------------------
+# Min-interval throttling (GAIA_Project-2wr)
+# ------------------------------------------------------------------
+
+
+class TestMinIntervalThrottling:
+    def test_min_interval_blocks_until_elapsed(self, bare_scheduler):
+        """A task with min_interval that ran recently is ineligible."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=10)
+        bare_scheduler.register_task(SleepTask(
+            task_id="throttled", task_type="t", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=recent, min_interval_seconds=60,
+        ))
+        assert bare_scheduler.get_next_task() is None, \
+            "throttled task should be ineligible (10s < 60s interval)"
+
+    def test_min_interval_elapsed_allows_run(self, bare_scheduler):
+        """After min_interval elapses, the task becomes eligible again."""
+        old = datetime.now(timezone.utc) - timedelta(seconds=120)
+        bare_scheduler.register_task(SleepTask(
+            task_id="ready", task_type="t", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=old, min_interval_seconds=60,
+        ))
+        next_task = bare_scheduler.get_next_task()
+        assert next_task is not None
+        assert next_task.task_id == "ready"
+
+    def test_p5_can_win_when_p1_is_throttled(self, bare_scheduler):
+        """The bug repro: throttling hot P1 tasks lets P5 win their slots.
+
+        Pre-fix, P1 tasks rotated among themselves at 6s and P5 never ran
+        (15,000+ P1 runs, 0 P5 runs). With min_interval throttling, P5
+        gets the slot when no eligible P1 task is available.
+        """
+        recent = datetime.now(timezone.utc) - timedelta(seconds=5)
+        bare_scheduler.register_task(SleepTask(
+            task_id="hot_p1", task_type="m", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=recent, min_interval_seconds=60,
+        ))
+        bare_scheduler.register_task(SleepTask(
+            task_id="penpal_review", task_type="PENPAL", priority=5,
+            interruptible=True, estimated_duration_seconds=120,
+            handler=lambda: None,
+            min_interval_seconds=3600,
+        ))
+        next_task = bare_scheduler.get_next_task()
+        assert next_task is not None
+        assert next_task.task_id == "penpal_review", \
+            "P5 task should be picked when P1 is throttled"
+
+    def test_no_eligible_tasks_returns_none(self, bare_scheduler):
+        """If every task is throttled, get_next_task returns None."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=1)
+        bare_scheduler.register_task(SleepTask(
+            task_id="cooling_a", task_type="t", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=recent, min_interval_seconds=60,
+        ))
+        bare_scheduler.register_task(SleepTask(
+            task_id="cooling_b", task_type="t", priority=2, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=recent, min_interval_seconds=60,
+        ))
+        assert bare_scheduler.get_next_task() is None
+
+    def test_default_min_interval_zero_preserves_old_behavior(self, bare_scheduler):
+        """Tasks without min_interval (default 0) behave as before."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=1)
+        bare_scheduler.register_task(SleepTask(
+            task_id="unthrottled", task_type="t", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            last_run=recent,  # no min_interval — default 0
+        ))
+        next_task = bare_scheduler.get_next_task()
+        assert next_task is not None
+        assert next_task.task_id == "unthrottled"
+
+    def test_never_run_task_is_eligible_regardless_of_min_interval(self, bare_scheduler):
+        """A task with last_run=None bypasses the interval check —
+        first run always allowed."""
+        bare_scheduler.register_task(SleepTask(
+            task_id="fresh", task_type="t", priority=1, interruptible=True,
+            estimated_duration_seconds=5, handler=lambda: None,
+            min_interval_seconds=3600,  # would normally need 1hr cooldown
+        ))
+        next_task = bare_scheduler.get_next_task()
+        assert next_task is not None
+        assert next_task.task_id == "fresh"
+
+
+# ------------------------------------------------------------------
+# Penpal handler (GAIA_Project-2wr — serenity gate removed)
+# ------------------------------------------------------------------
+
+
+class TestPenpalReviewHandler:
+    def test_handler_runs_regardless_of_serenity(self, bare_scheduler):
+        """The serenity gate was blocking penpal forever. After 2wr,
+        the handler proceeds even when not serene — penpal is I/O +
+        LLM, not autonomous goal-setting."""
+        # Force _is_serene to return False (the long-standing reality).
+        # The handler must still call run_penpal_cycle.
+        with patch.object(bare_scheduler, "_is_serene", return_value=False), \
+             patch("gaia_core.cognition.penpal_protocol.run_penpal_cycle") as mock_run:
+            mock_run.return_value = {"new_episodes": 0, "reviewed": 0}
+            bare_scheduler._run_penpal_review()
+            mock_run.assert_called_once()
+
+    def test_handler_logs_at_info_when_no_episodes(self, bare_scheduler, caplog):
+        """Skip + 'no episodes' messages should be INFO not DEBUG so
+        operators can see what the handler did."""
+        import logging
+        caplog.set_level(logging.INFO, logger="GAIA.SleepTaskScheduler")
+        with patch("gaia_core.cognition.penpal_protocol.run_penpal_cycle") as mock_run:
+            mock_run.return_value = {"new_episodes": 0, "reviewed": 0}
+            bare_scheduler._run_penpal_review()
+        msgs = [r.message for r in caplog.records]
+        assert any("no new episodes" in m.lower() for m in msgs), \
+            f"expected 'no new episodes' INFO log, got: {msgs}"
+
+    def test_handler_swallows_exceptions(self, bare_scheduler):
+        """run_penpal_cycle failure should not propagate — sleep cycle
+        keeps ticking."""
+        with patch("gaia_core.cognition.penpal_protocol.run_penpal_cycle",
+                   side_effect=RuntimeError("MCP down")):
+            # Should not raise
+            bare_scheduler._run_penpal_review()
 
 
 # ------------------------------------------------------------------
