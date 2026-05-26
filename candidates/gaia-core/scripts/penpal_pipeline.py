@@ -502,28 +502,77 @@ class PenpalPipeline:
         )
 
         base_user = "\n".join(user_parts)
+
+        # GAIA_Project-45i (Path 3): route through the creative-generation
+        # cognitive gate. It packages the LLM call + consistency audit +
+        # re-roll loop + (optional) KG recency grounding into one call.
+        # Replaces the prior inline audit-and-reroll loop while preserving
+        # the same behavior — Path 4 still works, now reusable.
+        try:
+            from gaia_core.cognition.creative_generation import (
+                generate_creative_grounded,
+            )
+            _have_creative_gate = True
+        except Exception:
+            generate_creative_grounded = None  # type: ignore
+            _have_creative_gate = False
+
+        if _have_creative_gate:
+            # Strip the grounding from the user prompt — generate_creative_grounded
+            # injects it under its own labelled block, with a stronger prompt.
+            user_without_grounding = base_user
+            if grounding:
+                user_without_grounding = base_user.replace(f"\n{grounding}", "")
+            result = generate_creative_grounded(
+                system_prompt=system,
+                user_prompt=user_without_grounding,
+                consistency_source_text=section_text,
+                grounding_evidence=grounding or "",
+                endpoint=self.client.endpoint,
+                model=self.client.model,
+                max_tokens=800,
+                temperature=0.8,
+                repetition_penalty=1.15,
+                max_rerolls=2,
+            )
+            if result.error:
+                logger.warning(
+                    "    [creative_gate] LLM failure on section %d: %s",
+                    section_index, result.error,
+                )
+                # Fall through to the legacy direct path below
+            else:
+                if not result.consistency_clean and result.fabrications_found:
+                    logger.warning(
+                        "    [Consistency] Section %d still has %d unsourced "
+                        "terms after %d re-rolls; keeping last draft: %s",
+                        section_index, len(result.fabrications_found),
+                        result.rerolls, result.fabrications_found[:5],
+                    )
+                elif result.rerolls > 0:
+                    logger.info(
+                        "    [Consistency] Section %d cleared after %d re-roll(s)",
+                        section_index, result.rerolls,
+                    )
+                return postprocess(result.text)
+
+        # Legacy direct path — used when the creative gate is unavailable
+        # (e.g. running outside gaia-core). Preserves the original behavior
+        # so the pipeline still ships if the import fails.
         raw = self.client.chat(
             system, base_user,
             max_tokens=800, temperature=0.8, repetition_penalty=1.15,
         )
-
-        # Consistency-gated re-roll. Audit the draft for fabricated specifics
-        # (named entities + slash-paths with no trace in the transcript section
-        # or KG). If any, re-generate with an explicit "do not use these terms"
-        # clause. Cap at 2 re-rolls so a stubbornly hallucinating section can't
-        # block the pipeline.
         accumulated_banned: List[str] = []
         for attempt in range(2):
             banned = _audit_section_response(section_text, raw)
             if not banned:
                 break
-            # Merge with prior attempts so each re-roll knows everything banned
-            # so far, not just what this attempt added.
             for t in banned:
                 if t not in accumulated_banned:
                     accumulated_banned.append(t)
             logger.info(
-                "    [Consistency] Section %d re-roll %d/2 — %d unsourced term(s): %s",
+                "    [Consistency-legacy] Section %d re-roll %d/2 — %d unsourced term(s): %s",
                 section_index, attempt + 1, len(banned), banned[:5],
             )
             stricter_user = base_user + (
@@ -540,13 +589,10 @@ class PenpalPipeline:
                 max_tokens=800, temperature=0.7, repetition_penalty=1.20,
             )
         else:
-            # Both re-rolls failed — emit a warning but keep what we have so
-            # the section isn't dropped entirely. The compress pass downstream
-            # may still clean up some of the noise.
             if accumulated_banned:
                 logger.warning(
-                    "    [Consistency] Section %d still has %d unsourced terms "
-                    "after 2 re-rolls; keeping last draft.",
+                    "    [Consistency-legacy] Section %d still has %d unsourced "
+                    "terms after 2 re-rolls; keeping last draft.",
                     section_index, len(accumulated_banned),
                 )
 
