@@ -32,7 +32,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -64,7 +64,14 @@ class Contradiction:
 class KnowledgeGraph:
     """SQLite-backed temporal knowledge graph with contradiction detection."""
 
-    def __init__(self, db_path: str = None, contradiction_callback=None):
+    def __init__(
+        self,
+        db_path: str = None,
+        contradiction_callback=None,
+        *,
+        require_merge_approval: Optional[bool] = None,
+        merge_candidates_dir: Optional[str] = None,
+    ):
         """
         Args:
             db_path: Path to SQLite database
@@ -77,9 +84,31 @@ class KnowledgeGraph:
                 - "pending": flag for human review (default)
                 If no callback is set, contradictions auto-resolve as "update"
                 (assume newer information supersedes older).
+            require_merge_approval: World Model Stage 5 (clm) approval gate.
+                When True, apply_merge() refuses to execute unless the
+                merge's candidate file has status="approved". When None,
+                honors GAIA_KG_REQUIRE_MERGE_APPROVAL env var (defaults
+                to True). Pass False explicitly for test fixtures or
+                automated flows that don't want the human gate.
+            merge_candidates_dir: where to write merge candidate JSONs.
+                Defaults to GAIA_MERGE_CANDIDATES_DIR env var or
+                knowledge/candidates/world_merges under the project root.
         """
         self.db_path = db_path or DEFAULT_KG_PATH
         self._contradiction_callback = contradiction_callback
+
+        if require_merge_approval is None:
+            _env_gate = os.environ.get("GAIA_KG_REQUIRE_MERGE_APPROVAL", "1")
+            require_merge_approval = _env_gate not in ("0", "false", "False", "no", "")
+        self.require_merge_approval = require_merge_approval
+
+        if merge_candidates_dir is None:
+            merge_candidates_dir = os.environ.get(
+                "GAIA_MERGE_CANDIDATES_DIR",
+                "/gaia/GAIA_Project/knowledge/candidates/world_merges",
+            )
+        self.merge_candidates_dir = Path(merge_candidates_dir)
+
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         logger.info("KnowledgeGraph initialized: %s", self.db_path)
@@ -1293,6 +1322,79 @@ class KnowledgeGraph:
         conn.close()
         return snapshot
 
+    # ── World Model Stage 5b (clm): merge approval gate ──────────────
+
+    def _candidate_path(self, merge_id: str) -> Path:
+        return self.merge_candidates_dir / f"{merge_id}.json"
+
+    def _write_candidate(self, merge_id: str, payload: dict) -> None:
+        """Atomic-ish write of a merge candidate JSON. Failures are logged
+        but don't propagate — the DB persistence is the source of truth
+        for the merge mechanism; the candidate file is the approval
+        surface."""
+        try:
+            self.merge_candidates_dir.mkdir(parents=True, exist_ok=True)
+            path = self._candidate_path(merge_id)
+            tmp = path.with_suffix(".json.tmp")
+            with open(tmp, "w") as f:
+                json.dump(payload, f, indent=2, default=str)
+            tmp.replace(path)
+        except OSError as e:
+            logger.warning("Could not write merge candidate %s: %s", merge_id, e)
+
+    def _read_candidate(self, merge_id: str) -> Optional[dict]:
+        path = self._candidate_path(merge_id)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Could not read merge candidate %s: %s", merge_id, e)
+            return None
+
+    def approve_merge(self, merge_id: str, *, approver: str = "architect") -> dict:
+        """Mark a pending merge candidate as approved.
+
+        This is the gate that gaia-study's UI flips after the Architect
+        reviews the proposal. Returns the updated candidate dict. Raises
+        ValueError if the candidate doesn't exist or isn't pending.
+        """
+        candidate = self._read_candidate(merge_id)
+        if candidate is None:
+            raise ValueError(f"No candidate file for merge {merge_id!r}")
+        if candidate.get("status") != "pending":
+            raise ValueError(
+                f"Merge {merge_id} is not pending "
+                f"(current candidate status: {candidate.get('status')!r})"
+            )
+        candidate["status"] = "approved"
+        candidate["approved_at"] = datetime.now(timezone.utc).isoformat()
+        candidate["approved_by"] = approver
+        self._write_candidate(merge_id, candidate)
+        logger.info("Merge approved: %s by %s", merge_id, approver)
+        return candidate
+
+    def reject_merge(self, merge_id: str, *, reason: str = "") -> dict:
+        """Mark a pending merge candidate as rejected. Also flips the DB
+        row to status='rejected' so subsequent apply attempts fail loudly
+        with the proposal-state mismatch."""
+        candidate = self._read_candidate(merge_id) or {"merge_id": merge_id}
+        candidate["status"] = "rejected"
+        candidate["rejected_at"] = datetime.now(timezone.utc).isoformat()
+        candidate["rejected_reason"] = reason
+        self._write_candidate(merge_id, candidate)
+        conn = self._conn()
+        try:
+            conn.execute(
+                "UPDATE merges SET status = 'rejected' WHERE id = ? AND status = 'pending'",
+                (merge_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info("Merge rejected: %s (%s)", merge_id, reason or "no reason given")
+        return candidate
+
     def propose_merge(
         self,
         source_world: str,
@@ -1364,6 +1466,23 @@ class KnowledgeGraph:
             merge_id, src_meta["name"], tgt_meta["name"],
             proposal["triples_to_rewrite"], len(entity_mapping),
         )
+
+        # Stage 5b (clm): mirror the proposal as a candidate file so
+        # gaia-study's approval queue can surface it for the Architect.
+        # The file is the user-facing surface; the DB row is the system
+        # source of truth. Write failures are logged but don't fail the
+        # proposal (the DB row is what matters).
+        candidate = {
+            **proposal,
+            "proposed_at": datetime.now(timezone.utc).isoformat(),
+            "approved_at": None,
+            "approved_by": None,
+            "rejected_at": None,
+            "rejected_reason": None,
+            "applied_at": None,
+        }
+        self._write_candidate(merge_id, candidate)
+
         return proposal
 
     def apply_merge(self, merge_id: str) -> dict:
@@ -1376,8 +1495,27 @@ class KnowledgeGraph:
           3. Drop source-world edges and the world row itself
           4. Mark the merge as applied with a timestamp
 
+        Stage 5b (clm): when ``require_merge_approval`` is True
+        (default), this method refuses to execute unless the merge's
+        candidate file has status="approved". Call
+        ``approve_merge(merge_id)`` first — typically via the gaia-study
+        UI after the Architect reviews the proposal.
+
         Returns the final proposal record with status='applied'.
         """
+        # Stage 5b approval gate.
+        if self.require_merge_approval:
+            candidate = self._read_candidate(merge_id)
+            cand_status = candidate.get("status") if candidate else None
+            if cand_status != "approved":
+                raise PermissionError(
+                    f"Merge {merge_id} requires approval before apply "
+                    f"(candidate status: {cand_status!r}). "
+                    f"Call approve_merge({merge_id!r}) first, or "
+                    f"construct KnowledgeGraph(require_merge_approval=False) "
+                    f"for an automated flow."
+                )
+
         conn = self._conn()
         row = conn.execute(
             "SELECT source_world, target_world, status, entity_mapping "
@@ -1427,6 +1565,14 @@ class KnowledgeGraph:
         conn.close()
         logger.info("Merge applied: %s (source %s collapsed into %s)",
                     merge_id, src_id, tgt_id)
+
+        # Stage 5b: mirror the final state into the candidate file so
+        # the approval queue shows the merge as completed.
+        candidate = self._read_candidate(merge_id) or {"merge_id": merge_id}
+        candidate["status"] = "applied"
+        candidate["applied_at"] = datetime.now(timezone.utc).isoformat()
+        self._write_candidate(merge_id, candidate)
+
         return self.get_merge(merge_id)
 
     def reverse_merge(self, merge_id: str) -> dict:

@@ -15,8 +15,20 @@ import pytest
 
 @pytest.fixture
 def kg(tmp_path):
+    """Default KG fixture for merge tests. require_merge_approval=False
+    so the existing propose+apply tests run without the Stage 5b
+    (clm) approval gate. The gate itself is exercised in
+    test_world_merge_approval.py.
+
+    Candidate dir still set under tmp_path so propose_merge can write
+    its candidate JSON without polluting the project tree.
+    """
     from gaia_common.utils.knowledge_graph import KnowledgeGraph
-    return KnowledgeGraph(db_path=str(tmp_path / "kg.sqlite"))
+    return KnowledgeGraph(
+        db_path=str(tmp_path / "kg.sqlite"),
+        require_merge_approval=False,
+        merge_candidates_dir=str(tmp_path / "candidates" / "world_merges"),
+    )
 
 
 class TestCorefScoring:
