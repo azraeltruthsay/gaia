@@ -364,6 +364,22 @@ class SleepTaskScheduler:
             min_interval_seconds=3600,
         ))
 
+        # GAIA_Project-99z: skill_creator cycle. Scans the failure log
+        # (5qy Phase 1), drafts SKILL.md stubs for patterns above the
+        # threshold via Prime (45i creative_generation route). Throttled
+        # to 12 hours — failure patterns accumulate over days, no point
+        # checking more often. Skipped silently if Prime is unreachable
+        # (handler falls back to deterministic body).
+        self.register_task(SleepTask(
+            task_id="skill_creator_cycle",
+            task_type="SELF_IMPROVE",
+            priority=5,
+            interruptible=True,
+            estimated_duration_seconds=180,
+            handler=self._run_skill_creator_cycle,
+            min_interval_seconds=12 * 3600,
+        ))
+
         # DocSentinel — living documentation (Phase 6)
         self.register_task(SleepTask(
             task_id="doc_sentinel_glossary",
@@ -1284,6 +1300,46 @@ class SleepTaskScheduler:
                 logger.info("Penpal: no new episodes (last_check now)")
         except Exception as e:
             logger.warning("Penpal review failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # skill_creator_cycle (SELF_IMPROVE) — auto-draft skills from failures
+    # ------------------------------------------------------------------
+
+    def _run_skill_creator_cycle(self, **kwargs) -> None:
+        """Scan the failure log; for patterns above threshold, draft a
+        SKILL.md via Prime (or deterministic fallback).
+
+        GAIA_Project-99z (Phase 2 of 5qy). Pulls together:
+          - skill_failures.find_patterns_above_threshold (5qy P1)
+          - creative_generation_grounded (45i) via skill_llm_body
+          - SkillGateway reload trigger so newly-drafted skills enter
+            the registry on the next reload cycle
+        """
+        try:
+            from gaia_core.cognition.skill_llm_body import run_skill_creator_cycle
+            import os
+            # Best-effort reload trigger — the MCP container exposes
+            # skill reload via its admin endpoint; failure here is OK,
+            # gateway will reload on its next natural restart anyway.
+            reload_url = os.environ.get(
+                "SKILL_RELOAD_URL",
+                "http://gaia-mcp:8765/admin/skills/reload",
+            )
+            result = run_skill_creator_cycle(
+                threshold=3,
+                window_hours=7 * 24,
+                use_llm=True,
+                reload_url=reload_url,
+            )
+            if result.get("drafted", 0) > 0:
+                logger.info(
+                    "skill_creator_cycle: drafted %d auto-skill(s), reloaded=%s",
+                    result["drafted"], result.get("reloaded"),
+                )
+            else:
+                logger.debug("skill_creator_cycle: no patterns above threshold")
+        except Exception as e:
+            logger.warning("skill_creator_cycle failed: %s", e)
 
     # ------------------------------------------------------------------
     # codemind_cycle (CODEMIND) — autonomous code self-improvement
