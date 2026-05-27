@@ -487,6 +487,23 @@ class SkillGateway:
             except Exception as e:
                 logger.debug("SkillGateway: palace mirror on learn failed: %s", e)
 
+        # GAIA_Project-5qy Phase 1: when an interaction fails, record it
+        # into the failure-pattern log. After threshold (default: 3
+        # failures in a 7-day window), the skill_creator can draft a new
+        # SKILL.md stub for the pattern. We don't run the creator here on
+        # the hot path — that's a separate sleep-cycle hook (Phase 2).
+        if not success:
+            try:
+                from gaia_common.utils.skill_failures import record_failure
+                record_failure(
+                    intent=params.get("domain"),
+                    query=task,
+                    skill_name=skill_name or "",
+                    source=params.get("source"),
+                )
+            except Exception as e:
+                logger.debug("SkillGateway: failure-log write failed: %s", e)
+
         return {"ok": True, "recorded": True, "task": task[:80], "success": success,
                 "skill": skill_name}
 
