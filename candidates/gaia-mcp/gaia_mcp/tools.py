@@ -266,6 +266,15 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kg_merge_approve": lambda p: _kg_merge_approve_impl(p),
         "kg_merge_reject": lambda p: _kg_merge_reject_impl(p),
         "kg_merge_list_pending": lambda p: _kg_merge_list_pending_impl(p),
+        # Tabular workspace (19g Phase 1) — GAIA-controlled spreadsheet store
+        "workspace_list": lambda p: _workspace_list_impl(p),
+        "workspace_create": lambda p: _workspace_create_impl(p),
+        "workspace_read": lambda p: _workspace_read_impl(p),
+        "workspace_append_row": lambda p: _workspace_append_row_impl(p),
+        "workspace_write_cell": lambda p: _workspace_write_cell_impl(p),
+        "workspace_create_sheet": lambda p: _workspace_create_sheet_impl(p),
+        "workspace_delete_sheet": lambda p: _workspace_delete_sheet_impl(p),
+        "workspace_info": lambda p: _workspace_info_impl(p),
         # Lifecycle (Stage 6 / azr) — ephemeral vs durable, promotion, GC
         "kg_world_promote": lambda p: _kg_world_promote_impl(p),
         "kg_world_gc": lambda p: _kg_world_gc_impl(p),
@@ -877,6 +886,150 @@ def _kg_merge_list_pending_impl(params: dict) -> dict:
     except OSError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, "pending": pending, "count": len(pending)}
+
+
+# ── Tabular workspace (GAIA_Project-19g Phase 1) ────────────────────
+
+
+def _workspace_list_impl(params: dict) -> dict:
+    """List all workbooks in the workspace store."""
+    try:
+        from gaia_common.utils.workspace import list_workbooks
+        return {"ok": True, "workbooks": list_workbooks()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_create_impl(params: dict) -> dict:
+    """Create a new workbook. params: {name, sheet_name?, overwrite?}."""
+    try:
+        from gaia_common.utils.workspace import create_workbook
+        name = params.get("name", "")
+        if not name:
+            return {"ok": False, "error": "name parameter required"}
+        wb = create_workbook(
+            name,
+            sheet_name=params.get("sheet_name", "main"),
+            overwrite=bool(params.get("overwrite", False)),
+        )
+        return {"ok": True, "name": wb.name, "sheets": list(wb.sheets.keys())}
+    except FileExistsError as e:
+        return {"ok": False, "error": str(e), "code": "exists"}
+    except (ValueError, OSError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_read_impl(params: dict) -> dict:
+    """Read rows. params: {name, sheet?, filter?, sort_by?, descending?, limit?}.
+
+    `filter` is a dict (exact-match column→value); pass None to skip.
+    """
+    try:
+        from gaia_common.utils.workspace import read_rows
+        name = params.get("name", "")
+        if not name:
+            return {"ok": False, "error": "name parameter required"}
+        rows = read_rows(
+            name,
+            sheet=params.get("sheet", "main"),
+            filter_=params.get("filter"),
+            sort_by=params.get("sort_by"),
+            descending=bool(params.get("descending", False)),
+            limit=params.get("limit"),
+        )
+        return {"ok": True, "rows": rows, "count": len(rows)}
+    except KeyError as e:
+        return {"ok": False, "error": str(e), "code": "sheet_not_found"}
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_append_row_impl(params: dict) -> dict:
+    """Append one row. params: {name, sheet, row}."""
+    try:
+        from gaia_common.utils.workspace import append_row
+        name = params.get("name", "")
+        sheet = params.get("sheet", "main")
+        row = params.get("row")
+        if not name or not isinstance(row, dict):
+            return {"ok": False, "error": "name + row (dict) required"}
+        idx = append_row(name, sheet, row)
+        return {"ok": True, "row_index": idx}
+    except (FileNotFoundError, KeyError) as e:
+        return {"ok": False, "error": str(e), "code": "not_found"}
+    except (ValueError, TypeError, OSError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_write_cell_impl(params: dict) -> dict:
+    """Update a single cell. params: {name, sheet, row_index, column, value}."""
+    try:
+        from gaia_common.utils.workspace import write_cell
+        required = ["name", "sheet", "row_index", "column"]
+        missing = [k for k in required if k not in params]
+        if missing:
+            return {"ok": False, "error": f"missing: {missing}"}
+        ok = write_cell(
+            params["name"], params["sheet"],
+            int(params["row_index"]), params["column"],
+            params.get("value"),
+        )
+        if not ok:
+            return {"ok": False, "error": "write failed or row out of range"}
+        return {"ok": True}
+    except (KeyError, ValueError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_create_sheet_impl(params: dict) -> dict:
+    """Add a new sheet to an existing workbook. params: {name, sheet_name}."""
+    try:
+        from gaia_common.utils.workspace import create_sheet
+        name = params.get("name", "")
+        sheet_name = params.get("sheet_name", "")
+        if not name or not sheet_name:
+            return {"ok": False, "error": "name + sheet_name required"}
+        ok = create_sheet(name, sheet_name)
+        if not ok:
+            return {"ok": False, "error": "sheet exists or workbook missing",
+                    "code": "exists_or_missing"}
+        return {"ok": True}
+    except (ValueError, OSError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_delete_sheet_impl(params: dict) -> dict:
+    """Remove a sheet. params: {name, sheet_name}. Refuses the last sheet."""
+    try:
+        from gaia_common.utils.workspace import delete_sheet
+        name = params.get("name", "")
+        sheet_name = params.get("sheet_name", "")
+        if not name or not sheet_name:
+            return {"ok": False, "error": "name + sheet_name required"}
+        ok = delete_sheet(name, sheet_name)
+        if not ok:
+            return {"ok": False,
+                    "error": "sheet not found OR refused (last sheet)",
+                    "code": "not_found_or_last"}
+        return {"ok": True}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _workspace_info_impl(params: dict) -> dict:
+    """Summary stats for one sheet. params: {name, sheet?}."""
+    try:
+        from gaia_common.utils.workspace import sheet_info
+        name = params.get("name", "")
+        if not name:
+            return {"ok": False, "error": "name parameter required"}
+        info = sheet_info(name, sheet=params.get("sheet", "main"))
+        if not info:
+            return {"ok": False, "error": "workbook or sheet not found",
+                    "code": "not_found"}
+        return {"ok": True, **info}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _kg_merge_get_impl(params: dict) -> dict:
