@@ -61,6 +61,21 @@ class SkillGateway:
         self._skill_embeddings = {}
         logger.info("SkillGateway reloaded: %d packages", len(self._packages))
 
+        # GAIA_Project-a3i: mirror each loaded skill into MemPalace so
+        # cross-session recall ("how did we handle X?") can surface it.
+        # Best-effort — gracefully no-ops if MemPalace isn't available.
+        try:
+            from gaia_common.utils.skill_palace import record_skill_loaded
+            for pkg_name, pkg in self._packages.items():
+                record_skill_loaded(
+                    pkg.name,
+                    pkg.description,
+                    version=getattr(pkg, "version", 1),
+                    source_path=str(getattr(pkg, "source_path", "") or ""),
+                )
+        except Exception as e:
+            logger.debug("SkillGateway: palace mirror on reload failed: %s", e)
+
     def _get_embedder(self):
         """Lazy-load sentence-transformers. Returns None if unavailable."""
         if self._embedder is self._UNSET:
@@ -456,6 +471,21 @@ class SkillGateway:
             # skill utility still accrues across calls.
             if skill_name:
                 self._direct_record_skill_outcome(skill_name, success)
+
+        # GAIA_Project-a3i: mirror the outcome into MemPalace so future
+        # recall ("how did we solve X last week?") can surface skill events
+        # alongside other persistent memories. Best-effort.
+        if skill_name:
+            try:
+                from gaia_common.utils.skill_palace import record_skill_outcome
+                record_skill_outcome(
+                    skill_name,
+                    intent=params.get("domain"),
+                    success=success,
+                    query=task,
+                )
+            except Exception as e:
+                logger.debug("SkillGateway: palace mirror on learn failed: %s", e)
 
         return {"ok": True, "recorded": True, "task": task[:80], "success": success,
                 "skill": skill_name}
