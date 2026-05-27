@@ -1143,6 +1143,47 @@ class AgentCore:
                 except Exception:
                     logger.debug("Failed to get loop recovery context", exc_info=True)
 
+            # --- Stakes classification (GAIA_Project-6ho Phase 2) ---
+            # Multi-axis disambiguation BEFORE persona overlay: detect whether
+            # the utterance is real-world urgency, in-game, or AMBIGUOUS (the
+            # load-bearing case — "I broke my leg" during a D&D session).
+            # Phase 2 only classifies + logs + stashes on the packet; the
+            # user-facing clarification UX is a follow-up issue.
+            try:
+                from gaia_core.cognition.stakes_classifier import (
+                    classify_stakes, is_role_play_active,
+                    STAKES_NONE,
+                )
+                _stakes_result = classify_stakes(
+                    user_input or "",
+                    role_play_active=is_role_play_active(),
+                )
+                if _stakes_result.stakes != STAKES_NONE:
+                    logger.info(
+                        "Stakes: %s (id=%s, body=%s, clarify=%s, conf=%.2f, "
+                        "safety=%s, game=%s)",
+                        _stakes_result.stakes,
+                        _stakes_result.identity,
+                        _stakes_result.proprioceptive,
+                        _stakes_result.requires_clarification,
+                        _stakes_result.confidence,
+                        _stakes_result.matched_safety[:3],
+                        _stakes_result.matched_game[:3],
+                    )
+                # Stash on packet for downstream consumers (clarification
+                # flow, log analysis, training-data labeling).
+                try:
+                    packet.content.data_fields.append(DataField(
+                        key="stakes_classification",
+                        value=_stakes_result.to_dict(),
+                        type="json",
+                        source="stakes_classifier_6ho",
+                    ))
+                except Exception:
+                    logger.debug("stakes_classification attach failed", exc_info=True)
+            except Exception:
+                logger.debug("Stakes classification failed", exc_info=True)
+
             # --- Semantic Probe: pre-cognition vector lookup ---
             # Runs BEFORE persona selection. Extracts interesting phrases from
             # user input, probes all vector collections, and uses hits to drive
