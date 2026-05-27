@@ -90,30 +90,157 @@ async def _event_generator(session_id: str = ""):
         await asyncio.sleep(_POLL_INTERVAL)
 
 
+_STREAM_TAIL_BYTES = 256 * 1024  # how far back to scan when synthesizing layers
+_STREAM_MAX_LINES = 2000          # cap on lines parsed from the tail
+
+
+def _discover_layers_from_stream(
+    stream_path: str = None,
+    *,
+    tail_bytes: int = _STREAM_TAIL_BYTES,
+    max_lines: int = _STREAM_MAX_LINES,
+) -> dict:
+    """Synthesize layer/tier info from the activation_stream.jsonl tail.
+
+    GAIA_Project-874: when meta.json is stale or missing, the API
+    derives the live layer set by scanning the tail of the stream.
+    Each stream record carries ``tier`` and per-feature ``layer``, so
+    no engine call is needed.
+
+    Returns ``{"layers": sorted_list, "tier": str | None,
+               "sample_count": int}``. Empty layers if the stream
+    doesn't exist or has no parseable records.
+    """
+    path = stream_path or _LOG_PATH
+    layers: set[int] = set()
+    tiers: set[str] = set()
+    sample_count = 0
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return {"layers": [], "tier": None, "sample_count": 0}
+    if size == 0:
+        return {"layers": [], "tier": None, "sample_count": 0}
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, size - tail_bytes))
+            chunk = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return {"layers": [], "tier": None, "sample_count": 0}
+    # Drop the (likely truncated) first line when we seeked mid-file
+    lines = chunk.splitlines()
+    if len(lines) > 1 and tail_bytes < size:
+        lines = lines[1:]
+    # Limit how many we parse — recent lines are more representative
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    for raw in lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        sample_count += 1
+        if isinstance(rec.get("tier"), str):
+            tiers.add(rec["tier"])
+        feats = rec.get("features") or []
+        if isinstance(feats, list):
+            for feat in feats:
+                if isinstance(feat, dict) and isinstance(feat.get("layer"), int):
+                    layers.add(feat["layer"])
+    # Tier inference: most-common is the "primary" but we only return
+    # something definitive when the tail is dominated by one tier.
+    tier = None
+    if len(tiers) == 1:
+        tier = next(iter(tiers))
+    return {
+        "layers": sorted(layers),
+        "tier": tier,
+        "sample_count": sample_count,
+    }
+
+
+def _load_atlas_meta(atlas_dir: str) -> dict:
+    """Read meta.json or return an empty dict."""
+    meta_path = os.path.join(atlas_dir, "meta.json")
+    try:
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_atlas_meta(atlas_dir: str, payload: dict) -> bool:
+    """Atomic-ish write of meta.json. Failures are logged but
+    non-blocking — the synthesized result is still returned to the
+    caller."""
+    meta_path = os.path.join(atlas_dir, "meta.json")
+    tmp_path = meta_path + ".tmp"
+    try:
+        os.makedirs(atlas_dir, exist_ok=True)
+        with open(tmp_path, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp_path, meta_path)
+        return True
+    except OSError as e:
+        logger.debug("Could not write atlas meta.json (%s)", e)
+        return False
+
+
 @router.get("/atlas")
 async def get_atlas():
     """Return SAE feature labels for the mind map.
 
-    Reads from ``/shared/atlas/core/meta.json`` if it exists, plus
-    any per-layer feature label files.  Returns a structured dict
-    that the D3 mind map uses to label activation nodes.
+    Reads ``meta.json`` if present; **synthesizes layer info from the
+    activation stream tail** when meta.json is missing, stale, or has
+    no ``layers`` field (GAIA_Project-874). When synthesis succeeds and
+    differs from the on-disk meta.json, the file is rewritten so the
+    next request hits the cache.
+
+    Also merges any per-layer feature label files (``layer_N_labels.json``).
     """
     result = {"layers": {}, "model": None, "timestamp": None}
 
-    meta_path = os.path.join(_ATLAS_DIR, "meta.json")
-    try:
-        with open(meta_path, "r") as f:
-            meta = json.load(f)
-        result["model"] = meta.get("model")
-        result["timestamp"] = meta.get("timestamp")
+    on_disk = _load_atlas_meta(_ATLAS_DIR)
+    if on_disk:
+        result["model"] = on_disk.get("model")
+        result["timestamp"] = on_disk.get("timestamp")
+        if "layers" in on_disk:
+            result["layers"] = on_disk["layers"]
 
-        # meta.json may contain inline feature labels
-        if "layers" in meta:
-            result["layers"] = meta["layers"]
-    except (OSError, json.JSONDecodeError):
-        pass
+    # Stage 1 (874): synthesize layer info from the live stream tail.
+    # If the stream tells us layers that aren't in the on-disk meta.json,
+    # the on-disk file is stale — overwrite with the synthesized layer
+    # set so the UI matches what's actually being recorded.
+    stream_info = _discover_layers_from_stream()
+    stream_layers = stream_info.get("layers") or []
+    if stream_layers:
+        on_disk_layers = on_disk.get("layers") if isinstance(on_disk.get("layers"), list) else None
+        if on_disk_layers != stream_layers:
+            logger.info(
+                "Atlas meta layers differ from live stream — refreshing "
+                "(on_disk=%s, stream=%s, tier=%s)",
+                on_disk_layers, stream_layers, stream_info.get("tier"),
+            )
+            refreshed = {
+                **on_disk,
+                "layers": stream_layers,
+                "tier": stream_info.get("tier") or on_disk.get("tier"),
+                "timestamp": time.time(),
+                "source": "auto_from_activation_stream",
+                "sample_count": stream_info.get("sample_count", 0),
+            }
+            _write_atlas_meta(_ATLAS_DIR, refreshed)
+            # Reflect the refreshed layers in this response too. We use
+            # the list-of-ints form here; the labels dict (populated
+            # below from layer_N_labels.json) is keyed by str(layer).
+            result["layers"] = {str(L): {"features": {}} for L in stream_layers}
+            result["model"] = refreshed.get("model") or result["model"]
+            result["timestamp"] = refreshed["timestamp"]
 
-    # Also check for per-layer label files (layer_N_labels.json)
+    # Always check for per-layer label files (layer_N_labels.json)
     try:
         for entry in os.listdir(_ATLAS_DIR):
             if entry.startswith("layer_") and entry.endswith("_labels.json"):
@@ -123,6 +250,11 @@ async def get_atlas():
                         labels = json.load(f)
                     # Merge — per-layer files override meta.json
                     layer_key = str(layer_idx)
+                    # Coerce list-form layers into the labels-merge dict
+                    if isinstance(result["layers"], list):
+                        result["layers"] = {
+                            str(L): {"features": {}} for L in result["layers"]
+                        }
                     if layer_key not in result["layers"]:
                         result["layers"][layer_key] = {"features": {}}
                     result["layers"][layer_key]["features"].update(labels)
