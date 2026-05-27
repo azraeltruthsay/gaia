@@ -262,6 +262,10 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kg_merge_reverse": lambda p: _kg_merge_reverse_impl(p),
         "kg_merge_get": lambda p: _kg_merge_get_impl(p),
         "kg_merge_list": lambda p: _kg_merge_list_impl(p),
+        # Merge approval gate (Stage 5b / clm) — Architect review surface
+        "kg_merge_approve": lambda p: _kg_merge_approve_impl(p),
+        "kg_merge_reject": lambda p: _kg_merge_reject_impl(p),
+        "kg_merge_list_pending": lambda p: _kg_merge_list_pending_impl(p),
         # Lifecycle (Stage 6 / azr) — ephemeral vs durable, promotion, GC
         "kg_world_promote": lambda p: _kg_world_promote_impl(p),
         "kg_world_gc": lambda p: _kg_world_gc_impl(p),
@@ -811,6 +815,68 @@ def _kg_merge_reverse_impl(params: dict) -> dict:
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, **result}
+
+
+# ── Stage 5b approval gate (clm / 21h Phase 1) ──────────────────────
+
+
+def _kg_merge_approve_impl(params: dict) -> dict:
+    """Approve a pending merge candidate so it can be applied.
+
+    Stage 5b approval gate: apply_merge refuses to execute unless the
+    candidate file's status is 'approved'. This tool flips that status
+    from the gaia-study review surface (or any approver).
+    """
+    kg = _get_kg()
+    merge_id = params.get("merge_id")
+    if not merge_id:
+        return {"ok": False, "error": "merge_id parameter required"}
+    approver = params.get("approver", "architect")
+    try:
+        candidate = kg.approve_merge(merge_id, approver=approver)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **candidate}
+
+
+def _kg_merge_reject_impl(params: dict) -> dict:
+    """Reject a pending merge candidate — blocks future apply."""
+    kg = _get_kg()
+    merge_id = params.get("merge_id")
+    if not merge_id:
+        return {"ok": False, "error": "merge_id parameter required"}
+    reason = params.get("reason", "")
+    try:
+        candidate = kg.reject_merge(merge_id, reason=reason)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **candidate}
+
+
+def _kg_merge_list_pending_impl(params: dict) -> dict:
+    """List all candidate files whose status is 'pending'.
+
+    Used by gaia-study's review queue to surface unresolved merges.
+    Reads directly from the merge_candidates_dir so it works
+    cross-container without requiring SQL access.
+    """
+    kg = _get_kg()
+    pending: list[dict] = []
+    candidates_dir = kg.merge_candidates_dir
+    try:
+        if not candidates_dir.exists():
+            return {"ok": True, "pending": [], "count": 0}
+        for entry in sorted(candidates_dir.glob("*.json")):
+            try:
+                import json as _json
+                data = _json.loads(entry.read_text())
+                if data.get("status") == "pending":
+                    pending.append(data)
+            except (OSError, _json.JSONDecodeError):
+                continue
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "pending": pending, "count": len(pending)}
 
 
 def _kg_merge_get_impl(params: dict) -> dict:

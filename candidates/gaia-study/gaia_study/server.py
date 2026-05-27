@@ -809,4 +809,104 @@ def create_app() -> FastAPI:
         _adaptive_trainer.cancel()
         return {"ok": True, "message": "Cancel requested — will stop after current phase"}
 
+    # ── World Model merge approval review queue (GAIA_Project-21h) ────
+    # Stage 5c Phase 1: HTTP surface for the Architect-approval flow.
+    # The frontend UI is a follow-up; these endpoints are what it'll
+    # consume. Reads from / writes to the candidate JSONs directly,
+    # so the underlying mechanism (gaia_common KnowledgeGraph) is the
+    # single source of truth.
+
+    def _get_world_kg():
+        """Lazy KnowledgeGraph accessor for merge-approval endpoints.
+
+        Uses the shared default DB path so candidates land under the
+        same /shared/atlas tree the rest of the stack reads from.
+        Honors GAIA_KG_REQUIRE_MERGE_APPROVAL (default True) and
+        GAIA_MERGE_CANDIDATES_DIR.
+        """
+        from gaia_common.utils.knowledge_graph import KnowledgeGraph
+        return KnowledgeGraph()
+
+    @app.get("/world_merges/pending")
+    async def list_pending_merges():
+        """List merge candidates whose JSON status is 'pending'.
+
+        Returns: {"ok": True, "pending": [<candidate>...], "count": N}.
+        Each candidate has the full propose_merge payload — source/
+        target world IDs and names, entity_mapping (coref preview),
+        triples_to_rewrite count, notes, proposed_at.
+        """
+        import json as _json
+        kg = _get_world_kg()
+        pending: list[dict] = []
+        candidates_dir = kg.merge_candidates_dir
+        if candidates_dir.exists():
+            for entry in sorted(candidates_dir.glob("*.json")):
+                try:
+                    data = _json.loads(entry.read_text())
+                    if data.get("status") == "pending":
+                        pending.append(data)
+                except (OSError, _json.JSONDecodeError):
+                    continue
+        return {"ok": True, "pending": pending, "count": len(pending)}
+
+    @app.get("/world_merges/{merge_id}")
+    async def get_merge_candidate(merge_id: str):
+        """Return a single candidate JSON regardless of status.
+
+        404 when the candidate file doesn't exist. Useful for the UI's
+        detail view + for polling after approve/reject to confirm the
+        new state.
+        """
+        import json as _json
+        kg = _get_world_kg()
+        path = kg._candidate_path(merge_id)
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No candidate file for merge {merge_id!r}",
+            )
+        try:
+            data = _json.loads(path.read_text())
+        except (OSError, _json.JSONDecodeError) as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return {"ok": True, **data}
+
+    class _MergeApproveRequest(BaseModel):
+        approver: str = "architect"
+
+    @app.post("/world_merges/{merge_id}/approve")
+    async def approve_merge(merge_id: str, request: _MergeApproveRequest = None):
+        """Approve a pending merge — flips candidate to status=approved.
+
+        After approval, apply_merge can proceed (Stage 5b gate satisfied).
+        Conflict (4xx) when the candidate isn't pending or doesn't exist.
+        """
+        approver = (request.approver if request else None) or "architect"
+        kg = _get_world_kg()
+        try:
+            candidate = kg.approve_merge(merge_id, approver=approver)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"ok": True, **candidate}
+
+    class _MergeRejectRequest(BaseModel):
+        reason: str = ""
+
+    @app.post("/world_merges/{merge_id}/reject")
+    async def reject_merge(merge_id: str, request: _MergeRejectRequest = None):
+        """Reject a merge — flips candidate AND DB row to status=rejected.
+
+        Subsequent apply attempts fail with the apply-gate PermissionError.
+        Idempotent: rejecting an already-rejected candidate just refreshes
+        the rejected_at timestamp.
+        """
+        reason = (request.reason if request else None) or ""
+        kg = _get_world_kg()
+        try:
+            candidate = kg.reject_merge(merge_id, reason=reason)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"ok": True, **candidate}
+
     return app
