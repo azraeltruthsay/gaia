@@ -1111,6 +1111,92 @@ async def process_packet(packet_data: Dict[str, Any]):
                 yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
                 return
 
+            # --- PRE-FLIGHT: Stakes clarification (GAIA_Project-pbb) ---
+            # Phase 3 of 6ho. Two paths:
+            #   1. PRIOR ASK pending: treat this turn as the reply,
+            #      resolve, and replay the original utterance with an
+            #      explicit IC/OOC marker so the rest of the pipeline
+            #      runs with the right framing.
+            #   2. NEW UTTERANCE ambiguous + low-confidence + not in
+            #      debounce window → emit a clarifying question and
+            #      short-circuit. The Phase 2 agent_core hook still
+            #      runs to stash the classification on the packet.
+            _stakes_clarif_msg = None
+            try:
+                from gaia_core.cognition.stakes_clarification import (
+                    decide_clarification, resolve_clarification_reply,
+                    pending_clarification,
+                )
+                from gaia_core.cognition.stakes_classifier import (
+                    classify_stakes, is_role_play_active,
+                )
+
+                _pending = pending_clarification(session_id)
+                if _pending:
+                    _reply = resolve_clarification_reply(
+                        session_id, user_input or "",
+                    )
+                    if _reply and _reply.resolution != "unresolved":
+                        # Replay the original utterance with the
+                        # resolved framing. The IC/OOC marker pushes
+                        # the downstream classifier into high-confidence
+                        # mode and skips re-asking.
+                        _marker = (
+                            "ooc:" if _reply.resolution == "real_world"
+                            else "in-character:"
+                        )
+                        logger.info(
+                            "[STAKES] Resolved %s — replaying %r with %s marker",
+                            _reply.resolution,
+                            _reply.original_user_input[:60],
+                            _marker,
+                        )
+                        user_input = (
+                            f"{_marker} {_reply.original_user_input}\n\n"
+                            f"[User confirmed: "
+                            f"{_reply.resolution.replace('_', '-')}]"
+                        )
+                        try:
+                            packet.content.original_prompt = user_input
+                        except Exception:
+                            pass
+                    # else: unresolved reply or no reply parsed —
+                    # let the new utterance go through the classifier
+                    # below as fresh input.
+
+                if user_input and _stakes_clarif_msg is None:
+                    _stakes = classify_stakes(
+                        user_input,
+                        role_play_active=is_role_play_active(),
+                    )
+                    _decision = decide_clarification(
+                        _stakes,
+                        session_id=session_id,
+                        user_input=user_input,
+                    )
+                    if _decision.ask:
+                        _stakes_clarif_msg = _decision.question
+            except Exception:
+                logger.debug("Stakes clarification flow failed", exc_info=True)
+
+            if _stakes_clarif_msg:
+                logger.info(
+                    "[STAKES CLARIFICATION] Asking before answering: %s",
+                    _stakes_clarif_msg[:80],
+                )
+                yield json.dumps(
+                    {"type": "token", "value": _stakes_clarif_msg}
+                ) + "\n"
+                yield json.dumps({"type": "flush"}) + "\n"
+                from gaia_common.protocols.cognition_packet import PacketState
+                packet.status.state = PacketState.COMPLETED
+                packet.response.candidate = _stakes_clarif_msg
+                yield json.dumps(
+                    {"type": "packet",
+                     "value": packet.to_serializable_dict()}
+                ) + "\n"
+                return
+
             # --- PRE-FLIGHT: unreachable-path hedge ---
             # Detect file paths in user_input that fall OUTSIDE the MCP allow-
             # list (/gaia/GAIA_Project, /knowledge, /gaia-common, /sandbox).
