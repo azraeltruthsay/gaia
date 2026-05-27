@@ -197,16 +197,50 @@ def main() -> int:
     save_file(merged_sd, str(out_file), metadata={"format": "pt"})
     log.info("Wrote %.2f GB", out_file.stat().st_size / 1024**3)
 
-    # Copy config + tokenizer/processor files from base
-    log.info("Copying config + tokenizer files from base...")
+    # Copy config + tokenizer/processor files from base.
+    #
+    # GAIA_Project-clp: include the VL-side processor configs and the
+    # legacy tokenizer files (merges.txt / vocab.json). Without these,
+    # AutoProcessor.from_pretrained() on the merged dir fails with
+    # "Can't load image processor for ...", the engine flips
+    # has_vision=False, and the NF4 load path falls through to
+    # AutoModelForCausalLM — which doesn't support Qwen3VL — and the
+    # worker exits. Each file is optional: text-only bases simply
+    # won't have them, and the `if src.exists()` guard skips silently.
+    log.info("Copying config + tokenizer/processor files from base...")
     import shutil
-    for fname in ("config.json", "generation_config.json",
-                  "processor_config.json", "tokenizer_config.json",
-                  "tokenizer.json", "special_tokens_map.json"):
+    _files_to_copy = (
+        # Core config
+        "config.json", "generation_config.json",
+        # Tokenizer
+        "tokenizer_config.json", "tokenizer.json",
+        "special_tokens_map.json",
+        # Legacy tokenizer (BPE merges / vocab) — needed by some
+        # processor classes even when tokenizer.json is present
+        "merges.txt", "vocab.json",
+        # Processor configs (text + vision + video)
+        "processor_config.json",
+        "preprocessor_config.json",        # VL image processor (clp)
+        "video_preprocessor_config.json",  # VL video processor (clp)
+        # Chat template (separate from tokenizer_config.json on some VL bases)
+        "chat_template.json",              # clp
+    )
+    copied: list[str] = []
+    missing: list[str] = []
+    for fname in _files_to_copy:
         src = Path(base_path) / fname
         if src.exists():
             shutil.copy(src, out_dir / fname)
             log.info("  copied %s", fname)
+            copied.append(fname)
+        else:
+            missing.append(fname)
+    log.info(
+        "Processor copy summary: %d copied, %d not present in base",
+        len(copied), len(missing),
+    )
+    if missing:
+        log.debug("  base did not have: %s", ", ".join(missing))
 
     log.info("Done. Output: %s", out_dir)
     return 0
