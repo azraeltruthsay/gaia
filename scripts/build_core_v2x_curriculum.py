@@ -31,6 +31,10 @@ from datasets import load_dataset
 
 CORE_V2X = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x")
 CORE2 = Path("/gaia/GAIA_Project/knowledge/curricula/core2")
+# 6s8: diverse COCO pool (5K NEW images, one caption each) downloaded by
+# scripts/download_coco_diversity.py. The image-diversity fix for the
+# vision-loss-stuck-at-13.5 problem.
+CORE_VISION = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_vision")
 CORE_PILOT = Path("/gaia/GAIA_Project/knowledge/curricula/core_pilot")
 SELF_MODEL = Path("/gaia/GAIA_Project/knowledge/curricula/self-model")
 TOOL_CALLING = Path("/gaia/GAIA_Project/knowledge/curricula/tool_calling_v1")
@@ -378,6 +382,43 @@ def section_vision_coco(rng: random.Random) -> list:
     return rows[:TARGET_VISION_COCO]
 
 
+def section_vision_diverse(rng: random.Random) -> list:
+    """6s8: load the 5K diverse-COCO pool (one caption per image).
+
+    This is the image-diversity fix: the v1 attempt's vision loss stuck
+    at 13.5 because 2000 captions covered only 421 unique images. The
+    diverse pool (downloaded by download_coco_diversity.py) gives ~5K
+    unique images, one caption each, which is what actually teaches
+    general image-grounding.
+
+    Image paths in core_v2x_vision/vision_pairs.jsonl are relative to
+    that dir's images/ subfolder. main()'s image-consolidation step
+    links those into core_v2x/images/, so we keep the "images/<fname>"
+    relative form unchanged here.
+    """
+    print("[vision-diverse] loading 6s8 diverse COCO pool...")
+    src = CORE_VISION / "vision_pairs.jsonl"
+    if not src.exists():
+        print(f"  WARN: {src} missing — run download_coco_diversity.py first")
+        return []
+    rows = []
+    with open(src) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Keep the diverse category label for per-cat loss logging
+            d.setdefault("category", "vision_diverse")
+            rows.append(d)
+    rng.shuffle(rows)
+    print(f"  loaded: {len(rows)} diverse vision pairs")
+    return rows
+
+
 def section_audio_reuse() -> list:
     """Pass through existing core2/audio_pairs.jsonl unchanged."""
     print("[audio] reusing existing audio_pairs.jsonl...")
@@ -461,30 +502,61 @@ def main():
         print(f"  {c}: {counts[c]}")
     print(f"  TOTAL: {len(text_buckets)}")
 
-    # Vision
-    vision = section_vision_coco(rng)
+    # Vision — two sources merged (6s8):
+    #   1. section_vision_coco: existing 421 images, multi-caption (~2K)
+    #   2. section_vision_diverse: 5K NEW diverse images, one caption each
+    # Diversity is the lever (v1 vision loss stuck at 13.5 on 421 imgs).
+    vision_coco = section_vision_coco(rng)
+    vision_diverse = section_vision_diverse(rng)
+    vision = vision_coco + vision_diverse
+    rng.shuffle(vision)
     write_jsonl(CORE_V2X / "vision_pairs.jsonl", vision)
 
     # Audio
     audio = section_audio_reuse()
     write_jsonl(CORE_V2X / "audio_pairs.jsonl", audio)
 
-    # Symlink images/audio dirs
-    for name in ("images", "audio"):
-        src = CORE2 / name
-        dst = CORE_V2X / name
-        if dst.exists() or dst.is_symlink():
-            if dst.is_symlink() or dst.is_file():
-                dst.unlink()
-            else:
-                shutil.rmtree(dst)
-        if src.exists():
-            os.symlink(src, dst)
-            print(f"  symlinked {name}")
+    # Consolidate images into CORE_V2X/images/ as a real dir. The two
+    # vision sources live in separate dirs (core2/images + core_v2x_vision/
+    # images); a single symlink can't merge them, so we per-file symlink
+    # both pools into one root that VISION_IMAGES_ROOT can point at.
+    images_dst = CORE_V2X / "images"
+    if images_dst.is_symlink() or images_dst.is_file():
+        images_dst.unlink()
+    elif images_dst.exists():
+        shutil.rmtree(images_dst)
+    images_dst.mkdir(parents=True, exist_ok=True)
+    linked = 0
+    for img_src_dir in (CORE2 / "images", CORE_VISION / "images"):
+        if not img_src_dir.exists():
+            continue
+        for img in img_src_dir.iterdir():
+            if not img.is_file():
+                continue
+            link = images_dst / img.name
+            if link.exists() or link.is_symlink():
+                continue
+            try:
+                os.symlink(img.resolve(), link)
+                linked += 1
+            except OSError:
+                pass
+    print(f"  consolidated {linked} images into {images_dst}")
+
+    # Audio dir — still a single source, plain symlink is fine
+    audio_dst = CORE_V2X / "audio"
+    if audio_dst.exists() or audio_dst.is_symlink():
+        if audio_dst.is_symlink() or audio_dst.is_file():
+            audio_dst.unlink()
+        else:
+            shutil.rmtree(audio_dst)
+    if (CORE2 / "audio").exists():
+        os.symlink(CORE2 / "audio", audio_dst)
+        print("  symlinked audio")
 
     print("\n=== Core 2.x curriculum summary ===")
     print(f"  Text:   {len(text_buckets)}")
-    print(f"  Vision: {len(vision)}")
+    print(f"  Vision: {len(vision)} ({len(vision_coco)} multi-caption + {len(vision_diverse)} diverse)")
     print(f"  Audio:  {len(audio)}")
     print(f"  TOTAL:  {len(text_buckets) + len(vision) + len(audio)}")
 
