@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GAIA World-Model Merge Approvals</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260527">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { margin: 0; padding: 1rem 1.5rem; }
+    .merges-page-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .merges-page-header h1 { margin: 0; font-size: 1.3rem; }
+    .merges-page-header .meta { opacity: 0.7; font-size: 0.85rem; }
+    .merges-page-header a { color: #5cf; }
+
+    .merges-page-controls {
+      display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+      font-size: 0.85rem; margin-bottom: 1rem;
+    }
+    .merges-page-controls .refresh-btn {
+      background: #2a3540; border: 1px solid #44556a; color: #ddd;
+      padding: 0.3rem 0.7rem; border-radius: 3px; cursor: pointer;
+    }
+    .merges-page-controls .refresh-btn:hover { background: #354556; }
+    .merges-page-controls .auto-refresh {
+      display: flex; align-items: center; gap: 0.3rem;
+    }
+
+    .merge-card {
+      background: #1a1a20; padding: 0.75rem 1rem;
+      border-radius: 4px; margin-bottom: 0.75rem;
+      border-left: 3px solid #ff6;  /* yellow for pending */
+    }
+    .merge-card.applied { border-left-color: #6f6; }
+    .merge-card.rejected { border-left-color: #f66; opacity: 0.7; }
+
+    .merge-card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .merge-card-header .arrow { color: #5cf; font-weight: bold; }
+    .merge-card-header .status-pill {
+      display: inline-block; padding: 0.1rem 0.5rem;
+      border-radius: 2px; font-size: 0.75rem;
+      background: #2a3540;
+    }
+    .merge-card-header .status-pill.applied  { background: #1a4a1a; color: #6f6; }
+    .merge-card-header .status-pill.rejected { background: #4a1a1a; color: #f66; }
+    .merge-card-header .status-pill.pending  { background: #4a4a1a; color: #ff6; }
+
+    .merge-card .summary-row {
+      display: flex; gap: 1.5rem; font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+    .merge-card .summary-row span { opacity: 0.7; }
+    .merge-card .summary-row b { font-variant-numeric: tabular-nums; }
+
+    .merge-card .mapping-preview {
+      background: #0f0f14; padding: 0.5rem 0.75rem;
+      border-radius: 3px; font-family: monospace; font-size: 0.8rem;
+      max-height: 6rem; overflow-y: auto; margin: 0.5rem 0;
+    }
+    .merge-card .mapping-preview .map-row {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem;
+      padding: 0.1rem 0;
+    }
+    .merge-card .mapping-preview .map-row .arrow { color: #5cf; }
+
+    .merge-card .notes-line {
+      font-size: 0.8rem; opacity: 0.7; font-style: italic;
+      margin-top: 0.4rem;
+    }
+
+    .merge-actions {
+      display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;
+    }
+    .merge-actions button {
+      padding: 0.3rem 0.8rem; border-radius: 3px; cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .merge-actions .btn-approve {
+      background: #1a4a1a; border: 1px solid #2a6a2a; color: #6f6;
+    }
+    .merge-actions .btn-approve:hover { background: #225522; }
+    .merge-actions .btn-reject {
+      background: #4a1a1a; border: 1px solid #6a2a2a; color: #f66;
+    }
+    .merge-actions .btn-reject:hover { background: #552222; }
+    .merge-actions input[type=text] {
+      flex-grow: 1; background: #0f0f14; color: #ddd;
+      border: 1px solid #333; padding: 0.3rem 0.5rem; border-radius: 3px;
+    }
+    .merge-actions .pending-state {
+      flex-grow: 1; color: #888; font-size: 0.8rem; font-style: italic;
+    }
+    .merge-actions .approver-input {
+      width: 120px; background: #0f0f14; color: #ddd;
+      border: 1px solid #333; padding: 0.3rem 0.5rem; border-radius: 3px;
+    }
+
+    .merge-card .post-action {
+      font-size: 0.8rem; opacity: 0.8; margin-top: 0.3rem;
+    }
+    .merge-card .post-action.applied  { color: #6f6; }
+    .merge-card .post-action.rejected { color: #f66; }
+
+    .empty-state {
+      padding: 2rem; text-align: center; opacity: 0.6; font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="merges-page-header">
+    <h1>World-Model Merge Approvals</h1>
+    <div class="meta">
+      <a href="/static/index.html">← Mission Control</a>
+      <span style="margin-left: 1rem;">knowledge/candidates/world_merges/</span>
+    </div>
+  </div>
+
+  <div x-data="mergeApprovalApp()" x-init="init()">
+
+    <div class="merges-page-controls">
+      <button class="refresh-btn" @click="loadPending">Refresh</button>
+      <span x-show="loading" class="meta">loading...</span>
+      <span x-show="error" style="color:#f66" x-text="error"></span>
+      <span x-text="`${pending.length} pending`" class="meta"></span>
+      <label class="auto-refresh">
+        <input type="checkbox" x-model="autoRefresh" @change="toggleAutoRefresh">
+        auto-refresh every 30s
+      </label>
+      <label class="auto-refresh">
+        Default approver:
+        <input type="text" class="approver-input" x-model="defaultApprover">
+      </label>
+    </div>
+
+    <div x-show="!loading && pending.length === 0" class="empty-state">
+      No pending merges. The KG isn't proposing any identity-collapse
+      operations right now.
+    </div>
+
+    <template x-for="m in pending" :key="m.merge_id">
+      <div class="merge-card"
+           :class="resultStatus(m) === 'applied' ? 'applied'
+                 : resultStatus(m) === 'rejected' ? 'rejected'
+                 : 'pending'">
+
+        <div class="merge-card-header">
+          <div>
+            <code x-text="m.merge_id"></code>
+            <span style="margin: 0 0.5rem;" class="arrow">·</span>
+            <b x-text="m.source_world_name || m.source_world"></b>
+            <span class="arrow"> → </span>
+            <b x-text="m.target_world_name || m.target_world"></b>
+          </div>
+          <div>
+            <span class="status-pill" :class="resultStatus(m)"
+                  x-text="resultStatus(m).toUpperCase()"></span>
+          </div>
+        </div>
+
+        <div class="summary-row">
+          <div><span>triples to rewrite:</span> <b x-text="m.triples_to_rewrite ?? '?'"></b></div>
+          <div><span>edges to remap:</span> <b x-text="m.edges_to_remap ?? '?'"></b></div>
+          <div><span>entities mapped:</span>
+            <b x-text="m.entity_mapping ? Object.keys(m.entity_mapping).length : 0"></b></div>
+          <div><span>proposed at:</span>
+            <b x-text="formatTime(m.proposed_at)"></b></div>
+        </div>
+
+        <!-- Coreference mapping preview -->
+        <template x-if="m.entity_mapping && Object.keys(m.entity_mapping).length > 0">
+          <div class="mapping-preview">
+            <template x-for="[src, dst] in Object.entries(m.entity_mapping).slice(0, 8)"
+                      :key="src">
+              <div class="map-row">
+                <span x-text="src"></span>
+                <span class="arrow">→</span>
+                <span x-text="dst"></span>
+              </div>
+            </template>
+            <template x-if="Object.keys(m.entity_mapping).length > 8">
+              <div style="opacity: 0.5; font-style: italic;"
+                   x-text="`... and ${Object.keys(m.entity_mapping).length - 8} more`">
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="m.notes">
+          <div class="notes-line">
+            <span>notes:</span> <span x-text="m.notes"></span>
+          </div>
+        </template>
+
+        <!-- Actions, only when status is still pending in our local state -->
+        <template x-if="resultStatus(m) === 'pending'">
+          <div class="merge-actions">
+            <input type="text" placeholder="reject reason (optional)"
+                   x-model="rejectReasons[m.merge_id]">
+            <button class="btn-approve"
+                    :disabled="busy[m.merge_id]"
+                    @click="approve(m.merge_id)">
+              <span x-show="!busy[m.merge_id]">✓ Approve</span>
+              <span x-show="busy[m.merge_id]">…</span>
+            </button>
+            <button class="btn-reject"
+                    :disabled="busy[m.merge_id]"
+                    @click="reject(m.merge_id)">
+              <span x-show="!busy[m.merge_id]">✗ Reject</span>
+              <span x-show="busy[m.merge_id]">…</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- Post-action confirmation -->
+        <template x-if="resultStatus(m) === 'approved'">
+          <div class="post-action applied">
+            ✓ Approved by <span x-text="m.approved_by"></span>
+            at <span x-text="formatTime(m.approved_at)"></span>
+            — apply_merge can now proceed.
+          </div>
+        </template>
+        <template x-if="resultStatus(m) === 'applied'">
+          <div class="post-action applied">
+            ✓ Applied at <span x-text="formatTime(m.applied_at)"></span>.
+          </div>
+        </template>
+        <template x-if="resultStatus(m) === 'rejected'">
+          <div class="post-action rejected">
+            ✗ Rejected
+            <template x-if="m.rejected_reason">
+              <span>— <span x-text="m.rejected_reason"></span></span>
+            </template>
+            at <span x-text="formatTime(m.rejected_at)"></span>.
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <script>
+    function mergeApprovalApp() {
+      return {
+        pending: [],
+        loading: false,
+        error: '',
+        defaultApprover: 'architect',
+        autoRefresh: false,
+        rejectReasons: {},
+        busy: {},
+        _refreshTimer: null,
+
+        async init() {
+          await this.loadPending();
+        },
+
+        async loadPending() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const resp = await fetch('/api/world_merges/pending');
+            if (!resp.ok) {
+              throw new Error(`HTTP ${resp.status}`);
+            }
+            const body = await resp.json();
+            this.pending = body.pending || [];
+          } catch (e) {
+            this.error = `Failed to load pending merges: ${e.message}`;
+            this.pending = [];
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async approve(mergeId) {
+          this.busy[mergeId] = true;
+          try {
+            const resp = await fetch(
+              `/api/world_merges/${encodeURIComponent(mergeId)}/approve`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ approver: this.defaultApprover }),
+              },
+            );
+            if (!resp.ok) {
+              const body = await resp.json().catch(() => ({}));
+              throw new Error(body.detail?.error || body.detail || `HTTP ${resp.status}`);
+            }
+            const body = await resp.json();
+            // Patch the local entry with the updated fields
+            this._patchEntry(mergeId, body);
+          } catch (e) {
+            this.error = `Approve failed: ${e.message}`;
+          } finally {
+            this.busy[mergeId] = false;
+          }
+        },
+
+        async reject(mergeId) {
+          const reason = this.rejectReasons[mergeId] || '';
+          if (!reason && !confirm('Reject without a reason?')) return;
+          this.busy[mergeId] = true;
+          try {
+            const resp = await fetch(
+              `/api/world_merges/${encodeURIComponent(mergeId)}/reject`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason }),
+              },
+            );
+            if (!resp.ok) {
+              const body = await resp.json().catch(() => ({}));
+              throw new Error(body.detail?.error || body.detail || `HTTP ${resp.status}`);
+            }
+            const body = await resp.json();
+            this._patchEntry(mergeId, body);
+          } catch (e) {
+            this.error = `Reject failed: ${e.message}`;
+          } finally {
+            this.busy[mergeId] = false;
+          }
+        },
+
+        _patchEntry(mergeId, fresh) {
+          // Update in-place rather than refetching the whole list —
+          // keeps scroll position + filter state stable.
+          const idx = this.pending.findIndex(m => m.merge_id === mergeId);
+          if (idx >= 0) {
+            // The proxy passes through gaia-study's response which has
+            // {ok, ...candidate_fields}. Strip ok, merge the rest.
+            const { ok, ...rest } = fresh;
+            this.pending[idx] = { ...this.pending[idx], ...rest };
+          }
+        },
+
+        // ── Status derivation ─────────────────────────────────────
+        resultStatus(m) {
+          // Prefer the candidate file's status (the gate's source of truth)
+          return m.status || 'pending';
+        },
+
+        // ── Auto-refresh ──────────────────────────────────────────
+        toggleAutoRefresh() {
+          if (this._refreshTimer) {
+            clearInterval(this._refreshTimer);
+            this._refreshTimer = null;
+          }
+          if (this.autoRefresh) {
+            this._refreshTimer = setInterval(() => this.loadPending(), 30000);
+          }
+        },
+
+        // ── Formatters ────────────────────────────────────────────
+        formatTime(iso) {
+          if (!iso) return '—';
+          try {
+            const parts = iso.split('T');
+            return parts[0] + ' ' + (parts[1] || '').slice(0, 8);
+          } catch { return iso; }
+        },
+      };
+    }
+  </script>
+
+</body>
+</html>
