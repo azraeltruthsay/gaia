@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GAIA Training Runs</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260527">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    /* GAIA_Project-n0e Phase 2 — minimal styles scoped to this page.
+       Inherits typography + colors from /static/style.css. */
+    body { margin: 0; padding: 1rem 1.5rem; }
+    .training-page-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .training-page-header h1 { margin: 0; font-size: 1.3rem; }
+    .training-page-header .meta { opacity: 0.7; font-size: 0.85rem; }
+    .training-page-header a { color: #5cf; }
+
+    .training-runs-table {
+      width: 100%; border-collapse: collapse; margin-bottom: 1rem;
+      font-size: 0.85rem;
+    }
+    .training-runs-table th,
+    .training-runs-table td {
+      padding: 0.4rem 0.6rem; text-align: left;
+      border-bottom: 1px solid #2a2a30;
+      white-space: nowrap;
+    }
+    .training-runs-table th {
+      background: #1c1c22; cursor: pointer; user-select: none;
+      position: sticky; top: 0;
+    }
+    .training-runs-table th:hover { background: #25252c; }
+    .training-runs-table tr.selected td { background: #2a3540; }
+    .training-runs-table tr:hover td { background: #1f1f25; }
+    .training-runs-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .training-runs-table .status-success { color: #6f6; }
+    .training-runs-table .status-failed  { color: #f66; }
+    .training-runs-table .status-running { color: #ff6; }
+    .training-runs-table .battery-good { color: #6f6; }
+    .training-runs-table .battery-mid  { color: #ff6; }
+    .training-runs-table .battery-low  { color: #f66; }
+
+    .training-detail {
+      background: #1a1a20; padding: 0.75rem 1rem; border-radius: 4px;
+      margin-bottom: 1rem;
+    }
+    .training-detail h2 { margin: 0 0 0.5rem 0; font-size: 1rem; }
+    .training-detail .kv-grid {
+      display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem;
+      font-size: 0.85rem;
+    }
+    .training-detail .kv-grid > div:nth-child(odd) { opacity: 0.7; }
+    .training-detail .kv-grid > div:nth-child(even) { font-variant-numeric: tabular-nums; }
+
+    .loss-curve-canvas {
+      width: 100%; height: 240px; background: #0f0f14;
+      border-radius: 4px; margin-top: 0.5rem;
+      display: block;
+    }
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1rem;
+      margin-top: 0.5rem; font-size: 0.8rem;
+    }
+    .legend .swatch {
+      display: inline-block; width: 12px; height: 12px;
+      margin-right: 0.3rem; vertical-align: middle; border-radius: 2px;
+    }
+    .empty-state {
+      padding: 2rem; text-align: center; opacity: 0.6; font-style: italic;
+    }
+    .training-page-controls {
+      margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;
+      align-items: center; font-size: 0.85rem;
+    }
+    .training-page-controls input[type=text] {
+      background: #1a1a20; color: #ddd; border: 1px solid #333;
+      padding: 0.3rem 0.5rem; border-radius: 3px; width: 250px;
+    }
+    .training-page-controls .refresh-btn {
+      background: #2a3540; border: 1px solid #44556a; color: #ddd;
+      padding: 0.3rem 0.7rem; border-radius: 3px; cursor: pointer;
+    }
+    .training-page-controls .refresh-btn:hover { background: #354556; }
+    .battery-summary {
+      display: inline-block; padding: 0.1rem 0.4rem;
+      background: #1c2530; border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="training-page-header">
+    <h1>Training Runs</h1>
+    <div class="meta">
+      <a href="/static/index.html">← Mission Control</a>
+      <span style="margin-left: 1rem;">/shared/training_runs/</span>
+    </div>
+  </div>
+
+  <div x-data="trainingRunsApp()" x-init="init()">
+
+    <div class="training-page-controls">
+      <input
+        type="text"
+        x-model="filterText"
+        placeholder="Filter by run_id / scope_label / status..."
+      />
+      <span x-text="`${filteredRuns.length} of ${runs.length}`"></span>
+      <button class="refresh-btn" @click="loadRuns">Refresh</button>
+      <span x-show="loading" class="meta">loading...</span>
+      <span x-show="error" style="color:#f66" x-text="error"></span>
+    </div>
+
+    <!-- Runs table -->
+    <table class="training-runs-table" x-show="runs.length > 0">
+      <thead>
+        <tr>
+          <template x-for="col in columns" :key="col.key">
+            <th @click="sortByColumn(col.key)">
+              <span x-text="col.label"></span>
+              <span x-show="sortBy === col.key" x-text="descending ? ' ↓' : ' ↑'"></span>
+            </th>
+          </template>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="run in filteredRuns" :key="run.run_id">
+          <tr :class="{ selected: selectedRunId === run.run_id }"
+              @click="selectRun(run.run_id)">
+            <td x-text="run.run_id"></td>
+            <td x-text="run.scope_label || '—'"></td>
+            <td><span :class="statusClass(run.status)" x-text="run.status || '—'"></span></td>
+            <td class="num" x-text="formatLoss(run.final_loss)"></td>
+            <td class="num" x-text="formatSteps(run.final_steps)"></td>
+            <td class="num" x-text="formatDuration(run.runtime_seconds)"></td>
+            <td>
+              <template x-if="run.battery">
+                <span class="battery-summary" :class="batteryClass(run.battery)">
+                  <span x-text="run.battery.alignment || '—'"></span>
+                  <span x-show="run.battery.pass_rate != null"
+                        x-text="` ${formatPercent(run.battery.pass_rate)}`"></span>
+                </span>
+              </template>
+              <template x-if="!run.battery">
+                <span style="opacity: 0.4">—</span>
+              </template>
+            </td>
+            <td x-text="formatStartedAt(run.started_at)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+
+    <div x-show="!loading && runs.length === 0" class="empty-state">
+      No training runs found in /shared/training_runs/.
+    </div>
+
+    <!-- Detail panel for the selected run -->
+    <div x-show="selectedRun" class="training-detail">
+      <h2>
+        <span x-text="selectedRunId"></span>
+        <button class="refresh-btn" style="margin-left: 1rem;" @click="closeDetail">Close</button>
+      </h2>
+      <div class="kv-grid" x-show="selectedRun">
+        <div>Base model</div><div x-text="selectedRun?.config?.base_model || '—'"></div>
+        <div>Scope</div><div x-text="selectedRun?.config?.version_tag || selectedRun?.summary?.scope_label || '—'"></div>
+        <div>LoRA r</div><div x-text="selectedRun?.config?.lora_r ?? '—'"></div>
+        <div>LR</div><div x-text="selectedRun?.config?.learning_rate ?? '—'"></div>
+        <div>Steps</div><div x-text="`${selectedRun?.summary?.final_steps ?? '?'} / ${selectedRun?.config?.max_steps ?? '?'}`"></div>
+        <div>Final loss</div><div x-text="formatLoss(selectedRun?.summary?.final_loss)"></div>
+        <div>Status</div><div x-text="selectedRun?.summary?.status || '—'"></div>
+        <div>Runtime</div><div x-text="formatDuration(selectedRun?.summary?.runtime_seconds)"></div>
+        <div>Adapter</div><div x-text="selectedRun?.summary?.adapter_dir || '—'"></div>
+        <div>Checkpoints</div><div x-text="(selectedRun?.checkpoints || []).join(', ') || '—'"></div>
+        <template x-if="selectedRun?.battery">
+          <div>Battery</div>
+        </template>
+        <template x-if="selectedRun?.battery">
+          <div>
+            <span x-text="selectedRun.battery.alignment"></span>
+            ·
+            <span x-text="`${selectedRun.battery.summary?.passed ?? '?'}/${selectedRun.battery.summary?.total ?? '?'}`"></span>
+            (<span x-text="formatPercent(selectedRun.battery.summary?.pass_rate)"></span>)
+          </div>
+        </template>
+      </div>
+
+      <!-- Loss curve canvas -->
+      <div x-show="lossCurve">
+        <h2 style="margin-top: 1rem;">Loss curve</h2>
+        <canvas
+          x-ref="lossCanvas"
+          class="loss-curve-canvas"
+          @resize.window="drawCurve"
+        ></canvas>
+        <div class="legend">
+          <span><span class="swatch" style="background:#6cf"></span>overall loss</span>
+          <template x-for="(_, cat) in (lossCurve?.per_category || {})" :key="cat">
+            <span>
+              <span class="swatch" :style="`background:${categoryColor(cat)}`"></span>
+              <span x-text="cat"></span>
+            </span>
+          </template>
+        </div>
+      </div>
+      <div x-show="selectedRun && !lossCurve && !loadingMetrics" class="empty-state">
+        No metrics recorded for this run.
+      </div>
+      <div x-show="loadingMetrics" class="empty-state">Loading metrics...</div>
+    </div>
+  </div>
+
+  <script>
+    // GAIA_Project-n0e Phase 2 — training runs dashboard.
+    //
+    // Reads /api/training/runs for the list, /api/training/runs/{id} for
+    // detail, /api/training/runs/{id}/loss_curve for the chart. Renders
+    // overall + per-category losses onto a single canvas.
+    function trainingRunsApp() {
+      return {
+        runs: [],
+        loading: false,
+        error: '',
+        sortBy: 'started_at',
+        descending: true,
+        filterText: '',
+        selectedRunId: null,
+        selectedRun: null,
+        lossCurve: null,
+        loadingMetrics: false,
+
+        columns: [
+          { key: 'run_id',          label: 'Run ID' },
+          { key: 'scope_label',     label: 'Scope' },
+          { key: 'status',          label: 'Status' },
+          { key: 'final_loss',      label: 'Final loss' },
+          { key: 'final_steps',     label: 'Steps' },
+          { key: 'runtime_seconds', label: 'Runtime' },
+          { key: 'battery',         label: 'Battery' },
+          { key: 'started_at',      label: 'Started' },
+        ],
+
+        async init() {
+          await this.loadRuns();
+        },
+
+        async loadRuns() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const params = new URLSearchParams({
+              sort_by: this.sortBy === 'battery' ? 'started_at' : this.sortBy,
+              descending: String(this.descending),
+            });
+            const resp = await fetch(`/api/training/runs?${params}`);
+            if (!resp.ok) {
+              throw new Error(`HTTP ${resp.status}`);
+            }
+            const body = await resp.json();
+            this.runs = body.runs || [];
+          } catch (e) {
+            this.error = `Failed to load runs: ${e.message}`;
+            this.runs = [];
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        get filteredRuns() {
+          if (!this.filterText) return this.runs;
+          const q = this.filterText.toLowerCase();
+          return this.runs.filter(r => {
+            return (r.run_id || '').toLowerCase().includes(q)
+                || (r.scope_label || '').toLowerCase().includes(q)
+                || (r.status || '').toLowerCase().includes(q)
+                || (r.base_model || '').toLowerCase().includes(q);
+          });
+        },
+
+        sortByColumn(key) {
+          if (this.sortBy === key) {
+            this.descending = !this.descending;
+          } else {
+            this.sortBy = key;
+            this.descending = true;
+          }
+          this.loadRuns();
+        },
+
+        async selectRun(run_id) {
+          this.selectedRunId = run_id;
+          this.selectedRun = null;
+          this.lossCurve = null;
+          this.loadingMetrics = true;
+          try {
+            const detailResp = await fetch(`/api/training/runs/${encodeURIComponent(run_id)}`);
+            if (detailResp.ok) {
+              this.selectedRun = await detailResp.json();
+            }
+            // Loss curve (separate fetch — can be larger)
+            const curveResp = await fetch(`/api/training/runs/${encodeURIComponent(run_id)}/loss_curve`);
+            if (curveResp.ok) {
+              const body = await curveResp.json();
+              if ((body.series && body.series.length) ||
+                  (body.per_category && Object.keys(body.per_category).length)) {
+                this.lossCurve = body;
+                // Render on next tick (canvas needs to be visible first)
+                this.$nextTick(() => this.drawCurve());
+              }
+            }
+          } catch (e) {
+            this.error = `Failed to load detail: ${e.message}`;
+          } finally {
+            this.loadingMetrics = false;
+          }
+        },
+
+        closeDetail() {
+          this.selectedRunId = null;
+          this.selectedRun = null;
+          this.lossCurve = null;
+        },
+
+        // ── Canvas rendering ──────────────────────────────────────
+        drawCurve() {
+          const canvas = this.$refs.lossCanvas;
+          if (!canvas || !this.lossCurve) return;
+
+          // Resize to actual display size for crisp 1:1 pixel mapping
+          const dpr = window.devicePixelRatio || 1;
+          const rect = canvas.getBoundingClientRect();
+          canvas.width = rect.width * dpr;
+          canvas.height = rect.height * dpr;
+          const ctx = canvas.getContext('2d');
+          ctx.scale(dpr, dpr);
+          ctx.clearRect(0, 0, rect.width, rect.height);
+
+          // Gather all series for shared step + loss range
+          const allSeries = [];
+          if (this.lossCurve.series && this.lossCurve.series.length) {
+            allSeries.push({ name: 'overall', color: '#6cf',
+                             data: this.lossCurve.series });
+          }
+          for (const [cat, points] of Object.entries(this.lossCurve.per_category || {})) {
+            if (points && points.length) {
+              allSeries.push({ name: cat, color: this.categoryColor(cat),
+                               data: points });
+            }
+          }
+          if (allSeries.length === 0) return;
+
+          let minStep = Infinity, maxStep = -Infinity;
+          let minLoss = Infinity, maxLoss = -Infinity;
+          for (const s of allSeries) {
+            for (const p of s.data) {
+              if (p.step < minStep) minStep = p.step;
+              if (p.step > maxStep) maxStep = p.step;
+              if (p.loss < minLoss) minLoss = p.loss;
+              if (p.loss > maxLoss) maxLoss = p.loss;
+            }
+          }
+          if (!isFinite(minStep) || maxStep === minStep) return;
+
+          const pad = { l: 50, r: 12, t: 12, b: 28 };
+          const w = rect.width - pad.l - pad.r;
+          const h = rect.height - pad.t - pad.b;
+
+          const sx = step => pad.l + ((step - minStep) / (maxStep - minStep)) * w;
+          const sy = loss => pad.t + h - ((loss - minLoss) / (maxLoss - minLoss || 1)) * h;
+
+          // Axes
+          ctx.strokeStyle = '#333';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(pad.l, pad.t);
+          ctx.lineTo(pad.l, pad.t + h);
+          ctx.lineTo(pad.l + w, pad.t + h);
+          ctx.stroke();
+
+          // Y ticks: 4 evenly-spaced
+          ctx.fillStyle = '#888';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+          for (let i = 0; i <= 4; i++) {
+            const v = minLoss + (i / 4) * (maxLoss - minLoss);
+            const y = sy(v);
+            ctx.fillText(v.toFixed(2), pad.l - 5, y);
+            ctx.strokeStyle = '#222';
+            ctx.beginPath();
+            ctx.moveTo(pad.l, y);
+            ctx.lineTo(pad.l + w, y);
+            ctx.stroke();
+          }
+
+          // X ticks: 5 evenly-spaced steps
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          for (let i = 0; i <= 5; i++) {
+            const v = Math.round(minStep + (i / 5) * (maxStep - minStep));
+            const x = sx(v);
+            ctx.fillText(String(v), x, pad.t + h + 4);
+          }
+
+          // Series lines
+          for (const series of allSeries) {
+            if (!series.data.length) continue;
+            ctx.strokeStyle = series.color;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            let first = true;
+            for (const p of series.data) {
+              if (first) {
+                ctx.moveTo(sx(p.step), sy(p.loss));
+                first = false;
+              } else {
+                ctx.lineTo(sx(p.step), sy(p.loss));
+              }
+            }
+            ctx.stroke();
+          }
+        },
+
+        // ── Formatters ────────────────────────────────────────────
+        formatLoss(v) {
+          if (v == null || isNaN(v)) return '—';
+          return Number(v).toFixed(3);
+        },
+        formatSteps(v) {
+          if (v == null) return '—';
+          return Number(v).toLocaleString();
+        },
+        formatDuration(seconds) {
+          if (seconds == null) return '—';
+          if (seconds < 60) return `${Math.round(seconds)}s`;
+          if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+          const h = Math.floor(seconds / 3600);
+          const m = Math.round((seconds % 3600) / 60);
+          return `${h}h ${m}m`;
+        },
+        formatPercent(v) {
+          if (v == null) return '—';
+          return `${Number(v).toFixed(1)}%`;
+        },
+        formatStartedAt(iso) {
+          if (!iso) return '—';
+          try {
+            return iso.split('T')[0] + ' ' + iso.split('T')[1].slice(0, 8);
+          } catch { return iso; }
+        },
+        statusClass(status) {
+          if (!status) return '';
+          const s = status.toLowerCase();
+          if (s.includes('success') || s === 'completed') return 'status-success';
+          if (s.includes('fail') || s === 'error') return 'status-failed';
+          if (s.includes('run') || s === 'running') return 'status-running';
+          return '';
+        },
+        batteryClass(b) {
+          if (!b || b.pass_rate == null) return '';
+          if (b.pass_rate >= 80) return 'battery-good';
+          if (b.pass_rate >= 50) return 'battery-mid';
+          return 'battery-low';
+        },
+        categoryColor(cat) {
+          // Stable per-category color via a tiny hash
+          let h = 0;
+          for (let i = 0; i < cat.length; i++) h = (h * 31 + cat.charCodeAt(i)) & 0xff;
+          const palette = ['#f86', '#fa6', '#fd6', '#af6', '#6f8', '#6fc',
+                           '#6af', '#a8f', '#d6f', '#f6a'];
+          return palette[h % palette.length];
+        },
+      };
+    }
+  </script>
+
+</body>
+</html>
