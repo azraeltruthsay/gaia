@@ -369,17 +369,63 @@ def build_dataset(text_path: str | None, vision_path: str | None,
 
 
 class MultimodalCollator:
-    """Collate variable-length text/vision samples into a batch.
+    """Collate variable-length text/vision/audio samples into a batch.
 
-    Pads input_ids/attention_mask/labels with pad_token_id / 0 / -100
-    respectively. Stacks pixel_values along batch dim when every sample
-    in the batch has an image; drops them silently if mixed (shouldn't
-    happen given our text-first / vision-second sort order).
+    Builds causal-LM labels that score ONLY the assistant's answer. Every
+    position up to and including the assistant turn marker is masked to
+    -100 (this covers the instruction AND the image/audio soft-token
+    placeholders, which live in the user turn), as is padding.
+
+    This is the standard PaliGemma / Gemma-4 SFT objective. The previous
+    code set ``labels = input_ids`` and masked only padding, so the
+    ~256 image soft-tokens per vision sample (and the audio soft-tokens)
+    were scored against the image placeholder id. Those positions are
+    unlearnable and dominate the per-category mean, pinning vision/audio
+    loss at ~ln(vocab) (~12 for Gemma 4's 256k vocab) so it never
+    converged while text did. See GAIA_Project-axa.
+
+    Stacks pixel_values / input_features along batch dim when every
+    sample in the batch has them; drops them silently if mixed (shouldn't
+    happen given our text-first / vision-second / audio-third sort order).
     """
 
     def __init__(self, processor, pad_token_id: int):
         self.processor = processor
         self.pad_token_id = pad_token_id
+        tok = processor.tokenizer
+        # Assistant turn marker for the active chat template. Everything
+        # up to and including this marker is masked from the loss; only
+        # the answer tokens that follow are scored. For Gemma 4 the
+        # delimiters are atomic special tokens, so this 3-token sequence
+        # matches cleanly as a subsequence of the processed input_ids.
+        if CHAT_TEMPLATE == "chatml":
+            marker = "<|im_start|>assistant"
+        else:  # gemma4
+            marker = "<|turn>assistant<turn|>"
+        self._assistant_ids = list(tok(marker, add_special_tokens=False)["input_ids"])
+        # Defensive fallback: image/audio placeholder token ids, masked
+        # wherever they appear (they always precede the marker, so the
+        # prompt mask already covers them — this is belt-and-suspenders).
+        self._modality_token_ids = set()
+        for attr in ("image_token", "audio_token"):
+            t = getattr(processor, attr, None)
+            if t:
+                tid = tok.convert_tokens_to_ids(t)
+                if isinstance(tid, int) and tid >= 0:
+                    self._modality_token_ids.add(tid)
+        self._missing_marker_warned = False
+
+    @staticmethod
+    def _last_subseq_end(haystack, needle):
+        """Index just past the LAST occurrence of ``needle`` in
+        ``haystack`` (both lists of int ids), or None if absent."""
+        n = len(needle)
+        if n == 0:
+            return None
+        for start in range(len(haystack) - n, -1, -1):
+            if haystack[start:start + n] == needle:
+                return start + n
+        return None
 
     def __call__(self, batch):
         import torch
@@ -395,8 +441,32 @@ class MultimodalCollator:
                 ids = torch.cat([ids, torch.full((pad,), self.pad_token_id, dtype=ids.dtype)])
                 mask = torch.cat([mask, torch.zeros(pad, dtype=mask.dtype)])
             labels = ids.clone()
-            # Mask padding positions in labels
+            # 1) Mask the prompt: everything up to and including the
+            #    assistant turn marker. This covers the instruction and
+            #    the image/audio soft-token placeholders (all in the user
+            #    turn), so only the assistant's answer is scored.
+            real_len = int(mask.sum().item())
+            real_ids = ids[:real_len].tolist()
+            answer_start = self._last_subseq_end(real_ids, self._assistant_ids)
+            if answer_start is None:
+                # Marker absent (e.g. answer truncated past max_length) —
+                # score nothing rather than train on prompt/image tokens.
+                labels[:] = -100
+                if not self._missing_marker_warned:
+                    log.warning(
+                        "MultimodalCollator: assistant marker %s not found in a "
+                        "sample (likely truncation); masking it entirely. If this "
+                        "is frequent, check chat template / MAX_SEQ_LENGTH.",
+                        self._assistant_ids,
+                    )
+                    self._missing_marker_warned = True
+            else:
+                labels[:answer_start] = -100
+            # 2) Mask padding positions.
             labels[mask == 0] = -100
+            # 3) Defensive: mask any stray image/audio soft-token ids.
+            for tid in self._modality_token_ids:
+                labels[ids == tid] = -100
             padded_ids.append(ids)
             padded_masks.append(mask)
             padded_labels.append(labels)
