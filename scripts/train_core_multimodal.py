@@ -873,6 +873,12 @@ def main():
                              "scope which language_model layers get LoRA "
                              "(e.g. only the last 12). Default matches all "
                              "language_model attention/MLP linears.")
+    parser.add_argument("--modules-to-save", default=None,
+                        help="Comma-separated module names to FULLY train (not "
+                             "LoRA) and save, via PEFT modules_to_save. Use "
+                             "'embed_vision' to unfreeze the vision projector so "
+                             "the model can learn image grounding (GAIA_Project-gix); "
+                             "add 'vision_tower' to also train the encoder.")
     parser.add_argument("--no-shuffle", action="store_true",
                         help="Use SequentialSampler instead of default "
                              "RandomSampler. Required when training a "
@@ -1150,9 +1156,16 @@ def main():
         r"(?:q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
     )
     log.info("LoRA target_modules regex: %s", target_modules_regex)
+    modules_to_save = (
+        [m.strip() for m in args.modules_to_save.split(",") if m.strip()]
+        if args.modules_to_save else None
+    )
+    if modules_to_save:
+        log.info("Fully training (modules_to_save): %s", modules_to_save)
     lora_config = LoraConfig(
         r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT,
         target_modules=target_modules_regex,
+        modules_to_save=modules_to_save,
         task_type=TaskType.CAUSAL_LM, bias="none",
     )
     model = get_peft_model(model, lora_config)
