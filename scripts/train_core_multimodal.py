@@ -829,6 +829,11 @@ def main():
                         format="%(asctime)s [%(levelname)s] %(message)s")
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--save-steps", type=int, default=500,
+                        help="Checkpoint every N steps. Lower = less work lost "
+                             "when the NVRM RC watchdog kills the run "
+                             "(GAIA_Project-22a); the resilient wrapper resumes "
+                             "from the latest checkpoint. save_total_limit keeps 2.")
     parser.add_argument("--steps", type=int, default=200,
                         help="Max training steps (default 200)")
     parser.add_argument("--skip-merge", action="store_true",
@@ -1168,7 +1173,7 @@ def main():
         warmup_steps=WARMUP_STEPS,
         max_grad_norm=0.5,
         logging_steps=10,
-        save_steps=max(50, args.steps // 4),
+        save_steps=max(50, min(args.save_steps, args.steps // 2)),
         save_total_limit=2,
         bf16=True,
         gradient_checkpointing=True,
@@ -1291,9 +1296,14 @@ def main():
     _resume = None
     _adapter_path = Path(ADAPTER_DIR)
     if _adapter_path.exists():
-        _ckpts = sorted(_adapter_path.glob("checkpoint-*"))
+        # Sort NUMERICALLY by step — lexical sort picks the wrong checkpoint
+        # once step counts differ in digit length (e.g. "checkpoint-11000"
+        # sorts before "checkpoint-5500"). Critical for resume-after-crash
+        # (GAIA_Project-22a).
+        _ckpts = [p for p in _adapter_path.glob("checkpoint-*")
+                  if p.name.rsplit("-", 1)[-1].isdigit()]
         if _ckpts:
-            _resume = str(_ckpts[-1])
+            _resume = str(max(_ckpts, key=lambda p: int(p.name.rsplit("-", 1)[-1])))
             log.info("Resuming from checkpoint: %s", _resume)
     result = trainer.train(resume_from_checkpoint=_resume)
     elapsed = time.time() - t0
