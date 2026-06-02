@@ -1162,6 +1162,14 @@ def main():
     )
     if modules_to_save:
         log.info("Fully training (modules_to_save): %s", modules_to_save)
+        # bnb's llm_int8_skip_modules doesn't reliably skip nested .linear
+        # submodules (same issue as the audio_tower fix), so these modules
+        # may still be NF4 Params4bit — and PEFT's modules_to_save calls
+        # requires_grad_() which fails on non-float (4-bit) params. Dequantize
+        # them to bf16 nn.Linear first so they're fully trainable (gix).
+        for _m in modules_to_save:
+            _n = dequantize_tower_linear4bit(model, _m)
+            log.info("  dequantized %d Linear4bit under '%s' → bf16 (trainable)", _n, _m)
     lora_config = LoraConfig(
         r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT,
         target_modules=target_modules_regex,
