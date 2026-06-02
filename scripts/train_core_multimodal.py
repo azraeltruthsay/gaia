@@ -154,6 +154,36 @@ def format_audio_prompt(instruction: str, output: str, audio_placeholder: str) -
     )
 
 
+# ── Answer-span helpers (loss masking) ──────────────────────────────────────
+def _assistant_marker_string() -> str:
+    """Assistant turn marker for the active chat template. Tokens up to and
+    including this marker are masked from the loss (prompt + image/audio
+    soft-token placeholders); only the answer that follows is scored."""
+    return "<|im_start|>assistant" if CHAT_TEMPLATE == "chatml" else "<|turn>assistant<turn|>"
+
+
+def _last_subseq_end(haystack, needle):
+    """Index just past the LAST occurrence of ``needle`` in ``haystack``
+    (both lists of int ids), or None if absent."""
+    n = len(needle)
+    if n == 0:
+        return None
+    for start in range(len(haystack) - n, -1, -1):
+        if haystack[start:start + n] == needle:
+            return start + n
+    return None
+
+
+def _has_scorable_answer(input_ids, marker_ids) -> bool:
+    """True if the assistant marker is present AND at least one answer token
+    follows it. Samples that fail this (answer truncated past max_length, or
+    marker absent) would mask to all -100 → CrossEntropyLoss over zero tokens
+    → NaN. The dataset builder skips them rather than feed NaN into the loss."""
+    seq = input_ids.tolist()
+    end = _last_subseq_end(seq, marker_ids)
+    return end is not None and end < len(seq)
+
+
 # ── Dataset building ───────────────────────────────────────────────────────
 def _load_wav_mono_16k(path: str):
     """Read a WAV file → float32 numpy array at 16 kHz mono.
@@ -207,6 +237,14 @@ def build_dataset(text_path: str | None, vision_path: str | None,
     audio_tok = getattr(processor, "audio_token", None) or "<|audio|>"
     samples = []
 
+    # Answer-span marker: samples whose answer is truncated past MAX_SEQ_LENGTH
+    # (so nothing is left to score) are skipped — feeding an all-masked sample
+    # to CrossEntropyLoss yields NaN. Mostly long multi-turn text; vision/audio
+    # are short enough that this rarely fires.
+    marker_ids = list(processor.tokenizer(
+        _assistant_marker_string(), add_special_tokens=False)["input_ids"])
+    skipped = {"text": 0, "vision": 0, "audio": 0}
+
     # Text-only
     text_count = 0
     if text_path and Path(text_path).exists():
@@ -221,8 +259,12 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     text, return_tensors="pt", truncation=True,
                     max_length=MAX_SEQ_LENGTH,
                 )
+                ids = tok["input_ids"].squeeze(0)
+                if not _has_scorable_answer(ids, marker_ids):
+                    skipped["text"] += 1
+                    continue
                 samples.append({
-                    "input_ids": tok["input_ids"].squeeze(0),
+                    "input_ids": ids,
                     "attention_mask": tok["attention_mask"].squeeze(0),
                     "is_vision": False,
                     "category": d.get("category", "text"),
@@ -256,8 +298,12 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     return_tensors="pt", padding=False, truncation=True,
                     max_length=MAX_SEQ_LENGTH,
                 )
+                ids = processed["input_ids"].squeeze(0)
+                if not _has_scorable_answer(ids, marker_ids):
+                    skipped["vision"] += 1
+                    continue
                 sample = {
-                    "input_ids": processed["input_ids"].squeeze(0),
+                    "input_ids": ids,
                     "attention_mask": processed["attention_mask"].squeeze(0),
                     "is_vision": True,
                     "category": "vision",
@@ -312,8 +358,12 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     return_tensors="pt", padding=False,
                     sampling_rate=16000,
                 )
+                ids = processed["input_ids"].squeeze(0)
+                if not _has_scorable_answer(ids, marker_ids):
+                    skipped["audio"] += 1
+                    continue
                 sample = {
-                    "input_ids": processed["input_ids"].squeeze(0),
+                    "input_ids": ids,
                     "attention_mask": processed["attention_mask"].squeeze(0),
                     "is_vision": False,
                     "is_audio": True,
@@ -330,6 +380,13 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                 samples.append(sample)
                 audio_count += 1
     log.info("Audio samples: %d", audio_count)
+    if any(skipped.values()):
+        log.warning(
+            "Skipped %d samples with no scorable answer (truncated past "
+            "MAX_SEQ_LENGTH=%d): text=%d vision=%d audio=%d",
+            sum(skipped.values()), MAX_SEQ_LENGTH,
+            skipped["text"], skipped["vision"], skipped["audio"],
+        )
 
     # Homogenize batches: text first, then vision, then audio — prevents
     # mixed-modality batches the collator can't stack.
@@ -398,11 +455,10 @@ class MultimodalCollator:
         # the answer tokens that follow are scored. For Gemma 4 the
         # delimiters are atomic special tokens, so this 3-token sequence
         # matches cleanly as a subsequence of the processed input_ids.
-        if CHAT_TEMPLATE == "chatml":
-            marker = "<|im_start|>assistant"
-        else:  # gemma4
-            marker = "<|turn>assistant<turn|>"
-        self._assistant_ids = list(tok(marker, add_special_tokens=False)["input_ids"])
+        # (build_dataset already skips samples whose answer is truncated
+        # away, so a missing marker here should be rare.)
+        self._assistant_ids = list(tok(
+            _assistant_marker_string(), add_special_tokens=False)["input_ids"])
         # Defensive fallback: image/audio placeholder token ids, masked
         # wherever they appear (they always precede the marker, so the
         # prompt mask already covers them — this is belt-and-suspenders).
@@ -414,18 +470,6 @@ class MultimodalCollator:
                 if isinstance(tid, int) and tid >= 0:
                     self._modality_token_ids.add(tid)
         self._missing_marker_warned = False
-
-    @staticmethod
-    def _last_subseq_end(haystack, needle):
-        """Index just past the LAST occurrence of ``needle`` in
-        ``haystack`` (both lists of int ids), or None if absent."""
-        n = len(needle)
-        if n == 0:
-            return None
-        for start in range(len(haystack) - n, -1, -1):
-            if haystack[start:start + n] == needle:
-                return start + n
-        return None
 
     def __call__(self, batch):
         import torch
@@ -447,7 +491,7 @@ class MultimodalCollator:
             #    turn), so only the assistant's answer is scored.
             real_len = int(mask.sum().item())
             real_ids = ids[:real_len].tolist()
-            answer_start = self._last_subseq_end(real_ids, self._assistant_ids)
+            answer_start = _last_subseq_end(real_ids, self._assistant_ids)
             if answer_start is None:
                 # Marker absent (e.g. answer truncated past max_length) —
                 # score nothing rather than train on prompt/image tokens.
