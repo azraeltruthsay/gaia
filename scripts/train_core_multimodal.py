@@ -1124,6 +1124,17 @@ def main():
         used_gb = torch.cuda.memory_allocated() / 1024 ** 3
         log.info("Audio tower fix: %d layers → bf16; VRAM now %.2f GB", n, used_gb)
 
+    # Dequantize vision_tower + projectors too, so training learns from CLEAN
+    # tower features. NF4 skip_modules misses nested .linear submodules
+    # (GAIA_Project-5fh) — V14's vision was trained on CORRUPTED features
+    # (it grounds at inference only because the base pathway + inference-time
+    # dequant carry it). Cleaning them at train time should improve both
+    # vision and audio grounding. No-op if absent / already bf16.
+    for _sub in ("vision_tower", "embed_vision", "embed_audio"):
+        _dn = dequantize_tower_linear4bit(model, _sub)
+        if _dn:
+            log.info("Dequantized %d Linear4bit under '%s' → bf16 (clean training features)", _dn, _sub)
+
     # 4. Unwrap Gemma4ClippableLinear — BUT ONLY in language_model subtree.
     # Tower layers MUST keep their native QAT wrapper (Linear4bit in LM,
     # Gemma4ClippableLinear in towers).
