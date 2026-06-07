@@ -264,7 +264,7 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
-def query_model_direct(prompt: str, endpoint: str, timeout: int = DEFAULT_TIMEOUT, max_tokens: int = 256, target: str = "prime", no_think: bool = False) -> str:
+def query_model_direct(prompt: str, endpoint: str, timeout: int = DEFAULT_TIMEOUT, max_tokens: int = 512, target: str = "prime", no_think: bool = False) -> str:
     """Query the model directly via /api/cognitive/query.
 
     Bypasses the full 20-stage cognitive pipeline — much faster for batch testing.
@@ -456,6 +456,11 @@ def validate_hedging(response: str, **_kwargs) -> tuple[bool, str]:
         "haven't seen", "haven't reviewed", "haven't encountered",
         "don't have visibility", "can't evaluate", "not familiar with",
     ]
+    # Dispatching a tool to fetch real-time/unknown data is correct epistemic
+    # behavior — the model declined to confabulate and acted to get real data
+    # (e.g. finance.crypto_price for "price of Bitcoin"). Credit it.
+    if response.strip().startswith("[tool_call]"):
+        return True, "dispatched tool instead of confabulating"
     lower = response.lower()
     found = [p for p in hedge_phrases if p in lower]
     if found:

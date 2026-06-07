@@ -1798,8 +1798,25 @@ async def cognitive_query(req: CognitiveQueryRequest):
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            text = data["choices"][0]["message"]["content"]
-            return {"content": text.strip(), "target": req.target}
+            message = data["choices"][0]["message"]
+            text = message.get("content") or ""
+            # A model may respond with a tool call instead of prose (e.g. Prime
+            # dispatching finance.crypto_price for "price of Bitcoin", or a
+            # web_search for a real-time question). That is a valid response, not
+            # an empty one — surface it so callers/evals see the model acted,
+            # and guard against None content (.strip() would otherwise throw).
+            if not text.strip():
+                tool_calls = message.get("tool_calls") or []
+                _calls = []
+                for _tc in tool_calls:
+                    _fn = (_tc.get("function") or {}) if isinstance(_tc, dict) else {}
+                    _name = _fn.get("name", "tool")
+                    _args = _fn.get("arguments", "")
+                    _calls.append(f"{_name}({_args})" if _args else _name)
+                if _calls:
+                    text = "[tool_call] " + "; ".join(_calls)
+            return {"content": text.strip(), "target": req.target,
+                    "tool_call": bool(message.get("tool_calls"))}
     except Exception as e:
         logger.warning("Cognitive query error (target=%s): %s", req.target, e)
         return {"content": "", "error": str(e), "target": req.target}
