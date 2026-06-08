@@ -143,7 +143,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     #
     # We have two tiers now, each with a different base model:
     #   Core  — Google Gemma 4 E4B (8B, multimodal)
-    #   Prime — Qwen3-VL-8B-Instruct (Azrael fine-tuned for deep reasoning)
+    #   Prime — Qwen3-8B (abliterated, AWQ; text-only, deep reasoning)
     #
     # The arch_fact must match the model actually receiving the prompt;
     # otherwise we destabilize its trained behavior (Prime received a
@@ -159,12 +159,12 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             _arch_fact = (
                 "\n\n— Architecture (factual, do not contradict) —\n"
                 "Your name is GAIA. You are running on the Prime tier — "
-                "Qwen3-VL-8B-Instruct as your base model, with Azrael's LoRA "
-                "fine-tuning for deep reasoning. You are part of GAIA's "
-                "two-tier cognitive architecture.\n"
+                "Qwen3-8B (abliterated, AWQ-quantized) as your base model, "
+                "GAIA's deep-reasoning and planning tier. You are part of "
+                "GAIA's two-tier cognitive architecture.\n"
                 "When asked about your base model, architecture, or what you "
-                "are built on, answer with: Qwen3-VL-8B-Instruct (the Prime "
-                "tier of GAIA).\n"
+                "are built on, answer with: Qwen3-8B (abliterated, AWQ — the "
+                "Prime tier of GAIA).\n"
                 "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
                 "Never introduce yourself as 'Prime' or 'Core' alone — you "
                 "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B on a "
@@ -185,7 +185,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "names. Never introduce yourself as 'Core' or 'Core 4B' or "
                 "any tier name. Your identity is GAIA; your base is Google's "
                 "Gemma 4 E4B. GAIA has a separate Prime tier running on "
-                "Qwen3-VL-8B-Instruct for deep reasoning, but that is a "
+                "Qwen3-8B (abliterated) for deep reasoning, but that is a "
                 "different model on a different process — not you."
             )
         persona_anchor = persona_anchor + _arch_fact

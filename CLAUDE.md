@@ -29,14 +29,14 @@ Candidate (HA) services mirror production with `+1` ports. Defined in `docker-co
 
 ## Sovereign Duality — Model Architecture
 
-GAIA uses a **two-tier** Pure Gemma 4 architecture. All models are identity-baked.
+GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime**. Identity is **system-prompt-anchored** — injected at runtime by `gaia-core`'s `gaia_core/utils/prompt_builder.py` (tier-aware "Architecture (factual)" block), **not weight-baked**. This changed at curriculum V11 (`build_core_v2x_curriculum.py:section_gaia()` returns `[]`) after baked-identity LoRAs (V7–V10) kept confabulating and negation-poisoning when rivals were named. Changing what GAIA says about itself = edit `prompt_builder.py`, no retrain.
 
 | Tier | Model | Base | Backend | VRAM (GPU) | Role |
 |------|-------|------|---------|------------|------|
 | **Core/Operator** | Gemma4-E4B-GAIA-Core-v1 | google/gemma-4-E4B | GAIA Engine managed (GPU NF4 or CPU GGUF) | ~8.8 GB | Triage, intent, tools, vision, audio, chat |
-| **Prime/Sovereign** | Gemma4-26B-A4B-Sovereign-v1 | google/gemma-4-26B-A4B | GAIA Engine managed (GPU Expert Buffered or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
-| **Oracle** | gpt-4o-mini | — | OpenAI API | — | Cloud escalation fallback |
-| **Groq** | llama-3.3-70b-versatile | — | Groq API | — | Fast external fallback |
+| **Prime/Sovereign** | Qwen3-8B-abliterated-AWQ | Qwen/Qwen3-8B (abliterated) | GAIA Engine managed (GPU AWQ or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
+| **Groq** | llama-3.3-70b-versatile | — | Groq API | — | Cloud escalation / external fallback |
+| ~~Oracle~~ | ~~gpt-4o-mini~~ | — | — | — | **Retired** — OpenAI no longer used for any task. Groq is the cloud fallback. |
 
 **Routing**: Core handles all requests directly. Prime is loaded on GPU only when deep reasoning is needed (FOCUSING state). The orchestrator manages gear shifts via the consciousness matrix.
 
