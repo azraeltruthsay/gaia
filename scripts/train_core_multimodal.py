@@ -1015,7 +1015,34 @@ def main():
     # from config.json's processor_class)
     log.info("Loading processor for %s...", BASE_MODEL)
     from transformers import AutoProcessor
-    processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    try:
+        processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    except Exception as _proc_exc:
+        # Text-only runs (--no-vision --no-audio) only need the tokenizer.
+        # Merged Gemma 4 dirs make AutoProcessor pull a video processor that
+        # requires torchvision (absent in gaia-study); fall back to a tokenizer
+        # shim so identity/text refinement doesn't need the vision stack.
+        if args.no_vision and args.no_audio:
+            from transformers import AutoTokenizer
+            log.warning("AutoProcessor failed (%s); text-only run -> AutoTokenizer fallback",
+                        str(_proc_exc).strip()[:120] or type(_proc_exc).__name__)
+
+            class _TextOnlyProcessor:
+                """Minimal stand-in exposing only what the text path touches:
+                .tokenizer, null image/audio tokens, and save_pretrained."""
+                def __init__(self, tokenizer):
+                    self.tokenizer = tokenizer
+                    self.image_token = None
+                    self.audio_token = None
+                    self.image_token_id = None
+                    self.audio_token_id = None
+                def save_pretrained(self, path):
+                    self.tokenizer.save_pretrained(path)
+
+            _tok = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
+            processor = _TextOnlyProcessor(_tok)
+        else:
+            raise
     log.info("Processor: %s", type(processor).__name__)
     if processor.tokenizer.pad_token is None:
         processor.tokenizer.pad_token = processor.tokenizer.eos_token
