@@ -154,6 +154,11 @@ knowledge/curricula/*
 # and Prime training pipelines see the same cases.
 !knowledge/curricula/core_v2x_tools/
 !knowledge/curricula/core_v2x_tools/**
+# Core identity/voice patch corpus — hand-authored self-concept + tone seed data
+# (loaded into the gaia_identity bucket by build_core_v2x_curriculum.py). Not
+# regeneratable; track it so the bake is reproducible and the authoring survives.
+!knowledge/curricula/core_v2x_patch/
+!knowledge/curricula/core_v2x_patch/**
 
 # --- Python ---
 __pycache__/
