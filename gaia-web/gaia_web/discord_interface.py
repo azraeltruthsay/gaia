@@ -121,6 +121,32 @@ class DiscordInterface:
         intents.voice_states = True
         intents.typing = True  # Receive typing events for speculative prime wake
 
+        # Discord voice needs libopus for audio encode/decode. py-cord does not
+        # auto-load it on slim images, so load it explicitly here — without this
+        # voice silently fails to send or receive any audio (is_loaded()=False).
+        # libopus0/-dev are installed in the gaia-web image (see Dockerfile).
+        try:
+            if not discord.opus.is_loaded():
+                import ctypes.util
+                _found = ctypes.util.find_library("opus")
+                for _name in (_found, "libopus.so.0", "libopus.so"):
+                    if not _name:
+                        continue
+                    try:
+                        discord.opus.load_opus(_name)
+                    except Exception:
+                        continue
+                    if discord.opus.is_loaded():
+                        logger.info("Discord voice: libopus loaded via %r", _name)
+                        break
+                if not discord.opus.is_loaded():
+                    logger.warning(
+                        "Discord voice: libopus NOT loaded — voice features "
+                        "(VAD/STT/TTS calls) will be unavailable"
+                    )
+        except Exception:
+            logger.warning("Discord voice: opus load check failed", exc_info=True)
+
         bot = commands.Bot(command_prefix="!", intents=intents)
 
         @bot.event
