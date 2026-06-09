@@ -431,6 +431,18 @@ class SleepTaskScheduler:
         each hit 15,000+. Throttling P1 tasks gives lower-priority work
         slots when nothing high-priority is due.
         """
+        # GAIA_Project-61i: maintenance mode = quiet machine. While the operator
+        # has GAIA parked for maintenance, run NO background cognition — the
+        # scheduler previously kept firing LLM tasks on Core's CPU GGUF (~50% of
+        # cores), starving foreground apps (e.g. a game) and corrupting battery
+        # runs. is_maintenance_active() reads /shared/maintenance_mode.json,
+        # which gaia-doctor sets on /maintenance/enter.
+        try:
+            from gaia_common.utils.maintenance import is_maintenance_active
+            if is_maintenance_active():
+                return None
+        except Exception:
+            pass
         if not self._tasks:
             return None
 
