@@ -791,8 +791,68 @@ class VoiceManager:
         text = re.sub(r'^\[[\w\s()]+\]\s*\n?', '', text).strip()
         return text
 
+    # Voice cognition is hybrid (a1t). The dry-run showed the full /process_packet
+    # pipeline runs tool-routing + web search + grounding on EVERY turn (8-18s,
+    # even a web search on "how are you"). So: conversational turns take the
+    # lightweight /api/cognitive/query path on Core/GPU (~1.5-6s); only turns
+    # that clearly need a tool fall through to the full, tool-capable pipeline.
+    _TOOL_TRIGGERS = re.compile(
+        r"\b(search|look up|google|find (out|me)|latest|current(ly)?|right now|"
+        r"today'?s|tonight|news|weather|stock|price|"
+        r"remember (this|that)|save (this|that)|note (this|that)|store|write (this|that) down|"
+        r"read (the|my)|open (the|my)|what'?s in|\brun \b|execute |check (the|my)|"
+        r"schedule|set (a|an) (reminder|alarm|timer))\b",
+        re.IGNORECASE,
+    )
+
+    def _voice_needs_tools(self, text: str) -> bool:
+        """Gate: does this utterance clearly need the tool-capable full pipeline?"""
+        return bool(self._TOOL_TRIGGERS.search(text or ""))
+
     async def _get_response(self, text: str) -> str | None:
-        """Send transcribed text to gaia-core as a CognitionPacket and get response.
+        """Hybrid voice cognition: fast conversational path by default; full
+        tool-capable pipeline only when a tool is clearly needed."""
+        if self._voice_needs_tools(text):
+            logger.info("Voice: tool-trigger — full pipeline")
+            return await self._get_response_full(text)
+        fast = await self._get_response_fast(text)
+        if fast:
+            return fast
+        logger.info("Voice: fast path empty — falling back to full pipeline")
+        return await self._get_response_full(text)
+
+    async def _get_response_fast(self, text: str) -> str | None:
+        """Lightweight conversational path: /api/cognitive/query on Core (GPU).
+        ~1.5-6s, voice-tuned brevity, no tool routing / grounding overhead."""
+        payload = {
+            "prompt": text,
+            "target": "core",
+            "system": (
+                "You are GAIA, speaking aloud in a live voice conversation. "
+                "Reply in 1-2 short, natural spoken sentences — warm and direct. "
+                "No markdown, no lists, no stage directions."
+            ),
+            "max_tokens": 160,
+            "no_think": True,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(
+                    f"{self.core_endpoint}/api/cognitive/query",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                if resp.status_code != 200:
+                    logger.warning("Voice fast path failed: %d", resp.status_code)
+                    return None
+                content = (resp.json().get("content") or "").strip()
+                return self._strip_response_header(content) if content else None
+        except Exception:
+            logger.error("Voice fast path error", exc_info=True)
+            return None
+
+    async def _get_response_full(self, text: str) -> str | None:
+        """Full /process_packet pipeline — tool-capable but slower (8-18s).
 
         Parses the NDJSON streaming response from /process_packet.
         """

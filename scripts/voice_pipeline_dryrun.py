@@ -119,10 +119,22 @@ def main():
     transcript = (stt_out.get("text") or "").strip()
     print(f"  transcript: {transcript!r}  ({timings['stt']:.2f}s)")
 
-    # ④ THINK (VOICE_PRIME → core)
-    stage("④ COGNITION (VOICE_PRIME → core /process_packet)")
+    # ④ THINK — hybrid voice cognition (mirrors voice_manager). Conversational
+    # turns take the fast /api/cognitive/query path on Core/GPU.
+    stage("④ COGNITION (fast path: /api/cognitive/query, Core/GPU)")
     t0 = time.monotonic()
-    reply = core_process_packet(transcript or args.prompt)
+    payload = {
+        "prompt": transcript or args.prompt, "target": "core", "max_tokens": 160,
+        "no_think": True,
+        "system": ("You are GAIA, speaking aloud in a live voice conversation. "
+                   "Reply in 1-2 short, natural spoken sentences — warm and direct. "
+                   "No markdown, no lists, no stage directions."),
+    }
+    req = urllib.request.Request(f"{CORE}/api/cognitive/query",
+                                 data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        reply = (json.load(r).get("content") or "").strip()
     timings["cognition"] = time.monotonic() - t0
     print(f"  GAIA: {reply!r}  ({timings['cognition']:.2f}s)")
 
