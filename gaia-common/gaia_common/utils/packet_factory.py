@@ -114,10 +114,16 @@ _SOURCE_DEFAULTS: Dict[PacketSource, Dict[str, Any]] = {
     },
     PacketSource.VOICE_PRIME: {
         "destination": OutputDestination.AUDIO,
-        "target_engine": TargetEngine.PRIME,
+        # Voice routes to CORE (GPU, ~1-2s), NOT Prime. The NeuralRouter only
+        # runs when the model starts as "core"; pre-pinning to Prime bypassed it
+        # and forced every voice turn onto Prime-on-CPU (8-17s — the latency
+        # killer found by the voice dry-run, GAIA_Project-a1t). With CORE as the
+        # entry point, the router still escalates to Prime when a turn genuinely
+        # needs deep reasoning. max_tokens trimmed for snappy spoken replies.
+        "target_engine": TargetEngine.CORE,
         "priority": 5,
         "tone_hint": "conversational",
-        "max_tokens": 512,
+        "max_tokens": 256,
         "time_budget_ms": 15000,
         "safety_mode": "strict",
         "dry_run": True,
