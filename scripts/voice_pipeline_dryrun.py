@@ -82,13 +82,19 @@ def main():
     args = ap.parse_args()
 
     from gaia_audio.stt_engine import STTEngine
-    from gaia_audio.tts_engine import TTSEngine  # noqa
+    from gaia_audio.tts_engine import PrimeSpeaker
+    from gaia_audio.config import get_config
+    cfg = get_config()
     timings = {}
 
-    # Engines
+    # Engines (PrimeSpeaker = Qwen3-TTS voice clone; same wiring as main.py)
     stage("loading engines")
     stt = STTEngine(); stt.load()
-    tts = TTSEngine(voice_ref_audio=args.voice_ref) if "voice_ref_audio" in TTSEngine.__init__.__code__.co_varnames else TTSEngine()
+    tts = PrimeSpeaker(
+        model_path=cfg.prime_speaker_model_path,
+        voice_ref_audio=cfg.voice_ref_audio,
+        voice_ref_text=cfg.voice_ref_text,
+    )
     tts.load()
 
     # Input utterance
@@ -120,10 +126,19 @@ def main():
     timings["cognition"] = time.monotonic() - t0
     print(f"  GAIA: {reply!r}  ({timings['cognition']:.2f}s)")
 
-    # ⑤ SPEAK (TTS)
+    # ⑤ SPEAK (TTS). Qwen3-TTS is voice-clone mode → needs a ref audio+text.
+    # Use the configured GAIA voice if present; otherwise fall back to the input
+    # clip + its transcript so the dry-run can still measure TTS latency.
     stage("⑤ TTS (Qwen3-TTS, in-process)")
+    ref_audio, ref_text = cfg.voice_ref_audio, cfg.voice_ref_text
+    import os as _os
+    if not (ref_audio and _os.path.isfile(ref_audio)):
+        ref_audio = "/tmp/_dryrun_ref.wav"
+        write_wav(ref_audio, (audio * 32767).clip(-32768, 32767).astype(np.int16).tobytes(), 16000)
+        ref_text = transcript or args.prompt
+        print(f"  (no GAIA voice ref configured — using input clip as ref, ref_text={ref_text[:50]!r})")
     t0 = time.monotonic()
-    spoken = tts.synthesize_sync(reply or "I didn't catch that.")
+    spoken = tts.synthesize_sync(reply or "I didn't catch that.", voice=ref_audio, ref_text=ref_text)
     timings["tts"] = time.monotonic() - t0
     write_wav(args.out, spoken["audio_bytes"], spoken["sample_rate"])
     print(f"  reply WAV: {args.out}  ({spoken['duration_seconds']:.1f}s audio, synth {timings['tts']:.2f}s)")
