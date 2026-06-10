@@ -808,6 +808,12 @@ services:
       - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-4}
       - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
       - COMPOSE_PROJECT_NAME=gaia_project
+      # HA candidate compose must resolve relative volume paths (./candidates/...)
+      # against the real project root, NOT the /compose mount point — otherwise
+      # docker mounts a bogus empty /compose/candidates/* over /app and the
+      # candidate crash-loops on ModuleNotFoundError. The project root is mounted
+      # 1:1 at /gaia/GAIA_Project and holds both the compose files and candidates/.
+      - COMPOSE_DIR=/gaia/GAIA_Project
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MONKEY_ENDPOINT=${MONKEY_ENDPOINT:-http://gaia-monkey:6420}
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
