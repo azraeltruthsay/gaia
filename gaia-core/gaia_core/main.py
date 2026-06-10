@@ -1822,6 +1822,57 @@ async def cognitive_query(req: CognitiveQueryRequest):
         return {"content": "", "error": str(e), "target": req.target}
 
 
+@app.post("/api/cognitive/stream")
+async def cognitive_stream(req: CognitiveQueryRequest):
+    """Streaming variant of /api/cognitive/query — yields token deltas as NDJSON
+    ({"token": "..."}\\n per line) so voice/TTS callers can synthesize sentence-by-
+    sentence as Core generates, dropping first-word latency. Minimal system prompt
+    (no world-state/arch injection) to keep first-token fast. no_think is NOT used
+    (the /no_think directive makes Gemma-4 Core return empty/truncated content)."""
+    import httpx, json as _json
+    from fastapi.responses import StreamingResponse
+
+    target_endpoints = {
+        "core": os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092"),
+        "prime": os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"),
+        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8093"),
+    }
+    base = target_endpoints.get(req.target, target_endpoints["core"])
+    url = f"{base.rstrip('/')}/v1/chat/completions"
+    payload = {
+        "messages": [
+            {"role": "system", "content": req.system},
+            {"role": "user", "content": req.prompt},
+        ],
+        "max_tokens": req.max_tokens,
+        "temperature": req.temperature,
+        "stream": True,
+    }
+
+    async def gen():
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream("POST", url, json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            ev = _json.loads(data)
+                            delta = (ev["choices"][0].get("delta", {}) or {}).get("content")
+                        except Exception:
+                            continue
+                        if delta:
+                            yield _json.dumps({"token": delta}) + "\n"
+        except Exception as e:
+            yield _json.dumps({"error": str(e)}) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
 # ── Embedded llama-server Management ─────────────────────────────────
 # Used by the self-awareness training pipeline to release/reload the
 # Core CPU model without restarting the gaia-core container.
