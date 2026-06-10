@@ -87,13 +87,19 @@ def lm_layers(model):
     raise RuntimeError("could not locate language-model layers/embed_tokens on this model")
 
 
-def orthogonalize_(W, direction):
-    """In-place: remove the component of each output row along `direction`.
-    W: (..., d_model) writing into the residual stream. direction: unit (d_model,)."""
+def orthogonalize_input_(W, direction):
+    """Rows of W live in residual (d_model) space — e.g. embed_tokens (vocab, d_model).
+    Remove the refusal component from each row. direction: unit (d_model,)."""
     d = direction.to(W.dtype).to(W.device)
-    # W_proj = (W @ d) outer d  -> subtract
-    proj = torch.outer(W @ d, d)
-    W.sub_(proj)
+    W.sub_(torch.outer(W @ d, d))
+
+
+def orthogonalize_output_(W, direction):
+    """W: (d_model_out, d_in) writes to the residual along its OUTPUT (rows) —
+    e.g. o_proj / down_proj. Project the refusal direction out of the output:
+    W_new = W - r ⊗ (r^T W). direction r: unit (d_model,)."""
+    d = direction.to(W.dtype).to(W.device)
+    W.sub_(torch.outer(d, d @ W))
 
 
 def main():
@@ -141,10 +147,10 @@ def main():
 
     print("[abliterate] orthogonalizing residual-writing weights (o_proj, down_proj, embed)...")
     edited = 0
-    orthogonalize_(embed.weight.data, direction); edited += 1
+    orthogonalize_input_(embed.weight.data, direction); edited += 1   # (vocab, d_model)
     for i, blk in enumerate(layers):
-        orthogonalize_(blk.self_attn.o_proj.weight.data, direction); edited += 1
-        orthogonalize_(blk.mlp.down_proj.weight.data, direction); edited += 1
+        orthogonalize_output_(blk.self_attn.o_proj.weight.data, direction); edited += 1  # (d_model, *)
+        orthogonalize_output_(blk.mlp.down_proj.weight.data, direction); edited += 1      # (d_model, *)
     print(f"[abliterate] orthogonalized {edited} weight matrices across {n_layers} layers")
 
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
