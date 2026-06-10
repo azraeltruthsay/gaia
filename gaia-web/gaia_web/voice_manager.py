@@ -17,6 +17,7 @@ import io
 import json
 import logging
 import os
+import re
 import struct
 import subprocess
 import threading
@@ -511,6 +512,11 @@ class VoiceManager:
 
             # Start async processing loop
             self._listen_task = asyncio.create_task(self._process_audio_loop())
+
+            # Greet + warm the TTS in one shot: GAIA's first synth is her spoken
+            # greeting, which also pays the one-time Prime-TTS CUDA-graph warmup so
+            # the first real response is snappy. Background so join returns fast.
+            asyncio.create_task(self._greet_and_warm())
         except Exception as _join_exc:
             try:
                 from gaia_common.utils.error_logging import log_gaia_error
@@ -645,19 +651,16 @@ class VoiceManager:
                     self._state = "responding"
                     response_text = await self._get_lite_stalling_response(text)
                 else:
-                    # 3. Try Reflex fast-path for short utterances
-                    response_text = None
-                    if len(text.strip()) < 150:
-                        t0 = time.monotonic()
-                        response_text = await self._get_nano_response(text)
-                        if response_text:
-                            nano_ms = (time.monotonic() - t0) * 1000
-                            logger.info("Voice: Nano (%.0fms): %s", nano_ms, response_text[:80])
-
-                    if not response_text:
-                        # Fall through to full Thinker
+                    # Conversational turns STREAM (think+speak interleaved — first word
+                    # out ~4s, GAIA speaks sentence 1 while formulating the rest).
+                    # Tool-needing turns take the full tool-capable pipeline + monolithic speak.
+                    if not self._voice_needs_tools(text):
                         self._state = "responding"
-                        response_text = await self._get_response(text)
+                        if await self._stream_think_speak(text):
+                            return  # streamed + spoke; finally{} drains echo + sets listening
+                        logger.info("Voice: streaming produced no audio — full pipeline fallback")
+                    self._state = "responding"
+                    response_text = await self._get_response_full(text)
                 if not response_text:
                     logger.warning("No response from gaia-core")
                     self._state = "listening"
@@ -665,7 +668,7 @@ class VoiceManager:
 
                 logger.info("Response: %s", response_text[:100])
 
-                # 4. Synthesize and play via Discord
+                # 4. Synthesize and play via Discord (monolithic — tool/stalling path)
                 self._state = "speaking"
                 await self._speak(response_text)
 
@@ -685,7 +688,14 @@ class VoiceManager:
                     logger.error("Utterance processing failed: %s", _utt_exc, exc_info=True)
             finally:
                 # Full duplex: sink was never paused, just drain echo audio
+                # (covers both the streaming early-return and the monolithic path).
                 _echo_zone = False
+                if self._audio_queue:
+                    while not self._audio_queue.empty():
+                        try:
+                            self._audio_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
@@ -915,8 +925,152 @@ class VoiceManager:
             logger.error("Core stalling request failed", exc_info=True)
         return None
 
+    # ── Streaming voice (Phase 1.5): think+speak interleaved ────────────
+    # Stream Core tokens -> segment sentences -> synth each on Prime GPU TTS ->
+    # play in order, overlapping synth-ahead with playback. First word out in
+    # ~4s (vs ~12s waiting for the full reply) since GAIA starts speaking
+    # sentence 1 while still formulating the rest. See scripts/voice_stream_pipeline.py.
+    _VOICE_SYS = (
+        "You are GAIA, speaking aloud in a live voice conversation. Reply in 1-3 short, "
+        "natural spoken sentences — warm and direct. No markdown, no lists, no stage directions."
+    )
+    _SENT_RE = re.compile(r"(.*?[.!?]+)(\s|$)", re.DOTALL)
+
+    async def _stream_cognition(self, text: str):
+        """Yield response tokens from Core's streaming cognition endpoint."""
+        payload = {"prompt": text, "target": "core", "system": self._VOICE_SYS,
+                   "max_tokens": 160, "temperature": 0.3}
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream(
+                    "POST", f"{self.core_endpoint}/api/cognitive/stream",
+                    json=payload, headers={"Content-Type": "application/json"},
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.warning("Voice stream cognition failed: %d", resp.status_code)
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            ev = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        tok = ev.get("token")
+                        if tok:
+                            yield tok
+        except Exception:
+            logger.error("Voice stream cognition error", exc_info=True)
+
+    async def _synthesize_sentence(self, text: str):
+        """Synth one sentence on Prime GPU TTS; return (audio_bytes, sample_rate) or None."""
+        text = self._strip_response_header(text)
+        if not text.strip():
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self.audio_endpoint}/synthesize",
+                    json={"text": text, "tier": "prime"},  # force GPU Prime (Nano CPU = 6-11x realtime)
+                )
+                if resp.status_code != 200:
+                    logger.error("Sentence synth failed: %d", resp.status_code)
+                    return None
+                data = resp.json()
+            b64 = data.get("audio_base64")
+            if not b64:
+                return None
+            return base64.b64decode(b64), data.get("sample_rate", 24000)
+        except Exception:
+            logger.error("Sentence synth error", exc_info=True)
+            return None
+
+    async def _play_audio_segment(self, audio_bytes: bytes, sample_rate: int) -> None:
+        """Play one audio segment through Discord, waiting for any prior segment to finish."""
+        if not self._vc or not self._vc.is_connected():
+            return
+        import discord as _discord
+        # Sequential playback — wait for the previous sentence to finish first.
+        while self._vc.is_playing():
+            await asyncio.sleep(0.05)
+        source = _discord.FFmpegPCMAudio(
+            io.BytesIO(audio_bytes), pipe=True,
+            before_options=f"-f s16le -ar {sample_rate} -ac 1",
+            options="-ar 48000 -ac 2",
+        )
+        done = asyncio.Event()
+
+        def after_play(error):
+            if error:
+                logger.error("Voice playback error: %s", error)
+            done.set()
+
+        self._vc.play(source, after=after_play)
+        try:
+            await asyncio.wait_for(done.wait(), timeout=60.0)
+        except asyncio.TimeoutError:
+            if self._vc.is_playing():
+                self._vc.stop()
+
+    async def _stream_think_speak(self, text: str) -> bool:
+        """Stream cognition -> sentence synth (Prime) -> ordered playback, overlapping
+        synth-ahead with playback. Returns True if GAIA spoke at least one sentence."""
+        audio_q: asyncio.Queue = asyncio.Queue()
+        spoke = {"any": False}
+
+        async def producer():
+            buf = ""
+            try:
+                async for tok in self._stream_cognition(text):
+                    buf += tok
+                    while True:
+                        m = self._SENT_RE.match(buf)
+                        if not m:
+                            break
+                        sentence = m.group(1).strip()
+                        buf = buf[m.end():]
+                        if sentence:
+                            seg = await self._synthesize_sentence(sentence)
+                            if seg:
+                                await audio_q.put(seg)
+                if buf.strip():
+                    seg = await self._synthesize_sentence(buf.strip())
+                    if seg:
+                        await audio_q.put(seg)
+            finally:
+                await audio_q.put(None)  # sentinel
+
+        async def consumer():
+            while True:
+                seg = await audio_q.get()
+                if seg is None:
+                    break
+                self._state = "speaking"
+                await self._play_audio_segment(*seg)
+                spoke["any"] = True
+
+        await asyncio.gather(producer(), consumer())
+        return spoke["any"]
+
+    async def _greet_and_warm(self) -> None:
+        """Speak a greeting at join — doubles as the Prime-TTS warmup. The first
+        synth pays a ~4-7s CUDA-graph cost; hiding it behind a natural call-open
+        greeting keeps every real turn snappy. (Validated: the cold synth is valid
+        audio, not garbage — see scripts/_warmup_greeting_test.py.)"""
+        try:
+            seg = await self._synthesize_sentence("Hey, it's GAIA. I'm here and listening.")
+            if seg:
+                self._state = "speaking"
+                await self._play_audio_segment(*seg)
+        except Exception:
+            logger.debug("Greeting/warmup failed (non-fatal)", exc_info=True)
+        finally:
+            if self._vc and self._vc.is_connected():
+                self._state = "listening"
+
     async def _speak(self, text: str) -> None:
-        """Synthesize text and play through Discord voice."""
+        """Synthesize text and play through Discord voice (monolithic — used for the
+        tool-capable full pipeline + stalling responses; conversational turns stream)."""
         if not self._vc or not self._vc.is_connected():
             return
 
