@@ -699,6 +699,19 @@ class VoiceManager:
                 if self._vc and self._vc.is_connected():
                     self._state = "listening"
 
+    @staticmethod
+    def _signed_headers(method: str, path: str) -> dict:
+        """HMAC auth headers for inter-service calls to gaia-audio (+ JSON type).
+        gaia-audio's /transcribe and /synthesize are NOT public paths, so they
+        require an X-GAIA-Auth signature (shared key at /shared/secrets/gaia_service_key)."""
+        h = {"Content-Type": "application/json"}
+        try:
+            from gaia_common.utils.service_auth import auth_headers
+            h.update(auth_headers(method, path))
+        except Exception:
+            logger.debug("service_auth unavailable; sending unsigned", exc_info=True)
+        return h
+
     async def _transcribe(self, pcm_16k_mono: bytes) -> str | None:
         """Send audio to gaia-audio /transcribe and return text."""
         audio_b64 = pcm_to_wav_base64(pcm_16k_mono)
@@ -707,6 +720,7 @@ class VoiceManager:
                 resp = await client.post(
                     f"{self.audio_endpoint}/transcribe",
                     json={"audio_base64": audio_b64, "sample_rate": 16000},
+                    headers=self._signed_headers("POST", "/transcribe"),
                 )
                 if resp.status_code == 200:
                     return resp.json().get("text", "")
@@ -972,6 +986,7 @@ class VoiceManager:
                 resp = await client.post(
                     f"{self.audio_endpoint}/synthesize",
                     json={"text": text, "tier": "prime"},  # force GPU Prime (Nano CPU = 6-11x realtime)
+                    headers=self._signed_headers("POST", "/synthesize"),
                 )
                 if resp.status_code != 200:
                     logger.error("Sentence synth failed: %d", resp.status_code)
@@ -1080,6 +1095,7 @@ class VoiceManager:
                 resp = await client.post(
                     f"{self.audio_endpoint}/synthesize",
                     json={"text": text},
+                    headers=self._signed_headers("POST", "/synthesize"),
                 )
                 if resp.status_code != 200:
                     logger.error("Synthesize failed: %d", resp.status_code)
