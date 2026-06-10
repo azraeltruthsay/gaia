@@ -61,11 +61,11 @@ class LifecycleMachine:
             "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
         }
 
-        # Model paths per tier (symlinks resolve to current model family)
+        # Model paths per tier
         self._tier_models = {
-            "core": os.environ.get("CORE_MODEL_PATH", "/models/core"),
-            "nano": os.environ.get("NANO_MODEL_PATH", "/models/nano"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
+            "core": os.environ.get("CORE_MODEL_PATH", "/models/Qwen3.5-2B-GAIA-Core-v3"),
+            "nano": os.environ.get("NANO_MODEL_PATH", "/models/Qwen3.5-0.8B-Abliterated-merged"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ"),
         }
 
         # Audio endpoint
@@ -292,7 +292,7 @@ class LifecycleMachine:
     # Used by _execute_transition() to delegate tier actions to the CM.
     _STATE_TO_CM_CONFIG = {
         LifecycleState.AWAKE: "awake",
-        LifecycleState.LISTENING: "awake",       # Same tier layout as AWAKE
+        LifecycleState.LISTENING: "listening",   # voice gear (heo): Core-GGUF-GPU so STT+TTS fit
         LifecycleState.FOCUSING: "focusing",
         LifecycleState.MEDITATION: "meditation",
         LifecycleState.SLEEP: "sleep",

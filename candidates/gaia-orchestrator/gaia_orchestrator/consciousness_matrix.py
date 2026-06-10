@@ -316,9 +316,16 @@ class ConsciousnessMatrix:
         if not targets:
             return {"ok": False, "error": f"Unknown configuration: {config_name}"}
 
-        # Remember which config we're applying so _load_tier_gpu can pick the
-        # voice-gear (GGUF-on-GPU) Core variant for "listening" (heo).
+        # Voice gear (heo): _load_tier_gpu picks the Core variant from _active_config
+        # (GGUF for "listening", NF4 otherwise). But Core's consciousness LEVEL is
+        # CONSCIOUS in BOTH awake & listening, so set_target() short-circuits on the
+        # unchanged level and skips the NF4<->GGUF swap. When crossing the listening
+        # boundary, reset Core's actual level so the transition re-runs; _load_tier_gpu's
+        # exact path-match then swaps the variant (or no-ops if already correct).
+        _prev_config = getattr(self, "_active_config", None)
         self._active_config = config_name
+        if "listening" in (_prev_config, config_name) and "core" in self._tiers:
+            self._tiers["core"].actual = ConsciousnessLevel.UNCONSCIOUS
 
         results = {}
         for tier, level in targets.items():

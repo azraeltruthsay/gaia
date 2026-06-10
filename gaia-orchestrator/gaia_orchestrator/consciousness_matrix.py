@@ -204,6 +204,7 @@ class ConsciousnessMatrix:
     # Map consciousness configuration names to lifecycle states
     _CONFIG_TO_LIFECYCLE = {
         "awake": "awake",
+        "listening": "listening",  # voice gear (heo): Core-GGUF-GPU + audio
         "focusing": "focusing",
         "sleep": "sleep",
         "deep_sleep": "deep_sleep",
@@ -288,6 +289,10 @@ class ConsciousnessMatrix:
     # Future: E4B text-only reflex (~2.8GB) + on-demand modality tower loading
     _PRESETS = {
         "awake": {"core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
+        # Voice gear (heo): same tier layout as awake — Core CONSCIOUS (on GPU) —
+        # but _load_tier_gpu loads Core as the GGUF (GPU-offloaded, ~3.7GB) instead
+        # of NF4 (~10.5GB) so STT + TTS fit on the GPU alongside it. Prime stays CPU.
+        "listening": {"core": ConsciousnessLevel.CONSCIOUS, "prime": ConsciousnessLevel.SUBCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
         "focusing": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.CONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
         "sleep": {"core": ConsciousnessLevel.SUBCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
         "deep_sleep": {"core": ConsciousnessLevel.UNCONSCIOUS, "prime": ConsciousnessLevel.UNCONSCIOUS, "nano": ConsciousnessLevel.UNCONSCIOUS},
@@ -310,6 +315,17 @@ class ConsciousnessMatrix:
         targets = self._PRESETS.get(config_name)
         if not targets:
             return {"ok": False, "error": f"Unknown configuration: {config_name}"}
+
+        # Voice gear (heo): _load_tier_gpu picks the Core variant from _active_config
+        # (GGUF for "listening", NF4 otherwise). But Core's consciousness LEVEL is
+        # CONSCIOUS in BOTH awake & listening, so set_target() short-circuits on the
+        # unchanged level and skips the NF4<->GGUF swap. When crossing the listening
+        # boundary, reset Core's actual level so the transition re-runs; _load_tier_gpu's
+        # exact path-match then swaps the variant (or no-ops if already correct).
+        _prev_config = getattr(self, "_active_config", None)
+        self._active_config = config_name
+        if "listening" in (_prev_config, config_name) and "core" in self._tiers:
+            self._tiers["core"].actual = ConsciousnessLevel.UNCONSCIOUS
 
         results = {}
         for tier, level in targets.items():
@@ -602,6 +618,18 @@ class ConsciousnessMatrix:
         model) gets unloaded atomically instead of returning 409.
         """
         model = self._gpu_models.get(tier)
+        # Voice gear (heo): in the "listening" config, load Core as the GGUF
+        # GPU-offloaded build (~3.7GB at GGUF_GPU_LAYERS=33) rather than NF4
+        # (~10.5GB), so STT + TTS fit on the GPU at the same time. The GGUF path
+        # differs from the NF4 path, so _tier_desired_state triggers a clean
+        # swap on BOTH boundaries (NF4->GGUF entering, GGUF->NF4 leaving).
+        # NOTE: gaia-core's engine must run with GGUF_GPU_LAYERS=33 (Gemma 4
+        # crashes the CUDA graph at full-offload; 33 = all-but-last is stable).
+        if tier == "core" and getattr(self, "_active_config", None) == "listening":
+            import os as _os
+            model = (_os.environ.get("CORE_VOICE_GPU_PATH")
+                     or self._cpu_models.get("core") or "/models/core.gguf")
+            logger.info("Voice gear: loading Core as GGUF on GPU (%s)", model)
         if not model:
             return {"ok": False, "tier": tier, "error": "no GPU model configured"}
 

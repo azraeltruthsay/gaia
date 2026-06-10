@@ -263,6 +263,10 @@ services:
     environment:
       - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
+      # Voice gear (heo): when the consciousness matrix loads Core as the GGUF on
+      # GPU (listening config), offload all-but-last layer. Gemma 4 crashes the
+      # llama.cpp CUDA graph at full offload (999); 33 = E4B layers - 1 is stable.
+      - GGUF_GPU_LAYERS=${GGUF_GPU_LAYERS:-33}
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
