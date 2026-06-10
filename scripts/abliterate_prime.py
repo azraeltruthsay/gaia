@@ -73,10 +73,18 @@ def mean_lasttoken_resid(model, tok, prompts, layer_idx, device):
 
 
 def lm_layers(model):
-    """Return (layers_module_list, embed_tokens) for Qwen3-VL or plain LM layouts."""
-    base = getattr(model, "language_model", None) or getattr(model, "model", None) or model
-    base = getattr(base, "model", base)  # some wrap an extra .model
-    return base.layers, base.embed_tokens
+    """Locate the text decoder's (layers, embed_tokens) across Qwen3-VL / generic layouts."""
+    for path in ("language_model", "model.language_model", "model.model", "model", "transformer"):
+        obj = model
+        ok = True
+        for attr in path.split("."):
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                ok = False
+                break
+        if ok and hasattr(obj, "layers") and hasattr(obj, "embed_tokens"):
+            return obj.layers, obj.embed_tokens
+    raise RuntimeError("could not locate language-model layers/embed_tokens on this model")
 
 
 def orthogonalize_(W, direction):
@@ -97,11 +105,21 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="find direction + report; do NOT write")
     args = ap.parse_args()
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    print(f"[abliterate] loading {args.src} (device_map=auto, offload as needed)...")
+    from transformers import AutoTokenizer
+    try:
+        from transformers import AutoModelForImageTextToText as _AutoVL
+    except ImportError:
+        from transformers import Qwen3VLForConditionalGeneration as _AutoVL
+    # Dry-run can offload (auto) — we only read activations. The real run loads
+    # FULLY MATERIALIZED on CPU so every weight is editable in-place (device_map
+    # offload leaves some params on the meta device, which can't be sub_()'d).
+    _dmap = "auto" if args.dry_run else None
+    print(f"[abliterate] loading {args.src} via {_AutoVL.__name__} "
+          f"(device_map={_dmap or 'cpu-materialized'})...")
     tok = AutoTokenizer.from_pretrained(args.src, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.src, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True)
+    model = _AutoVL.from_pretrained(
+        args.src, dtype=torch.bfloat16, device_map=_dmap,
+        low_cpu_mem_usage=True, trust_remote_code=True)
     model.eval()
     layers, embed = lm_layers(model)
     n_layers = len(layers)
