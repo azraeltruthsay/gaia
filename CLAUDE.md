@@ -29,7 +29,7 @@ Candidate (HA) services mirror production with `+1` ports. Defined in `docker-co
 
 ## Sovereign Duality — Model Architecture
 
-GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime**. Identity is **system-prompt-anchored** — injected at runtime by `gaia-core`'s `gaia_core/utils/prompt_builder.py` (tier-aware "Architecture (factual)" block), **not weight-baked**. This changed at curriculum V11 (`build_core_v2x_curriculum.py:section_gaia()` returns `[]`) after baked-identity LoRAs (V7–V10) kept confabulating and negation-poisoning when rivals were named. Changing what GAIA says about itself = edit `prompt_builder.py`, no retrain.
+GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime**. Identity is now **both weight-baked and prompt-anchored**: Core (**V3**, baked 2026-06-09) carries an intrinsic GAIA **self-concept in its weights** (positive-only, fact-free, negation-free — `knowledge/curricula/core_v2x_patch/`), so a prompt-stripped Core still says "I'm GAIA" instead of reverting to a base-model placeholder. **Volatile facts** (base model, tier names) stay **prompt-injected** at runtime by `gaia-core`'s `gaia_core/utils/prompt_builder.py` — baking *those* (the V7–V10 LoRAs) caused confabulation and negation-poisoning when rivals were named, whereas a fact-free self-concept bakes cleanly. So: changing what GAIA says she's *running on* = edit `prompt_builder.py` (no retrain); changing *who she is* = the `core_v2x_patch` corpus + a bake.
 
 | Tier | Model | Base | Backend | VRAM (GPU) | Role |
 |------|-------|------|---------|------------|------|
