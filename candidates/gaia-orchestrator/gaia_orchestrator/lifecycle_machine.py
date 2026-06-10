@@ -292,7 +292,7 @@ class LifecycleMachine:
     # Used by _execute_transition() to delegate tier actions to the CM.
     _STATE_TO_CM_CONFIG = {
         LifecycleState.AWAKE: "awake",
-        LifecycleState.LISTENING: "awake",       # Same tier layout as AWAKE
+        LifecycleState.LISTENING: "listening",   # voice gear (heo): Core-GGUF-GPU so STT+TTS fit
         LifecycleState.FOCUSING: "focusing",
         LifecycleState.MEDITATION: "meditation",
         LifecycleState.SLEEP: "sleep",
