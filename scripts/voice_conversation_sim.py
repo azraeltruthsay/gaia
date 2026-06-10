@@ -66,6 +66,8 @@ def main():
     ap.add_argument("--turns", type=int, default=len(DIALOGUE))
     ap.add_argument("--prime-tts", action="store_true", help="also measure GAIA TTS on GPU PrimeSpeaker")
     ap.add_argument("--no-tts", action="store_true", help="skip GAIA TTS (measure STT+formulate only — fast A/B)")
+    ap.add_argument("--prime-only", action="store_true", help="measure only Prime GPU TTS (skip Nano CPU)")
+    ap.add_argument("--no-stt", action="store_true", help="skip STT (use scripted line as 'heard'; saves ~1.8GB VRAM)")
     ap.add_argument("--out-dir", default="/shared/voice/sim")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
@@ -76,14 +78,16 @@ def main():
     cfg = get_config()
 
     print(f"\n=== VOICE CONVERSATION SIM  [label={args.label}  target={args.target}] ===")
-    stt = STTEngine(); stt.load()
+    stt = None
+    if not args.no_stt:
+        stt = STTEngine(); stt.load()
     interlocutor = EspeakFallback(); interlocutor.load()          # distinct synthetic "human"
     nano = None
-    if not args.no_tts:
+    if not args.no_tts and not args.prime_only:
         nano = NanoSpeaker(voice_ref_audio=cfg.voice_ref_audio, voice_ref_text=cfg.voice_ref_text)
         nano.load()                                                # GAIA voice clone, CPU
     prime = None
-    if args.prime_tts and not args.no_tts:
+    if (args.prime_tts or args.prime_only) and not args.no_tts:
         try:
             prime = PrimeSpeaker(model_path=cfg.prime_speaker_model_path,
                                  voice_ref_audio=cfg.voice_ref_audio, voice_ref_text=cfg.voice_ref_text)
@@ -110,13 +114,16 @@ def main():
         t_iloc = time.monotonic() - t
         convo_chunks.append(("human", to_16k_mono_f32(h["audio_bytes"], h["sample_rate"])))
 
-        # ② STT transcribes the injected audio
-        audio16 = to_16k_mono_f32(h["audio_bytes"], h["sample_rate"])
-        t = time.monotonic()
-        stt_out = stt.transcribe_sync(audio16, sample_rate=16000)
-        t_stt = time.monotonic() - t
-        heard = (stt_out.get("text") or "").strip()
-        print(f"  STT heard: {heard!r}  ({t_stt:.2f}s)")
+        # ② STT transcribes the injected audio (skipped with --no-stt)
+        if stt is not None:
+            audio16 = to_16k_mono_f32(h["audio_bytes"], h["sample_rate"])
+            t = time.monotonic()
+            stt_out = stt.transcribe_sync(audio16, sample_rate=16000)
+            t_stt = time.monotonic() - t
+            heard = (stt_out.get("text") or "").strip()
+            print(f"  STT heard: {heard!r}  ({t_stt:.2f}s)")
+        else:
+            heard, t_stt = human_line, 0.0
 
         # ③ formulate (cognition) — threaded dialogue so it's a real conversation
         convo = "\n".join(history + [f"Human: {heard or human_line}", "GAIA:"])
