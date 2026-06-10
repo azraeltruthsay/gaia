@@ -34,7 +34,7 @@ GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime
 | Tier | Model | Base | Backend | VRAM (GPU) | Role |
 |------|-------|------|---------|------------|------|
 | **Core/Operator** | Gemma4-E4B-GAIA-Core-v1 | google/gemma-4-E4B | GAIA Engine managed (GPU NF4 or CPU GGUF) | ~8.8 GB | Triage, intent, tools, vision, audio, chat |
-| **Prime/Sovereign** | Qwen3-8B-abliterated-AWQ | Qwen/Qwen3-8B (abliterated) | GAIA Engine managed (GPU AWQ or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
+| **Prime/Sovereign** | Qwen3-VL-8B-GAIA-Prime-v1 | Qwen3-VL-8B (Azrael identity-aligned; self-abliteration pending) | GAIA Engine managed (GPU safetensors or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
 | **Groq** | llama-3.3-70b-versatile | — | Groq API | — | Cloud escalation / external fallback |
 | ~~Oracle~~ | ~~gpt-4o-mini~~ | — | — | — | **Retired** — OpenAI no longer used for any task. Groq is the cloud fallback. |
 
