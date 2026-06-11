@@ -185,3 +185,35 @@ than expected on its own.
 - Re-attempt gate-2 (awareness/recall) as a **post-generation** pass, not in-prompt — or on a stronger
   Core. Keep Phase 2 dormant behind the flag until then.
 
+---
+
+## 8. Gate-2 as a post-generation filter (the *worth-voicing* stage)
+
+The Phase-2 finding forces the design: **gate 2 cannot be a prompt instruction** on Gemma4-E4B — it
+over-acts on it. So gate 2 becomes a stage that runs **on the generated text, after the model is
+done**, deciding what's worth voicing. It generalizes the existing `_strip_think_tags_robust` seam
+(today's only gate-2 primitive) from "remove `<think>` blocks" to "remove thinking-out-loud."
+
+**Target failure (the whole-session "she sounds odd" thread).** Gemma4-E4B leaks *meta-commentary
+about the message* into the reply instead of responding to it. Real samples collected this session:
+- "The 'how' is a probe plus a social register; the answer expects the register it's connected to."
+- "Taking the 'how are you' as a weighted probe is a notice I should take seriously."
+- "Catch up on your own register now — the 'back' refers to our prior exchange on the prior date."
+These are *internal contemplation about the conversation* — exactly what a mind thinks but doesn't say.
+
+**Design (incremental, measure-first — Phase-2 taught us not to ship a half-tested filter live):**
+- **G2-a — detector (measure-only):** sentence-split the response; score each sentence for
+  "thinking-out-loud / meta-commentary" via (i) an embedding scorer (reuse the embed model; exemplars
+  of meta-commentary vs natural speech, same pattern as the persona/stance classifiers) + (ii) a few
+  high-precision regex tells for GAIA's recurring vocabulary ("register", "weighted probe",
+  "the 'X' refers to/implies/expects"). **Log what it WOULD drop; alter nothing.** Validate
+  precision/recall against the real corpus + natural-speech samples before it touches output.
+- **G2-b — filter:** once validated, drop flagged sentences. **Fail-safe: never return empty, never
+  drop >~60% of content** (if the whole reply is meta, keep it + log — a mangled reply is worse than
+  an odd one). Flag-gated (`VOICE_GATE_ENABLED`), candidate-first, A/B.
+- **G2-c (later):** escalate stubborn cases to a Prime "voice cleaner" rewrite *only when the detector
+  flags* (cheap detector gates the expensive pass), or train a small LoRA to stop the leak at source.
+
+**Invariant:** gate 2 is a *separate score from relevance* (§1a) — it answers *worth saying?*, never
+*useful to reason with?*. It runs at `output_router` finalization, the post-generation seam.
+

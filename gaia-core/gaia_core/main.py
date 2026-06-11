@@ -1634,6 +1634,26 @@ async def process_packet(packet_data: Dict[str, Any]):
             from gaia_core.utils.output_router import _strip_think_tags_robust
             full_response = _strip_think_tags_robust(full_response)
 
+            # Gate 2 (worth-voicing): strip leaked meta-commentary / thinking-out-
+            # loud post-generation. Measure-only unless VOICE_GATE_ENABLED — when
+            # on, this cleans the packet candidate (voice + candidate consumers).
+            # NOTE: the Discord path accumulates streamed tokens, not the candidate,
+            # so its apply-path is a separate step; this already logs what it WOULD
+            # strip on every turn (incl. Discord) for validation. See voice_gate.py.
+            try:
+                from gaia_core.cognition.voice_gate import filter_voiced
+                _vg_out, _vg_dbg = filter_voiced(full_response)
+                if _vg_dbg.get("dropped"):
+                    logger.info(
+                        "VoiceGate: %s %d meta sentence(s)%s | e.g. %r",
+                        "stripped" if not _vg_dbg.get("measure_only") else "would strip",
+                        len(_vg_dbg["dropped"]),
+                        f" (failsafe={_vg_dbg['failsafe']})" if _vg_dbg.get("failsafe") else "",
+                        _vg_dbg["dropped"][0]["sent"][:80])
+                    full_response = _vg_out
+            except Exception:
+                logger.debug("VoiceGate failed (non-fatal)", exc_info=True)
+
             if final_packet_dict:
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
