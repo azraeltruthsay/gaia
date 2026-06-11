@@ -291,9 +291,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (skipped capability block)", _li)
         else:
             # World-answerable (e.g. time): the data is already in world_state.
+            # Be specific — Core otherwise ignores the line and confabulates
+            # timezone math ("add 6 hours"). Point it at the exact pre-computed
+            # lines to quote.
             persona_anchor = persona_anchor + (
-                "\n\n(The current date/time and system state are already provided "
-                "in your context above — answer directly from that; no tool needed.)"
+                "\n\n(Time question: your context above already lists both the "
+                "UTC 'Clock' line and a pre-computed 'User's local time' line. "
+                "Read those two off and state them directly — they are already "
+                "correct. Do not compute or convert timezone offsets yourself.)"
             )
             logger.info("PromptBuilder: world-answerable intent '%s' — answer from world_state, no tool", _li)
     except Exception:
