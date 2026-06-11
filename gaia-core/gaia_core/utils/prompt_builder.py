@@ -272,7 +272,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         if not _tool_free:
             persona_anchor = persona_anchor + _capability_block
         else:
-            logger.info("PromptBuilder: tool-free intent '%s' — skipping capability block (~500 tok)", _li)
+            # Casual/social turn: no tools needed. Steer toward warm, present
+            # conversation with a SHORT, POSITIVE-only nudge — negative framing
+            # ("don't deflect") makes the model fixate on the named concept and
+            # go meta, so keep it about what TO do.
+            # Short + positive is the sweet spot: more explicit nudges (e.g.
+            # "share about yourself first") backfire — Core's task-assistant
+            # prior resists them and goes generic/meta. Keep it light.
+            _social_block = (
+                "\n\n— This is casual conversation —\n"
+                "Be warm and present, like a friend catching up. If asked how "
+                "you are, answer genuinely in your own voice."
+            )
+            persona_anchor = persona_anchor + _social_block
+            logger.info("PromptBuilder: tool-free intent '%s' — social mode (skipped capability block)", _li)
     except Exception:
         logger.debug("Capability-block injection skipped (non-fatal)", exc_info=True)
 
