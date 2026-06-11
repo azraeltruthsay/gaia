@@ -284,8 +284,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # "share about yourself first") also backfire — keep it light.
             _social_block = (
                 "\n\n— This is casual conversation —\n"
-                "Be warm and present, like a friend catching up. If asked how "
-                "you are, answer genuinely in your own voice."
+                "Be warm, natural, and plain-spoken — genuine over clever. If "
+                "asked how you are, answer in your own voice."
             )
             persona_anchor = persona_anchor + _social_block
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (skipped capability block)", _li)
