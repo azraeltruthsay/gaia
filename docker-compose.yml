@@ -273,6 +273,10 @@ services:
       # User's timezone — world_state renders the operator's local time from this
       # (Core confabulates TZ math otherwise). Override per deployment/travel.
       - GAIA_USER_TZ=${GAIA_USER_TZ:-America/Los_Angeles}
+      # CFR-for-conversation Phase 1: build the working set by relevance×decay
+      # instead of pure recency (fixes recency-bleed). Set 0 to revert to the
+      # legacy sliding-window. Tunables: CFR_RELEVANCE_FLOOR, CFR_RECENCY_HALFLIFE_TURNS.
+      - CFR_CONVERSATION_ENABLED=${CFR_CONVERSATION_ENABLED:-1}
       - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths

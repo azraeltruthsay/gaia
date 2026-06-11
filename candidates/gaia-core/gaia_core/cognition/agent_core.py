@@ -606,15 +606,36 @@ class AgentCore:
         SLIDING_WINDOW_SIZE = 6  # Last 3 turn-pairs
         all_history = history or []
 
-        # Skip history for simple greetings — prevents old conversation turns
-        # from polluting trivial responses (e.g. "good afternoon" → strawberry answer)
-        _greeting_words = {"hello", "hi", "hey", "good", "morning", "afternoon", "evening",
-                           "night", "howdy", "greetings", "yo", "sup", "gaia"}
-        _input_words = set(user_input.lower().split())
-        if len(_input_words) <= 5 and _input_words.issubset(_greeting_words | {".", "!", ",", "?"}):
-            window = all_history[-2:]  # Only last exchange, not full window
+        # CFR-for-conversation Phase 1 (flag CFR_CONVERSATION_ENABLED): the
+        # working set is chosen by RELEVANCE×recency-decay, not pure recency.
+        # FOCUS the most relevant recent turns (+ a 1-turn recency anchor) and
+        # BLUR (drop) clearly-unrelated ones — so a greeting after a clock chat
+        # no longer pulls the clock turns in. Embedding-only (no LLM on the hot
+        # path). Legacy recency window + greeting heuristic stays as the default.
+        try:
+            from gaia_core.memory.conversation_cfr import cfr_conversation_enabled, select_focus_turns
+            _cfr_on = cfr_conversation_enabled()
+        except Exception:
+            _cfr_on = False
+        if _cfr_on and all_history:
+            window, _cfr_dbg = select_focus_turns(
+                all_history, user_input, max_focus=SLIDING_WINDOW_SIZE, anchor_n=1)
+            self.logger.info(
+                "CFR working set: %d focus / %d blurred (floor=%s top_rel=%s%s)",
+                _cfr_dbg.get("focus", 0), _cfr_dbg.get("blurred", 0),
+                _cfr_dbg.get("floor"), _cfr_dbg.get("top_rel"),
+                f" fallback={_cfr_dbg['fallback']}" if _cfr_dbg.get("fallback") else "")
         else:
-            window = all_history[-SLIDING_WINDOW_SIZE:]
+            # Legacy: pure-recency sliding window + greeting heuristic.
+            # Skip history for simple greetings — prevents old conversation turns
+            # from polluting trivial responses (e.g. "good afternoon" → strawberry answer)
+            _greeting_words = {"hello", "hi", "hey", "good", "morning", "afternoon", "evening",
+                               "night", "howdy", "greetings", "yo", "sup", "gaia"}
+            _input_words = set(user_input.lower().split())
+            if len(_input_words) <= 5 and _input_words.issubset(_greeting_words | {".", "!", ",", "?"}):
+                window = all_history[-2:]  # Only last exchange, not full window
+            else:
+                window = all_history[-SLIDING_WINDOW_SIZE:]
 
         relevant_history_snippet = []
         for i, msg in enumerate(window):
