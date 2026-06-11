@@ -203,25 +203,27 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     # UTC, so we use the USER's configured timezone (GAIA_USER_TZ, default the
     # operator's America/Los_Angeles) — NOT time.localtime (which is the host's).
     try:
-        from zoneinfo import ZoneInfo
-        import datetime as _dt
-        _user_tz = os.environ.get("GAIA_USER_TZ", "America/Los_Angeles")
-        _user_dt = _dt.datetime.fromtimestamp(snap['ts'], tz=ZoneInfo(_user_tz))
-        lines.append(
-            f"User's local time ({_user_tz}): "
-            f"{_user_dt.strftime('%Y-%m-%d %H:%M:%S %Z (UTC%z)')}"
-        )
-    except Exception:
-        # Fallback: host localtime (UTC unless the container TZ is set).
-        try:
-            _local_struct = time.localtime(snap['ts'])
-            _tz_name = time.strftime('%Z', _local_struct) or "local"
+        _user_tz = (os.environ.get("GAIA_USER_TZ") or "").strip()
+        if _user_tz:
+            # Explicit override via GAIA_USER_TZ (IANA name).
+            from zoneinfo import ZoneInfo
+            import datetime as _dt
+            _user_dt = _dt.datetime.fromtimestamp(snap['ts'], tz=ZoneInfo(_user_tz))
             lines.append(
-                f"Local time (host): "
-                f"{time.strftime('%Y-%m-%d %H:%M:%S', _local_struct)} {_tz_name}"
+                f"User's local time ({_user_tz}): "
+                f"{_user_dt.strftime('%Y-%m-%d %H:%M:%S %Z (UTC%z)')}"
             )
-        except Exception:
-            pass
+        else:
+            # Sync to the HOST system timezone — the container mounts the host's
+            # /etc/localtime, so time.localtime() renders the user's real local
+            # time (falls back to UTC if the mount is absent).
+            _local = time.localtime(snap['ts'])
+            lines.append(
+                "User's local time: "
+                f"{time.strftime('%Y-%m-%d %H:%M:%S %Z (UTC%z)', _local)}"
+            )
+    except Exception:
+        pass
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
     
     # Immune System — one-line summary only (full MRI available via introspect_logs)
