@@ -261,7 +261,18 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "NEVER project your own state onto the user — if you parked at "
             "30min idle, that does NOT mean the user was in bed."
         )
-        persona_anchor = persona_anchor + _capability_block
+        # Skip the ~500-token capability/tools block for clearly tool-free
+        # conversational turns (greetings, chitchat, thanks). It bloats the
+        # system prompt enough to OOM Core's logits on the heavy GPU path, and
+        # the block itself says chitchat needs no tool. Any non-conversational
+        # intent keeps it so tool use is unaffected.
+        _li = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+        _tool_free = _li in {"greeting", "farewell", "gratitude", "smalltalk",
+                             "social", "chitchat", "acknowledgment", "affirmation"}
+        if not _tool_free:
+            persona_anchor = persona_anchor + _capability_block
+        else:
+            logger.info("PromptBuilder: tool-free intent '%s' — skipping capability block (~500 tok)", _li)
     except Exception:
         logger.debug("Capability-block injection skipped (non-fatal)", exc_info=True)
 
