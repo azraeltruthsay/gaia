@@ -664,7 +664,8 @@ class DiscordInterface:
                                 # Flush current buffer immediately
                                 if full_response.strip():
                                     _sent_responses.add(full_response.strip())
-                                    await self._send_response(message_obj, full_response.strip(), is_dm)
+                                    _voiced = await self._apply_voice_gate(full_response.strip())
+                                    await self._send_response(message_obj, _voiced, is_dm)
                                     full_response = ""
                             
                             elif event_type == "packet":
@@ -690,7 +691,8 @@ class DiscordInterface:
             # Finalize any remaining accumulated response not yet flushed.
             # Skip if it duplicates something already sent via a flush event.
             if full_response.strip() and full_response.strip() not in _sent_responses:
-                await self._send_response(message_obj, full_response.strip(), is_dm)
+                _voiced = await self._apply_voice_gate(full_response.strip())
+                await self._send_response(message_obj, _voiced, is_dm)
 
             # Record GAIA reply for typing-wake 48h gate
             if is_dm and _dm_blocklist:
@@ -750,6 +752,33 @@ class DiscordInterface:
             )
         except Exception:
             logger.debug("Presence update failed", exc_info=True)
+
+    async def _apply_voice_gate(self, text: str) -> str:
+        """Gate 2 (worth-voicing): strip leaked meta-commentary before sending.
+
+        Discord renders the accumulated stream tokens, not the cleaned packet
+        candidate, so the gaia-core finalization filter never reaches this path.
+        We apply the same filter here via gaia-core's /api/voice_gate. Gated by
+        VOICE_GATE_ENABLED; fail-open (any error / empty result → original text,
+        so a message is never lost or blanked).
+        """
+        if os.environ.get("VOICE_GATE_ENABLED", "0").lower() not in ("1", "true", "yes", "on"):
+            return text
+        if not text or not text.strip():
+            return text
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.post(f"{self.core_endpoint}/api/voice_gate", json={"text": text})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    cleaned = data.get("text")
+                    if cleaned and cleaned.strip():
+                        if data.get("changed"):
+                            logger.info("VoiceGate(Discord): stripped %d meta sentence(s)", data.get("dropped", 0))
+                        return cleaned
+        except Exception as e:
+            logger.debug("VoiceGate(Discord) call failed (non-fatal): %s", e)
+        return text
 
     async def _send_response(self, message_obj: Any, content: str, is_dm: bool):
         """Send response back to Discord."""

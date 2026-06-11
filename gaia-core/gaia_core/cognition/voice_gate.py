@@ -75,6 +75,25 @@ def voice_gate_enabled() -> bool:
     return os.environ.get("VOICE_GATE_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 
 
+# Exemplar embeddings are constant — encode once per model, reuse (keeps the
+# /api/voice_gate endpoint fast: only the response's own sentences are encoded
+# per call, not the ~20 exemplars).
+_EXEMPLAR_CACHE: Dict = {}
+
+
+def _exemplar_embeddings(model):
+    key = id(model)
+    cached = _EXEMPLAR_CACHE.get(key)
+    if cached is None:
+        cached = (
+            model.encode(_META_EXEMPLARS, show_progress_bar=False),
+            model.encode(_NATURAL_EXEMPLARS, show_progress_bar=False),
+        )
+        _EXEMPLAR_CACHE.clear()  # only ever hold the current model's exemplars
+        _EXEMPLAR_CACHE[key] = cached
+    return cached
+
+
 def _cfg_float(key: str, default: float) -> float:
     try:
         return float(os.environ.get(key, default))
@@ -120,8 +139,7 @@ def filter_voiced(text: str, measure_only: bool = None) -> Tuple[str, Dict]:
         from gaia_core.memory.session_history_indexer import _get_embed_model, _cosine_similarity
         model = _get_embed_model()
         if model is not None:
-            meta_embs = model.encode(_META_EXEMPLARS, show_progress_bar=False)
-            nat_embs = model.encode(_NATURAL_EXEMPLARS, show_progress_bar=False)
+            meta_embs, nat_embs = _exemplar_embeddings(model)
     except Exception:
         logger.debug("voice_gate embed unavailable; tells-only", exc_info=True)
         model = None

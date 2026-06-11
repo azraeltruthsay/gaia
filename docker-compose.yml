@@ -285,9 +285,10 @@ services:
       - CFR_BLUR_BREADCRUMB=${CFR_BLUR_BREADCRUMB:-0}
       # Gate 2 (worth-voicing): post-generation filter that strips leaked meta-
       # commentary / thinking-out-loud ("the 'how' is a probe plus a social
-      # register"). DEFAULT OFF = measure-only (logs what it WOULD strip). Set 1
-      # to apply (cleans the packet candidate → voice; Discord apply-path is WIP).
-      - VOICE_GATE_ENABLED=${VOICE_GATE_ENABLED:-0}
+      # register"). DEFAULT ON: applies to the packet candidate (voice) here, and
+      # the Discord path calls /api/voice_gate per message. Conservative + fail-
+      # open + never-empty. Set 0 for measure-only (logs what it WOULD strip).
+      - VOICE_GATE_ENABLED=${VOICE_GATE_ENABLED:-1}
       - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths
@@ -432,6 +433,10 @@ services:
       - SHARED_DIR=/shared
       # Service endpoints (configurable for candidate injection)
       - CORE_ENDPOINT=${CORE_ENDPOINT:-http://gaia-core:6415}
+      # Gate 2 (worth-voicing): when on, the Discord path POSTs each outgoing
+      # message to gaia-core /api/voice_gate to strip leaked meta-commentary
+      # before sending (Discord renders stream tokens, not the cleaned candidate).
+      - VOICE_GATE_ENABLED=${VOICE_GATE_ENABLED:-1}
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
       - MCP_HEALTH_ENDPOINT=${MCP_HEALTH_ENDPOINT:-http://gaia-mcp:8765}
       # Web server settings

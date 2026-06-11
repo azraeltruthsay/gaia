@@ -1914,6 +1914,35 @@ async def cognitive_query(req: CognitiveQueryRequest):
         return {"content": "", "error": str(e), "target": req.target}
 
 
+@app.post("/api/voice_gate")
+async def api_voice_gate(req: Request):
+    """Gate 2 (worth-voicing) as a service: strip leaked meta-commentary from a
+    finished response. gaia-web's Discord path renders accumulated stream tokens
+    (not the cleaned packet candidate), so it calls this just before sending to
+    apply the same filter that finalization applies to the candidate. Fail-open:
+    on any error, returns the input unchanged so a message is never lost.
+    """
+    try:
+        body = await req.json()
+        text = body.get("text", "") or ""
+        if not text.strip():
+            return {"text": text, "dropped": 0}
+        from gaia_core.cognition.voice_gate import filter_voiced
+        out, dbg = filter_voiced(text, measure_only=False)
+        return {
+            "text": out,
+            "dropped": len(dbg.get("dropped", [])),
+            "failsafe": dbg.get("failsafe"),
+            "changed": out.strip() != text.strip(),
+        }
+    except Exception as e:
+        logger.debug("api_voice_gate failed (non-fatal): %s", e, exc_info=True)
+        try:
+            return {"text": (await req.json()).get("text", ""), "dropped": 0, "error": str(e)}
+        except Exception:
+            return {"text": "", "dropped": 0, "error": str(e)}
+
+
 @app.post("/api/cognitive/stream")
 async def cognitive_stream(req: CognitiveQueryRequest):
     """Streaming variant of /api/cognitive/query — yields token deltas as NDJSON

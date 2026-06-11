@@ -208,9 +208,12 @@ These are *internal contemplation about the conversation* — exactly what a min
   high-precision regex tells for GAIA's recurring vocabulary ("register", "weighted probe",
   "the 'X' refers to/implies/expects"). **Log what it WOULD drop; alter nothing.** Validate
   precision/recall against the real corpus + natural-speech samples before it touches output.
-- **G2-b — filter:** once validated, drop flagged sentences. **Fail-safe: never return empty, never
-  drop >~60% of content** (if the whole reply is meta, keep it + log — a mangled reply is worse than
-  an odd one). Flag-gated (`VOICE_GATE_ENABLED`), candidate-first, A/B.
+- **G2-b — filter (SHIPPED):** drops flagged sentences. Fail-safe: never empty, never a fragment (if
+  the whole reply is meta, keep it + log). Flag `VOICE_GATE_ENABLED` (default on). **Apply-path:**
+  gaia-core finalization cleans the packet candidate (→ voice); since Discord renders the accumulated
+  stream tokens (not the candidate), `discord_interface` POSTs each outgoing message to gaia-core
+  `POST /api/voice_gate` (exemplar embeddings cached) before sending — fail-open. Endpoint battery:
+  meta cleaned, all-meta keeps original, 5/5 natural untouched.
 - **G2-c (later):** escalate stubborn cases to a Prime "voice cleaner" rewrite *only when the detector
   flags* (cheap detector gates the expensive pass), or train a small LoRA to stop the leak at source.
 
