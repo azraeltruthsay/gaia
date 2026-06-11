@@ -1374,7 +1374,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _intent_lbl, _ = _eic.classify(user_input or "")
                     _suppress_tools = _intent_lbl in {
                         "greeting", "farewell", "gratitude", "smalltalk",
-                        "social", "chitchat", "acknowledgment", "affirmation"}
+                        "social", "chitchat", "acknowledgment", "affirmation",
+                        # 'time' is world-state-answerable: the clock is already
+                        # injected in the prompt, so drop the redundant (noisy)
+                        # worldstate tool call and let Core answer from context.
+                        "time"}
                     if _suppress_tools:
                         logger.info("Chat: tool-free intent '%s' — suppressing tool calls", _intent_lbl)
             except Exception:

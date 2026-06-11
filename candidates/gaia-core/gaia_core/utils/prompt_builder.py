@@ -267,18 +267,21 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # the block itself says chitchat needs no tool. Any non-conversational
         # intent keeps it so tool use is unaffected.
         _li = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
-        _tool_free = _li in {"greeting", "farewell", "gratitude", "smalltalk",
-                             "social", "chitchat", "acknowledgment", "affirmation"}
-        if not _tool_free:
+        _chitchat = _li in {"greeting", "farewell", "gratitude", "smalltalk",
+                            "social", "chitchat", "acknowledgment", "affirmation"}
+        # World-state-answerable intents (e.g. time): the clock/uptime/load are
+        # already injected via world_state_snapshot, so a tool is redundant.
+        # Skip the capability block so Core answers from context instead of
+        # emitting a (noisy, redundant) worldstate call.
+        _world_answerable = _li in {"time"}
+        if not (_chitchat or _world_answerable):
             persona_anchor = persona_anchor + _capability_block
-        else:
+        elif _chitchat:
             # Casual/social turn: no tools needed. Steer toward warm, present
             # conversation with a SHORT, POSITIVE-only nudge — negative framing
             # ("don't deflect") makes the model fixate on the named concept and
-            # go meta, so keep it about what TO do.
-            # Short + positive is the sweet spot: more explicit nudges (e.g.
-            # "share about yourself first") backfire — Core's task-assistant
-            # prior resists them and goes generic/meta. Keep it light.
+            # go meta, so keep it about what TO do. More explicit nudges (e.g.
+            # "share about yourself first") also backfire — keep it light.
             _social_block = (
                 "\n\n— This is casual conversation —\n"
                 "Be warm and present, like a friend catching up. If asked how "
@@ -286,6 +289,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             )
             persona_anchor = persona_anchor + _social_block
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (skipped capability block)", _li)
+        else:
+            # World-answerable (e.g. time): the data is already in world_state.
+            persona_anchor = persona_anchor + (
+                "\n\n(The current date/time and system state are already provided "
+                "in your context above — answer directly from that; no tool needed.)"
+            )
+            logger.info("PromptBuilder: world-answerable intent '%s' — answer from world_state, no tool", _li)
     except Exception:
         logger.debug("Capability-block injection skipped (non-fatal)", exc_info=True)
 
