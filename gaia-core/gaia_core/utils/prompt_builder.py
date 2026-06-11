@@ -1791,18 +1791,19 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # Closing line is action-SUPPRESSING, not action-suggesting: Gemma4-E4B
         # will spuriously act on "look back"/"check" verbs ("I'll check… report
         # back in a few minutes"), so we tell it NOT to act on these unless asked.
+        # NEUTRAL framing only. An earlier version added "if you lack the detail,
+        # say so rather than inventing it" — meant as a speak-gate anti-confab
+        # rule, but Gemma4-E4B over-applied it and DISOWNED facts it actually
+        # had in focus (buried-fact recall A/B: breadcrumb-on deflected, off
+        # answered correctly). So: pure awareness + a quiet recall option, no
+        # behavioral instruction that can prime evasion.
         _crumb_lines = [
-            "(Reference only — do not mention or quote this note. Earlier turns in "
-            "this conversation were set aside as not currently relevant; you see "
-            "only a short gist of each, not their full text:)"
+            "(Reference only — do not mention this note. Topics from earlier in "
+            "this conversation that aren't in current focus; full text of any is "
+            "available by calling expand_context with its id if you need it:)"
         ]
         for _b in _blurred[:6]:
             _crumb_lines.append(f"- [{_b.get('id')}] {_b.get('role', '?')}: {_b.get('gist', '')}")
-        _crumb_lines.append(
-            "Background only — do not bring these up or act on them unless the user "
-            "does. If asked about one you only have the gist of, just say you don't "
-            "have the detail in front of you rather than inventing it."
-        )
         final_prompt.append({"role": "system", "content": "\n".join(_crumb_lines)})
 
     # Normalize history + the final user prompt together so collapsing works across boundaries

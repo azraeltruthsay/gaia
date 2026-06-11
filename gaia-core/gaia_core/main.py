@@ -115,6 +115,30 @@ class MinimalPersona:
             self.system_prompt = ""
 
 
+def _resolve_cfr_recall(history, rid):
+    """CFR Phase 2b: resolve a BLURred conversation turn's full text by id.
+
+    The page-fault handler for conversation-as-virtual-memory. When GAIA emits
+    an expand_context tool call to page a set-aside turn back, we resolve it
+    locally from this session's history (the backing store is always resident
+    here) — no MCP round-trip. Returns a compact result dict, or None if the id
+    isn't found. Pure + side-effect-free so it can be unit-tested in isolation.
+    """
+    if not rid or not history:
+        return None
+    for m in history:
+        if str(m.get("id")) != str(rid):
+            continue
+        text = (m.get("content") or "")
+        try:
+            from gaia_core.utils.output_router import _strip_think_tags_robust
+            text = _strip_think_tags_robust(text)
+        except Exception:
+            pass  # strip is best-effort; never let it drop a valid match
+        return {"recalled_turn_id": str(rid), "role": m.get("role", "?"), "text": text[:2000]}
+    return None
+
+
 def initialize_cognitive_system():
     """
     Initialize the cognitive system components.
@@ -1406,7 +1430,10 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     # Tool-free conversational turn: drop the call
                                     # silently — no "[calling...]" display, no MCP
                                     # round-trip. The reply text still streams.
-                                    if _suppress_tools:
+                                    # expand_context is the CFR recall fault-handler — never
+                                    # suppress it; it's how GAIA pages a set-aside turn back
+                                    # into focus, and is meaningful even on a chatty turn.
+                                    if _suppress_tools and pe.tool_name != "expand_context":
                                         logger.info("Tool call '%s' suppressed (tool-free intent)", pe.tool_name)
                                         continue
                                     # Dedup: only process each unique tool call once
@@ -1467,13 +1494,29 @@ async def process_packet(packet_data: Dict[str, Any]):
                         _META_VERBS = {"search", "do", "learn", "remember", "ask"}
                         _is_meta = tc.tool_name in _META_VERBS
 
-                        tool_params = dict(tc.tool_params or {})
-                        if not _is_meta and tc.tool_action:
-                            tool_params["action"] = tc.tool_action
-                        rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
-                            method=tc.tool_name,
-                            params=tool_params,
-                        ))
+                        if tc.tool_name == "expand_context":
+                            # CFR Phase 2b page-fault: resolve a BLURred turn's full
+                            # text locally from this session's history (the backing
+                            # store) — no MCP. Produce an rpc_result in call_jsonrpc's
+                            # shape so the shared result-handling below covers it.
+                            _rid = str((tc.tool_params or {}).get("id")
+                                       or (tc.tool_params or {}).get("turn")
+                                       or tc.tool_action or "").strip()
+                            _rec = _resolve_cfr_recall(history, _rid)
+                            if _rec:
+                                rpc_result = {"ok": True, "response": {"result": _rec}}
+                                logger.info("CFR recall: paged turn '%s' back into focus", _rid)
+                            else:
+                                rpc_result = {"ok": False, "error": f"No set-aside turn with id '{_rid}'."}
+                                logger.info("CFR recall MISS for id '%s'", _rid)
+                        else:
+                            tool_params = dict(tc.tool_params or {})
+                            if not _is_meta and tc.tool_action:
+                                tool_params["action"] = tc.tool_action
+                            rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
+                                method=tc.tool_name,
+                                params=tool_params,
+                            ))
                         if rpc_result.get("ok"):
                             actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
                             result_xml = format_tool_result(actual_result)

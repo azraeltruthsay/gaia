@@ -154,3 +154,34 @@ Originally "unify the relevance kernel." The two-gate framing (§1a) makes the r
 - `main.py:1376` stream loop — CFR_EXPAND signal interception (Phase 2)
 - `session_manager.py:200–257` archival — backing store reader + retention (Phase 3)
 
+---
+
+## 7. Findings (empirical)
+
+### Phase 1 — shipped, default ON. Works.
+Relevance×decay working set replaces the recency window. Kills the bleed (greeting after
+clock-chat blurs the clock turns) **and** — unexpectedly — already serves as a *de-facto fault
+handler*: a buried fact, referenced later, gets **re-focused** by the per-turn re-scoring (locker
+combo buried under 4 off-topic turns → top_rel 0.808 → answered correctly). Phase 1 recovers more
+than expected on its own.
+
+### Phase 2 — built, default **OFF**. The breadcrumb backfires on Gemma4-E4B.
+- **2a (breadcrumb)** + **2b (`expand_context` recall)** are built, unit-tested, no-regression, and
+  **disabled by default** (`CFR_BLUR_BREADCRUMB=0`). The `_resolve_cfr_recall` resolver and the
+  tool-call-path recall wiring are sound and dormant.
+- **Why off:** the in-prompt awareness/recall scaffolding makes Gemma4-E4B *over-act*. A/B on the
+  buried-fact case:
+  - breadcrumb **OFF** → "locker #417, padlock 9-2-6-3" ✅ (Phase 1 re-focus)
+  - breadcrumb **ON**, anti-confab framing ("say you don't have it") → **disowned a fact it had** ❌
+  - breadcrumb **ON**, neutral framing → grabbed an unrelated memory tool (`palace(recall)`) ❌
+- **The deep lesson (validates §1a):** the breadcrumb is a *speak-gate* device (awareness/discretion),
+  and putting it in the prompt as an instruction **corrupted gate 1** — she stopped reasoning from
+  context she had. A crude speak-gate rule poisons the reasoning gate. **Gate 2 cannot be an in-prompt
+  instruction on a small model; it must be a separate post-generation filter** (which is exactly the
+  Phase-4 "gate 2 as a first-class stage" target). This experiment is *why*.
+
+### Next
+- Phase 1 carries conversation context recovery for now.
+- Re-attempt gate-2 (awareness/recall) as a **post-generation** pass, not in-prompt — or on a stronger
+  Core. Keep Phase 2 dormant behind the flag until then.
+
