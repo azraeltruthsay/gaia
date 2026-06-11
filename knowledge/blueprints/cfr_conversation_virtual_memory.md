@@ -27,6 +27,34 @@ set* fits; the *corpus* need not. Full text is **always** on disk (lossless), so
 
 ---
 
+## 1a. The two gates — *resident-for-reasoning* vs *worth-voicing*
+
+The page-replacement policy is only **one** of two filters a mind runs. A human holding a
+conversation isn't "thinking of everything at once" — they dynamically focus and blur to keep the
+*relevant* subset resident (gate 1), **and** they exercise discretion about which of those resident
+thoughts are actually worth saying (gate 2). Thinking a thing ≠ saying it; much internal
+contemplation is *about the conversation itself* and is rightly never voiced — it would be
+embarrassing, wrong, half-formed, or just pointless.
+
+| Gate | Question | Mechanism in GAIA |
+|------|----------|-------------------|
+| **1 — Resident-for-reasoning** | *What do I focus into working memory to reason with?* | CFR FOCUS/BLUR/EXPAND (this plan) |
+| **2 — Worth-voicing** | *Of what I'm thinking, what's worth saying aloud?* | the `<think>`/speak seam (`strip_think_tags`) + output discretion |
+
+These are **independent**. A turn can be resident (gate 1 passes — she's reasoning with it) yet
+unvoiced (gate 2 holds it back). The blur **breadcrumb** (Phase 2a) is the sharp case: it is GAIA's
+*internal contemplation about the conversation* — her private awareness of what she set aside. The
+empirically-discovered failure mode was **thinking out loud** — leaking that note into speech ("I'll
+check the world state, report back…"). The fix (reference-only, action-suppressing framing, leak
+tests) **is** gate 2 in miniature. We didn't theorize the speak-gate; we hit it.
+
+**Implication:** internal context that is CFR-managed (focus/blur, even of meta-thoughts about the
+exchange) must pass through a *separate* worth-voicing filter before it reaches the user. An interior
+— a mind that feels like it has private thought rather than just an output stream — *requires* the
+two gates to be distinct. This reframes Phase 4 (below).
+
+---
+
 ## 2. What we REUSE (this is extension, not greenfield)
 
 - **`cfr_manager.py`** — the resolution-tree primitives (FOCUS/SUMMARY/expand, on-disk persistence,
@@ -85,10 +113,16 @@ For *conversation* that's too slow per turn. So: **the per-turn replacement poli
 - **Acceptance:** working set shrinks aggressively; aged turns are still answerable via expand/RAG; a
   metric logs what was evicted/archived (no silent loss).
 
-### Phase 4 — Unify the relevance kernel
-- One `relevance = confidence × decay(age, type)` scorer across **conversation turns + KG facts +
-  documents**, so every context surface shares the foveation model and one budget. Retire the
-  parallel positional compactor + ad-hoc sliding window.
+### Phase 4 — Unify the two gates across all surfaces
+Originally "unify the relevance kernel." The two-gate framing (§1a) makes the real target bigger:
+- **Gate 1 (resident):** one `relevance = confidence × decay(age, type)` scorer across **conversation
+  turns + KG facts + documents**, so every context surface shares the foveation model and one budget.
+  Retire the parallel positional compactor + ad-hoc sliding window.
+- **Gate 2 (voiced):** a *separate*, explicit worth-voicing filter on the output path — distinct from
+  relevance — that decides which resident/contemplated material is actually said. Generalizes today's
+  `<think>`/`strip_think_tags` seam and the Phase-2a breadcrumb discretion into a first-class stage.
+  The two scores answer different questions (*useful to reason with?* vs *worth saying?*) and must not
+  be collapsed into one.
 
 ---
 
