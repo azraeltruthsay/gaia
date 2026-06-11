@@ -1,6 +1,37 @@
 {
     "_comment": "Exemplar phrases for embed-based persona classification. Each persona has a list of representative user queries; new user input is embedded and matched against these via cosine similarity. Threshold lives in gaia_constants EMBED_PERSONA. To add a persona, add a new top-level key with ~20-30 exemplars covering the range of how users naturally invoke that mode. Keep phrases short and varied (different verbs, different topics within the persona's domain). See embed_persona_classifier.py for the matching mechanics.",
 
+    "conversational": [
+        "Hello GAIA",
+        "Hey, how are you?",
+        "Good morning",
+        "How's it going?",
+        "What's up?",
+        "How are you feeling today?",
+        "Can you tell me what time it is?",
+        "What's today's date?",
+        "Thanks for your help",
+        "That's great, thank you",
+        "How was your day?",
+        "What have you been up to lately?",
+        "Tell me a little about yourself",
+        "Who are you?",
+        "What can you do?",
+        "I just wanted to chat for a bit",
+        "How do you actually work?",
+        "What do you think about that?",
+        "It's nice to talk with you",
+        "Let's just have a casual conversation",
+        "What's on your mind?",
+        "How's everything going with you?",
+        "Are you doing okay?",
+        "Just checking in to see how you're doing",
+        "Good to see you again",
+        "What's new with you?",
+        "Can you help me with a quick question?",
+        "I'm curious what you think about something"
+    ],
+
     "dnd_player_assistant": [
         "Tell me about Rupert Roads",
         "What's the deal with the BlueShot crystals",

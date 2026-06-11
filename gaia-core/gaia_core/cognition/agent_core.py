@@ -1703,7 +1703,15 @@ class AgentCore:
                                     user_input or "",
                                     confidence_threshold=_threshold,
                                 )
-                                if _stance == "in_character_invitation":
+                                # Only honor an in-character invitation when we're
+                                # actually in a roleplay persona (one with a knowledge
+                                # base, e.g. dnd_campaign). For plain conversational
+                                # chat (kb=None) there is no character to step into, and
+                                # the single-stance embed classifier otherwise fires on
+                                # ordinary greetings — wrongly forcing slow Prime
+                                # escalation. (Explicit keyword invitations above still
+                                # apply regardless.)
+                                if _stance == "in_character_invitation" and knowledge_base_name:
                                     _is_roleplay_invite = True
                                     logger.info(
                                         "[STANCE] embed classifier fired in_character_invitation (score=%.3f)",
@@ -5224,7 +5232,7 @@ class AgentCore:
         if not grounding_text:
             # No search results — return original with hedge if it was self-conflating
             if reason == "self_conflation":
-                return f"I'm not confident in my answer to that. Let me be honest: I don't have reliable information about this topic. Could you provide more context, or would you like me to try a different approach?"
+                return "I'm not confident in my answer to that. Let me be honest: I don't have reliable information about this topic. Could you provide more context, or would you like me to try a different approach?"
             return initial_response
 
         # Step 2: Regenerate with grounded context

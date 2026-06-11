@@ -434,7 +434,7 @@
   },
   "EMBED_PERSONA": {
     "enabled": true,
-    "confidence_threshold": 0.35,
+    "confidence_threshold": 0.5,
     "top_k": 3
   },
   "EMBED_STANCE": {
@@ -464,7 +464,7 @@
     "max_tokens": 900,
     "temperature": 0.55,
     "retry_on_confabulation": "warn",
-    "low_confidence_prefix": "[low-confidence: response had verification flags — treat with skepticism] ",
+    "low_confidence_prefix": "[low-confidence: response had verification flags \u2014 treat with skepticism] ",
     "skip_when_reflex_eligible": true
   },
   "CROSS_TIER_AUDIT": {
