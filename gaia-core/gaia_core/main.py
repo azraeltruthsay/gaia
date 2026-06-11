@@ -1361,6 +1361,25 @@ async def process_packet(packet_data: Dict[str, Any]):
             _pending_tool_calls = []
             _seen_tool_calls = set()  # Dedup repeated tool calls
 
+            # Suppress tool calls on tool-free conversational intents — Core
+            # habitually emits e.g. worldstate() even on a greeting, which adds
+            # "[calling...]" noise and fragments the reply. Greetings/chitchat
+            # never need a tool, so drop such calls silently (the surrounding
+            # reply text still streams).
+            _suppress_tools = False
+            try:
+                from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+                _eic = EmbedIntentClassifier.instance()
+                if _eic.ready:
+                    _intent_lbl, _ = _eic.classify(user_input or "")
+                    _suppress_tools = _intent_lbl in {
+                        "greeting", "farewell", "gratitude", "smalltalk",
+                        "social", "chitchat", "acknowledgment", "affirmation"}
+                    if _suppress_tools:
+                        logger.info("Chat: tool-free intent '%s' — suppressing tool calls", _intent_lbl)
+            except Exception:
+                logger.debug("intent pre-check for tool suppression failed (non-fatal)", exc_info=True)
+
             while True:
                 event = await loop.run_in_executor(None, _next_event)
                 if event is None:
@@ -1380,6 +1399,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     response_pieces.append(pe.text)
                                     yield json.dumps({"type": "token", "value": pe.text}) + "\n"
                                 elif pe.type == ParseEventType.TOOL_CALL_DETECTED:
+                                    # Tool-free conversational turn: drop the call
+                                    # silently — no "[calling...]" display, no MCP
+                                    # round-trip. The reply text still streams.
+                                    if _suppress_tools:
+                                        logger.info("Tool call '%s' suppressed (tool-free intent)", pe.tool_name)
+                                        continue
                                     # Dedup: only process each unique tool call once
                                     _tc_key = f"{pe.tool_name}:{pe.tool_action}:{json.dumps(pe.tool_params, sort_keys=True)}"
                                     if _tc_key in _seen_tool_calls:

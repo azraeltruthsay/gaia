@@ -203,6 +203,10 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "list_tree": lambda p: _list_tree_impl(p),
         "count_chars": lambda p: _count_chars_impl(p),
         "world_state": lambda p: world_state_detail(),
+        # Alias: Core habitually emits worldstate(action=current) for world state.
+        # Map it to world_state_detail so the call succeeds instead of erroring
+        # (-32603) and fragmenting the reply. The action param is ignored.
+        "worldstate": lambda p: world_state_detail(),
         "gpu_status": lambda p: world_state_detail(),
         "recall_events": lambda p: _recall_events_impl(p),
         "memory_status": lambda p: _memory_status_impl(p),
