@@ -219,6 +219,10 @@ class Context:
     constraints: Constraints = field(default_factory=Constraints)
     relevant_history_snippet: List[RelevantHistorySnippet] = field(default_factory=list)
     available_mcp_tools: Optional[List[str]] = None
+    # CFR-for-conversation Phase 2: turns the relevance policy set aside (BLUR)
+    # this turn — [{id, role, gist, rel}]. Surfaced as a breadcrumb so GAIA knows
+    # what she's not seeing and can page one back via expand_context(id=…).
+    blurred_turns: List[Dict[str, Any]] = field(default_factory=list)
 
 # --- Content ---
 @dataclass_json

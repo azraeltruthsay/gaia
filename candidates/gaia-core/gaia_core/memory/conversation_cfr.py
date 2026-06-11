@@ -109,12 +109,31 @@ def select_focus_turns(
         focus = chosen + list(anchor)
         focus.sort(key=lambda t: pos.get(id(t), 0))
 
+        # Blurred-turn breadcrumb metadata (Phase 2): what was set aside, so the
+        # prompt can list it and GAIA can page it back via expand_context(id=…).
+        # Only turns with a stable id are recoverable; gist = first ~14 words.
+        chosen_ids = {id(t) for t in chosen}
+        anchor_ids = {id(t) for t in anchor}
+        blurred_meta = []
+        for s in scored:
+            t = s["turn"]
+            if id(t) in chosen_ids or id(t) in anchor_ids:
+                continue
+            tid = t.get("id")
+            if not tid:
+                continue  # unrecoverable without a stable id — omit from breadcrumb
+            gist = " ".join((t.get("content") or "").split()[:14])
+            blurred_meta.append({"id": str(tid), "role": t.get("role", "?"),
+                                 "gist": gist[:120], "rel": round(s["rel"], 3)})
+        blurred_meta.sort(key=lambda b: -b["rel"])  # most-nearly-relevant first
+
         return focus, {
             "focus": len(focus),
             "blurred": len(candidates) - len(chosen),
             "floor": round(floor, 3),
             "anchor": len(anchor),
             "top_rel": round(max((s["rel"] for s in scored), default=0.0), 3),
+            "blurred_turns": blurred_meta[:8],
         }
     except Exception:
         logger.debug("CFR select_focus_turns failed; falling back to recency", exc_info=True)

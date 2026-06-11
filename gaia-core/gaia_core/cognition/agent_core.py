@@ -612,6 +612,7 @@ class AgentCore:
         # BLUR (drop) clearly-unrelated ones — so a greeting after a clock chat
         # no longer pulls the clock turns in. Embedding-only (no LLM on the hot
         # path). Legacy recency window + greeting heuristic stays as the default.
+        _blurred_turns = []  # Phase 2 breadcrumb: turns BLURred this turn (CFR on)
         try:
             from gaia_core.memory.conversation_cfr import cfr_conversation_enabled, select_focus_turns
             _cfr_on = cfr_conversation_enabled()
@@ -620,6 +621,7 @@ class AgentCore:
         if _cfr_on and all_history:
             window, _cfr_dbg = select_focus_turns(
                 all_history, user_input, max_focus=SLIDING_WINDOW_SIZE, anchor_n=1)
+            _blurred_turns = _cfr_dbg.get("blurred_turns", []) or []
             self.logger.info(
                 "CFR working set: %d focus / %d blurred (floor=%s top_rel=%s%s)",
                 _cfr_dbg.get("focus", 0), _cfr_dbg.get("blurred", 0),
@@ -699,7 +701,8 @@ class AgentCore:
                 policies=[]
             ),
             relevant_history_snippet=relevant_history_snippet,
-            available_mcp_tools=available_tools
+            available_mcp_tools=available_tools,
+            blurred_turns=_blurred_turns,
         )
 
         content = Content(original_prompt=user_input)

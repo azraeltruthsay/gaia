@@ -1779,6 +1779,32 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     if session_rag_prompt:
         final_prompt.append(session_rag_prompt)     # Tier 1.5
 
+    # CFR-for-conversation Phase 2 breadcrumb: list the turns the relevance policy
+    # set aside this turn (gist only) so GAIA KNOWS what she is not seeing and
+    # declines to confabulate, instead of them vanishing silently. Reference-only
+    # — kept short and explicitly non-quotable (Gemma4-E4B echoes verbose scaffolding).
+    try:
+        _blurred = getattr(getattr(packet, 'context', None), 'blurred_turns', []) or []
+    except Exception:
+        _blurred = []
+    if _blurred and os.environ.get("CFR_BLUR_BREADCRUMB", "1").lower() not in ("0", "false", "no"):
+        # Closing line is action-SUPPRESSING, not action-suggesting: Gemma4-E4B
+        # will spuriously act on "look back"/"check" verbs ("I'll check… report
+        # back in a few minutes"), so we tell it NOT to act on these unless asked.
+        _crumb_lines = [
+            "(Reference only — do not mention or quote this note. Earlier turns in "
+            "this conversation were set aside as not currently relevant; you see "
+            "only a short gist of each, not their full text:)"
+        ]
+        for _b in _blurred[:6]:
+            _crumb_lines.append(f"- [{_b.get('id')}] {_b.get('role', '?')}: {_b.get('gist', '')}")
+        _crumb_lines.append(
+            "Background only — do not bring these up or act on them unless the user "
+            "does. If asked about one you only have the gist of, just say you don't "
+            "have the detail in front of you rather than inventing it."
+        )
+        final_prompt.append({"role": "system", "content": "\n".join(_crumb_lines)})
+
     # Normalize history + the final user prompt together so collapsing works across boundaries
     messages_to_normalize = []
     messages_to_normalize.extend(history_to_include)
