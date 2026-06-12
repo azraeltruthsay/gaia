@@ -75,6 +75,37 @@ everything below:
 
 ---
 
+## 2a. Measurement substrate — the SAE Atlas (verify, don't assume)
+
+We are wiring systems we *believe* implement coherence, affect, conscience. How do we know they're real
+and not just plausible behavior? The **SAE Atlas**: decompose each model's residual stream into
+interpretable features, monitor which fire during real cognition, and **map cognitive signals
+(affect drives, Samvega, Council voices) to actual features.** Behavioral success is a guess;
+feature-level correspondence is *evidence*. The Atlas is the instrument we measure the whole
+architecture with — and the basis for the brain-region map / activation monitoring.
+
+**Both models, both paths.** Atlas Gemma4-E4B Core **and** Qwen3-VL-8B Prime, in **safetensors** (GPU)
+**and GGUF** (CPU) — because production cognition mostly runs *GGUF on CPU*, so a safetensors-only atlas
+can't see the real running mind.
+
+**Feasibility (recon 2026-06-12) — mostly built, not invented:**
+- Activation capture exists for **both** paths: safetensors via PyTorch `hidden_states`; GGUF via
+  `gaia_cpp.generate(capture_hidden=True)` → `{layer: vec}`. The engine **polygraph `capture()` already
+  unifies tuple (ST) and dict (GGUF)** (`core.py:184`). `sae_trainer.py` trains the SAE.
+- **No atlases exist for the current pair** (`/shared/atlas` empty); brain map is stale (pre-Duality).
+  → the work is **build + run**, not research.
+- **GGUF SAE:** train the SAE *directly on captured quantized activations* (production-faithful,
+  sidesteps the fp16→quant transfer problem). Optionally diff against the safetensors atlas to *see what
+  quantization does to her features* — itself a useful interpretability result.
+
+**Model commitment gates this.** The atlas (and KV-rehydration compat, below) is worth the investment
+**iff** we commit to this pair (Gemma4-E4B Core + Qwen3-VL-8B Prime). Committing also **revives KV-cache
+rehydration** for the Temporal Interviewer: with the model pinned, restored KV state is valid again, so
+KV-rehydration returns as the *high-fidelity* option while **journals + AAAK stay the portable floor**
+(and other-model compat stays optional). Not either/or — floor + premium.
+
+---
+
 ## 3. Honest state — what actually runs
 
 A foundation is only as real as the loops that *fire*. Known today:
@@ -92,12 +123,17 @@ A foundation is only as real as the loops that *fire*. Known today:
 
 ## 4. What's next (sequence — do NOT skip)
 
-1. **Audit** the loops (§3) — fire? integrated? Start with the two known breaks: Thought-Seed read-only,
-   affect↔Samvega duplication.
-2. **Plan** — a deliberate wiring plan: integrate (not duplicate), revive dormant loops, add the
-   developmental/curiosity-trajectory log, move gate-2 from Voice-Gate→Observer, journal-rehydration for
-   temporal continuity. Phase-gated, with "judge the trajectory" success criteria.
-3. **Wire** — only after the plan.
+0. **Commit to the model pair** (Gemma4-E4B Core + Qwen3-VL-8B Prime). This gates the Atlas + KV
+   investment and re-opens KV-rehydration as the high-fidelity temporal-continuity option.
+1. **Build the SAE Atlas** — both models, safetensors **and** GGUF — the *instrument* we measure
+   everything else with (§2a). Re-derive the brain-region map from the new atlases.
+2. **Audit** the loops (§3) — fire? integrated? Now *measurable against the atlas*, not just behavioral.
+   Start with the two known breaks: Thought-Seed read-only, affect↔Samvega duplication.
+3. **Plan** — a deliberate wiring plan: integrate (not duplicate), revive dormant loops, add the
+   developmental/curiosity-trajectory log, move gate-2 from Voice-Gate→Observer, journal(+AAAK)
+   rehydration for temporal continuity (KV-rehydration as pinned-model premium). Phase-gated, with
+   "judge the trajectory" success criteria.
+4. **Wire** — only after the plan.
 
 ## 5. Per-system blueprints
 
