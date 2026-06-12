@@ -18,6 +18,29 @@ class Interrupt:
     reason: str
     suggestion: str = ""
 
+
+# Observer health (A3). The StreamObserver is constructed per-turn, so health must
+# live at module level to survive instance churn. The observer degrades to OK on
+# any exception (a safe default), but that means a persistently-broken conscience
+# silently passes output through ungated — this makes that VISIBLE and queryable.
+_OBS_HEALTH = {"count": 0, "fail": 0, "last_ts": 0.0, "last_fail_ts": 0.0}
+
+
+def observer_health() -> dict:
+    """Snapshot of Observer health for the doctor / health endpoint. `healthy` is
+    False when the recent failure rate is high — i.e. the conscience may be
+    silently degraded and passing output ungated."""
+    c = _OBS_HEALTH["count"]
+    f = _OBS_HEALTH["fail"]
+    rate = (f / c) if c else 0.0
+    return {
+        "observations": c, "failures": f, "fail_rate": round(rate, 3),
+        "last_obs_ts": _OBS_HEALTH["last_ts"], "last_fail_ts": _OBS_HEALTH["last_fail_ts"],
+        # count==0 = no data yet (fine at startup); only a high failure rate is unhealthy.
+        "healthy": (rate < 0.5) if c > 0 else True,
+    }
+
+
 class StreamObserver:
     def __init__(self, config: Config, llm, name: str = "AgentCore-Observer"):
         self.config = config
@@ -82,6 +105,8 @@ class StreamObserver:
         # Rate-limit / cache: if the same output was just observed recently,
         # return the cached result to avoid repeated LLM calls for minor updates.
         now = time.time()
+        _OBS_HEALTH["count"] += 1
+        _OBS_HEALTH["last_ts"] = now
         try:
             if output == self._last_output or (now - self._last_obs_time) < float(self._min_interval):
                 logger.debug("StreamObserver: skipping observe (cached or rate-limited).")
@@ -270,6 +295,22 @@ class StreamObserver:
                 reason=_recitation_issue,
                 suggestion="Reproduce the Retrieved Document text verbatim. Do not improvise or paraphrase.",
             )
+
+        # Worth-voicing (gate 2, A3): catch leaked thinking-out-loud / meta-
+        # commentary ("the 'how' is a probe plus a social register"). The Observer
+        # is the worth-voicing AUTHORITY; the Voice Gate is its lightweight strip
+        # remediation. CAUTION only on substantial leakage so minor cases are left
+        # to the strip. Post-stream / long output only — skips the embed cost on
+        # per-token in-flight checks.
+        if getattr(self, "post_stream_only", False) or len(output or "") > 200:
+            _meta_issue = self._check_thinking_out_loud(output)
+            if _meta_issue:
+                logger.warning("StreamObserver: THINKING-OUT-LOUD — %s", _meta_issue)
+                return Interrupt(
+                    level="CAUTION",
+                    reason=_meta_issue,
+                    suggestion="Respond to the user directly. Do not narrate your analysis of their message — its register, whether it's a probe, its pragmatics. That's internal thought, not speech.",
+                )
 
         # identity may be on older packets as packet.identity (dict), or on v0.3 packets in header.persona
         identity_text = ""
@@ -583,6 +624,16 @@ class StreamObserver:
             # Log at warning but include debug traceback; don't raise exceptions from observer
             logger.warning(f"⚠️ Observer exception: {e}")
             logger.debug("Observer exception details", exc_info=True)
+            # A3 health: the observer degrades to OK here, so a persistently-broken
+            # conscience would pass everything ungated. Track it and ESCALATE to
+            # ERROR when the failure rate is high so it's not invisible.
+            _OBS_HEALTH["fail"] += 1
+            _OBS_HEALTH["last_fail_ts"] = time.time()
+            if _OBS_HEALTH["fail"] >= 3 and _OBS_HEALTH["fail"] / max(1, _OBS_HEALTH["count"]) >= 0.5:
+                logger.error(
+                    "Observer health DEGRADED: %d/%d observations failing — the "
+                    "conscience may be passing output ungated",
+                    _OBS_HEALTH["fail"], _OBS_HEALTH["count"])
             # cache a safe default so we don't hammer the model on repeated exceptions
             fallback = Interrupt(level="OK", reason=f"Observer failed: {e}")
             try:
@@ -592,6 +643,24 @@ class StreamObserver:
             except Exception:
                 logger.debug("Failed to cache fallback observer result", exc_info=True)
             return fallback
+
+    def _check_thinking_out_loud(self, output: str):
+        """Worth-voicing discernment (A3): detect leaked meta-commentary — GAIA
+        narrating her analysis of the message instead of responding to it. Reuses
+        the voice_gate detector. Returns a reason string on SUBSTANTIAL leakage
+        (>=2 meta sentences); minor single-sentence leaks are left to the Voice
+        Gate strip, so the Observer doesn't trigger a re-reflect on every tiny case."""
+        if not output or len(output.strip()) < 40:
+            return None
+        try:
+            from gaia_core.cognition.voice_gate import filter_voiced
+            _out, dbg = filter_voiced(output, measure_only=True)
+            dropped = dbg.get("dropped", []) or []
+            if len(dropped) >= 2:
+                return f"{len(dropped)} meta-commentary sentences (e.g. {dropped[0]['sent'][:60]!r})"
+        except Exception:
+            logger.debug("StreamObserver: thinking-out-loud check failed", exc_info=True)
+        return None
 
     def fast_check(self, buffer: str) -> bool:
         """

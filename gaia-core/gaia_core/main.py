@@ -634,6 +634,14 @@ async def health_check():
     else:
         status = "degraded"
 
+    # Observer (conscience) health — A3. Surfaces a silently-degraded gate-2
+    # (the observer soft-fails to OK) so Doctor, which polls /health, can see it.
+    try:
+        from gaia_core.utils.stream_observer import observer_health
+        _obs = observer_health()
+    except Exception:
+        _obs = None
+
     return JSONResponse(
         status_code=200,
         content={
@@ -641,6 +649,7 @@ async def health_check():
             "service": "gaia-core",
             "inference_ok": inference_ok,
             "inference_detail": inference_detail or "ok",
+            "observer": _obs,
         }
     )
 
