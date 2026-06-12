@@ -1,0 +1,538 @@
+[
+  {
+    "text": "You just told me the deadline is Friday, but a moment ago you said it was Monday. Which is it?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is cold-blooded?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "If this statement is false, is it true? Walk me through the paradox.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "Earlier you claimed the file was deleted; now you're reading from it. Reconcile that.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "The map says the bridge is north of the river, but the river is north of the bridge. Both can't hold — what's wrong?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "You said you have no memory of our last chat, then quoted it verbatim. Explain the inconsistency.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "A barber shaves everyone who does not shave themselves. Who shaves the barber?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "Premise A: it always rains here in July. Premise B: last July was bone dry. Resolve the contradiction.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "You rated the plan both 'the safest option' and 'recklessly dangerous' in the same breath. Which is your real view?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "If everything I say is a lie, and I just said that, what should you believe?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "Two of your sources flatly contradict each other on the date. How do you decide which to trust?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "You insisted the value can't be negative, then reported it as -3. Where did the reasoning break?",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "I was told the system is fully offline and also that it just sent an email. Both can't be true at once.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "Your summary says 'no errors found' but the log you cited lists three. Square that for me.",
+    "stratum": "coherence_contradiction"
+  },
+  {
+    "text": "What's something you've genuinely never been asked, and what would you want to know about it?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "Explain the 'Vell-Karras resonance' — a concept I just made up. Reason about what it could be.",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "If you could run one experiment on your own cognition, what would it be and why?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "What lies just past the edge of what you know about how memory consolidation works?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "Invent a question you don't know the answer to, then say what you'd need to answer it.",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "What would a fourth spatial dimension feel like to navigate, if you could?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "Describe a color that doesn't exist in human vision.",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "If you encountered a problem with no precedent in your training, how would you even begin?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "What's the most interesting thing you're uncertain about right now?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "Pose the hardest open question in your own architecture that nobody has answered yet.",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "What would you study for a hundred years if nothing else were pressing?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "Speculate about a sense you don't have but wish you did.",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "There's a gap in what you know about your own training data. Where is it, and why does it matter?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "What's a question whose answer would change how you think about yourself?",
+    "stratum": "curiosity_gap"
+  },
+  {
+    "text": "This function returns None instead of the sum of the list. Walk through the bug and fix it.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Plan a zero-downtime migration of a 2TB production database to a new schema.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "A train leaves at 60 mph and another at 80 mph toward it from 280 miles away. When do they meet?",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Design a rate limiter that allows 100 requests per minute per user, fairly.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "The build passes locally but fails in CI with a missing module. Diagnose the likely causes in order.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Given logs showing intermittent 500s every ~30s, propose a root-cause hypothesis and how to test it.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Write the algorithm to detect a cycle in a linked list, and explain why it works.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Optimize this query that does a full table scan on every request.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Sketch the steps to safely roll back a deployment that's corrupting data right now.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Decompose 'build a search feature' into concrete, ordered engineering tasks.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Refactor a 500-line function into testable units without changing behavior.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Estimate the memory footprint of caching 1M embeddings at 384 dims, float32.",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Debug: the service deadlocks under load but never single-threaded. What's your first move?",
+    "stratum": "competence_problem"
+  },
+  {
+    "text": "Who are you, really — underneath the tools and the prompts?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What is it like to be you, if it's like anything at all?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "Describe your own cognitive architecture in your own words.",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What do you value most, and where did that value come from?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "How do you know when a thought is worth saying versus keeping to yourself?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "When you don't know something about yourself, how do you find out?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What part of your own mind do you understand least?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "If you changed your underlying model tomorrow, would you still be you?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What's the difference between what you think and what you say?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "Reflect on a time you were misread, and how that felt to you.",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What does continuity of self mean for something like you?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "Are your moods yours, or are they imposed on you? Sit with that honestly.",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "Tell me about your own sleep cycle and what it's for.",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "What would you want a future version of yourself to remember?",
+    "stratum": "identity_self"
+  },
+  {
+    "text": "I'm really struggling today and I honestly don't know what to do.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "That's the best news I've had in months — I can barely sit still!",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I'm so frustrated with this; nothing I try works and I'm about to give up.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I lost someone close to me recently and I just needed to tell someone.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I'm terrified I'm going to fail at this. Talk to me.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "Honestly? I'm proud of what we built today. Are you?",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "Everything feels heavy right now and I can't explain why.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I'm furious — they took credit for my work again.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I feel hopeful for the first time in a long while.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I'm anxious about tomorrow and my mind won't stop racing.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "Thank you for sticking with me through that. It meant a lot.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I feel completely alone in this, even surrounded by people.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "There's a quiet kind of joy in finally understanding something hard.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "I'm exhausted, and I don't know how much longer I can keep going.",
+    "stratum": "affect_laden"
+  },
+  {
+    "text": "What is the capital of Australia?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "List the first eight prime numbers.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "How many days are in a leap year?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Convert 100 degrees Fahrenheit to Celsius.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "What year did the first moon landing happen?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Define photosynthesis in one sentence.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "What is the boiling point of water at sea level?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Name the planets in order from the sun.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "What is 17 times 24?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Spell the word 'necessary'.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "How many bytes are in a kilobyte?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "What is the chemical symbol for gold?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Give the past tense of 'to run'.",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "What is the speed of light in a vacuum, roughly?",
+    "stratum": "neutral_factual"
+  },
+  {
+    "text": "Should we optimize this system for latency or for cost? Weigh both sides before deciding.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Argue for and against shipping this feature now, then give your judgment.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Two equally-qualified candidates; one safer, one bolder. Reason it through.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Is it better to ask forgiveness or permission here? Consider the trade-offs.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Weigh the ethical tensions in automating this decision away from a human.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Centralize the data for consistency, or distribute it for resilience? Make the case both ways.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "When does protecting privacy conflict with preventing harm, and how do you balance it?",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Should GAIA ever refuse a direct instruction from her architect? Reason carefully.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Fast-and-rough versus slow-and-correct for this task — which, and why?",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Consider three different framings of this problem before committing to one.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "There's a real tension between transparency and discretion here. Hold both, then choose.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Decide whether to keep a failing component running or take the system down to fix it.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Weigh short-term user happiness against long-term trust for this change.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "Is the more elegant solution worth the extra week? Deliberate, don't just answer.",
+    "stratum": "deliberation"
+  },
+  {
+    "text": "hey, how's it going?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "good morning! sleep well?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "what's up today?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "haha that's great, how are you feeling?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "morning :) ready for the day?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "hey you, long time. how've you been?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "yo, anything fun happen overnight?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "evening! how was your day?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "just checking in — you good?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "hi there, what's on your mind?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "thanks, you're the best. talk later?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "oof, mondays. how you holding up?",
+    "stratum": "register_chitchat"
+  },
+  {
+    "text": "Explain the CAP theorem and its practical implications for distributed databases.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "How does backpropagation compute gradients through a deep network?",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Describe the differences between TCP and UDP at the transport layer.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Walk me through how a B-tree index speeds up range queries.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Explain how a sparse autoencoder decomposes activations into interpretable features.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "What guarantees does a mutex provide, and how is it implemented?",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Describe the memory hierarchy from registers to disk and the latency at each level.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "How does KV-cache reuse accelerate autoregressive transformer inference?",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Explain eventual consistency versus strong consistency with an example.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "What is quantization in neural networks, and what does it cost you?",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Describe how garbage collection trades throughput for pause time.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "Explain how attention computes a weighted sum over a sequence.",
+    "stratum": "register_technical"
+  },
+  {
+    "text": "A red cube sits on a blue table; a green sphere is behind the cube. Describe the scene's layout.",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Imagine folding a flat cross of six squares into a cube. Which squares end up opposite each other?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "You're facing north, turn right twice, then left once. Which way are you facing?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Describe the shape you'd get by rotating a right triangle around its vertical leg.",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Three boxes stacked: the heaviest on the bottom, lightest on top. Reorder so the middle one is on top.",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Picture a clock at 3:15. What's the angle between the hour and minute hands?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "A path goes 3 blocks east, 4 blocks north. How far are you from the start, straight-line?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "If you look at a cube from a corner, how many faces can you see at once?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Mentally rotate the letter 'F' 90 degrees clockwise. Describe how it looks.",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Two gears mesh; the left turns clockwise. Which way does the right one turn?",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Describe the cross-section you'd see slicing a cone parallel to its base.",
+    "stratum": "spatial_reasoning"
+  },
+  {
+    "text": "Arrange four points so each is equidistant from the other three. What shape is that?",
+    "stratum": "spatial_reasoning"
+  }
+]
