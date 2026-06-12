@@ -106,18 +106,26 @@ KV-rehydration returns as the *high-fidelity* option while **journals + AAAK sta
 
 ---
 
-## 3. Honest state — what actually runs
+## 3. Honest state — what actually runs (AUDITED 2026-06-12 — see `loop_audit.md`)
 
-A foundation is only as real as the loops that *fire*. Known today:
-- **Affect** was completely empty until P0 (2026-06-12) gave it a writer. Unsoaked.
-- **Thought Seed** is throwing read-only errors writing its seeds — incubation may be silently dead.
-- **Samvega ↔ affect** are parallel coherence signals, not integrated.
-- **Observer / Council** — presence confirmed in journals (voice evidence), but whether they *gate output*
-  or *fire unattended* today is unverified.
-- **Temporal Interviewer** — built on KV-rehydration that may be off the table.
+Verified against live container probes. **More alive than feared**, damage concentrated:
+- ✅ **LIVE + integrated:** Observer (gates output — BLOCK aborts stream, CAUTION→Samvega; bicameral),
+  Samvega (1291 artifacts, consumed by journal/sleep/training via disk glob), mempalace+AAAK (live
+  read/write, AAAK on every store), Deliberation (live — but voices are regex tags on one call, not
+  multi-agent; strict per-voice was abandoned, "the cage made it worse").
+- ⚠️ **Affect** — LIVE in the running container (flag=1) but unsoaked, and **PARALLEL to Samvega**: both
+  consume the *same* `consistency_detector` result, un-joined. The coherence drive duplicates Samvega.
+- 🔴 **Thought Seed** — mount is RW (read-only error was stale), but **11,374 pending / 0 archived**:
+  planter floods (~every 30s), triage re-defers everything (`archive=0/act=0`). A landfill, not an
+  incubator.
+- 🔴 **Council-note escalation** (Lite→Prime mid-turn) — orphaned, no live caller.
+- 🔴 **Temporal Interviewer** — bake **failing now** (`_save_lite_state` KV error); states/interviews on
+  disk are stale (Feb–Mar); resolves a deprecated `"lite"` tier → falls back to Prime. KV-rehydration is
+  not a safe foundation today → **validates the journal+AAAK pivot**.
 
-→ The next move is an **audit of the loops**: for each organ, *does it fire end-to-end unattended*, and
-*is it integrated or parallel*. Only then do we plan the wiring.
+**Integration priorities (from the audit):** (1) affect → plug into the Samvega pipeline (kill the
+duplicate); (2) gate-2 → route into the Observer (it already gates); (3) drain/throttle Thought Seed;
+(4) rebuild temporal continuity on journals+AAAK; (5) revive-or-remove the orphaned Council escalation.
 
 ---
 
