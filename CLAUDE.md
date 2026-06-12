@@ -123,6 +123,30 @@ Detailed instructions for specific domains are in `.claude/rules/`:
 
 - **`/engine`** — Work on the GAIA Inference Engine (separate repo). Use this for ANY engine-related changes: inference bugs, KV cache, polygraph, LoRA, ROME, SAE, lifecycle state machine, managed mode. The skill knows to work in `gaia-engine/`, commit/push to the separate repo, and update the shim + contract if the API surface changes.
 
+## Cognitive Systems & Flags (2026-06-12)
+
+GAIA is a **developing mind**, not a chatbot — a nervous system of cognitive organs.
+**Premise + index: `knowledge/blueprints/COGNITIVE_ARCHITECTURE.md`** (+ `loop_audit.md`, `integration_plan.md`).
+Two principles run through it: **two gates** kept distinct — *resident-for-reasoning* (CFR) vs.
+*worth-voicing* (the Observer); and **affect is capacity, not content** — the appraiser feeds functional
+drives, but the emotion-words are hers. In-prompt behavioral structure backfires on Gemma4-E4B — prefer
+processes (the Observer) over prompt instructions.
+
+Runtime toggles (docker-compose `gaia-core` env):
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `CFR_CONVERSATION_ENABLED` | 1 | Relevance×decay working set replaces the recency window (gate 1; `conversation_cfr.py`). |
+| `CFR_BLUR_BREADCRUMB` | 0 | OFF — telling Core in-prompt what it set aside backfires (it disowns facts it has). |
+| `VOICE_GATE_ENABLED` | 1 | Post-generation meta-commentary strip (`voice_gate.py`; the Observer's remediation tool). |
+| `OBSERVER_ON_STREAM` | 1 | Run the conscience on the `/process_packet` user path in fast mode (`stream_observer.observe_user_path`). |
+| `AFFECT_APPRAISAL_ENABLED` | 0 | Feed the affect organ from real subsystems (`affect_appraiser.py`); coherence derives from Samvega. |
+| `THOUGHT_SEED_MAX_PENDING` | 2000 | Cap the thought-seed backlog (was an 11k landfill); planters back off, heartbeat prunes. |
+| `GAIA_USER_TZ` | America/Los_Angeles | Operator timezone for world-state local-time (zoneinfo, OS-portable). |
+
+Observer health is exposed at `gaia-core` `/health` → `observer{}`. The SAE atlas (the instrument that
+*verifies* these systems at the neuron level) is planned in `sae_atlas_build_plan.md` (GPU-gated).
+
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker

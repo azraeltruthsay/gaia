@@ -1,16 +1,24 @@
 # GAIA As-Built Architecture Reference
 
-> **Last updated**: 2026-04-11 | **Era**: Sovereign Awareness (Phase 5) | **Consolidated Core**
+> **Last updated**: 2026-06-12 | **Era**: Sovereign Duality (two-tier) | partially refreshed
+>
+> ⚠️ **Service/model topology reference.** For the **cognitive architecture** (the developing mind —
+> CFR, affect, Observer, Samvega, the loop audit), see
+> `knowledge/blueprints/COGNITIVE_ARCHITECTURE.md`. Authoritative current model identity lives in
+> `GAIA_Project/CLAUDE.md` — and **verify a tier against disk + `/health`, not env strings**
+> (`PRIME_MODEL_PATH` has lied). Sections below the tables (SDH, VRAM, consciousness FSM) are
+> structurally current but predate the Qwen Prime cutover — treat their "26B" figures as historical.
 
-This document reflects the actual running state of GAIA, following the **Great Consolidation (Phase 5-C)** and the **Gemma 4 Chord** deployment.
+This document reflects GAIA's service/model topology in the **Sovereign Duality** era (Gemma4 Core +
+Qwen3-VL-8B Prime; `gaia-nano` removed).
 
 ## Service Topology (Consolidated)
 
 | Service | Role | Core Components |
 |---------|------|-----------------|
 | `gaia-core` | The Brain | **Neural Router**, Reasoning Loop, Embedded Inference |
-| `gaia-prime` | The Voice | Gemma 4 26B-A4B MoE (vLLM/GAIA Engine) |
-| `gaia-nano` | The Reflex | Gemma 4 E2B (0.8B) — Sub-100ms Triage |
+| `gaia-prime` | The Voice / Sovereign | **Qwen3-VL-8B-GAIA-Prime** (abliterated, vision-language) — GAIA Engine (GPU safetensors / CPU GGUF) |
+| ~~`gaia-nano`~~ | ~~The Reflex~~ | **DEPRECATED / removed** — Core handles all triage (Sovereign Duality) |
 | `gaia-mcp` | The Hands | **Capability Engine (Limbs)**, Tool Execution |
 | `gaia-study` | The Subconscious | **DocSentinel**, QLoRA, Vector Indexing |
 | `gaia-common`| The Nervous System | **GaiaVitals**, Shared Protocols (Packet v0.5) |
@@ -18,12 +26,14 @@ This document reflects the actual running state of GAIA, following the **Great C
 
 ## Model Tiers (The Sovereign Duality)
 
-| Tier | Model | Active Params | VRAM (NF4) | Role |
-|------|-------|---------------|------------|------|
-| **Sovereign** | Gemma 4 26B-A4B MoE | 4B | 8.9GB* | Deep Reasoning, Architecture, Sovereign Identity |
-| **Operator** | Gemma 4 E4B (8B) | 4B | 3.5GB | Always-On Brain, Triage, Native Multimodal |
+| Tier | Model | Backend | VRAM | Role |
+|------|-------|---------|------|------|
+| **Sovereign / Prime** | **Qwen3-VL-8B-GAIA-Prime** (abliterated, vision-language) | GAIA Engine (GPU safetensors / CPU GGUF default) | ~4.6 GB | Deep reasoning, architecture, code, planning |
+| **Operator / Core** | **Gemma4-E4B-GAIA-Core** (V3 identity-baked, multimodal) | GAIA Engine (GPU NF4 / CPU GGUF) | ~8.8 GB | Always-on triage, intent, tools, vision, audio, chat |
 
-*\*Prime uses vLLM acceleration at a fixed 8.9GB budget. Operator (E4B) uses a 'Featherweight' NF4 profile to stay within the 12.1GB baseline.*
+*Identity is both weight-baked (Core V3 self-concept) and prompt-anchored (`prompt_builder.py` arch facts).
+Cloud fallback: Groq llama-3.3-70b. OpenAI is retired. Older "26B Prime" claims were wrong (corrected
+2026-06-09) — Prime is Qwen3-VL-8B.*
 
 ## Consciousness Matrix (The Sovereign Duality)
 
