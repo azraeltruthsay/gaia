@@ -78,16 +78,20 @@ def _set_curious(topic: str, weight: float, *, source: str) -> None:
 
 # ── Event entry points (called from subsystem sites; all fail-safe) ─────────
 
-def note_coherence(*, clean: bool, findings: int = 0) -> None:
-    """Coherence drive ← a consistency check. A confabulation (not clean) raises
-    the tension; a clean response lets it ease. Decay returns it to calm."""
+def note_samvega(weight: float, root_cause: str = "") -> None:
+    """Coherence drive ← a Samvega artifact (the unified misalignment alarm).
+
+    Samvega is the acute, severity-weighted signal — consistency, drift, cross-tier
+    audit, and self-reflection all funnel through `save_samvega_artifact`. The
+    coherence drive is its slow-decaying *felt residue*: one signal, two timescales.
+    This is the SINGLE coherence-affect source — affect now DERIVES from Samvega
+    instead of re-appraising the consistency detector in parallel (audit finding #2).
+    `weight` already folds in observer severity + repeated-domain. Quiet periods (no
+    Samvega) let coherence decay back to calm — no explicit relief needed."""
     if not appraisal_enabled():
         return
-    if clean:
-        _bump_drive("coherence", -0.05, source="appraiser:consistency:clean")
-    else:
-        _bump_drive("coherence", min(0.4, 0.18 + 0.06 * max(0, findings)),
-                    source="appraiser:consistency:findings")
+    _bump_drive("coherence", min(0.4, 0.12 * max(0.0, float(weight))),
+                source=f"samvega:{(root_cause or '?')[:30]}")
 
 
 def note_task_outcome(success: bool, label: str = "") -> None:

@@ -502,13 +502,9 @@ def run_consistency_check_sync(
         result.clean, len(result.findings),
         result.entities_examined, result.kg_entities_matched, result.elapsed_ms,
     )
-    # Affect appraisal (P0): coherence drive ← this check. A confabulation
-    # (not clean) raises the tension; a clean response eases it. Fail-safe.
-    try:
-        from gaia_core.cognition.affect_appraiser import note_coherence
-        note_coherence(clean=result.clean, findings=len(result.findings))
-    except Exception:
-        pass
+    # (Affect coherence is NOT appraised here — it derives from Samvega, which
+    # _emit_samvega already produces on findings. One signal, one source. The
+    # affect hook lives in samvega.save_samvega_artifact. Audit finding #2.)
     return result
 
 
