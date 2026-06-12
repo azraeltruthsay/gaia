@@ -251,6 +251,21 @@ def _choose_initial_n_gpu(desired_n_gpu: int, free_bytes: int | None) -> int:
     # >=8 GiB
     return min(desired_n_gpu, 4) if desired_n_gpu > 0 else 0
 
+
+# Legacy/deprecated role names → current canonical tiers. Old code (heartbeat
+# triage, temporal interviewer/state manager, lite_journal, council_notes) still
+# asks for "lite"; with no "lite" tier it silently fell through to the Prime
+# fallback and triaged/interviewed the WRONG self. Applied at every role resolver.
+_LEGACY_ROLE_MAP = {
+    "reflex": "nano",
+    "thinker": "prime",
+    "lite": "core",
+    "operator": "core",
+    "gpu_prime": "prime",
+    "cpu_prime": "prime",
+}
+
+
 class SafeModelProxy:
     """Wraps a raw model backend (e.g. ``llama_cpp.Llama``) with pool-aware
     metadata so downstream code can always rely on a uniform interface.
@@ -975,6 +990,12 @@ class ModelPool:
         If lazy_load=True (default), will attempt to load the model on-demand if
         it's not already in the pool.
         """
+        # Normalize deprecated/legacy role names to current tiers (lite->core,
+        # reflex->nano, thinker->prime, …) BEFORE any resolution, so legacy
+        # callers (heartbeat triage, temporal interviewer) don't silently fall
+        # through to the Prime fallback and act on the wrong tier. (il8)
+        role = _LEGACY_ROLE_MAP.get(role.lower(), role)
+
         # Handle distracted state
         if self.resource_monitor.is_distracted() and role == 'prime':
             logger.warning("System is distracted, falling back to 'lite' model for 'prime' role.")
@@ -1083,16 +1104,8 @@ class ModelPool:
         Legacy names (reflex, thinker, lite, operator, gpu_prime, cpu_prime)
         are mapped to their canonical equivalents for backward compatibility.
         """
-        # Legacy backward compat — old names resolve to canonical
-        _LEGACY_MAP = {
-            "reflex": "nano",
-            "thinker": "prime",
-            "lite": "core",
-            "operator": "core",
-            "gpu_prime": "prime",
-            "cpu_prime": "prime",
-        }
-        target_role = _LEGACY_MAP.get(role.lower(), role.lower())
+        # Legacy backward compat — old names resolve to canonical (shared map)
+        target_role = _LEGACY_ROLE_MAP.get(role.lower(), role.lower())
 
         # 1. If it's already a loaded key, return it
         if target_role in self.models:

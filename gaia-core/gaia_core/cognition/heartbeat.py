@@ -349,12 +349,15 @@ class ThoughtSeedHeartbeat:
             )
             text = result["choices"][0]["message"]["content"].strip()
             lines = text.splitlines()
-            first_word = lines[0].strip().upper() if lines else ""
+            first_line = lines[0].strip().upper() if lines else ""
             reason = lines[1].strip() if len(lines) > 1 else ""
 
-            if first_word == "ARCHIVE":
+            # Match the keyword anywhere in the first line — models often wrap it
+            # ("ARCHIVE:", "Decision: ACT") rather than emit it as a bare word,
+            # which is why every seed used to default to pending. (il8)
+            if "ARCHIVE" in first_line:
                 return ("archive", reason)
-            elif first_word == "ACT":
+            elif "ACT" in first_line:
                 return ("act", reason)
             else:
                 return ("pending", reason)
