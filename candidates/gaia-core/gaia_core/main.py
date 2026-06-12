@@ -1653,48 +1653,36 @@ async def process_packet(packet_data: Dict[str, Any]):
             from gaia_core.utils.output_router import _strip_think_tags_robust
             full_response = _strip_think_tags_robust(full_response)
 
-            # Gate 2 (worth-voicing): strip leaked meta-commentary / thinking-out-
-            # loud post-generation. Measure-only unless VOICE_GATE_ENABLED — when
-            # on, this cleans the packet candidate (voice + candidate consumers).
-            # NOTE: the Discord path accumulates streamed tokens, not the candidate,
-            # so its apply-path is a separate step; this already logs what it WOULD
-            # strip on every turn (incl. Discord) for validation. See voice_gate.py.
+            # 1mg: the Observer (conscience) on the user path — /process_packet
+            # bypassed it. Two aspects of gate-2, unified here:
+            #   WORTH-VOICING remediation — strip leaked meta-commentary (the
+            #     Observer's active tool; respects VOICE_GATE_ENABLED via filter_voiced).
+            #   SAFETY conscience — observe_user_path(): curated cheap checks (error
+            #     patterns, fabricated code paths, epistemic honesty), no LLM, no
+            #     noisy identity-keyword heuristic. Fast (~10-30ms). Logs flags +
+            #     updates health; acting on safety verdicts is a follow-up.
+            # Fail-safe; flag OBSERVER_ON_STREAM.
             try:
                 from gaia_core.cognition.voice_gate import filter_voiced
                 _vg_out, _vg_dbg = filter_voiced(full_response)
-                if _vg_dbg.get("dropped"):
-                    logger.info(
-                        "VoiceGate: %s %d meta sentence(s)%s | e.g. %r",
-                        "stripped" if not _vg_dbg.get("measure_only") else "would strip",
-                        len(_vg_dbg["dropped"]),
-                        f" (failsafe={_vg_dbg['failsafe']})" if _vg_dbg.get("failsafe") else "",
-                        _vg_dbg["dropped"][0]["sent"][:80])
+                if _vg_dbg.get("dropped") and not _vg_dbg.get("measure_only"):
+                    logger.info("Observer remediation (strip): %d meta sentence(s) | e.g. %r",
+                                len(_vg_dbg["dropped"]), _vg_dbg["dropped"][0]["sent"][:80])
                     full_response = _vg_out
             except Exception:
-                logger.debug("VoiceGate failed (non-fatal)", exc_info=True)
-
-            # 1mg: put the Observer (conscience) on the user path — /process_packet
-            # bypassed it. FAST MODE (no LLM): the cheap rule-based + embedding
-            # checks (incl. thinking-out-loud) run; the expensive LLM observation is
-            # skipped to keep streaming responsive. For now: observe + LOG + update
-            # health (prove it runs cheaply, see what it flags); remediation is a
-            # follow-up. Fail-safe; flag OBSERVER_ON_STREAM. (Voice Gate above stays
-            # as the active meta-commentary remediation.)
+                logger.debug("worth-voicing strip failed (non-fatal)", exc_info=True)
             try:
                 if os.environ.get("OBSERVER_ON_STREAM", "1").lower() in ("1", "true", "yes", "on") and full_response:
                     from gaia_core.utils.stream_observer import StreamObserver
                     _t_obs = __import__("time").perf_counter()
                     _obs = StreamObserver(_agent_core.config, llm=None, name="StreamPath-Observer")
-                    _obs._use_llm_config = False
-                    _obs._force_llm = False
-                    _obs.post_stream_only = True
-                    _verdict = _obs.observe(packet, full_response)
+                    _verdict = _obs.observe_user_path(packet, full_response)
                     _dt = (__import__("time").perf_counter() - _t_obs) * 1000
                     if _verdict and _verdict.level != "OK":
-                        logger.info("StreamObserver(fast): %s — %s [%.0fms]",
+                        logger.info("StreamObserver(user-path): %s — %s [%.0fms]",
                                     _verdict.level, (_verdict.reason or "")[:120], _dt)
                     else:
-                        logger.debug("StreamObserver(fast): OK [%.0fms]", _dt)
+                        logger.debug("StreamObserver(user-path): OK [%.0fms]", _dt)
             except Exception:
                 logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
 

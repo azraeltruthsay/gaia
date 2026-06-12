@@ -662,6 +662,43 @@ class StreamObserver:
             logger.debug("StreamObserver: thinking-out-loud check failed", exc_info=True)
         return None
 
+    def observe_user_path(self, packet, output) -> Interrupt:
+        """Fast conscience pass for the live user path (/process_packet), which
+        bypasses the full observe(). Runs ONLY the concrete, low-false-positive
+        checks — error patterns, fabricated code paths, epistemic honesty — with
+        NO LLM call and NOT the crude identity-keyword heuristic (it false-positives
+        on greetings). Worth-voicing (meta-commentary) is handled by the Voice Gate
+        strip, so it's skipped here too. Updates health; never raises. (1mg)"""
+        _OBS_HEALTH["count"] += 1
+        _OBS_HEALTH["last_ts"] = time.time()
+        try:
+            if not output or not packet:
+                return Interrupt(level="OK", reason="no output/packet")
+            # 1. Fast error-pattern check (tracebacks, error tokens).
+            if self.fast_check(output):
+                return Interrupt(level="CAUTION", reason=self.interrupt_reason or "error-like pattern in output")
+            # 2. Fabricated code-path references (cites a path that doesn't exist).
+            try:
+                pv = self._validate_code_paths(output) or []
+                missing = [r["reference"] for r in pv if not r.get("exists", True)]
+                if missing:
+                    return Interrupt(level="CAUTION", reason=f"unverified code path(s): {', '.join(missing[:3])}")
+            except Exception:
+                pass
+            # 3. Epistemic honesty (claims certainty it can't have, etc.).
+            try:
+                _ep = self._check_epistemic_honesty(output, packet)
+                if _ep:
+                    return Interrupt(level="CAUTION", reason=_ep)
+            except Exception:
+                pass
+            return Interrupt(level="OK", reason="user-path checks clean")
+        except Exception as e:
+            _OBS_HEALTH["fail"] += 1
+            _OBS_HEALTH["last_fail_ts"] = time.time()
+            logger.warning("StreamObserver(user-path) exception: %s", e)
+            return Interrupt(level="OK", reason=f"observer failed: {e}")
+
     def fast_check(self, buffer: str) -> bool:
         """
         Performs fast, rule-based checks for obvious errors.
