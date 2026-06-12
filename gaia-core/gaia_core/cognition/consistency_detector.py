@@ -30,7 +30,6 @@ Design doc: knowledge/Dev_Notebook/2026-05-21_world_model_design.md
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -38,8 +37,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Re-use the samvega directory layout from cross_tier_audit so artifacts
 # from both detectors land together and the review queue stays unified.
@@ -504,6 +502,13 @@ def run_consistency_check_sync(
         result.clean, len(result.findings),
         result.entities_examined, result.kg_entities_matched, result.elapsed_ms,
     )
+    # Affect appraisal (P0): coherence drive ← this check. A confabulation
+    # (not clean) raises the tension; a clean response eases it. Fail-safe.
+    try:
+        from gaia_core.cognition.affect_appraiser import note_coherence
+        note_coherence(clean=result.clean, findings=len(result.findings))
+    except Exception:
+        pass
     return result
 
 

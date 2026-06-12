@@ -289,6 +289,11 @@ services:
       # the Discord path calls /api/voice_gate per message. Conservative + fail-
       # open + never-empty. Set 0 for measure-only (logs what it WOULD strip).
       - VOICE_GATE_ENABLED=${VOICE_GATE_ENABLED:-1}
+      # Affect appraisal (P0): feed the affect system from real subsystems —
+      # coherence (consistency), competence (tool outcomes), curiosity (knowledge
+      # gaps) write FUNCTIONAL drives/foci (never feels — those are hers). DEFAULT
+      # OFF while it soaks; the report path (P1) isn't wired yet. Set 1 to populate.
+      - AFFECT_APPRAISAL_ENABLED=${AFFECT_APPRAISAL_ENABLED:-0}
       - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths

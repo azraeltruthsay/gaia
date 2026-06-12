@@ -2953,6 +2953,16 @@ class AgentCore:
                                len(_grounding_ctx.results),
                                ",".join(_grounding_ctx.sources_queried),
                                _grounding_ctx.elapsed_ms)
+                elif _grounding_ctx is not None:
+                    # Grounding ran but found nothing — a knowledge gap. Affect
+                    # appraisal (P0): pull curiosity toward what she couldn't
+                    # ground. (Personal intents skip grounding, so _grounding_ctx
+                    # stays None there and this never fires for chitchat.)
+                    try:
+                        from gaia_core.cognition.affect_appraiser import note_knowledge_gap
+                        note_knowledge_gap(user_input)
+                    except Exception:
+                        pass
             except Exception:
                 logger.debug("Knowledge router failed (non-blocking)", exc_info=True)
 

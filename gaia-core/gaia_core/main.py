@@ -1549,6 +1549,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                         yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
+                        # Affect appraisal (P0): competence drive ← tool outcome
+                        # (a real MCP tool, not the expand_context recall). Failure
+                        # raises the "get it right" tension; success eases it.
+                        if tc.tool_name != "expand_context":
+                            try:
+                                from gaia_core.cognition.affect_appraiser import note_task_outcome
+                                note_task_outcome(bool(rpc_result.get("ok")), label=tc.tool_name)
+                            except Exception:
+                                pass
+
                         # ── Continuation generation ──────────────────────
                         # Build messages: original prompt + model's first output
                         # (including tool_call) + tool_result, then generate again.
