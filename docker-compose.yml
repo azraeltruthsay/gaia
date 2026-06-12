@@ -289,6 +289,10 @@ services:
       # the Discord path calls /api/voice_gate per message. Conservative + fail-
       # open + never-empty. Set 0 for measure-only (logs what it WOULD strip).
       - VOICE_GATE_ENABLED=${VOICE_GATE_ENABLED:-1}
+      # 1mg: run the Observer (conscience) on the /process_packet user path in FAST
+      # mode (no LLM — cheap rule/embedding checks only). Was bypassed there. Set 0
+      # to disable. Remediation is a follow-up; for now it observes + logs + health.
+      - OBSERVER_ON_STREAM=${OBSERVER_ON_STREAM:-1}
       # Affect appraisal (P0): feed the affect system from real subsystems —
       # coherence (consistency), competence (tool outcomes), curiosity (knowledge
       # gaps) write FUNCTIONAL drives/foci (never feels — those are hers). DEFAULT

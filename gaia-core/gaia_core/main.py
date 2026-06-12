@@ -1673,6 +1673,31 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 logger.debug("VoiceGate failed (non-fatal)", exc_info=True)
 
+            # 1mg: put the Observer (conscience) on the user path — /process_packet
+            # bypassed it. FAST MODE (no LLM): the cheap rule-based + embedding
+            # checks (incl. thinking-out-loud) run; the expensive LLM observation is
+            # skipped to keep streaming responsive. For now: observe + LOG + update
+            # health (prove it runs cheaply, see what it flags); remediation is a
+            # follow-up. Fail-safe; flag OBSERVER_ON_STREAM. (Voice Gate above stays
+            # as the active meta-commentary remediation.)
+            try:
+                if os.environ.get("OBSERVER_ON_STREAM", "1").lower() in ("1", "true", "yes", "on") and full_response:
+                    from gaia_core.utils.stream_observer import StreamObserver
+                    _t_obs = __import__("time").perf_counter()
+                    _obs = StreamObserver(_agent_core.config, llm=None, name="StreamPath-Observer")
+                    _obs._use_llm_config = False
+                    _obs._force_llm = False
+                    _obs.post_stream_only = True
+                    _verdict = _obs.observe(packet, full_response)
+                    _dt = (__import__("time").perf_counter() - _t_obs) * 1000
+                    if _verdict and _verdict.level != "OK":
+                        logger.info("StreamObserver(fast): %s — %s [%.0fms]",
+                                    _verdict.level, (_verdict.reason or "")[:120], _dt)
+                    else:
+                        logger.debug("StreamObserver(fast): OK [%.0fms]", _dt)
+            except Exception:
+                logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
+
             if final_packet_dict:
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
