@@ -469,6 +469,19 @@ def _plant_thought_seed(
     if not stale_entries:
         return
 
+    # Back-pressure (audit A2): this planter ran every ~30s and built an 11k-seed
+    # landfill (triage perpetually defers). Don't add to an already-full backlog —
+    # the heartbeat prune caps it; let the queue drain before planting more.
+    try:
+        import os as _os
+        from gaia_core.cognition.thought_seed import seed_backlog_count
+        _cap = int(_os.environ.get("THOUGHT_SEED_MAX_PENDING", "2000"))
+        if seed_backlog_count() >= _cap:
+            logger.info("DocsMaint: seed backlog full (>=%d) — skipping plant", _cap)
+            return
+    except Exception:
+        pass
+
     seeds_dir = Path("/knowledge/seeds")
     try:
         seeds_dir.mkdir(parents=True, exist_ok=True)

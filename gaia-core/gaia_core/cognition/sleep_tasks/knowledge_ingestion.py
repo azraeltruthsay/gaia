@@ -384,6 +384,16 @@ def _plant_thought_seed(
     results: List[dict],
 ) -> None:
     """Plant a thought seed summarizing the knowledge ingestion run."""
+    # Back-pressure (audit A2): don't add to an already-full seed backlog.
+    try:
+        import os as _os
+        from gaia_core.cognition.thought_seed import seed_backlog_count
+        _cap = int(_os.environ.get("THOUGHT_SEED_MAX_PENDING", "2000"))
+        if seed_backlog_count() >= _cap:
+            logger.info("KnowledgeIngestion: seed backlog full (>=%d) — skipping plant", _cap)
+            return
+    except Exception:
+        pass
     try:
         SEEDS_DIR.mkdir(parents=True, exist_ok=True)
     except Exception:

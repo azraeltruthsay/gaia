@@ -294,6 +294,10 @@ services:
       # gaps) write FUNCTIONAL drives/foci (never feels — those are hers). DEFAULT
       # OFF while it soaks; the report path (P1) isn't wired yet. Set 1 to populate.
       - AFFECT_APPRAISAL_ENABLED=${AFFECT_APPRAISAL_ENABLED:-0}
+      # Thought-seed backlog cap (audit A2): heartbeat prunes pending+root to the
+      # newest N (archives the rest oldest-first); planters back off when full.
+      # Was an unbounded 11k+ landfill because LLM triage perpetually defers.
+      - THOUGHT_SEED_MAX_PENDING=${THOUGHT_SEED_MAX_PENDING:-2000}
       - GAIA_AUTOLOAD_MODEL=${GAIA_AUTOLOAD_MODEL:-0}
       - GAIA_ENV=${GAIA_ENV:-development}
       # Paths

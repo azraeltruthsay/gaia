@@ -264,6 +264,60 @@ def archive_seed(seed_filename: str) -> bool:
         return False
 
 
+def seed_backlog_count() -> int:
+    """Total un-archived seeds (root unreviewed + pending). Used for back-pressure
+    on the planters so they stop flooding a full backlog."""
+    n = 0
+    for d in (SEEDS_DIR, SEEDS_PENDING_DIR):
+        try:
+            if d.exists():
+                n += sum(1 for _ in d.glob("seed_*.json"))
+        except Exception:
+            pass
+    return n
+
+
+def prune_seed_backlog(max_keep: int = 2000) -> int:
+    """Archive the OLDEST seeds beyond `max_keep` (across root + pending).
+
+    The deterministic drain for the seed landfill: LLM triage perpetually defers
+    (it never emits ARCHIVE/ACT), so without this retention floor `pending/` grows
+    unbounded. Keeps the newest `max_keep` (most relevant; high-value Observer
+    seeds are recent → kept) and archives the rest oldest-first. Returns count.
+    """
+    files = []
+    for d in (SEEDS_DIR, SEEDS_PENDING_DIR):
+        try:
+            if d.exists():
+                files += [(f.stat().st_mtime, f) for f in d.glob("seed_*.json")]
+        except Exception:
+            pass
+    if len(files) <= max_keep:
+        return 0
+    files.sort(key=lambda t: t[0])  # oldest first
+    archived = 0
+    try:
+        SEEDS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return 0
+    for _, f in files[: len(files) - max_keep]:
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            data["archived"] = True
+            data["archived_at"] = datetime.now(timezone.utc).isoformat()
+            data["archived_reason"] = "backlog_cap"
+            with open(SEEDS_ARCHIVE_DIR / f.name, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+            f.unlink()
+            archived += 1
+        except Exception:
+            logger.debug("prune_seed_backlog: failed on %s", f.name, exc_info=True)
+    if archived:
+        logger.info("Thought seeds: pruned %d aged seeds (backlog cap %d)", archived, max_keep)
+    return archived
+
+
 def defer_seed(seed_filename: str, revisit_after: str | None = None) -> bool:
     """Move a seed to the pending directory (deferred for later).
 

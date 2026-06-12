@@ -173,7 +173,20 @@ class ThoughtSeedHeartbeat:
         from gaia_core.cognition.thought_seed import (
             list_pending_seeds_due,
             list_unreviewed_seeds,
+            prune_seed_backlog,
         )
+
+        # 0. Drain the backlog. LLM triage perpetually defers (it never emits
+        # ARCHIVE/ACT), and the doc-maintenance planter floods, so without a
+        # retention floor pending/ grows unbounded (was 11k+). Keep the newest
+        # THOUGHT_SEED_MAX_PENDING; archive the rest oldest-first. Deterministic,
+        # no LLM dependency. Audit finding #3 (A2).
+        try:
+            import os as _os
+            _cap = int(_os.environ.get("THOUGHT_SEED_MAX_PENDING", "2000"))
+            prune_seed_backlog(max_keep=_cap)
+        except Exception:
+            logger.debug("seed backlog prune failed", exc_info=True)
 
         # 1. Promote overdue pending seeds
         promoted = list_pending_seeds_due()
