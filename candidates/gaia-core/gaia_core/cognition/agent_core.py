@@ -2907,6 +2907,28 @@ class AgentCore:
                         "KnowledgeRouter: skipped — user solicits opinion; "
                         "factual retrieval doesn't help a philosophical chat"
                     )
+            # Personal/chitchat gate: "how are you?", greetings, smalltalk don't
+            # benefit from knowledge grounding — and grounding them retrieves PAST
+            # ops-flavored answers from the journal ("I'm awake and running, parked
+            # between your messages, the world's been holding steady"). That is a
+            # feedback loop: her old monitoring-dashboard replies become "grounding"
+            # for new personal questions, reinforcing the flavor. Skip entirely.
+            if not _kr_skip:
+                _kr_intent = str(getattr(plan, "intent", "") if plan else "").lower()
+                _ui_pers = (user_input or "").lower()
+                _is_personal = _kr_intent in {
+                    "greeting", "farewell", "gratitude", "smalltalk", "social",
+                    "chitchat", "acknowledgment", "affirmation",
+                } or any(m in _ui_pers for m in (
+                    "how are you", "how're you", "how are u", "how you doing",
+                    "how are things", "how do you feel", "how you feeling",
+                    "how's it going", "hows it going", "how goes it",
+                ))
+                if _is_personal:
+                    _kr_skip = True
+                    logger.info(
+                        "KnowledgeRouter: skipped — personal/chitchat ('%s')",
+                        _kr_intent or _ui_pers[:30])
             try:
                 if not _kr_skip:
                     from gaia_core.cognition.knowledge_router import ground_query
