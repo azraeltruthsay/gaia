@@ -3,6 +3,8 @@
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+
 
 from gaia_core.utils.temporal_context import (
     _format_duration,
@@ -15,6 +17,12 @@ from gaia_core.utils.temporal_context import (
 
 
 class TestSemanticTime:
+    # Pin the tz to UTC so the time-of-day word is computed from the UTC hour
+    # we pass in (real deployments set GAIA_USER_TZ to the operator's zone).
+    @pytest.fixture(autouse=True)
+    def _utc_tz(self, monkeypatch):
+        monkeypatch.setenv("GAIA_USER_TZ", "UTC")
+
     def test_includes_day_of_week(self):
         # 2026-02-18 is a Wednesday
         dt = datetime(2026, 2, 18, 14, 30, tzinfo=timezone.utc)
@@ -40,6 +48,13 @@ class TestSemanticTime:
     def test_early_morning(self):
         dt = datetime(2026, 2, 18, 3, 0, tzinfo=timezone.utc)
         assert "(early morning)" in _semantic_time(dt)
+
+    def test_localized_to_user_tz(self, monkeypatch):
+        # 06:00 UTC is 22:00 (night) the previous day in LA — the period word
+        # must follow the operator's local hour, not the UTC hour.
+        monkeypatch.setenv("GAIA_USER_TZ", "America/Los_Angeles")
+        dt = datetime(2026, 2, 18, 6, 0, tzinfo=timezone.utc)
+        assert "(night)" in _semantic_time(dt)
 
 
 class TestFormatDuration:
@@ -107,10 +122,11 @@ class TestCodeEvolutionSummary:
 
 
 class TestBuildTemporalContext:
-    def test_minimal_output(self):
+    def test_minimal_output(self, monkeypatch):
+        monkeypatch.setenv("GAIA_USER_TZ", "UTC")
         result = build_temporal_context()
-        assert "[Temporal Context]" in result
-        # Should at least have semantic time
+        assert "[Here & Now]" in result
+        # Should at least have semantic time, rendered in the configured tz
         assert "UTC" in result
 
     def test_with_session_data(self):
@@ -131,4 +147,4 @@ class TestBuildTemporalContext:
         broken.events_since.side_effect = RuntimeError("broken")
         result = build_temporal_context(timeline_store=broken)
         # Should still have semantic time at minimum
-        assert "[Temporal Context]" in result
+        assert "[Here & Now]" in result

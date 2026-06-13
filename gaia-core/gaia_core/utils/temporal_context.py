@@ -1,13 +1,17 @@
 """
-Temporal Context Builder — assembles a rich temporal snapshot for prompt injection.
+Temporal Context Builder — assembles GAIA's felt sense of "now and here".
 
-Produces a concise text block (~100-150 tokens) injected into the system prompt
-so GAIA has awareness of time, her wake cycle, session state, and code evolution.
+Produces a concise text block (~100-180 tokens) injected into the system prompt
+so GAIA has a single, coherent sense of place, time, her wake cycle, session
+state, and code evolution — rather than reading scattered telemetry. This is the
+*felt* surface; world_state.py remains the terse operational/fallback layer.
 
 Example output:
 
-    [Temporal Context]
-    Tuesday 2026-02-18, 22:41 UTC (evening)
+    [Here & Now]
+    You run on this workstation (RTX 5080, 16 GB) in the Los Angeles area;
+    Azrael is nearby. Out there now: clear sky, 18°C, daytime, late spring.
+    Tuesday 2026-02-18, 3:41 PM PST (afternoon).
     Awake for 2h 15m. Last sleep: 45m (20:26–21:11 UTC).
     This conversation: 45m old, 12 messages. Last message 3m ago.
     Since waking: 3 conversations, 1 sleep task completed.
@@ -15,6 +19,7 @@ Example output:
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -48,6 +53,16 @@ def build_temporal_context(
     """
     now = datetime.now(timezone.utc)
     sections = []
+
+    # 0. Locality — place + live environment (the spatial half of presence).
+    #    Lives in gaia_common so every service can ground the same way.
+    try:
+        from gaia_common.utils.locality import build_locality_block
+        locality_line = build_locality_block()
+        if locality_line:
+            sections.append(locality_line)
+    except Exception:
+        logger.debug("Locality block failed", exc_info=True)
 
     # 1. Semantic time (always available)
     sections.append(_semantic_time(now))
@@ -102,22 +117,42 @@ def build_temporal_context(
     if not sections:
         return ""
 
-    return "[Temporal Context]\n" + "\n".join(sections)
+    return "[Here & Now]\n" + "\n".join(sections)
 
 
 # ── Sub-functions ────────────────────────────────────────────────────────
 
 
 def _semantic_time(dt: datetime) -> str:
-    """'Tuesday 2026-02-18, 22:41 UTC (evening)'"""
-    day_name = dt.strftime("%A")
-    date_str = dt.strftime("%Y-%m-%d, %H:%M UTC")
-    hour = dt.hour
+    """'Tuesday 2026-02-18, 3:41 PM PST (afternoon)'
+
+    Rendered in the operator's timezone (GAIA_USER_TZ) so the time-of-day word
+    matches reality — computing 'evening' from the UTC hour put her hours off.
+    Falls back to UTC when the tz is unset or invalid.
+    """
+    local = dt
+    tz = (os.environ.get("GAIA_USER_TZ") or "").strip()
+    if tz:
+        try:
+            from zoneinfo import ZoneInfo
+            local = dt.astimezone(ZoneInfo(tz))
+        except Exception:
+            logger.debug("Bad GAIA_USER_TZ %r; semantic time in UTC", tz, exc_info=True)
+
+    day_name = local.strftime("%A")
+    # "%-I" (no zero pad) is POSIX; guard for portability.
+    try:
+        clock = local.strftime("%-I:%M %p %Z").strip()
+    except ValueError:
+        clock = local.strftime("%I:%M %p %Z").lstrip("0").strip()
+    date_str = local.strftime("%Y-%m-%d")
+
+    hour = local.hour
     period = "night"
     for threshold, label in _TIME_OF_DAY:
         if hour >= threshold:
             period = label
-    return f"{day_name} {date_str} ({period})"
+    return f"{day_name} {date_str}, {clock} ({period})"
 
 
 def _format_duration(seconds: float) -> str:

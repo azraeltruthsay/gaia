@@ -47,6 +47,13 @@ services:
       - SHARED_DIR=/shared
       - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-999}
       - GAIA_AUTOLOAD_MODELS=1
+      # Parity with production gaia-core: operator timezone + Locality organ
+      # (place + live open-meteo weather in the [Here & Now] block). Without
+      # these the HA mirror renders UTC and no place. Values come from .env.
+      - GAIA_USER_TZ=${GAIA_USER_TZ:-America/Los_Angeles}
+      - GAIA_LOCALE_CITY=${GAIA_LOCALE_CITY:-}
+      - GAIA_LOCALE_LAT=${GAIA_LOCALE_LAT:-}
+      - GAIA_LOCALE_LON=${GAIA_LOCALE_LON:-}
 
     deploy:
       resources:

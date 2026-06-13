@@ -273,6 +273,13 @@ services:
       # User's timezone — world_state renders the operator's local time from this
       # (Core confabulates TZ math otherwise). Override per deployment/travel.
       - GAIA_USER_TZ=${GAIA_USER_TZ:-America/Los_Angeles}
+      # Locality organ (gaia_common/utils/locality.py) — GAIA's sense of place +
+      # live environment, folded into the [Here & Now] block. City defaults to a
+      # name derived from GAIA_USER_TZ; set lat/lon to enable live weather from
+      # open-meteo (cached 15m, degrades to season+daylight offline). All optional.
+      - GAIA_LOCALE_CITY=${GAIA_LOCALE_CITY:-}
+      - GAIA_LOCALE_LAT=${GAIA_LOCALE_LAT:-}
+      - GAIA_LOCALE_LON=${GAIA_LOCALE_LON:-}
       # CFR-for-conversation Phase 1: build the working set by relevance×decay
       # instead of pure recency (fixes recency-bleed). Set 0 to revert to the
       # legacy sliding-window. Tunables: CFR_RELEVANCE_FLOOR, CFR_RECENCY_HALFLIFE_TURNS.
