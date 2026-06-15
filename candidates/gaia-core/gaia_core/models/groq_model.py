@@ -5,8 +5,9 @@ Groq provides free, fast inference on open-source models via their custom LPU ha
 This wrapper provides an OpenAI-compatible interface for use as a fallback when local
 GPU inference is unavailable.
 
-Environment:
-    GROQ_API_KEY: API key from console.groq.com (required)
+Key sourcing (zero-trust, see .claude/rules/safety.md):
+    1. Docker secret at /run/secrets/groq_api_key (preferred)
+    2. GROQ_API_KEY environment variable (fallback)
     GROQ_MODEL: Model to use (default: llama-3.3-70b-versatile)
     GROQ_TIMEOUT: Request timeout in seconds (default: 60)
 """
@@ -17,6 +18,25 @@ import time
 from typing import Any, Dict, Generator, List
 
 logger = logging.getLogger("GAIA.Groq")
+
+_GROQ_SECRET_PATH = "/run/secrets/groq_api_key"
+
+
+def resolve_groq_api_key() -> str:
+    """Resolve the Groq API key: Docker secret first, env var fallback.
+
+    Zero-trust prefers the mounted secret over an env var that can leak via
+    process inspection. Returns "" if neither is present.
+    """
+    try:
+        with open(_GROQ_SECRET_PATH, "r", encoding="utf-8") as fh:
+            key = fh.read().strip()
+            if key:
+                return key
+    except OSError:
+        pass
+    return os.getenv("GROQ_API_KEY", "").strip()
+
 
 # Lazy import to avoid dependency issues if groq not installed
 Groq = None
@@ -85,13 +105,13 @@ class GroqAPIModel:
         _ensure_groq_imported()
 
         self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.api_key = api_key or resolve_groq_api_key()
         self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "60"))
 
         if not self.api_key:
             raise RuntimeError(
-                "Groq API key not configured. Set GROQ_API_KEY environment variable. "
-                "Get a free key at https://console.groq.com"
+                "Groq API key not configured. Provide the /run/secrets/groq_api_key "
+                "Docker secret or set GROQ_API_KEY. Get a free key at https://console.groq.com"
             )
 
         if self.model_name not in self.AVAILABLE_MODELS:

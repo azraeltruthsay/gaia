@@ -759,9 +759,12 @@ class ModelPool:
                     logger.warning("GroqAPIModel unavailable (groq package not installed)")
                     return False
                 logger.info(f"🔹 Loading Groq API model {model_name}")
-                api_key = os.getenv("GROQ_API_KEY")
+                from .groq_model import resolve_groq_api_key
+                api_key = resolve_groq_api_key()
                 if not api_key:
-                    logger.warning(f"GROQ_API_KEY not set; skipping {model_name}")
+                    logger.warning(
+                        f"Groq key absent (no /run/secrets/groq_api_key, no GROQ_API_KEY); skipping {model_name}"
+                    )
                     return False
                 model_id = model_config.get("model", "llama-3.3-70b-versatile")
                 self.models[model_name] = GroqAPIModel(model_name=model_id, api_key=api_key)
@@ -1130,7 +1133,7 @@ class ModelPool:
         If lazy_load=True (default), will attempt to load the model on-demand if
         it's not already in the pool.
 
-        For prime roles, implements a fallback chain: gpu_prime -> groq_fallback -> oracle_openai
+        For prime roles, implements a fallback chain: gpu_prime -> groq_fallback
         """
         name = self._resolve_model_name_for_role(role)
 
@@ -1151,7 +1154,8 @@ class ModelPool:
         # 3. FALLBACK CHAIN: If primary model unavailable for prime roles, try fallbacks
         if not name or name not in self.models:
             if role in ('prime', 'gpu_prime', 'cpu_prime', 'thinker'):
-                fallback_chain = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
+                # Oracle (OpenAI/Gemini) retired — Groq is the only cloud fallback.
+                fallback_chain = ['groq_fallback']
                 for fallback in fallback_chain:
                     if fallback in self.models:
                         logger.warning(f"🔄 Using {fallback} as fallback for {role}")
@@ -1183,8 +1187,9 @@ class ModelPool:
         self.set_status(name, "busy")
         return model
 
-    # Fallback chain for inference-level failures (model acquired but fails mid-call)
-    _INFERENCE_FALLBACK_CHAIN = ['groq_fallback', 'oracle_openai', 'oracle_gemini']
+    # Fallback chain for inference-level failures (model acquired but fails mid-call).
+    # Oracle (OpenAI/Gemini) retired — Groq is the only cloud fallback.
+    _INFERENCE_FALLBACK_CHAIN = ['groq_fallback']
 
     @staticmethod
     def _tee_to_generation_log(result, model_name: str, role: str):
