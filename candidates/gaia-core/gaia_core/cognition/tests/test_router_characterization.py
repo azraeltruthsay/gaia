@@ -105,3 +105,36 @@ def test_nano_production_surface_is_documented():
     assert NeuralRouter._score_to_engine(THRESHOLD_LITE - 0.01, "x", "hi") == TargetEngine.NANO
     # 2. score >= THRESHOLD_LITE -> not NANO
     assert NeuralRouter._score_to_engine(THRESHOLD_LITE, "x", "hi") != TargetEngine.NANO
+
+
+# ── Audio triage: tier decision matrix (pure, static) ───────────────────────
+
+def _audio(duration):
+    return [{"duration_seconds": duration}]
+
+
+def test_audio_short_reflex_source_is_nano_TODAY():
+    # NANO→CORE on retire: short audio from a reflex source currently → NANO.
+    tgt, _ = NeuralRouter._triage_audio("go", "wake_word", _audio(2.0))
+    assert tgt == TargetEngine.NANO
+
+
+def test_audio_short_brief_text_is_nano_TODAY():
+    # NANO→CORE on retire: short audio + ≤6 words → NANO.
+    tgt, _ = NeuralRouter._triage_audio("turn on the light", "api", _audio(3.0))
+    assert tgt == TargetEngine.NANO
+
+
+def test_audio_technical_markers_go_prime():
+    tgt, _ = NeuralRouter._triage_audio("debug this docker deploy pipeline", "api", _audio(30.0))
+    assert tgt == TargetEngine.PRIME
+
+
+def test_audio_very_long_goes_prime():
+    tgt, _ = NeuralRouter._triage_audio("a long talk", "api", _audio(700.0))
+    assert tgt == TargetEngine.PRIME
+
+
+def test_audio_standard_is_core():
+    tgt, _ = NeuralRouter._triage_audio("here is a normal voice message about my day", "api", _audio(20.0))
+    assert tgt == TargetEngine.CORE
