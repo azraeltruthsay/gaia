@@ -96,7 +96,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             local_date = _now.strftime("%A, %B %d, %Y")
             clock_display = f"{local_time}, {local_date}"
         except Exception:
-            from gaia_common.utils.world_state import format_world_state_snapshot
+            # Use the module-level import (line 17). A local re-import here would
+            # make format_world_state_snapshot a function-local name for the WHOLE
+            # of build_from_packet, shadowing the module import and raising
+            # UnboundLocalError at the later (non-Nano) world-state call. See xs2.
             world_state = format_world_state_snapshot()
             clock_line = next((l.strip() for l in world_state.splitlines() if l.startswith("Clock:")), "")
             clock_display = clock_line.replace("Clock: ", "")
