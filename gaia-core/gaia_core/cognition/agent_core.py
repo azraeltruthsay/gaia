@@ -650,6 +650,26 @@ class AgentCore:
         if any(m.get('id') is None for m in window):
             self.logger.warning("AgentCore: Missing IDs found in history; temporary auto_ IDs assigned.")
 
+        # 231 Phase 1: prepend the tool-result ledger as always-present 'tool'
+        # snippets — provenance (title/url/source) + gist of what was recently
+        # surfaced via tools. Independent of the CFR working set, so a later
+        # "what's its name / the link?" can ground on it even when CFR blurs the
+        # content turn. prompt_builder renders the 'tool' role natively.
+        try:
+            _ledger = self.session_manager.get_tool_ledger(session_id) if session_id else []
+        except Exception:
+            _ledger = []
+        for _e in _ledger:
+            _prov = _e.get("title") or _e.get("url") or _e.get("source") or _e.get("tool", "")
+            _bits = [f"Retrieved via {_e.get('tool', 'tool')}: {_prov}"]
+            if _e.get("url") and _e.get("url") != _prov:
+                _bits.append(_e["url"])
+            if _e.get("gist"):
+                _bits.append(f"— {_e['gist']}")
+            relevant_history_snippet.insert(0, RelevantHistorySnippet(
+                id=_e.get("id", "tool_ledger"), role="tool",
+                summary=strip_think_tags(" ".join(_bits))[:600]))
+
         # Discover available MCP tools — use consolidated domain names
         available_tools = []
         try:

@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import threading
+import uuid
 from typing import List, Dict
 from datetime import datetime, timedelta, timezone
 from gaia_core.config import Config
@@ -141,19 +142,29 @@ class SessionManager:
             self._save_state()  # Save immediately after creation
         return self.sessions[session_id]
 
-    def add_message(self, session_id: str, role: str, content: str):
-        """Adds a message and checks if it's time to create a long-term memory."""
+    def add_message(self, session_id: str, role: str, content: str, meta: Dict = None):
+        """Adds a message and checks if it's time to create a long-term memory.
+
+        Every turn gets a stable ``id`` (Phase 0): without one, CFR's blurred-turn
+        breadcrumb + expand_context paging cannot recover a turn (conversation_cfr
+        omits id-less turns). ``meta`` carries optional structured provenance for
+        non-conversational turns (e.g. tool results: tool/action/title/url).
+        """
         if role == "assistant":
             content = _strip_think_tags_robust(content)
             if not content.strip():
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return
         session = self.get_or_create_session(session_id)
-        session.history.append({
+        turn = {
+            "id": f"m{uuid.uuid4().hex[:8]}",
             "role": role,
             "content": content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        if meta:
+            turn["meta"] = meta
+        session.history.append(turn)
         logger.debug(f"💬 Added '{role}' message to session '{session_id}'. History length: {len(session.history)}")
 
         # Update Markdown chat log for human/AI readability
@@ -177,6 +188,46 @@ class SessionManager:
         else:
             # If not archiving, just save the new message to the state file
             self._save_state()
+
+    # ── Tool-result ledger (231 Phase 1) ───────────────────────────────────
+    # Tool/fetch results are emitted to the user but never become durable turns,
+    # so a later "what's its name / the link?" has nothing to ground on and GAIA
+    # confabulates. The ledger keeps a small, always-in-context record of what was
+    # recently surfaced via tools (provenance + gist), independent of the CFR
+    # working set — so meta/reference follow-ups resolve even when CFR blurs the
+    # content turn. (First-class tool TURNS folded into CFR are Phase 2.)
+    TOOL_LEDGER_MAX = 5
+
+    def record_tool_result(self, session_id: str, tool: str, action: str = "",
+                           title: str = "", url: str = "", source: str = "",
+                           gist: str = "") -> Dict:
+        """Record a tool result's provenance + gist in the session's tool ledger."""
+        session = self.get_or_create_session(session_id)
+        ledger = session.meta.setdefault("tool_ledger", [])
+        entry = {
+            "id": f"tl{uuid.uuid4().hex[:8]}",
+            "tool": tool,
+            "action": action,
+            "title": (title or "").strip()[:200],
+            "url": (url or "").strip()[:500],
+            "source": (source or "").strip()[:120],
+            "gist": " ".join((gist or "").split())[:300],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        ledger.append(entry)
+        # Keep only the most recent TOOL_LEDGER_MAX entries.
+        if len(ledger) > self.TOOL_LEDGER_MAX:
+            del ledger[: len(ledger) - self.TOOL_LEDGER_MAX]
+        self._save_state()
+        logger.debug(f"🔧 Recorded tool result in ledger for '{session_id}': {tool}/{action} title={entry['title'][:40]!r}")
+        return entry
+
+    def get_tool_ledger(self, session_id: str, n: int = TOOL_LEDGER_MAX) -> List[Dict]:
+        """Return the most recent tool-result ledger entries (newest last)."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return []
+        return list(session.meta.get("tool_ledger", []))[-n:]
 
     def _update_markdown_log(self, session_id: str, role: str, content: str):
         """Append a message to the session's Markdown chat log."""

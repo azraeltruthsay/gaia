@@ -1529,6 +1529,33 @@ async def process_packet(packet_data: Dict[str, Any]):
                         if rpc_result.get("ok"):
                             actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
                             result_xml = format_tool_result(actual_result)
+                            # 231 Phase 1: record tool-result provenance in the
+                            # session ledger so a later "what's its name/the link?"
+                            # can ground on it (skip the expand_context recall).
+                            if tc.tool_name != "expand_context":
+                                try:
+                                    _title = _url = _src = _gist = ""
+                                    _ar = actual_result
+                                    if isinstance(_ar, dict):
+                                        _rows = _ar.get("results")
+                                        if isinstance(_rows, list) and _rows and isinstance(_rows[0], dict):
+                                            _title = _rows[0].get("title") or _rows[0].get("name") or ""
+                                            _url = _rows[0].get("url") or _rows[0].get("link") or ""
+                                            _gist = " | ".join(
+                                                (r.get("title") or r.get("snippet") or "")
+                                                for r in _rows[:3] if isinstance(r, dict))
+                                        else:
+                                            _title = _ar.get("title") or _ar.get("name") or ""
+                                            _url = _ar.get("url") or _ar.get("link") or ""
+                                            _gist = str(_ar.get("content") or _ar.get("text")
+                                                        or _ar.get("summary") or "")
+                                    else:
+                                        _gist = str(_ar)
+                                    _agent_core.session_manager.record_tool_result(
+                                        session_id, tool=tc.tool_name, action=tc.tool_action or "",
+                                        title=_title, url=_url, source=_src, gist=_gist)
+                                except Exception:
+                                    logger.debug("tool-ledger record failed (non-fatal)", exc_info=True)
                         else:
                             # Normalize error payloads. The model otherwise sees
                             # the raw HTTP/JSON-RPC error verbatim and confabulates
