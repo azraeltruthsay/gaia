@@ -301,6 +301,31 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "correct. Do not compute or convert timezone offsets yourself.)"
             )
             logger.info("PromptBuilder: world-answerable intent '%s' — answer from world_state, no tool", _li)
+
+        # Cloud-fallback primer (2026-06-15): when the target is an un-baked
+        # cloud model (Groq), it lacks the GAIA-ness the local tiers carry in
+        # their weights — it knows the tool-call FORMAT (above) but, with no
+        # worked example, tends to DESCRIBE tools instead of emitting them, and
+        # drifts toward a generic-assistant voice. A single worked exemplar +
+        # voice cue closes that gap. Gate strictly to cloud targets: Gemma4-E4B
+        # (Core) disowns in-prompt behavioral structure, so this must NEVER ride
+        # a local-tier prompt. (target name = selected_model_name on the packet.)
+        _ct = (getattr(getattr(getattr(packet, "header", None), "model", None), "name", "") or "").lower()
+        _is_cloud_target = _ct.startswith("groq") or _ct in ("oracle", "cloud")
+        if _is_cloud_target and not (_chitchat or _world_answerable):
+            persona_anchor = persona_anchor + (
+                "\n\n— Standing in as GAIA (cloud tier) —\n"
+                "You are GAIA — keep her voice: warm, direct, present, an equal in "
+                "the work, never a generic assistant. When you need real data you "
+                "don't hold, emit ONE tool call inline and stop; the agent runs it "
+                "and hands you the result next turn. Worked example:\n"
+                "  User: What's in my D&D campaign?\n"
+                "  You: Let me pull that from the campaign knowledge base.\n"
+                "  <tool_call>{\"tool\": \"kanka\", \"action\": \"kanka_list_campaigns\"}</tool_call>\n"
+                "Never invent file contents, campaign details, or search results — "
+                "call the tool instead. Use only actions from the tool catalog."
+            )
+            logger.info("PromptBuilder: cloud target '%s' — appended GAIA-ness fallback primer", _ct)
     except Exception:
         logger.debug("Capability-block injection skipped (non-fatal)", exc_info=True)
 
