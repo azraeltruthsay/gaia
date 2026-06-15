@@ -68,3 +68,35 @@ def test_tool_ledger_is_bounded(sm, sid):
 
 def test_get_tool_ledger_empty_for_unknown_session(sm):
     assert sm.get_tool_ledger("nonexistent_session_xyz") == []
+
+
+# ── Phase 2: pageable body + expand_context recall ──────────────────────────
+
+def test_record_tool_result_stores_pageable_body(sm, sid):
+    long_body = "word " * 2000  # ~10k chars, exceeds gist cap
+    e = sm.record_tool_result(sid, tool="web_fetch", title="X", body=long_body)
+    assert len(e["gist"]) <= 300, "gist stays short for in-context injection"
+    assert len(e["body"]) > 300, "body keeps the fuller text for paging"
+    assert len(e["body"]) <= SessionManager.TOOL_BODY_MAX
+
+
+def test_get_tool_ledger_entry_by_id(sm, sid):
+    e = sm.record_tool_result(sid, tool="web_search", title="Coming Undone", body="full text here")
+    got = sm.get_tool_ledger_entry(sid, e["id"])
+    assert got and got["title"] == "Coming Undone"
+    assert sm.get_tool_ledger_entry(sid, "tl_nope") is None
+
+
+def test_resolve_cfr_recall_falls_back_to_ledger():
+    from gaia_core.main import _resolve_cfr_recall
+    ledger = [{"id": "tl42", "title": "Coming Undone | The Poetry Foundation",
+               "body": "Ryan Ruby's vertiginous secret history of poetry...", "tool": "web_search"}]
+    # not in history -> resolved from the ledger
+    rec = _resolve_cfr_recall(history=[{"id": "m1", "content": "hi"}], rid="tl42", tool_ledger=ledger)
+    assert rec is not None and rec["role"] == "tool"
+    assert "Coming Undone" in rec["text"]
+    # history still resolves normally
+    rec2 = _resolve_cfr_recall(history=[{"id": "m1", "content": "hello", "role": "user"}], rid="m1")
+    assert rec2 and "hello" in rec2["text"]
+    # unknown id -> None
+    assert _resolve_cfr_recall(history=[], rid="tl_missing", tool_ledger=ledger) is None

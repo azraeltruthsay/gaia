@@ -35,6 +35,34 @@ def _cfg_float(key: str, default: float) -> float:
         return default
 
 
+# 231 Phase 3: meta/reference ("deictic") follow-ups — "what's its name?", "the
+# second one", "that link", "you just said" — refer back to recent content but
+# embed POORLY against that content's body, so plain cosine relevance blurs the
+# exact turn the user is asking about. When detected, we widen the recency
+# anchor + relax the floor so the recent content turns survive regardless of
+# score. Conservative: requires a reference marker AND a short query (long
+# queries carry their own topical signal and don't need the rescue).
+_REFERENCE_MARKERS = (
+    " its ", " it ", " it.", " it?", " that ", " that.", " that?", " those ",
+    " them ", " they ", " this ", " the one", " the first", " the second",
+    " the third", " the last", " the other", " the link", " the url",
+    " the name", " the title", " the author", " the source", " the article",
+    " the poem", " the result", " you just", " you said", " you mentioned",
+    " earlier", " above", " before that", " which one", " what was",
+)
+
+
+def looks_like_reference_query(msg: str, max_words: int = 12) -> bool:
+    """True if ``msg`` looks like a short deictic/meta follow-up referring back."""
+    if not msg:
+        return False
+    words = msg.split()
+    if len(words) > max_words:
+        return False
+    padded = " " + msg.lower().strip() + " "
+    return any(mark in padded for mark in _REFERENCE_MARKERS)
+
+
 def select_focus_turns(
     history: List[Dict],
     current_msg: str,
@@ -65,6 +93,15 @@ def select_focus_turns(
     if not history:
         return [], {"focus": 0, "blurred": 0, "floor": floor}
 
+    # 231 Phase 3: on a deictic/meta follow-up, widen the recency anchor (the
+    # referenced content is almost always within the last few turns) and relax
+    # the floor, so a low-cosine "what's its name?" can't blur the very turn it
+    # refers to. Tunable: CFR_REFERENCE_ANCHOR (default 4).
+    _is_reference = looks_like_reference_query(current_msg)
+    if _is_reference:
+        anchor_n = max(anchor_n, int(_cfg_float("CFR_REFERENCE_ANCHOR", 4.0)))
+        floor = min(floor, 0.15)
+
     anchor_n = max(0, min(anchor_n, len(history)))
     anchor = history[-anchor_n:] if anchor_n else []
     candidates = history[:-anchor_n] if anchor_n else list(history)
@@ -72,7 +109,8 @@ def select_focus_turns(
 
     if not candidates or keep_budget == 0:
         return list(anchor), {"focus": len(anchor), "blurred": len(candidates),
-                              "floor": round(floor, 3), "anchor": len(anchor)}
+                              "floor": round(floor, 3), "anchor": len(anchor),
+                              "reference": _is_reference}
 
     # Reuse the session indexer's embed model + cosine helper (no new infra).
     try:
@@ -132,6 +170,7 @@ def select_focus_turns(
             "blurred": len(candidates) - len(chosen),
             "floor": round(floor, 3),
             "anchor": len(anchor),
+            "reference": _is_reference,
             "top_rel": round(max((s["rel"] for s in scored), default=0.0), 3),
             "blurred_turns": blurred_meta[:8],
         }

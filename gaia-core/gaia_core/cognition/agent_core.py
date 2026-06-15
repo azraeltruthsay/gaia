@@ -666,6 +666,9 @@ class AgentCore:
                 _bits.append(_e["url"])
             if _e.get("gist"):
                 _bits.append(f"— {_e['gist']}")
+            # Phase 2: advertise the pageable full body so GAIA can recall it.
+            if _e.get("body"):
+                _bits.append(f"(full text via expand_context id={_e.get('id')})")
             relevant_history_snippet.insert(0, RelevantHistorySnippet(
                 id=_e.get("id", "tool_ledger"), role="tool",
                 summary=strip_think_tags(" ".join(_bits))[:600]))

@@ -198,12 +198,22 @@ class SessionManager:
     # content turn. (First-class tool TURNS folded into CFR are Phase 2.)
     TOOL_LEDGER_MAX = 5
 
+    TOOL_BODY_MAX = 6000  # pageable full-ish body kept per ledger entry (Phase 2)
+
     def record_tool_result(self, session_id: str, tool: str, action: str = "",
                            title: str = "", url: str = "", source: str = "",
-                           gist: str = "") -> Dict:
-        """Record a tool result's provenance + gist in the session's tool ledger."""
+                           gist: str = "", body: str = "") -> Dict:
+        """Record a tool result's provenance + gist in the session's tool ledger.
+
+        ``gist`` is the short always-in-context summary; ``body`` is the fuller
+        text kept for on-demand recall via expand_context(id=<entry id>) — it is
+        NOT injected into every prompt (Phase 2 pageable backing store).
+        """
         session = self.get_or_create_session(session_id)
         ledger = session.meta.setdefault("tool_ledger", [])
+        _body = " ".join((body or "").split())[: self.TOOL_BODY_MAX]
+        if not gist and _body:
+            gist = _body  # derive the short summary from the body when not given
         entry = {
             "id": f"tl{uuid.uuid4().hex[:8]}",
             "tool": tool,
@@ -212,6 +222,7 @@ class SessionManager:
             "url": (url or "").strip()[:500],
             "source": (source or "").strip()[:120],
             "gist": " ".join((gist or "").split())[:300],
+            "body": _body,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         ledger.append(entry)
@@ -228,6 +239,16 @@ class SessionManager:
         if not session:
             return []
         return list(session.meta.get("tool_ledger", []))[-n:]
+
+    def get_tool_ledger_entry(self, session_id: str, entry_id: str) -> Dict:
+        """Look up one tool-ledger entry by its id (for expand_context recall)."""
+        session = self.sessions.get(session_id)
+        if not session or not entry_id:
+            return None
+        for e in session.meta.get("tool_ledger", []):
+            if str(e.get("id")) == str(entry_id):
+                return e
+        return None
 
     def _update_markdown_log(self, session_id: str, role: str, content: str):
         """Append a message to the session's Markdown chat log."""

@@ -115,18 +115,19 @@ class MinimalPersona:
             self.system_prompt = ""
 
 
-def _resolve_cfr_recall(history, rid):
-    """CFR Phase 2b: resolve a BLURred conversation turn's full text by id.
+def _resolve_cfr_recall(history, rid, tool_ledger=None):
+    """CFR Phase 2b: resolve a BLURred turn (or tool-ledger entry) by id.
 
     The page-fault handler for conversation-as-virtual-memory. When GAIA emits
-    an expand_context tool call to page a set-aside turn back, we resolve it
-    locally from this session's history (the backing store is always resident
-    here) — no MCP round-trip. Returns a compact result dict, or None if the id
-    isn't found. Pure + side-effect-free so it can be unit-tested in isolation.
+    an expand_context tool call to page set-aside content back, we resolve it
+    locally — no MCP round-trip. Two backing stores: this session's history
+    (conversation turns) and the tool ledger (full bodies of recent tool/fetch
+    results, id 'tl…'). Returns a compact result dict, or None if not found.
+    Pure + side-effect-free so it can be unit-tested in isolation.
     """
-    if not rid or not history:
+    if not rid:
         return None
-    for m in history:
+    for m in (history or []):
         if str(m.get("id")) != str(rid):
             continue
         text = (m.get("content") or "")
@@ -136,6 +137,13 @@ def _resolve_cfr_recall(history, rid):
         except Exception:
             pass  # strip is best-effort; never let it drop a valid match
         return {"recalled_turn_id": str(rid), "role": m.get("role", "?"), "text": text[:2000]}
+    # Fall back to the tool ledger: page the full body of a recent tool result.
+    for e in (tool_ledger or []):
+        if str(e.get("id")) == str(rid):
+            _body = e.get("body") or e.get("gist") or ""
+            _prov = e.get("title") or e.get("url") or e.get("tool", "")
+            return {"recalled_turn_id": str(rid), "role": "tool",
+                    "text": (f"{_prov}\n{_body}" if _prov else _body)[:6000]}
     return None
 
 
@@ -1511,7 +1519,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                             _rid = str((tc.tool_params or {}).get("id")
                                        or (tc.tool_params or {}).get("turn")
                                        or tc.tool_action or "").strip()
-                            _rec = _resolve_cfr_recall(history, _rid)
+                            try:
+                                _tl = _agent_core.session_manager.get_tool_ledger(session_id)
+                            except Exception:
+                                _tl = []
+                            _rec = _resolve_cfr_recall(history, _rid, tool_ledger=_tl)
                             if _rec:
                                 rpc_result = {"ok": True, "response": {"result": _rec}}
                                 logger.info("CFR recall: paged turn '%s' back into focus", _rid)
@@ -1553,7 +1565,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         _gist = str(_ar)
                                     _agent_core.session_manager.record_tool_result(
                                         session_id, tool=tc.tool_name, action=tc.tool_action or "",
-                                        title=_title, url=_url, source=_src, gist=_gist)
+                                        title=_title, url=_url, source=_src, gist=_gist,
+                                        body=_gist if len(_gist) > 300 else "")
                                 except Exception:
                                     logger.debug("tool-ledger record failed (non-fatal)", exc_info=True)
                         else:
