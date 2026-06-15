@@ -183,7 +183,8 @@ def _capability_affordances(tools: List[str]) -> List[str]:
     return affordances
 
 
-def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None) -> str:
+def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None,
+                                sleep_manager_status: Dict = None) -> str:
     """
     Render a short text block suitable for system prompts.
     Keeps lines bounded to avoid token bloat.
@@ -191,6 +192,11 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     Args:
         max_lines: Maximum lines to include in the snapshot
         output_context: Optional dict with output routing info (source, destination, is_dm, etc.)
+        sleep_manager_status: Optional sleep/wake-manager status dict (state, phase, …)
+            from SleepWakeManager.get_status(); rendered as a compact lifecycle
+            line. Declarative fact only — paired in-prompt with the
+            "Lifecycle ≠ biography" note so the model doesn't narrate it as
+            experience.
     """
     logger.info("Formatting world state snapshot")
     snap = world_state_snapshot()
@@ -225,7 +231,20 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     except Exception:
         pass
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
-    
+
+    # Lifecycle / gearbox state (declarative — see "Lifecycle ≠ biography").
+    if sleep_manager_status:
+        try:
+            _state = sleep_manager_status.get("state")
+            if _state:
+                _phase = sleep_manager_status.get("phase")
+                _life = f"Lifecycle: {_state}"
+                if _phase and _phase != _state:
+                    _life += f" (phase: {_phase})"
+                lines.append(_life)
+        except Exception:
+            pass
+
     # Immune System — one-line summary only (full MRI available via introspect_logs)
     try:
         immune_health = immune_system.get_immune_summary()
