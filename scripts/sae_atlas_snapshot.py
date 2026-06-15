@@ -107,7 +107,8 @@ def get_tier_config(tier: str) -> dict:
 
 
 def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline", model_override: str = "",
-              corpus_path: str = "", layers_override: str = "", sparsity: float = 0.01):
+              corpus_path: str = "", layers_override: str = "", sparsity: float = 0.01,
+              top_k: int = 0):
     """Run the full SAE atlas pipeline.
 
     corpus_path: optional path to a stratified corpus JSON (list of {text, stratum});
@@ -205,8 +206,8 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     hidden_size = list(trainer.activations.values())[0][0].shape[-1]
     num_features = hidden_size * config["num_features_multiplier"]
 
-    logger.info("Phase 2: Training SAEs (hidden=%d, features=%d, sparsity=%s)...",
-                hidden_size, num_features, sparsity)
+    logger.info("Phase 2: Training SAEs (hidden=%d, features=%d, sparsity=%s, top_k=%s)...",
+                hidden_size, num_features, sparsity, top_k or None)
     train_results = trainer.train_sae(
         layers=layers,
         num_features=num_features,
@@ -214,6 +215,7 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
         lr=1e-3,
         epochs=config["epochs"],
         batch_size=256,
+        top_k=top_k or None,
     )
 
     for layer_idx, result in train_results.items():
@@ -345,11 +347,13 @@ def main():
     parser.add_argument("--model", default="", help="Override model path (e.g., GPTQ quantized variant)")
     parser.add_argument("--corpus", default="", help="Stratified corpus JSON (list of {text, stratum}) — captures all capabilities")
     parser.add_argument("--layers", default="", help="Comma-separated layer indices (denser = more neuron-path detail)")
-    parser.add_argument("--sparsity", type=float, default=0.01, help="L1 sparsity weight (raise to make features sparse/interpretable)")
+    parser.add_argument("--sparsity", type=float, default=0.01, help="L1 sparsity weight (L1 mode only)")
+    parser.add_argument("--topk", type=int, default=0, help="Top-k SAE: keep k features/sample (L0=k, direct sparsity). 0=L1 mode")
     args = parser.parse_args()
 
     run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model,
-              corpus_path=args.corpus, layers_override=args.layers, sparsity=args.sparsity)
+              corpus_path=args.corpus, layers_override=args.layers, sparsity=args.sparsity,
+              top_k=args.topk)
 
 
 if __name__ == "__main__":
