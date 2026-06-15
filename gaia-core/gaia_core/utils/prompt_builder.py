@@ -106,7 +106,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
         return [
             {"role": "system", "content": (
-                "You are GAIA, a sovereign AI created by Azrael. You are the Nano Reflex tier.\n"
+                "You are GAIA, a sovereign AI created by Azrael. This is your fast-reflex mode.\n"
                 f"Current time: {clock_display}\n"
                 "Rules:\n"
                 "- Greetings: respond warmly as GAIA. Never include the time unless asked.\n"

@@ -4144,7 +4144,7 @@ class AgentCore:
                                 len(_stripped_response), _stripped_response.count("\n"))
 
             if (_response_empty or _response_too_short or _recitation_summarized) and selected_model_name not in (
-                "prime", "groq_fallback", "oracle_openai"
+                "prime", "groq_fallback"
             ):
                 if _recitation_summarized:
                     _escalation_reason = "recitation request got summary instead of full text"
@@ -5337,11 +5337,10 @@ class AgentCore:
 
     # Escalation chain for slim path failures.
     # Order: deeper-reasoning local model first (Prime), then peer Core,
-    # then external APIs. Prime is the natural escalation target after
-    # Sovereign Duality made Core the slim/operator model.
-    # "oracle_openai"/"oracle_gemini" must match keys in MODEL_CONFIGS;
-    # the legacy "oracle" alias never matched and silently exhausted.
-    _SLIM_ESCALATION_CHAIN = ["prime", "core", "groq_fallback", "oracle_openai", "oracle_gemini"]
+    # then the cloud fallback. Prime is the natural escalation target after
+    # Sovereign Duality made Core the slim/operator model. Oracle
+    # (OpenAI/Gemini) is retired — Groq is the only cloud backend.
+    _SLIM_ESCALATION_CHAIN = ["prime", "core", "groq_fallback"]
 
     def _escalate_slim_response(self, failed_model: str, messages: list, max_tokens: int,
                                 grounding_context: str = "", knowledge_base_name: str = "") -> str:
