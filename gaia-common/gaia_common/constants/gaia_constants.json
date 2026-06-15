@@ -52,18 +52,6 @@
       "use_prime": true,
       "type": "managed"
     },
-    "oracle_gemini": {
-      "enabled": false,
-      "model": "gemini-1.5-flash",
-      "provider": "gemini",
-      "type": "api"
-    },
-    "oracle_openai": {
-      "enabled": true,
-      "model": "gpt-4o-mini",
-      "provider": "openai",
-      "type": "api"
-    },
     "groq_fallback": {
       "enabled": true,
       "model": "llama-3.3-70b-versatile",
