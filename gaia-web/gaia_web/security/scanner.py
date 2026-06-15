@@ -172,7 +172,7 @@ class PromptInjectionScanner:
                 scanner="PromptInjection",
                 rule_id="tier3_canary_echo",
                 severity="BLOCK",
-                redacted_excerpt=f"[canary token detected in user input — system prompt extraction]",
+                redacted_excerpt="[canary token detected in user input — system prompt extraction]",
             ))
 
         score = min(score, 1.0)

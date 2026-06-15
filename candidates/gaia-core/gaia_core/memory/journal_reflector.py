@@ -43,7 +43,7 @@ import os
 import random
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from gaia_core.memory.journal import (
     JournalEntry,

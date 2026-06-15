@@ -35,12 +35,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
-from bisect import bisect_left, bisect_right
+from bisect import bisect_right
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from gaia_core.memory.heimric_calendar import HeimricDate, parse as parse_heimric, try_parse
 from gaia_core.memory import journal as _j

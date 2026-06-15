@@ -14,8 +14,6 @@ from gaia_core.cognition.stakes_clarification import (
     DEBOUNCE_SECONDS,
     DEFAULT_CONFIDENCE_THRESHOLD,
     PENDING_TTL_SECONDS,
-    ClarificationDecision,
-    ClarificationReply,
     _classify_reply,
     clear_pending,
     decide_clarification,

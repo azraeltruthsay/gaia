@@ -1,13 +1,11 @@
 import importlib
 import importlib.util
-import os
 import sys
 import ast
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 
-from gaia_common.utils import get_logger
 
 logger = logging.getLogger("GAIA.SkillManager")
 

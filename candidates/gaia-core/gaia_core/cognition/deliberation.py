@@ -40,7 +40,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from gaia_core.memory import journal as _j
 
@@ -669,7 +669,7 @@ def _persist_deliberation(
         f"User input: {user_input[:240].replace(chr(10), ' ')}",
         f"Elapsed: {elapsed_ms:.0f}ms",
         f"Model: {model_used}",
-        f"Voice evidence: " + ", ".join(f"{v}={n}" for v, n in voice_evidence.items()),
+        "Voice evidence: " + ", ".join(f"{v}={n}" for v, n in voice_evidence.items()),
     ]
     if forbidden_hits:
         meta_lines.append("Forbidden phrases that slipped through:")

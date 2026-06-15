@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from gaia_core.cognition.skill_llm_body import (
     _build_user_prompt,

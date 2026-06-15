@@ -265,7 +265,6 @@ def run_skill_creator_cycle(
     reload_error = None
     if reload_url:
         try:
-            import json
             import urllib.request
             req = urllib.request.Request(
                 reload_url,

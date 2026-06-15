@@ -37,7 +37,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("GAIA.StakesClarification")
