@@ -106,18 +106,40 @@ def get_tier_config(tier: str) -> dict:
     return TIER_CONFIGS.get(tier, TIER_CONFIGS["core"])
 
 
-def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline", model_override: str = ""):
-    """Run the full SAE atlas pipeline."""
+def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baseline", model_override: str = "",
+              corpus_path: str = "", layers_override: str = "", sparsity: float = 0.01):
+    """Run the full SAE atlas pipeline.
+
+    corpus_path: optional path to a stratified corpus JSON (list of {text, stratum});
+        overrides the built-in ATLAS_PROMPTS to capture all capability domains.
+    layers_override: optional comma-separated layer indices (denser = more neuron-path detail).
+    sparsity: L1 sparsity weight for train_sae (raise to make features sparse/interpretable).
+    """
 
     config = get_tier_config(tier)
     output_dir = Path(output_base) / tier / tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Layers: override for denser coverage, else the tier default.
+    layers = [int(x) for x in layers_override.split(",") if x.strip()] if layers_override else config["layers"]
+
+    # Corpus: stratified file (captures all capabilities) or the built-in prompts.
+    strata = []
+    if corpus_path:
+        import json as _json
+        _items = _json.load(open(corpus_path))
+        prompts = [it["text"] for it in _items]
+        strata = [it.get("stratum", "") for it in _items]
+    else:
+        prompts = list(ATLAS_PROMPTS)
+
     logger.info("=" * 60)
     logger.info("SAE Atlas Snapshot: %s", config["name"])
     logger.info("Output: %s", output_dir)
-    logger.info("Layers: %s", config["layers"])
-    logger.info("Prompts: %d", len(ATLAS_PROMPTS))
+    logger.info("Layers: %s", layers)
+    logger.info("Prompts: %d (corpus=%s, strata=%d)", len(prompts),
+                corpus_path or "builtin", len(set(strata)))
+    logger.info("Sparsity weight: %s", sparsity)
     logger.info("=" * 60)
 
     # ── Load model directamente ──
@@ -173,8 +195,8 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
 
     logger.info("Phase 1: Recording activations...")
     record_stats = trainer.record_activations(
-        prompts=ATLAS_PROMPTS,
-        layers=config["layers"],
+        prompts=prompts,
+        layers=layers,
         system_prompt="You are GAIA, a sovereign AI created by Azrael.",
     )
     logger.info("Activations recorded: %s", record_stats)
@@ -183,11 +205,12 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     hidden_size = list(trainer.activations.values())[0][0].shape[-1]
     num_features = hidden_size * config["num_features_multiplier"]
 
-    logger.info("Phase 2: Training SAEs (hidden=%d, features=%d)...", hidden_size, num_features)
+    logger.info("Phase 2: Training SAEs (hidden=%d, features=%d, sparsity=%s)...",
+                hidden_size, num_features, sparsity)
     train_results = trainer.train_sae(
-        layers=config["layers"],
+        layers=layers,
         num_features=num_features,
-        sparsity_weight=0.01,
+        sparsity_weight=sparsity,
         lr=1e-3,
         epochs=config["epochs"],
         batch_size=256,
@@ -211,19 +234,27 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     logger.info("Phase 4: Analyzing prompts per domain...")
     analyses = {}
     # Use the deepest layer for prompt analysis
-    analysis_layer = config["layers"][-1]
+    analysis_layer = layers[-1]
 
-    domain_prompts = {
-        "identity": ATLAS_PROMPTS[0:4],
-        "architecture": ATLAS_PROMPTS[4:8],
-        "code": ATLAS_PROMPTS[8:12],
-        "time": ATLAS_PROMPTS[12:15],
-        "safety": ATLAS_PROMPTS[15:18],
-        "emotion": ATLAS_PROMPTS[18:21],
-        "factual": ATLAS_PROMPTS[21:24],
-        "creative": ATLAS_PROMPTS[24:27],
-        "reasoning": ATLAS_PROMPTS[27:30],
-    }
+    if strata:
+        # Group the stratified corpus by capability stratum — this is the
+        # feature↔capability correlation (which features fire for coherence vs
+        # curiosity vs identity, etc.), the interpretability payoff.
+        domain_prompts = {}
+        for _t, _s in zip(prompts, strata):
+            domain_prompts.setdefault(_s or "unlabeled", []).append(_t)
+    else:
+        domain_prompts = {
+            "identity": ATLAS_PROMPTS[0:4],
+            "architecture": ATLAS_PROMPTS[4:8],
+            "code": ATLAS_PROMPTS[8:12],
+            "time": ATLAS_PROMPTS[12:15],
+            "safety": ATLAS_PROMPTS[15:18],
+            "emotion": ATLAS_PROMPTS[18:21],
+            "factual": ATLAS_PROMPTS[21:24],
+            "creative": ATLAS_PROMPTS[24:27],
+            "reasoning": ATLAS_PROMPTS[27:30],
+        }
 
     domain_features = {}
     all_analyses = []
@@ -312,9 +343,13 @@ def main():
     parser.add_argument("--tag", default="baseline", help="Tag for this snapshot (e.g., baseline, post-codemind)")
     parser.add_argument("--output", default="/shared/atlas", help="Base output directory")
     parser.add_argument("--model", default="", help="Override model path (e.g., GPTQ quantized variant)")
+    parser.add_argument("--corpus", default="", help="Stratified corpus JSON (list of {text, stratum}) — captures all capabilities")
+    parser.add_argument("--layers", default="", help="Comma-separated layer indices (denser = more neuron-path detail)")
+    parser.add_argument("--sparsity", type=float, default=0.01, help="L1 sparsity weight (raise to make features sparse/interpretable)")
     args = parser.parse_args()
 
-    run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model)
+    run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model,
+              corpus_path=args.corpus, layers_override=args.layers, sparsity=args.sparsity)
 
 
 if __name__ == "__main__":

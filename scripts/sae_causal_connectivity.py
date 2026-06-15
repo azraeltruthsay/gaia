@@ -137,9 +137,9 @@ def compute_region_connectivity(
     }
 
 
-def run_tier(tier: str, atlas_base: str, region_atlas_path: str, output_base: str):
+def run_tier(tier: str, atlas_base: str, region_atlas_path: str, output_base: str, tag: str = "baseline"):
     """Compute causal connectivity for one tier."""
-    atlas_dir = Path(atlas_base) / tier / "baseline"
+    atlas_dir = Path(atlas_base) / tier / tag
     if not atlas_dir.exists():
         logger.error("Atlas not found: %s", atlas_dir)
         return None
@@ -256,8 +256,8 @@ def run_tier(tier: str, atlas_base: str, region_atlas_path: str, output_base: st
         "synapses": all_synapses[:200],  # Top 200 strongest for viz
     }
 
-    # Save
-    output_dir = Path(output_base) / tier
+    # Save alongside the atlas it was computed from.
+    output_dir = Path(output_base) / tier / tag
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "causal_connectivity.json"
     with open(out_path, "w") as f:
@@ -277,6 +277,7 @@ def main():
     parser.add_argument("--atlas", default="/shared/atlas", help="Atlas base directory")
     parser.add_argument("--region-atlas", default="/gaia/GAIA_Project/gaia-web/static/brain_region_atlas.json")
     parser.add_argument("--output", default="/shared/atlas", help="Output directory")
+    parser.add_argument("--tag", default="baseline", help="Atlas tag (subdir under <atlas>/<tier>/)")
     args = parser.parse_args()
 
     tiers = ["nano", "core", "prime"] if args.all else [args.tier]
@@ -287,7 +288,7 @@ def main():
         logger.info("=" * 60)
         logger.info("Computing causal connectivity: %s", tier.upper())
         logger.info("=" * 60)
-        run_tier(tier, args.atlas, args.region_atlas, args.output)
+        run_tier(tier, args.atlas, args.region_atlas, args.output, tag=args.tag)
 
 
 if __name__ == "__main__":
