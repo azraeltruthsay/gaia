@@ -4,7 +4,7 @@ import sys
 import ast
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 
 
 logger = logging.getLogger("GAIA.SkillManager")
