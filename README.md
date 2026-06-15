@@ -12,15 +12,14 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 
 ## Models
 
-### Three-Tier Local Inference
+### Two-Tier Local Inference (Sovereign Duality)
 
 | Tier | Model | Base | Container | Backend | Context |
 |------|-------|------|-----------|---------|---------|
-| **Thinker/Prime** | Huihui-Qwen3-8B-GAIA-Prime-adaptive | Qwen3-8B | gaia-prime | GAIA Engine (GPU), LoRA-enabled | 16,384 |
-| **Core/Operator** | Qwen3.5-2B-GAIA-Core-v3 | Qwen3.5-2B | gaia-core | embedded Core GPU (:8092) / GGUF (CPU) | 8,192 |
-| **Nano/Reflex** | Qwen3.5-0.8B-Abliterated | Qwen3.5-0.8B | gaia-nano | GAIA Engine (GPU primary, GGUF fallback) | 2,048 |
+| **Core/Operator** | Gemma4-E4B-GAIA-Core-v1 (V3) | google/gemma-4-E4B | gaia-core | GAIA Engine managed — GPU NF4 / CPU GGUF, embedded (:8092) | 8,192 |
+| **Prime/Sovereign** | Qwen3-VL-8B-GAIA-Prime-v1 (abliterated) | Qwen3-VL-8B | gaia-prime | GAIA Engine — GPU safetensors / CPU GGUF, LoRA-enabled | 16,384 |
 
-Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime. Prime's subconscious mode uses **Q4_K_M** quantization for efficient CPU inference at ~15 tok/s.
+Two model families: Gemma 4 for Core (~8.8 GB on GPU NF4), Qwen3-VL for Prime (~4.6 GB on GPU). Core handles all requests directly (triage, intent, tools, vision, audio, chat); Prime is loaded on GPU only when deep reasoning is needed (FOCUSING gear). Both run **Q4_K_M** GGUF on CPU when off the GPU.
 
 ### Model Sourcing
 
@@ -28,9 +27,8 @@ GAIA's models are not included in the repository. Download base models from Hugg
 
 | Model | HuggingFace Source | Notes |
 |-------|-------------------|-------|
-| Qwen3.5-0.8B-Abliterated | [huihui-ai/Qwen3.5-0.8B-abliterated](https://huggingface.co/huihui-ai/Qwen3.5-0.8B-abliterated) | Base for Nano tier. Few-shot prompted, no fine-tune needed. |
-| Qwen3.5-2B (base for Core) | [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B) | QLoRA identity-baked → `Qwen3.5-2B-GAIA-Core-v3` |
-| Huihui-Qwen3-8B-abliterated | [huihui-ai/Qwen3-8B-abliterated-v2](https://huggingface.co/huihui-ai/Qwen3-8B-abliterated-v2) | QLoRA identity-baked → `GAIA-Prime-adaptive`. GGUF quantized for CPU (Q4_K_M). |
+| Gemma 4 E4B (base for Core) | [google/gemma-4-E4B](https://huggingface.co/google/gemma-4-E4B) | QLoRA identity-baked → `Gemma4-E4B-GAIA-Core-v1` (V3). Self-concept is weight-baked; volatile facts stay prompt-injected. GGUF quantized for CPU (Q4_K_M). |
+| Qwen3-VL-8B (base for Prime) | [Qwen/Qwen3-VL-8B](https://huggingface.co/Qwen/Qwen3-VL-8B) | Azrael identity-aligned + self-abliterated → `Qwen3-VL-8B-GAIA-Prime-v1`. GGUF quantized for CPU (Q4_K_M). |
 | all-MiniLM-L6-v2 | [sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Embedding model for vector search (gaia-study) |
 | Qwen3-ASR-0.6B | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) | Speech recognition (gaia-audio) |
 | Qwen3-TTS-12Hz-0.6B-Base | [Qwen/Qwen3-TTS-12Hz-0.6B-Base](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) | Text-to-speech (gaia-audio) |
@@ -43,8 +41,9 @@ Place downloaded models in the `gaia-instance/gaia-models/` directory (adjacent 
 
 | Backend | Model | Purpose |
 |---------|-------|---------|
-| `groq_fallback` | llama-3.3-70b-versatile | Free-tier API fallback |
-| `oracle_openai` | gpt-4o-mini | High-quality reasoning oracle |
+| `groq_fallback` | llama-3.3-70b-versatile | Cloud escalation / external fallback (the only cloud backend) |
+
+> OpenAI/Oracle (gpt-4o-mini) is **retired** — GAIA no longer uses OpenAI for any task. Groq is the sole cloud fallback.
 
 ### Embedding: all-MiniLM-L6-v2
 
@@ -52,20 +51,19 @@ Sentence-transformer model used by gaia-study for document embeddings and vector
 
 ## Consciousness Matrix
 
-GAIA operates on a three-state consciousness model, allowing different parts of her brain to maintain independent states of awareness and resource allocation.
+GAIA's GPU lifecycle is a transmission ("the gearbox"): the orchestrator shifts gears via the Consciousness Matrix, moving each tier between GPU, CPU (GGUF), and unloaded to fit the 16 GB budget. The **clutch** is the Neural Handoff protocol — capture the prefix-cache text before a GPU unload, replay it into the CPU backend after load.
 
-| State | Name | Resource | Description |
-|-------|------|----------|-------------|
-| **3** | Conscious | GPU | High-performance inference (SafeTensors/vLLM) |
-| **2** | Subconscious | CPU | Efficient GGUF inference (llama-server) |
-| **1** | Unconscious | Unloaded | Resource hibernation |
+| Gear | State | Core | Prime | GPU VRAM |
+|------|-------|------|-------|----------|
+| **P** | PARKED | CPU (GGUF) | Unloaded | ~0 GB |
+| **1** | AWAKE | GPU (NF4) | CPU (GGUF) | ~8.8 GB |
+| **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~8.8 GB |
+| **2** | FOCUSING | CPU (GGUF) | GPU (Buffered) | ~4.6 GB |
+| **S** | SLEEP | CPU (GGUF) | Unloaded | ~0 GB |
+| **0** | DEEP_SLEEP | Unloaded | Unloaded | ~0 GB |
+| **T** | MEDITATION | Unloaded | Unloaded | Study owns GPU |
 
-**Presets:**
-- **AWAKE**: Core=3, Nano=3, Prime=2 (Prime observes on CPU)
-- **FOCUSING**: Prime=3, Nano=3, Core=2 (Prime handles deep reasoning on GPU)
-- **SLEEP**: Nano=2, Core=2, Prime=1
-- **DEEP SLEEP**: All→1 (Nano stays 2 for wake detection)
-- **TRAINING**: Target tier=1, others=2 (VRAM freed for QLoRA)
+Transition flow: `OFF → PARKED → AWAKE ↔ FOCUSING → PARKED`.
 
 ## Architecture
 
@@ -75,8 +73,8 @@ GAIA operates on a three-state consciousness model, allowing different parts of 
                    [gaia-web]            Face — UI, API gateway, Discord bot, voice
                      /     \
               [gaia-wiki] [gaia-core]    Library & Brain — docs, cognition, session memory
-                          /  |   \
-             [gaia-prime] [gaia-nano] [gaia-mcp]   Voice, Reflex & Hands — GPU/CPU inference, tools
+                              |   \
+                       [gaia-prime] [gaia-mcp]   Sovereign & Hands — GPU/CPU inference, tools
                                          |
                                     [gaia-study]   Subconscious — vector indexing, QLoRA training
                                          |
@@ -88,14 +86,13 @@ GAIA operates on a three-state consciousness model, allowing different parts of 
               [gaia-translate]           Tongue — multi-language translation (LibreTranslate)
 ```
 
-### Services (13 Total)
+### Services (12 Total)
 
 | Service | Role | Port | Runtime |
 |---------|------|------|---------|
 | **gaia-orchestrator** | GPU scheduling, Consciousness Matrix, container lifecycle | 6410 | Python 3.11 |
-| **gaia-prime** | GAIA Engine inference (Thinker/Prime, GPU/CPU) | 7777 | gaia-engine-base |
-| **gaia-nano** | Nano/Reflex triage classifier (GAIA Engine managed mode) | 8090 | llama-server + GPU |
-| **gaia-core** | Cognitive pipeline, model pool, embedded Core GPU inference | 6415 | Python 3.11 |
+| **gaia-prime** | GAIA Engine inference (Sovereign/Prime, GPU/CPU) | 7777 | gaia-engine-base |
+| **gaia-core** | Cognitive pipeline, model pool, embedded Core GPU inference + triage | 6415 | Python 3.11 |
 | **gaia-web** | Discord bot, HTTP API, voice manager, dashboard | 6414 | Python 3.11 |
 | **gaia-mcp** | Tool registry (file I/O, shell, knowledge, study gateway) | 8765 | Python 3.11 |
 | **gaia-study** | Vector index (sole writer), QLoRA adapter training | 8766 | CUDA 12.4 |
@@ -127,8 +124,8 @@ GAIA can autonomously improve her own coding capabilities through a curriculum-b
 ### Open Knowledge Ingestion
 A structured pipeline for ingesting large-scale educational content (e.g., MIT OCW). GAIA classifies, chunks, and embeds documents for long-term epistemic retrieval.
 
-### Cascade Routing
-Nano classifies queries (SIMPLE/COMPLEX) -> Core handles intent and tool selection -> Prime handles heavyweight reasoning and code generation.
+### Routing
+Core triages every request and handles intent, tools, vision, audio, and chat directly. When deep reasoning, architecture, code, or planning is needed, the orchestrator shifts to FOCUSING and Prime takes the GPU. Groq (llama-3.3-70b) is the cloud escalation path.
 
 ## Discord
 

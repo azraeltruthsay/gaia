@@ -156,23 +156,26 @@ def section_alpaca(rng: random.Random) -> list:
 
 
 def section_gaia(rng: random.Random) -> list:
-    """V11: gaia_identity bucket is now system-prompt-anchored, not
-    weight-baked. Architecture metadata (base model, tier names, parameter
-    counts) is injected into every system prompt by gaia-core's
-    prompt_builder.py (pulled from MODEL_CONFIGS). This makes the bulk of
-    self-model/ and core2/text.jsonl content redundant and actively harmful:
-    every sample that says "I'm built on Gemma 4 E4B" or "My Nano tier
-    uses..." duplicates system-prompt state with weight-baked claims that
-    can drift, confabulate, and reintroduce negation-poisoning the moment
-    a rival is named.
+    """No-op since V11; identity now arrives via the patch dir (see below).
 
-    The fix (after four LoRA rounds V7-V10 failed to dislodge spontaneous
-    base-model confabulation) is to drop the entire self-model + core2
-    source and let the system prompt carry identity authoritatively.
-    Persona/voice training comes from the patch dir (clean_termination,
-    dissociation) and from the broader curriculum's natural distribution.
+    History: V11 dropped the entire self-model/ + core2/text.jsonl source
+    after four LoRA rounds (V7-V10) failed to dislodge spontaneous
+    base-model confabulation. Those sources baked *volatile facts* (base
+    model, tier names, parameter counts) into the weights, where they
+    drifted, confabulated, and reintroduced negation-poisoning the moment a
+    rival was named. Volatile facts stay prompt-injected by gaia-core's
+    prompt_builder.py.
+
+    V3 (baked 2026-06-09) corrected the strategy rather than abandoning the
+    weights: identity is now BOTH weight-baked AND prompt-anchored. The
+    *self-concept* — fact-free, positive, negation-free — bakes cleanly and
+    is carried by the core_v2x_patch corpus loaded in build() below (the
+    *_in_context names rivals only in the masked instruction field, never
+    in an output). What does NOT get baked is the volatile-fact layer.
+    section_gaia therefore stays a no-op: it must not reintroduce the old
+    self-model/core2 facts.
     """
-    print("[gaia] V11: self-model/core2 dropped — identity is system-prompt-anchored")
+    print("[gaia] section_gaia no-op — self-concept arrives via core_v2x_patch (V3: baked + prompt-anchored)")
     return []
 
 
@@ -446,8 +449,10 @@ def main():
     text_buckets += section_tool_synthesis(rng)
     text_buckets += section_deliberation(rng)
     text_buckets += section_multiturn(rng)
-    # V6 patch: targeted samples for identified failure modes
-    # (base-model hallucination, dissociation patterns, clean termination)
+    # core_v2x_patch: the weight-baked identity layer (V3+) plus targeted
+    # samples for identified failure modes (self-concept, dissociation,
+    # clean termination). Non-recursive glob, so disabled_v11/ (retired
+    # V8/V9 corpora) is intentionally excluded from the bake.
     patch_dir = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_patch")
     if patch_dir.exists():
         for patch_file in sorted(patch_dir.glob("*.jsonl")):
