@@ -36,7 +36,8 @@ CORE2 = Path("/gaia/GAIA_Project/knowledge/curricula/core2")
 # vision-loss-stuck-at-13.5 problem.
 CORE_VISION = Path("/gaia/GAIA_Project/knowledge/curricula/core_v2x_vision")
 CORE_PILOT = Path("/gaia/GAIA_Project/knowledge/curricula/core_pilot")
-SELF_MODEL = Path("/gaia/GAIA_Project/knowledge/curricula/self-model")
+# SELF_MODEL (knowledge/curricula/self-model) removed: deprecated V11, no longer
+# loaded — section_gaia is a no-op and identity now comes from core_v2x_patch.
 TOOL_CALLING = Path("/gaia/GAIA_Project/knowledge/curricula/tool_calling_v1")
 JSON_ARCH = Path("/gaia/GAIA_Project/knowledge/curricula/json-architect")
 CODE_ARCH = Path("/gaia/GAIA_Project/knowledge/curricula/code-architect")
