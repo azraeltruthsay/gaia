@@ -7,8 +7,6 @@ This package provides:
 - vllm_model: vLLM backend for GPU inference
 - vllm_remote_model: Remote vLLM backend over HTTP (gaia-prime)
 - hf_model: HuggingFace Transformers backend
-- gemini_model: Google Gemini API backend
-- oracle_model: External API oracle backend
 - mcp_proxy_model: MCP-proxied model backend
 - dev_model: Development/testing model backend
 - document: Document model definitions
@@ -23,8 +21,6 @@ __all__ = [
     "vllm_model",
     "vllm_remote_model",
     "hf_model",
-    "gemini_model",
-    "oracle_model",
     "mcp_proxy_model",
     "dev_model",
     "document",

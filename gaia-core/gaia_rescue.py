@@ -958,7 +958,6 @@ def main():
     parser.add_argument("--session-id", type=str, default="cli_default_session", help="Session ID to use/continue.")
     parser.add_argument("--persona", type=str, default="dev", help="Persona to load (default: dev).")
     parser.add_argument("--prompt", type=str, help="Run a single prompt and exit.")
-    parser.add_argument("--use-oracle", action="store_true", help="Enable the use of the Oracle model.")
     parser.add_argument("--register-dev-model", action="store_true", help="Register the dev model on startup.")
     parser.add_argument("--reuse-packet", type=str, help="Path to JSON packet to reuse")
     parser.add_argument("--reflect-packet", type=str, help="Path to packet for reflection")
@@ -984,12 +983,6 @@ def main():
     parser.add_argument("--embed-knowledge-base", type=str, help="Embed documents for a specific knowledge base.")
     args = parser.parse_args()
     SESSION_ID = args.session_id
-
-    import os
-    # If operator requested oracle mode, force backend selection to oracle_openai
-    # so intent/routing won't pick prime.
-    if getattr(args, "use_oracle", False):
-        os.environ["GAIA_BACKEND"] = "oracle_openai"
 
     ai = MinimalAIManager()
     mgr = get_manager()
@@ -1081,7 +1074,7 @@ def main():
             logger.exception("ensure_prime_loaded() raised an exception")
 
         # Then load remaining models (core/observer/embed) into the pool.
-        model_pool.load_models(args.use_oracle)
+        model_pool.load_models()
         try:
             logger.warning("[MODEL_POOL DEBUG] after load: id=%s keys=%s", id(model_pool), list(getattr(model_pool, 'models', {}).keys()))
         except Exception:

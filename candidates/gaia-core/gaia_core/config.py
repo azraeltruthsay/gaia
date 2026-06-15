@@ -104,10 +104,6 @@ class Config(CommonConfig):
     def cheat_sheet(self) -> Dict[str, Any]:
         return self._load_cheat_sheet()
 
-    @property
-    def use_oracle(self) -> bool:
-        return self.constants.get("use_oracle", False)
-
     def get_persona_instructions(self) -> str:
         """Return default persona instructions from constants or fallback."""
         return (

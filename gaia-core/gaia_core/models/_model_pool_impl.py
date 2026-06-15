@@ -23,8 +23,6 @@ import traceback, sys
 # trigger torch/CUDA initialization (or fail when system CUDA/toolkit mismatch
 # exists). We attempt to import them lazily; if unavailable we set to None and
 # allow the rest of the system to continue operating in a degraded mode.
-GPTAPIModel = None
-GeminiAPIModel = None
 HFModel = None
 MCPProxyModel = None
 VLLMChatModel = None
@@ -32,16 +30,6 @@ try:
     from .dev_model import DevModel
 except Exception:
     DevModel = None
-try:
-    from .oracle_model import GPTAPIModel as _GPTAPIModel
-    GPTAPIModel = _GPTAPIModel
-except Exception:
-    GPTAPIModel = None
-try:
-    from .gemini_model import GeminiAPIModel as _GeminiAPIModel
-    GeminiAPIModel = _GeminiAPIModel
-except Exception:
-    GeminiAPIModel = None
 try:
     from .hf_model import HFModel as _HFModel
     HFModel = _HFModel
@@ -368,7 +356,7 @@ class ModelPool:
         except Exception as _exc:
             logger.debug("ModelPool: env setdefault failed: %s", _exc)
 
-    def load_models(self, use_oracle=False):
+    def load_models(self):
         logger.info("--- ENTERING load_models ---")
         if getattr(self, "_models_loaded", False):
             try:
@@ -385,7 +373,7 @@ class ModelPool:
 
         ordered_keys = self._ordered_model_keys()
         for model_name in ordered_keys:
-            self._load_model_entry(model_name, use_oracle=use_oracle)
+            self._load_model_entry(model_name)
 
         self._promote_prime_aliases()
 
@@ -402,7 +390,7 @@ class ModelPool:
             return False
         self._apply_env_model_overrides()
         if 'prime' in self.config.MODEL_CONFIGS:
-            loaded = self._load_model_entry('prime', use_oracle=False, force=force)
+            loaded = self._load_model_entry('prime', force=force)
         else:
             loaded = False
         self._promote_prime_aliases()
@@ -608,7 +596,7 @@ class ModelPool:
                 ordered_keys.append(key)
         return ordered_keys
 
-    def _load_model_entry(self, model_name: str, use_oracle: bool = False, force: bool = False) -> bool:
+    def _load_model_entry(self, model_name: str, force: bool = False) -> bool:
         model_config = self.config.MODEL_CONFIGS.get(model_name)
         if not isinstance(model_config, dict):
             logger.error(f"⚠️ Skipping model '{model_name}': invalid config type: {type(model_config)}")
@@ -706,23 +694,8 @@ class ModelPool:
                         logger.error("MODEL_DIAG: %s not present after load attempts", model_name)
                 except Exception:
                     logger.exception("MODEL_DIAG: failed to log diagnostics for %s", model_name)
-            elif model_type == 'api' and use_oracle:
-                provider = model_config.get("provider", "openai")
-                logger.info(f"🔹 Loading {model_name} model (provider={provider})")
-                if provider == "gemini":
-                    if GeminiAPIModel is None:
-                        raise RuntimeError("GeminiAPIModel unavailable (missing dependency)")
-                    api_key = self.config.get_api_key("google")
-                    self.models[model_name] = GeminiAPIModel(
-                        model_config.get("model") or "gemini-1.5-flash",
-                        api_key=api_key,
-                    )
-                else:
-                    if GPTAPIModel is None:
-                        raise RuntimeError("GPTAPIModel unavailable (missing dependency)")
-                    # Pass the model alias so the client uses the correct configured model
-                    self.models[model_name] = GPTAPIModel(self.config, model_alias=model_name)
             elif model_type == 'api':
+                # Oracle (OpenAI/Gemini) retired — 'api'-type models no longer load.
                 return False
             elif model_type == 'hf':
                 logger.info(f"🔹 Loading HF model {model_name}")
@@ -960,7 +933,7 @@ class ModelPool:
 
         # Load the model
         logger.info(f"🔄 Lazy loading model '{name}' on demand...")
-        success = self._load_model_entry(name, use_oracle=False, force=force)
+        success = self._load_model_entry(name, force=force)
 
         # Promote aliases if needed
         if success and name in ('gpu_prime', 'cpu_prime'):

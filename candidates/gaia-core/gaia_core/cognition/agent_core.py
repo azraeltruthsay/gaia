@@ -1800,13 +1800,11 @@ class AgentCore:
                 logger.info(f"[MODEL_SELECT] Knowledge base '{knowledge_base_name}' matched but query is trivial — skipping prime override.")
     
             if not selected_model_name:
-                # Explicit prime: / thinker: / oracle: prefix takes precedence
-                # over GAIA_BACKEND so a user can override default routing
-                # per-turn. Without this re-ordering, GAIA_BACKEND=core (the
-                # production default) silently swallowed `prime:` requests.
-                if "oracle" in text_lower and self.config.use_oracle:
-                    selected_model_name = "oracle"
-                elif any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"]):
+                # Explicit prime: / thinker: prefix takes precedence over
+                # GAIA_BACKEND so a user can override default routing per-turn.
+                # Without this re-ordering, GAIA_BACKEND=core (the production
+                # default) silently swallowed `prime:` requests.
+                if any(tag in text_lower for tag in ["thinker:", "[thinker]", "::thinker", "prime:", "[prime]", "::prime"]):
                     for cand in ["prime", "cpu_prime"]:
                         if cand == "prime" and _gpu_sleeping:
                             continue
