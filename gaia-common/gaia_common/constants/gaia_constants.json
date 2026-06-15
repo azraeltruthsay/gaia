@@ -41,11 +41,11 @@
     },
     "core": {
       "enabled": true,
-      "path": "Gemma4-E4B-GAIA-Core-v1",
+      "path": "/models/core",
       "type": "managed",
       "endpoint": "http://localhost:8092",
       "max_model_len": 4096,
-      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma 4 E4B identity-baked"
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma4-E4B-GAIA-Core CORE_IDENTITY_V3 (baked 2026-06-09)"
     },
     "observer": {
       "enabled": true,

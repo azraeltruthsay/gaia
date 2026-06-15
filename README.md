@@ -16,7 +16,7 @@ GAIA is a self-hosted, containerized AI system built around a locally-served lan
 
 | Tier | Model | Base | Container | Backend | Context |
 |------|-------|------|-----------|---------|---------|
-| **Core/Operator** | Gemma4-E4B-GAIA-Core-v1 (V3) | google/gemma-4-E4B | gaia-core | GAIA Engine managed — GPU NF4 / CPU GGUF, embedded (:8092) | 8,192 |
+| **Core/Operator** | Gemma4-E4B-GAIA-Core CORE_IDENTITY_V3 | google/gemma-4-E4B | gaia-core | GAIA Engine managed — GPU NF4 / CPU GGUF, embedded (:8092) | 8,192 |
 | **Prime/Sovereign** | Qwen3-VL-8B-GAIA-Prime-v1 (abliterated) | Qwen3-VL-8B | gaia-prime | GAIA Engine — GPU safetensors / CPU GGUF, LoRA-enabled | 16,384 |
 
 Two model families: Gemma 4 for Core (~8.8 GB on GPU NF4), Qwen3-VL for Prime (~4.6 GB on GPU). Core handles all requests directly (triage, intent, tools, vision, audio, chat); Prime is loaded on GPU only when deep reasoning is needed (FOCUSING gear). Both run **Q4_K_M** GGUF on CPU when off the GPU.
@@ -27,7 +27,7 @@ GAIA's models are not included in the repository. Download base models from Hugg
 
 | Model | HuggingFace Source | Notes |
 |-------|-------------------|-------|
-| Gemma 4 E4B (base for Core) | [google/gemma-4-E4B](https://huggingface.co/google/gemma-4-E4B) | QLoRA identity-baked → `Gemma4-E4B-GAIA-Core-v1` (V3). Self-concept is weight-baked; volatile facts stay prompt-injected. GGUF quantized for CPU (Q4_K_M). |
+| Gemma 4 E4B (base for Core) | [google/gemma-4-E4B](https://huggingface.co/google/gemma-4-E4B) | QLoRA identity-baked → `CORE_IDENTITY_V3` (baked 2026-06-09; `/models/core` + `/models/core.gguf`). Self-concept is weight-baked; volatile facts stay prompt-injected. GGUF quantized for CPU (Q4_K_M). |
 | Qwen3-VL-8B (base for Prime) | [Qwen/Qwen3-VL-8B](https://huggingface.co/Qwen/Qwen3-VL-8B) | Azrael identity-aligned + self-abliterated → `Qwen3-VL-8B-GAIA-Prime-v1`. GGUF quantized for CPU (Q4_K_M). |
 | all-MiniLM-L6-v2 | [sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Embedding model for vector search (gaia-study) |
 | Qwen3-ASR-0.6B | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) | Speech recognition (gaia-audio) |
