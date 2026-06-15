@@ -159,6 +159,8 @@ knowledge/curricula/*
 # regeneratable; track it so the bake is reproducible and the authoring survives.
 !knowledge/curricula/core_v2x_patch/
 !knowledge/curricula/core_v2x_patch/**
+# Retired V8/V9 identity corpora — kept local for reference, never re-baked.
+knowledge/curricula/core_v2x_patch/disabled_v11/
 
 # --- Python ---
 __pycache__/
