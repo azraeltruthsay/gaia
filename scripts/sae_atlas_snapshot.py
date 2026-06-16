@@ -92,11 +92,12 @@ TIER_CONFIGS = {
         "epochs": 50,
     },
     "prime": {
-        "name": "Prime (Gemma 4 26B)",
-        "model_path": "/models/Gemma4-26B-A4B-GAIA-Prime-v1",
-        "layers": [0, 7, 14, 21, 29],  # 30 layers total
+        "name": "Prime (Qwen3-VL-8B abliterated)",
+        "model_path": "/models/prime",  # committed Qwen3-VL-8B-GAIA-Prime-v1-abliterated
+        # Qwen3-VL text transformer = 36 layers (hidden 4096); dense spread.
+        "layers": [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 35],
         "num_features_multiplier": 2,
-        "epochs": 30,
+        "epochs": 50,
     },
 }
 
@@ -179,12 +180,22 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            quantization_config=bnb_config,
-            device_map=device,
-            trust_remote_code=True,
-        )
+        # NOTE (Prime/Qwen3-VL lining-up): both Core (Gemma4ForConditionalGeneration)
+        # and Prime (Qwen3VLForConditionalGeneration) are vision-language models with
+        # a vision_config, yet Core loads + records fine via AutoModelForCausalLM
+        # (the top-k atlas proved it). So try CausalLM first for Prime too. IF Qwen3-VL
+        # rejects AutoModelForCausalLM, fall back to AutoModelForImageTextToText (text
+        # prompts forward through the language tower) — validate before the full run.
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path, quantization_config=bnb_config, device_map=device, trust_remote_code=True,
+            )
+        except (ValueError, KeyError, OSError) as _e:
+            from transformers import AutoModelForImageTextToText
+            logger.warning("  AutoModelForCausalLM failed (%s) — falling back to AutoModelForImageTextToText", _e)
+            model = AutoModelForImageTextToText.from_pretrained(
+                model_path, quantization_config=bnb_config, device_map=device, trust_remote_code=True,
+            )
     model.eval()
     logger.info("Model loaded: %s (device=%s)", model_path, device)
 
