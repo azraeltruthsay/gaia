@@ -308,6 +308,132 @@ class TestActOnSeed:
         assert not (seeds / "seed_done.json").exists()
         assert (seeds / "archive" / "seed_done.json").exists()
 
+    def test_act_archives_when_dreaming_if_defer_count_ge_2(self, _patch_seeds_dirs):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        from gaia_core.cognition.sleep_wake_manager import GaiaState
+
+        seeds = _patch_seeds_dirs
+        _write_seed(seeds, "seed_dream_archive.json", defer_count=2)
+
+        swm = MagicMock()
+        swm.get_state.return_value = GaiaState.DREAMING
+
+        llm = _mock_llm("Expanded prompt")
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb.sleep_wake_manager = swm
+        hb.agent_core = MagicMock()
+        hb._timeline = None
+
+        hb._act_on_seed(llm, "seed_dream_archive.json", {"seed": "test", "context": {}, "defer_count": 2})
+
+        # Should be archived, not deferred
+        hb.agent_core.run_turn.assert_not_called()
+        assert not (seeds / "pending" / "seed_dream_archive.json").exists()
+        assert (seeds / "archive" / "seed_dream_archive.json").exists()
+
+    def test_act_archives_when_distracted_if_defer_count_ge_2(self, _patch_seeds_dirs):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        from gaia_core.cognition.sleep_wake_manager import GaiaState
+
+        seeds = _patch_seeds_dirs
+        _write_seed(seeds, "seed_distracted_archive.json", defer_count=2)
+
+        swm = MagicMock()
+        swm.get_state.return_value = GaiaState.DISTRACTED
+
+        llm = _mock_llm("Expanded prompt")
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb.sleep_wake_manager = swm
+        hb.agent_core = MagicMock()
+        hb._timeline = None
+
+        hb._act_on_seed(llm, "seed_distracted_archive.json", {"seed": "test", "context": {}, "defer_count": 2})
+
+        # Should be archived, not deferred
+        hb.agent_core.run_turn.assert_not_called()
+        assert not (seeds / "pending" / "seed_distracted_archive.json").exists()
+        assert (seeds / "archive" / "seed_distracted_archive.json").exists()
+
+    def test_act_archives_on_expansion_failure_if_defer_count_ge_2(self, _patch_seeds_dirs):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        from gaia_core.cognition.sleep_wake_manager import GaiaState
+
+        seeds = _patch_seeds_dirs
+        _write_seed(seeds, "seed_fail_expand.json", defer_count=3)
+
+        swm = MagicMock()
+        swm.get_state.return_value = GaiaState.ACTIVE
+
+        # LLM mock that fails expansion (returns empty string)
+        llm = MagicMock()
+        llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": ""}}]
+        }
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb.sleep_wake_manager = swm
+        hb.agent_core = MagicMock()
+        hb._timeline = None
+
+        hb._act_on_seed(llm, "seed_fail_expand.json", {"seed": "test", "context": {}, "defer_count": 3})
+
+        # Should be archived immediately
+        hb.agent_core.run_turn.assert_not_called()
+        assert not (seeds / "pending" / "seed_fail_expand.json").exists()
+        assert (seeds / "archive" / "seed_fail_expand.json").exists()
+
+    def test_act_archives_on_missing_agent_core_if_defer_count_ge_2(self, _patch_seeds_dirs):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        from gaia_core.cognition.sleep_wake_manager import GaiaState
+
+        seeds = _patch_seeds_dirs
+        _write_seed(seeds, "seed_no_core.json", defer_count=2)
+
+        swm = MagicMock()
+        swm.get_state.return_value = GaiaState.ACTIVE
+
+        llm = _mock_llm("Expanded prompt")
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb.sleep_wake_manager = swm
+        hb.agent_core = None
+        hb._timeline = None
+
+        hb._act_on_seed(llm, "seed_no_core.json", {"seed": "test", "context": {}, "defer_count": 2})
+
+        # Should be archived
+        assert not (seeds / "pending" / "seed_no_core.json").exists()
+        assert (seeds / "archive" / "seed_no_core.json").exists()
+
+    def test_act_archives_on_wake_timeout_if_defer_count_ge_2(self, _patch_seeds_dirs, monkeypatch):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        from gaia_core.cognition.sleep_wake_manager import GaiaState
+
+        # Mock time.sleep to avoid waiting 180s in test
+        monkeypatch.setattr("time.sleep", lambda x: None)
+
+        seeds = _patch_seeds_dirs
+        _write_seed(seeds, "seed_wake_timeout.json", defer_count=2)
+
+        swm = MagicMock()
+        swm.get_state.return_value = GaiaState.ASLEEP
+
+        llm = _mock_llm("Expanded prompt")
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb.sleep_wake_manager = swm
+        hb.agent_core = MagicMock()
+        hb._timeline = None
+
+        hb._act_on_seed(llm, "seed_wake_timeout.json", {"seed": "test", "context": {}, "defer_count": 2})
+
+        # Should trigger wake, fail (state remains ASLEEP), and archive
+        swm.receive_wake_signal.assert_called_once()
+        assert not (seeds / "pending" / "seed_wake_timeout.json").exists()
+        assert (seeds / "archive" / "seed_wake_timeout.json").exists()
+
 
 # ── Heartbeat Lifecycle ──────────────────────────────────────────────────
 
@@ -437,3 +563,61 @@ class TestTemporalIntegration:
         hb._tick()
 
         mock_tsm.bake_state.assert_not_called()
+
+
+class TestTriageEnhancements:
+    def test_sanitize_llm_output_strips_think_tags(self):
+        from gaia_core.cognition.heartbeat import sanitize_llm_output
+        raw = "<think>\nThinking about this...\n</think>\n**ARCHIVE**\nThis is the reason."
+        cleaned = sanitize_llm_output(raw)
+        assert cleaned == "ARCHIVE\nThis is the reason."
+
+        raw_unclosed = "<think>\nThinking... but never closed\nARCHIVE\nreason"
+        cleaned_unclosed = sanitize_llm_output(raw_unclosed)
+        assert cleaned_unclosed == ""
+
+    def test_triage_seed_increments_defer_count(self, _patch_seeds_dirs):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        import shutil
+
+        seeds = _patch_seeds_dirs
+        filename = "seed_defer_test.json"
+        _write_seed(seeds, filename, defer_count=0)
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        hb._do_defer(filename)
+
+        pending_file = seeds / "pending" / filename
+        assert pending_file.exists()
+        with open(pending_file, "r") as f:
+            data = json.load(f)
+        assert data.get("defer_count") == 1
+
+        # Move it back to SEEDS_DIR to simulate promotion, then defer again
+        shutil.move(str(pending_file), str(seeds / filename))
+        hb._do_defer(filename)
+
+        with open(pending_file, "r") as f:
+            data = json.load(f)
+        assert data.get("defer_count") == 2
+
+    def test_triage_seed_forces_binary_choice_on_threshold(self):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+
+        # When defer_count is less than 2, LLM triage proceeds normally with system prompt
+        llm = _mock_llm("PENDING\nNeeds more detail.")
+        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}, "defer_count": 1})
+        assert decision == "pending"
+
+        # When defer_count is >= 2, LLM triage forces binary choice. If LLM outputs PENDING, it forces archive
+        llm_pending = _mock_llm("PENDING\nStill needs more detail.")
+        decision, reason = hb._triage_seed(llm_pending, {"seed": "test", "context": {}, "defer_count": 2})
+        assert decision == "archive"
+        assert "Forced archive due to deferral threshold" in reason
+
+        # When defer_count >= 2, if LLM outputs ACT, it is respected
+        llm_act = _mock_llm("ACT\nActionable now.")
+        decision, reason = hb._triage_seed(llm_act, {"seed": "test", "context": {}, "defer_count": 2})
+        assert decision == "act"

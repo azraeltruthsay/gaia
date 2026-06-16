@@ -665,10 +665,13 @@ class StreamObserver:
     def observe_user_path(self, packet, output) -> Interrupt:
         """Fast conscience pass for the live user path (/process_packet), which
         bypasses the full observe(). Runs ONLY the concrete, low-false-positive
-        checks — error patterns, fabricated code paths, epistemic honesty — with
-        NO LLM call and NOT the crude identity-keyword heuristic (it false-positives
-        on greetings). Worth-voicing (meta-commentary) is handled by the Voice Gate
-        strip, so it's skipped here too. Updates health; never raises. (1mg)"""
+        checks — error patterns, fabricated code paths, epistemic honesty, and
+        worth-voicing (gate-2) — with NO LLM call and NOT the crude identity-keyword
+        heuristic (it false-positives on greetings). For worth-voicing the Observer
+        is the AUTHORITY: substantial leaked meta-commentary is flagged here via the
+        integrated Voice Gate detector; the standalone Voice Gate strip in the
+        response path remains the remediation + secondary fallback (A3). Updates
+        health; never raises. (1mg)"""
         _OBS_HEALTH["count"] += 1
         _OBS_HEALTH["last_ts"] = time.time()
         try:
@@ -690,6 +693,20 @@ class StreamObserver:
                 _ep = self._check_epistemic_honesty(output, packet)
                 if _ep:
                     return Interrupt(level="CAUTION", reason=_ep)
+            except Exception:
+                pass
+            # 4. Worth-voicing (gate-2, A3): route the decision through the Observer
+            #    (the authority). _check_thinking_out_loud uses the integrated Voice
+            #    Gate detector (filter_voiced) and only flags SUBSTANTIAL leakage
+            #    (>=2 meta sentences); single-sentence leaks are left to the strip.
+            try:
+                _meta = self._check_thinking_out_loud(output)
+                if _meta:
+                    return Interrupt(
+                        level="CAUTION", reason=_meta,
+                        suggestion="Respond to the user directly. Do not narrate your "
+                                   "analysis of their message — its register, whether it's a "
+                                   "probe. That's internal thought, not speech.")
             except Exception:
                 pass
             return Interrupt(level="OK", reason="user-path checks clean")

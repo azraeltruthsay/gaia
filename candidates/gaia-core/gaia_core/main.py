@@ -644,9 +644,14 @@ async def health_check():
 
     # Observer (conscience) health — A3. Surfaces a silently-degraded gate-2
     # (the observer soft-fails to OK) so Doctor, which polls /health, can see it.
+    # A failing conscience degrades the service even if inference is fine.
     try:
         from gaia_core.utils.stream_observer import observer_health
         _obs = observer_health()
+        if _obs and not _obs.get("healthy", True):
+            if status == "healthy":
+                status = "degraded"
+            inference_detail = (inference_detail or "ok") + " | observer degraded (conscience failing)"
     except Exception:
         _obs = None
 

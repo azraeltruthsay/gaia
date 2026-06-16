@@ -221,3 +221,7 @@ gaia-engine/
 .dolt/
 *.db
 .beads-credential-key
+
+# Antigravity (agy) teamwork swarm workspace — transient, not project state
+.agents/
+PROJECT.md

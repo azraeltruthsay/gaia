@@ -305,3 +305,37 @@ def test_verify_no_packet_returns_ok(observer):
     result = observer.verify_side_effects(None, route_result)
     assert result.level == "OK"
     assert "No packet" in result.reason
+
+
+# ── Worth-voicing (gate-2, A3): routed through the Observer's user path ───────
+
+def test_user_path_flags_substantial_meta_commentary(observer, packet):
+    """observe_user_path is the worth-voicing AUTHORITY: >=2 leaked meta
+    sentences (via the integrated Voice Gate detector) -> CAUTION."""
+    meta = ("The how is a probe plus a social register. "
+            "The answer expects the register it is connected to.")
+    result = observer.observe_user_path(packet, meta)
+    assert result.level == "CAUTION"
+    assert "meta-commentary" in result.reason.lower()
+    assert "directly" in (result.suggestion or "").lower()
+
+
+def test_user_path_single_meta_left_to_strip(observer, packet):
+    """A single meta sentence is below the Observer's substantial-leakage bar
+    (left to the Voice Gate strip) -> the Observer passes it OK."""
+    result = observer.observe_user_path(packet, "The how is a probe plus a social register.")
+    assert result.level == "OK"
+
+
+def test_user_path_clean_output_ok(observer, packet):
+    """Ordinary content with no meta-commentary -> OK."""
+    result = observer.observe_user_path(packet, "Sure — the capital of France is Paris.")
+    assert result.level == "OK"
+
+
+def test_observer_health_snapshot_shape():
+    """observer_health() returns the doctor/health-endpoint snapshot (A3)."""
+    from gaia_core.utils.stream_observer import observer_health
+    h = observer_health()
+    assert set(("observations", "failures", "fail_rate", "healthy")).issubset(h.keys())
+    assert isinstance(h["healthy"], bool)

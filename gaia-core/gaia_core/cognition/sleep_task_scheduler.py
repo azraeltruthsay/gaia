@@ -231,6 +231,7 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_docs_maintenance,
+            min_interval_seconds=600,
         ))
 
         self.register_task(SleepTask(

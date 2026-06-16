@@ -68,7 +68,8 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
             "seed": seed_text.strip(),
             "reviewed": False,
             "action_taken": False,
-            "result": None
+            "result": None,
+            "defer_count": 0
         }
         with open(SEEDS_DIR / fname, "w", encoding="utf-8") as f:
             json.dump(seed_obj, f, indent=2)
@@ -90,6 +91,7 @@ def list_unreviewed_seeds():
             with open(f, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 if not data.get("reviewed"):
+                    data.setdefault("defer_count", 0)
                     seeds.append((f, data))
         except Exception as e:
             logger.error(f"❌ Error reading thought seed file {f}: {e}", exc_info=True)
@@ -105,7 +107,9 @@ def get_seed_by_id(seed_id: str) -> Dict[str, Any] | None:
         return None
     try:
         with open(seed_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            data.setdefault("defer_count", 0)
+            return data
     except Exception as e:
         logger.error(f"❌ Error reading thought seed file {seed_file}: {e}", exc_info=True)
         return None
@@ -252,6 +256,7 @@ def archive_seed(seed_filename: str) -> bool:
         SEEDS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
         with open(src, "r", encoding="utf-8") as f:
             data = json.load(f)
+        data.setdefault("defer_count", 0)
         data["archived"] = True
         data["archived_at"] = datetime.now(timezone.utc).isoformat()
         with open(SEEDS_ARCHIVE_DIR / seed_filename, "w", encoding="utf-8") as f:
@@ -334,6 +339,7 @@ def defer_seed(seed_filename: str, revisit_after: str | None = None) -> bool:
         SEEDS_PENDING_DIR.mkdir(parents=True, exist_ok=True)
         with open(src, "r", encoding="utf-8") as f:
             data = json.load(f)
+        data.setdefault("defer_count", 0)
         data["pending"] = True
         data["deferred_at"] = datetime.now(timezone.utc).isoformat()
         if revisit_after:
@@ -368,6 +374,7 @@ def list_pending_seeds_due() -> list[tuple[Path, dict]]:
         try:
             with open(fp, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            data.setdefault("defer_count", 0)
 
             due = False
             revisit = data.get("revisit_after")

@@ -15,6 +15,7 @@ keeping sleep focused on pure memory maintenance.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,11 +32,39 @@ You are GAIA's thought seed triage system. You will be shown a thought seed — 
 a dormant idea that was generated during a previous conversation.
 
 Respond with EXACTLY one of these words on the first line:
-  ARCHIVE — This seed is no longer relevant, too vague, or not worth pursuing.
-  PENDING — This seed has potential but should be revisited later.
-  ACT     — This seed is actionable and worth expanding on right now.
+  ARCHIVE — This seed is no longer relevant, too vague, or not worth pursuing. Prefer this over PENDING.
+  PENDING — Only use this if the seed is highly valuable AND requires a specific future event or context to be actionable. Do NOT use this for vague, low-priority, or general ideas.
+  ACT     — This seed is actionable, specific, and worth expanding on right now.
 
+Prefer ARCHIVE or ACT. Avoid PENDING unless absolutely necessary.
 On the second line, write a single sentence justifying your decision."""
+
+_TRIAGE_BINARY_SYSTEM_PROMPT = """\
+You are GAIA's thought seed triage system. You will be shown a thought seed — \
+a dormant idea that has been deferred multiple times. You must now make a final choice to either ACT or ARCHIVE.
+
+Respond with EXACTLY one of these words on the first line:
+  ARCHIVE — This seed is no longer relevant, too vague, or not worth pursuing.
+  ACT     — This seed is actionable, specific, and worth expanding on right now.
+
+Do NOT choose PENDING. You must choose either ARCHIVE or ACT.
+On the second line, write a single sentence justifying your decision."""
+
+
+def sanitize_llm_output(text: str) -> str:
+    """Strip <think> tags and sanitize LLM output."""
+    if not text:
+        return ""
+    # Remove closed think blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Remove unclosed think blocks
+    text = re.sub(r"<think>.*", "", text, flags=re.DOTALL)
+    # Clean up bolding, asterisks, and other markdown wrappers from each line
+    lines = []
+    for line in text.splitlines():
+        cleaned = line.strip().replace("**", "").replace("*", "").replace("`", "")
+        lines.append(cleaned)
+    return "\n".join(lines).strip()
 
 _EXPAND_SYSTEM_PROMPT = """\
 You are GAIA's thought seed expansion system. Given a thought seed and its \
@@ -329,6 +358,11 @@ class ThoughtSeedHeartbeat:
         if seed_type == "knowledge_gap":
             return ("act", "Knowledge gap — auto-routing to research")
 
+        defer_count = seed_data.get("defer_count", 0)
+        force_binary = defer_count >= 2
+
+        system_prompt = _TRIAGE_BINARY_SYSTEM_PROMPT if force_binary else _TRIAGE_SYSTEM_PROMPT
+
         seed_text = seed_data.get("seed", "")
         context = seed_data.get("context", {})
         user_prompt = (
@@ -340,14 +374,15 @@ class ThoughtSeedHeartbeat:
         try:
             result = llm.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": _TRIAGE_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.2,
                 max_tokens=128,
                 stream=False,
             )
-            text = result["choices"][0]["message"]["content"].strip()
+            raw_text = result["choices"][0]["message"]["content"]
+            text = sanitize_llm_output(raw_text)
             lines = text.splitlines()
             first_line = lines[0].strip().upper() if lines else ""
             reason = lines[1].strip() if len(lines) > 1 else ""
@@ -360,9 +395,13 @@ class ThoughtSeedHeartbeat:
             elif "ACT" in first_line:
                 return ("act", reason)
             else:
+                if force_binary:
+                    return ("archive", f"Forced archive due to deferral threshold (raw output: {first_line})")
                 return ("pending", reason)
         except Exception:
             logger.warning("Triage LLM call failed, defaulting to pending", exc_info=True)
+            if force_binary:
+                return ("archive", "Forced archive due to deferral threshold (LLM call failed)")
             return ("pending", "LLM call failed")
 
     # ------------------------------------------------------------------
@@ -374,7 +413,11 @@ class ThoughtSeedHeartbeat:
         archive_seed(filename)
 
     def _do_defer(self, filename: str) -> None:
-        from gaia_core.cognition.thought_seed import defer_seed
+        from gaia_core.cognition.thought_seed import defer_seed, get_seed_by_id, update_seed
+        seed_data = get_seed_by_id(filename)
+        if seed_data:
+            seed_data["defer_count"] = seed_data.get("defer_count", 0) + 1
+            update_seed(filename, seed_data)
         # Default revisit: 7 days from now
         revisit = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         defer_seed(filename, revisit_after=revisit)
@@ -385,21 +428,32 @@ class ThoughtSeedHeartbeat:
 
     def _act_on_seed(self, llm, seed_filename: str, seed_data: Dict[str, Any]) -> None:
         """Expand the seed with Lite, then run through agent_core."""
+        defer_count = seed_data.get("defer_count", 0)
+        force_archive = defer_count >= 2
+
         # 1. Expand
         expanded = self._expand_seed(llm, seed_data)
         if not expanded:
-            logger.warning("Heartbeat: expansion failed for %s, deferring", seed_filename)
-            self._do_defer(seed_filename)
+            if force_archive:
+                logger.warning("Heartbeat: expansion failed for %s, archiving due to defer_count >= 2", seed_filename)
+                self._do_archive(seed_filename)
+            else:
+                logger.warning("Heartbeat: expansion failed for %s, deferring", seed_filename)
+                self._do_defer(seed_filename)
             return
 
         # 2. Check state — can we run a turn?
-        if not self._ensure_active(seed_filename):
-            return  # Deferred or skipped inside _ensure_active
+        if not self._ensure_active(seed_filename, force_archive=force_archive):
+            return  # Archived/Deferred or skipped inside _ensure_active
 
         # 3. Execute via agent_core
         if self.agent_core is None:
-            logger.warning("Heartbeat: no agent_core, deferring seed %s", seed_filename)
-            self._do_defer(seed_filename)
+            if force_archive:
+                logger.warning("Heartbeat: no agent_core, archiving seed %s due to defer_count >= 2", seed_filename)
+                self._do_archive(seed_filename)
+            else:
+                logger.warning("Heartbeat: no agent_core, deferring seed %s", seed_filename)
+                self._do_defer(seed_filename)
             return
 
         try:
@@ -449,7 +503,7 @@ class ThoughtSeedHeartbeat:
             logger.warning("Seed expansion LLM call failed", exc_info=True)
             return ""
 
-    def _ensure_active(self, seed_filename: str) -> bool:
+    def _ensure_active(self, seed_filename: str, force_archive: bool = False) -> bool:
         """Ensure GAIA is in an ACTIVE state for running a turn.
 
         If ASLEEP, sends a wake signal and polls for up to 180s.
@@ -476,13 +530,21 @@ class ThoughtSeedHeartbeat:
                 time.sleep(2)
                 if self.sleep_wake_manager.get_state() == GaiaState.ACTIVE:
                     return True
-            logger.warning("Heartbeat: wake timed out, deferring seed %s", seed_filename)
-            self._do_defer(seed_filename)
+            if force_archive:
+                logger.warning("Heartbeat: wake timed out, archiving seed %s", seed_filename)
+                self._do_archive(seed_filename)
+            else:
+                logger.warning("Heartbeat: wake timed out, deferring seed %s", seed_filename)
+                self._do_defer(seed_filename)
             return False
 
         if state in (GaiaState.DREAMING, GaiaState.DISTRACTED):
-            logger.info("Heartbeat: GAIA is %s, deferring seed %s", state.value, seed_filename)
-            self._do_defer(seed_filename)
+            if force_archive:
+                logger.info("Heartbeat: GAIA is %s, archiving seed %s", state.value, seed_filename)
+                self._do_archive(seed_filename)
+            else:
+                logger.info("Heartbeat: GAIA is %s, deferring seed %s", state.value, seed_filename)
+                self._do_defer(seed_filename)
             return False
 
         if state == GaiaState.OFFLINE:
@@ -490,7 +552,10 @@ class ThoughtSeedHeartbeat:
             return False
 
         # DROWSY or unknown — defer to be safe
-        self._do_defer(seed_filename)
+        if force_archive:
+            self._do_archive(seed_filename)
+        else:
+            self._do_defer(seed_filename)
         return False
 
     # ------------------------------------------------------------------
