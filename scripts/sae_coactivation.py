@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--atlas", default="/shared/atlas")
     ap.add_argument("--topk", type=int, default=32, help="top-k to restore on loaded SAEs")
     ap.add_argument("--top-pairs", type=int, default=200, help="top co-activating pairs to keep per layer")
+    ap.add_argument("--all-tokens", action="store_true", help="capture ALL token positions (~seq_len× samples) — robust synapse stats")
     args = ap.parse_args()
 
     import torch
@@ -60,8 +61,10 @@ def main():
         sae.k = args.topk          # restore top-k sparsity on the reloaded SAEs
         sae.eval()
 
-    logger.info("Re-encoding corpus (CPU)...")
-    trainer.record_activations_gguf(prompts, layers=layers, backend=backend)
+    logger.info("Re-encoding corpus (CPU)%s...", " — ALL-TOKEN" if args.all_tokens else "")
+    trainer.record_activations_gguf(prompts, layers=layers, backend=backend,
+                                    capture_all_tokens=args.all_tokens,
+                                    n_embd=backend.n_embd() if args.all_tokens else None)
 
     out = {"tier": args.tier, "tag": args.tag, "layers": layers,
            "topk": args.topk, "n_samples": None, "per_layer": {}}
