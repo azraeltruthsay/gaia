@@ -350,6 +350,97 @@ def run_atlas(tier: str, output_base: str = "/shared/atlas", tag: str = "baselin
     return analysis_output
 
 
+def run_atlas_gguf(tier: str, gguf_path: str, output_base: str = "/shared/atlas", tag: str = "gguf",
+                   corpus_path: str = "", layers_override: str = "", top_k: int = 0):
+    """SAE atlas from the GGUF/CPU path via gaia_cpp (the quantized production model).
+
+    Capture is CPU (gaia_cpp.LlamaCppBackend, n_gpu_layers=0) so it does NOT contend
+    with whatever safetensors model is on the GPU — the bicameral counterbalance. SAE
+    training is small-GPU. The model can't be re-run for per-prompt analysis (gaia_cpp
+    backend), so stratum signatures are computed from the recorded activations.
+    """
+    import torch, json as _json
+    from gaia_engine.cpp import gaia_cpp
+    from gaia_engine.sae_trainer import SAETrainer
+
+    config = get_tier_config(tier)
+    output_dir = Path(output_base) / tier / tag
+    output_dir.mkdir(parents=True, exist_ok=True)
+    layers = [int(x) for x in layers_override.split(",") if x.strip()] if layers_override else config["layers"]
+
+    strata = []
+    if corpus_path:
+        _items = _json.load(open(corpus_path))
+        prompts = [it["text"] for it in _items]
+        strata = [it.get("stratum", "") for it in _items]
+    else:
+        prompts = list(ATLAS_PROMPTS)
+
+    logger.info("=" * 60)
+    logger.info("SAE Atlas (GGUF/gaia_cpp): %s — %s", config["name"], gguf_path)
+    logger.info("Layers: %s | prompts: %d | top_k: %s", layers, len(prompts), top_k or None)
+    logger.info("=" * 60)
+
+    logger.info("Loading GGUF on CPU via gaia_cpp ...")
+    backend = gaia_cpp.LlamaCppBackend(model_path=gguf_path, n_gpu_layers=0,
+                                       capture_layers=layers, n_ctx=2048)
+    logger.info("  n_layer=%d n_embd=%d", backend.n_layer(), backend.n_embd())
+
+    # GGUF atlas trains the SAEs on CPU (capture is already CPU) so it NEVER
+    # contends with the GPU-resident counterbalance model (bicameral arrangement).
+    # The SAEs are small; CPU training is slower but conflict-free.
+    device = "cpu"
+    trainer = SAETrainer(model=backend, tokenizer=None, device=device)
+
+    logger.info("Phase 1: Recording GGUF activations...")
+    rec = trainer.record_activations_gguf(prompts, layers=layers, backend=backend)
+    logger.info("  %s", rec)
+
+    hidden_size = list(trainer.activations.values())[0][0].shape[-1]
+    num_features = hidden_size * config["num_features_multiplier"]
+    logger.info("Phase 2: Training SAEs (hidden=%d, features=%d, top_k=%s)...",
+                hidden_size, num_features, top_k or None)
+    trainer.train_sae(layers=layers, num_features=num_features, lr=1e-3,
+                      epochs=config["epochs"], batch_size=256, top_k=top_k or None)
+
+    logger.info("Phase 3: Saving atlas...")
+    trainer.save_atlas(str(output_dir))
+
+    # Phase 4: per-stratum feature signatures FROM RECORDED ACTIVATIONS (no model re-run).
+    analysis_layer = layers[-1]
+    sae = trainer.saes[analysis_layer]
+    acts = trainer.activations[analysis_layer]  # one [1, n_embd] per prompt, in prompt order
+    domain_strength = {}  # stratum -> {feature_idx: max_strength}
+    with torch.no_grad():
+        for i, a in enumerate(acts):
+            s = (strata[i] if i < len(strata) else "") or "unlabeled"
+            hs_norm = (a.float().cpu() - sae._norm_mean) / sae._norm_std
+            feat = sae.get_feature_activations(hs_norm.to(device))[0]
+            top = feat.topk(20)
+            d = domain_strength.setdefault(s, {})
+            for idx, val in zip(top.indices.tolist(), top.values.tolist()):
+                if val > d.get(idx, 0.0):
+                    d[idx] = val
+    domain_features = {
+        s: [{"index": idx, "strength": round(v, 4)}
+            for idx, v in sorted(d.items(), key=lambda kv: -kv[1])[:10]]
+        for s, d in domain_strength.items()
+    }
+    for s in domain_features:
+        logger.info("  %s: top features = %s", s, [f["index"] for f in domain_features[s][:5]])
+
+    analysis = {
+        "tier": tier, "backend": "gguf", "model": gguf_path, "layers": layers,
+        "num_features": num_features, "top_k": top_k or None,
+        "analysis_layer": analysis_layer, "domain_features": domain_features,
+    }
+    (output_dir / "analysis.json").write_text(_json.dumps(analysis, indent=2))
+    logger.info("=" * 60)
+    logger.info("GGUF atlas complete: %s → %s (%d layers, %d strata)",
+                config["name"], output_dir, len(layers), len(domain_features))
+    logger.info("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="SAE Atlas Snapshot")
     parser.add_argument("--tier", choices=["nano", "core", "prime"], required=True)
@@ -360,11 +451,16 @@ def main():
     parser.add_argument("--layers", default="", help="Comma-separated layer indices (denser = more neuron-path detail)")
     parser.add_argument("--sparsity", type=float, default=0.01, help="L1 sparsity weight (L1 mode only)")
     parser.add_argument("--topk", type=int, default=0, help="Top-k SAE: keep k features/sample (L0=k, direct sparsity). 0=L1 mode")
+    parser.add_argument("--gguf", default="", help="GGUF path (e.g. /models/core.gguf) → capture via gaia_cpp on CPU instead of transformers/GPU")
     args = parser.parse_args()
 
-    run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model,
-              corpus_path=args.corpus, layers_override=args.layers, sparsity=args.sparsity,
-              top_k=args.topk)
+    if args.gguf:
+        run_atlas_gguf(args.tier, args.gguf, output_base=args.output, tag=args.tag,
+                       corpus_path=args.corpus, layers_override=args.layers, top_k=args.topk)
+    else:
+        run_atlas(args.tier, output_base=args.output, tag=args.tag, model_override=args.model,
+                  corpus_path=args.corpus, layers_override=args.layers, sparsity=args.sparsity,
+                  top_k=args.topk)
 
 
 if __name__ == "__main__":
