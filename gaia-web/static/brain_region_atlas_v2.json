@@ -1,0 +1,608 @@
+{
+  "_meta": {
+    "version": "2.0.0",
+    "description": "Brain-region map re-derived from committed Sovereign-Duality top-k atlases (A4)",
+    "source_atlases": "/shared/atlas/{core,prime}/<top-k tag>",
+    "derived": "depth zones per tier; domains = dominant capability strata; features = top per layer",
+    "tiers": [
+      "core",
+      "prime"
+    ]
+  },
+  "regions": [
+    {
+      "id": 1,
+      "name": "Core-Perceptual",
+      "tier": "core",
+      "function": "Early tokenization / surface features",
+      "domains": [
+        "register_chitchat",
+        "neutral_factual",
+        "affect_laden"
+      ],
+      "layerRange": [
+        0,
+        9
+      ],
+      "atlasLayers": [
+        0,
+        3,
+        6,
+        9
+      ],
+      "topFeaturesByLayer": {
+        "0": [
+          4490,
+          3282,
+          1817,
+          4094,
+          574,
+          2152,
+          1869,
+          731,
+          2429,
+          940
+        ],
+        "3": [
+          2980,
+          2517,
+          1169,
+          2094,
+          197,
+          3414,
+          726,
+          1382,
+          4190,
+          1619
+        ],
+        "6": [
+          2607,
+          3665,
+          3071,
+          2293,
+          657,
+          1180,
+          3681,
+          3486,
+          140,
+          271
+        ],
+        "9": [
+          4763,
+          748,
+          3866,
+          4694,
+          1,
+          3234,
+          1185,
+          1537,
+          4375,
+          2192
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "name": "Core-Associative",
+      "tier": "core",
+      "function": "Lexical-semantic association",
+      "domains": [
+        "affect_laden",
+        "neutral_factual",
+        "competence_problem"
+      ],
+      "layerRange": [
+        12,
+        21
+      ],
+      "atlasLayers": [
+        12,
+        15,
+        18,
+        21
+      ],
+      "topFeaturesByLayer": {
+        "12": [
+          4317,
+          942,
+          1372,
+          302,
+          1805,
+          1866,
+          2555,
+          655,
+          4505,
+          4308
+        ],
+        "15": [
+          122,
+          4223,
+          3754,
+          1926,
+          1409,
+          3738,
+          1963,
+          3337,
+          213,
+          2227
+        ],
+        "18": [
+          4961,
+          3297,
+          539,
+          314,
+          4435,
+          3741,
+          2909,
+          4746,
+          3203,
+          3093
+        ],
+        "21": [
+          2668,
+          5116,
+          5020,
+          1328,
+          4766,
+          1224,
+          3129,
+          39,
+          4834,
+          2223
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "name": "Core-Integrative",
+      "tier": "core",
+      "function": "Cross-context integration / reasoning",
+      "domains": [
+        "affect_laden",
+        "register_chitchat",
+        "competence_problem"
+      ],
+      "layerRange": [
+        24,
+        30
+      ],
+      "atlasLayers": [
+        24,
+        27,
+        30
+      ],
+      "topFeaturesByLayer": {
+        "24": [
+          1165,
+          464,
+          4385,
+          2247,
+          2618,
+          657,
+          977,
+          4341,
+          3847,
+          2014
+        ],
+        "27": [
+          3606,
+          3643,
+          3346,
+          831,
+          2046,
+          116,
+          1941,
+          1249,
+          3448,
+          3313
+        ],
+        "30": [
+          1511,
+          4219,
+          3853,
+          3960,
+          4503,
+          4580,
+          1604,
+          2026,
+          3475,
+          4755
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "name": "Core-Executive",
+      "tier": "core",
+      "function": "Decision, planning, output shaping",
+      "domains": [
+        "register_chitchat",
+        "neutral_factual",
+        "competence_problem"
+      ],
+      "layerRange": [
+        33,
+        41
+      ],
+      "atlasLayers": [
+        33,
+        36,
+        39,
+        41
+      ],
+      "topFeaturesByLayer": {
+        "33": [
+          4406,
+          2235,
+          3215,
+          2742,
+          1221,
+          4701,
+          1067,
+          4755,
+          3328,
+          457
+        ],
+        "36": [
+          2729,
+          3311,
+          3038,
+          2581,
+          600,
+          636,
+          4857,
+          2741,
+          2900,
+          582
+        ],
+        "39": [
+          4827,
+          4473,
+          3373,
+          4281,
+          4479,
+          2283,
+          3074,
+          3506,
+          1587,
+          452
+        ],
+        "41": [
+          3118,
+          4030,
+          4230,
+          184,
+          2954,
+          4279,
+          3371,
+          3753,
+          2189,
+          1524
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "name": "Prime-Perceptual",
+      "tier": "prime",
+      "function": "Early tokenization / surface features",
+      "domains": [
+        "register_chitchat",
+        "neutral_factual",
+        "affect_laden"
+      ],
+      "layerRange": [
+        0,
+        6
+      ],
+      "atlasLayers": [
+        0,
+        3,
+        6
+      ],
+      "topFeaturesByLayer": {
+        "0": [
+          2537,
+          3046,
+          1635,
+          7427,
+          6912,
+          4201,
+          179,
+          4008,
+          7017,
+          2526
+        ],
+        "3": [
+          2452,
+          784,
+          678,
+          10,
+          160,
+          8184,
+          3895,
+          2295,
+          684,
+          715
+        ],
+        "6": [
+          5123,
+          1020,
+          4797,
+          1220,
+          33,
+          93,
+          3475,
+          2959,
+          1552,
+          4050
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "name": "Prime-Associative",
+      "tier": "prime",
+      "function": "Lexical-semantic association",
+      "domains": [
+        "register_chitchat",
+        "affect_laden",
+        "neutral_factual"
+      ],
+      "layerRange": [
+        9,
+        15
+      ],
+      "atlasLayers": [
+        9,
+        12,
+        15
+      ],
+      "topFeaturesByLayer": {
+        "9": [
+          7822,
+          1868,
+          2593,
+          1961,
+          3414,
+          4664,
+          2870,
+          7972,
+          809,
+          305
+        ],
+        "12": [
+          1780,
+          8132,
+          3549,
+          5158,
+          2265,
+          5936,
+          6132,
+          1988,
+          3584,
+          1096
+        ],
+        "15": [
+          2266,
+          4854,
+          4813,
+          2318,
+          5803,
+          4429,
+          3000,
+          4283,
+          7059,
+          7672
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "name": "Prime-Integrative",
+      "tier": "prime",
+      "function": "Cross-context integration / reasoning",
+      "domains": [
+        "affect_laden",
+        "competence_problem",
+        "curiosity_gap"
+      ],
+      "layerRange": [
+        18,
+        27
+      ],
+      "atlasLayers": [
+        18,
+        21,
+        24,
+        27
+      ],
+      "topFeaturesByLayer": {
+        "18": [
+          7505,
+          7434,
+          5280,
+          2413,
+          6244,
+          79,
+          3107,
+          4029,
+          5612,
+          3140
+        ],
+        "21": [
+          4040,
+          4924,
+          3074,
+          111,
+          4432,
+          611,
+          7209,
+          207,
+          719,
+          3220
+        ],
+        "24": [
+          4875,
+          2016,
+          7891,
+          1793,
+          6395,
+          1308,
+          1791,
+          4473,
+          1227,
+          13
+        ],
+        "27": [
+          5626,
+          395,
+          6015,
+          1790,
+          7728,
+          107,
+          2210,
+          7169,
+          6926,
+          689
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "name": "Prime-Executive",
+      "tier": "prime",
+      "function": "Decision, planning, output shaping",
+      "domains": [
+        "affect_laden",
+        "competence_problem",
+        "spatial_reasoning"
+      ],
+      "layerRange": [
+        30,
+        35
+      ],
+      "atlasLayers": [
+        30,
+        33,
+        35
+      ],
+      "topFeaturesByLayer": {
+        "30": [
+          2303,
+          1305,
+          3695,
+          5938,
+          6369,
+          1151,
+          252,
+          6511,
+          714,
+          7301
+        ],
+        "33": [
+          2141,
+          206,
+          1473,
+          3930,
+          2602,
+          1133,
+          820,
+          6285,
+          841,
+          2239
+        ],
+        "35": [
+          6204,
+          2754,
+          520,
+          7852,
+          1102,
+          6679,
+          7755,
+          8014,
+          3748,
+          4410
+        ]
+      }
+    }
+  ],
+  "tier_layer_map": {
+    "core": {
+      "atlas_sampled_layers": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        36,
+        39,
+        41
+      ],
+      "n_layers": 42
+    },
+    "prime": {
+      "atlas_sampled_layers": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        35
+      ],
+      "n_layers": 36
+    }
+  },
+  "domain_to_region_map": {
+    "register_chitchat": [
+      "Core-Perceptual",
+      "Core-Integrative",
+      "Core-Executive",
+      "Prime-Perceptual",
+      "Prime-Associative"
+    ],
+    "neutral_factual": [
+      "Core-Perceptual",
+      "Core-Associative",
+      "Core-Executive",
+      "Prime-Perceptual",
+      "Prime-Associative"
+    ],
+    "affect_laden": [
+      "Core-Perceptual",
+      "Core-Associative",
+      "Core-Integrative",
+      "Prime-Perceptual",
+      "Prime-Associative",
+      "Prime-Integrative",
+      "Prime-Executive"
+    ],
+    "competence_problem": [
+      "Core-Associative",
+      "Core-Integrative",
+      "Core-Executive",
+      "Prime-Integrative",
+      "Prime-Executive"
+    ],
+    "curiosity_gap": [
+      "Prime-Integrative"
+    ],
+    "spatial_reasoning": [
+      "Prime-Executive"
+    ]
+  }
+}
