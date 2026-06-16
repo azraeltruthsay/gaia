@@ -264,3 +264,26 @@ async def get_atlas():
         pass
 
     return result
+
+
+# Default canonical (top-k, discriminative) atlas tags per tier, both holding a
+# synapse_graph.json (within-layer co-activation + cross-layer causal) — A4/72q.
+_SYNAPSE_DEFAULT_TAG = {"core": "CORE_IDENTITY_V3_gguf", "prime": "PRIME_ABLITERATED_gguf"}
+_ATLAS_BASE = os.getenv("SAE_ATLAS_BASE", "/shared/atlas")
+
+
+@router.get("/synapse_graph")
+async def get_synapse_graph(tier: str = "core", tag: str = ""):
+    """Serve the assembled feature synapse graph for the mind map.
+
+    Nodes = (layer, feature) with brain region (re-derived A4 map); edges carry
+    kind=coactivation|causal, weights, polarity. Built by build_synapse_graph.py.
+    """
+    tag = tag or _SYNAPSE_DEFAULT_TAG.get(tier, "")
+    path = os.path.join(_ATLAS_BASE, tier, tag, "synapse_graph.json")
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except OSError:
+        return {"error": f"no synapse_graph for {tier}/{tag}", "tier": tier, "tag": tag,
+                "node_count": 0, "edge_count": 0, "nodes": [], "edges": []}
