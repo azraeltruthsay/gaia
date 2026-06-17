@@ -84,6 +84,8 @@ def decay(
     if hl is None or fact_type == BIOGRAPHICAL:
         # No-decay class — always 1.0.
         return 1.0
+    if hl <= 0.0:
+        return 0.0
     a = max(0.0, float(age))
     if kind == "exponential":
         return math.pow(0.5, a / hl)

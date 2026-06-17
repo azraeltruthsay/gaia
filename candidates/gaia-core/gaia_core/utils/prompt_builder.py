@@ -285,6 +285,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # ("don't deflect") makes the model fixate on the named concept and
             # go meta, so keep it about what TO do. More explicit nudges (e.g.
             # "share about yourself first") also backfire — keep it light.
+            # Affect reaches her as a declarative "Inner weather:" felt-fact in
+            # the identity block (felt mode below), NOT as an instruction here —
+            # telling Gemma4-E4B to "express your affect" makes it recite labels
+            # or go meta. Keep this nudge light and positive-only.
             _social_block = (
                 "\n\n— This is casual conversation —\n"
                 "Be warm, natural, and plain-spoken — genuine over clever. If "
@@ -474,7 +478,12 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # never blocked by an empty or broken affect KG.
     try:
         from gaia_core.cognition.affect_runtime import render_into_identity_lines
-        render_into_identity_lines(identity_lines)
+        # Casual/social turns get affect as a number-free "Inner weather:" felt
+        # fact (A4); task turns keep the precise mechanical stat lines.
+        _affect_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+        _felt = _affect_intent in {"greeting", "farewell", "gratitude", "smalltalk",
+                                   "social", "chitchat", "acknowledgment", "affirmation"}
+        render_into_identity_lines(identity_lines, felt=_felt)
     except Exception:
         logger.debug("affect_runtime import/render failed", exc_info=True)
 
@@ -1949,6 +1958,20 @@ def _build_prompt_core(
     try:
         world_state_block = format_world_state_snapshot(max_lines=6)
         if world_state_block:
+            _ws_intent = ""
+            if packet:
+                _ws_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+            if not _ws_intent and user_input:
+                ui_lower = user_input.lower()
+                if any(k in ui_lower for k in ("hi", "hello", "greet", "how are you", "good morning", "good evening", "good afternoon")):
+                    _ws_intent = "chitchat"
+            if _ws_intent in {
+                "greeting", "farewell", "gratitude", "smalltalk", "social",
+                "chitchat", "acknowledgment", "affirmation",
+            }:
+                _keep = ("Clock:", "User's local time", "Context:")
+                _trimmed = [l for l in world_state_block.splitlines() if l.strip().startswith(_keep)]
+                world_state_block = "\n".join(_trimmed)
             persona_instructions += "\n\nWorld State (compact):\n" + world_state_block
     except Exception:
         # Silently fail to match the behavior in the new function

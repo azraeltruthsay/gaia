@@ -105,7 +105,18 @@ def _decayed_confidence(
 
 
 def _clamp01(x: float) -> float:
-    return max(0.0, min(1.0, float(x)))
+    try:
+        if math.isnan(x):
+            return 0.0
+    except TypeError:
+        pass
+    try:
+        val = float(x)
+        if math.isnan(val):
+            return 0.0
+        return max(0.0, min(1.0, val))
+    except Exception:
+        return 0.0
 
 
 # ── Facade ──────────────────────────────────────────────────────────

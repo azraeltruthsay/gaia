@@ -21,6 +21,7 @@ Decay is automatic via the KG fact-type half-lives. Flag: AFFECT_APPRAISAL_ENABL
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 logger = logging.getLogger("GAIA.AffectAppraiser")
@@ -40,7 +41,18 @@ def _af():
 
 
 def _clamp(v: float) -> float:
-    return max(0.0, min(1.0, v))
+    try:
+        if math.isnan(v):
+            return 0.0
+    except TypeError:
+        pass
+    try:
+        val = float(v)
+        if math.isnan(val):
+            return 0.0
+        return max(0.0, min(1.0, val))
+    except Exception:
+        return 0.0
 
 
 def _bump_drive(name: str, delta: float, *, source: str) -> None:
@@ -88,19 +100,27 @@ def note_samvega(weight: float, root_cause: str = "") -> None:
     instead of re-appraising the consistency detector in parallel (audit finding #2).
     `weight` already folds in observer severity + repeated-domain. Quiet periods (no
     Samvega) let coherence decay back to calm — no explicit relief needed."""
-    if not appraisal_enabled():
-        return
-    _bump_drive("coherence", min(0.4, 0.12 * max(0.0, float(weight))),
-                source=f"samvega:{(root_cause or '?')[:30]}")
+    try:
+        if not appraisal_enabled():
+            return
+        cause = str(root_cause) if root_cause is not None else "?"
+        _bump_drive("coherence", min(0.4, 0.12 * max(0.0, float(weight))),
+                    source=f"samvega:{cause[:30]}")
+    except Exception:
+        pass
 
 
 def note_task_outcome(success: bool, label: str = "") -> None:
     """Competence drive ← a task/tool outcome. Failure raises the tension (there's
     something to get right); success eases it. Decay returns it to calm."""
-    if not appraisal_enabled():
-        return
-    _bump_drive("competence", 0.12 if (not success) else -0.10,
-                source=f"appraiser:task:{(label or '?')[:30]}")
+    try:
+        if not appraisal_enabled():
+            return
+        lbl = str(label) if label is not None else "?"
+        _bump_drive("competence", 0.12 if (not success) else -0.10,
+                    source=f"appraiser:task:{lbl[:30]}")
+    except Exception:
+        pass
 
 
 _Q_STARTS = (
@@ -123,12 +143,15 @@ def note_knowledge_gap(topic: str) -> None:
     """Curiosity ← a genuine question she couldn't ground. Pulls her toward the
     topic. Commands/imperatives that merely miss grounding ("use your tools to
     list files") are NOT curiosity — only info-seeking questions are."""
-    if not appraisal_enabled() or not topic or not _looks_like_question(topic):
-        return
-    t = topic.strip().rstrip("?").strip()
-    tl = t.lower()
-    for stem in _Q_STEMS:
-        if tl.startswith(stem):
-            t = t[len(stem):].strip()
-            break
-    _set_curious(t or topic, 0.55, source="appraiser:knowledge_gap")
+    try:
+        if not appraisal_enabled() or not topic or not _looks_like_question(topic):
+            return
+        t = topic.strip().rstrip("?").strip()
+        tl = t.lower()
+        for stem in _Q_STEMS:
+            if tl.startswith(stem):
+                t = t[len(stem):].strip()
+                break
+        _set_curious(t or topic, 0.55, source="appraiser:knowledge_gap")
+    except Exception:
+        pass

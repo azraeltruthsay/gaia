@@ -309,3 +309,49 @@ class TestActivateDetectedContexts:
         a1 = activate_detected_contexts("/roll 1d20")
         a2 = activate_detected_contexts("/roll 1d20")
         assert a1 == a2
+
+
+# ── A4: number-free "Inner weather" felt-fact for casual/social mode ──────────
+
+def test_affect_felt_line_is_number_free_and_grammatical():
+    from gaia_core.cognition.affect_runtime import affect_felt_line
+    line = affect_felt_line({
+        "feels": {"curious": 0.55},
+        "curious_about": {"the engine work": 0.7},
+        "tired_of": {"docs triage": 0.45},
+    })
+    assert line == "a quiet curiosity, keenly drawn toward the engine work, a little worn"
+    assert not any(c.isdigit() for c in line)  # no raw stats leak into the felt fact
+
+
+def test_affect_felt_line_normalizes_adjective_feels():
+    """Adjective feel-words ('curious', 'frustrated') normalize to nouns so the
+    'a quiet ___' article stays grammatical; nouns pass through."""
+    from gaia_core.cognition.affect_runtime import affect_felt_line
+    assert affect_felt_line({"feels": {"frustrated": 0.5}}) == "a quiet frustration"
+    assert affect_felt_line({"feels": {"irritation": 0.7}}) == "a strong irritation"
+
+
+def test_affect_felt_line_empty_when_calm():
+    from gaia_core.cognition.affect_runtime import affect_felt_line
+    assert affect_felt_line({}) == ""
+
+
+def test_render_felt_mode_emits_inner_weather_not_stats():
+    """felt=True renders the declarative 'Inner weather:' fact; felt=False keeps
+    the mechanical 'Current Affect (...)' stat lines (task mode)."""
+    from gaia_core.cognition import affect_runtime
+    snap = {"feels": {"curious": 0.55}}
+    orig = affect_runtime.current_affect_snapshot
+    affect_runtime.current_affect_snapshot = lambda *a, **k: snap
+    try:
+        felt_lines = []
+        affect_runtime.render_into_identity_lines(felt_lines, felt=True)
+        assert felt_lines == ["Inner weather: a quiet curiosity."]
+        assert not any(ch.isdigit() for ln in felt_lines for ch in ln)
+
+        stat_lines = []
+        affect_runtime.render_into_identity_lines(stat_lines, felt=False)
+        assert any(ln.startswith("Current Affect") for ln in stat_lines)
+    finally:
+        affect_runtime.current_affect_snapshot = orig

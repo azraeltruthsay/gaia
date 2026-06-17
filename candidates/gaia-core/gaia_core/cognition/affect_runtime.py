@@ -154,6 +154,55 @@ def affect_state_lines(snapshot: Optional[dict] = None) -> list[str]:
     return lines
 
 
+# Intensity bands → a felt article. The band is the ONLY quantization the model
+# sees (no numbers), keeping casual-mode affect declarative-felt, not mechanical.
+_FELT_BANDS = ((0.66, "a strong"), (0.40, "a quiet"), (0.0, "a faint"))
+
+
+def _felt_article(v: float) -> str:
+    for thresh, art in _FELT_BANDS:
+        if v >= thresh:
+            return art
+    return "a faint"
+
+
+# Feel axes mix adjectives ("curious") and nouns ("irritation"); normalize to a
+# noun so "a quiet ___" stays grammatical. Unknown words fall through verbatim.
+_FEEL_NOUN = {
+    "curious": "curiosity", "excited": "excitement", "frustrated": "frustration",
+    "irritation": "irritation", "irritated": "irritation", "anxious": "anxiousness",
+    "content": "contentment", "calm": "calm", "bored": "boredom",
+    "eager": "eagerness", "restless": "restlessness", "tense": "tension",
+    "warm": "warmth", "wary": "wariness", "pensive": "pensiveness",
+}
+
+
+def affect_felt_line(snapshot: Optional[dict] = None) -> str:
+    """Render the affect snapshot as ONE number-free declarative felt-fact, for
+    casual/social mode — e.g. "a quiet curiosity, drawn toward the engine work;
+    a little worn". A FACT, parallel to the Locality organ's outer weather: Gemma4
+    -E4B disowns "you feel X" instructions but accepts felt facts, and the
+    emotion-words stay hers to voice. Returns "" when affect is calm. (A4)"""
+    if snapshot is None:
+        snapshot = current_affect_snapshot()
+    clauses: list[str] = []
+    feels = _top_items(snapshot.get("feels", {}))
+    if feels:
+        n, v = feels[0]
+        word = _FEEL_NOUN.get(str(n).lower(), str(n).replace("_", " "))
+        clauses.append(f"{_felt_article(v)} {word}")
+    focus = _top_items(snapshot.get("curious_about", {}))
+    if focus:
+        n, v = focus[0]
+        verb = "keenly drawn toward" if v >= 0.66 else "drawn toward"
+        clauses.append(f"{verb} {str(n).replace('_', ' ')}")
+    tired = _top_items(snapshot.get("tired_of", {}))
+    if tired:
+        n, v = tired[0]
+        clauses.append("worn thin" if v >= 0.66 else "a little worn")
+    return ", ".join(clauses)
+
+
 # ── Inference modulation ────────────────────────────────────────────
 
 # Public modulation shape:
@@ -247,17 +296,29 @@ def affect_inference_params(snapshot: Optional[dict] = None) -> dict:
 # ── Hot-path-safe wrapper for prompt builder ────────────────────────
 
 def render_into_identity_lines(identity_lines: list[str],
-                                active_context: Optional[str] = None) -> None:
-    """Append affect lines to an identity_lines list in-place.
+                                active_context: Optional[str] = None,
+                                felt: bool = False) -> None:
+    """Append affect to an identity_lines list in-place.
 
     Designed for the exact pattern used in
     `prompt_builder.build_from_packet`, where identity_lines is built up
     iteratively. Never raises — failures are logged at debug level.
+
+    felt=True (casual/social mode, A4): append ONE number-free declarative
+    "Inner weather:" felt-fact instead of the mechanical 'Current Affect
+    (feels): x=0.62' stat lines, so she voices a felt state in her own words
+    rather than reciting numbers. Capacity-side modulation (the sampler) stays
+    active regardless — this only governs what reaches the prompt text.
     """
     try:
         snapshot = current_affect_snapshot(active_context=active_context)
-        for line in affect_state_lines(snapshot):
-            identity_lines.append(line)
+        if felt:
+            line = affect_felt_line(snapshot)
+            if line:
+                identity_lines.append("Inner weather: " + line + ".")
+        else:
+            for line in affect_state_lines(snapshot):
+                identity_lines.append(line)
     except Exception:
         logger.debug("affect render failed; skipping", exc_info=True)
 
