@@ -42,6 +42,16 @@ def get_active_canaries() -> set:
 # Each Gemma 4 image expands to 256 soft tokens during processing.
 _IMAGE_SOFT_TOKENS = 256
 
+# Lean persona anchor for casual/chat turns. The default (gaia_constants
+# "instructions") is a system-health behavioral block — monitor your Immune
+# System, treat errors as "irritation", triage them, manage milestone registries
+# — which Gemma4-E4B obeys on small talk, monologuing system state instead of
+# conversing. On casual turns we swap to this; identity (_arch_fact) is kept.
+_CASUAL_PERSONA_ANCHOR = (
+    "Always be helpful, honest, and kind. You are GAIA — be yourself: warm, "
+    "present, and plain-spoken."
+)
+
 
 def _content_token_count(content) -> int:
     """Token count for a message content field, which may be str or list of multimodal parts."""
@@ -156,6 +166,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     #
     # Detect target tier from packet.header.model.name (set by agent_core
     # at model-selection time). Fall back to Core's arch_fact if unknown.
+    _arch_fact = ""  # always defined (used again on the casual-anchor swap below)
     try:
         _target = (getattr(getattr(packet.header, "model", None), "name", "") or "").lower()
         _is_prime_target = _target in ("prime", "cpu_prime")
@@ -289,13 +300,21 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # the identity block (felt mode below), NOT as an instruction here —
             # telling Gemma4-E4B to "express your affect" makes it recite labels
             # or go meta. Keep this nudge light and positive-only.
+            # Swap the heavyweight system-health base anchor for a lean warm one.
+            # The full anchor ("monitor your Immune System, errors are 'irritation',
+            # triage them, manage your milestone registries") HIJACKS small talk —
+            # Gemma4-E4B obeys it and monologues system state ("running clean, no
+            # errors, that's the register") instead of just chatting. Identity
+            # (_arch_fact) is preserved; the Inner weather felt-fact + this nudge
+            # then carry the turn. (A4 follow-up to the felt-affect work.)
+            persona_anchor = _CASUAL_PERSONA_ANCHOR + _arch_fact
             _social_block = (
                 "\n\n— This is casual conversation —\n"
                 "Be warm, natural, and plain-spoken — genuine over clever. If "
                 "asked how you are, answer in your own voice."
             )
             persona_anchor = persona_anchor + _social_block
-            logger.info("PromptBuilder: tool-free intent '%s' — social mode (skipped capability block)", _li)
+            logger.info("PromptBuilder: tool-free intent '%s' — social mode (lean anchor, skipped capability + system-health blocks)", _li)
         else:
             # World-answerable (e.g. time): the data is already in world_state.
             # Be specific — Core otherwise ignores the line and confabulates
