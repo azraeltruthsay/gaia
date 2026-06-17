@@ -1318,7 +1318,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     # 5.9. Cognitive Index Layer (CIL) — lightweight pointer index
     # Routes gaia-core to the right knowledge without loading it wholesale.
-    if not compact_mode and not kv_prefix_active:
+    # Skipped on casual/social turns: its topic entries (Sleep cycle, Immune
+    # system, current cycle, ...) get narrated as her present experience
+    # ("finished the last sleep cycle, no errors") — crowding out plain
+    # conversation and the Inner weather felt-fact. Casual turns need no router. (A4)
+    # NOTE: this casual-intent set is now duplicated 5x in this module — a shared
+    # constant is overdue (the missing "chat" label was a real bug, fixed mgz).
+    _cil_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+    _cil_casual = _cil_intent in {"chat", "greeting", "farewell", "gratitude",
+                                  "smalltalk", "social", "chitchat",
+                                  "acknowledgment", "affirmation"}
+    if not compact_mode and not kv_prefix_active and not _cil_casual:
         try:
             from pathlib import Path
             _cil_path = Path("/shared/memory/gaia-index.md")
