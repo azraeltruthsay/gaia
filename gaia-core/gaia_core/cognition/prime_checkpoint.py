@@ -74,6 +74,14 @@ class PrimeCheckpointManager:
         self._consumed_flag.unlink(missing_ok=True)
 
         state_summary = self._generate_checkpoint(packet, model_pool)
+        
+        # Ensure directory exists before write (handles cases where /shared was transiently missing)
+        try:
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Failed to create checkpoint directory %s: %s", self.checkpoint_dir, exc)
+            raise
+
         self.checkpoint_file.write_text(state_summary, encoding="utf-8")
 
         logger.info("Checkpoint written: %s (%d chars)", self.checkpoint_file, len(state_summary))

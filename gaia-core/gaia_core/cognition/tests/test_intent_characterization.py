@@ -10,7 +10,6 @@ The "LITE = Nano/Lite zone" + "TRIAGE = defer to _nano_triage" assertions are
 the nano surface here: on 21j, LITE stays on Core and TRIAGE arbitration becomes
 a Core (or pure-heuristic) decision, not a Nano LLM call.
 """
-import pytest
 
 from gaia_core.cognition.nlu.intent_detection import WeightedIntentClassifier, Plan
 

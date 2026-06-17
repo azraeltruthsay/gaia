@@ -99,8 +99,9 @@ def default_stop_tokens(prompt_config: Optional[Dict] = None) -> List[str]:
     If the model gets stuck in think loops, that's a generation/prompt issue,
     not a stop token issue.
     """
-    # ChatML end token should be first - it's the primary stop signal
-    tokens = ["<|im_end|>", "<|endoftext|>", "\n\nUser:", "\n\nAssistant:"]
+    # Stop tokens for all supported model families
+    # ChatML (Qwen): <|im_end|>, Gemma 4: <turn|>
+    tokens = ["<|im_end|>", "<turn|>", "<eos>", "<|endoftext|>", "\n\nUser:", "\n\nAssistant:"]
     if prompt_config:
         custom = prompt_config.get("stop_tokens") or prompt_config.get("hf_stop_tokens")
         if isinstance(custom, list):
