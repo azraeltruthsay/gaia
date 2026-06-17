@@ -495,6 +495,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # state lines for any non-trivial feels/drives/curious/tired axes.
     # Failures are swallowed inside the runtime — prompt building is
     # never blocked by an empty or broken affect KG.
+    _affect_prompt_lines = []  # dynamic affect overlay; re-injected on the compact path (ly6)
     try:
         from gaia_core.cognition.affect_runtime import render_into_identity_lines
         # Casual/social turns get affect as a number-free "Inner weather:" felt
@@ -502,7 +503,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         _affect_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
         _felt = _affect_intent in {"chat", "greeting", "farewell", "gratitude", "smalltalk",
                                    "social", "chitchat", "acknowledgment", "affirmation"}
+        _before = len(identity_lines)
         render_into_identity_lines(identity_lines, felt=_felt)
+        # The affect overlay is DYNAMIC per-request and is NOT in the static
+        # KV-cache prefix. The compact/kv-prefix fast path below skips the whole
+        # identity block, so capture the affect line(s) to re-inject there — the
+        # same reason arch_fact is re-injected on that path. (ly6)
+        _affect_prompt_lines = identity_lines[_before:]
     except Exception:
         logger.debug("affect_runtime import/render failed", exc_info=True)
 
@@ -887,6 +894,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         if "— Architecture (factual" in persona_anchor:
             _arch_idx = persona_anchor.index("— Architecture (factual")
             system_content_parts.append(persona_anchor[_arch_idx:].strip())
+        # Dynamic affect overlay (Inner weather / Current Affect) is per-request
+        # and NOT in the static cached prefix — re-inject it here like arch_fact,
+        # else "how are you" never sees her felt state on the compact path. (ly6)
+        if _affect_prompt_lines:
+            system_content_parts.append("\n".join(_affect_prompt_lines))
         # Skip to dynamic sections (world state, task instruction, RAG, etc.)
     else:
         # 1. Unified Identity Block (single injection — replaces 3 separate identity blocks)
