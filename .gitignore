@@ -224,4 +224,5 @@ gaia-engine/
 
 # Antigravity (agy) teamwork swarm workspace — transient, not project state
 .agents/
+agents/
 PROJECT.md
