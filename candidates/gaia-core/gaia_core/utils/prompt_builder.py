@@ -270,7 +270,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # the block itself says chitchat needs no tool. Any non-conversational
         # intent keeps it so tool use is unaffected.
         _li = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
-        _chitchat = _li in {"greeting", "farewell", "gratitude", "smalltalk",
+        _chitchat = _li in {"chat", "greeting", "farewell", "gratitude", "smalltalk",
                             "social", "chitchat", "acknowledgment", "affirmation"}
         # World-state-answerable intents (e.g. time): the clock/uptime/load are
         # already injected via world_state_snapshot, so a tool is redundant.
@@ -481,7 +481,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # Casual/social turns get affect as a number-free "Inner weather:" felt
         # fact (A4); task turns keep the precise mechanical stat lines.
         _affect_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
-        _felt = _affect_intent in {"greeting", "farewell", "gratitude", "smalltalk",
+        _felt = _affect_intent in {"chat", "greeting", "farewell", "gratitude", "smalltalk",
                                    "social", "chitchat", "acknowledgment", "affirmation"}
         render_into_identity_lines(identity_lines, felt=_felt)
     except Exception:
@@ -625,7 +625,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     try:
         _ws_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
         if world_state_block_content and _ws_intent in {
-            "greeting", "farewell", "gratitude", "smalltalk", "social",
+            "chat", "greeting", "farewell", "gratitude", "smalltalk", "social",
             "chitchat", "acknowledgment", "affirmation",
         }:
             _keep = ("Clock:", "User's local time", "Context:")
@@ -1966,7 +1966,7 @@ def _build_prompt_core(
                 if any(k in ui_lower for k in ("hi", "hello", "greet", "how are you", "good morning", "good evening", "good afternoon")):
                     _ws_intent = "chitchat"
             if _ws_intent in {
-                "greeting", "farewell", "gratitude", "smalltalk", "social",
+                "chat", "greeting", "farewell", "gratitude", "smalltalk", "social",
                 "chitchat", "acknowledgment", "affirmation",
             }:
                 _keep = ("Clock:", "User's local time", "Context:")
