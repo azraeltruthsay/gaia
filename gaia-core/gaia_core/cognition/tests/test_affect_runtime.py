@@ -210,9 +210,10 @@ class TestApplyAffectModulation:
     def test_curiosity_expands_max_tokens(self, affect_with_kg):
         from gaia_core.cognition.affect_runtime import apply_affect_modulation
         affect_with_kg.record_feeling("curiosity", 0.8)
-        _, m, dbg = apply_affect_modulation(0.7, 1000)
-        assert m > 1000
-        assert any("exploratory" in r for r in dbg["reasons"])
+        t, m, dbg = apply_affect_modulation(0.7, 1000)
+        assert m > 1000          # roomier
+        assert t > 0.7           # warmer (continuous capacity wires temperature too now)
+        assert dbg["style_hint"] == "exploratory"
 
     def test_irritation_lowers_temperature(self, affect_with_kg):
         from gaia_core.cognition.affect_runtime import apply_affect_modulation

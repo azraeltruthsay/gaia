@@ -224,72 +224,86 @@ _DEFAULT_MOD = {
 
 
 def affect_inference_params(snapshot: Optional[dict] = None) -> dict:
-    """Derive inference modulation hints from the affect snapshot.
+    """Map current affect to CONTINUOUS sampler modulation — the autonomic
+    'capacity' layer (3rr rebuild). Affect shapes HOW she generates (exploration
+    via temperature, room via max_tokens), never WHAT she says, and it is GRADED
+    across the whole 0..1 range so ordinary affect is felt — not just extremes
+    (the old version used 0.6+ thresholds, so normal-range affect did nothing,
+    and the temperature delta was computed-then-discarded by the caller).
 
-    Heuristics (intentionally simple, easy to tune):
-
-      - High `caution` trait (≥0.7) AND high `logic_priority` trait
-        (≥0.7) → escalate_to_prime. The pairing says "this is a
-        careful, reasoning-heavy moment" — exactly Prime's job.
-      - High `feels=irritation` (≥0.6) → cap temperature (delta -0.2),
-        style_hint='measured'. Don't let a bad mood improvise.
-      - High `feels=curiosity` OR `feels=excited` (≥0.6) → expand
-        max_tokens (×1.3), style_hint='exploratory'.
-      - High `curious_about=<anything>` (≥0.7) → small max_tokens
-        bump (×1.15). She wants to chase a topic — give her room.
-      - High `feels=fatigue` (≥0.6) → contract max_tokens (×0.8),
-        style_hint='terse'.
-
-    Returns a dict copy of _DEFAULT_MOD with adjustments applied. Caller
-    is expected to interpret the hints; this module does not directly
-    touch the sampler.
+    Each drive contributes proportionally to its intensity:
+      explore (curiosity/excited/eager + curious_about) -> warmer + roomier
+      worn    (fatigue / tired_of)                       -> cooler + terser
+      edge    (irritation / frustration)                 -> measured (cooler, clipped)
+      restless                                           -> a touch warmer, clipped
+      settled (contentment / calm)                       -> slightly cooler, even
+      coherence-tension (Samvega drive)                  -> careful (cooler)
+      caution & logic_priority traits (>=0.7)            -> escalate_to_prime
+    Deltas are bounded at the call site (apply_affect_modulation).
     """
     if snapshot is None:
         snapshot = current_affect_snapshot()
 
     mod = dict(_DEFAULT_MOD)
-    mod["reasons"] = []  # fresh list
+    mod["reasons"] = []
+    feels = snapshot.get("feels", {}) or {}
+    drives = snapshot.get("drives", {}) or {}
+    curious = snapshot.get("curious_about", {}) or {}
+    tired = snapshot.get("tired_of", {}) or {}
+    traits = snapshot.get("traits", {}) or {}
 
-    traits = snapshot.get("traits", {})
-    feels = snapshot.get("feels", {})
-    curious = snapshot.get("curious_about", {})
+    def _f(*keys):
+        return max((float(feels.get(k, 0.0)) for k in keys), default=0.0)
 
-    caution = traits.get("caution", 0.0)
-    logic = traits.get("logic_priority", 0.0)
-    if caution >= 0.7 and logic >= 0.7:
+    td, tm = 0.0, 1.0
+    note = mod["reasons"].append
+
+    explore = max(_f("curiosity", "curious", "excited", "excitement", "eager", "eagerness"),
+                  0.8 * max(curious.values(), default=0.0))
+    if explore > 0.1:
+        td += 0.25 * explore
+        tm *= 1.0 + 0.35 * explore
+        note(f"explore={explore:.2f} -> warmer/roomier")
+
+    worn = max(_f("fatigue", "tired"), max(tired.values(), default=0.0))
+    if worn > 0.1:
+        td -= 0.15 * worn
+        tm *= 1.0 - 0.30 * worn
+        note(f"worn={worn:.2f} -> cooler/terser")
+
+    edge = _f("irritation", "irritated", "frustration", "frustrated")
+    if edge > 0.1:
+        td -= 0.22 * edge
+        tm *= 1.0 - 0.15 * edge
+        note(f"edge={edge:.2f} -> measured")
+
+    restless = _f("restlessness", "restless")
+    if restless > 0.1:
+        td += 0.10 * restless
+        tm *= 1.0 - 0.10 * restless
+        note(f"restless={restless:.2f} -> quicker")
+
+    settled = _f("contentment", "content", "calm")
+    if settled > 0.1:
+        td -= 0.08 * settled
+        note(f"settled={settled:.2f} -> even")
+
+    coherence = float(drives.get("coherence", 0.0))
+    if coherence > 0.3:
+        td -= 0.12 * coherence
+        note(f"coherence_tension={coherence:.2f} -> careful")
+
+    if float(traits.get("caution", 0.0)) >= 0.7 and float(traits.get("logic_priority", 0.0)) >= 0.7:
         mod["escalate_to_prime"] = True
-        mod["reasons"].append(
-            f"caution={caution:.2f} & logic_priority={logic:.2f} → escalate"
-        )
+        note("caution & logic_priority -> escalate")
 
-    irritation = feels.get("irritation", 0.0)
-    if irritation >= 0.6:
-        mod["temperature_delta"] -= 0.2
-        mod["style_hint"] = "measured"
-        mod["reasons"].append(f"feels.irritation={irritation:.2f} → cap temperature")
-
-    excitement = max(feels.get("curiosity", 0.0), feels.get("excited", 0.0))
-    if excitement >= 0.6 and not mod["style_hint"]:
-        mod["max_tokens_multiplier"] *= 1.3
+    mod["temperature_delta"] = round(td, 3)
+    mod["max_tokens_multiplier"] = round(tm, 3)
+    # Derived audit label (not load-bearing): the net felt direction.
+    if tm <= 0.85 or td <= -0.15:
+        mod["style_hint"] = "terse" if tm <= 0.85 else "measured"
+    elif td >= 0.12 or tm >= 1.12:
         mod["style_hint"] = "exploratory"
-        mod["reasons"].append(
-            f"feels.curiosity/excited={excitement:.2f} → exploratory"
-        )
-
-    top_curious = max(curious.values(), default=0.0)
-    if top_curious >= 0.7:
-        mod["max_tokens_multiplier"] *= 1.15
-        mod["reasons"].append(
-            f"curious_about.max={top_curious:.2f} → +15% max_tokens"
-        )
-
-    fatigue = feels.get("fatigue", 0.0)
-    if fatigue >= 0.6:
-        mod["max_tokens_multiplier"] *= 0.8
-        # Fatigue overrides earlier style hint — terseness wins.
-        mod["style_hint"] = "terse"
-        mod["reasons"].append(f"feels.fatigue={fatigue:.2f} → terse")
-
     return mod
 
 

@@ -3287,6 +3287,22 @@ class AgentCore:
                 # Recitation: temperature=0.0 for faithful reproduction from RAG
                 _temperature = 0.0 if _plan_intent == "recitation" else self.config.temperature
 
+                # Autonomic affect capacity (3rr): affect shapes HOW she generates
+                # — warmer/roomier when eager/curious, cooler/terser when worn or
+                # edgy — never WHAT she says. Graded; bounded in apply_affect_modulation.
+                # Skipped for recitation (faithful RAG reproduction must stay at temp 0).
+                if _plan_intent != "recitation":
+                    try:
+                        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+                        _temperature, _effective_max_tokens, _aff_dbg = apply_affect_modulation(
+                            base_temperature=_temperature, base_max_tokens=_effective_max_tokens)
+                        if _aff_dbg.get("reasons"):
+                            self.logger.info("Affect capacity: temp→%.2f tokens→%d (%s)",
+                                             _temperature, _effective_max_tokens,
+                                             "; ".join(_aff_dbg["reasons"]))
+                    except Exception:
+                        self.logger.debug("affect capacity modulation skipped", exc_info=True)
+
                 plan_res = self.model_pool.forward_to_model(
                     selected_model_name,
                     messages=plan_messages,
