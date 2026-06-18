@@ -2862,6 +2862,17 @@ def poll_cycle():
                     _alarmed_services.discard(name)
             _service_state[name]["healthy"] = True
         else:
+            # Startup grace: on doctor boot (and full-system boot) services are
+            # still warming up — loading models, opening ports. Don't count
+            # failures or remediate for the first N seconds, or the doctor
+            # "freaks out" and restart-loops healthy-but-slow-starting services.
+            _STARTUP_GRACE_SECONDS = int(os.environ.get("DOCTOR_STARTUP_GRACE", "120"))
+            _since_boot = time.monotonic() - _start_time
+            if _since_boot < _STARTUP_GRACE_SECONDS:
+                log.info("%s unhealthy but within doctor startup grace (%.0fs/%ds) — skipping",
+                         name, _since_boot, _STARTUP_GRACE_SECONDS)
+                continue
+
             # Grace period: after a remediation restart, services need time
             # to load models before they're fully healthy.  Suppress failure
             # counting for 90s after the most recent restart to avoid a
@@ -2878,8 +2889,20 @@ def poll_cycle():
             failures = _consecutive_failures[name]
 
             if failures >= FAILURE_THRESHOLD:
+                # Second opinion: one fresh confirmation poll before pulling the
+                # trigger. The service may have recovered since the last cycle (a
+                # transient blip across check intervals, a GC pause, a load spike).
+                # Don't remediate a state that has already healed.
+                if check_health(name, url):
+                    log.info("%s recovered on confirmation re-check (was %d failures) — standing down",
+                             name, failures)
+                    _consecutive_failures[name] = 0
+                    _service_state[name]["healthy"] = True
+                    _alarmed_services.discard(name)
+                    continue
+
                 if _service_state[name]["healthy"] is not False:
-                    log.warning("%s is DOWN (%d consecutive failures)", name, failures)
+                    log.warning("%s is DOWN (%d consecutive failures, confirmed by re-check)", name, failures)
                     # Break serenity for vital services going down (not during meditation)
                     if not _is_meditation_active() and name in ("gaia-core", "gaia-web", "gaia-mcp", "gaia-nano", "gaia-orchestrator"):
                         _notify_monkey_break_serenity(f"Vital service {name} went DOWN")
