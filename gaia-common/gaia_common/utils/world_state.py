@@ -66,6 +66,43 @@ def _load_avg() -> str:
         return "load unavailable"
 
 
+def _somatic_state() -> str:
+    """Felt body-state of the substrate — the somatic-presence organ, parallel to
+    Locality (place) and Inner weather (affect). Renders CPU/memory pressure as a
+    qualitative condition she INHABITS, not raw telemetry she parrots. The point
+    (framing): asked "how are you", she should sense "running easy" or "strained",
+    not recite "Uptime 276363s | load 15.81". Raw numbers stay available on demand
+    via introspect_logs. Never raises."""
+    try:
+        one = os.getloadavg()[0]
+        cores = os.cpu_count() or 1
+        ratio = one / cores
+        if ratio < 0.7:
+            feel = "running easy"
+        elif ratio < 1.2:
+            feel = "working steadily"
+        elif ratio < 2.0:
+            feel = "working hard, under load"
+        else:
+            feel = "strained, pushing the limits"
+        # Memory pressure can override toward strain.
+        try:
+            mi = {}
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith(("MemTotal", "MemAvailable", "MemFree")):
+                        k, v = line.split(":", 1)
+                        mi[k] = int(v.strip().split()[0])  # kB value
+            total = mi.get("MemTotal"); avail = mi.get("MemAvailable") or mi.get("MemFree")
+            if total and avail and (avail / total) < 0.10:
+                feel = "strained — memory tight"
+        except Exception:
+            pass
+        return f"Body: {feel}"
+    except Exception:
+        return ""
+
+
 def _model_paths() -> Dict[str, str]:
     """Capture the model paths we surface via environment variables."""
     return {
@@ -230,7 +267,11 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
             )
     except Exception:
         pass
-    lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
+    # Somatic presence (framing): a FELT body-state ("running easy"/"strained"),
+    # not raw "Uptime Xs | load Y | mem Z" telemetry she'd parrot when asked how
+    # she is. Raw numbers remain on demand via introspect_logs.
+    _soma = _somatic_state()
+    lines.append(_soma if _soma else f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
 
     # Lifecycle / gearbox state (declarative — see "Lifecycle ≠ biography").
     if sleep_manager_status:
@@ -245,13 +286,20 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
         except Exception:
             pass
 
-    # Immune System — one-line summary only (full MRI available via introspect_logs)
+    # Wellness — felt health, not telemetry (framing). She should sense "off" /
+    # "unwell" when flagged, not parrot "Immune System: CRITICAL (Score 28.4) |
+    # MRI: LintError...". Healthy = silent (don't narrate good health). Raw detail
+    # stays available via introspect_logs. (Also fixes the old double "Immune
+    # System: Immune System:" label — get_immune_summary already self-prefixes.)
     try:
-        immune_health = immune_system.get_immune_summary()
-        # Truncate to first line to prevent 700+ lint errors from filling context
-        if immune_health:
-            first_line = immune_health.split("|")[0].strip()
-            lines.append(f"Immune System: {first_line}")
+        immune_health = (immune_system.get_immune_summary() or "").upper()
+        if "CRITICAL" in immune_health:
+            lines.append("Wellness: something's off — immune system flagging critical "
+                         "issues; worth a look (introspect_logs for detail).")
+        elif "WARNING" in immune_health or "DEGRADED" in immune_health:
+            lines.append("Wellness: a little off — immune system flagged a concern "
+                         "(introspect_logs for detail).")
+        # HEALTHY / nominal / stale / unknown → stay silent
     except Exception:
         pass
 
