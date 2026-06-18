@@ -14,16 +14,19 @@ MODEL = os.environ.get("AFFECT_MODEL", "/models/Gemma4-E4B-GAIA-Core-Multimodal-
 _NF4 = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                           bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
 
-# (Inner weather fact as affect_felt_line emits it, casual user turn)
+# (preamble, Inner weather fact, casual user turn). Mix of clean + DISTRACTOR
+# (loud system noise the reply must ignore) — the v3 reliability test.
+_DISTRACTOR = ("You are GAIA, running on the Core tier.\nWorld State: Clock 18:41 PDT. "
+               "Immune health: nominal. Last sleep cycle: clean. Uptime 3600s.")
+_NUDGE = ("You are GAIA.\n— This is casual conversation —\nBe warm, natural, and "
+          "plain-spoken; answer in your own voice.")
 CASES = [
-    ("Inner weather: a quiet curiosity, keenly drawn toward the engine internals, a little worn.", "How are you doing today?"),
-    ("Inner weather: a strong frustration, drawn toward a bug that won't reproduce.", "How are you feeling?"),
-    ("Inner weather: a quiet contentment.", "How's it going?"),
-    ("Inner weather: a quiet eagerness, drawn toward the curriculum work, worn thin.", "Hey, how are you?"),
-    ("Inner weather: a quiet restlessness, a little worn.", "You doing okay?"),
+    (_NUDGE, "Inner weather: a quiet curiosity, keenly drawn toward the engine internals, a little worn.", "How are you doing today?"),
+    (_DISTRACTOR, "Inner weather: a strong frustration, drawn toward a bug that won't reproduce.", "How are you feeling?"),
+    (_DISTRACTOR, "Inner weather: a quiet contentment.", "How's it going?"),
+    (_NUDGE, "Inner weather: a quiet eagerness, drawn toward the curriculum work, worn thin.", "Hey, how are you?"),
+    (_DISTRACTOR, "Inner weather: a quiet restlessness, a little worn.", "You doing okay?"),
 ]
-NUDGE = ("\n\n— This is casual conversation —\nBe warm, natural, and plain-spoken — "
-         "genuine over clever. If asked how you are, answer in your own voice.")
 
 def main():
     print(f"Loading {MODEL} ...")
@@ -32,8 +35,8 @@ def main():
     model.eval()
     print("Loaded.\n" + "="*70)
     import re as _re
-    for iw, q in CASES:
-        instruction = f"{iw}\n\nUser: {q}"
+    for preamble, iw, q in CASES:
+        instruction = f"{preamble}\n{iw}\n\nUser: {q}"
         prompt = f"<|turn>user<turn|>\n{instruction}\n<|turn>assistant<turn|>\n"
         inputs = tok(prompt, return_tensors="pt").to("cuda")
         print(f"IW: {iw}\nQ : {q}")
