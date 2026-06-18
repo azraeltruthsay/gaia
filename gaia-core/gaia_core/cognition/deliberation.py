@@ -554,6 +554,18 @@ def run_deliberated_turn(
     adapter_name = None if _is_prime_tier else cfg.get("adapter_name", "core_deliberation_v1")
     max_tokens = int(cfg.get("max_tokens", 900))
     temperature = float(cfg.get("temperature", 0.55))
+    # Autonomic affect capacity (3rr): affect shapes HOW the deliberated response
+    # is generated — warmer/roomier when eager/curious, cooler/terser when worn or
+    # edgy — never WHAT she says. This is the primary user-response path (the
+    # plan_res fallback in agent_core is wired separately). Fallback-safe.
+    try:
+        from gaia_core.cognition.affect_runtime import apply_affect_modulation
+        temperature, max_tokens, _aff_dbg = apply_affect_modulation(temperature, max_tokens)
+        if _aff_dbg.get("reasons"):
+            logger.info("Affect capacity (deliberation): temp→%.2f tokens→%d (%s)",
+                        temperature, max_tokens, "; ".join(_aff_dbg["reasons"]))
+    except Exception:
+        logger.debug("affect capacity modulation skipped", exc_info=True)
     retry_strategy = (cfg.get("retry_on_confabulation") or "warn").lower()
     warning_prefix = cfg.get(
         "low_confidence_prefix",
