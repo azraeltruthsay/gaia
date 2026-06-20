@@ -84,12 +84,19 @@ class EventBuffer:
         events = self._read_all()
         return list(reversed(events[-n:]))
 
-    # Event types to suppress in prompt-bound output. These are internal
-    # routing/debug events that leak GAIA terminology into the LLM's
-    # context and cause identity confabulation (e.g., "Model: core
-    # (OPERATOR)" gets parroted back as the model's self-description —
-    # see GAIA_Project-ar2).
-    _PROMPT_SUPPRESSED_EVENT_TYPES = frozenset({"routing"})
+    # Event types to suppress in prompt-bound output. Two reasons:
+    #  - routing: leaks GAIA terminology ("Model: core (OPERATOR)") that the LLM
+    #    parrots as its self-description (GAIA_Project-ar2).
+    #  - lifecycle / system: autonomic GPU power-management churn ("FOCUSING →
+    #    PARKED (standby_idle, 6s)", "Idle 30min — entering standby"). These are
+    #    her *heartbeat*, not episodic experiences — surfacing them makes her
+    #    narrate substrate as biography ("I was asleep, I just woke up") and
+    #    project it onto the user (framing). The PRESENT gear is already shown
+    #    declaratively as the world-state "Lifecycle:" line; the transition
+    #    HISTORY is noise. Real episodic memory (conversation, voice, training,
+    #    alert, penpal) is kept. Introspection tools pass suppress_internal=False
+    #    to see the full stream.
+    _PROMPT_SUPPRESSED_EVENT_TYPES = frozenset({"routing", "lifecycle", "system"})
 
     def recent_formatted(self, n: int = 8, suppress_internal: bool = True) -> str:
         """Return last N events as formatted text for prompt injection.

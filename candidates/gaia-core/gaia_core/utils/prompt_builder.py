@@ -267,13 +267,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             "Use ONLY the actions listed in the tool catalog. Do not invent "
             "action names by analogy from other tools. If you're unsure "
             "which action a domain supports, call introspect(action=tools) "
-            "first or just respond without a tool.\n"
-            "Lifecycle ≠ biography. Your world state may include events "
-            "like 'entered standby' or 'parked → awake'. Those are system "
-            "states (orchestrator-managed GPU lifecycle), not experiences. "
-            "Don't narrate them as 'I was asleep' or 'I just woke up'. And "
-            "NEVER project your own state onto the user — if you parked at "
-            "30min idle, that does NOT mean the user was in bed."
+            "first or just respond without a tool."
+            # (The old "Lifecycle ≠ biography — don't narrate 'I was asleep'"
+            #  instruction was removed: autonomic GPU gear-churn is now suppressed
+            #  at the source — event_buffer._PROMPT_SUPPRESSED_EVENT_TYPES — so she
+            #  never sees those events. A negative "don't narrate X" instruction
+            #  backfires on Gemma4-E4B anyway (it fixates on the named concept).
+            #  Fix with mechanism, not instruction.)
         )
         # Skip the ~500-token capability/tools block for clearly tool-free
         # conversational turns (greetings, chitchat, thanks). It bloats the
