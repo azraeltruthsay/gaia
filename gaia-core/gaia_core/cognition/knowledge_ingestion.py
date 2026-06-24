@@ -395,62 +395,103 @@ def run_auto_detect(
 # LLM-Driven Domain Classification (Nano model)
 # ---------------------------------------------------------------------------
 
-def classify_domain_llm(text_snippet: str, available_kbs: list) -> str:
-    """
-    Use the Nano model to classify which knowledge domain a text snippet belongs to.
+# Short descriptive enrichments for known domains — the bare KB key ("system")
+# embeds poorly, so we give the label a few words of meaning. Unknown KBs fall
+# back to the humanized key (underscores → spaces). Extend as KBs are added.
+_DOMAIN_DESCRIPTIONS = {
+    "dnd_campaign": "tabletop Dungeons & Dragons campaign — characters, lore, quests, sessions",
+    "system": "GAIA system internals — services, architecture, configuration, operations",
+    "blueprints": "design blueprints and architecture plans for the cognitive system",
+    "code": "source code, functions, APIs, programming, implementation",
+    "general": "general knowledge that fits no specialized domain",
+}
 
-    Falls back to 'general' on any failure.
-    """
+
+def classify_domain(text_snippet: str, available_kbs: list) -> str:
+    """Classify which knowledge domain a text snippet belongs to via EMBEDDING
+    nearest-neighbour — no LLM (86x: domain-from-fixed-label-set is structurally
+    decidable). Encodes the snippet and each candidate domain (enriched with a
+    short description), picks the highest cosine; below threshold → 'general'.
+    Deterministic, cheap, reuses the shared CPU embed model (no GPU/model load).
+    Degrades to a keyword heuristic, then 'general', if embeddings are unavailable."""
     if not available_kbs:
         available_kbs = ["dnd_campaign", "system", "blueprints", "general"]
-
-    # Ensure 'general' is always an option
     if "general" not in available_kbs:
         available_kbs = available_kbs + ["general"]
 
-    kb_list = ", ".join(available_kbs)
-    prompt_text = (
-        f"Given this text excerpt, which knowledge domain does it belong to?\n"
-        f"Available domains: {kb_list}\n"
-        f"Text: {text_snippet[:1000]}\n"
-        f"Reply with ONLY the domain name, nothing else."
-    )
+    snippet = (text_snippet or "").strip()
+    if not snippet:
+        return "general"
 
     try:
-        from gaia_core.models._model_pool_impl import ModelPool
-        from gaia_core.config import get_config
-        config = get_config()
+        from gaia_core.memory.session_history_indexer import _get_embed_model, _cosine_similarity
+        import numpy as np
 
-        nano_key = "nano"
-        if nano_key not in config.MODEL_CONFIGS:
-            logger.warning("No Nano model configured — falling back to keyword classification")
-            return "general"
+        embed_model = _get_embed_model()
+        if embed_model is None:
+            return _classify_domain_keyword(snippet, available_kbs)
 
-        pool = ModelPool(config)
-        pool.ensure_model_loaded(nano_key)
-        nano = pool.get(nano_key)
-        if not nano:
-            return "general"
-
-        messages = [
-            {"role": "system", "content": "You are a document classifier. Respond with exactly one domain name."},
-            {"role": "user", "content": prompt_text},
+        # Domain texts: enriched description when known, else the humanized key.
+        domain_texts = [
+            _DOMAIN_DESCRIPTIONS.get(kb, kb.replace("_", " ")) for kb in available_kbs
         ]
-        res = nano.create_chat_completion(messages=messages, max_tokens=16, temperature=0.1)
-        response = res["choices"][0]["message"]["content"].strip().lower()
+        vecs = embed_model.encode(
+            [snippet[:1000]] + domain_texts,
+            show_progress_bar=False, normalize_embeddings=True,
+        )
+        vecs = np.asarray(vecs, dtype=np.float32)
+        q, domain_vecs = vecs[0], vecs[1:]
 
-        # Validate response against available KBs
-        for kb in available_kbs:
-            if kb in response:
-                logger.info("Nano domain classification: '%s' → %s", text_snippet[:50], kb)
-                return kb
+        best_kb, best_sim = "general", -1.0
+        for kb, dv in zip(available_kbs, domain_vecs):
+            sim = _cosine_similarity(q, dv)
+            if sim > best_sim:
+                best_kb, best_sim = kb, sim
 
-        logger.info("Nano response '%s' didn't match any KB — using 'general'", response)
-        return "general"
+        # Confidence floor: a weak best match means no domain really fits → general.
+        _DOMAIN_SIM_FLOOR = 0.25
+        if best_sim < _DOMAIN_SIM_FLOOR:
+            logger.info("Domain classify: best '%s' sim %.2f < floor — using 'general' for '%s'",
+                        best_kb, best_sim, snippet[:50])
+            return "general"
+        logger.info("Domain classify (embed): '%s' → %s (sim %.2f)", snippet[:50], best_kb, best_sim)
+        return best_kb
 
     except Exception as e:
-        logger.warning("Nano domain classification failed: %s — using 'general'", e)
-        return "general"
+        logger.warning("Embedding domain classification failed: %s — keyword fallback", e)
+        return _classify_domain_keyword(snippet, available_kbs)
+
+
+# High-signal surface keywords per domain, for the embeddings-down fallback only.
+# (The embed path handles semantics; this just needs to be reasonable when
+# embeddings are unavailable.) The description words are folded in as well.
+_DOMAIN_KEYWORDS = {
+    "dnd_campaign": ["party", "dragon", "rogue", "initiative", "campaign", "dungeon",
+                     "spell", "quest", "character", "session", "lore", "dice", "dnd"],
+    "system": ["service", "orchestrator", "container", "config", "restart", "docker",
+               "health", "gpu", "engine", "architecture", "deploy", "endpoint"],
+    "blueprints": ["blueprint", "design", "plan", "architecture", "diagram", "spec"],
+    "code": ["function", "class", "api", "import", "def ", "return", "code", "module"],
+}
+
+
+def _classify_domain_keyword(snippet: str, available_kbs: list) -> str:
+    """Last-resort keyword heuristic when embeddings are unavailable. Scores the
+    snippet against per-domain keyword banks (+ description words)."""
+    low = snippet.lower()
+    best_kb, best_hits = "general", 0
+    for kb in available_kbs:
+        terms = set(_DOMAIN_KEYWORDS.get(kb, []))
+        terms |= {t for t in _DOMAIN_DESCRIPTIONS.get(kb, kb).replace("_", " ").lower().split()
+                  if len(t) >= 4}
+        hits = sum(1 for t in terms if t in low)
+        if hits > best_hits:
+            best_kb, best_hits = kb, hits
+    return best_kb
+
+
+# Backwards-compat alias (the function is no longer LLM-based; 86x).
+classify_domain_llm = classify_domain
 
 
 def run_attachment_ingestion(
@@ -474,7 +515,7 @@ def run_attachment_ingestion(
     available_kbs = get_available_knowledge_bases()
 
     # Step 1: LLM domain classification
-    kb_name = classify_domain_llm(text_content, available_kbs)
+    kb_name = classify_domain(text_content, available_kbs)
 
     # Step 2: User hint override (e.g., "save this D&D stuff")
     if user_hint:
