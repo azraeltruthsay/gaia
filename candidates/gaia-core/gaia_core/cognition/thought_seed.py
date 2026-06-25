@@ -127,57 +127,6 @@ def update_seed(seed_id: str, seed_data: Dict[str, Any]) -> bool:
         return False
 
 
-def review_and_process_seeds(config=None, llm=None, auto_act=False):  # <--- llm parameter added
-    """
-    Load unreviewed seeds, use model to decide whether to act, then process as appropriate.
-    """
-    # Local import to break circular dependency
-
-    if config is None:
-        config = Config()
-
-    # Ensure LLM is available. If not passed, try to get from config's model_pool.
-    if llm is None:
-        if hasattr(config, 'model_pool') and config.model_pool is not None:
-            llm = config.model_pool.get_model_for_role("prime")
-        else:
-            logger.error("❌ No LLM provided and model_pool not available in config for seed review.")
-            return False  # Indicate failure
-
-    seeds = list_unreviewed_seeds()
-    for f, data in seeds:
-        review_prompt = (
-            f"Here is a thought seed generated earlier:\nSeed: {data['seed']}\n"
-            f"Context: {data['context']}\nShould GAIA act on this seed now? Answer yes or no, and explain."
-        )
-        try:
-            messages = [
-                {"role": "system", "content": "You are a decision-making assistant. Answer with 'yes' or 'no' and a brief explanation."},
-                {"role": "user", "content": review_prompt},
-            ]
-            result = llm.create_chat_completion(
-                messages=messages,
-                temperature=0.3,
-                top_p=0.7,
-                max_tokens=256,
-                stream=False
-            )
-            decision = result["choices"][0]["message"]["content"].strip()
-            should_act = "yes" in decision.lower()
-            data["reviewed"] = True
-            data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
-            data["review_decision"] = decision
-            if should_act and auto_act:
-                action_result = "Not implemented yet"
-                data["action_taken"] = True
-                data["action_result"] = action_result
-            if update_seed(f.name, data):
-                logger.info(f"Thought seed reviewed: {f.name} — Decision: {decision}")
-        except Exception as e:
-            logger.error(f"❌ Error reviewing thought seed {f.name}: {e}", exc_info=True)
-    return True
-
-
 def refine_seed(seed_id, refinement_prompt, config=None, llm=None):
     """Refines an existing thought seed."""
     seed_data = get_seed_by_id(seed_id)
@@ -227,15 +176,6 @@ def link_seeds(source_seed_id, target_seed_id, relationship):
 
     source_seed["links"].append({"target": target_seed_id, "relationship": relationship})
     return update_seed(source_seed_id, source_seed)
-
-
-def maybe_review_seeds(config, llm=None):  # <--- llm parameter added
-    """
-    Decides (based on config/heuristics) whether to review/process seeds now.
-    """
-    # Add conditions as needed—by default, always review for demonstration.
-    review_and_process_seeds(config=config, llm=llm, auto_act=False)  # <--- Pass llm here
-    # Set auto_act=True if you want seeds to trigger actions directly.
 
 
 # ── Heartbeat directory operations ──────────────────────────────────────

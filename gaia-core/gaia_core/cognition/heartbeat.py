@@ -15,6 +15,7 @@ keeping sleep focused on pure memory maintenance.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -25,6 +26,10 @@ logger = logging.getLogger("GAIA.Heartbeat")
 
 # Session ID for heartbeat-initiated turns (stays internal)
 HEARTBEAT_SESSION_ID = "gaia_heartbeat_session"
+
+# Deterministic triage fast-path thresholds (86x audit #2). Configurable.
+_TRIAGE_MIN_SEED_CHARS = int(os.environ.get("TRIAGE_MIN_SEED_CHARS", "12"))
+_TRIAGE_STALE_DAYS = float(os.environ.get("TRIAGE_STALE_DAYS", "14"))
 
 # Triage system prompt for Lite
 _TRIAGE_SYSTEM_PROMPT = """\
@@ -358,13 +363,34 @@ class ThoughtSeedHeartbeat:
         if seed_type == "knowledge_gap":
             return ("act", "Knowledge gap — auto-routing to research")
 
+        # Deterministic fast-paths (86x audit #2): resolve the clearly-decidable
+        # seeds with a RULE so the LLM only handles the ambiguous middle. Cheaper,
+        # and it drains seeds the LLM would otherwise perpetually defer.
+        seed_text = (seed_data.get("seed", "") or "").strip()
+
+        # 1. Empty / trivial seed — nothing to act on; archive without an LLM call.
+        if len(seed_text) < _TRIAGE_MIN_SEED_CHARS:
+            return ("archive", f"Empty/trivial seed ({len(seed_text)} chars) — auto-archive")
+
+        # 2. Stale seed — created beyond the staleness horizon and never acted on;
+        #    archive without an LLM call (complements the count-based backlog cap
+        #    with an age-based drain). Generous default; configurable.
+        try:
+            created = seed_data.get("created")
+            if created:
+                age_days = (datetime.now(timezone.utc)
+                            - datetime.fromisoformat(created)).total_seconds() / 86400.0
+                if age_days > _TRIAGE_STALE_DAYS:
+                    return ("archive", f"Stale seed ({age_days:.0f}d > {_TRIAGE_STALE_DAYS}d) — auto-archive")
+        except Exception:
+            pass  # unparseable timestamp → fall through to LLM triage
+
         defer_count = seed_data.get("defer_count", 0)
         force_binary = defer_count >= 2
 
         system_prompt = _TRIAGE_BINARY_SYSTEM_PROMPT if force_binary else _TRIAGE_SYSTEM_PROMPT
 
-        seed_text = seed_data.get("seed", "")
-        context = seed_data.get("context", {})
+        context = seed_data.get("context", {})  # seed_text set above (stripped)
         user_prompt = (
             f"Thought seed: {seed_text}\n"
             f"Original context: {context}\n"

@@ -181,7 +181,7 @@ class TestTriageSeed:
         hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
         llm = _mock_llm("ARCHIVE\nThis seed is too vague to act on.")
 
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}})
 
         assert decision == "archive"
         assert "vague" in reason
@@ -192,7 +192,7 @@ class TestTriageSeed:
         hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
         llm = _mock_llm("PENDING\nRevisit after the refactoring is done.")
 
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}})
 
         assert decision == "pending"
 
@@ -202,7 +202,7 @@ class TestTriageSeed:
         hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
         llm = _mock_llm("ACT\nThis is immediately actionable.")
 
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}})
 
         assert decision == "act"
 
@@ -212,9 +212,69 @@ class TestTriageSeed:
         hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
         llm = _mock_llm("I'm not sure what to do with this seed.")
 
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}})
 
         assert decision == "pending"
+
+    # ── Deterministic fast-paths (86x audit #2): resolve clearly-decidable seeds
+    #    with a RULE, never calling the LLM. ──────────────────────────────────
+
+    def test_empty_seed_archives_without_llm(self):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("ACT\nshould not be reached")
+        decision, reason = hb._triage_seed(llm, {"seed": "   ", "context": {}})
+        assert decision == "archive"
+        assert "trivial" in reason.lower()
+        llm.create_chat_completion.assert_not_called()  # no LLM call
+
+    def test_trivial_short_seed_archives_without_llm(self):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("ACT\nshould not be reached")
+        decision, _ = hb._triage_seed(llm, {"seed": "hi", "context": {}})
+        assert decision == "archive"
+        llm.create_chat_completion.assert_not_called()
+
+    def test_stale_seed_archives_without_llm(self):
+        from datetime import datetime, timezone, timedelta
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("ACT\nshould not be reached")
+        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        decision, reason = hb._triage_seed(
+            llm, {"seed": "Investigate the caching layer refactor", "context": {}, "created": old})
+        assert decision == "archive"
+        assert "stale" in reason.lower()
+        llm.create_chat_completion.assert_not_called()
+
+    def test_fresh_realistic_seed_reaches_llm(self):
+        from datetime import datetime, timezone
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("ACT\nThis is actionable.")
+        now = datetime.now(timezone.utc).isoformat()
+        decision, _ = hb._triage_seed(
+            llm, {"seed": "Investigate the caching layer refactor", "context": {}, "created": now})
+        assert decision == "act"
+        llm.create_chat_completion.assert_called_once()  # fast-paths did NOT intercept
+
+    def test_knowledge_gap_acts_without_llm(self):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("ARCHIVE\nshould not be reached")
+        decision, _ = hb._triage_seed(llm, {"seed": "x", "context": {}, "seed_type": "knowledge_gap"})
+        assert decision == "act"
+        llm.create_chat_completion.assert_not_called()
+
+    def test_unparseable_created_falls_through_to_llm(self):
+        from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
+        hb = ThoughtSeedHeartbeat.__new__(ThoughtSeedHeartbeat)
+        llm = _mock_llm("PENDING\nNeeds detail.")
+        decision, _ = hb._triage_seed(
+            llm, {"seed": "Investigate the caching layer refactor", "context": {}, "created": "not-a-date"})
+        assert decision == "pending"
+        llm.create_chat_completion.assert_called_once()  # bad ts → safe fall-through
 
     def test_llm_failure_defaults_to_pending(self):
         from gaia_core.cognition.heartbeat import ThoughtSeedHeartbeat
@@ -223,7 +283,7 @@ class TestTriageSeed:
         llm = MagicMock()
         llm.create_chat_completion.side_effect = RuntimeError("model crashed")
 
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}})
 
         assert decision == "pending"
 
@@ -608,16 +668,16 @@ class TestTriageEnhancements:
 
         # When defer_count is less than 2, LLM triage proceeds normally with system prompt
         llm = _mock_llm("PENDING\nNeeds more detail.")
-        decision, reason = hb._triage_seed(llm, {"seed": "test", "context": {}, "defer_count": 1})
+        decision, reason = hb._triage_seed(llm, {"seed": "Investigate the caching layer refactor", "context": {}, "defer_count": 1})
         assert decision == "pending"
 
         # When defer_count is >= 2, LLM triage forces binary choice. If LLM outputs PENDING, it forces archive
         llm_pending = _mock_llm("PENDING\nStill needs more detail.")
-        decision, reason = hb._triage_seed(llm_pending, {"seed": "test", "context": {}, "defer_count": 2})
+        decision, reason = hb._triage_seed(llm_pending, {"seed": "Investigate the caching layer refactor", "context": {}, "defer_count": 2})
         assert decision == "archive"
         assert "Forced archive due to deferral threshold" in reason
 
         # When defer_count >= 2, if LLM outputs ACT, it is respected
         llm_act = _mock_llm("ACT\nActionable now.")
-        decision, reason = hb._triage_seed(llm_act, {"seed": "test", "context": {}, "defer_count": 2})
+        decision, reason = hb._triage_seed(llm_act, {"seed": "Investigate the caching layer refactor", "context": {}, "defer_count": 2})
         assert decision == "act"
