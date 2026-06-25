@@ -304,10 +304,19 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # The full anchor ("monitor your Immune System, errors are 'irritation',
             # triage them, manage your milestone registries") HIJACKS small talk —
             # Gemma4-E4B obeys it and monologues system state ("running clean, no
-            # errors, that's the register") instead of just chatting. Identity
-            # (_arch_fact) is preserved; the Inner weather felt-fact + this nudge
-            # then carry the turn. (A4 follow-up to the felt-affect work.)
-            persona_anchor = _CASUAL_PERSONA_ANCHOR + _arch_fact
+            # errors, that's the register") instead of just chatting.
+            #
+            # arch_fact is ALSO dropped on casual turns (7n3): the model-spec
+            # recital ("you are running on the Core tier — Google's Gemma 4 E4B...")
+            # is the dominant substrate she narrates on "how are you" ("I run on
+            # the Core tier — Gemma 4 E4B" instead of voicing her felt state).
+            # Identity is safe without it — Core V3 has GAIA identity WEIGHT-BAKED,
+            # and _CASUAL_PERSONA_ANCHOR already says "You are GAIA"; small talk
+            # never asks her base model (that's an identity/architecture intent,
+            # which keeps the full arch_fact). Verified: dropping arch_fact lets
+            # the felt Inner-weather line surface; keeping it makes her recite the
+            # model spec. The Inner weather felt-fact + lean nudge carry the turn.
+            persona_anchor = _CASUAL_PERSONA_ANCHOR
             _social_block = (
                 "\n\n— This is casual conversation —\n"
                 "Be warm, natural, and plain-spoken — genuine over clever. If "
