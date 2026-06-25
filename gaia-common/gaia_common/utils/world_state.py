@@ -292,14 +292,16 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     # stays available via introspect_logs. (Also fixes the old double "Immune
     # System: Immune System:" label — get_immune_summary already self-prefixes.)
     try:
+        # Real immune states (immune_system: score>25 CRITICAL, >8 IRRITATED,
+        # >2 MINOR NOISE, else STABLE). Surface only the ones worth feeling.
         immune_health = (immune_system.get_immune_summary() or "").upper()
         if "CRITICAL" in immune_health:
             lines.append("Wellness: something's off — immune system flagging critical "
                          "issues; worth a look (introspect_logs for detail).")
-        elif "WARNING" in immune_health or "DEGRADED" in immune_health:
+        elif "IRRITATED" in immune_health:
             lines.append("Wellness: a little off — immune system flagged a concern "
                          "(introspect_logs for detail).")
-        # HEALTHY / nominal / stale / unknown → stay silent
+        # MINOR NOISE / STABLE / unknown → stay silent (don't narrate good health)
     except Exception:
         pass
 

@@ -102,15 +102,30 @@ class ImmuneSystem:
             
             # Calculate systemic score
             systemic_score = sum(s["weighted_score"] for s in log_stats.values())
-            # Add scores for diagnostic issues (proactive detection).
-            # Cap MRI contribution at 25.0 to prevent static analysis lint
-            # findings (hundreds of F841 etc.) from drowning out actual
-            # runtime errors. Lint issues are important but not urgent.
-            _mri_score = 0.0
-            _MRI_SCORE_CAP = 25.0
+            # Add scores for diagnostic issues (proactive detection). Lint
+            # (code-quality) is scored SEPARATELY from runtime/structural issues
+            # and capped low (GAIA_Project-t7w): hundreds of F841 etc. previously
+            # summed to the 25.0 MRI cap, which sits right at the IRRITATED→CRITICAL
+            # boundary — so a lint-only system "felt" maximally irritated/unwell
+            # over unused variables (surfaced via the felt Wellness line). Lint is
+            # important but not urgent: cap it inside MINOR NOISE so it can't drive
+            # the wellness state on its own, while genuine runtime/structural MRI
+            # (missing model, syntax error) still reaches IRRITATED/CRITICAL.
+            # Lint cap kept low enough that lint + baseline log noise stays under
+            # the IRRITATED threshold (8) → lint debt reads as MINOR NOISE (silent
+            # wellness), surfaced via introspect_logs rather than felt unwellness.
+            # Genuine runtime/structural MRI is scored separately and CAN irritate.
+            _lint_score = 0.0
+            _runtime_score = 0.0
+            _LINT_SCORE_CAP = 3.0
+            _RUNTIME_MRI_CAP = 25.0
             for issue in diagnostic_issues:
-                _mri_score += self._get_priority(issue) * 3.0
-            systemic_score += min(_mri_score, _MRI_SCORE_CAP)
+                contrib = self._get_priority(issue) * 3.0
+                if re.search(r"LintError", issue, re.IGNORECASE):
+                    _lint_score += contrib
+                else:
+                    _runtime_score += contrib
+            systemic_score += min(_lint_score, _LINT_SCORE_CAP) + min(_runtime_score, _RUNTIME_MRI_CAP)
 
             if total_raw_events == 0 and not diagnostic_issues:
                 summary = "Immune System: STABLE. No active irritants."
