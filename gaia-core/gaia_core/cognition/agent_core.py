@@ -1846,6 +1846,16 @@ class AgentCore:
                 if backend_env == "auto":
                     backend_env = "prime" if not _gpu_sleeping else "core"
                     logger.info("[MODEL_SELECT] GAIA_BACKEND=auto resolved to '%s' (gear-follow)", backend_env)
+                    # Casual/social turns PIN to Core regardless of gear (7n3). A
+                    # "how are you" / greeting is Core's job — it carries the affect
+                    # + framing reforms (felt Inner-weather, lean casual prompt);
+                    # Prime gets the deep-reasoning arch_fact and flatly denies
+                    # feelings. Gear-follow would otherwise send small talk to Prime
+                    # whenever she's FOCUSING. Only override when Core is available.
+                    if backend_env == "prime" and _early_intent in ("chat", "greeting") \
+                            and "core" in self.model_pool.models:
+                        backend_env = "core"
+                        logger.info("[MODEL_SELECT] casual intent '%s' → pinned to Core (overriding gear-follow)", _early_intent)
                 if backend_env:
                     # Skip gpu_prime when GPU is released for sleep
                     if backend_env == "prime" and _gpu_sleeping:
