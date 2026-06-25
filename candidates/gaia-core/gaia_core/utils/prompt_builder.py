@@ -1276,8 +1276,18 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             pass
         return 'system'
 
-    # 5.5. Temporal Context (wake cycle, session info, code evolution)
-    if not compact_mode and not kv_prefix_active:
+    # 5.5. Temporal Context (wake cycle, session info, locality/[Here & Now]).
+    # Gated OFF on casual/social turns: live testing showed Gemma4-E4B narrates
+    # ANY substrate context ("running on the RTX 5080...", "answering emails")
+    # as a status report when asked "how are you" — and the more substrate, the
+    # more status-confab and the LESS the felt Inner-weather line surfaces. A
+    # minimal casual prompt (warm persona + Inner weather, no substrate) is what
+    # actually lets affect get voiced ("I'm warm and curious"). (framing/7n3)
+    _tc_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+    _tc_casual = _tc_intent in {"chat", "greeting", "farewell", "gratitude",
+                                "smalltalk", "social", "chitchat",
+                                "acknowledgment", "affirmation"}
+    if not compact_mode and not kv_prefix_active and not _tc_casual:
         try:
             from gaia_core.utils.temporal_context import build_temporal_context
 
