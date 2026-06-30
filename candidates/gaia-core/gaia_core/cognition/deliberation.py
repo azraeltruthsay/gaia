@@ -176,6 +176,35 @@ section headers; it's just the answer that emerged from the thinking.\
 """
 
 
+# Lean deliberation block for CASUAL turns (chitchat / "how are you").
+# 7n3: the full _DELIBERATION_INSTRUCTIONS above re-imposes an analytical
+# "observe / quote / recall / critique" frame on top of the (already lean,
+# already warm) casual prompt — turning "how are you" into an analysis task
+# and diluting the felt Inner-weather line into a status readout. On casual
+# turns we keep ONLY the anti-confab guardrail (the part that earns its
+# keep vs. the degenerate slim path) and drop the analytical scaffolding.
+#
+# Deliberately NO explicit "voice your affect / read the Inner-weather line"
+# instruction: the bench (gemma4-e4b-core-will-not-voice-prompt-side) showed
+# Gemma4-E4B recites labels or goes meta when told to express affect. The
+# already-present lean casual prompt (warm positive nudge + declarative
+# "Inner weather:" felt-fact) carries the voicing on its own once the
+# analytical dilution is removed — removing the frame IS the "voice your
+# felt state" move, not adding another instruction.
+_CASUAL_DELIBERATION_INSTRUCTIONS = """\
+Before replying, take a brief <think>...</think> to stay honest, then answer.
+
+Keep the thinking short — one check only: if your reply would state a \
+specific (a number, a past event, a status, a name, a date, a file path), \
+make sure you actually have it. If you don't, leave it out rather than \
+invent it. And don't volunteer system, model, or diagnostic details that \
+weren't asked for — this is a conversation, not a status report.
+
+After </think>, just reply: warm, plain-spoken, in your own voice. If \
+asked how you are, answer genuinely, however you actually find yourself.\
+"""
+
+
 # ── Section parsing ─────────────────────────────────────────────────────
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
@@ -407,6 +436,7 @@ def deliberate(
     persist: bool = True,
     user_message_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    casual: bool = False,
 ) -> DeliberationResult:
     """Run a single-call deliberation pass: thinking phase + final response.
 
@@ -417,18 +447,23 @@ def deliberate(
 
     `adapter_name`, when provided, is passed through to model_pool.forward_to_model
     so the deliberation adapter (core_deliberation_v1) is active during generation.
+
+    `casual`, when True, appends the lean anti-confab-only block instead of
+    the full analytical scaffolding (7n3) — keeps the no-confabulation guard
+    but drops the observe/quote/critique frame that diluted the felt line.
     """
     t0 = time.time()
 
     messages = [dict(m) for m in assembled_messages]
-    addendum = "\n\n---\nDELIBERATION:\n" + _DELIBERATION_INSTRUCTIONS
+    _instructions = _CASUAL_DELIBERATION_INSTRUCTIONS if casual else _DELIBERATION_INSTRUCTIONS
+    addendum = "\n\n---\nDELIBERATION:\n" + _instructions
     if messages and messages[0].get("role") == "system":
         messages[0] = {
             **messages[0],
             "content": (messages[0].get("content", "").rstrip() + addendum),
         }
     else:
-        messages.insert(0, {"role": "system", "content": _DELIBERATION_INSTRUCTIONS})
+        messages.insert(0, {"role": "system", "content": _instructions})
 
     model = None
     raw = ""
@@ -520,6 +555,7 @@ def run_deliberated_turn(
     user_message_id: Optional[str] = None,
     session_id: Optional[str] = None,
     model_role: str = "core",
+    casual: bool = False,
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
 
@@ -587,6 +623,7 @@ def run_deliberated_turn(
         persist=True,
         user_message_id=user_message_id,
         session_id=session_id,
+        casual=casual,
     )
 
     # 2. If clean, return as-is
@@ -614,6 +651,7 @@ def run_deliberated_turn(
                 persist=True,
                 user_message_id=user_message_id,
                 session_id=session_id,
+                casual=casual,
             )
             retry.retried = True
             # Use the retry only if Prime tripped fewer flags than Core

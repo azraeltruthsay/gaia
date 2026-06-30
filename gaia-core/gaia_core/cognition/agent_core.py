@@ -77,6 +77,15 @@ _THINK_TAG_PATTERN = re.compile(r'<think>.*?</think>\s*', re.DOTALL)
 _GCP_SECTIONS = ['HEADER', 'ROUTING', 'MODEL', 'CONTEXT', 'INTENT', 'CONTENT',
                  'REASONING', 'GOVERNANCE', 'METRICS', 'STATUS', 'RESPONSE']
 
+# Casual/social intents that get the lean anti-confab-only deliberation block
+# (7n3) instead of the full analytical scaffolding — keeps the no-confabulation
+# guard but drops the observe/quote/critique frame that diluted the felt line.
+# Mirrors the casual set used in prompt_builder for the lean social anchor.
+_CASUAL_DELIB_INTENTS = frozenset({
+    "chat", "greeting", "farewell", "gratitude", "smalltalk",
+    "social", "chitchat", "acknowledgment", "affirmation",
+})
+
 
 # Use the migrated strip_think_tags from output_router
 strip_think_tags = _strip_think_tags_robust
@@ -3020,6 +3029,11 @@ class AgentCore:
                 ):
                     from gaia_core.cognition.deliberation import run_deliberated_turn
                     _delib_messages = build_from_packet(packet)
+                    # 7n3: casual turns get the lean anti-confab-only deliberation
+                    # block (no analytical observe/quote/critique frame) so the
+                    # felt Inner-weather line isn't diluted into a status readout.
+                    _delib_intent = str(getattr(plan, "intent", "") if plan else "").lower() or _early_intent
+                    _delib_casual = _delib_intent in _CASUAL_DELIB_INTENTS
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
@@ -3032,6 +3046,7 @@ class AgentCore:
                         # Core-flavored reflection pass. Sovereign Duality
                         # v2 fix — see GAIA_Project bd-(filed).
                         model_role=selected_model_name or "core",
+                        casual=_delib_casual,
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -3696,6 +3711,9 @@ class AgentCore:
                     )
                     if _delib_cfg.get("enabled", False) and not _has_image_att2:
                         from gaia_core.cognition.deliberation import run_deliberated_turn
+                        # 7n3: lean casual deliberation block on chitchat turns.
+                        _delib_intent2 = str(getattr(plan, "intent", "") if plan else "").lower() \
+                            or str(getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
                         _delib_result = run_deliberated_turn(
                             user_input=packet.content.original_prompt or "",
                             assembled_messages=final_messages,
@@ -3703,6 +3721,7 @@ class AgentCore:
                             config=self.config,
                             user_message_id=getattr(packet.header, "packet_id", None),
                             session_id=session_id,
+                            casual=_delib_intent2 in _CASUAL_DELIB_INTENTS,
                         )
                         if _delib_result and _delib_result.final_response:
                             logger.info(
