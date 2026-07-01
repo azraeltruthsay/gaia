@@ -1212,11 +1212,18 @@ function mindMapPanel() {
     _synapses: [],           // [{id, x, y, strength, pairKey, neuronA, neuronB, lastActive, tier}]
     _maxSynapses: 40,       // cap
 
-    init() {
+    async init() {
       this._colorScale = d3.scaleLinear()
         .domain([0, 5, 15])
         .range(['#4fc3f7', '#ffa726', '#e94560'])
         .clamp(true);
+
+      // Load the data-derived brain-region atlas (domains = cognitive signals,
+      // per-region discriminative features, corrected 42/36-layer ranges) BEFORE
+      // generating neurons, so region geometry + layer mapping come from the
+      // committed SAE atlas (hybrid map, GAIA_Project-7jz), not the hardcoded
+      // fallback. Silently keeps the fallback if the fetch fails.
+      await this._loadRegionAtlas();
 
       // Generate neurons for all tiers into a single array with global IDs
       const allNeurons = [];
@@ -1926,11 +1933,43 @@ function mindMapPanel() {
         const resp = await fetch('/api/activations/atlas');
         if (resp.ok) {
           const data = await resp.json();
-          if (data && data.labels) {
-            this._featureLabels = data.labels;
+          // Endpoint returns { layers: { "<L>": { features: { "<idx>": label } } } }
+          // sourced from /shared/atlas/<tier>/layer_<L>_labels.json. Flatten into a
+          // feature-index→label map for live neuron labelling. (Legacy top-level
+          // data.labels still honored if a future build emits it.)
+          const flat = (data && data.labels) ? { ...data.labels } : {};
+          if (data && data.layers && typeof data.layers === 'object') {
+            for (const L of Object.keys(data.layers)) {
+              const feats = data.layers[L] && data.layers[L].features;
+              if (feats) Object.assign(flat, feats);
+            }
           }
+          this._featureLabels = flat;
         }
       } catch { /* atlas unavailable — use fallback labels */ }
+    },
+
+    // Load the committed hybrid brain-region atlas and replace BRAIN_REGIONS with
+    // its data-derived regions (signals + discriminative features + real layer
+    // ranges). Names/coordinates match the anatomy so REGION_EDGES still key in.
+    async _loadRegionAtlas() {
+      try {
+        const resp = await fetch('/static/brain_region_atlas.json');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data || !Array.isArray(data.regions) || data.regions.length === 0) return;
+        BRAIN_REGIONS = data.regions.map(r => ({
+          name: r.name, tier: r.tier,
+          layerRange: r.layerRange || [0, 0],
+          cx: r.cx, cy: r.cy, rx: r.rx, ry: r.ry,
+          domains: r.domains || [],
+          features: r.features || [],
+          function: r.function || '',
+        }));
+        // Rebuild the region-center lookup (const object — mutate, don't reassign).
+        for (const k of Object.keys(_regionCenterMap)) delete _regionCenterMap[k];
+        for (const reg of BRAIN_REGIONS) _regionCenterMap[reg.name] = { cx: reg.cx, cy: reg.cy };
+      } catch { /* keep hardcoded fallback */ }
     },
 
     toggleLive() {
