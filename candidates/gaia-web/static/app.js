@@ -1199,6 +1199,7 @@ function mindMapPanel() {
   return {
     live: true,
     hoveredFeature: null,
+    hoveredRegion: null,    // {name, tier, function, domains[], features[]} on region hover
     activeConcepts: [],     // [{label, color, strength}] — for dynamic legend
     tierConsciousness: { core: 'unconscious', prime: 'unconscious' },
     _es: null,
@@ -1340,6 +1341,40 @@ function mindMapPanel() {
         .attr('height', 280 * (BRAIN_SVG_VIEWBOX.h / BRAIN_SVG_VIEWBOX.w))
         .attr('preserveAspectRatio', 'xMidYMid meet')
         .attr('opacity', 0.25);
+
+      // Region hover layer (7jz): faint hit-areas surfacing each region's
+      // data-assigned cognitive signals + discriminative features at rest.
+      // Drawn BELOW pathways/synapses/neurons so live-neuron hover still wins
+      // on top; the region catches hovers over its empty background.
+      const cmp = this;
+      zoomG.append('g').attr('class', 'region-layer')
+        .selectAll('ellipse.region-hit')
+        .data(BRAIN_REGIONS.filter(r => r.cx != null && (r.domains || []).length))
+        .enter()
+        .append('ellipse')
+        .attr('class', 'region-hit')
+        .attr('cx', d => d.cx).attr('cy', d => d.cy)
+        .attr('rx', d => d.rx).attr('ry', d => d.ry)
+        .attr('fill', d => TIER_IDLE_COLORS[d.tier] || '#90caf9')
+        .attr('fill-opacity', 0.05)
+        .attr('stroke', d => TIER_IDLE_COLORS[d.tier] || '#90caf9')
+        .attr('stroke-opacity', 0.22)
+        .attr('stroke-width', 0.4)
+        .style('cursor', 'pointer')
+        .on('mouseover', function (evt, d) {
+          d3.select(this).attr('fill-opacity', 0.14).attr('stroke-opacity', 0.55);
+          cmp.hoveredRegion = {
+            name: d.name,
+            tier: (d.tier || '').toUpperCase(),
+            function: d.function || '',
+            domains: d.domains || [],
+            features: (d.features || []).slice(0, 5),
+          };
+        })
+        .on('mouseout', function () {
+          d3.select(this).attr('fill-opacity', 0.05).attr('stroke-opacity', 0.22);
+          cmp.hoveredRegion = null;
+        });
 
       // Pathway layer (below neurons)
       zoomG.append('g').attr('class', 'pathways');

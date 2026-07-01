@@ -182,6 +182,33 @@
             <span class="legend-cocount" x-text="'co:' + hoveredFeature?.coCount"></span>
           </template>
         </div>
+        <!-- Region panel: data-assigned cognitive signals + discriminative features (7jz) -->
+        <div class="mind-map-region" x-show="hoveredRegion" x-cloak
+             style="margin-top:6px;padding:8px 10px;border:1px solid var(--border,#333);border-radius:6px;background:var(--panel,#1b1b22);font-size:11px;line-height:1.45;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+            <strong style="font-size:12px;" x-text="hoveredRegion?.name"></strong>
+            <span style="opacity:.6;text-transform:uppercase;font-size:9px;letter-spacing:.5px;" x-text="hoveredRegion?.tier"></span>
+          </div>
+          <div style="opacity:.7;margin:2px 0 5px;" x-text="hoveredRegion?.function"></div>
+          <div x-show="hoveredRegion?.domains?.length" style="margin-bottom:5px;">
+            <span style="opacity:.5;">signals: </span>
+            <template x-for="s in (hoveredRegion?.domains || [])" :key="s">
+              <span style="display:inline-block;margin:0 3px 3px 0;padding:1px 6px;border-radius:8px;background:var(--accent-dim,#2a2a3a);" x-text="s"></span>
+            </template>
+          </div>
+          <template x-if="hoveredRegion?.features?.length">
+            <div>
+              <div style="opacity:.5;margin-bottom:2px;">top features (candidate correlates):</div>
+              <template x-for="f in (hoveredRegion?.features || [])" :key="f.index">
+                <div style="display:flex;gap:6px;align-items:baseline;">
+                  <span style="opacity:.55;font-variant-numeric:tabular-nums;" x-text="'#' + f.index"></span>
+                  <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" x-text="f.label"></span>
+                  <span style="opacity:.6;font-variant-numeric:tabular-nums;" x-text="(f.strength != null ? Number(f.strength).toFixed(1) : '')"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
       </aside>
     </div>
   </section>
