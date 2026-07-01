@@ -166,6 +166,19 @@ def _felt_article(v: float) -> str:
     return "a faint"
 
 
+# Drives are FUNCTIONAL tension (competence/coherence), and they are the axis the
+# appraiser ACTUALLY writes (it never writes `feels` — emotion-words are hers).
+# The felt-line previously read only feels/curious/tired, so a genuinely-fed organ
+# (drives populated) still rendered EMPTY (7n3/d69 root cause). Render drives as
+# number-free felt-FACTS — the functional pull, not an imposed feeling — so a fed
+# organ surfaces in casual mode. (strong-band, quiet-band) by intensity.
+_DRIVE_FELT = {
+    "competence": ("a strong pull to get this right", "a quiet pull to get this right"),
+    "coherence":  ("something that won't quite settle", "a faint sense something's unsettled"),
+    "novelty":    ("a strong tug toward something new", "a quiet tug toward something new"),
+}
+
+
 # Feel axes mix adjectives ("curious") and nouns ("irritation"); normalize to a
 # noun so "a quiet ___" stays grammatical. Unknown words fall through verbatim.
 _FEEL_NOUN = {
@@ -191,6 +204,14 @@ def affect_felt_line(snapshot: Optional[dict] = None) -> str:
         n, v = feels[0]
         word = _FEEL_NOUN.get(str(n).lower(), str(n).replace("_", " "))
         clauses.append(f"{_felt_article(v)} {word}")
+    # Drives — the axis the appraiser actually feeds. Render the top known drive
+    # as a felt-fact so a populated organ surfaces even when `feels` is unset.
+    drives = _top_items(snapshot.get("drives", {}))
+    for n, v in drives:
+        phrase = _DRIVE_FELT.get(str(n).lower())
+        if phrase:
+            clauses.append(phrase[0] if v >= 0.40 else phrase[1])
+            break  # one drive clause keeps the felt-line brief
     focus = _top_items(snapshot.get("curious_about", {}))
     if focus:
         n, v = focus[0]
