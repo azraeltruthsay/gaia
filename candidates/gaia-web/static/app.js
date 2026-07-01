@@ -1207,7 +1207,7 @@ function mindMapPanel() {
     _neurons: [],           // all neurons, all tiers, single array
     _neuronsByTier: {},     // tier -> [neuron refs] for fast lookup
     _activeNeurons: new Map(), // neuronId -> {label, strength, ...}
-    _featureLabels: {},
+    _featureLabels: { core: {}, prime: {} },  // per-tier {idx: label} (separate SAEs)
     _colorScale: null,
     _reconnectTimer: null,
     _synapses: [],           // [{id, x, y, strength, pairKey, neuronA, neuronB, lastActive, tier}]
@@ -1578,7 +1578,7 @@ function mindMapPanel() {
       const frameFeaturesByIdx = new Map();
 
       for (const feat of data.features) {
-        const label = feat.label || this._featureLabels[feat.idx] || ('feature_' + feat.idx);
+        const label = feat.label || (this._featureLabels[tier] && this._featureLabels[tier][feat.idx]) || ('feature_' + feat.idx);
         const neuron = this._mapFeatureToNeuron(feat, tier);
         if (!neuron) continue;
 
@@ -1964,14 +1964,17 @@ function mindMapPanel() {
     },
 
     async _loadAtlas() {
-      try {
-        const resp = await fetch('/api/activations/atlas');
-        if (resp.ok) {
+      // Core and Prime are separately trained SAEs — feature indices are NOT
+      // comparable across tiers, so labels are fetched + stored PER TIER and
+      // looked up by (tier, idx) in _updateTier. Endpoint returns
+      // { tier, layers: { "<L>": { features: { "<idx>": label } } } } sourced
+      // from /shared/atlas/<tier>/layer_<L>_labels.json.
+      const byTier = { core: {}, prime: {} };
+      await Promise.all(['core', 'prime'].map(async (tier) => {
+        try {
+          const resp = await fetch('/api/activations/atlas?tier=' + tier);
+          if (!resp.ok) return;
           const data = await resp.json();
-          // Endpoint returns { layers: { "<L>": { features: { "<idx>": label } } } }
-          // sourced from /shared/atlas/<tier>/layer_<L>_labels.json. Flatten into a
-          // feature-index→label map for live neuron labelling. (Legacy top-level
-          // data.labels still honored if a future build emits it.)
           const flat = (data && data.labels) ? { ...data.labels } : {};
           if (data && data.layers && typeof data.layers === 'object') {
             for (const L of Object.keys(data.layers)) {
@@ -1979,9 +1982,10 @@ function mindMapPanel() {
               if (feats) Object.assign(flat, feats);
             }
           }
-          this._featureLabels = flat;
-        }
-      } catch { /* atlas unavailable — use fallback labels */ }
+          byTier[tier] = flat;
+        } catch { /* this tier's labels unavailable — fallback below */ }
+      }));
+      this._featureLabels = byTier;
     },
 
     // Load the committed hybrid brain-region atlas and replace BRAIN_REGIONS with

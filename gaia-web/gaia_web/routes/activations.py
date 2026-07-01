@@ -190,8 +190,13 @@ def _write_atlas_meta(atlas_dir: str, payload: dict) -> bool:
 
 
 @router.get("/atlas")
-async def get_atlas():
+async def get_atlas(tier: str = "core"):
     """Return SAE feature labels for the mind map.
+
+    ``tier`` selects the per-tier atlas dir (core → /shared/atlas/core,
+    prime → /shared/atlas/prime). Core and Prime are SEPARATELY trained SAEs
+    whose feature indices are not comparable, so labels must be served (and
+    consumed) per tier. Defaults to core for backward compatibility.
 
     Reads ``meta.json`` if present; **synthesizes layer info from the
     activation stream tail** when meta.json is missing, stale, or has
@@ -201,9 +206,14 @@ async def get_atlas():
 
     Also merges any per-layer feature label files (``layer_N_labels.json``).
     """
-    result = {"layers": {}, "model": None, "timestamp": None}
+    # Resolve the per-tier atlas dir. Core keeps _ATLAS_DIR (env-overridable +
+    # test-patchable, defaults to /shared/atlas/core); prime resolves under the
+    # atlas base. Unknown tier falls back to the core default.
+    atlas_dir = os.path.join(_ATLAS_BASE, "prime") if tier == "prime" else _ATLAS_DIR
 
-    on_disk = _load_atlas_meta(_ATLAS_DIR)
+    result = {"layers": {}, "model": None, "timestamp": None, "tier": tier}
+
+    on_disk = _load_atlas_meta(atlas_dir)
     if on_disk:
         result["model"] = on_disk.get("model")
         result["timestamp"] = on_disk.get("timestamp")
@@ -213,26 +223,28 @@ async def get_atlas():
     # Stage 1 (874): synthesize layer info from the live stream tail.
     # If the stream tells us layers that aren't in the on-disk meta.json,
     # the on-disk file is stale — overwrite with the synthesized layer
-    # set so the UI matches what's actually being recorded.
+    # set so the UI matches what's actually being recorded. Only apply this
+    # when the stream tail is dominated by the SAME tier we're serving —
+    # otherwise a core-heavy stream would clobber prime's meta (and vice versa).
     stream_info = _discover_layers_from_stream()
     stream_layers = stream_info.get("layers") or []
-    if stream_layers:
+    if stream_layers and stream_info.get("tier") == tier:
         on_disk_layers = on_disk.get("layers") if isinstance(on_disk.get("layers"), list) else None
         if on_disk_layers != stream_layers:
             logger.info(
                 "Atlas meta layers differ from live stream — refreshing "
-                "(on_disk=%s, stream=%s, tier=%s)",
-                on_disk_layers, stream_layers, stream_info.get("tier"),
+                "(tier=%s, on_disk=%s, stream=%s)",
+                tier, on_disk_layers, stream_layers,
             )
             refreshed = {
                 **on_disk,
                 "layers": stream_layers,
-                "tier": stream_info.get("tier") or on_disk.get("tier"),
+                "tier": tier,
                 "timestamp": time.time(),
                 "source": "auto_from_activation_stream",
                 "sample_count": stream_info.get("sample_count", 0),
             }
-            _write_atlas_meta(_ATLAS_DIR, refreshed)
+            _write_atlas_meta(atlas_dir, refreshed)
             # Reflect the refreshed layers in this response too. We use
             # the list-of-ints form here; the labels dict (populated
             # below from layer_N_labels.json) is keyed by str(layer).
@@ -242,11 +254,11 @@ async def get_atlas():
 
     # Always check for per-layer label files (layer_N_labels.json)
     try:
-        for entry in os.listdir(_ATLAS_DIR):
+        for entry in os.listdir(atlas_dir):
             if entry.startswith("layer_") and entry.endswith("_labels.json"):
                 try:
                     layer_idx = int(entry.split("_")[1])
-                    with open(os.path.join(_ATLAS_DIR, entry), "r") as f:
+                    with open(os.path.join(atlas_dir, entry), "r") as f:
                         labels = json.load(f)
                     # Merge — per-layer files override meta.json
                     layer_key = str(layer_idx)
