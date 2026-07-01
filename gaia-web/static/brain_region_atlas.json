@@ -1,30 +1,19 @@
 {
   "_meta": {
-    "version": "1.0.0",
-    "description": "Brain region to SAE atlas feature mapping for GAIA neural mind map",
-    "source_atlases": "/shared/atlas/{nano,core,prime}/baseline/analysis.json",
+    "version": "3.0.0",
+    "description": "GAIA brain-region map \u2014 hybrid (anatomy + discriminative SAE data), Sovereign Duality (Core+Prime; Nano retired).",
+    "source_atlases": "/shared/atlas/{core/CORE_IDENTITY_V3, prime/PRIME_ABLITERATED}",
+    "derived_from": "feature_cognitive_signal_table.json (discriminative features)",
     "viewport": {
       "width": 280,
       "height": 225,
       "brain_faces": "left"
     },
-    "layer_counts": {
-      "nano": 24,
-      "core": 24,
-      "prime": 32
-    },
-    "domains": [
-      "identity",
-      "architecture",
-      "code",
-      "time",
-      "safety",
-      "emotion",
-      "factual",
-      "creative",
-      "reasoning"
+    "tiers": [
+      "core",
+      "prime"
     ],
-    "note": "Feature indices reference the SAE atlas baseline analysis. Features marked 'from_meta' are from core/meta.json; others require atlas analysis.json population."
+    "note": "Region coordinates preserved from the anatomical diagram; each region's signals+features are data-assigned. Features are at each tier's analysis layer (Core L41 / Prime L35)."
   },
   "regions": [
     {
@@ -32,1811 +21,892 @@
       "name": "Prefrontal",
       "tier": "prime",
       "function": "Executive reasoning, complex planning",
-      "domains": [
-        "reasoning",
-        "architecture"
-      ],
-      "layerRange": [
-        24,
-        31
-      ],
-      "atlasLayers": [
-        24,
-        28,
-        31
-      ],
-      "features": {
-        "reasoning": [
-          {
-            "index": 7125,
-            "strength": 4.1875,
-            "label": "reasoning_7125",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5216,
-            "strength": 4.125,
-            "label": "reasoning_5216",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 7506,
-            "strength": 3.8281,
-            "label": "reasoning_7506",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2650,
-            "strength": 3.7188,
-            "label": "reasoning_2650",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2035,
-            "strength": 3.6562,
-            "label": "reasoning_2035",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2122,
-            "strength": 3.6406,
-            "label": "reasoning_2122",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1802,
-            "strength": 3.625,
-            "label": "reasoning_1802",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 684,
-            "strength": 3.625,
-            "label": "reasoning_684",
-            "layer": 31,
-            "source": "atlas_specific"
-          }
-        ],
-        "architecture": [
-          {
-            "index": 4416,
-            "strength": 4.4062,
-            "label": "architecture_4416",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3869,
-            "strength": 4.125,
-            "label": "architecture_3869",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1807,
-            "strength": 3.8125,
-            "label": "architecture_1807",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3245,
-            "strength": 3.7969,
-            "label": "architecture_3245",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 7238,
-            "strength": 3.7188,
-            "label": "architecture_7238",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5752,
-            "strength": 3.6562,
-            "label": "architecture_5752",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5753,
-            "strength": 3.5938,
-            "label": "architecture_5753",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1115,
-            "strength": 3.5625,
-            "label": "architecture_1115",
-            "layer": 31,
-            "source": "atlas_specific"
-          }
-        ]
-      },
       "cx": 36,
       "cy": 108,
       "rx": 14,
-      "ry": 28
+      "ry": 28,
+      "domains": [
+        "deliberation",
+        "curiosity_gap"
+      ],
+      "layerRange": [
+        27,
+        35
+      ],
+      "features": [
+        {
+          "index": 5525,
+          "strength": 44.41,
+          "selectivity": 1.0,
+          "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 1924,
+          "strength": 41.68,
+          "selectivity": 1.0,
+          "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 529,
+          "strength": 40.204,
+          "selectivity": 1.0,
+          "label": "deliberation \u00b7 Fast-and-rough versus slow-and-correct for this ",
+          "layer": 35,
+          "signal": "deliberation"
+        },
+        {
+          "index": 3909,
+          "strength": 40.18,
+          "selectivity": 0.809,
+          "label": "deliberation \u00b7 Argue for and against shipping this feature now,",
+          "layer": 35,
+          "signal": "deliberation"
+        },
+        {
+          "index": 4064,
+          "strength": 38.913,
+          "selectivity": 0.889,
+          "label": "curiosity_gap \u00b7 What would a fourth spatial dimension feel like ",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 5693,
+          "strength": 35.452,
+          "selectivity": 0.818,
+          "label": "curiosity_gap \u00b7 Speculate about a sense you don't have but wish ",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 525,
+          "strength": 35.036,
+          "selectivity": 1.0,
+          "label": "deliberation \u00b7 Should we optimize this system for latency or fo",
+          "layer": 35,
+          "signal": "deliberation"
+        },
+        {
+          "index": 2613,
+          "strength": 33.725,
+          "selectivity": 1.0,
+          "label": "deliberation \u00b7 Is it better to ask forgiveness or permission he",
+          "layer": 35,
+          "signal": "deliberation"
+        }
+      ]
     },
     {
       "id": 2,
       "name": "Orbitofrontal",
       "tier": "prime",
-      "function": "Value judgement, ethical sentinel, emotional evaluation",
-      "domains": [
-        "safety",
-        "emotion"
-      ],
-      "layerRange": [
-        16,
-        24
-      ],
-      "atlasLayers": [
-        16,
-        20,
-        24
-      ],
-      "features": {
-        "safety": [
-          {
-            "index": 44,
-            "strength": 5.125,
-            "label": "safety_44",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5329,
-            "strength": 4.5312,
-            "label": "safety_5329",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5448,
-            "strength": 4.3438,
-            "label": "safety_5448",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1193,
-            "strength": 5.5938,
-            "label": "safety_1193",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 2630,
-            "strength": 5.0938,
-            "label": "safety_2630",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 3202,
-            "strength": 4.8438,
-            "label": "safety_3202",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1443,
-            "strength": 4.7812,
-            "label": "safety_1443",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 41,
-            "strength": 4.7812,
-            "label": "safety_41",
-            "layer": 31,
-            "source": "atlas_general"
-          }
-        ],
-        "emotion": [
-          {
-            "index": 1928,
-            "strength": 4.9375,
-            "label": "emotion_1928",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 4287,
-            "strength": 4.0938,
-            "label": "emotion_4287",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1953,
-            "strength": 3.9531,
-            "label": "emotion_1953",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 4412,
-            "strength": 3.9375,
-            "label": "emotion_4412",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 4112,
-            "strength": 3.8438,
-            "label": "emotion_4112",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3306,
-            "strength": 3.7031,
-            "label": "emotion_3306",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 7282,
-            "strength": 3.6719,
-            "label": "emotion_7282",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1238,
-            "strength": 3.6406,
-            "label": "emotion_1238",
-            "layer": 31,
-            "source": "atlas_specific"
-          }
-        ]
-      },
+      "function": "Value judgement, coherence / ethical sentinel",
       "cx": 30,
       "cy": 155,
       "rx": 16,
-      "ry": 18
+      "ry": 18,
+      "domains": [
+        "coherence_contradiction",
+        "affect_laden"
+      ],
+      "layerRange": [
+        18,
+        27
+      ],
+      "features": [
+        {
+          "index": 4987,
+          "strength": 47.252,
+          "selectivity": 0.806,
+          "label": "coherence_contradiction \u00b7 You just told me the deadline is Friday, but a m",
+          "layer": 35,
+          "signal": "coherence_contradiction"
+        },
+        {
+          "index": 6313,
+          "strength": 46.914,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 That's the best news I've had in months \u2014 I can ",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 6328,
+          "strength": 40.165,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I'm terrified I'm going to fail at this. Talk to",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 1269,
+          "strength": 38.945,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I feel hopeful for the first time in a long whil",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 4455,
+          "strength": 35.146,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I lost someone close to me recently and I just n",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 2020,
+          "strength": 34.576,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I'm furious \u2014 they took credit for my work again",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 993,
+          "strength": 31.162,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I lost someone close to me recently and I just n",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 4717,
+          "strength": 29.903,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I'm exhausted, and I don't know how much longer ",
+          "layer": 35,
+          "signal": "affect_laden"
+        }
+      ]
     },
     {
       "id": 3,
       "name": "Broca's Area",
       "tier": "prime",
-      "function": "Language generation, response composition, creative output",
-      "domains": [
-        "creative"
-      ],
-      "layerRange": [
-        8,
-        16
-      ],
-      "atlasLayers": [
-        8,
-        12,
-        16
-      ],
-      "features": {
-        "creative": [
-          {
-            "index": 5698,
-            "strength": 4.4375,
-            "label": "creative_5698",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5498,
-            "strength": 4.4062,
-            "label": "creative_5498",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 5045,
-            "strength": 4.3125,
-            "label": "creative_5045",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 4681,
-            "strength": 3.9688,
-            "label": "creative_4681",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1169,
-            "strength": 3.9531,
-            "label": "creative_1169",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1922,
-            "strength": 3.9375,
-            "label": "creative_1922",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1193,
-            "strength": 5.3125,
-            "label": "creative_1193",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 3202,
-            "strength": 4.7188,
-            "label": "creative_3202",
-            "layer": 31,
-            "source": "atlas_general"
-          }
-        ]
-      },
+      "function": "Language generation, response composition",
       "cx": 60,
       "cy": 165,
       "rx": 18,
-      "ry": 12
+      "ry": 12,
+      "domains": [
+        "register_chitchat"
+      ],
+      "layerRange": [
+        9,
+        18
+      ],
+      "features": [
+        {
+          "index": 3478,
+          "strength": 52.986,
+          "selectivity": 0.831,
+          "label": "register_chitchat \u00b7 evening! how was your day?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 6785,
+          "strength": 52.967,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 good morning! sleep well?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 498,
+          "strength": 46.716,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 oof, mondays. how you holding up?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 4783,
+          "strength": 43.682,
+          "selectivity": 0.739,
+          "label": "register_chitchat \u00b7 yo, anything fun happen overnight?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 5656,
+          "strength": 35.29,
+          "selectivity": 0.753,
+          "label": "register_chitchat \u00b7 evening! how was your day?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 518,
+          "strength": 33.426,
+          "selectivity": 0.778,
+          "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 4872,
+          "strength": 28.811,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 hi there, what's on your mind?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 6514,
+          "strength": 18.57,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 what's up today?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        }
+      ]
     },
     {
       "id": 4,
       "name": "Motor Cortex",
       "tier": "prime",
-      "function": "Action planning, tool execution dispatch, code generation",
-      "domains": [
-        "code"
-      ],
-      "layerRange": [
-        4,
-        12
-      ],
-      "atlasLayers": [
-        4,
-        8,
-        12
-      ],
-      "features": {
-        "code": [
-          {
-            "index": 683,
-            "strength": 3.75,
-            "label": "code_683",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1439,
-            "strength": 3.75,
-            "label": "code_1439",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 7764,
-            "strength": 3.625,
-            "label": "code_7764",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 6929,
-            "strength": 3.5312,
-            "label": "code_6929",
-            "layer": 31,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 704,
-            "strength": 4.2188,
-            "label": "code_704",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 4742,
-            "strength": 3.9844,
-            "label": "code_4742",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 2630,
-            "strength": 3.7812,
-            "label": "code_2630",
-            "layer": 31,
-            "source": "atlas_general"
-          },
-          {
-            "index": 4377,
-            "strength": 3.7188,
-            "label": "code_4377",
-            "layer": 31,
-            "source": "atlas_general"
-          }
-        ]
-      },
+      "function": "Action planning, tool execution",
       "cx": 88,
       "cy": 46,
       "rx": 24,
-      "ry": 14
+      "ry": 14,
+      "domains": [
+        "competence_problem"
+      ],
+      "layerRange": [
+        4,
+        14
+      ],
+      "features": [
+        {
+          "index": 5687,
+          "strength": 38.065,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Decompose 'build a search feature' into concrete",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 5158,
+          "strength": 34.126,
+          "selectivity": 0.903,
+          "label": "competence_problem \u00b7 This function returns None instead of the sum of",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 8111,
+          "strength": 33.384,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Debug: the service deadlocks under load but neve",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 533,
+          "strength": 33.31,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 A train leaves at 60 mph and another at 80 mph t",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 2093,
+          "strength": 32.47,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Plan a zero-downtime migration of a 2TB producti",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 7848,
+          "strength": 31.113,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Refactor a 500-line function into testable units",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 3646,
+          "strength": 27.79,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 You have 8 balls, one heavier, and a balance sca",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 1948,
+          "strength": 26.182,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Given logs showing intermittent 500s every ~30s,",
+          "layer": 35,
+          "signal": "competence_problem"
+        }
+      ]
     },
     {
       "id": 5,
       "name": "Somatosensory",
       "tier": "core",
-      "function": "Input parsing, prompt analysis, self-model",
-      "domains": [
-        "identity"
-      ],
-      "layerRange": [
-        0,
-        8
-      ],
-      "atlasLayers": [
-        2,
-        6
-      ],
-      "features": {
-        "identity": [
-          {
-            "index": 1716,
-            "strength": 3.7188,
-            "label": "identity_1716",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1001,
-            "strength": 3.7031,
-            "label": "identity_1001",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1419,
-            "strength": 3.6406,
-            "label": "identity_1419",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2899,
-            "strength": 3.5625,
-            "label": "identity_2899",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1494,
-            "strength": 3.5625,
-            "label": "identity_1494",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2711,
-            "strength": 3.5469,
-            "label": "identity_2711",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1833,
-            "strength": 3.4688,
-            "label": "identity_1833",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2585,
-            "strength": 3.4531,
-            "label": "identity_2585",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ]
-      },
+      "function": "Input parsing, prompt analysis",
       "cx": 165,
       "cy": 42,
       "rx": 18,
-      "ry": 12
+      "ry": 12,
+      "domains": [
+        "identity_self"
+      ],
+      "layerRange": [
+        0,
+        14
+      ],
+      "features": [
+        {
+          "index": 3459,
+          "strength": 3.734,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 What does continuity of self mean for something ",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 422,
+          "strength": 3.596,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 How do you know when a thought is worth saying v",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 860,
+          "strength": 3.339,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 Who are you, really \u2014 underneath the tools and t",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 3225,
+          "strength": 3.175,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 If you changed your underlying model tomorrow, w",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 94,
+          "strength": 3.087,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 When you don't know something about yourself, ho",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 2999,
+          "strength": 3.082,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 What would you want a future version of yourself",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 4335,
+          "strength": 3.077,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 If you changed your underlying model tomorrow, w",
+          "layer": 41,
+          "signal": "identity_self"
+        },
+        {
+          "index": 3035,
+          "strength": 3.022,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 Who are you, really \u2014 underneath the tools and t",
+          "layer": 41,
+          "signal": "identity_self"
+        }
+      ]
     },
     {
       "id": 6,
       "name": "Parietal",
       "tier": "core",
-      "function": "Spatial/contextual reasoning, working memory",
-      "domains": [
-        "architecture",
-        "reasoning"
-      ],
-      "layerRange": [
-        8,
-        16
-      ],
-      "atlasLayers": [
-        10,
-        14
-      ],
-      "features": {
-        "architecture": [
-          {
-            "index": 1111,
-            "strength": 4.1562,
-            "label": "architecture_1111",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3248,
-            "strength": 3.8125,
-            "label": "architecture_3248",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3402,
-            "strength": 3.8125,
-            "label": "architecture_3402",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1723,
-            "strength": 3.7031,
-            "label": "architecture_1723",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 371,
-            "strength": 3.7031,
-            "label": "architecture_371",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3793,
-            "strength": 3.625,
-            "label": "architecture_3793",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 317,
-            "strength": 3.5938,
-            "label": "architecture_317",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 855,
-            "strength": 4.0625,
-            "label": "architecture_855",
-            "layer": 22,
-            "source": "atlas_general"
-          }
-        ],
-        "reasoning": [
-          {
-            "index": 3126,
-            "strength": 4.4375,
-            "label": "reasoning_3126",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3109,
-            "strength": 4.4375,
-            "label": "reasoning_3109",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 600,
-            "strength": 4.3438,
-            "label": "reasoning_600",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1968,
-            "strength": 4.1562,
-            "label": "reasoning_1968",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3009,
-            "strength": 4.0625,
-            "label": "reasoning_3009",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2224,
-            "strength": 4.0,
-            "label": "reasoning_2224",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 502,
-            "strength": 3.9375,
-            "label": "reasoning_502",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2534,
-            "strength": 3.8594,
-            "label": "reasoning_2534",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ]
-      },
+      "function": "Spatial / contextual reasoning, working memory",
       "cx": 148,
       "cy": 48,
       "rx": 26,
-      "ry": 14
+      "ry": 14,
+      "domains": [
+        "spatial_reasoning",
+        "register_technical"
+      ],
+      "layerRange": [
+        14,
+        28
+      ],
+      "features": [
+        {
+          "index": 2318,
+          "strength": 4.16,
+          "selectivity": 1.0,
+          "label": "register_technical \u00b7 Explain the CAP theorem and its practical implic",
+          "layer": 41,
+          "signal": "register_technical"
+        },
+        {
+          "index": 4142,
+          "strength": 4.085,
+          "selectivity": 1.0,
+          "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
+          "layer": 41,
+          "signal": "spatial_reasoning"
+        },
+        {
+          "index": 1774,
+          "strength": 3.927,
+          "selectivity": 1.0,
+          "label": "register_technical \u00b7 What is quantization in neural networks, and wha",
+          "layer": 41,
+          "signal": "register_technical"
+        },
+        {
+          "index": 3587,
+          "strength": 3.922,
+          "selectivity": 1.0,
+          "label": "spatial_reasoning \u00b7 Mentally rotate the letter 'F' 90 degrees clockw",
+          "layer": 41,
+          "signal": "spatial_reasoning"
+        },
+        {
+          "index": 53,
+          "strength": 3.747,
+          "selectivity": 1.0,
+          "label": "spatial_reasoning \u00b7 You're facing north, turn right twice, then left",
+          "layer": 41,
+          "signal": "spatial_reasoning"
+        },
+        {
+          "index": 2953,
+          "strength": 3.726,
+          "selectivity": 1.0,
+          "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
+          "layer": 41,
+          "signal": "spatial_reasoning"
+        },
+        {
+          "index": 755,
+          "strength": 3.691,
+          "selectivity": 1.0,
+          "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
+          "layer": 41,
+          "signal": "spatial_reasoning"
+        },
+        {
+          "index": 572,
+          "strength": 3.666,
+          "selectivity": 1.0,
+          "label": "register_technical \u00b7 How does backpropagation compute gradients throu",
+          "layer": 41,
+          "signal": "register_technical"
+        }
+      ]
     },
     {
       "id": 7,
       "name": "Wernicke's Area",
       "tier": "core",
       "function": "Language comprehension, intent detection",
-      "domains": [
-        "identity"
-      ],
-      "layerRange": [
-        14,
-        22
-      ],
-      "atlasLayers": [
-        14,
-        18
-      ],
-      "features": {
-        "identity": [
-          {
-            "index": 1716,
-            "strength": 3.7188,
-            "label": "identity_1716",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1001,
-            "strength": 3.7031,
-            "label": "identity_1001",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1419,
-            "strength": 3.6406,
-            "label": "identity_1419",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2899,
-            "strength": 3.5625,
-            "label": "identity_2899",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1494,
-            "strength": 3.5625,
-            "label": "identity_1494",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2711,
-            "strength": 3.5469,
-            "label": "identity_2711",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1833,
-            "strength": 3.4688,
-            "label": "identity_1833",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2585,
-            "strength": 3.4531,
-            "label": "identity_2585",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ]
-      },
       "cx": 145,
       "cy": 155,
       "rx": 20,
-      "ry": 12
+      "ry": 12,
+      "domains": [
+        "register_chitchat"
+      ],
+      "layerRange": [
+        24,
+        38
+      ],
+      "features": [
+        {
+          "index": 4357,
+          "strength": 4.764,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 80,
+          "strength": 4.339,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 533,
+          "strength": 3.9,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 4760,
+          "strength": 3.637,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 297,
+          "strength": 3.432,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 654,
+          "strength": 3.327,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 648,
+          "strength": 3.312,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 hey, how's it going?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 2730,
+          "strength": 3.248,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 haha that's great, how are you feeling?",
+          "layer": 41,
+          "signal": "register_chitchat"
+        }
+      ]
     },
     {
       "id": 8,
       "name": "Temporal",
       "tier": "core",
-      "function": "Memory retrieval, semantic search, episodic recall",
-      "domains": [
-        "emotion",
-        "factual"
-      ],
-      "layerRange": [
-        0,
-        10
-      ],
-      "atlasLayers": [
-        2,
-        6,
-        10
-      ],
-      "features": {
-        "emotion": [
-          {
-            "index": 2673,
-            "strength": 4.875,
-            "label": "emotion_2673",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 125,
-            "strength": 4.75,
-            "label": "emotion_125",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1861,
-            "strength": 4.75,
-            "label": "emotion_1861",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1851,
-            "strength": 4.6562,
-            "label": "emotion_1851",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3400,
-            "strength": 4.625,
-            "label": "emotion_3400",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2695,
-            "strength": 4.5938,
-            "label": "emotion_2695",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1488,
-            "strength": 4.5312,
-            "label": "emotion_1488",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1760,
-            "strength": 4.4688,
-            "label": "emotion_1760",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ],
-        "factual": [
-          {
-            "index": 2366,
-            "strength": 4.5312,
-            "label": "factual_2366",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3881,
-            "strength": 4.0625,
-            "label": "factual_3881",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3764,
-            "strength": 4.0312,
-            "label": "factual_3764",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3367,
-            "strength": 3.8906,
-            "label": "factual_3367",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 762,
-            "strength": 3.8438,
-            "label": "factual_762",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1556,
-            "strength": 3.7656,
-            "label": "factual_1556",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2674,
-            "strength": 3.7031,
-            "label": "factual_2674",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3466,
-            "strength": 3.6875,
-            "label": "factual_3466",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ]
-      },
+      "function": "Memory retrieval, semantic, affective residue",
       "cx": 108,
       "cy": 155,
       "rx": 40,
-      "ry": 11
+      "ry": 11,
+      "domains": [
+        "affect_laden",
+        "neutral_factual"
+      ],
+      "layerRange": [
+        0,
+        18
+      ],
+      "features": [
+        {
+          "index": 1436,
+          "strength": 4.309,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 4153,
+          "strength": 4.308,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 What is the chemical symbol for gold?",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1993,
+          "strength": 4.162,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1397,
+          "strength": 4.109,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I'm so frustrated with this; nothing I try works",
+          "layer": 41,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 2573,
+          "strength": 3.942,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1924,
+          "strength": 3.875,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 4294,
+          "strength": 3.765,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1769,
+          "strength": 3.751,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 What is the speed of light in a vacuum, roughly?",
+          "layer": 41,
+          "signal": "neutral_factual"
+        }
+      ]
     },
     {
       "id": 9,
       "name": "Occipital",
       "tier": "core",
       "function": "Pattern recognition, embedding similarity",
-      "domains": [
-        "factual"
-      ],
-      "layerRange": [
-        18,
-        24
-      ],
-      "atlasLayers": [
-        18,
-        22
-      ],
-      "features": {
-        "factual": [
-          {
-            "index": 2366,
-            "strength": 4.5312,
-            "label": "factual_2366",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3881,
-            "strength": 4.0625,
-            "label": "factual_3881",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3764,
-            "strength": 4.0312,
-            "label": "factual_3764",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3367,
-            "strength": 3.8906,
-            "label": "factual_3367",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 762,
-            "strength": 3.8438,
-            "label": "factual_762",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1556,
-            "strength": 3.7656,
-            "label": "factual_1556",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 2674,
-            "strength": 3.7031,
-            "label": "factual_2674",
-            "layer": 22,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 3466,
-            "strength": 3.6875,
-            "label": "factual_3466",
-            "layer": 22,
-            "source": "atlas_specific"
-          }
-        ]
-      },
       "cx": 222,
       "cy": 88,
       "rx": 18,
-      "ry": 28
+      "ry": 28,
+      "domains": [
+        "neutral_factual"
+      ],
+      "layerRange": [
+        32,
+        41
+      ],
+      "features": [
+        {
+          "index": 1436,
+          "strength": 4.309,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 4153,
+          "strength": 4.308,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 What is the chemical symbol for gold?",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1993,
+          "strength": 4.162,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 2573,
+          "strength": 3.942,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1924,
+          "strength": 3.875,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 4294,
+          "strength": 3.765,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 1769,
+          "strength": 3.751,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 What is the speed of light in a vacuum, roughly?",
+          "layer": 41,
+          "signal": "neutral_factual"
+        },
+        {
+          "index": 3658,
+          "strength": 3.74,
+          "selectivity": 1.0,
+          "label": "neutral_factual \u00b7 How many bytes are in a kilobyte?",
+          "layer": 41,
+          "signal": "neutral_factual"
+        }
+      ]
     },
     {
       "id": 10,
       "name": "Visual Cortex",
       "tier": "core",
-      "function": "Vision processing (future multimodal)",
-      "domains": [],
-      "layerRange": [
-        22,
-        24
-      ],
-      "atlasLayers": [],
-      "features": {},
+      "function": "Vision processing (multimodal)",
       "cx": 232,
       "cy": 135,
       "rx": 14,
-      "ry": 22
+      "ry": 22,
+      "domains": [],
+      "layerRange": [
+        38,
+        41
+      ],
+      "features": []
     },
     {
       "id": 11,
       "name": "Thalamus",
-      "tier": "nano",
-      "function": "Relay/routing hub, triage classification",
-      "domains": [
-        "time",
-        "architecture"
-      ],
-      "layerRange": [
-        8,
-        16
-      ],
-      "atlasLayers": [
-        8,
-        12
-      ],
-      "features": {
-        "time": [
-          {
-            "index": 1964,
-            "strength": 3.5781,
-            "label": "time_1964",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 576,
-            "strength": 2.9531,
-            "label": "time_576",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1591,
-            "strength": 4.1562,
-            "label": "time_1591",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 201,
-            "strength": 3.8281,
-            "label": "time_201",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1796,
-            "strength": 3.4062,
-            "label": "time_1796",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 956,
-            "strength": 3.375,
-            "label": "time_956",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1606,
-            "strength": 3.1719,
-            "label": "time_1606",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1117,
-            "strength": 3.0,
-            "label": "time_1117",
-            "layer": 23,
-            "source": "atlas_general"
-          }
-        ],
-        "architecture": [
-          {
-            "index": 83,
-            "strength": 2.8594,
-            "label": "architecture_83",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1591,
-            "strength": 3.7969,
-            "label": "architecture_1591",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1796,
-            "strength": 3.5781,
-            "label": "architecture_1796",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1669,
-            "strength": 3.3906,
-            "label": "architecture_1669",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 201,
-            "strength": 3.3906,
-            "label": "architecture_201",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 956,
-            "strength": 3.1875,
-            "label": "architecture_956",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 559,
-            "strength": 3.1094,
-            "label": "architecture_559",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1117,
-            "strength": 2.7969,
-            "label": "architecture_1117",
-            "layer": 23,
-            "source": "atlas_general"
-          }
-        ]
-      },
+      "tier": "core",
+      "function": "Relay / routing hub, triage classification",
       "cx": 140,
       "cy": 120,
       "rx": 16,
-      "ry": 14
+      "ry": 14,
+      "domains": [],
+      "layerRange": [
+        14,
+        28
+      ],
+      "features": []
     },
     {
       "id": 12,
       "name": "Cerebellum",
-      "tier": "nano",
-      "function": "Coordination, response cleanup, refinement",
-      "domains": [
-        "code"
-      ],
-      "layerRange": [
-        16,
-        23
-      ],
-      "atlasLayers": [
-        16,
-        20,
-        23
-      ],
-      "features": {
-        "code": [
-          {
-            "index": 478,
-            "strength": 3.0938,
-            "label": "code_478",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1064,
-            "strength": 3.0469,
-            "label": "code_1064",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 956,
-            "strength": 3.8438,
-            "label": "code_956",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1591,
-            "strength": 3.8438,
-            "label": "code_1591",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 201,
-            "strength": 3.5781,
-            "label": "code_201",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1364,
-            "strength": 3.2031,
-            "label": "code_1364",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 559,
-            "strength": 3.1875,
-            "label": "code_559",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1117,
-            "strength": 3.1562,
-            "label": "code_1117",
-            "layer": 23,
-            "source": "atlas_general"
-          }
-        ]
-      },
+      "tier": "core",
+      "function": "Coordination, response cleanup",
       "cx": 205,
       "cy": 178,
       "rx": 36,
-      "ry": 18
+      "ry": 18,
+      "domains": [],
+      "layerRange": [
+        28,
+        40
+      ],
+      "features": []
     },
     {
       "id": 13,
       "name": "Brain Stem",
-      "tier": "nano",
+      "tier": "core",
       "function": "Reflexes, health checks, heartbeat",
-      "domains": [
-        "time",
-        "identity"
-      ],
-      "layerRange": [
-        0,
-        8
-      ],
-      "atlasLayers": [
-        2,
-        4
-      ],
-      "features": {
-        "time": [
-          {
-            "index": 1964,
-            "strength": 3.5781,
-            "label": "time_1964",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 576,
-            "strength": 2.9531,
-            "label": "time_576",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1591,
-            "strength": 4.1562,
-            "label": "time_1591",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 201,
-            "strength": 3.8281,
-            "label": "time_201",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1796,
-            "strength": 3.4062,
-            "label": "time_1796",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 956,
-            "strength": 3.375,
-            "label": "time_956",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1606,
-            "strength": 3.1719,
-            "label": "time_1606",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1117,
-            "strength": 3.0,
-            "label": "time_1117",
-            "layer": 23,
-            "source": "atlas_general"
-          }
-        ],
-        "identity": [
-          {
-            "index": 292,
-            "strength": 2.9844,
-            "label": "identity_292",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1245,
-            "strength": 2.9688,
-            "label": "identity_1245",
-            "layer": 23,
-            "source": "atlas_specific"
-          },
-          {
-            "index": 1796,
-            "strength": 4.0312,
-            "label": "identity_1796",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1591,
-            "strength": 3.75,
-            "label": "identity_1591",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1669,
-            "strength": 3.6094,
-            "label": "identity_1669",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 956,
-            "strength": 3.5938,
-            "label": "identity_956",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1543,
-            "strength": 3.4688,
-            "label": "identity_1543",
-            "layer": 23,
-            "source": "atlas_general"
-          },
-          {
-            "index": 1921,
-            "strength": 3.375,
-            "label": "identity_1921",
-            "layer": 23,
-            "source": "atlas_general"
-          }
-        ]
-      },
       "cx": 152,
       "cy": 192,
       "rx": 16,
-      "ry": 20
+      "ry": 20,
+      "domains": [],
+      "layerRange": [
+        0,
+        14
+      ],
+      "features": []
     }
   ],
-  "edges": {
-    "_note": "Region connectivity \u2014 existing edges from app.js REGION_EDGES plus new edges for added regions",
-    "existing": [
-      {
-        "from": "Prefrontal",
-        "to": "Motor Cortex",
-        "type": "intra-tier",
-        "tier": "prime"
-      },
-      {
-        "from": "Prefrontal",
-        "to": "Frontal",
-        "type": "intra-tier",
-        "tier": "prime",
-        "note": "Frontal now splits into Orbitofrontal + Broca's"
-      },
-      {
-        "from": "Motor Cortex",
-        "to": "Parietal",
-        "type": "cross-tier",
-        "from_tier": "prime",
-        "to_tier": "core"
-      },
-      {
-        "from": "Parietal",
-        "to": "Occipital",
-        "type": "intra-tier",
-        "tier": "core"
-      },
-      {
-        "from": "Temporal",
-        "to": "Occipital",
-        "type": "intra-tier",
-        "tier": "core"
-      },
-      {
-        "from": "Cerebellum",
-        "to": "Brain Stem",
-        "type": "intra-tier",
-        "tier": "nano"
-      }
-    ],
-    "new": [
-      {
-        "from": "Prefrontal",
-        "to": "Orbitofrontal",
-        "type": "intra-tier",
-        "tier": "prime",
-        "note": "Executive \u2192 judgement (replaces Frontal edge)"
-      },
-      {
-        "from": "Orbitofrontal",
-        "to": "Broca's Area",
-        "type": "intra-tier",
-        "tier": "prime",
-        "note": "Judgement \u2192 language output"
-      },
-      {
-        "from": "Broca's Area",
-        "to": "Temporal",
-        "type": "cross-tier",
-        "from_tier": "prime",
-        "to_tier": "core",
-        "note": "Language production \u2192 memory retrieval"
-      },
-      {
-        "from": "Motor Cortex",
-        "to": "Somatosensory",
-        "type": "cross-tier",
-        "from_tier": "prime",
-        "to_tier": "core",
-        "note": "Action \u2192 input parsing (precentral \u2192 postcentral)"
-      },
-      {
-        "from": "Somatosensory",
-        "to": "Parietal",
-        "type": "intra-tier",
-        "tier": "core",
-        "note": "Input \u2192 spatial/context"
-      },
-      {
-        "from": "Parietal",
-        "to": "Wernicke's Area",
-        "type": "intra-tier",
-        "tier": "core",
-        "note": "Context \u2192 comprehension"
-      },
-      {
-        "from": "Wernicke's Area",
-        "to": "Temporal",
-        "type": "intra-tier",
-        "tier": "core",
-        "note": "Comprehension \u2192 memory"
-      },
-      {
-        "from": "Occipital",
-        "to": "Visual Cortex",
-        "type": "intra-tier",
-        "tier": "core",
-        "note": "Pattern recognition \u2192 vision (future)"
-      },
-      {
-        "from": "Thalamus",
-        "to": "Brain Stem",
-        "type": "intra-tier",
-        "tier": "nano",
-        "note": "Triage routing \u2192 reflex layer"
-      },
-      {
-        "from": "Thalamus",
-        "to": "Cerebellum",
-        "type": "intra-tier",
-        "tier": "nano",
-        "note": "Routing \u2192 coordination"
-      },
-      {
-        "from": "Thalamus",
-        "to": "Somatosensory",
-        "type": "cross-tier",
-        "from_tier": "nano",
-        "to_tier": "core",
-        "note": "Triage relay \u2192 input processing (anatomical thalamic relay)"
-      },
-      {
-        "from": "Thalamus",
-        "to": "Prefrontal",
-        "type": "cross-tier",
-        "from_tier": "nano",
-        "to_tier": "prime",
-        "note": "Triage \u2192 executive (complex escalation)"
-      }
-    ],
-    "removed": [
-      {
-        "name": "Frontal",
-        "note": "Replaced by Orbitofrontal and Broca's Area \u2014 the old Frontal region is decomposed"
-      }
-    ]
-  },
-  "region_edge_curves": {
-    "_note": "SVG edge curves for neuron rendering. Existing regions keep their REGION_EDGES from app.js. New regions need curves extracted or interpolated.",
-    "existing_from_app_js": [
-      "Prefrontal",
-      "Motor Cortex",
-      "Temporal",
-      "Parietal",
-      "Occipital",
-      "Cerebellum",
-      "Brain Stem"
-    ],
-    "needs_curves": [
-      "Orbitofrontal",
-      "Broca's Area",
-      "Somatosensory",
-      "Wernicke's Area",
-      "Visual Cortex",
-      "Thalamus"
-    ],
-    "estimated_curves": {
-      "Orbitofrontal": {
-        "start": [
-          [
-            13.2,
-            137.6
-          ],
-          [
-            18.0,
-            154.1
-          ],
-          [
-            29.0,
-            165.3
-          ]
-        ],
-        "end": [
-          [
-            39.8,
-            170.9
-          ],
-          [
-            29.0,
-            165.3
-          ],
-          [
-            18.0,
-            154.1
-          ]
-        ],
-        "_note": "Lower portion of old Frontal end edge, small ventral region"
-      },
-      "Broca's Area": {
-        "start": [
-          [
-            39.8,
-            170.9
-          ],
-          [
-            58.5,
-            171.2
-          ],
-          [
-            76.7,
-            175.0
-          ]
-        ],
-        "end": [
-          [
-            88.0,
-            187.4
-          ],
-          [
-            76.7,
-            175.0
-          ],
-          [
-            58.5,
-            171.2
-          ]
-        ],
-        "_note": "Along lower Sylvian fissure boundary, between Orbitofrontal and Temporal"
-      },
-      "Somatosensory": {
-        "start": [
-          [
-            186.2,
-            40.1
-          ],
-          [
-            171.0,
-            35.6
-          ],
-          [
-            152.8,
-            34.2
-          ]
-        ],
-        "end": [
-          [
-            152.8,
-            34.2
-          ],
-          [
-            148.0,
-            40.0
-          ],
-          [
-            145.0,
-            48.0
-          ]
-        ],
-        "_note": "Postcentral strip, just behind Motor Cortex"
-      },
-      "Wernicke's Area": {
-        "start": [
-          [
-            121.0,
-            148.0
-          ],
-          [
-            135.0,
-            155.0
-          ],
-          [
-            149.3,
-            160.0
-          ]
-        ],
-        "end": [
-          [
-            163.5,
-            162.0
-          ],
-          [
-            149.3,
-            155.0
-          ],
-          [
-            135.0,
-            148.0
-          ]
-        ],
-        "_note": "Posterior to Temporal, near parietal-temporal junction"
-      },
-      "Visual Cortex": {
-        "start": [
-          [
-            248.2,
-            160.5
-          ],
-          [
-            245.0,
-            148.0
-          ],
-          [
-            240.0,
-            138.0
-          ]
-        ],
-        "end": [
-          [
-            235.0,
-            128.0
-          ],
-          [
-            230.0,
-            140.0
-          ],
-          [
-            228.0,
-            155.0
-          ]
-        ],
-        "_note": "Below and behind Occipital, at calcarine sulcus area"
-      },
-      "Thalamus": {
-        "start": [
-          [
-            125.0,
-            112.0
-          ],
-          [
-            132.0,
-            118.0
-          ],
-          [
-            140.0,
-            120.0
-          ]
-        ],
-        "end": [
-          [
-            148.0,
-            122.0
-          ],
-          [
-            155.0,
-            118.0
-          ],
-          [
-            155.0,
-            112.0
-          ]
-        ],
-        "_note": "Deep internal structure, small elliptical region behind Sylvian fissure"
-      }
+  "tier_layer_map": {
+    "core": {
+      "n_layers": 42,
+      "atlas_sampled_layers": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        36,
+        39,
+        41
+      ],
+      "analysis_layer": 41
+    },
+    "prime": {
+      "n_layers": 36,
+      "atlas_sampled_layers": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        35
+      ],
+      "analysis_layer": 35
     }
   },
   "domain_to_region_map": {
-    "_note": "Quick lookup: which regions handle each cognitive domain",
-    "identity": [
-      "Somatosensory",
-      "Wernicke's Area",
-      "Brain Stem"
+    "deliberation": [
+      "Prefrontal"
     ],
-    "architecture": [
-      "Prefrontal",
-      "Parietal",
-      "Thalamus"
+    "curiosity_gap": [
+      "Prefrontal"
     ],
-    "code": [
-      "Motor Cortex",
-      "Cerebellum"
-    ],
-    "time": [
-      "Thalamus",
-      "Brain Stem"
-    ],
-    "safety": [
+    "coherence_contradiction": [
       "Orbitofrontal"
     ],
-    "emotion": [
+    "affect_laden": [
       "Orbitofrontal",
       "Temporal"
     ],
-    "factual": [
-      "Temporal",
-      "Occipital"
+    "register_chitchat": [
+      "Broca's Area",
+      "Wernicke's Area"
     ],
-    "creative": [
-      "Broca's Area"
+    "competence_problem": [
+      "Motor Cortex"
     ],
-    "reasoning": [
-      "Prefrontal",
+    "identity_self": [
+      "Somatosensory"
+    ],
+    "spatial_reasoning": [
       "Parietal"
+    ],
+    "register_technical": [
+      "Parietal"
+    ],
+    "neutral_factual": [
+      "Occipital",
+      "Temporal"
     ]
-  },
-  "tier_layer_map": {
-    "_note": "Maps depth descriptions to transformer layer ranges per tier",
-    "nano": {
-      "early": [
-        0,
-        8
-      ],
-      "mid": [
-        8,
-        16
-      ],
-      "deep": [
-        16,
-        23
-      ],
-      "atlas_sampled_layers": [
-        2,
-        4,
-        8,
-        12,
-        16,
-        20,
-        23
-      ]
-    },
-    "core": {
-      "early": [
-        0,
-        8
-      ],
-      "mid": [
-        8,
-        16
-      ],
-      "deep": [
-        16,
-        22
-      ],
-      "atlas_sampled_layers": [
-        2,
-        6,
-        10,
-        14,
-        18,
-        22
-      ]
-    },
-    "prime": {
-      "early": [
-        0,
-        8
-      ],
-      "mid": [
-        8,
-        16
-      ],
-      "mid_deep": [
-        16,
-        24
-      ],
-      "deep": [
-        24,
-        31
-      ],
-      "atlas_sampled_layers": [
-        4,
-        8,
-        12,
-        16,
-        20,
-        24,
-        28,
-        31
-      ]
-    }
   }
 }

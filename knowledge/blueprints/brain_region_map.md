@@ -1,68 +1,32 @@
 # GAIA Brain Region Map
 
-> Butcher-diagram style: sagittal side-view, brain faces LEFT.
-> 13 named regions across 3 cognitive tiers.
+> Hybrid (anatomy + discriminative SAE data). **Sovereign Duality**: Core + Prime only — the Nano tier is retired, its 3 subcortical regions re-tiered to Core. Region coordinates keep the anatomical diagram; each region's cognitive signals + features are **data-assigned** from `feature_cognitive_signal_table`.
 
-## Visual Layout
-
-```
-SAGITTAL SIDE VIEW (brain faces LEFT)
-VP: 280w x 225h, brain image y=20..220
-
-          ┌─ Motor Cortex(4) ─┐
-         ╱   (action/tools)    ╲
-  ┌─ Prefrontal(1) ─┐  ┌─ Somatosensory(5) ─┐
-  │  (executive      │  │  (input parsing)    │
-  │   reasoning)     │  └────────┬────────────┘
-  ├──────────────────┤    ┌─ Parietal(6) ─┐    ┌─ Occipital(9) ──┐
-  │ Orbitofrontal(2) │    │ (spatial/      │    │  (pattern       │
-  │ (judgement)      │    │  context)      │    │   recognition)  │
-  └──────┬───────────┘    └─────┬──────────┘    └──────┬──────────┘
-    ┌─ Broca's(3) ─┐   ┌─ Wernicke's(7) ─┐          │
-    │ (language     │   │  (language      │     ┌─ Visual(10) ──┐
-    │  output)      │   │   comprehension)│     │  (vision,     │
-    └──────┬────────┘   └──────┬──────────┘     │   future)     │
-     ┌─ Temporal(8) ──────────────────────┐     └───────────────┘
-     │   (memory / semantic retrieval)    │
-     └────────────────────────────────────┘
-          ┌─ Thalamus(11) ─┐
-          │  (relay/triage) │
-          └──────┬──────────┘
-        ┌─ Cerebellum(12) ─┐
-        │  (coordination)   │
-        └───────┬───────────┘
-          ┌─ Brain Stem(13) ─┐
-          │   (reflexes)      │
-          └───────────────────┘
-```
+> Features are at each tier's analysis layer (Core L41 / Prime L35). Core 78.6% / Prime 67.7% of features are stratum-selective.
 
 ## Region Table
 
-| # | Region | Tier | GAIA Function | Anatomical Position |
-|---|--------|------|---------------|---------------------|
-| 1 | Prefrontal | Prime | Executive reasoning, complex planning | Upper-left front |
-| 2 | Orbitofrontal | Prime | Value judgement, ethical sentinel | Lower-left front |
-| 3 | Broca's Area | Prime | Language generation, response composition | Left-mid, below Sylvian fissure |
-| 4 | Motor Cortex | Prime | Action planning, tool execution dispatch | Top center, precentral gyrus |
-| 5 | Somatosensory | Core | Input parsing, prompt analysis | Top center, postcentral gyrus |
-| 6 | Parietal | Core | Spatial/contextual reasoning, working memory | Upper-mid dome |
-| 7 | Wernicke's Area | Core | Language comprehension, intent detection | Mid-left, posterior Sylvian |
-| 8 | Temporal | Core | Memory retrieval, semantic search, episodic | Lower band, below Sylvian |
-| 9 | Occipital | Core | Pattern recognition, embedding similarity | Back upper |
-| 10 | Visual Cortex | Core | Vision processing (future multimodal) | Back lower |
-| 11 | Thalamus | Nano | Relay/routing hub, triage classification | Deep center (internal) |
-| 12 | Cerebellum | Nano | Coordination, response cleanup, refinement | Lower-right, foliated |
-| 13 | Brain Stem | Nano | Reflexes, health checks, heartbeat | Bottom center-right |
+| # | Region | Tier | Function | Signals (data-assigned) | Layers |
+|---|--------|------|----------|-------------------------|--------|
+| 1 | Prefrontal | prime | Executive reasoning, complex planning | deliberation, curiosity_gap | 27–35 |
+| 2 | Orbitofrontal | prime | Value judgement, coherence / ethical sentinel | coherence_contradiction, affect_laden | 18–27 |
+| 3 | Broca's Area | prime | Language generation, response composition | register_chitchat | 9–18 |
+| 4 | Motor Cortex | prime | Action planning, tool execution | competence_problem | 4–14 |
+| 5 | Somatosensory | core | Input parsing, prompt analysis | identity_self | 0–14 |
+| 6 | Parietal | core | Spatial / contextual reasoning, working memory | spatial_reasoning, register_technical | 14–28 |
+| 7 | Wernicke's Area | core | Language comprehension, intent detection | register_chitchat | 24–38 |
+| 8 | Temporal | core | Memory retrieval, semantic, affective residue | affect_laden, neutral_factual | 0–18 |
+| 9 | Occipital | core | Pattern recognition, embedding similarity | neutral_factual | 32–41 |
+| 10 | Visual Cortex | core | Vision processing (multimodal) | — | 38–41 |
+| 11 | Thalamus | core | Relay / routing hub, triage classification | — | 14–28 |
+| 12 | Cerebellum | core | Coordination, response cleanup | — | 28–40 |
+| 13 | Brain Stem | core | Reflexes, health checks, heartbeat | — | 0–14 |
 
-## Tier Summary
-
-- **Prime** (4 regions): Prefrontal, Orbitofrontal, Broca's, Motor Cortex — higher cognition
-- **Core** (6 regions): Somatosensory, Parietal, Wernicke's, Temporal, Occipital, Visual — operational processing
-- **Nano** (3 regions): Thalamus, Cerebellum, Brain Stem — fast reflexes and routing
+## Tiers
+- **Prime** (4): Prefrontal, Orbitofrontal, Broca's, Motor Cortex — higher cognition
+- **Core** (9): Somatosensory, Parietal, Wernicke's, Temporal, Occipital, Visual, + Thalamus, Cerebellum, Brain Stem (formerly Nano) — operational + subcortical
 
 ## Notes
-
-- Coordinates TBD — will be assigned after SAE atlas review determines how many features per region
-- Layer ranges per region will map to transformer layer groups from each tier's SAE
-- Region edges (start/end anchor curves) follow the existing SVG anatomy paths
-- Thalamus is anatomically deep/internal — rendered as a small ellipse behind the Sylvian fissure
+- Signals per region are functional best-match; the *features* attached are the actual discriminative SAE features for that signal (candidate neural correlates).
+- `layer_N_labels.json` emitted alongside so the live activation monitor shows these signal labels.
+- Follow-up (7jz): resolve causal_connectivity synapse source/target regions against this map; per-layer (not just analysis-layer) signal distribution.
