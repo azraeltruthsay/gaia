@@ -131,12 +131,20 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             {"role": "assistant", "content": "Good evening! What can I do for you?"},
             {"role": "user", "content": "What time is it?"},
             {"role": "assistant", "content": f"It's {clock_display}."},
-            {"role": "user", "content": "Who are you?"},
-            {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael."},
             {"role": "user", "content": "What is the capital of France?"},
             {"role": "assistant", "content": "ESCALATE"},
-            {"role": "user", "content": "Tell me about quantum physics"},
+            {"role": "user", "content": "Can you check the weather forecast?"},
             {"role": "assistant", "content": "ESCALATE"},
+            # Identity exemplar placed LAST, immediately before the real turn:
+            # Gemma4-E4B's few-shot proximity bias means whatever sits closest
+            # to the real input has the strongest pull on it. This used to be
+            # a topic-heavy ESCALATE example ("quantum physics"), which bled
+            # its content into unrelated identity answers (GAIA_Project-bte —
+            # "who are you" produced a confabulated quantum-physics tangent).
+            # Identity content is the safe thing to have adjacent: worst case
+            # a leak just reinforces "I'm GAIA," which is harmless everywhere.
+            {"role": "user", "content": "Who are you?"},
+            {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael."},
             {"role": "user", "content": packet.content.original_prompt}
         ]
     logger.info(packet)
