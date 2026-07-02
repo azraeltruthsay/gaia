@@ -36,7 +36,10 @@ services:
       - CORE_ENDPOINT=http://gaia-core-candidate:6415
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
-      - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      # Tracks the live /models/prime symlink — was hardcoded to an
+      # abandoned Huihui-Qwen3-8B abliteration experiment that no longer
+      # exists on disk (GAIA_Project-74v).
+      - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
       # Candidate Core: safetensors primary (GPU), GGUF fallback (CPU).
       # Tracks the same live /models/core{,.gguf} symlinks as production
       # (promotion pipeline repoints these) — was hardcoded to the retired
@@ -211,7 +214,7 @@ services:
     # Config, volume, and env var are already wired — just needs this flag.
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model ${PRIME_MODEL_PATH:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
+      --model ${PRIME_MODEL_PATH:-/models/prime}
       --host 0.0.0.0
       --port 7777
       --gpu-memory-utilization 0.65
