@@ -151,12 +151,14 @@ class TestInferenceParams:
             affect_inference_params, current_affect_snapshot,
         )
         # Curiosity would say "exploratory" but fatigue should win.
-        affect_with_kg.record_feeling("curiosity", 0.7)
-        affect_with_kg.record_feeling("fatigue", 0.7)
+        # Graded formula (post-3rr): explore(0.3) -> tm*=1.105;
+        # fatigue(1.0) -> tm*=0.7 => tm=0.7735, under the 0.85 terse
+        # threshold. (curiosity=0.7/fatigue=0.7 no longer trips terse —
+        # tm tops out at 0.984, so style_hint falls through to None.)
+        affect_with_kg.record_feeling("curiosity", 0.3)
+        affect_with_kg.record_feeling("fatigue", 1.0)
         params = affect_inference_params(current_affect_snapshot())
         assert params["style_hint"] == "terse"
-        # Fatigue ×0.8 then prior ×1.3 ⇒ 1.04 — caller will floor
-        # at some sane minimum; we just check direction.
         assert params["max_tokens_multiplier"] < 1.3
 
 
