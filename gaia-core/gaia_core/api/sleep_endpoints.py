@@ -379,7 +379,7 @@ async def deep_sleep(request: Request):
                 logger.info("Deep sleep: Core running llama-server (no unload endpoint)")
                 try:
                     # Clear all KV cache slots
-                    resp2 = await client.post(f"{core_engine_url}/slots/idle")
+                    await client.post(f"{core_engine_url}/slots/idle")
                     logger.info("Deep sleep: Core llama-server slots cleared")
                 except Exception:
                     pass

@@ -37,9 +37,13 @@ services:
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/Huihui-Qwen3-8B-abliterated-v2-merged}
-      # Candidate Core: safetensors primary (GPU), GGUF fallback (CPU)
-      - CORE_SAFETENSORS_PATH=/models/Qwen3.5-2B-GAIA-Core-v3
-      - CORE_CPU_MODEL_PATH=/models/Qwen3.5-2B/Qwen3.5-2B-BF16.gguf
+      # Candidate Core: safetensors primary (GPU), GGUF fallback (CPU).
+      # Tracks the same live /models/core{,.gguf} symlinks as production
+      # (promotion pipeline repoints these) — was hardcoded to the retired
+      # Qwen3.5-2B generation, which no longer exists on disk, so the
+      # embedded engine silently never started (GAIA_Project-jov).
+      - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
+      - CORE_CPU_MODEL_PATH=/models/core.gguf
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
