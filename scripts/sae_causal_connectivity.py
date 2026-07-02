@@ -107,14 +107,31 @@ def compute_region_connectivity(
     regions = region_atlas.get("regions", [])
 
     def find_region(layer: int, tier_name: str) -> str:
-        """Find which brain region a layer belongs to for this tier."""
-        for r in regions:
-            if r["tier"] != tier_name:
-                continue
+        """Find which brain region a layer belongs to for this tier.
+
+        Regions may not tile the full layer range (e.g. Prime's lowest region
+        Motor Cortex starts at layer 4, leaving 0-3 uncovered). Rather than
+        emit "unknown", snap an uncovered layer to the nearest region of the
+        tier by layer distance — every synapse resolves to a real region.
+        """
+        tier_regions = [r for r in regions if r["tier"] == tier_name]
+        for r in tier_regions:
             lr = r.get("layerRange", [0, 0])
             if lr[0] <= layer <= lr[1]:
                 return r["name"]
-        return "unknown"
+        # No region contains this layer — snap to the nearest by edge distance.
+        if not tier_regions:
+            return "unknown"
+
+        def dist(r):
+            lo, hi = r.get("layerRange", [0, 0])
+            if layer < lo:
+                return lo - layer
+            if layer > hi:
+                return layer - hi
+            return 0
+
+        return min(tier_regions, key=dist)["name"]
 
     source_region = find_region(source_layer, tier)
     target_region = find_region(target_layer, tier)

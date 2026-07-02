@@ -8,8 +8,9 @@ Two signals, ONE atlas (same feature space — must be the same atlas/tag):
   - CROSS-layer causal connectivity (causal_connectivity.json): encoder_M·decoder_N
     influence → "pathways" (inter-layer edges), strength-weighted, signed.
 
-Nodes are (layer, feature), annotated with brain region (from the re-derived
-brain_region_atlas_v2.json, A4). Output: synapse_graph.json (nodes + edges +
+Nodes are (layer, feature), annotated with brain region (from the canonical
+hybrid brain_region_atlas.json — the anatomy scheme the dashboard uses, which
+superseded the v2 depth-zone map). Output: synapse_graph.json (nodes + edges +
 summary) — the graph the dashboard / analysis consumes.
 
   docker compose exec -T gaia-core python /gaia/GAIA_Project/scripts/build_synapse_graph.py \
@@ -26,12 +27,18 @@ def region_lookup(region_atlas_path, tier):
         return lambda L: "unknown"
     regions = [r for r in ra.get("regions", []) if r.get("tier") == tier]
 
+    def dist(r, layer):
+        lo, hi = r.get("layerRange", [0, 0])
+        return lo - layer if layer < lo else (layer - hi if layer > hi else 0)
+
     def find(layer):
         for r in regions:
             lo, hi = r.get("layerRange", [0, 0])
             if lo <= layer <= hi:
                 return r["name"]
-        return "unknown"
+        # Uncovered layer — snap to nearest region of the tier (see
+        # sae_causal_connectivity.find_region for rationale).
+        return min(regions, key=lambda r: dist(r, layer))["name"] if regions else "unknown"
     return find
 
 
@@ -40,7 +47,7 @@ def main():
     ap.add_argument("--tier", required=True)
     ap.add_argument("--tag", required=True, help="atlas tag holding BOTH co_activation.json + causal_connectivity.json")
     ap.add_argument("--atlas", default="/shared/atlas")
-    ap.add_argument("--region-atlas", default="/gaia/GAIA_Project/gaia-web/static/brain_region_atlas_v2.json")
+    ap.add_argument("--region-atlas", default="/gaia/GAIA_Project/gaia-web/static/brain_region_atlas.json")
     ap.add_argument("--min-cofire", type=int, default=0, help="extra floor on intra-layer edges")
     args = ap.parse_args()
 
