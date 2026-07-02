@@ -2759,14 +2759,33 @@ class AgentCore:
                 # Remove the tool-request phrasing to get the actual query
                 import re as _re_search
                 _query = user_input
+                _stripped_any = False
                 for _strip in ["can you please focus and ", "can you ", "please ",
                                "use your web tool to ", "use the web tool to ",
                                "search the web for ", "search for ",
                                "try to use your web tool to ",
                                "recite ", "look up "]:
-                    _query = _re_search.sub(f"(?i){_re_search.escape(_strip)}", "", _query).strip()
-                if not _query or len(_query) < 3:
-                    _query = user_input  # Fallback to full input
+                    _new_query = _re_search.sub(f"(?i){_re_search.escape(_strip)}", "", _query).strip()
+                    if _new_query != _query:
+                        _stripped_any = True
+                    _query = _new_query
+                if not _stripped_any or not _query or len(_query) < 3:
+                    # None of the known strip-phrases isolated a subject —
+                    # the trigger phrase is embedded in ordinary conversational
+                    # prose ("...it would probably be best to do a web search
+                    # to learn more."). Rather than falling back to the ENTIRE
+                    # raw utterance — including the speaker's own
+                    # self-referential instruction to search — drop
+                    # whichever sentence(s) contain the trigger phrase and
+                    # use what's left (the actual subject matter).
+                    # (GAIA_Project-h34)
+                    _sentences = _re_search.split(r'(?<=[.?!])\s+', user_input)
+                    _trigger_phrases = ["web tool", "web search", "search the web",
+                                        "search online", "look it up", "look up online",
+                                        "use your web", "search for the", "search for it"]
+                    _kept = [s for s in _sentences if not any(t in s.lower() for t in _trigger_phrases)]
+                    _candidate = " ".join(_kept).strip()
+                    _query = _candidate if len(_candidate) >= 3 else user_input
 
                 logger.info("Deterministic web search pre-execution: query='%s'", _query[:80])
                 try:

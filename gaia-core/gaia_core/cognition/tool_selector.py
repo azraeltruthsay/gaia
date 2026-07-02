@@ -253,9 +253,26 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
                         query = before
                     break
 
-        # Pattern 3: fallback — use the full text but strip tool instructions
+        # Pattern 3: the trigger phrase is embedded in ordinary conversational
+        # prose ("...it would probably be best to do a web search to learn
+        # more."), so neither explicit pattern above matched. Rather than
+        # handing the model's search tool the ENTIRE raw utterance — which
+        # includes the speaker's own self-referential instruction to search —
+        # drop whichever sentence(s) contain the trigger phrase and use
+        # what's left (the actual subject matter) as the query.
+        # (GAIA_Project-h34: a "search the web" aside inside a multi-sentence
+        # explanation previously became the literal, verbatim search query.)
         if query is None:
-            query = lowered
+            _sentences = re.split(r'(?<=[.?!])\s+', lowered)
+            _trigger_phrases = ["web search", "search the web", "search online",
+                                 "search the internet", "google ", "look it up"]
+            _kept = [s for s in _sentences if not any(t in s for t in _trigger_phrases)]
+            _candidate = " ".join(_kept).strip()
+            # Only trust the trimmed candidate if real content remains —
+            # otherwise the whole message WAS just the search request
+            # ("please do a web search"), and the full text is genuinely
+            # all we have.
+            query = _candidate if len(_candidate) >= 3 else lowered
 
         # Clean up common prefixes (addressing, politeness) — apply repeatedly
         _changed = True
