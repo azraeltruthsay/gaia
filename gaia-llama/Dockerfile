@@ -1,4 +1,7 @@
 # gaia-nano: Dual-mode Reflex tier — GGUF (llama-server) + Safetensors (GAIAEngine)
+# LEGACY: the Nano tier was deprecated in Sovereign Duality. No compose file builds
+# this image today — production gaia-nano is an alpine/socat proxy to gaia-core:8092.
+# Kept as the original engine container in case a real Nano tier is restored.
 # GGUF mode: fast inference via llama.cpp with CUDA
 # Safetensors mode: full activation monitoring (polygraph), SAE analysis, adapter loading
 ARG LLAMA_CPP_TAG=b8770

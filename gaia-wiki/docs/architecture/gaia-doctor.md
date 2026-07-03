@@ -38,6 +38,6 @@ Doctor also runs periodic wiring validation (every 5 minutes) to check for orpha
 - **Cognitive battery**: ~50 tests across 9 sections validating model alignment
 - **Cognitive monitor**: Periodic heartbeat probes to verify inference health
 - **Surgeon queue**: Human-in-the-loop approval for automated repairs
-- **KV cache monitoring**: Independent pressure monitoring on Nano/Core slots
+- **KV cache monitoring**: Independent pressure monitoring on engine slots (the `gaia-nano:8080/slots` probe now reaches Core's embedded engine via the deprecated-nano passthrough)
 - **GPU zombie cleanup**: Detects orphaned GPU processes
 - **VRAM reconciliation**: Compares orchestrator state vs actual nvidia-smi

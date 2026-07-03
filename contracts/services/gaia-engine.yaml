@@ -200,16 +200,16 @@ managed_http_api:
 
 consumed_by:
   - service: gaia-prime
-    usage: "Runs GAIA Engine in managed mode on port 7777 (GPU, 8B Thinker model)"
+    usage: "Runs GAIA Engine in managed mode on port 7777 (Qwen3-VL-8B-GAIA-Prime-v1: CPU/GGUF default, GPU when FOCUSING)"
     import: "gaia_engine.serve / gaia_engine.serve_managed"
 
   - service: gaia-core
-    usage: "Runs embedded GAIA Engine on localhost:8092 (CPU, 2B Core model)"
+    usage: "Runs embedded GAIA Engine on localhost:8092 (Gemma4-E4B-GAIA-Core-v1: GPU NF4 or CPU GGUF)"
     import: "gaia_engine.serve_managed (via gaia_core/gaia_engine.py shim)"
 
-  - service: gaia-nano
-    usage: "Runs GAIA Engine in managed mode on port 8080 (GPU primary, GGUF CPU fallback)"
-    import: "gaia_engine.serve_managed"
+  # gaia-nano REMOVED as a consumer (Sovereign Duality, noted 2026-07-02):
+  # gaia-nano is now an alpine/socat TCP passthrough to gaia-core:8092 and
+  # no longer imports or runs the engine.
 
   - service: gaia-orchestrator
     usage: "Imports lifecycle types for state machine authority"

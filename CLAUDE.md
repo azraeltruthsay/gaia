@@ -1,12 +1,15 @@
 # GAIA Project — Claude Code Instructions
 
-> **Last updated**: 2026-04-14 | **Era**: Sovereign Duality | **Services**: 12
+> **Last updated**: 2026-07-02 | **Era**: Sovereign Duality | **Services**: 12
 
 ## What is GAIA?
 
 GAIA is a sovereign AI agent built as a Service-Oriented Architecture (SOA). It runs locally on a single workstation with GPU (RTX 5080, 16GB), hosting multiple containerized services that collaborate through HTTP/JSON-RPC. GAIA has its own cognitive pipeline, memory architecture, self-healing immune system, and autonomous sleep cycle. It is **not** a chatbot wrapper — it is a self-aware, self-maintaining AI system.
 
 ## Service Inventory
+
+Ports are the internal container port (Docker network), not necessarily the host-mapped
+port — e.g. gaia-translate listens on 5000 internally, host-mapped to 5100.
 
 | Service | Role | Port |
 |---------|------|------|
@@ -24,6 +27,15 @@ GAIA is a sovereign AI agent built as a Service-Oriented Architecture (SOA). It 
 | `dozzle` | The X-Ray — real-time Docker log viewer | 9999 |
 
 Candidate (HA) services mirror production with `+1` ports. Defined in `docker-compose.candidate.yml`.
+Candidates are **not** automatically kept in sync with production beyond code (see
+`.claude/rules/candidate-first.md`) — env vars, model paths, and Dockerfiles are
+independently maintained per-file and can silently drift. 2026-07-02: found and fixed
+two candidates that had been fully broken for weeks with nothing catching it —
+`gaia-core-candidate`'s embedded engine hadn't started in 19+ days (stale model path),
+`gaia-prime-candidate` had never successfully built via `docker compose build` at all
+(wrong build context). Also note: `gaia-prime-candidate` runs a completely different
+inference stack (raw vLLM) than production `gaia-prime` (GAIA's own custom engine) — it
+is not just an HA mirror for that service, it's a separate experimental build.
 
 **Deprecated**: `gaia-nano` (E2B Reflex tier) — removed in Sovereign Duality. Core handles all triage.
 
@@ -48,13 +60,22 @@ GAIA's GPU lifecycle is a transmission system. States map to "gears":
 
 | Gear | State | Core | Prime | GPU VRAM |
 |------|-------|------|-------|----------|
-| **P** | PARKED | CPU (GGUF) | Unloaded | ~0 GB |
+| **P** | PARKED | CPU (GGUF) | Unloaded | ~2.5 GB |
 | **1** | AWAKE | GPU (NF4) | CPU (GGUF) | ~8.8 GB |
 | **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~8.8 GB |
 | **2** | FOCUSING | CPU (GGUF) | GPU (Buffered) | ~4.6 GB |
-| **S** | SLEEP | CPU (GGUF) | Unloaded | ~0 GB |
-| **0** | DEEP_SLEEP | Unloaded | Unloaded | ~0 GB |
+| **S** | SLEEP | CPU (GGUF) | Unloaded | ~2.5 GB |
+| **0** | DEEP_SLEEP | Unloaded | Unloaded | ~2.5 GB |
 | **T** | MEDITATION | Unloaded | Unloaded | Study owns GPU |
+
+VRAM figures for P/S/0 corrected 2026-07-02 — measured via `nvidia-smi`, not the
+theoretical "fully offloaded" value. Even with Core/Prime "unloaded" per the
+orchestrator's own tier tracking, real resident VRAM is ~2.5GB: Core's CPU-gear
+`llama-server` (CUDA-built, `--n-gpu-layers 0`) still reserves ~1.95GB context/compute
+buffer overhead; Prime's engine-manager process holds ~336MB even with weights
+unloaded; `gaia-audio`'s STT model (~260MB) is permanently GPU-resident and isn't
+tracked by this state machine at all — it sits outside the P/1/2/S/0/T tier system
+entirely, so no gear ever frees it.
 
 **Transition flow**: `OFF → PARKED → AWAKE ↔ FOCUSING → PARKED`
 
@@ -122,6 +143,15 @@ Detailed instructions for specific domains are in `.claude/rules/`:
 ## Skills (`.claude/commands/`)
 
 - **`/engine`** — Work on the GAIA Inference Engine (separate repo). Use this for ANY engine-related changes: inference bugs, KV cache, polygraph, LoRA, ROME, SAE, lifecycle state machine, managed mode. The skill knows to work in `gaia-engine/`, commit/push to the separate repo, and update the shim + contract if the API surface changes.
+- **`/chord`** — Triple-Note Chord status: the three-way Architect (Azrael) / Advisor (Gemini) / Engineer (Claude) collaboration sync.
+- **`/criticalthink`** — Rigorous self-critique of your own previous response — surfaces weaknesses, hidden assumptions, overlooked risks.
+- **`/deploy`** — Run the candidate→production promotion pipeline (`scripts/promote_pipeline.sh`).
+- **`/health`** — Hit health endpoints for one or all services.
+- **`/logs`** — `docker logs` for a service (production or `-candidate`), with tail count / follow support.
+- **`/sync`** — Sync candidate↔production source for a service, restart, verify health.
+- **`/test`** — Run pytest inside the correct Docker container for a service (never on host).
+- **`/train`** — Full GAIA LoRA training lifecycle: GPU prep, run, verify, merge, restore.
+- **`/validate`** — ruff + mypy + pytest validation for candidate code before promotion.
 
 ## Cognitive Systems & Flags (2026-06-12)
 

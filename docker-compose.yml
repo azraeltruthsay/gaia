@@ -1,9 +1,9 @@
 # GAIA Service-Oriented Architecture - Master Composition
 #
 # Services:
-#   - gaia-core:  The Brain   - Cognitive loop + embedded Core CPU inference (delegates to gaia-prime for GPU)
-#   - gaia-nano:  The Reflex  - Nano triage classifier (GPU, GAIA Engine managed mode)
-#   - gaia-prime: The Voice   - Standalone vLLM inference server (GPU)
+#   - gaia-core:  The Brain   - Cognitive loop + embedded Core inference (GAIA Engine: GPU NF4 or CPU GGUF)
+#   - gaia-nano:  DEPRECATED  - socat proxy forwarding :8080 -> gaia-core:8092 (Core handles triage)
+#   - gaia-prime: The Voice   - GAIA Engine inference server (standby; GPU when FOCUSING)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
 #   - gaia-mcp:   The Hands   - Sandboxed tool execution
@@ -205,9 +205,9 @@ services:
           memory: 32M
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-core: The Brain - Cognitive loop + embedded Core CPU inference
-  # Runs llama-server internally for Core/Lite (Qwen3.5-4B) on port 8092
-  # GPU inference offloaded to gaia-prime via PRIME_ENDPOINT
+  # gaia-core: The Brain - Cognitive loop + embedded Core/Operator inference
+  # Runs the GAIA Engine internally for Core (Gemma4-E4B-GAIA-Core-v1) on port 8092
+  # (GPU NF4 safetensors normally; CPU GGUF llama-server when Prime owns the GPU)
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-core:
     build:
@@ -322,7 +322,7 @@ services:
       # Service endpoints (configurable for candidate injection)
       - MCP_ENDPOINT=${MCP_ENDPOINT:-http://gaia-mcp:8765/jsonrpc}
       - STUDY_ENDPOINT=${STUDY_ENDPOINT:-http://gaia-study:8766}
-      # CPU-only mode — GPU inference offloaded to gaia-prime
+      # Inference backend selection (auto = GPU safetensors when available, CPU GGUF otherwise)
       - GAIA_BACKEND=${GAIA_BACKEND:-auto}
       - GAIA_FORCE_CPU=0
       - GAIA_FORCE_OPERATOR=${GAIA_FORCE_OPERATOR:-0}
@@ -343,7 +343,7 @@ services:
       - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
       # Force NF4 quantization for Core — bf16 (8.9GB) leaves too little
-      # headroom for KV cache + logits on 16GB GPU with Nano also loaded.
+      # headroom for KV cache + logits on the 16GB GPU.
       # NF4 (~2.5GB) frees ~6GB for generation and prevents OOM.
       - GAIA_ENGINE_QUANTIZE=nf4
       # Multimodal Core: keep vision + audio towers attached (adds ~3GB VRAM

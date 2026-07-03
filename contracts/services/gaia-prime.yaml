@@ -12,6 +12,14 @@ notes: |
 
   If PRIME_AUTOLOAD=1, the model is loaded on startup (standalone mode).
 
+  NOTE (2026-07-02): this contract describes PRODUCTION gaia-prime only.
+  gaia-prime-candidate (docker-compose.candidate.yml) is NOT an HA mirror of this
+  service in the usual sense — it runs a completely different inference stack, a raw
+  vLLM server (candidates/gaia-prime/Dockerfile), not the GAIA Engine described here.
+  Different framework, different API surface, different lifecycle (no managed-mode
+  zero-GPU standby — vLLM loads the model on container start). Treat it as a separate
+  experimental build, not a drop-in candidate for this contract.
+
 provides:
   # ── OpenAI-Compatible Inference ────────────────────────────────────
   - endpoint: /v1/chat/completions
@@ -197,7 +205,7 @@ consumes: []
 
 environment:
   PRIME_PORT: "7777"
-  PRIME_MODEL_PATH: "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ"
+  PRIME_MODEL_PATH: "/models/prime"  # live symlink -> Qwen3-VL-8B-GAIA-Prime-v1-abliterated
   PRIME_DEVICE: "cuda"
   PRIME_AUTOLOAD: "1"
 

@@ -103,7 +103,7 @@ Commands:
 
 When you inject a candidate:
 
-1. The candidate container starts on the **live network** (`gaia-network`)
+1. The candidate container starts on the **live network** (`gaia-net`)
 2. It's accessible to live services via hostname (e.g., `gaia-mcp-candidate`)
 3. You manually redirect traffic by restarting the caller with an endpoint override
 
@@ -147,7 +147,7 @@ curl http://localhost:6414/api/chat -d '{"message": "test"}'
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    gaia-network                              │
+│                    gaia-net                                  │
 │                                                              │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐              │
 │  │ gaia-web │───▶│gaia-core │───▶│ gaia-mcp │  (live)      │
@@ -167,7 +167,7 @@ In parallel mode, all candidates talk to each other on the same network:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    gaia-network                              │
+│                    gaia-net                                  │
 │                                                              │
 │  Live services (running)          Candidates (running)      │
 │  ┌──────────┐                     ┌────────────────────┐   │

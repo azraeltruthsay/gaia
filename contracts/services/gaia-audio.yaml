@@ -61,10 +61,10 @@ provides:
         sample_rate: int
     consumers: [gaia-web]
 
-  # ── Refinement (Nano LLM) ─────────────────────────────────────────
+  # ── Refinement (via NANO_ENDPOINT) ─────────────────────────────────
   - endpoint: /refine
     method: POST
-    description: "Clean up and format a transcript using the nano-refiner (via gaia-nano HTTP)."
+    description: "Clean up and format a transcript via NANO_ENDPOINT. (2026-07-02: gaia-nano is a socat passthrough — refinement is actually served by Core's embedded engine at gaia-core:8092.)"
     request_schema:
       fields:
         text: string
@@ -157,17 +157,17 @@ consumes:
     method: POST
     protocol: http
     port: 8080
-    description: "Nano-Refiner for transcript cleanup"
+    description: "Transcript cleanup via NANO_ENDPOINT (DEPRECATED name: gaia-nano is a socat passthrough to gaia-core:8092 — Core's embedded engine serves this)"
 
   - service: gaia-orchestrator
     endpoint: /register
     method: POST
     protocol: http
     port: 6410
-    description: "Register capabilities on startup (best-effort)"
+    description: "Register capabilities on startup (best-effort). 2026-07-02 audit: orchestrator implements NO /register route — this call always fails silently."
 
 environment:
-  NANO_ENDPOINT: "http://gaia-nano:8080"
+  NANO_ENDPOINT: "http://gaia-nano:8080"  # DEPRECATED — socat passthrough to gaia-core:8092 (Sovereign Duality)
   GAIA_CONSTANTS_PATH: "/gaia-common/gaia_common/constants/gaia_constants.json"
 
 volumes:

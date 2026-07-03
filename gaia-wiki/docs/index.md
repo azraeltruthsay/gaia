@@ -18,7 +18,7 @@ Internal developer documentation for the GAIA project — a sovereign AI system 
 |---------|----------------|----------|
 | **gaia-prime** | The Voice — Thinker/Prime inference | GAIA Engine (GPU/CPU) |
 | **gaia-core** | The Brain — Cognition loop, embedded Core | Python + GPU (:8092) |
-| **gaia-nano** | The Reflex — Sub-second triage classifier | GAIA Engine (GPU/CPU) |
+| **gaia-nano** | **Deprecated** — socat passthrough to gaia-core :8092 (preserves DNS name) | alpine/socat |
 | **gaia-web** | The Face — Dashboard, API, Discord | Python |
 | **gaia-mcp** | The Hands — Sandboxed tool execution | Python |
 | **gaia-study** | The Subconscious — QLoRA, Vector indexing | CUDA 12.4 (GPU) |
@@ -38,7 +38,7 @@ All services communicate on `gaia-net` (Docker bridge, `172.28.0.0/16`).
 |---------|-----------|------|
 | gaia-orchestrator | 6410 | GPU lifecycle, state matrix |
 | gaia-prime | 7777 | Thinker inference (22 tok/s) |
-| gaia-nano | 8090 | Reflex triage |
+| gaia-nano | 8090 | Deprecated — passthrough to gaia-core:8092 |
 | gaia-core | 6415 | Brain / Cognitive loop |
 | gaia-web | 6414 | UI / Discord Gateway |
 | gaia-mcp | 8765 | Tool execution |

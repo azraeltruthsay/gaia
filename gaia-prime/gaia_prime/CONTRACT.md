@@ -12,7 +12,7 @@ The **Voice** of GAIA. High-performance GPU inference for large models (8B+). Su
 ## ⚙️ Configuration
 - **Source File:** [config.json](./config.json)
 - **Key Parameters:**
-    - `MODEL_CONFIGS`: Specialized configuration for prime-tier models (Gemma-4-26B).
+    - `MODEL_CONFIGS`: Specialized configuration for prime-tier models (Qwen3-VL-8B-GAIA-Prime-v1-abliterated, served via the `/models/prime` symlink).
 
 ## 🛠️ Integration
 The primary provider of high-fidelity reasoning for `gaia-core`. Supports advanced thought composition.

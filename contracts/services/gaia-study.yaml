@@ -9,6 +9,10 @@ notes: |
   ensures fresh CUDA contexts per child process, with guaranteed VRAM release
   on exit. The parent process never imports torch.
 
+  2026-07-02 audit: code also exposes /study/adaptive-train, /study/adaptive-train/status,
+  /study/adaptive-train/cancel and /world_merges/* (pending/approve/reject) endpoints
+  that are not yet documented below.
+
 provides:
   # ── Health & Status ────────────────────────────────────────────────
   - endpoint: /health
@@ -205,7 +209,7 @@ environment:
   VECTOR_STORE_PATH: "/vector_store"
   MODELS_DIR: "/models"
   WARM_POOL_DIR: "/warm_pool"
-  BASE_MODEL_PATH: "/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive"
+  BASE_MODEL_PATH: "/models/prime"  # corrected 2026-07-02: compose default is /models/prime (symlink to the Prime model); old warm_pool Huihui path was stale
   CORE_ENDPOINT: "http://gaia-core:6415"
 
 volumes:

@@ -7,7 +7,8 @@ Every inter-service call in the GAIA mesh. Read as: **Consumer calls Provider**.
 | Consumer | Provider | Protocol | Endpoint | Port | Purpose |
 |----------|----------|----------|----------|------|---------|
 | gaia-web | gaia-core | HTTP POST (streaming) | `/process_packet` | 6415 | Primary cognition entry: sends CognitionPacket, receives NDJSON token stream |
-| gaia-web | gaia-core | HTTP POST | `/presence` | 6415 | Update Discord bot presence from sleep cycle |
+| gaia-core | gaia-web | HTTP POST | `/presence` | 6414 | Update Discord bot presence from sleep cycle (direction corrected 2026-07-02: core's sleep_cycle_loop calls web) |
+| gaia-web | gaia-core | HTTP POST | `/api/voice_gate` | 6415 | Discord path strips leaked meta-commentary from each outgoing message (added 2026-07-02) |
 | gaia-web | gaia-core | HTTP GET | `/sleep/status` | 6415 | Poll sleep state for dashboard |
 | gaia-web | gaia-core | HTTP POST | `/sleep/wake` | 6415 | Send wake signal on first message during sleep |
 | gaia-web | gaia-core | HTTP POST | `/sleep/force` | 6415 | Force sleep from dashboard |
@@ -45,8 +46,8 @@ Every inter-service call in the GAIA mesh. Read as: **Consumer calls Provider**.
 | gaia-core | gaia-prime | HTTP POST | `/model/unload` | 7777 | Unload model from GPU |
 | gaia-core | gaia-prime | HTTP POST | `/adapter/load` | 7777 | Load LoRA adapter |
 | gaia-core | gaia-prime | HTTP POST | `/adapter/set` | 7777 | Set active LoRA adapter |
-| gaia-core | gaia-nano | HTTP POST | `/v1/chat/completions` | 8080 | Nano triage / reflex inference (OpenAI-compatible) |
-| gaia-core | gaia-nano | HTTP GET | `/health` | 8080 | Nano health check |
+| gaia-core | gaia-nano | HTTP POST | `/v1/chat/completions` | 8080 | DEPRECATED (Sovereign Duality): gaia-nano is now an alpine/socat TCP passthrough to gaia-core:8092 — these calls transparently hit Core's embedded engine |
+| gaia-core | gaia-nano | HTTP GET | `/health` | 8080 | DEPRECATED: passthrough — health of Core's embedded engine, not a Nano tier |
 | gaia-core | gaia-mcp | JSON-RPC 2.0 POST | `/jsonrpc` | 8765 | Tool execution (sandboxed) |
 | gaia-core | gaia-orchestrator | HTTP POST | `/gpu/sleep` | 6410 | Release GPU for sleep cycle |
 | gaia-core | gaia-orchestrator | HTTP POST | `/gpu/wake` | 6410 | Reclaim GPU after wake |
@@ -85,8 +86,8 @@ Every inter-service call in the GAIA mesh. Read as: **Consumer calls Provider**.
 | gaia-study | gaia-core | HTTP POST | `/model/release` | 6415 | Release embedded model for GGUF overwrite |
 | gaia-study | gaia-core | HTTP POST | `/model/reload` | 6415 | Reload embedded model after deploy |
 | gaia-audio | gaia-core | HTTP POST | `/sleep/wake` | 6415 | Signal voice activity (wake trigger) |
-| gaia-audio | gaia-nano | HTTP POST | `/v1/chat/completions` | 8080 | Nano-Refiner transcript cleanup |
-| gaia-audio | gaia-orchestrator | HTTP POST | `/register` | 6410 | Register capabilities on startup |
+| gaia-audio | gaia-nano | HTTP POST | `/v1/chat/completions` | 8080 | Nano-Refiner transcript cleanup (2026-07-02: gaia-nano is a socat passthrough — actually served by Core's embedded engine at gaia-core:8092) |
+| gaia-audio | gaia-orchestrator | HTTP POST | `/register` | 6410 | Register capabilities on startup (2026-07-02: orchestrator implements NO /register route — call is best-effort and fails silently) |
 | gaia-monkey | gaia-core | HTTP POST | `/api/cognitive/query` | 6415 | Linguistic chaos evaluation |
 
 ## Shared State (File-Based)
@@ -108,9 +109,9 @@ and model surgery tools used by tier containers.
 
 | Consumer | Import | Purpose |
 |----------|--------|---------|
-| gaia-prime | `gaia_engine.serve_managed` | Runs GAIA Engine on port 7777 (GPU, 8B Thinker) |
-| gaia-nano | `gaia_engine.serve_managed` | Runs GAIA Engine on port 8080 (GPU/GGUF, 0.8B Reflex) |
-| gaia-core | `gaia_engine.serve_managed` | Embedded Core inference on localhost:8092 (CPU, 2B) |
+| gaia-prime | `gaia_engine.serve_managed` | Runs GAIA Engine on port 7777 (Qwen3-VL-8B-GAIA-Prime-v1: CPU/GGUF default, GPU when FOCUSING) |
+| ~~gaia-nano~~ | — | DEPRECATED (Sovereign Duality): gaia-nano is an alpine/socat TCP passthrough to gaia-core:8092; it no longer runs the engine |
+| gaia-core | `gaia_engine.serve_managed` | Embedded Core inference on localhost:8092 (Gemma4-E4B-GAIA-Core-v1: GPU NF4 or CPU GGUF) |
 | gaia-orchestrator | `gaia_engine.lifecycle` | Lifecycle state machine types (LifecycleState, transitions) |
 | gaia-study | `gaia_engine.weighted_trainer`, `gaia_engine.sae_trainer` | QLoRA training, SAE atlas |
 | gaia-common (shim) | `gaia_engine.*` | Backward-compat re-export for `from gaia_common.engine import ...` |
@@ -121,7 +122,7 @@ and model surgery tools used by tier containers.
 |---------|--------------|-----------|----------|
 | gaia-orchestrator | 6410 | 6410 | HTTP (FastAPI) |
 | gaia-prime | 7777 | 7777 | HTTP (GAIA Engine) |
-| gaia-nano | 8080 | 8090 | HTTP (GAIA Engine) |
+| gaia-nano | 8080 | 8090 | TCP passthrough (socat → gaia-core:8092, DEPRECATED) |
 | gaia-core | 6415 | 6415 | HTTP (FastAPI) |
 | gaia-core (embedded) | 8092 | -- | HTTP (llama-server/GAIA Engine, localhost only) |
 | gaia-web | 6414 | 6414 | HTTP (FastAPI) |
@@ -131,5 +132,5 @@ and model surgery tools used by tier containers.
 | gaia-doctor | 6419 | 6419 | HTTP (stdlib http.server) |
 | gaia-monkey | 6420 | 6420 | HTTP (FastAPI) |
 | gaia-wiki | 8080 | -- | HTTP (MkDocs) |
-| gaia-translate | 5000 | -- | HTTP (LibreTranslate) |
+| gaia-translate | 5000 | 5100 | HTTP (LibreTranslate) |
 | dozzle | 8080 | 9999 | HTTP (Web UI) |

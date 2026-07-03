@@ -125,6 +125,10 @@ provides:
     description: "CodeMind autonomous improvement proxy."
     consumers: [dashboard]
 
+  # 2026-07-02 audit: code also mounts /api/training, /api/voice,
+  # /api/world_merges, /api/conversations, /api/curriculum and /api/hooks
+  # routers that are not yet documented here.
+
 consumes:
   - service: gaia-core
     endpoint: /process_packet
@@ -146,6 +150,13 @@ consumes:
     protocol: http
     port: 6415
     description: "Sleep cycle management (status, wake, force, deep, toggle, hold, config)"
+
+  - service: gaia-core
+    endpoint: /api/voice_gate
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Discord path strips leaked meta-commentary per outgoing message when VOICE_GATE_ENABLED=1 (added 2026-07-02)"
 
   - service: gaia-doctor
     endpoint: /status

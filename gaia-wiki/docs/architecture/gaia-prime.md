@@ -8,7 +8,7 @@ Standalone GAIA Engine inference server. Runs CPU/GGUF by default; gets GPU duri
 - Run in CPU/GGUF mode as subconscious observer (default state)
 - Accept GPU handoff during FOCUSING for heavyweight tasks
 - Support LoRA adapter hot-loading
-- Identity-baked model (Huihui-Qwen3-8B-GAIA-Prime-adaptive)
+- Identity-aligned model (Qwen3-VL-8B-GAIA-Prime-v1-abliterated, served via the `/models/prime` symlink)
 
 ## Runtime Configuration
 
@@ -17,10 +17,10 @@ Prime uses GAIA Engine managed mode (not vLLM). Key settings:
 | Setting | Value | Rationale |
 |---------|-------|-----------|
 | Backend | GAIA Engine | Custom engine with polygraph, KV cache, lifecycle |
-| Default state | Subconscious (CPU/GGUF) | Conserve GPU for Nano/Core |
+| Default state | Subconscious (CPU/GGUF) | Conserve GPU for Core |
 | GPU mode | On FOCUSING transition | Orchestrator swaps GPU when escalation needed |
 | Port | 7777 | OpenAI-compatible API |
-| `GAIA_AUTOLOAD_MODEL` | 0 | Standby until orchestrator loads |
+| `PRIME_AUTOLOAD` | 0 | Standby until orchestrator loads |
 
 ## Consciousness States
 
@@ -33,8 +33,8 @@ Prime uses GAIA Engine managed mode (not vLLM). Key settings:
 ## Container
 
 - **Non-root**: Runs as `gaia` user (Dockerfile updated 2026-03-25)
-- **Model path**: `/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive` (safetensors) or GGUF variant
+- **Model path**: `/models/prime` — a symlink to `Qwen3-VL-8B-GAIA-Prime-v1-abliterated` (set via `PRIME_MODEL_PATH`)
 
 ## Model Loading
 
-The active model is an identity-baked 8B model. GGUF Q8_0 variant used for CPU inference. Safetensors variant used when GPU is available during FOCUSING.
+The active model is an identity-aligned, self-abliterated 8B vision-language model (Qwen3-VL-8B base). GGUF variant used for CPU inference. Safetensors variant used when GPU is available during FOCUSING.

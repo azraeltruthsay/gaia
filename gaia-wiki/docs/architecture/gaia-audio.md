@@ -1,14 +1,15 @@
 # gaia-audio — The Ears & Mouth
 
-**Port:** 8080 | **GPU:** Yes (shared) | **Dependencies:** Qwen3-ASR-0.6B, Coqui XTTS v2
+**Port:** 8080 | **GPU:** Yes (shared) | **Dependencies:** Qwen3-ASR-0.6B (STT), Qwen3-TTS (0.6B CPU / 1.7B GPU)
 
 gaia-audio provides GAIA with auditory input (STT), text refinement (Nano-Refiner), and vocal output (TTS).
 
 ## Design Principles
 
 - **Full-duplex GPU**: Simultaneous STT and TTS without blocking
-- **CPU-based Nano-Refiner**: 0.5B model for blazing-fast transcript cleanup without VRAM impact
-- **Fallback chains**: Coqui TTS -> espeak-ng (local) -> ElevenLabs (cloud)
+- **Three-tier voices**: Listener (Qwen3-ASR 0.6B, GPU), Nano Speaker (Qwen3-TTS 0.6B, CPU, instant short phrases), Prime Speaker (Qwen3-TTS 1.7B, GPU, on-demand long-form)
+- **Fallback chain**: Qwen3-TTS -> espeak-ng (emergency local fallback)
+- **Nano-Refiner**: transcript cleanup delegated over HTTP to the `gaia-nano` endpoint — since the Nano tier's deprecation this transparently reaches Core's embedded engine (`gaia-core:8092`)
 
 ## Key Endpoints
 

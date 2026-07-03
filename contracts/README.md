@@ -15,7 +15,7 @@ contracts/
     gaia-core.yaml       -- The Brain: cognitive loop, LLM routing, reasoning
     gaia-web.yaml        -- The Face: dashboard, API gateway, Discord bridge
     gaia-prime.yaml      -- The Voice: GAIA Engine inference (GPU)
-    gaia-nano.yaml       -- The Reflex: Nano triage classifier
+    gaia-nano.yaml       -- DEPRECATED (Sovereign Duality): socat passthrough to gaia-core:8092
     gaia-mcp.yaml        -- The Hands: sandboxed tool execution (JSON-RPC)
     gaia-study.yaml      -- The Subconscious: training, vector indexing
     gaia-orchestrator.yaml -- The Coordinator: GPU lifecycle, HA overlay
@@ -31,7 +31,8 @@ contracts/
 
 **gaia-engine** (github.com/azraeltruthsay/gaia-engine) is the only component
 extracted to its own repo. It is a Python library (not a service) consumed by
-gaia-prime, gaia-nano, gaia-core, gaia-orchestrator, and gaia-study. Its contract
+gaia-prime, gaia-core, gaia-orchestrator, and gaia-study (gaia-nano no longer
+consumes it — deprecated to a socat passthrough in Sovereign Duality). Its contract
 is defined in `services/gaia-engine.yaml` and covers both the Python API and the
 HTTP API exposed when running in managed mode.
 
@@ -60,5 +61,6 @@ HTTP API exposed when running in managed mode.
 - All HTTP communication uses the `gaia-net` Docker bridge network.
 - gaia-doctor uses stdlib-only HTTP (`http.server`), not FastAPI. Its endpoints
   are plain `do_GET`/`do_POST` handlers.
-- gaia-prime and gaia-nano run the GAIA Engine (custom inference server), not
-  FastAPI. Their APIs are OpenAI-compatible with GAIA extensions.
+- gaia-prime runs the GAIA Engine (custom inference server), not FastAPI. Its
+  API is OpenAI-compatible with GAIA extensions. gaia-nano is DEPRECATED
+  (2026-07-02): now an alpine/socat TCP passthrough to gaia-core:8092.

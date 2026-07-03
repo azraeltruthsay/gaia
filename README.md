@@ -55,13 +55,17 @@ GAIA's GPU lifecycle is a transmission ("the gearbox"): the orchestrator shifts 
 
 | Gear | State | Core | Prime | GPU VRAM |
 |------|-------|------|-------|----------|
-| **P** | PARKED | CPU (GGUF) | Unloaded | ~0 GB |
+| **P** | PARKED | CPU (GGUF) | Unloaded | ~2.5 GB |
 | **1** | AWAKE | GPU (NF4) | CPU (GGUF) | ~8.8 GB |
 | **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~8.8 GB |
 | **2** | FOCUSING | CPU (GGUF) | GPU (Buffered) | ~4.6 GB |
-| **S** | SLEEP | CPU (GGUF) | Unloaded | ~0 GB |
-| **0** | DEEP_SLEEP | Unloaded | Unloaded | ~0 GB |
+| **S** | SLEEP | CPU (GGUF) | Unloaded | ~2.5 GB |
+| **0** | DEEP_SLEEP | Unloaded | Unloaded | ~2.5 GB |
 | **T** | MEDITATION | Unloaded | Unloaded | Study owns GPU |
+
+VRAM figures are measured, not theoretical — even "unloaded" tiers leave ~2.5GB
+resident (CUDA-built CPU-backend overhead, an idle engine-manager process, and
+gaia-audio's always-on STT model, which sits outside this tier system entirely).
 
 Transition flow: `OFF → PARKED → AWAKE ↔ FOCUSING → PARKED`.
 
@@ -88,6 +92,10 @@ Transition flow: `OFF → PARKED → AWAKE ↔ FOCUSING → PARKED`.
 
 ### Services (12 Total)
 
+Ports are the **internal container port** (Docker network), matching `contracts/`'s
+convention — not necessarily the host-mapped port. E.g. gaia-translate listens on 5000
+internally but is host-mapped to 5100 (`docker-compose.yml`).
+
 | Service | Role | Port | Runtime |
 |---------|------|------|---------|
 | **gaia-orchestrator** | GPU scheduling, Consciousness Matrix, container lifecycle | 6410 | Python 3.11 |
@@ -100,7 +108,7 @@ Transition flow: `OFF → PARKED → AWAKE ↔ FOCUSING → PARKED`.
 | **gaia-doctor** | HA watchdog, cognitive test battery, auto-heal | 6419 | Python 3.12 |
 | **gaia-monkey** | Adversarial chaos engine, serenity/meditation | 6420 | Python 3.12 + Node |
 | **gaia-wiki** | Internal MkDocs Material documentation server | 8080* | Python 3.11 |
-| **gaia-translate** | Multi-language translation (LibreTranslate) | 5100 | C++ / Python |
+| **gaia-translate** | Multi-language translation (LibreTranslate) | 5000 | C++ / Python |
 | **dozzle** | Real-time Docker log viewer | 9999 | Go |
 
 **Infrastructure**: ELK stack (Elasticsearch, Logstash, Kibana, Filebeat) for centralized observability.
@@ -151,11 +159,9 @@ Capabilities exposed to the cognitive pipeline through gaia-mcp:
 ## Running
 
 ```bash
-# Live stack
+# Live stack (gaia-prime starts with it — no compose profiles are defined
+# in this project, `--profile prime` is not a real flag here)
 docker compose up -d
-
-# Start prime (GPU inference)
-docker compose --profile prime up -d gaia-prime
 
 # GPU handoff test
 curl -X POST http://localhost:6410/handoff/prime-to-study \

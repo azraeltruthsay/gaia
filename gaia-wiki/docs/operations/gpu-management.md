@@ -8,21 +8,25 @@ The Consciousness Matrix tracks each tier's GPU state:
 
 | State | GPU | Inference | Default Tiers |
 |-------|-----|-----------|---------------|
-| **Conscious** | Yes | Full speed | Nano (0.8B), Core (2B) |
-| **Subconscious** | No | CPU/GGUF | Prime (8B) |
+| **Conscious** | Yes | Full speed | Core (Gemma4-E4B) |
+| **Subconscious** | No | CPU/GGUF | Prime (Qwen3-VL-8B) |
 | **Unconscious** | No | None | — |
 
 Managed by orchestrator at `/consciousness/*`.
 
-## Lifecycle FSM States
+## Lifecycle FSM States (the Gearbox)
 
-| State | Description |
-|-------|-------------|
-| AWAKE | Normal operation (Nano + Core on GPU, Prime on CPU) |
-| FOCUSING | GPU swapped to Prime for heavyweight task |
-| SLEEP | Idle timeout, models partially unloaded |
-| DEEP_SLEEP | All models unloaded, zero VRAM |
-| MEDITATION | Chaos drills active, defensive posture |
+Defined in `gaia-common/gaia_common/lifecycle/states.py`:
+
+| Gear | State | Description |
+|------|-------|-------------|
+| P | PARKED | Core on CPU (GGUF), GPU empty — pre-warmed sentinel standby |
+| 1 | AWAKE | Normal operation (Core on GPU NF4, Prime on CPU) |
+| 1+ | LISTENING | AWAKE + audio STT active |
+| 2 | FOCUSING | GPU swapped to Prime for heavyweight task |
+| S | SLEEP | Idle timeout, models partially unloaded |
+| 0 | DEEP_SLEEP | All models unloaded (Groq fallback only) |
+| T | MEDITATION | Study owns the GPU for training; all cognitive tiers off |
 
 ## FOCUSING Auto-Transition
 
@@ -38,14 +42,13 @@ When Core escalates to Prime:
 
 | Component | Allocation |
 |-----------|-----------|
-| Nano (0.8B, GPU) | ~1.5 GB |
-| Core (2B, GPU) | ~4.7 GB |
+| Core (Gemma4-E4B, GPU NF4) | ~8.8 GB |
 | KV cache | ~1-2 GB (dynamic) |
 | LoRA adapters | ~50-200 MB each |
 | CUDA overhead | ~500 MB |
-| **Typical AWAKE** | **~8 GB** |
+| **Typical AWAKE** | **~9-11 GB** |
 
-Prime (8B) on GPU requires ~10-12 GB, which is why it defaults to CPU/GGUF and only gets GPU during FOCUSING.
+Prime (Qwen3-VL-8B) on GPU takes ~4.6 GB (expert-buffered) and only gets the GPU during FOCUSING, while Core drops to CPU/GGUF. Note that even in "unloaded" states real resident VRAM is ~2.5 GB (CUDA-built llama-server buffers, engine-manager overhead, and gaia-audio's always-resident STT model).
 
 ## Commands
 
@@ -55,7 +58,4 @@ Prime (8B) on GPU requires ~10-12 GB, which is why it defaults to CPU/GGUF and o
 
 # Manually release GPU (put prime to sleep)
 ./gaia.sh gpu release
-
-# Manually reclaim GPU (wake prime)
-./gaia.sh gpu reclaim
 ```

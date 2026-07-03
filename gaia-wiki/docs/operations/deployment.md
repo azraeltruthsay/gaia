@@ -26,7 +26,7 @@ The master control script provides commands for all service operations:
 ./gaia.sh live start|stop|restart|build|logs|status
 ./gaia.sh candidate start|stop|build
 ./gaia.sh swap core|mcp|study|web
-./gaia.sh gpu status|release|reclaim
+./gaia.sh gpu status|release
 ./gaia.sh wiki start|stop|build|logs|status
 ./gaia.sh status
 ```

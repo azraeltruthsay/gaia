@@ -1,7 +1,13 @@
 # Decision: prime.md Over KV Cache Persistence
 
-**Status:** Active
+**Status:** Active (updated)
 **Date:** 2026-02
+
+> **Update (2026-07):** Prime no longer runs vLLM — it runs the GAIA Engine, which
+> *does* support KV cache thought snapshots. The `prime.md` natural-language checkpoint
+> remains the primary continuity mechanism (rationales 2 and 3 below still hold); KV
+> snapshots complement it rather than replace it. The vLLM-specific claims below are
+> historical.
 
 ## Context
 

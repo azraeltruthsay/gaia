@@ -1,6 +1,6 @@
-# gaia-core-candidate: GPU-capable variant for testing and training
+# gaia-core: GPU-capable production image (staged here; promoted to gaia-core/Dockerfile)
 # Embeds CUDA-enabled llama-server for GPU-accelerated Core/Operator inference
-# Production gaia-core stays CPU-only; this candidate can offload to GPU when available
+# Both production and candidate gaia-core are GPU-capable; CPU GGUF is a runtime gear, not a build variant
 
 ARG LLAMA_CPP_TAG=b8250
 ARG CUDA_VERSION=12.8.1

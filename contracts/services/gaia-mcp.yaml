@@ -64,8 +64,14 @@ json_rpc_methods:
   # Sensitive tools (require approval): ai_write, write_file, run_shell,
   # memory_rebuild_index, promotion_create_request, kanka_create_entity,
   # kanka_update_entity, notebooklm_create_note, audio_listen_start
+  #
+  # 2026-07-02 audit: the public-facing interface is now 14 DOMAIN tools
+  # (file, shell, web, knowledge, palace, audio, study, introspect,
+  # worldbuild, notebook, context, browser, manage, fabric — see
+  # gaia_common.utils.domain_tools). The legacy flat names below remain
+  # internally routable; this list is a partial inventory, not exhaustive.
 
-  - method: ai_read
+  - method: read_file
     description: "Read a file"
     sensitive: false
 
@@ -89,8 +95,8 @@ json_rpc_methods:
     description: "Fetch a web page"
     sensitive: false
 
-  - method: memory_search
-    description: "Search vector memory"
+  - method: memory_query
+    description: "Search vector memory (was documented as memory_search — corrected 2026-07-02)"
     sensitive: false
 
   - method: memory_rebuild_index
@@ -105,8 +111,8 @@ json_rpc_methods:
     description: "Get current system world state"
     sensitive: false
 
-  - method: cfr_search
-    description: "Search conversation feedback records"
+  - method: cfr_status
+    description: "CFR (Context-Focus-Recall) status. (cfr_search does not exist — actual family is cfr_status, cfr_focus, cfr_expand, cfr_compress, cfr_ingest, cfr_synthesize, cfr_rolling_context; corrected 2026-07-02.)"
     sensitive: false
 
   - method: kanka_list_campaigns

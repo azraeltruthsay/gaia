@@ -273,7 +273,7 @@ consumes:
 
 environment:
   POLL_INTERVAL: "15"
-  FAILURE_THRESHOLD: "2"
+  FAILURE_THRESHOLD: "4"  # corrected 2026-07-02: compose sets ${DOCTOR_FAILURE_THRESHOLD:-4}; code default (no env) is 2
   RESTART_COOLDOWN: "300"
   HTTP_PORT: "6419"
   CORE_ENDPOINT: "http://gaia-core:6415"

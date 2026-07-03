@@ -138,21 +138,23 @@ provides:
     description: "Force-kill the training subprocess."
     consumers: [gaia-web]
 
-  # ── Nano GPU Backoff ───────────────────────────────────────────────
-  - endpoint: /nano/status
+  # ── Nano GPU Backoff — REMOVED ─────────────────────────────────────
+  # (2026-07-02 audit: /nano/status, /nano/backoff, /nano/restore no longer
+  # exist in gaia-orchestrator code. The Nano tier is deprecated in Sovereign
+  # Duality; gaia-nano is a socat passthrough to gaia-core:8092.)
+
+  # ── Consciousness Matrix (Gearbox) ─────────────────────────────────
+  # (2026-07-02 audit: these exist in code but were previously undocumented.
+  # See consciousness_matrix.py and CLAUDE.md "The Gearbox".)
+  - endpoint: /consciousness/matrix
     method: GET
-    description: "Nano GPU/CPU placement status."
+    description: "Consciousness matrix state (gear, tiers, VRAM)."
     consumers: [gaia-web]
 
-  - endpoint: /nano/backoff
+  - endpoint: /consciousness/{gear}
     method: POST
-    description: "Evict Nano from GPU to CPU to free VRAM."
-    consumers: [gaia-web]
-
-  - endpoint: /nano/restore
-    method: POST
-    description: "Restore Nano to GPU."
-    consumers: [gaia-web]
+    description: "Gear shift endpoints: /consciousness/awake, /focusing, /park, /sleep, /deep-sleep, /training, /set, /gear, /probe."
+    consumers: [gaia-web, gaia-core]
 
   # ── Watch Rotation ─────────────────────────────────────────────────
   - endpoint: /watch/state
@@ -266,7 +268,7 @@ provides:
   # ── Notifications ──────────────────────────────────────────────────
   - endpoint: /notify/oracle-fallback
     method: POST
-    description: "Receive notification that Oracle fallback is being used."
+    description: "Receive notification that cloud fallback is being used. (Endpoint name is legacy: the OpenAI 'Oracle' is retired — Groq llama-3.3-70b is the only cloud fallback as of 2026.)"
     consumers: [gaia-core]
 
   - endpoint: /ws/notifications

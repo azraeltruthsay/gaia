@@ -1,14 +1,19 @@
-# CognitionPacket v0.3 — The universal message format between gaia-web and gaia-core
+# CognitionPacket — The universal message format between gaia-web and gaia-core
 #
 # Source: gaia-common/gaia_common/protocols/cognition_packet.py
 # Uses: dataclasses + dataclasses_json for serialization
 # Transport: HTTP POST as JSON body (gaia-web -> gaia-core /process_packet)
+#
+# 2026-07-02 audit: code is at COGPACKET_VERSION = "v0.5" (v0.5 added
+# AudioPayload, TargetEngine expansion, Limb terminology — 2026-04). The field
+# inventory below documents the v0.3 baseline and has not yet been expanded
+# with the v0.5 additions.
 
-version: "v0.3"
+version: "v0.5"
 source_file: gaia-common/gaia_common/protocols/cognition_packet.py
 
 CognitionPacket:
-  version: string  # "v0.3"
+  version: string  # COGPACKET_VERSION, currently "v0.5" (2026-07-02: gaia-web's dashboard path still hardcodes "v0.4"; the Discord path uses COGPACKET_VERSION)
 
   header:
     session_id: string          # Conversation session identifier
@@ -202,7 +207,7 @@ streaming_chunks:
 # gaia-web constructs a minimal packet and POSTs to gaia-core:
 #
 # {
-#   "version": "v0.3",
+#   "version": "v0.5",   # (COGPACKET_VERSION; dashboard path currently hardcodes "v0.4")
 #   "header": {
 #     "session_id": "<session_id>",
 #     "packet_id": "<packet_id>",

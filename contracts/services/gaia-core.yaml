@@ -198,7 +198,7 @@ provides:
 
   - endpoint: /api/cognitive/similarity
     method: POST
-    description: "Rate semantic similarity between two texts (0.0-1.0). Uses Nano model, fallback to token overlap."
+    description: "Rate semantic similarity between two texts (0.0-1.0). Uses the nano endpoint (now a passthrough to Core's embedded engine), fallback to token overlap."
     request_schema:
       fields:
         text: string
@@ -214,7 +214,7 @@ provides:
         system: string (optional)
         max_tokens: int (default 512)
         temperature: float (default 0.3)
-        target: "core | prime | nano" (default core)
+        target: "core | prime | nano" (default core; "nano" now resolves to Core's embedded engine via the socat passthrough)
         no_think: bool (default false)
     consumers: [gaia-doctor, gaia-monkey]
 
@@ -306,15 +306,13 @@ provides:
     description: "Manually trigger KV cache compaction for a specific role."
     consumers: [gaia-web]
 
-  # ── Presence ───────────────────────────────────────────────────────
-  - endpoint: /presence
+  # ── Voice Gate ─────────────────────────────────────────────────────
+  # (2026-07-02 audit: /presence removed from provides — it is a gaia-web
+  # endpoint that gaia-core CALLS from sleep_cycle_loop; see consumes below.)
+  - endpoint: /api/voice_gate
     method: POST
-    description: "Update Discord bot presence (called by sleep cycle)."
-    request_schema:
-      fields:
-        activity: string
-        status: "idle | online | dnd | invisible"
-    consumers: [internal]
+    description: "Gate 2 (worth-voicing): strip leaked meta-commentary from an outgoing message. Called per-message by the Discord path when VOICE_GATE_ENABLED=1."
+    consumers: [gaia-web]
 
 consumes:
   - service: gaia-prime
@@ -345,19 +343,22 @@ consumes:
     port: 7777
     description: "Register LoRA adapter with Prime"
 
+  # DEPRECATED (Sovereign Duality, noted 2026-07-02): gaia-nano is now an
+  # alpine/socat TCP passthrough to gaia-core:8092 — these calls transparently
+  # hit Core's own embedded engine, not a separate Nano tier.
   - service: gaia-nano
     endpoint: /v1/chat/completions
     method: POST
     protocol: http
     port: 8080
-    description: "Nano triage / reflex inference"
+    description: "DEPRECATED — passthrough to Core embedded engine (was: Nano triage / reflex inference)"
 
   - service: gaia-nano
     endpoint: /health
     method: GET
     protocol: http
     port: 8080
-    description: "Nano health check"
+    description: "DEPRECATED — passthrough health check (reaches Core embedded engine)"
 
   - service: gaia-mcp
     endpoint: /jsonrpc
@@ -422,6 +423,13 @@ consumes:
     port: 8080
     description: "Wake audio (reload GPU models)"
 
+  - service: gaia-web
+    endpoint: /presence
+    method: POST
+    protocol: http
+    port: 6414
+    description: "Update Discord bot presence from the sleep cycle (direction corrected 2026-07-02)"
+
   - service: localhost:8092
     endpoint: /v1/chat/completions
     method: POST
@@ -432,7 +440,7 @@ consumes:
 environment:
   CORE_ENDPOINT: "http://gaia-core:6415"
   PRIME_ENDPOINT: "http://gaia-prime:7777"
-  NANO_ENDPOINT: "http://gaia-nano:8080"
+  NANO_ENDPOINT: "http://gaia-nano:8080"  # DEPRECATED — socat passthrough to gaia-core:8092 (Sovereign Duality)
   MCP_ENDPOINT: "http://gaia-mcp:8765/jsonrpc"
   STUDY_ENDPOINT: "http://gaia-study:8766"
   CORE_CPU_ENDPOINT: "http://localhost:8092"

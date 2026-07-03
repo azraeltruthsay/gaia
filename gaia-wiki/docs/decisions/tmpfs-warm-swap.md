@@ -1,7 +1,13 @@
 # Decision: tmpfs Warm Pool for Model Swap
 
-**Status:** Active
+**Status:** Active (updated)
 **Date:** 2026-02
+
+> **Update (2026-07):** vLLM has been replaced by the GAIA Engine (adapter API:
+> `POST /adapter/load` / `/adapter/set`). The warm pool is now mounted into containers
+> at `/warm_pool`; active models are served from `/models`
+> (`../gaia-instance/gaia-models`, e.g. `/models/prime`). The tmpfs rationale below is
+> unchanged.
 
 ## Context
 
@@ -26,8 +32,9 @@ GAIA needs to load different models for different roles (prime, lite, personalit
 ## Configuration
 
 ```yaml
-# docker-compose.yml
+# docker-compose.yml (current)
 gaia-prime:
   volumes:
-    - /mnt/gaia_warm_pool:/models:ro
+    - ../gaia-instance/gaia-models:/models:ro
+    - /mnt/gaia_warm_pool:/warm_pool:ro
 ```

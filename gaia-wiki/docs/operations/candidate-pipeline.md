@@ -21,12 +21,12 @@ candidates/
 ├── gaia-mcp/           # Candidate Hands
 ├── gaia-study/         # Candidate Subconscious
 ├── gaia-orchestrator/  # Candidate Coordinator
-├── gaia-prime/         # Candidate Voice
+├── gaia-prime/         # NOT a mirror — separate experimental build (raw vLLM vs production's GAIA Engine)
 ├── gaia-audio/         # Candidate Ears & Mouth
 └── gaia-common/        # Candidate shared library
 ```
 
-Each candidate mirrors the production service structure exactly. Containers mount from `candidates/` instead of the production paths.
+Each candidate mirrors the production service structure exactly (except `gaia-prime`, which is a distinct experimental stack). Containers mount from `candidates/` instead of the production paths. Note that beyond code, candidate env vars, model paths, and Dockerfiles are maintained per-file and can silently drift from production.
 
 ## Promotion Pipeline
 

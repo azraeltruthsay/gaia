@@ -8,7 +8,7 @@ Managed by the **gaia-orchestrator**, the Consciousness Matrix tracks the target
 
 | State | Name | Resource | Description |
 |-------|------|----------|-------------|
-| **3** | Conscious | GPU | High-performance inference (SafeTensors/vLLM) |
+| **3** | Conscious | GPU | High-performance inference (SafeTensors via GAIA Engine) |
 | **2** | Subconscious | CPU | Efficient GGUF inference (llama-server) |
 | **1** | Unconscious | Unloaded | Resource hibernation |
 
@@ -17,13 +17,18 @@ Like a dolphin's unihemispheric sleep, GAIA's tiers can maintain independent sta
 
 ## System States & Presets
 
-The system-wide sleep cycle translates user activity into matrix presets:
+The system-wide sleep cycle translates user activity into matrix presets. Since
+Sovereign Duality there are two tiers (Core, Prime — the Nano tier is deprecated), and
+the full lifecycle is the **gearbox** (P/1/1+/2/S/0/T) defined in
+`gaia-common/gaia_common/lifecycle/states.py`:
 
-- **AWAKE**: Core=3, Nano=3, Prime=2. (Fast reflex/intent, Prime observes on CPU).
-- **FOCUSING**: Prime=3, Nano=3, Core=2. (Deep reasoning on GPU, Core manages on CPU).
-- **SLEEP**: Nano=2, Core=2, Prime=1. (Low-power monitoring, ready to wake).
-- **DEEP SLEEP**: All → 1. (Full hibernation, Nano stays 2 for wake detection if configured).
-- **TRAINING**: Target Tier=1, Others=2. (Freeing VRAM for QLoRA training).
+- **PARKED (P)**: Core=2 (CPU GGUF), Prime=1. (Pre-warmed sentinel standby, GPU empty).
+- **AWAKE (1)**: Core=3 (GPU NF4, ~8.8 GB), Prime=2. (Core handles triage/intent, Prime observes on CPU).
+- **LISTENING (1+)**: AWAKE + audio STT active.
+- **FOCUSING (2)**: Prime=3 (GPU, ~4.6 GB), Core=2. (Deep reasoning on GPU, Core manages on CPU).
+- **SLEEP (S)**: Core=2, Prime=1. (Low-power monitoring, ready to wake).
+- **DEEP SLEEP (0)**: All → 1. (Full hibernation; Groq fallback only).
+- **MEDITATION (T)**: All cognitive tiers → 1; Study owns the GPU for QLoRA training.
 
 ## State Machine
 

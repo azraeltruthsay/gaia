@@ -14,9 +14,10 @@
 git clone <repo-url> /gaia/GAIA_Project
 cd /gaia/GAIA_Project
 
-# Copy environment template
-cp .env.example .env
-cp .env.discord.example .env.discord
+# Create environment files (no .example templates are checked in)
+# .env          — general configuration (GAIA_ENV, LOG_LEVEL, GROQ_API_KEY, ...)
+# .env.discord  — Discord bot token
+touch .env .env.discord
 
 # Edit .env with your configuration
 # Edit .env.discord with your Discord bot token

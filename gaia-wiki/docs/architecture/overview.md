@@ -16,7 +16,7 @@ GAIA is a service-oriented AI system where each container plays a distinct cogni
                     │                │                │
               ┌─────┴──────┐  ┌─────┴──────┐  ┌──────┴──────┐
               │ gaia-core  │  │ gaia-nano  │  │ gaia-study  │
-              │ The Brain  │  │ The Reflex │  │ The Sub-    │
+              │ The Brain  │  │ (deprec.)  │  │ The Sub-    │
               │ :6415      │  │ :8090      │  │ conscious   │
               └─────┬──────┘  └────────────┘  │ :8766       │
                     │                         └─────────────┘
@@ -38,13 +38,13 @@ GAIA is a service-oriented AI system where each container plays a distinct cogni
 
 1. **gaia-web** receives input (Discord message or web UI POST).
 2. Constructs a `CognitionPacket` and POSTs to **gaia-core** `/process_packet`.
-3. **gaia-core** sends a triage request to **gaia-nano** (The Reflex):
-    - Nano classifies as SIMPLE (handled by Core/Groq) or COMPLEX (requires Prime).
-    - Nano also cleans up voice transcripts.
+3. **gaia-core** triages the request itself (Sovereign Duality — the Nano tier is
+   deprecated; **gaia-nano** is now a socat passthrough that forwards `:8080` to
+   Core's embedded engine at `gaia-core:8092`, preserving the DNS name).
 4. **gaia-core** runs the cognitive loop:
     - Loads session history and context.
-    - If COMPLEX: Offloads to **gaia-prime** (The Thinker) or cloud fallback.
-    - If SIMPLE: Handles locally or via fast Groq/Oracle fallback.
+    - If COMPLEX: Offloads to **gaia-prime** (The Voice) or the Groq cloud fallback.
+    - If SIMPLE: Handles locally via the embedded Core engine.
     - Optionally calls **gaia-mcp** for tool execution.
 5. Response flows back through the packet to **gaia-web**.
 6. **gaia-web** routes the response to the destination (Discord, Web, or Audio).
@@ -61,7 +61,8 @@ GAIA is a service-oriented AI system where each container plays a distinct cogni
 
 ## Dual Stack: Live + Candidate
 
-Every service has a candidate counterpart in `candidates/`. The candidate stack:
+Core services have candidate counterparts in `candidates/` (defined in
+`docker-compose.candidate.yml`). The candidate stack:
 - Shares the `gaia-net` network with live services.
 - Uses separate Docker volumes (`gaia-candidate-shared`).
 - Maps to different external ports (+1 offset, with jumps for collisions).
@@ -70,7 +71,7 @@ See [Candidate Pipeline](../operations/candidate-pipeline.md) for the full promo
 
 ## GAIA Inference Engine
 
-All inference tiers (Prime, Core, Nano) run the standalone **GAIA Engine** (separate repository). It provides:
+Both inference tiers (Prime, Core) run the standalone **GAIA Engine** (separate repository, `github.com/azraeltruthsay/gaia-engine`). It provides:
 - Optimized generation (~22 tok/s).
 - Hidden State Polygraph (real-time monitoring).
 - KV Cache Snapshots.

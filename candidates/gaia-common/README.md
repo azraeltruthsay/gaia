@@ -1,13 +1,19 @@
-# gaia-common (Candidate)
+# gaia-common
 
-Shared library for GAIA SOA services - Candidate version for testing SOA-decoupled architecture.
+Shared library for GAIA SOA services — protocols, utilities, constants, and lifecycle
+definitions used by every containerized service.
 
-## Changes from Active
+## Key Contents
 
-This candidate version includes:
-- `config.py` - Centralized configuration (moved from gaia-core)
+- `config.py` - Centralized configuration (Config singleton merging constants + env + defaults)
+- `protocols/` - Inter-service message formats (e.g. `cognition_packet.py`)
+- `lifecycle/states.py` - GPU gearbox state machine (P/1/1+/2/S/0/T)
+- `constants/gaia_constants.json` - Master config (token budgets, endpoints, model configs)
 - `utils/safe_execution.py` - Safe shell execution primitives
 - `utils/world_state.py` - World state utilities
-- `utils/gaia_rescue_helper.py` - Updated rescue helper
+- `engine/` - Backward-compat shim delegating to the `gaia_engine` package (engine code
+  lives in the separate `gaia-engine` repo, NOT here)
 
-These changes support the SOA-decoupled architecture where gaia-mcp no longer depends on gaia-core.
+gaia-common is volume-mounted read-only into all containers; source changes require a
+container restart. Services must not depend on gaia-core — shared code lives here to keep
+the SOA decoupled.

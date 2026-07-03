@@ -8,12 +8,13 @@ This skill handles the full training lifecycle — GPU preparation, training exe
 
 1. **Disable restart policies** (prevents containers from respawning and stealing GPU):
    ```bash
-   docker update --restart=no gaia-core gaia-nano gaia-audio gaia-prime
+   docker update --restart=no gaia-core gaia-audio gaia-prime
    ```
+   (gaia-nano is now a socat proxy — no GPU, no need to touch it)
 
 2. **Stop GPU containers**:
    ```bash
-   docker stop gaia-core gaia-nano gaia-audio gaia-prime
+   docker stop gaia-core gaia-audio gaia-prime
    ```
 
 3. **Wait 15-30 seconds**, then verify GPU is clear:
@@ -40,7 +41,7 @@ curl -s -X POST http://localhost:8766/study/adaptive-train \
     "pass_threshold": 0.7,
     "rank": 16,
     "alpha": 32,
-    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "in_proj_qkv", "out_proj"],
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     "max_steps_phase1": 200,
     "max_steps_repair": 100,
     "training_timeout": 1800
@@ -54,7 +55,7 @@ curl -s http://localhost:8766/study/adaptive-train/status | python3 -m json.tool
 
 ### Critical Training Rules
 - **BitsAndBytes NF4 ONLY** — never quanto (wraps only 25% of layers)
-- **All 9 target modules** — attention + MLP + linear attention. MLP is where identity lives. Linear attention is 75% of Qwen3.5 layers.
+- **All target modules** — attention + MLP (the 7 above for current tiers: Gemma4-E4B Core, Qwen3-8B Prime). MLP is where identity lives. For Qwen3.5-hybrid models only, add `in_proj_qkv`/`out_proj` (linear attention is 75% of Qwen3.5 layers).
 - **Train data format**: JSON array of `{"instruction": "...", "output": "..."}` objects
 - For 9B models: may need `training_timeout: 3600` and `max_steps_phase1: 300`
 
@@ -73,8 +74,8 @@ curl -s http://localhost:8766/study/adaptive-train/status | python3 -m json.tool
 5. **Update symlinks** — `/models/core` → new merged dir, etc.
 6. **Re-enable restart and start containers**:
    ```bash
-   docker update --restart=unless-stopped gaia-core gaia-nano gaia-audio gaia-prime
-   docker start gaia-core gaia-nano gaia-audio gaia-prime
+   docker update --restart=unless-stopped gaia-core gaia-audio gaia-prime
+   docker start gaia-core gaia-audio gaia-prime
    ```
 7. **Verify system restored** — health checks on all tiers, consciousness matrix ok:true
 

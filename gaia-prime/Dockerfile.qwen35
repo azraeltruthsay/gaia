@@ -1,4 +1,6 @@
 # gaia-prime: vLLM with Qwen3.5 + LMCache support
+# LEGACY: not referenced by any compose file — production gaia-prime builds from
+# gaia-prime/Dockerfile.gaia-engine.
 # Extends official vLLM image with transformers 5.x for qwen3_5_text model type
 # and LMCache for hierarchical KV cache persistence (GPU → CPU → disk)
 FROM vllm/vllm-openai:latest

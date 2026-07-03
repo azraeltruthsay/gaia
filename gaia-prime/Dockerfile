@@ -1,4 +1,7 @@
 # gaia-prime: Custom vLLM inference server for GAIA
+# LEGACY: not referenced by any compose file — production gaia-prime builds from
+# gaia-prime/Dockerfile.gaia-engine (GAIA Engine, not vLLM). The maintained vLLM
+# experiment lives in candidates/gaia-prime/Dockerfile.
 # RTX 5080 Blackwell (sm_120 / compute capability 12.0) compatible build
 #
 # Uses NGC PyTorch base image which includes CUDA 12.8+ and PyTorch
