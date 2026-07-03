@@ -8,9 +8,7 @@ These pin the SELECTION behavior (which instruction block is appended) using
 a fake model_pool that captures the assembled messages. No GPU / no real model.
 """
 
-import pytest
 
-from gaia_core.cognition import deliberation
 from gaia_core.cognition.deliberation import (
     deliberate,
     _DELIBERATION_INSTRUCTIONS,
