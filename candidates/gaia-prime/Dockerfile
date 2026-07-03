@@ -72,11 +72,44 @@ RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project
 RUN pip install --no-cache-dir "numpy<2"
 
 # LMCache: hierarchical KV cache persistence (GPU → CPU → disk)
-# Enables KV replay on wake instead of full re-prefill
-RUN pip install --no-cache-dir lmcache
+# Enables KV replay on wake instead of full re-prefill.
+# lmcache's unpinned deps pull transformers>=5 and numpy 2.x — re-pin BOTH:
+#   - transformers==4.57.6 (last 4.x): transformers 5 hard-breaks vLLM 0.15's
+#     VL model paths at runtime (Qwen2VLImageProcessor.max_pixels removed;
+#     strict config attr access kills `config.tie_word_embeddings`). An earlier
+#     note here said the opposite — that 4.57.6 crashes on Qwen3-VL's tokenizer
+#     (`'list' object has no attribute 'keys'`). Root cause of THAT is the
+#     MODEL's tokenizer_config.json carrying a transformers-5-style
+#     `extra_special_tokens` flat list; solved by the *-tf4shadow model dir
+#     (see docker-compose.candidate.yml gaia-prime-candidate comments), so the
+#     4.x pin is safe. lmcache 0.5.0's metadata wants transformers>=5.4 (pip
+#     warns) but its runtime is verified working under 4.57.6; its optional
+#     c_ops need CUDA 13 and fall back to torch ops on this CUDA 12.8 image.
+#   - numpy<2 re-breaks otherwise (ABI pin above).
+# (GAIA_Project-foh)
+RUN pip install --no-cache-dir lmcache \
+    && pip install --no-cache-dir "transformers==4.57.6" "numpy<2"
 
-# Create non-root user for container execution (host UID mapping)
-RUN groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
+# Defensive forward-compat patch: vLLM reads image_processor.max_pixels /
+# .min_pixels as bare attributes (removed in transformers 5); route through
+# getattr with the size-dict fallback vLLM already half-uses. No-op under
+# transformers 4.x (attrs exist), prevents an instant startup crash if the
+# transformers pin ever drifts to 5.x again. vLLM is an editable install, so
+# patching the /tmp/vllm source is live. (GAIA_Project-foh)
+RUN sed -i \
+      -e 's/min_pixels=image_processor.min_pixels,/min_pixels=getattr(image_processor, "min_pixels", None) or image_processor.size["shortest_edge"],/' \
+      -e 's/max_pixels=image_processor.max_pixels,/max_pixels=getattr(image_processor, "max_pixels", None) or image_processor.size["longest_edge"],/' \
+      -e 's/image_processor.max_pixels or image_processor.size\["longest_edge"\]/getattr(image_processor, "max_pixels", None) or image_processor.size["longest_edge"]/' \
+      /tmp/vllm/vllm/model_executor/models/qwen2_vl.py \
+    && grep -c 'getattr(image_processor' /tmp/vllm/vllm/model_executor/models/qwen2_vl.py
+
+# Create non-root user for container execution (host UID mapping).
+# NGC's 25.03 base image ships a default `ubuntu` user/group already at
+# 1000 — remove it first so `gaia` can take that UID/GID (volume
+# permissions on the host expect 1000). (GAIA_Project-foh)
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && (groupdel ubuntu 2>/dev/null || true) \
+    && groupadd -g 1000 gaia && useradd -u 1000 -g gaia -m -s /bin/bash gaia
 
 # Set ownership for non-root execution
 RUN chown -R gaia:gaia /app

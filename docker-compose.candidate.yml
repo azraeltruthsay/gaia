@@ -186,8 +186,15 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
   gaia-prime-candidate:
     build:
-      context: .
-      dockerfile: ./candidates/gaia-prime/Dockerfile
+      # Context must be this service's own directory, not the project root:
+      # the Dockerfile's `COPY patch_float8.sh cmake_wrapper.sh /app/` and
+      # the co-located .dockerignore (which allow-lists exactly those two
+      # files) both assume it. Was `context: .` — `docker compose build`
+      # for this service had likely never worked; the stale pre-lmcache
+      # image was built by running `docker build` manually from inside
+      # candidates/gaia-prime/, bypassing compose. (GAIA_Project-foh)
+      context: ./candidates/gaia-prime
+      dockerfile: Dockerfile
     image: localhost:5000/gaia-prime-candidate:local
     container_name: gaia-prime-candidate
     hostname: gaia-prime-candidate
@@ -201,30 +208,73 @@ services:
     environment:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - LMCACHE_CONFIG_FILE=/etc/lmcache/config.yaml
+      # Load peak sits within ~200MB of OOM alongside live production
+      # (~3GB resident floor); expandable segments buy back fragmentation slack.
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      # Deterministic token hashing across restarts — without this, Python's
+      # per-process hash randomization gives every boot a fresh key space and
+      # LMCache's disk tier can never be re-hit (see lmcache_config.yaml note).
+      - PYTHONHASHSEED=0
 
     ports:
       - "7778:7777"
 
-    # LMCache KV persistence: blocked by vLLM 0.17 + Qwen3.5 hybrid arch.
-    # LMCacheConnectorV1 doesn't implement SupportsHMA, so:
-    #   - With HMA disabled: "failed to convert hybrid KV cache specs to one unified type"
-    #   - With HMA enabled:  "Connector LMCacheConnectorV1 does not support HMA"
-    # When LMCache ships HMA support, add to command block:
-    #   --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
-    # Config, volume, and env var are already wired — just needs this flag.
+    # LMCache KV persistence (GAIA_Project-foh, verified working 2026-07-03):
+    # the old "blocked by HMA" note was written for a PRIOR Prime model with a
+    # genuinely hybrid (mamba/SWA) architecture; current Prime
+    # (Qwen3-VL-8B-GAIA-Prime-v1-abliterated) is a standard GQA transformer
+    # (1 KV-cache group) and never touches vLLM's SupportsHMA gate.
+    #
+    # Three hard-won facts about THIS command block (full trail in bead foh):
+    #
+    # 1. MODEL PATH is the *-tf4shadow dir, NOT /models/prime. The real model
+    #    dir's tokenizer_config.json carries a transformers-5-style
+    #    `extra_special_tokens` flat list that crashes the transformers 4.57.6
+    #    this image now pins (vLLM 0.15 cannot run VL models under
+    #    transformers 5 — see candidates/gaia-prime/Dockerfile). The shadow
+    #    dir is symlinks to the real model dir + one patched
+    #    tokenizer_config.json (key removed; the tokens still load from
+    #    tokenizer.json). Production model files are untouched. Recreate by
+    #    symlinking every file except tokenizer_config.json and writing a
+    #    copy of it with the `extra_special_tokens` key deleted.
+    #    --served-model-name keeps the client-visible model id stable.
+    #    NOTE: LMCache keys chunks by the --model path — changing it
+    #    invalidates the persisted cache.
+    #
+    # 2. NO --quantization fp8: vLLM 0.15's *online* fp8 quantization
+    #    re-materializes quantized weights on GPU, silently defeating
+    #    --cpu-offload-gb (measured: identical ~12.3GiB load peak at offload
+    #    5/7/10 with fp8; behaves as expected without it). The current bf16
+    #    checkpoint (~16.4GB; fp8 leaves embed/lm_head/vision unquantized
+    #    anyway) cannot fit a 16GB card that also hosts production's ~3GB
+    #    resident floor, so weights are offloaded instead: 10GB pinned-CPU
+    #    via UVA, ~6.5GB on GPU, 1.9GiB KV (13,872 tokens). Slow (~30s
+    #    prefill for 3.4k tokens, ~4s/token decode) but functional — and
+    #    prefill is exactly what LMCache short-circuits. The old
+    #    0.65-util/24576-ctx/fp8 config was tuned for the retired quantized
+    #    Qwen3.5 checkpoint and never re-validated after the model migration.
+    #
+    # 3. Restart-surviving persistence needs BOTH the sha256 chunk hashing +
+    #    PYTHONHASHSEED (above) AND the fs:// remote backend instead of
+    #    local_disk — local_disk's key index lives only in process memory, so
+    #    its files are unreachable after a restart. Full rationale in
+    #    candidates/gaia-prime/lmcache_config.yaml; verification trail +
+    #    restart-and-reuse test results in bead foh.
     command: >
       python -m vllm.entrypoints.openai.api_server
-      --model ${PRIME_MODEL_PATH:-/models/prime}
+      --model /models/Qwen3-VL-8B-GAIA-Prime-v1-abliterated-tf4shadow
+      --served-model-name /models/prime
       --host 0.0.0.0
       --port 7777
-      --gpu-memory-utilization 0.65
-      --max-model-len 24576
+      --gpu-memory-utilization 0.70
+      --max-model-len 8192
       --max-num-seqs 1
       --trust-remote-code
       --dtype auto
       --enforce-eager
-      --quantization fp8
+      --cpu-offload-gb 10
       --enable-prefix-caching
+      --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7777/health"]

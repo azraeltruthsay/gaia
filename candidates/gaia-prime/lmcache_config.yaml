@@ -1,12 +1,40 @@
 # LMCache configuration for GAIA Prime
-# Hierarchical KV cache: GPU → CPU RAM → Disk
-# Persists KV tensors across sleep/wake cycles
+# Hierarchical KV cache: GPU → CPU RAM → filesystem
+# Persists KV tensors across container restarts / sleep-wake cycles
+#
+# TWO non-obvious requirements for restart-surviving persistence, both
+# found the hard way 2026-07-03 (GAIA_Project-foh):
+#
+# 1. pre_caching_hash_algorithm MUST be content-stable. The default
+#    "builtin" keys chunks with Python's per-process randomized hash(),
+#    so a restarted server re-stores identical prompts under fresh keys
+#    and never hits what it wrote (verified: hit=0, duplicate chunk
+#    files). PYTHONHASHSEED=0 in the compose env is the belt to this
+#    suspender — it also stabilizes vLLM's own prefix-cache hashing.
+#
+# 2. The persistent tier MUST be the fs:// REMOTE backend, not
+#    local_disk. local_disk keeps its key index in process memory only
+#    (no startup scan of the cache dir — see local_disk_backend.py), so
+#    its files are unreachable after restart even with stable keys
+#    (verified: sha256 + local_disk still gave hit=0). The FSConnector
+#    "remote" backend stats the filesystem per lookup — no index to lose.
 
 chunk_size: 256
+pre_caching_hash_algorithm: "sha256"
+
+# Hot tier: pinned CPU RAM
 local_cpu: true
 max_local_cpu_size: 4.0          # GB CPU RAM for KV cache tier
-local_disk: "file:///kvcache/"   # Persistent disk tier (volume-mounted)
-max_local_disk_size: 10.0        # GB
+
+# Persistent tier: filesystem via the fs:// remote connector
+# (/kvcache is volume-mounted from ../gaia-instance/logs/kvcache/prime).
+# The host:port segment ("localhost:0") is REQUIRED but ignored — FSConnector
+# only uses the path. lmcache's own doc example `fs:///tmp/lmcache` fails its
+# URL validation ("missing host"), and host-without-port fails too ("missing
+# port") — verified against parse_remote_url in lmcache 0.5.0.
+remote_url: "fs://localhost:0/kvcache/"
+remote_serde: "naive"
+
 cache_policy: "LRU"
 save_decode_cache: true          # Cache decode-phase KV too (multi-turn)
 enable_async_loading: true
