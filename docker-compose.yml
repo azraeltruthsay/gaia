@@ -466,7 +466,10 @@ services:
       - HOST=0.0.0.0
       - PORT=6414
       # Discord integration (Unified Interface Gateway)
-      # DISCORD_BOT_TOKEN loaded from env_file: .env.discord
+      # DISCORD_BOT_TOKEN comes from the docker secret (/run/secrets/
+      # discord_bot_token, attached below) — main.py prefers the secret file.
+      # It must NOT be in .env.discord / env vars: env_file injection leaks
+      # the token to anything that can `docker inspect`. (GAIA_Project-1axq)
       - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
       # HA failover — candidate-core as fallback
       - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-http://gaia-core-candidate:6415}
