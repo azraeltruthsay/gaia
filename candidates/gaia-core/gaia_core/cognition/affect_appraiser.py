@@ -181,14 +181,21 @@ _recent_outcomes: deque = deque(maxlen=20)
 # seen this process; the idleness tonic stays silent until one is.
 _last_turn_ts: float = 0.0
 
-# Questions aimed at GAIA herself ("how are you", "do you like…") are social
-# contact, not an outward topic pull — they must not write curious_about, or the
-# felt-line would report her being curious about being asked how she feels.
-_SELF_DIRECTED = (
-    "how are you", "how're you", "how you", "are you", "do you", "can you",
-    "could you", "will you", "would you", "have you", "what do you",
-    "how do you feel", "you feeling", "your day", "what are you",
-)
+# Questions aimed at GAIA herself ("how are you", "anything on your mind?",
+# "do you like…") are social contact, not an outward topic pull — they must not
+# write curious_about, or the felt-line would report her being curious about
+# being asked how she feels. Any second-person reference marks the question
+# self-directed; conservative on purpose (a missed outward "can you explain X"
+# still gets the stronger knowledge_gap write if grounding fails).
+_SELF_DIRECTED_RE = None  # compiled lazily so import stays side-effect-free
+
+
+def _is_self_directed(sl: str) -> bool:
+    global _SELF_DIRECTED_RE
+    if _SELF_DIRECTED_RE is None:
+        import re
+        _SELF_DIRECTED_RE = re.compile(r"\b(you|your|yours|yourself|u)\b")
+    return bool(_SELF_DIRECTED_RE.search(sl))
 
 
 def note_engagement(user_input: str) -> None:
@@ -206,7 +213,7 @@ def note_engagement(user_input: str) -> None:
         if not s or not _looks_like_question(s):
             return
         sl = s.lower()
-        if any(m in sl for m in _SELF_DIRECTED):
+        if _is_self_directed(sl):
             return
         t = s.rstrip("?").strip()
         tl = t.lower()

@@ -52,6 +52,11 @@ def test_engagement_outward_question_writes_weak_curiosity(mock_affect_kg):
 def test_engagement_self_directed_question_writes_nothing(mock_affect_kg):
     affect_appraiser.note_engagement("how are you today?")
     affect_appraiser.note_engagement("do you like jazz?")
+    # Live regression 2026-07-07: this wrote itself as a curiosity topic and
+    # the felt-line then reported her drawn toward being asked what's on her
+    # mind. Any second-person reference must mark the question self-directed.
+    affect_appraiser.note_engagement("Anything on your mind lately, GAIA?")
+    affect_appraiser.note_engagement("what was your favorite part of today?")
     assert _curious_topics(mock_affect_kg) == set()
 
 
