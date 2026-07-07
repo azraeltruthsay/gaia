@@ -15,6 +15,16 @@ P0 sources (event-driven; each note_* is fail-safe, never raises into the caller
   - competence ← task/tool outcomes (failure raises the tension to "get it right")
   - curiosity  ← knowledge gaps (a query she couldn't ground → pulled to the topic)
 
+l11 additions — the event hooks alone leave the organ EMPTY in ordinary chat
+(grounding suppresses knowledge_gap, casual turns complete no tool RPC, samvega
+only fires on dissonance):
+  - note_engagement ← every user turn (agent_core KR region). Genuine outward
+    questions write a WEAK curiosity even when grounding succeeds — the topic
+    held her attention regardless of whether she could answer.
+  - appraise_tonic  ← heartbeat-called slow baseline: competence floor from the
+    recent task error-rate, novelty floor from conversation idleness. Floors
+    RAISE only — events and KG decay own the downside.
+
 Decay is automatic via the KG fact-type half-lives. Flag: AFFECT_APPRAISAL_ENABLED
 (default off).
 """
@@ -23,6 +33,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
+from collections import deque
 
 logger = logging.getLogger("GAIA.AffectAppraiser")
 
@@ -116,6 +128,7 @@ def note_task_outcome(success: bool, label: str = "") -> None:
     try:
         if not appraisal_enabled():
             return
+        _recent_outcomes.append(bool(success))
         lbl = str(label) if label is not None else "?"
         _bump_drive("competence", 0.12 if (not success) else -0.10,
                     source=f"appraiser:task:{lbl[:30]}")
@@ -155,3 +168,101 @@ def note_knowledge_gap(topic: str) -> None:
         _set_curious(t or topic, 0.55, source="appraiser:knowledge_gap")
     except Exception:
         pass
+
+
+# ── Baseline tonic (l11) — continuous signals, heartbeat cadence ────────────
+
+# Rolling window of recent task/tool outcomes (True=success) — the tonic derives
+# a felt error-rate from it. In-process only; a restart starts calm, which is
+# honest (the tension re-accumulates from real events).
+_recent_outcomes: deque = deque(maxlen=20)
+
+# Wall-clock of the last user turn, stamped by note_engagement. 0.0 = no turn
+# seen this process; the idleness tonic stays silent until one is.
+_last_turn_ts: float = 0.0
+
+# Questions aimed at GAIA herself ("how are you", "do you like…") are social
+# contact, not an outward topic pull — they must not write curious_about, or the
+# felt-line would report her being curious about being asked how she feels.
+_SELF_DIRECTED = (
+    "how are you", "how're you", "how you", "are you", "do you", "can you",
+    "could you", "will you", "would you", "have you", "what do you",
+    "how do you feel", "you feeling", "your day", "what are you",
+)
+
+
+def note_engagement(user_input: str) -> None:
+    """Ordinary-chat write hook — called on EVERY user turn (agent_core KR
+    region, all paths). Stamps conversation recency for the idleness tonic, and
+    writes a WEAK curiosity (0.35 < knowledge_gap's 0.55) for genuine outward
+    info-seeking questions even when grounding succeeds — fixes the l11 gap
+    where an answerable pipeline left the organ permanently empty."""
+    global _last_turn_ts
+    try:
+        _last_turn_ts = time.time()
+        if not appraisal_enabled() or not user_input:
+            return
+        s = str(user_input).strip()
+        if not s or not _looks_like_question(s):
+            return
+        sl = s.lower()
+        if any(m in sl for m in _SELF_DIRECTED):
+            return
+        t = s.rstrip("?").strip()
+        tl = t.lower()
+        for stem in _Q_STEMS:
+            if tl.startswith(stem):
+                t = t[len(stem):].strip()
+                break
+        if t.lower().startswith(("you", "your")):
+            return
+        _set_curious(t or s, 0.35, source="appraiser:engagement")
+    except Exception:
+        pass
+
+
+def _floor_drive(name: str, floor: float, *, source: str) -> None:
+    """Raise-only: lift a drive to a tonic floor if it's meaningfully below it.
+    Never lowers (events own raises above the floor, KG decay owns the fall),
+    and skips small deltas so the tonic doesn't restart decay every tick."""
+    af = _af()
+    if af is None:
+        return
+    try:
+        snap = af.flatten_current_affect()
+        cur = float((snap.get("drives", {}) or {}).get(name, 0.0))
+        new = _clamp(floor)
+        if new - cur < 0.05:
+            return
+        af.record_drive(name, new, source=source)
+        logger.info("affect tonic %s: %.2f → %.2f (%s)", name, cur, new, source)
+    except Exception:
+        logger.debug("affect _floor_drive(%s) failed", name, exc_info=True)
+
+
+def appraise_tonic() -> None:
+    """Slow baseline appraisal from continuous signals — called once per
+    heartbeat tick (~20 min). Keeps the organ honestly non-empty in ordinary
+    ops without inventing feelings (charter: functional drives only):
+
+      - competence ← recent task error-rate: a run of failures leaves a
+        standing pull to get things right, even between events.
+      - novelty ← conversation idleness: hours without a user turn build a
+        quiet tug toward something new (capped below the strong band, so an
+        active conversation never shows it).
+    """
+    try:
+        if not appraisal_enabled():
+            return
+        if len(_recent_outcomes) >= 4:
+            rate = 1.0 - (sum(1 for ok in _recent_outcomes if ok) / len(_recent_outcomes))
+            if rate > 0.0:
+                _floor_drive("competence", min(0.40, 0.55 * rate),
+                             source=f"tonic:error_rate:{rate:.2f}")
+        if _last_turn_ts > 0.0:
+            idle_h = max(0.0, time.time() - _last_turn_ts) / 3600.0
+            if idle_h >= 1.0:
+                _floor_drive("novelty", min(0.35, 0.05 * idle_h),
+                             source=f"tonic:idle:{idle_h:.1f}h")
+    except Exception:
+        logger.debug("appraise_tonic failed", exc_info=True)

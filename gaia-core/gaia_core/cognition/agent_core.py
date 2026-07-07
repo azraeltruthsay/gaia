@@ -2922,6 +2922,15 @@ class AgentCore:
                 r"\.(?:md|json|jsonl|yaml|yml|py|sh|toml|txt|log|cfg|ini|tsv|csv)"
                 r"\b"
             )
+            # Affect engagement hook (l11): every user turn stamps conversation
+            # recency; genuine outward questions write a weak curiosity even
+            # when grounding succeeds. Runs before any KR gate — the gates
+            # decide retrieval, not whether the turn happened.
+            try:
+                from gaia_core.cognition.affect_appraiser import note_engagement
+                note_engagement(user_input or "")
+            except Exception:
+                pass
             _grounding_ctx = None
             _kr_skip = bool(_local_file_re2.search(user_input or ""))
             if _kr_skip:

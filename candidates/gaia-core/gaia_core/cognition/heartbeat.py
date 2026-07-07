@@ -204,6 +204,15 @@ class ThoughtSeedHeartbeat:
         except ImportError:
             pass
 
+        # Affect baseline tonic (l11): slow floors from continuous signals
+        # (recent error-rate, conversation idleness). Heartbeat cadence is the
+        # right timescale; fail-safe like every appraiser entry point.
+        try:
+            from gaia_core.cognition.affect_appraiser import appraise_tonic
+            appraise_tonic()
+        except Exception:
+            logger.debug("affect tonic failed", exc_info=True)
+
         from gaia_core.cognition.thought_seed import (
             list_pending_seeds_due,
             list_unreviewed_seeds,
