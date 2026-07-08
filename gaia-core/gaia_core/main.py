@@ -1343,6 +1343,23 @@ async def process_packet(packet_data: Dict[str, Any]):
                         yield json.dumps({"type": "flush"}) + "\n"
 
                         # FINALIZATION: Skip run_turn if reflex already provided the answer
+                        # a9mi: run_turn is where turns normally enter session
+                        # history, so a reflex-finalized exchange must persist
+                        # here or the next turn has no memory of it. Store the
+                        # clean reflex_text (not the ⚡-banner formatting) with
+                        # provenance meta so downstream consumers can discount
+                        # reflex-tier turns if they need to.
+                        try:
+                            _sm = _ai_manager.session_manager
+                            _sm.add_message(session_id, "user", user_input)
+                            _sm.add_message(
+                                session_id, "assistant", reflex_text,
+                                meta={"generated_by": "reflex", "model": _reflex_model},
+                            )
+                            _agent_core._emit_timeline_message(session_id, "user", source)
+                            _agent_core._emit_timeline_message(session_id, "assistant", source)
+                        except Exception:
+                            logger.warning("Reflex finalization: session persistence failed", exc_info=True)
                         from gaia_common.protocols.cognition_packet import PacketState
                         packet.status.state = PacketState.COMPLETED
                         packet.response.candidate = reflex_text
