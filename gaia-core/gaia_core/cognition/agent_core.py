@@ -1122,6 +1122,15 @@ class AgentCore:
                 yield {"type": "end"}
                 return
 
+        # Early-return handlers below (pending-write approval, research
+        # router) append an assistant message to session history, so the
+        # user's message must be persisted BEFORE they run — otherwise the
+        # history ends up with adjacent assistant turns, breaking prompt
+        # construction and vector indexing (GAIA_Project-axd8). The flag
+        # prevents double-logging when a handler raises and execution falls
+        # through to the normal pipeline's persistence site.
+        _user_msg_persisted = False
+
         # KB write approval — if the previous turn parked a pending write,
         # this turn might be the user's confirm/cancel/trust response. Handle
         # it before falling into the normal cognitive pipeline.
@@ -1131,6 +1140,9 @@ class AgentCore:
             if _pending and user_input:
                 _resp = kb_approval.classify_user_response(user_input)
                 if _resp["action"] != "none":
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self._emit_timeline_message(session_id, "user", source)
+                    _user_msg_persisted = True
                     yield from self._handle_pending_write_response(
                         session_id=session_id,
                         source=source,
@@ -1147,6 +1159,10 @@ class AgentCore:
         try:
             _research_topic = research_router.detect_research_intent(user_input)
             if _research_topic:
+                if not _user_msg_persisted:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self._emit_timeline_message(session_id, "user", source)
+                    _user_msg_persisted = True
                 yield from self._handle_research_request(
                     topic=_research_topic,
                     session_id=session_id,
@@ -2079,8 +2095,10 @@ class AgentCore:
                 source=source, destination=destination, metadata=_metadata,
                 attachments=attachments,
             )
-            self.session_manager.add_message(session_id, "user", user_input)
-            self._emit_timeline_message(session_id, "user", source)
+            if not _user_msg_persisted:
+                self.session_manager.add_message(session_id, "user", user_input)
+                self._emit_timeline_message(session_id, "user", source)
+                _user_msg_persisted = True
     
             # Inject semantic probe result into packet (if probe found hits)
             if probe_result and probe_result.has_hits:
