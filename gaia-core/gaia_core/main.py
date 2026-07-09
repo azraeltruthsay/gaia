@@ -1248,9 +1248,6 @@ async def process_packet(packet_data: Dict[str, Any]):
             # list (/gaia/GAIA_Project, /knowledge, /gaia-common, /sandbox).
             # We don't refuse — we append a system aside so the model knows
             # to hedge ("I don't have access to /tmp") instead of fabricating.
-            # Reflex is disabled for these so the full pipeline handles them
-            # carefully (reflex on Core has no path awareness).
-            _reflex_disabled_for_path = False
             if user_input:
                 _path_match_main = _re_blast_main.search(
                     r"(?:^|\s)((?:/tmp|/etc|/root|/boot|/var|/proc|/sys|/dev|/run|/mnt|/media|/srv)/"
@@ -1260,7 +1257,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                 if _path_match_main:
                     _unreachable = _path_match_main.group(1)
                     logger.info(
-                        "[ALLOW-LIST HEDGE] user mentioned unreachable path %r — appending hedge to user_input, disabling reflex",
+                        "[ALLOW-LIST HEDGE] user mentioned unreachable path %r — appending hedge to user_input",
                         _unreachable,
                     )
                     user_input = (
@@ -1276,95 +1273,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                         packet.content.original_prompt = user_input
                     except Exception:
                         pass
-                    _reflex_disabled_for_path = True
 
-            # --- PRE-FLIGHT: Speculative Reflex ---
-            # Trigger this BEFORE the heavy run_turn loop starts.
-            #
-            # GAIA_Project-19i: skip reflex when the user has explicitly
-            # routed to a heavier tier or when the orchestrator is already
-            # FOCUSING (Prime on GPU). See reflex_gate.should_skip_reflex.
-            from gaia_core.cognition.reflex_gate import should_skip_reflex
-            _lc = getattr(_agent_core, "_lifecycle_client", None) \
-                or getattr(app.state, "lifecycle_client", None)
-            _reflex_skip_reason = should_skip_reflex(
-                user_input or "", packet, _lc,
-            )
-
-            loop = asyncio.get_event_loop()
-            reflex_text = ""
+            # vjdf: the speculative-reflex pre-flight (nano tier) is removed —
+            # every turn goes through run_turn, so session persistence, the
+            # Observer, and CFR all apply uniformly.
             history = _ai_manager.session_manager.get_history(session_id)
-            _reflex_eligible = (
-                not _reflex_disabled_for_path
-                and _reflex_skip_reason is None
-                and _agent_core.is_eligible_for_reflex(packet, history)
-            )
-            if _reflex_skip_reason is not None:
-                logger.info("Main: Reflex skipped — %s", _reflex_skip_reason)
-            if _reflex_eligible:
-                logger.info("Main: Triggering instant speculative Reflex...")
-                _reflex_t0 = _time.perf_counter()
-                reflex_text = await loop.run_in_executor(
-                    None, _agent_core.generate_instant_reflex, packet
-                )
-                if reflex_text:
-                    # Uncertainty check: if reflex hedges or describes process
-                    # without an actual answer, DON'T return — let Core handle it
-                    user_input = packet.content.original_prompt or ""
-                    # Tool-call escape hatch: if reflex emitted a tool_call
-                    # envelope, the actual tool hasn't executed yet. Finalizing
-                    # here would show the user the envelope as the answer.
-                    # Always escalate so the agent layer parses + executes the
-                    # call and synthesizes a real follow-up response.
-                    _reflex_has_toolcall = (
-                        "<tool_call>" in reflex_text and "</tool_call>" in reflex_text
-                    )
-                    if _reflex_has_toolcall:
-                        logger.info("Main: Reflex emitted tool_call — escalating to full pipeline to execute it")
-                        reflex_text = ""
-                    elif _agent_core._should_escalate_for_uncertainty(reflex_text, user_input):
-                        logger.info("Main: Reflex uncertain — escalating to full pipeline")
-                        reflex_text = ""  # Clear so full pipeline runs
-                    else:
-                        # Log reflex generation to stream
-                        _reflex_model = getattr(_agent_core, '_last_responding_model', None) or "core"
-                        try:
-                            from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
-                            _gl = _get_gen_logger()
-                            _reflex_elapsed = int((_time.perf_counter() - _reflex_t0) * 1000)
-                            _gid = _gl.start_generation(_reflex_model, _reflex_model, "response")
-                            _gl.log_token(_gid, reflex_text)
-                            _gl.end_generation(_gid)
-                        except Exception:
-                            pass
-                        _reflex_label = "Operator" if _reflex_model == "core" else _reflex_model.title()
-                        formatted_reflex = f"⚡ **[({_reflex_label}) {_reflex_model.title()}]**\n{reflex_text}"
-                        yield json.dumps({"type": "token", "value": formatted_reflex + "\n\n---\n\n"}) + "\n"
-                        yield json.dumps({"type": "flush"}) + "\n"
-
-                        # FINALIZATION: Skip run_turn if reflex already provided the answer
-                        # a9mi: run_turn is where turns normally enter session
-                        # history, so a reflex-finalized exchange must persist
-                        # here or the next turn has no memory of it. Store the
-                        # clean reflex_text (not the ⚡-banner formatting) with
-                        # provenance meta so downstream consumers can discount
-                        # reflex-tier turns if they need to.
-                        try:
-                            _sm = _ai_manager.session_manager
-                            _sm.add_message(session_id, "user", user_input)
-                            _sm.add_message(
-                                session_id, "assistant", reflex_text,
-                                meta={"generated_by": "reflex", "model": _reflex_model},
-                            )
-                            _agent_core._emit_timeline_message(session_id, "user", source)
-                            _agent_core._emit_timeline_message(session_id, "assistant", source)
-                        except Exception:
-                            logger.warning("Reflex finalization: session persistence failed", exc_info=True)
-                        from gaia_common.protocols.cognition_packet import PacketState
-                        packet.status.state = PacketState.COMPLETED
-                        packet.response.candidate = reflex_text
-                        yield json.dumps({"type": "packet", "value": packet.to_serializable_dict()}) + "\n"
-                        return
 
             # Run the cognitive loop
             response_pieces = []
@@ -1411,7 +1324,6 @@ async def process_packet(packet_data: Dict[str, Any]):
                 destination=destination,
                 source=source,
                 metadata=metadata,
-                reflex_text=reflex_text,
                 attachments=_inbound_attachments,
             )
 
@@ -1934,7 +1846,7 @@ async def cognitive_query(req: CognitiveQueryRequest):
     target_endpoints = {
         "core": os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092"),
         "prime": os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"),
-        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8093"),
+        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8092"),  # legacy alias → Core embedded engine
     }
     base = target_endpoints.get(req.target, target_endpoints["core"])
     url = f"{base.rstrip('/')}/v1/chat/completions"
@@ -2050,7 +1962,7 @@ async def cognitive_stream(req: CognitiveQueryRequest):
     target_endpoints = {
         "core": os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092"),
         "prime": os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777"),
-        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8093"),
+        "nano": os.environ.get("NANO_ENDPOINT", "http://localhost:8092"),  # legacy alias → Core embedded engine
     }
     base = target_endpoints.get(req.target, target_endpoints["core"])
     url = f"{base.rstrip('/')}/v1/chat/completions"

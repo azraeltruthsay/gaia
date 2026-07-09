@@ -1,25 +1,26 @@
 service: gaia-nano
-port: 8080
-host_port: 8090
-role: "DEPRECATED — bare TCP passthrough, not an inference service"
-protocol: tcp
+port: null
+host_port: null
+role: "REMOVED — container deleted 2026-07-08 (vjdf); tombstone only"
+protocol: none
 
 notes: |
-  gaia-nano is deprecated (Sovereign Duality, 2026-04+). Core handles all
-  triage directly — see CLAUDE.md "Deprecated: gaia-nano".
+  gaia-nano was deprecated in Sovereign Duality (2026-04+) and its last
+  remnant — an alpine/socat TCP passthrough forwarding :8080 to
+  gaia-core:8092 — was removed from docker-compose.yml on 2026-07-08
+  (bead vjdf). The `gaia-nano` DNS name no longer exists on gaia-net.
 
-  Everything below this line in the old contract (GAIA Engine dual-mode
-  inference, polygraph, LoRA adapters, /model/load, /device/gpu, etc.) was
-  fictional against actual running state and has been removed — kept the
-  file itself only so nothing that still `depends_on: gaia-nano` breaks.
+  All former NANO_* consumers now target Core's embedded engine directly:
+    - inside gaia-core:        http://localhost:8092
+    - from other containers:   http://gaia-core:8092
+  The speculative-reflex pre-flight in gaia-core/main.py (the last code
+  path that generated user-facing replies under the nano label) was
+  deleted in the same change — every turn now runs the full pipeline.
 
-  Current reality (docker-compose.yml:180-195): gaia-nano is
-  `image: alpine/socat:latest`, a bare TCP proxy —
-  `TCP-LISTEN:8080,fork,reuseaddr TCP:gaia-core:8092` — forwarding
-  connections to gaia-core's embedded engine. No model, no GPU, no
-  endpoints of its own. Restore the original engine container to bring
-  Nano back as a real tier; until then this contract has nothing to
-  document beyond the passthrough.
+  This file is kept as a tombstone so greps for "nano" land here instead
+  of resurrecting the tier by accident. Remaining name-scrub (orchestrator
+  tier bookkeeping, lifecycle TierExpectations, prompt tier labels) is
+  tracked in the phase-3 follow-up bead.
 
 provides: []
 consumes: []

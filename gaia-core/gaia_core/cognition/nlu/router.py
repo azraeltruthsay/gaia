@@ -97,7 +97,7 @@ _RECITATION_MARKERS = [
     "recite", "poem", "verse", "lyrics", "quote", "memorize", "memorised", "cite",
 ]
 
-_NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
+_NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://localhost:8092")  # Core embedded engine (nano tier retired)
 
 _NANO_TRIAGE_PROMPT = """\
 You are GAIA. Assess this request's complexity.

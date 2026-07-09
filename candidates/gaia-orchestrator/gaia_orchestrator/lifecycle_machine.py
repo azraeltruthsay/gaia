@@ -57,7 +57,7 @@ class LifecycleMachine:
         # Tier engine endpoints (Docker network)
         self._tier_endpoints = {
             "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
-            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
             "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
         }
 

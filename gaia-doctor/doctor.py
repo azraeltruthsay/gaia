@@ -160,8 +160,9 @@ HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-stu
 HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "file_hashes.json"
 
 # KV cache pressure monitoring — independent of gaia-core
+# (nano entry removed: retired tier was a socat alias to core's engine,
+# so polling it double-counted the same slots)
 KV_CACHE_ENDPOINTS = {
-    "nano": "http://gaia-nano:8080/slots",
     "core": "http://localhost:8092/slots",
 }
 KV_CACHE_DOCTOR_THRESHOLD = float(os.environ.get("KV_CACHE_DOCTOR_THRESHOLD", "0.90"))
@@ -189,7 +190,6 @@ _HARDCODED_SERVICES = {
     "gaia-web": ("http://gaia-web:6414/health", "restart"),
     "gaia-mcp": ("http://gaia-mcp:8765/health", "restart"),
     "gaia-prime": ("http://gaia-prime:7777/health", None),
-    "gaia-nano": ("http://gaia-nano:8080/health", "restart"),
     "gaia-audio": ("http://gaia-audio:8080/health", "restart"),
     "gaia-study": ("http://gaia-study:8766/health", None),
     "gaia-orchestrator": ("http://gaia-orchestrator:6410/health", None),
@@ -401,7 +401,7 @@ def poll_kv_cache_pressure():
                 compacted = _request_compact(role)
                 if not compacted:
                     # Last resort: restart the service if it supports restart
-                    svc_name = "gaia-nano" if role in ("nano", "reflex") else "gaia-core"
+                    svc_name = "gaia-core"
                     svc_entry = SERVICES.get(svc_name)
                     if svc_entry and svc_entry[1] == "restart":
                         log.warning(
@@ -2267,12 +2267,10 @@ def sovereign_promote(divergent_files: list) -> bool:
 
 # Engine endpoints for direct tier probes
 _CORE_ENGINE = os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092")
-_NANO_ENGINE = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
 
 # Expected identity neurons per tier (from SAE atlas)
 _IDENTITY_NEURONS = {
     "core": {"layer": "layer_23", "neuron": 1201, "min_strength": 1.0},
-    "nano": {"layer": "layer_23", "neuron": 0, "min_strength": 0.5},
 }
 
 
@@ -2307,7 +2305,9 @@ def _run_cognitive_monitor():
         tiers_checked = 0
         tiers_passed = 0
 
-        for tier_name, endpoint in [("core", _CORE_ENGINE), ("nano", _NANO_ENGINE)]:
+        # nano tier retired (Sovereign Duality) — it aliased core's engine,
+        # so probing it duplicated the core check.
+        for tier_name, endpoint in [("core", _CORE_ENGINE)]:
             tier_result = {"status": "unknown"}
             try:
                 # Step 1: Identity probe — direct to engine, ~12 tokens
@@ -2904,7 +2904,7 @@ def poll_cycle():
                 if _service_state[name]["healthy"] is not False:
                     log.warning("%s is DOWN (%d consecutive failures, confirmed by re-check)", name, failures)
                     # Break serenity for vital services going down (not during meditation)
-                    if not _is_meditation_active() and name in ("gaia-core", "gaia-web", "gaia-mcp", "gaia-nano", "gaia-orchestrator"):
+                    if not _is_meditation_active() and name in ("gaia-core", "gaia-web", "gaia-mcp", "gaia-orchestrator"):
                         _notify_monkey_break_serenity(f"Vital service {name} went DOWN")
                 _service_state[name]["healthy"] = False
 

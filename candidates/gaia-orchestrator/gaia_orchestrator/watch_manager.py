@@ -41,14 +41,14 @@ class WatchManager:
         # Tier inference endpoints (inside Docker network)
         self._endpoints = {
             "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
-            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
         }
 
-        # Model paths for tier swapping
+        # Model paths for tier swapping (symlinks resolve to current model family)
         self._model_paths = {
-            "core": os.environ.get("CORE_MODEL_PATH", "/models/Qwen3.5-2B-GAIA-Core-v3"),
-            "nano": os.environ.get("NANO_MODEL_PATH", "/models/Qwen3.5-0.8B-Abliterated-merged"),
-            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-abliterated-v2-merged"),
+            "core": os.environ.get("CORE_MODEL_PATH", "/models/core"),
+            "nano": os.environ.get("NANO_MODEL_PATH", "/models/nano"),
+            "prime": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
         }
 
         # Identity prefix for KV pre-warming

@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     await gpu_manager.startup()
 
     # Initialize Nano-Refiner (via gaia-nano HTTP endpoint)
-    nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+    nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-core:8092")
     refiner_engine = RefinerEngine(endpoint=nano_endpoint)
     try:
         refiner_engine.load()
@@ -332,7 +332,7 @@ async def refine(request: RefineRequest):
     global refiner_engine
     logger.info(f"Refine request received. Engine initialized: {refiner_engine is not None}")
     if not refiner_engine:
-        nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-nano:8080")
+        nano_endpoint = os.getenv("NANO_ENDPOINT", "http://gaia-core:8092")
         logger.warning(f"Refiner engine was None! Initializing on-demand from {nano_endpoint}")
         refiner_engine = RefinerEngine(endpoint=nano_endpoint)
         refiner_engine.load()

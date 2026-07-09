@@ -60,11 +60,11 @@
     },
     "nano": {
       "enabled": true,
-      "path": "Gemma4-E2B-GAIA-Nano-v1",
+      "path": "Gemma4-E4B-GAIA-Core-v1",
       "type": "managed",
-      "endpoint": "http://gaia-nano:8080",
+      "endpoint": "http://localhost:8092",
       "max_model_len": 2048,
-      "description": "Nano \u2014 sub-second triage via llama-server, Qwen3.5-0.8B"
+      "description": "RETIRED tier \u2014 legacy alias to Core's embedded engine (Sovereign Duality: Core handles all triage)"
     }
   },
   "N_BATCH": 1024,

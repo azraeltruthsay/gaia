@@ -35,7 +35,7 @@ def _build_tier_defaults() -> dict:
                 "compile_mode": "reduce-overhead",
             },
             "nano": {
-                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg.get_inference_endpoint("nano") or "http://gaia-nano:8080"),
+                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg.get_inference_endpoint("nano") or "http://gaia-core:8092"),
                 "model_path": os.environ.get("NANO_MODEL_PATH", cfg.model_path("nano", "merged") or "/models/nano"),
                 "device": os.environ.get("NANO_DEVICE", "cuda"),
                 "compile_mode": "reduce-overhead",
@@ -57,7 +57,7 @@ def _build_tier_defaults() -> dict:
                 "compile_mode": "reduce-overhead",
             },
             "nano": {
-                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+                "engine_endpoint": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
                 "model_path": os.environ.get("NANO_MODEL_PATH", "/models/nano"),
                 "device": os.environ.get("NANO_DEVICE", "cuda"),
                 "compile_mode": "reduce-overhead",

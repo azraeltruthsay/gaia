@@ -486,7 +486,7 @@ async def registry_paths():
     verified, mismatched, unreachable, skipped = 0, [], 0, 0
     openapi_cache: dict[str, dict | None] = {}
 
-    no_openapi = {"gaia-doctor", "gaia-nano", "dozzle", "gaia-wiki"}
+    no_openapi = {"gaia-doctor", "dozzle", "gaia-wiki"}
     import re
 
     for edge in edges:
@@ -681,7 +681,7 @@ async def consciousness_transition(target: str):
 
 # Tier endpoint map for direct engine communication
 _TIER_ENDPOINTS = {
-    "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+    "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
     "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
     "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", "http://gaia-prime:7777"),
 }

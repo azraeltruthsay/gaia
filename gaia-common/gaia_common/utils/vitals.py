@@ -44,7 +44,7 @@ HEARTBEAT_PATH = SHARED_DIR / "heartbeat" / "time_check.json"
 HEALING_LOCK_PATH = SHARED_DIR / "HEALING_REQUIRED.lock"
 ADVERSARIAL_LOG_PATH = SHARED_DIR / "security" / "adversarial_events.jsonl"
 
-NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
+NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092")
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
 DOCTOR_ENDPOINT = os.environ.get("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
 

@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger("GAIA.EthicalSentinel")
 
-_NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080")
+_NANO_ENDPOINT = os.environ.get("NANO_INFERENCE_ENDPOINT", "http://localhost:8092")  # Core embedded engine (nano tier retired)
 
 
 class RecoverySignal:

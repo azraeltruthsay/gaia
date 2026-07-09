@@ -19,7 +19,7 @@ SYSTEM_PROMPT = (
 
 
 class RefinerEngine:
-    def __init__(self, endpoint: str = "http://gaia-nano:8080"):
+    def __init__(self, endpoint: str = "http://gaia-core:8092"):
         self.endpoint = endpoint.rstrip("/")
         self._ready: bool = False
 

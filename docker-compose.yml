@@ -2,7 +2,6 @@
 #
 # Services:
 #   - gaia-core:  The Brain   - Cognitive loop + embedded Core inference (GAIA Engine: GPU NF4 or CPU GGUF)
-#   - gaia-nano:  DEPRECATED  - socat proxy forwarding :8080 -> gaia-core:8092 (Core handles triage)
 #   - gaia-prime: The Voice   - GAIA Engine inference server (standby; GPU when FOCUSING)
 #   - gaia-web:   The Face    - UI and API gateway
 #   - gaia-study: The Subconscious - Background processing (GPU, SOLE WRITER)
@@ -172,39 +171,6 @@ services:
               capabilities: [gpu]
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # gaia-nano: Sovereign Duality proxy — forwards :8080 → gaia-core:8092
-  # Preserves the "nano" DNS name on the Docker network so all existing code
-  # that references gaia-nano:8080 transparently hits Core's inference engine.
-  # To restore a real Nano tier: replace this with the original engine container.
-  # ═══════════════════════════════════════════════════════════════════════════
-  gaia-nano:
-    image: alpine/socat:latest
-    container_name: gaia-nano
-    hostname: gaia-nano
-    restart: unless-stopped
-    command: TCP-LISTEN:8080,fork,reuseaddr TCP:gaia-core:8092
-    depends_on:
-      - gaia-core
-
-    ports:
-      - "127.0.0.1:8090:8080"
-
-    healthcheck:
-      test: ["CMD", "sh", "-c", "kill -0 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-
-    networks:
-      - gaia-net
-
-    deploy:
-      resources:
-        limits:
-          memory: 32M
-
-  # ═══════════════════════════════════════════════════════════════════════════
   # gaia-core: The Brain - Cognitive loop + embedded Core/Operator inference
   # Runs the GAIA Engine internally for Core (Gemma4-E4B-GAIA-Core-v1) on port 8092
   # (GPU NF4 safetensors normally; CPU GGUF llama-server when Prime owns the GPU)
@@ -333,9 +299,10 @@ services:
       # Remote GAIA Engine inference via gaia-prime
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime:7777}
       - PRIME_MODEL=${PRIME_MODEL:-/models/prime}
-      # Nano reflex — DEPRECATED in Sovereign Duality (Core handles triage)
-      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
-      - NANO_MODEL=${NANO_MODEL:-Gemma4-E2B-GAIA-Nano-v1}
+      # Nano tier RETIRED (vjdf) — legacy NANO_* consumers alias to Core's
+      # embedded engine directly (the socat proxy container is gone)
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://localhost:8092}
+      - NANO_MODEL=${NANO_MODEL:-Gemma4-E4B-GAIA-Core-v1}
       # Core/Operator inference endpoint (GAIA Engine managed mode)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
       - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Gemma4-E4B-GAIA-Core-v1}
@@ -726,7 +693,7 @@ services:
     hostname: gaia-audio
     restart: unless-stopped
     depends_on:
-      - gaia-nano
+      - gaia-core
 
     volumes:
       # Project root for unified access
@@ -755,7 +722,7 @@ services:
       # GPU-lease protocol — Core/Prime release first, then audio acquires.
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-nano:8080}
+      - NANO_ENDPOINT=${NANO_ENDPOINT:-http://gaia-core:8092}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     ports:

@@ -51,7 +51,7 @@ class Config:
 
     # ── Inference Endpoints (engine-level, not service-level) ──────
     inference_endpoints: Dict[str, str] = field(default_factory=lambda: {
-        "nano": "http://gaia-nano:8080",
+        "nano": "http://gaia-core:8092",
         "core": "http://gaia-core:8092",
         "prime": "http://gaia-prime:7777"
     })

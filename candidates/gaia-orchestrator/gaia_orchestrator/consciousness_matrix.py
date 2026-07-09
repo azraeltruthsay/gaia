@@ -89,7 +89,7 @@ class ConsciousnessMatrix:
 
         # Tier engine endpoints
         self._endpoints = {
-            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("nano", "http://gaia-nano:8080")),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("nano", "http://gaia-core:8092")),
             "core": os.environ.get("CORE_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("core", "http://gaia-core:8092")),
             "prime": os.environ.get("PRIME_INFERENCE_ENDPOINT", cfg["inference_endpoints"].get("prime", "http://gaia-prime:7777")),
         }
@@ -259,7 +259,7 @@ class ConsciousnessMatrix:
     def _load_config() -> dict:
         """Load tier paths and endpoints from gaia_constants.json."""
         defaults = {
-            "inference_endpoints": {"nano": "http://gaia-nano:8080", "core": "http://gaia-core:8092", "prime": "http://gaia-prime:7777"},
+            "inference_endpoints": {"nano": "http://gaia-core:8092", "core": "http://gaia-core:8092", "prime": "http://gaia-prime:7777"},
             "gpu_models": {"nano": "/models/nano", "core": "/models/core", "prime": "/models/prime"},
             "cpu_models": {"nano": "/models/nano.gguf", "core": "/models/core.gguf", "prime": "/models/prime.gguf"},
         }

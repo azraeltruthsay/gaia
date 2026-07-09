@@ -79,7 +79,7 @@ ADAPTER_DIR = (_registry_path("lora_adapters") or "/models/lora_adapters") + "/t
 
 # Endpoints (inside Docker network)
 CORE_CPU_ENDPOINT = os.environ.get("CORE_CPU_ENDPOINT", "http://gaia-core:6415")
-NANO_ENDPOINT = os.environ.get("NANO_ENDPOINT", "http://gaia-nano:8080")
+NANO_ENDPOINT = os.environ.get("NANO_ENDPOINT", "http://gaia-core:8092")
 ORCHESTRATOR = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
 # Use gaia-prime (GPU vLLM) for eval — same model as Core GGUF but much faster
 CORE_EVAL_ENDPOINT = os.environ.get("CORE_EVAL_ENDPOINT", "http://gaia-prime:7777")
@@ -1252,7 +1252,7 @@ def stage_deploy_nano(ctx: PipelineContext) -> StageResult:
 
         # Wait for health
         logger.info("Waiting for gaia-nano health...")
-        if not wait_for_health("http://gaia-nano:8080/health", timeout=60):
+        if not wait_for_health("http://gaia-core:8092/health", timeout=60):
             return StageResult(ok=False, message="gaia-nano failed to become healthy")
 
         return StageResult(ok=True, message="gaia-nano restarted with new GGUF")

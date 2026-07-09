@@ -41,7 +41,7 @@ class WatchManager:
         # Tier inference endpoints (inside Docker network)
         self._endpoints = {
             "core": os.environ.get("CORE_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
-            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-nano:8080"),
+            "nano": os.environ.get("NANO_INFERENCE_ENDPOINT", "http://gaia-core:8092"),
         }
 
         # Model paths for tier swapping (symlinks resolve to current model family)
