@@ -15,6 +15,7 @@ def _make_agent_core():
     ai_manager.config = MagicMock()
     ai_manager.config.constants = {}
     ai_manager.config.SHARED_DIR = "/tmp/test_shared"
+    ai_manager.config.config.SHARED_DIR = "/tmp/test_shared"
     ai_manager.model_pool = MagicMock()
     ai_manager.session_manager = MagicMock()
     return AgentCore(ai_manager)

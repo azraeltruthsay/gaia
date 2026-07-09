@@ -14,6 +14,8 @@ def mock_agent_core():
     config._slim_prompt = False
     config.cheat_sheet_path = "/tmp/cheat.json"
     config.identity_file_path = "/tmp/id.json"
+    config.SHARED_DIR = "/tmp/gaia_test_shared"
+    config.config.SHARED_DIR = "/tmp/gaia_test_shared"
     
     config.constants = {
         "KNOWLEDGE_BASES": {},
