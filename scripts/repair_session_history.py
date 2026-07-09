@@ -18,7 +18,13 @@ KNOWN_RECONSTRUCTIONS = [
     {
         "contains": "Samvega is a Buddhist concept",
         "role": "user",
-        "content": "What do you know about your Samvega system?"
+        "content": "[RECONSTRUCTED USER PROMPT - WARNING: This message was placed here programmatically due to a logging failure/corruption. Confidence: Medium] What do you know about your Samvega system?",
+        "meta": {
+            "reconstructed": True,
+            "confidence": 0.5,
+            "reconstruction_reason": "pattern_match",
+            "original_bug": "GAIA_Project-axd8"
+        }
     }
 ]
 
@@ -60,7 +66,8 @@ def repair_sessions():
                             "id": "reconstructed_" + turn.get("id", "turn"),
                             "role": "user",
                             "content": rec["content"],
-                            "timestamp": ts
+                            "timestamp": ts,
+                            "meta": rec.get("meta", {})
                         }
                         new_history.append(user_turn)
                         print(f"  -> Reconstructed and injected: \"{rec['content']}\"")
@@ -73,8 +80,13 @@ def repair_sessions():
                     user_turn = {
                         "id": "placeholder_" + turn.get("id", "turn"),
                         "role": "user",
-                        "content": "[System continuation / Context query]",
-                        "timestamp": ts
+                        "content": "[RECONSTRUCTED USER PROMPT - WARNING: This message was placed here programmatically due to a logging failure/corruption. Confidence: Low] [System continuation / Context query]",
+                        "timestamp": ts,
+                        "meta": {
+                            "reconstructed": True,
+                            "confidence": 0.1,
+                            "reconstruction_reason": "consecutive_assistant_fallback"
+                        }
                     }
                     new_history.append(user_turn)
                     print(f"  -> Injected fallback placeholder user query.")
