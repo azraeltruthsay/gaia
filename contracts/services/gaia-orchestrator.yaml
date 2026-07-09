@@ -326,6 +326,20 @@ consumes:
     port: 7777
     description: "Unload model from Prime"
 
+  - service: gaia-prime
+    endpoint: /inference/drain
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Drain in-flight inference before unload (r2kn). Also called on gaia-core's embedded engine at :8092. On timeout the unload is aborted."
+
+  - service: gaia-prime
+    endpoint: /inference/resume
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Clear the drain flag after an unload or aborted drain (r2kn). Also called on gaia-core's embedded engine at :8092."
+
   - service: gaia-study
     endpoint: /study/gpu-ready
     method: POST

@@ -121,7 +121,42 @@ class SleepWakeManager:
         # Read from SLEEP_CYCLE config section, fall back to 30 minutes
         sleep_cfg = getattr(self.config, "SLEEP_CYCLE", None) or {}
         threshold = sleep_cfg.get("idle_threshold_minutes", 30) if isinstance(sleep_cfg, dict) else 30
-        return idle_minutes >= threshold
+        if idle_minutes < threshold:
+            return False
+        # r2kn: the idle monitor only sees /process_packet traffic. Direct
+        # engine use (dashboard tier chat, SAE scripts, gaia-web streaming)
+        # keeps the GPU busy without ever marking activity — parking then
+        # unloads a model mid-generation. Probe the engines last (only after
+        # every cheap gate has passed) and treat in-flight inference as
+        # activity.
+        if self._inference_in_flight():
+            if self.idle_monitor is not None:
+                self.idle_monitor.mark_active()
+            logger.info("Drowsy deferred — inference in flight on an engine")
+            return False
+        return True
+
+    # Engines whose in-flight inference blocks the sleep transition.
+    _ENGINE_PROBE_ENDPOINTS = (
+        ("core", "CORE_CPU_ENDPOINT", "http://localhost:8092"),
+        ("prime", "PRIME_ENDPOINT", "http://gaia-prime:7777"),
+    )
+
+    def _inference_in_flight(self) -> bool:
+        """True if any engine reports active_inference > 0 (best-effort)."""
+        import os
+        import httpx
+        for name, env_var, default in self._ENGINE_PROBE_ENDPOINTS:
+            endpoint = os.environ.get(env_var, default)
+            try:
+                with httpx.Client(timeout=2.0) as client:
+                    resp = client.get(f"{endpoint}/health")
+                    if resp.status_code == 200 and resp.json().get("active_inference", 0) > 0:
+                        logger.debug("Engine %s busy (active_inference>0)", name)
+                        return True
+            except Exception:
+                continue  # unreachable engine can't be mid-generation
+        return False
 
     def set_auto_sleep(self, enabled: bool) -> None:
         """Enable or disable automatic sleep transitions."""

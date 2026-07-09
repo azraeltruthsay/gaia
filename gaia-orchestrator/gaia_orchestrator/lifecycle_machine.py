@@ -297,6 +297,11 @@ class LifecycleMachine:
         LifecycleState.MEDITATION: "meditation",
         LifecycleState.SLEEP: "sleep",
         LifecycleState.DEEP_SLEEP: "deep_sleep",
+        # r2kn: PARKED was missing, so idle-timeout parks took the legacy
+        # direct-unload path and never updated the CM tier targets. The 15s
+        # CM poll then saw target=CONSCIOUS/actual=UNCONSCIOUS and reloaded
+        # the model it had just unloaded — a permanent load/unload fight.
+        LifecycleState.PARKED: "parked",
     }
 
     async def _execute_transition(
@@ -645,15 +650,44 @@ class LifecycleMachine:
         return False
 
     async def _unload_tier(self, tier: str) -> bool:
-        """Unload a tier's model via its managed engine."""
+        """Unload a tier's model via its managed engine.
+
+        r2kn: drains in-flight inference first. /model/unload kills the
+        worker unconditionally; without the drain an idle-timeout park cuts
+        a user's generation mid-stream. If drain times out (inference still
+        active), the unload is aborted and the caller's transition fails —
+        it retries on a later cycle.
+        """
         endpoint = self._tier_endpoints.get(tier)
         if not endpoint:
             return False
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=45) as client:
+                try:
+                    health = await client.get(f"{endpoint}/health", timeout=5.0)
+                    if (health.status_code == 200
+                            and health.json().get("active_inference", 0) > 0):
+                        drain = await client.post(
+                            f"{endpoint}/inference/drain", json={"timeout_s": 30.0},
+                        )
+                        if not (drain.status_code == 200 and drain.json().get("ok")):
+                            await client.post(f"{endpoint}/inference/resume")
+                            logger.warning(
+                                "LIFECYCLE: %s unload ABORTED — inference active, drain timed out",
+                                tier,
+                            )
+                            return False
+                except httpx.HTTPError:
+                    pass  # health/drain unsupported or unreachable — proceed
                 resp = await client.post(f"{endpoint}/model/unload")
                 if resp.status_code == 200:
+                    # Clear stale drain flag — the manager doesn't reset it on
+                    # unload/load and it 503s inference after the next load.
+                    try:
+                        await client.post(f"{endpoint}/inference/resume")
+                    except httpx.HTTPError:
+                        pass
                     return True
                 # Fallback for llama-server (no /model/unload)
                 if resp.status_code == 404:

@@ -27,7 +27,10 @@ from gaia_core.cognition.sleep_wake_manager import (
 @pytest.fixture
 def mock_config(tmp_path):
     config = MagicMock()
-    config.SLEEP_IDLE_THRESHOLD_MINUTES = 5
+    # should_transition_to_drowsy reads SLEEP_CYCLE["idle_threshold_minutes"];
+    # a bare MagicMock attribute isn't a dict, so the code fell back to the
+    # 30-min default and the at/above-threshold tests silently tested nothing.
+    config.SLEEP_CYCLE = {"idle_threshold_minutes": 5}
     config.SLEEP_CHECKPOINT_DIR = str(tmp_path / "sleep_state")
     config.SHARED_DIR = str(tmp_path)
     return config
@@ -35,7 +38,11 @@ def mock_config(tmp_path):
 
 @pytest.fixture
 def manager(mock_config):
-    return SleepWakeManager(mock_config)
+    mgr = SleepWakeManager(mock_config)
+    # Keep unit tests hermetic: the r2kn in-flight-inference gate probes
+    # engine /health over HTTP. test_sleep_interference_gates.py covers it.
+    mgr._inference_in_flight = lambda: False
+    return mgr
 
 
 # ── State initialisation ──────────────────────────────────────────────

@@ -317,10 +317,31 @@ class TierRouter:
 
     async def _unload_tier(self, endpoint: str) -> dict:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=45) as client:
+                # r2kn: drain in-flight inference before killing the worker.
+                # On drain timeout, abort — don't cut a live generation.
+                try:
+                    health = await client.get(f"{endpoint}/health", timeout=5.0)
+                    if (health.status_code == 200
+                            and health.json().get("active_inference", 0) > 0):
+                        drain = await client.post(
+                            f"{endpoint}/inference/drain", json={"timeout_s": 30.0},
+                        )
+                        if not (drain.status_code == 200 and drain.json().get("ok")):
+                            await client.post(f"{endpoint}/inference/resume")
+                            return {"ok": False,
+                                    "error": "busy: active inference, drain timed out"}
+                except httpx.HTTPError:
+                    pass  # drain unsupported/unreachable — proceed as before
                 resp = await client.post(f"{endpoint}/model/unload")
                 if resp.status_code == 200:
-                    return resp.json()
+                    result = resp.json()
+                    # Clear stale drain flag (manager doesn't reset it on unload)
+                    try:
+                        await client.post(f"{endpoint}/inference/resume")
+                    except httpx.HTTPError:
+                        pass
+                    return result
                 # Fallback: try /slots/idle (llama-server GPU release) then /shutdown
                 if resp.status_code == 404:
                     logger.info("TIER: /model/unload not supported, trying llama-server /slots/idle")

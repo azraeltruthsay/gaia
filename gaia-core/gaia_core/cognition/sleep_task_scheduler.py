@@ -444,6 +444,12 @@ class SleepTaskScheduler:
                 return None
         except Exception:
             pass
+        # r2kn: a pending wake signal means the user is (re)engaging — don't
+        # start another task just to interrupt it seconds later. execute_task
+        # clears the event on start, so without this gate a queued wake could
+        # be swallowed by the next task instead of transitioning to WAKING.
+        if self._wake_event.is_set():
+            return None
         if not self._tasks:
             return None
 

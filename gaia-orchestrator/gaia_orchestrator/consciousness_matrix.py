@@ -329,6 +329,11 @@ class ConsciousnessMatrix:
 
         results = {}
         for tier, level in targets.items():
+            # r2kn: nano is deprecated (socat alias → gaia-core:8092). Acting on
+            # it here posts /model/unload to Core's live engine mid-use — the
+            # same trap training() already sidesteps. Skip it everywhere.
+            if tier == "nano":
+                continue
             results[tier] = await self.set_target(tier, level)
 
         result = {"configuration": config_name, "results": results}
@@ -502,6 +507,11 @@ class ConsciousnessMatrix:
                 if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
                     unload_result = await self._unload_tier(tier, endpoint, state)
                     if not unload_result.get("ok"):
+                        # r2kn: busy abort (drain timeout) must stop the whole
+                        # transition — /model/swap below would kill the live
+                        # worker the drain just protected.
+                        if "busy" in str(unload_result.get("error", "")):
+                            return unload_result
                         logger.warning("Unload %s before CPU load returned: %s", tier, unload_result)
                     await self._wait_for_manager_ready(tier, endpoint)
                 result = await self._load_tier_cpu(tier, endpoint, state)
@@ -516,6 +526,8 @@ class ConsciousnessMatrix:
                 if from_level in (ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS):
                     unload_result = await self._unload_tier(tier, endpoint, state)
                     if not unload_result.get("ok"):
+                        if "busy" in str(unload_result.get("error", "")):
+                            return unload_result  # r2kn: don't swap-kill a live generation
                         logger.warning("Unload %s before GPU load returned: %s", tier, unload_result)
                     await self._wait_for_manager_ready(tier, endpoint)
                 return await self._load_tier_gpu(tier, endpoint, state)
@@ -556,13 +568,64 @@ class ConsciousnessMatrix:
             await asyncio.sleep(0.5)
         logger.warning("Manager %s not confirmed ready after %.0fs — proceeding anyway", tier, timeout)
 
+    async def _drain_before_unload(self, tier: str, endpoint: str,
+                                   timeout_s: float = 30.0) -> bool:
+        """Drain in-flight inference before an unload (r2kn).
+
+        /model/unload kills the worker unconditionally, cutting any active
+        generation mid-stream. The engine manager exposes /inference/drain
+        exactly for this: stop accepting new requests, wait for in-flight
+        ones. Returns True when it's safe to unload. On drain timeout we
+        /inference/resume and report False — the caller aborts the unload
+        rather than killing a live generation; the poll loop retries later.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                health = await client.get(f"{endpoint}/health")
+                if health.status_code != 200:
+                    return True  # unreachable/unloaded — nothing to drain
+                if health.json().get("active_inference", 0) <= 0:
+                    return True
+        except Exception:
+            return True
+
+        logger.info("Unload %s deferred to drain — inference in flight", tier)
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s + 10.0) as client:
+                resp = await client.post(
+                    f"{endpoint}/inference/drain",
+                    json={"timeout_s": timeout_s},
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    return True
+                # Drain timed out with requests still active — let them live.
+                await client.post(f"{endpoint}/inference/resume")
+                logger.warning(
+                    "Unload %s ABORTED: drain timed out with inference still active",
+                    tier,
+                )
+                return False
+        except Exception as e:
+            # Engine without drain support (e.g. llama-server) — proceed as before.
+            logger.debug("Drain call failed for %s (%s) — proceeding with unload", tier, e)
+            return True
+
     async def _unload_tier(self, tier: str, endpoint: str, state: TierState) -> dict:
         """Unload a tier's model (any state → unconscious)."""
         logger.info("Unloading %s", tier)
+        if not await self._drain_before_unload(tier, endpoint):
+            return {"ok": False, "tier": tier, "error": "busy: active inference, drain timed out"}
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(f"{endpoint}/model/unload")
                 data = resp.json() if resp.status_code in (200, 409) else {}
+                # Clear any drain flag left set by _drain_before_unload — the
+                # manager doesn't reset it on unload/load, and a stale flag
+                # 503s all inference after the next load.
+                try:
+                    await client.post(f"{endpoint}/inference/resume")
+                except Exception:
+                    pass
                 state.actual = ConsciousnessLevel.UNCONSCIOUS
                 state.gpu_mb = 0
                 state.ram_mb = 0
