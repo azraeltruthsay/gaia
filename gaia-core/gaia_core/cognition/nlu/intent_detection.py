@@ -792,9 +792,26 @@ _VALID_INTENTS = {
 
 
 def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
-    """
-    Multi-stage intent detection with graceful fallback.
+    intent_str = _model_intent_detection_inner(text, config, lite_llm, full_llm, fallback_llm, probe_context, embed_model, source)
+    if intent_str == "chat" and text:
+        lowered = text.lower()
+        system_keywords = [
+            "docker", "container", "mcp", "localhost", "endpoint",
+            "vllm", "llama.cpp", "gguf", "safetensors", "orchestrator",
+            "sqlite", "database", "filesystem", "directory structure",
+            "folder structure", "repository", "git status", "git branch",
+            "error log", "codebase", "code structure"
+        ]
+        is_system_kw = any(k in lowered for k in system_keywords)
+        is_isolated_sys_word = any(f" {k} " in f" {lowered} " for k in ["port", "ports", "service", "services", "logs", "file", "files", "script", "scripts", "process", "processes", "git"])
+        if is_system_kw or is_isolated_sys_word:
+            logger.info("System keyword override: upgrading intent 'chat' -> 'other' for system awareness.")
+            return "other"
+    return intent_str
 
+
+def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
+    """
     Pipeline (each stage can short-circuit):
       1. Fast-track keyword match (no model needed)
       2. NLU heuristics: fragmentation, tool routing, file discovery (no model needed)

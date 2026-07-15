@@ -569,7 +569,7 @@ class DiscordInterface:
                 ),
                 operational_status=OperationalStatus(status="initialized")
             ),
-            intent=Intent(user_intent="chat", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0), # Placeholder
+            intent=Intent(user_intent="", system_task=SystemTask.GENERATE_DRAFT, confidence=0.0), # Placeholder
             context=Context(
                 session_history_ref=SessionHistoryRef(type="discord_channel", value=session_id),
                 cheatsheets=[],
