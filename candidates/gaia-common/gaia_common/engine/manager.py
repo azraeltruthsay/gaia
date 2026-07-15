@@ -138,6 +138,8 @@ class EngineManager:
                 ]
 
             env = os.environ.copy()
+            if device == "cpu" or (is_gguf and device != "cuda"):
+                env["CUDA_VISIBLE_DEVICES"] = ""
             # Pass quantize config via env if needed (avoids CLI arg complexity)
             if quantize:
                 env["GAIA_ENGINE_QUANTIZE"] = quantize

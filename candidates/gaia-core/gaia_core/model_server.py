@@ -196,10 +196,12 @@ class ModelServer:
         ]
 
         try:
+            env = dict(os.environ, CUDA_VISIBLE_DEVICES="")
             self._process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=env,
             )
         except FileNotFoundError:
             return {"ok": False, "error": "llama-server binary not found"}

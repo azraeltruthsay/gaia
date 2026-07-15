@@ -50,11 +50,13 @@ class IdleHeartbeat:
         model_pool=None,
         timeline_store=None,
         session_manager=None,
+        sleep_wake_manager=None,
     ) -> None:
         self.config = config
         self.model_pool = model_pool
         self._timeline = timeline_store
         self._session_manager = session_manager
+        self._sleep_wake_manager = sleep_wake_manager
 
         self._interval = int(os.environ.get(
             "IDLE_HEARTBEAT_INTERVAL",
@@ -156,6 +158,17 @@ class IdleHeartbeat:
 
     def _tick(self) -> None:
         """Single heartbeat tick — check idle state and optionally generate."""
+        # Don't fire if the system is asleep, drowsy, or dreaming (avoids GPU wakeups)
+        if self._sleep_wake_manager:
+            try:
+                from gaia_core.cognition.sleep_wake_manager import GaiaState
+                current_state = self._sleep_wake_manager.state
+                if current_state in (GaiaState.ASLEEP, GaiaState.DROWSY, GaiaState.DREAMING):
+                    logger.debug("Idle heartbeat: system is %s, skipping reflection to avoid wakeups", current_state.name)
+                    return
+            except Exception as e:
+                logger.debug("Idle heartbeat: failed to check sleep state: %s", e)
+
         # Don't fire if a user turn is active
         if self._turn_active.is_set():
             logger.debug("Idle heartbeat: user turn active, skipping")

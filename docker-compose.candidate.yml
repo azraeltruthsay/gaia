@@ -36,6 +36,9 @@ services:
       - CORE_ENDPOINT=http://gaia-core-candidate:6415
       - MCP_ENDPOINT=http://gaia-mcp-candidate:8765/jsonrpc
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
+      # Disable sleep and background heartbeats in candidate to avoid waking GPU
+      - SLEEP_ENABLED=False
+      - HEARTBEAT_ENABLED=False
       # Tracks the live /models/prime symlink — was hardcoded to an
       # abandoned Huihui-Qwen3-8B abliteration experiment that no longer
       # exists on disk (GAIA_Project-74v).

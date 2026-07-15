@@ -26,10 +26,7 @@ class Config(CommonConfig):
     def CODEX_ALLOW_HOT_RELOAD(self) -> bool:
         return True
 
-    # Sleep Cycle helpers
-    @property
-    def SLEEP_ENABLED(self) -> bool:
-        return self.SLEEP_CYCLE.get("enabled", True)
+
 
     @property
     def SLEEP_IDLE_THRESHOLD_MINUTES(self) -> int:
@@ -84,9 +81,7 @@ class Config(CommonConfig):
     def HEARTBEAT_INTERVAL_SECONDS(self) -> int:
         return 1200 # Fixed for now or could move to SYSTEM
 
-    @property
-    def HEARTBEAT_ENABLED(self) -> bool:
-        return True
+
 
     @property
     def identity_file_path(self) -> str:

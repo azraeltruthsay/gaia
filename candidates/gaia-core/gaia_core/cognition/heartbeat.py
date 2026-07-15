@@ -195,6 +195,17 @@ class ThoughtSeedHeartbeat:
 
     def _tick(self) -> None:
         """One heartbeat cycle: promote overdue, triage unreviewed seeds."""
+        # Skip heartbeat if system is asleep, drowsy, or dreaming to avoid waking up GPU
+        if self.sleep_wake_manager:
+            try:
+                from gaia_core.cognition.sleep_wake_manager import GaiaState
+                current_state = self.sleep_wake_manager.get_state()
+                if current_state in (GaiaState.ASLEEP, GaiaState.DROWSY, GaiaState.DREAMING):
+                    logger.debug("Thought seed heartbeat: system is %s, skipping tick to avoid GPU wakeups", current_state.name)
+                    return
+            except Exception as e:
+                logger.debug("Thought seed heartbeat: failed to check sleep state: %s", e)
+
         # Skip heartbeat during maintenance mode to avoid resource contention
         try:
             from gaia_common.utils.maintenance import is_maintenance_active

@@ -75,6 +75,8 @@ class Config:
     INTEGRATIONS: Dict[str, Any] = field(default_factory=dict)
     SAFE_EXECUTE_FUNCTIONS: List[str] = field(default_factory=list)
     CODEX_FILE_EXTS: Tuple[str, ...] = field(default_factory=lambda: (".md", ".yaml", ".yml", ".json"))
+    SLEEP_ENABLED: bool = True
+    HEARTBEAT_ENABLED: bool = True
 
     # Singleton instance
     _instance: Optional[Config] = None
@@ -226,6 +228,8 @@ class Config:
 
         # Map sections
         self.SLEEP_CYCLE = c.get("SLEEP_CYCLE", {})
+        self.SLEEP_ENABLED = self.SLEEP_CYCLE.get("enabled", True)
+        self.HEARTBEAT_ENABLED = c.get("HEARTBEAT_ENABLED", True)
         self.TEMPORAL_AWARENESS = c.get("TEMPORAL_AWARENESS", {})
         self.FRAGMENTATION = c.get("fragmentation", {})
         self.INTEGRATIONS = c.get("INTEGRATIONS", {})
@@ -277,7 +281,7 @@ class Config:
             self.endpoints["prime"] = prime_endpoint
             if "prime" in self.MODEL_CONFIGS:
                 self.MODEL_CONFIGS["prime"]["endpoint"] = prime_endpoint
-                self.MODEL_CONFIGS["prime"]["type"] = "vllm_remote"
+                self.MODEL_CONFIGS["prime"]["type"] = "gaia_engine"
 
         # 3. Port/Endpoint overrides
         for svc in self.endpoints:
@@ -292,6 +296,20 @@ class Config:
         vllm_max = os.getenv("VLLM_MAX_MODEL_LEN")
         if vllm_max and "prime" in self.MODEL_CONFIGS:
             self.MODEL_CONFIGS["prime"]["max_model_len"] = int(vllm_max)
+
+        # 6. Sleep & Heartbeat overrides
+        def _parse_bool(val: Optional[str], default: bool) -> bool:
+            if val is None:
+                return default
+            s = val.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off"):
+                return False
+            return default
+
+        self.SLEEP_ENABLED = _parse_bool(os.getenv("SLEEP_ENABLED"), self.SLEEP_ENABLED)
+        self.HEARTBEAT_ENABLED = _parse_bool(os.getenv("HEARTBEAT_ENABLED"), self.HEARTBEAT_ENABLED)
 
     def get_endpoint(self, service: str) -> str:
         """Get the endpoint for a specific service."""

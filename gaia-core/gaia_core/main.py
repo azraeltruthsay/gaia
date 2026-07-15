@@ -291,6 +291,26 @@ async def lifespan(app: FastAPI):
                 _agent_core.timeline_store = _sleep_loop.timeline_store
                 _agent_core._lifecycle_client = app.state.lifecycle_client
 
+            # Synchronize initial SleepWakeManager state with orchestrator lifecycle
+            if app.state.lifecycle_client and app.state.sleep_wake_manager:
+                try:
+                    logger.info("Synchronizing initial sleep-wake state with orchestrator...")
+                    snapshot = app.state.lifecycle_client.get_state_sync(timeout=3.0)
+                    from gaia_core.cognition.sleep_wake_manager import GaiaState
+                    state_val = snapshot.state
+                    logger.info("Orchestrator lifecycle state on boot: %s", state_val)
+                    if state_val in ("sleep", "deep_sleep", "parked"):
+                        app.state.sleep_wake_manager.state = GaiaState.ASLEEP
+                        logger.info("Synced local SleepWakeManager to ASLEEP")
+                    elif state_val == "meditation":
+                        app.state.sleep_wake_manager.state = GaiaState.DREAMING
+                        logger.info("Synced local SleepWakeManager to DREAMING")
+                    elif state_val in ("awake", "listening", "focusing"):
+                        app.state.sleep_wake_manager.state = GaiaState.ACTIVE
+                        logger.info("Synced local SleepWakeManager to ACTIVE")
+                except Exception as sync_exc:
+                    logger.warning("Failed to sync initial sleep-wake state with orchestrator: %s", sync_exc)
+
             _sleep_loop.start()
             logger.info("Sleep cycle loop started")
         else:
@@ -300,19 +320,23 @@ async def lifespan(app: FastAPI):
 
     # Start idle heartbeat — the "sound of silence"
     _idle_heartbeat = None
-    try:
-        from gaia_core.cognition.idle_heartbeat import IdleHeartbeat
-        _idle_heartbeat = IdleHeartbeat(
-            config=config,
-            model_pool=pool,
-            timeline_store=getattr(app.state, "timeline_store", None),
-            session_manager=getattr(_agent_core, "session_manager", None) if _agent_core else None,
-        )
-        _idle_heartbeat.start()
-        app.state.idle_heartbeat = _idle_heartbeat
-        logger.info("Idle heartbeat started")
-    except Exception:
-        logger.warning("Failed to start idle heartbeat", exc_info=True)
+    if getattr(config, "HEARTBEAT_ENABLED", True):
+        try:
+            from gaia_core.cognition.idle_heartbeat import IdleHeartbeat
+            _idle_heartbeat = IdleHeartbeat(
+                config=config,
+                model_pool=pool,
+                timeline_store=getattr(app.state, "timeline_store", None),
+                session_manager=getattr(_agent_core, "session_manager", None) if _agent_core else None,
+                sleep_wake_manager=getattr(app.state, "sleep_wake_manager", None),
+            )
+            _idle_heartbeat.start()
+            app.state.idle_heartbeat = _idle_heartbeat
+            logger.info("Idle heartbeat started")
+        except Exception:
+            logger.warning("Failed to start idle heartbeat", exc_info=True)
+    else:
+        logger.info("Idle heartbeat disabled (HEARTBEAT_ENABLED=False)")
 
     # Start KV cache manager (background restore + periodic checkpoint)
     _kv_cache_mgr = None
@@ -337,21 +361,24 @@ async def lifespan(app: FastAPI):
 
     # Start audio commentary daemon
     _audio_commentary = None
-    try:
-        from gaia_core.cognition.audio_commentary import AudioCommentaryEvaluator
-        from gaia_core.config import get_config as _get_config_ac
+    if getattr(config, "HEARTBEAT_ENABLED", True):
+        try:
+            from gaia_core.cognition.audio_commentary import AudioCommentaryEvaluator
+            from gaia_core.config import get_config as _get_config_ac
 
-        _ac_config = _get_config_ac()
-        _audio_commentary = AudioCommentaryEvaluator(
-            model_pool=_ai_manager.model_pool if _ai_manager else None,
-            agent_core=_agent_core,
-            sleep_wake_manager=getattr(app.state, "sleep_wake_manager", None),
-            config=_ac_config,
-        )
-        _audio_commentary.start()
-        app.state.audio_commentary = _audio_commentary
-    except Exception:
-        logger.warning("Failed to start audio commentary daemon", exc_info=True)
+            _ac_config = _get_config_ac()
+            _audio_commentary = AudioCommentaryEvaluator(
+                model_pool=_ai_manager.model_pool if _ai_manager else None,
+                agent_core=_agent_core,
+                sleep_wake_manager=getattr(app.state, "sleep_wake_manager", None),
+                config=_ac_config,
+            )
+            _audio_commentary.start()
+            app.state.audio_commentary = _audio_commentary
+        except Exception:
+            logger.warning("Failed to start audio commentary daemon", exc_info=True)
+    else:
+        logger.info("Audio commentary daemon disabled (HEARTBEAT_ENABLED=False)")
 
     yield
 

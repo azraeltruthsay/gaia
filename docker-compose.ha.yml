@@ -36,6 +36,9 @@ services:
       - MCP_LITE_ENDPOINT=http://gaia-mcp:8765/jsonrpc
       # LIVE gaia-study for background operations
       - STUDY_ENDPOINT=http://gaia-study:8766
+      # Disable sleep and background heartbeats in candidate to avoid waking GPU
+      - SLEEP_ENABLED=False
+      - HEARTBEAT_ENABLED=False
       # --- Preserve all other env vars from candidate compose ---
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core

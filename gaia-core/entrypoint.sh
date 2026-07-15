@@ -83,7 +83,7 @@ elif [ -n "$CORE_SAFETENSORS_PATH" ] && [ -d "$CORE_SAFETENSORS_PATH" ] && [ "$G
     echo "[entrypoint] Starting GAIA Inference Engine DIRECT (device=$CORE_DEVICE)..."
     echo "[entrypoint] Model: $CORE_SAFETENSORS_PATH"
     COMPILE_MODE="${GAIA_COMPILE_MODE:-reduce-overhead}"
-    python -m gaia_common.engine --gpu-memory-utilization 0.3 \
+    python -m gaia_common.engine \
         --model "$CORE_SAFETENSORS_PATH" \
         --port "$CORE_CPU_PORT" \
         --device "$CORE_DEVICE" \
@@ -116,7 +116,12 @@ elif [ -f "$CORE_CPU_MODEL_PATH" ]; then
     if [ -d "$CORE_CPU_SLOT_SAVE_PATH" ]; then
         LLAMA_ARGS="$LLAMA_ARGS --slot-save-path $CORE_CPU_SLOT_SAVE_PATH"
     fi
-    llama-server $LLAMA_ARGS 2>&1 | sed 's/^/[llama-server] /' &
+    if [ "$N_GPU_LAYERS" = "0" ]; then
+        echo "[entrypoint] n_gpu_layers is 0: hiding GPU to prevent VRAM allocation..."
+        CUDA_VISIBLE_DEVICES="" llama-server $LLAMA_ARGS 2>&1 | sed 's/^/[llama-server] /' &
+    else
+        llama-server $LLAMA_ARGS 2>&1 | sed 's/^/[llama-server] /' &
+    fi
 
     LLAMA_PID=$!
     echo "$LLAMA_PID" > /tmp/llama_server.pid
