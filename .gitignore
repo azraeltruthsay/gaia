@@ -226,3 +226,6 @@ gaia-engine/
 .agents/
 agents/
 PROJECT.md
+
+# Ad-hoc debug scratch dirs (throwaway repro scripts)
+scratch/
