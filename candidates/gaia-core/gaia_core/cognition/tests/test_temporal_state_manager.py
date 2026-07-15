@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import pickle
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -33,13 +32,13 @@ def mock_config(tmp_path):
 
 @pytest.fixture
 def mock_llm():
-    """Mock Llama instance with save_state/load_state."""
+    """Mock Llama instance with save_kv_cache/restore_kv_cache."""
     llm = MagicMock()
     llm.create_chat_completion.return_value = {
         "choices": [{"message": {"content": "I am reflecting on temporal context..."}}]
     }
-    llm.save_state.return_value = FakeLlamaState()
-    llm.load_state.return_value = None
+    llm.save_kv_cache.return_value = True
+    llm.restore_kv_cache.return_value = True
     return llm
 
 
@@ -101,7 +100,7 @@ class TestBakeState:
         assert path.exists()
         assert path.suffix == ".bin"
         assert path.name.startswith("lite_state_")
-        mock_llm.save_state.assert_called_once()
+        mock_llm.save_kv_cache.assert_called_once()
 
     def test_bake_creates_json_sidecar(self, mock_config, mock_model_pool):
         mgr = TemporalStateManager(config=mock_config, model_pool=mock_model_pool)
@@ -126,14 +125,11 @@ class TestBakeState:
         mgr = TemporalStateManager(config=mock_config, model_pool=None)
         assert mgr.bake_state() is None
 
-    def test_bake_state_is_picklable(self, mock_config, mock_model_pool):
-        """Verify the saved .bin file can be unpickled."""
+    def test_bake_state_is_marker_file(self, mock_config, mock_model_pool):
+        """Verify the saved .bin file contains the marker string."""
         mgr = TemporalStateManager(config=mock_config, model_pool=mock_model_pool)
         path = mgr.bake_state()
-
-        with open(path, "rb") as f:
-            state = pickle.load(f)
-        assert isinstance(state, FakeLlamaState)
+        assert path.read_bytes() == b"kv_cache_ref"
 
     def test_bake_includes_journal_content(
         self, mock_config, mock_model_pool, mock_llm, mock_journal,
@@ -161,11 +157,11 @@ class TestLoadState:
         state_id = path.stem
 
         # Reset mock to verify load is called
-        mock_llm.load_state.reset_mock()
+        mock_llm.restore_kv_cache.reset_mock()
 
         result = mgr.load_state(state_id)
         assert result is True
-        mock_llm.load_state.assert_called_once()
+        mock_llm.restore_kv_cache.assert_called_once()
 
     def test_load_nonexistent_returns_false(self, mock_config, mock_model_pool):
         mgr = TemporalStateManager(config=mock_config, model_pool=mock_model_pool)
@@ -178,7 +174,7 @@ class TestLoadState:
         state_id = path.stem
 
         # Make load_state raise
-        mock_llm.load_state.side_effect = RuntimeError("corrupt KV cache")
+        mock_llm.restore_kv_cache.side_effect = RuntimeError("corrupt KV cache")
 
         result = mgr.load_state(state_id)
         assert result is False
@@ -192,10 +188,10 @@ class TestLoadState:
         mgr = TemporalStateManager(config=mock_config, model_pool=mock_model_pool)
         mgr.bake_state()
 
-        mock_llm.load_state.reset_mock()
+        mock_llm.restore_kv_cache.reset_mock()
         result = mgr.restore_current()
         assert result is True
-        mock_llm.load_state.assert_called_once()
+        mock_llm.restore_kv_cache.assert_called_once()
 
 
 # ── TestRotation ────────────────────────────────────────────────────

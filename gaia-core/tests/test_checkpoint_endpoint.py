@@ -58,7 +58,7 @@ def test_checkpoint_endpoint_returns_200(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["prime"]["status"] == "ok"
-    assert data["lite"]["status"] == "ok"
+    assert data["core"]["status"] == "ok"
 
 
 def test_checkpoint_endpoint_returns_503_when_not_initialized():
@@ -99,7 +99,7 @@ def test_checkpoint_endpoint_handles_prime_failure(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["prime"]["status"] == "error"
-    assert data["lite"]["status"] == "ok"
+    assert data["core"]["status"] == "ok"
 
 
 def test_checkpoint_endpoint_lite_skipped_no_model(client):
@@ -128,4 +128,4 @@ def test_checkpoint_endpoint_lite_skipped_no_model(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["prime"]["status"] == "ok"
-    assert data["lite"]["status"] == "skipped"
+    assert data["core"]["status"] == "skipped"

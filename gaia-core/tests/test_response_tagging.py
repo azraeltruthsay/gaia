@@ -59,8 +59,8 @@ class TestMindTags:
 
     def test_unknown_model_uses_name(self):
         ac = _make_agent_core()
-        header = ac._build_response_header("groq_fallback", _make_packet(), None, None, None)
-        assert header == "[groq_fallback]\n\n"
+        header = ac._build_response_header("my_fancy_model", _make_packet(), None, None, None)
+        assert header == "[my_fancy_model]\n\n"
 
     def test_none_model(self):
         ac = _make_agent_core()

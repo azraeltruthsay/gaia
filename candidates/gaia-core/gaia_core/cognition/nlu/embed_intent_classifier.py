@@ -125,7 +125,7 @@ class EmbedIntentClassifier:
             (intent_label, confidence_score).
             Falls back to ("other", 0.0) if not ready or below threshold.
         """
-        if not self._ready or self._embed_model is None:
+        if not self._ready or self._embed_model is None or self._exemplar_matrix is None or getattr(self._exemplar_matrix, 'ndim', 0) < 2:
             return ("other", 0.0)
 
         try:

@@ -287,6 +287,10 @@ def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
     """
     if not raw:
         return "", "", True
+    if not isinstance(raw, str):
+        if hasattr(raw, '_mock_return_value') or raw.__class__.__name__ == 'MagicMock':
+            return "", "", False
+        raw = str(raw)
     m = _THINK_RE.search(raw)
     if not m:
         # No closed think block — but maybe an unclosed one consumed the

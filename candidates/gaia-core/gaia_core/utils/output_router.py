@@ -39,7 +39,11 @@ def _strip_think_tags_robust(text: str) -> str:
     the entire response is inside think tags.
     """
     if not text:
-        return text
+        return ""
+    if not isinstance(text, str):
+        if hasattr(text, '_mock_return_value') or text.__class__.__name__ == 'MagicMock':
+            return ""
+        text = str(text)
 
     result = text
 

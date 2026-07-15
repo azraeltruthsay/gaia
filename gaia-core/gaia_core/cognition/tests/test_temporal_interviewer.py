@@ -42,13 +42,13 @@ def mock_config(tmp_path):
 
 @pytest.fixture
 def mock_llm():
-    """Mock Llama instance that tracks save_state / load_state calls."""
+    """Mock Llama instance that tracks save_kv_cache / restore_kv_cache calls."""
     llm = MagicMock()
     llm.create_chat_completion.return_value = {
         "choices": [{"message": {"content": "I was processing intent detection queries."}}]
     }
-    llm.save_state.return_value = FakeLlamaState("current")
-    llm.load_state.return_value = None
+    llm.save_kv_cache.return_value = True
+    llm.restore_kv_cache.return_value = True
     return llm
 
 
@@ -188,10 +188,10 @@ class TestInterviewFlow:
         assert transcript["round_count"] == 3
         assert len(transcript["rounds"]) == 3
 
-        # Verify state save/restore: save_state once (start) + load_state twice
+        # Verify state save/restore: save_kv_cache once (start) + restore_kv_cache twice
         # (load past + restore current)
-        assert mock_llm.save_state.call_count == 1
-        assert mock_llm.load_state.call_count == 2
+        assert mock_llm.save_kv_cache.call_count == 1
+        assert mock_llm.restore_kv_cache.call_count == 2
 
         # Verify Prime was called for questions (3 rounds + 1 coherence)
         assert mock_model_pool.forward_to_model.call_count == 4
@@ -215,8 +215,8 @@ class TestInterviewFlow:
         # Should not crash
         interviewer.conduct_interview()
 
-        # State restore must have been called (load_state for past + restore)
-        assert mock_llm.load_state.call_count >= 2
+        # State restore must have been called (restore_kv_cache for past + restore)
+        assert mock_llm.restore_kv_cache.call_count >= 2
 
     def test_returns_none_without_model_pool(self, mock_config, tsm_with_states):
         iv = TemporalInterviewer(

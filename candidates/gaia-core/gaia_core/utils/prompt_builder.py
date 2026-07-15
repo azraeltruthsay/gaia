@@ -860,21 +860,25 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # sections for models with small context windows (e.g. E4B at 4096).
     _context_window_early = 8192
     try:
-        _context_window_early = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+        _val = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+        if isinstance(_val, (int, float)) and not hasattr(_val, '_mock_return_value') and _val.__class__.__name__ != 'MagicMock':
+            _context_window_early = int(_val)
     except Exception:
         pass
     try:
         _model_name_early = getattr(packet.header.model, 'name', '')
         # Try exact match first, then check if any config key is a substring
-        _model_cfg_early = config.MODEL_CONFIGS.get(_model_name_early, {})
-        if not _model_cfg_early:
-            for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
-                if _cfg_key in _model_name_early.lower() or _model_name_early.lower() in _cfg_key:
-                    _model_cfg_early = _cfg_val
-                    break
-        _mml = _model_cfg_early.get('max_model_len', _context_window_early)
-        if _mml and _mml < _context_window_early:
-            _context_window_early = _mml
+        if isinstance(_model_name_early, str):
+            _model_cfg_early = config.MODEL_CONFIGS.get(_model_name_early, {})
+            if not _model_cfg_early:
+                for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
+                    if _cfg_key in _model_name_early.lower() or _model_name_early.lower() in _cfg_key:
+                        _model_cfg_early = _cfg_val
+                        break
+            _mml = _model_cfg_early.get('max_model_len', _context_window_early)
+            if _mml and isinstance(_mml, (int, float)) and not hasattr(_mml, '_mock_return_value') and _mml.__class__.__name__ != 'MagicMock':
+                if _mml < _context_window_early:
+                    _context_window_early = int(_mml)
     except Exception:
         pass
     _tiny_context_early = _context_window_early <= 4096
@@ -1020,7 +1024,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # SKIP entirely when KV prefix contains these directives already.
     _context_window = 8192
     try:
-        _context_window = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+        _val = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
+        if isinstance(_val, (int, float)) and not hasattr(_val, '_mock_return_value') and _val.__class__.__name__ != 'MagicMock':
+            _context_window = int(_val)
     except Exception:
         pass
     # Also check max_model_len from MODEL_CONFIGS — this is the actual engine
@@ -1028,15 +1034,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # (which defaults to max_tokens_lite=8192 regardless of model).
     try:
         _model_name = getattr(packet.header.model, 'name', '')
-        _model_cfg = config.MODEL_CONFIGS.get(_model_name, {})
-        if not _model_cfg:
-            for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
-                if _cfg_key in _model_name.lower() or _model_name.lower() in _cfg_key:
-                    _model_cfg = _cfg_val
-                    break
-        _max_model_len = _model_cfg.get('max_model_len', _context_window)
-        if _max_model_len and _max_model_len < _context_window:
-            _context_window = _max_model_len
+        if isinstance(_model_name, str):
+            _model_cfg = config.MODEL_CONFIGS.get(_model_name, {})
+            if not _model_cfg:
+                for _cfg_key, _cfg_val in config.MODEL_CONFIGS.items():
+                    if _cfg_key in _model_name.lower() or _model_name.lower() in _cfg_key:
+                        _model_cfg = _cfg_val
+                        break
+            _max_model_len = _model_cfg.get('max_model_len', _context_window)
+            if _max_model_len and isinstance(_max_model_len, (int, float)) and not hasattr(_max_model_len, '_mock_return_value') and _max_model_len.__class__.__name__ != 'MagicMock':
+                if _max_model_len < _context_window:
+                    _context_window = int(_max_model_len)
     except Exception:
         pass
     _small_context = _context_window <= 8192

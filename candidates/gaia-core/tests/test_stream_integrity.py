@@ -4,9 +4,46 @@ from gaia_core.cognition.agent_core import AgentCore
 
 @pytest.fixture
 def mock_agent_core():
+    class MockConfig:
+        def __init__(self):
+            self.max_reflection_tokens = 500
+            self.max_history_len = 20
+            self.max_tokens = 2048
+            self.context_length = 8192
+            self._slim_prompt = False
+            self.cheat_sheet_path = "/tmp/cheat.json"
+            self.identity_file_path = "/tmp/id.json"
+            self.SHARED_DIR = "/tmp/gaia_test_shared"
+            self.KNOWLEDGE_CODEX_DIR = "/tmp/codex"
+            self.KNOWLEDGE_BASE_DIR = "/tmp/kb"
+            self.ENTITY_CACHE_PATH = "/tmp/entity_cache.json"
+            self.CODEX_FILE_EXTS = [".md", ".txt"]
+            # Pin backend to a model that exists in the mock pool — otherwise
+            # selection falls through to core/prime/cpu_prime (none present)
+            # and run_turn yields the "primary model unavailable" apology.
+            self.llm_backend = "gpu_prime"
+            self.constants = {
+                "KNOWLEDGE_BASES": {},
+                "COGNITIVE_AUDIT": {"enabled": False},
+                "MODEL_CONFIGS": {"observer": {"enabled": False}},
+                "LOOP_DETECTION_ENABLED": False,
+                "MODELS": {
+                    "lite": {"name": "lite"},
+                    "gpu_prime": {"name": "prime"}
+                }
+            }
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            # Fall back to mock for unspecified attributes
+            return MagicMock()
+
+    config_obj = MockConfig()
+
     config = MagicMock()
+    config.config = config_obj
     config.get_persona_instructions.return_value = "Test Persona"
-    # Ensure all numeric limits are real ints, not MagicMocks
     config.max_reflection_tokens = 500
     config.max_history_len = 20
     config.max_tokens = 2048
@@ -15,18 +52,7 @@ def mock_agent_core():
     config.cheat_sheet_path = "/tmp/cheat.json"
     config.identity_file_path = "/tmp/id.json"
     config.SHARED_DIR = "/tmp/gaia_test_shared"
-    config.config.SHARED_DIR = "/tmp/gaia_test_shared"
-    
-    config.constants = {
-        "KNOWLEDGE_BASES": {},
-        "COGNITIVE_AUDIT": {"enabled": False},
-        "MODEL_CONFIGS": {"observer": {"enabled": False}},
-        "LOOP_DETECTION_ENABLED": False,
-        "MODELS": {
-            "lite": {"name": "lite"},
-            "gpu_prime": {"name": "prime"}
-        }
-    }
+    config.constants = config_obj.constants
     
     with patch('gaia_common.utils.entity_validator.EntityValidator'), \
          patch('gaia_core.memory.session_manager.SessionManager'), \
@@ -56,7 +82,7 @@ def test_stream_integrity_no_double_posting(mock_agent_core):
     
     # We patch ExternalVoice.stream_response to yield our tokens
     with patch('gaia_core.cognition.agent_core.build_from_packet', return_value=[]), \
-         patch('gaia_core.cognition.agent_core.route_output', return_value={"council_messages": [], "response_to_user": "Hello world"}), \
+         patch('gaia_core.cognition.agent_core.route_output', return_value={"council_messages": [], "response_to_user": "Hello world", "execution_results": [], "side_effects": []}), \
          patch('gaia_core.cognition.agent_core.reflect_and_refine', return_value="Refined plan"), \
          patch('gaia_core.cognition.agent_core.run_cognitive_self_audit'), \
          patch('gaia_core.cognition.agent_core.ExternalVoice') as MockVoice:
@@ -97,7 +123,7 @@ def test_stream_integrity_flush_sequencing(mock_agent_core):
     mock_agent_core.model_pool.acquire_model_for_role.return_value = mock_llm
     
     with patch('gaia_core.cognition.agent_core.build_from_packet', return_value=[]), \
-         patch('gaia_core.cognition.agent_core.route_output', return_value={"council_messages": [], "response_to_user": "Part 1"}), \
+         patch('gaia_core.cognition.agent_core.route_output', return_value={"council_messages": [], "response_to_user": "Part 1", "execution_results": [], "side_effects": []}), \
          patch('gaia_core.cognition.agent_core.reflect_and_refine', return_value="Refined plan"), \
          patch('gaia_core.cognition.agent_core.run_cognitive_self_audit'), \
          patch('gaia_core.cognition.agent_core.ExternalVoice') as MockVoice:
