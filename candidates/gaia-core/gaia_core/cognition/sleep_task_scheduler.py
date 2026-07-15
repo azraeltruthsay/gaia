@@ -1664,6 +1664,25 @@ class SleepTaskScheduler:
     # CodeMind — LLM proposal via code-architect adapter
     # ------------------------------------------------------------------
 
+    def _inference_timeout(self, gpu_default: int = 90) -> int:
+        """Timeout (seconds) for direct-HTTP inference calls, scaled by gear.
+
+        Sleep cognition deliberately rides the CPU GGUF backend when the GPU
+        is dark (dream-work must never wake the GPU), and CPU generations run
+        minutes, not seconds. Mirror the call sites' own model preference:
+        if GPU Prime is resident keep the snappy default, otherwise budget
+        for CPU (GAIA_Project-q5ab).
+        """
+        try:
+            if self.model_pool is not None and self.model_pool.models.get("gpu_prime") is not None:
+                return gpu_default
+        except Exception:
+            pass
+        try:
+            return int(os.getenv("SLEEP_CPU_INFERENCE_TIMEOUT", "480"))
+        except ValueError:
+            return 480
+
     def _codemind_propose(self, prompt: str) -> str | None:
         """Generate a fix proposal using the code-architect adapter.
 
@@ -1708,7 +1727,7 @@ class SleepTaskScheduler:
                 data=payload,
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(req, timeout=90) as resp:
+            with urlopen(req, timeout=self._inference_timeout()) as resp:
                 result = _j.loads(resp.read().decode())
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
             return self._clean_code_response(content) if content else None
@@ -1958,7 +1977,7 @@ class SleepTaskScheduler:
                     "max_tokens": 2048,
                     "temperature": 0.0,
                 },
-                timeout=90,
+                timeout=self._inference_timeout(),
             )
             resp.raise_for_status()
             data = resp.json()
