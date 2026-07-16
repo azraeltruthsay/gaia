@@ -1,0 +1,39 @@
+# scaffold: sleep_task
+# description: A SleepTaskScheduler task handler + registration (CPU-only dream-work; never wakes the GPU)
+# output: python
+# var task_id: unique snake_case task identifier | example: knowledge_gap_scan
+# var task_description: one-line description of what the task does | example: Scan recent conversations for unanswered questions and queue research seeds
+# var interval_hours: hours between runs, as an int literal | example: 6
+# var handler_body: the indented body of the handler (12-space indent, no GPU calls, use self._inference_timeout() for any direct-HTTP inference) | example:             logger.info("scanning recent sessions")
+
+# Sleep task: ${task_id}
+# Registration — add inside SleepTaskScheduler._register_default_tasks():
+#
+#   self.register_task(SleepTask(
+#       task_id="${task_id}",
+#       description="${task_description}",
+#       interval_hours=${interval_hours},
+#       handler=self._run_${task_id},
+#   ))
+#
+# Handler — add as a method on SleepTaskScheduler:
+
+def _run_${task_id}(self, **kwargs) -> None:
+    """${task_description}
+
+    Sleep-cycle contract: runs only while asleep, rides the CPU GGUF
+    backend, and must call self.check_interrupted() inside any loop so
+    a wake signal can preempt it. Direct-HTTP inference calls use
+    timeout=self._inference_timeout() (CPU-scaled, q5ab).
+    """
+    import logging
+    logger = logging.getLogger("GAIA.SleepTask.${task_id}")
+    try:
+        self.check_interrupted()
+        if True:  # keep the handler body inside the interrupt/except frame
+${handler_body}
+    except InterruptedError:
+        logger.info("${task_id}: interrupted by wake signal — exiting cleanly")
+        raise
+    except Exception:
+        logger.warning("${task_id}: task failed (non-fatal)", exc_info=True)

@@ -309,13 +309,47 @@ class CodeMindEngine:
         issue_description: str,
         file_content: str,
         suggestion: str = "",
+        patch_mode: bool = False,
     ) -> str:
         """Build the LLM prompt for CodeMind's PROPOSE stage.
 
         Uses the code-architect adapter but with a surgical fix context,
         not a generative blueprint context.
+
+        patch_mode (s4r2): ask for SEARCH/REPLACE blocks instead of the
+        complete file — output tokens shrink from O(file) to O(change),
+        and untouched code physically cannot be mangled. Parsed/applied
+        by gaia_common.utils.codemind_patch; callers fall back to
+        whole-file mode when the patch fails to parse or apply.
         """
         suggestion_line = f"\nSUGGESTED APPROACH: {suggestion}" if suggestion else ""
+        if patch_mode:
+            return f"""You are CodeMind, GAIA's code self-improvement layer. Fix the specific error below by emitting a surgical patch.
+
+RULES:
+- Make the MINIMAL change needed to fix the error
+- Respond with one or more SEARCH/REPLACE blocks in EXACTLY this format:
+
+<<<<<<< SEARCH
+lines copied EXACTLY from the current code (including indentation)
+=======
+the replacement lines
+>>>>>>> REPLACE
+
+- The SEARCH text must match the current code character-for-character and appear exactly ONCE in the file — include enough surrounding lines to make it unique
+- Do NOT rewrite code that isn't broken; keep each block as small as uniqueness allows
+- If the fix requires changes to multiple files, respond: CANNOT_FIX: requires multi-file change
+- If the error is ambiguous, respond: CANNOT_FIX: <reason>
+
+FILE: {file_path}
+ERROR: {issue_description}{suggestion_line}
+
+CURRENT CODE:
+```python
+{file_content}
+```
+
+Respond with ONLY the SEARCH/REPLACE block(s). No markdown fences around them. No explanation."""
         return f"""You are CodeMind, GAIA's code self-improvement layer. Fix the specific error below.
 
 RULES:

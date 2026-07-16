@@ -1,0 +1,25 @@
+# scaffold: fastapi_endpoint
+# description: A FastAPI route with a validated pydantic request model (orchestrator/core house style)
+# output: python
+# var route_path: URL path for the endpoint | example: /deploy/status
+# var http_method: post or get, lowercase | example: post
+# var handler_name: snake_case python function name | example: deploy_status
+# var request_fields: pydantic field lines, first line unindented, subsequent lines at 4-space indent ('pass' if no fields) | example: services: List[str]
+# var handler_body: the endpoint body at 4-space indent, returning a dict | example: return {"ok": True}
+# var docstring: one-line docstring stating purpose and caller | example: Report deploy state. Called by gaia-doctor.
+
+from typing import List, Optional
+
+from fastapi import HTTPException
+from pydantic import BaseModel, field_validator
+
+
+class ${handler_name}Request(BaseModel):
+    ${request_fields}
+
+
+# Register on the service's FastAPI app:
+# @app.${http_method}("${route_path}")
+async def ${handler_name}(request: ${handler_name}Request):
+    """${docstring}"""
+    ${handler_body}

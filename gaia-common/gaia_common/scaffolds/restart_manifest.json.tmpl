@@ -1,0 +1,23 @@
+# scaffold: restart_manifest
+# description: A kmcb self-deploy restart manifest (drop in /shared/doctor/restart_requests/<id>.json; doctor gates, deadman judges, rollback on failure)
+# output: json
+# var manifest_id: unique id, convention <utc-stamp>_<service>_<bead> | example: 2026-07-16T09-00-00_study_q5ab
+# var requested_by: who/what is requesting | example: codemind
+# var bead: originating bd issue id, empty string if none | example: GAIA_Project-q5ab
+# var service: single logical service name (core|web|mcp|study|audio|orchestrator|common) | example: study
+# var change_summary: one-paragraph description of the change | example: CPU-scaled inference timeouts for sleep tasks
+# var tests_run: evidence string - test suite run in candidates and its result | example: pytest test_sleep_task_scheduler.py (41 passed)
+# var created_at: ISO-8601 UTC timestamp | example: 2026-07-16T09:00:00+00:00
+
+{
+  "manifest_version": 1,
+  "id": "${manifest_id}",
+  "requested_by": "${requested_by}",
+  "bead": "${bead}",
+  "services": ["${service}"],
+  "tier": "source",
+  "change_summary": "${change_summary}",
+  "tests_run": ["${tests_run}"],
+  "created_at": "${created_at}",
+  "status": "pending"
+}

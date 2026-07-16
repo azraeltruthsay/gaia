@@ -146,6 +146,17 @@ def build_analysis_prompt(detection: Dict[str, Any], related_files: List[str] = 
             except OSError:
                 files_section += f"\n--- {fp} --- (could not read)\n"
 
+    # s4r2: advertise the scaffold library so blueprints that call for NEW
+    # code name a scaffold + variable values instead of free-form modules.
+    scaffolds_section = ""
+    try:
+        from gaia_common.utils.scaffold import scaffold_prompt_block
+        block = scaffold_prompt_block()
+        if block:
+            scaffolds_section = f"\n\n{block}\n"
+    except Exception:
+        pass
+
     return f"""You are CodeMind, GAIA's code self-improvement layer performing root cause analysis.
 
 DETECTION:
@@ -155,7 +166,7 @@ DETECTION:
   Description: {detection.get('description', '')}
   Severity: {detection.get('severity', 'unknown')}
 
-{files_section}
+{files_section}{scaffolds_section}
 
 TASK: Analyze this detection and produce a fix blueprint in JSON format:
 {{

@@ -1,0 +1,41 @@
+# scaffold: pytest_module
+# description: A pytest module with a TYPED MockConfig fixture (never raw MagicMock configs — mock leaks into numeric/dict config reads break model selection and prompt building)
+# output: python
+# var module_under_test: dotted import path of the module being tested | example: gaia_core.cognition.deliberation
+# var subject: what these tests pin, for the module docstring | example: think-tag splitting behavior
+# var config_fields: MockConfig attribute lines at 8-space indent, REAL typed values only | example:         self.max_tokens = 2048
+# var test_name: snake_case name of the first test | example: split_handles_unclosed_tag
+# var test_body: first test body at 4-space indent | example: assert True
+
+"""Tests: ${subject}
+
+House rule (7345/qzqi lesson): configs handed to production code must be
+TYPED objects, never raw MagicMock — a MagicMock leaking into a numeric
+comparison or dict .get() produces failures far from the cause. Extend
+MockConfig with real values instead of loosening assertions.
+"""
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+import ${module_under_test} as mut
+
+
+class MockConfig:
+    def __init__(self):
+${config_fields}
+        self.constants = {}
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return MagicMock()
+
+
+@pytest.fixture
+def config():
+    return MockConfig()
+
+
+def test_${test_name}(config):
+    ${test_body}

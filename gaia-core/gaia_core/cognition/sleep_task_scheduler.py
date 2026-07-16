@@ -1561,23 +1561,54 @@ class SleepTaskScheduler:
                     engine.transition(CodeMindState.IDLE)
                     continue
 
-                fix_prompt = engine.build_fix_prompt(
-                    file_path=file_path,
-                    issue_description=issue,
-                    file_content=original_content,
-                )
+                # ── s4r2 patch-mode: surgical SEARCH/REPLACE first ──
+                # Output tokens shrink from O(file) to O(change) and
+                # untouched code can't be mangled. Any parse/apply failure
+                # falls back to the legacy whole-file prompt below.
+                proposed_content = None
+                if bool(codemind_cfg.get("patch_mode", True)):
+                    from gaia_common.utils.codemind_patch import parse_patch_blocks, apply_patch
+                    patch_response = self._codemind_propose(engine.build_fix_prompt(
+                        file_path=file_path,
+                        issue_description=issue,
+                        file_content=original_content,
+                        patch_mode=True,
+                    ))
+                    if patch_response and patch_response.strip().startswith("CANNOT_FIX"):
+                        logger.info("CodeMind: LLM declined (patch mode): %s",
+                                    patch_response.strip()[:200])
+                        engine.transition(CodeMindState.IDLE)
+                        continue
+                    if patch_response:
+                        blocks, perr = parse_patch_blocks(patch_response)
+                        if perr:
+                            logger.info("CodeMind: patch parse failed (%s) — falling back to whole-file", perr)
+                        else:
+                            patched, aerr = apply_patch(original_content, blocks)
+                            if aerr:
+                                logger.info("CodeMind: patch apply failed (%s) — falling back to whole-file", aerr)
+                            else:
+                                proposed_content = patched
+                                logger.info("CodeMind: patch-mode fix applied (%d block(s))", len(blocks))
 
-                proposed_content = self._codemind_propose(fix_prompt)
-                if not proposed_content:
-                    engine.transition(CodeMindState.IDLE)
-                    continue
+                if proposed_content is None:
+                    fix_prompt = engine.build_fix_prompt(
+                        file_path=file_path,
+                        issue_description=issue,
+                        file_content=original_content,
+                    )
 
-                # Check for CANNOT_FIX
-                if proposed_content.strip().startswith("CANNOT_FIX"):
-                    reason = proposed_content.strip()
-                    logger.info("CodeMind: LLM declined: %s", reason[:200])
-                    engine.transition(CodeMindState.IDLE)
-                    continue
+                    proposed_content = self._codemind_propose(fix_prompt)
+                    if not proposed_content:
+                        engine.transition(CodeMindState.IDLE)
+                        continue
+
+                    # Check for CANNOT_FIX
+                    if proposed_content.strip().startswith("CANNOT_FIX"):
+                        reason = proposed_content.strip()
+                        logger.info("CodeMind: LLM declined: %s", reason[:200])
+                        engine.transition(CodeMindState.IDLE)
+                        continue
 
                 # ── VALIDATE: syntax + lint + diff safety ──
                 engine.transition(CodeMindState.VALIDATE)

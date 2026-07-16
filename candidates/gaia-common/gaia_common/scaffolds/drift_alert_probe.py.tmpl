@@ -1,0 +1,33 @@
+# scaffold: drift_alert_probe
+# description: A gaia-doctor probe function (stdlib only) that returns {ok, issues} and feeds record_drift_alert
+# output: python
+# var probe_name: snake_case probe function name (check_ prefix convention) | example: check_model_symlinks
+# var probe_description: what rot class this probe catches | example: /models/prime symlink pointing at a deleted model dir
+# var interval_env: env var name for the probe interval | example: SYMLINK_SANITY_INTERVAL
+# var probe_body: probe body at 8-space indent; append human-readable strings to issues | example: pass
+# var alert_kind: drift-alert kind slug for record_drift_alert | example: symlink_sanity
+
+# Doctor probe: ${probe_name} (stdlib only — the doctor has no pip deps).
+#
+# Wire into the watch cycle next to the r67d compose-sanity block:
+#
+#   global _${probe_name}_last_run
+#   if time.time() - _${probe_name}_last_run >= int(os.environ.get("${interval_env}", "3600")):
+#       _${probe_name}_last_run = time.time()
+#       result = ${probe_name}()
+#       for issue in result.get("issues", []):
+#           record_drift_alert("${alert_kind}", issue.split(":", 1)[0], issue)
+
+def ${probe_name}() -> dict:
+    """${probe_description}
+
+    Returns {"ok": bool, "issues": [str]}. Non-fatal by contract: an
+    exception inside a probe must degrade to an issue string, never
+    crash the watch loop.
+    """
+    issues: list = []
+    try:
+        ${probe_body}
+    except Exception as exc:
+        issues.append(f"${probe_name}: probe errored: {exc}")
+    return {"ok": not issues, "issues": issues}
