@@ -633,8 +633,11 @@ async def gpu_sleep():
         if current == LifecycleState.MEDITATION:
             logger.info("GPU sleep rejected — MEDITATION active (study owns GPU)")
             return {"ok": True, "message": "MEDITATION active — study owns GPU", "state": current.value}
+        # reason="standby_idle" (not "sleep_cycle") so the model doesn't
+        # see "sleep_cycle" in event-buffer recent_events and frame its
+        # state as biographical sleep.
         result = await _lifecycle_machine.transition(
-            TransitionTrigger.IDLE_TIMEOUT, reason="sleep_cycle")
+            TransitionTrigger.IDLE_TIMEOUT, reason="standby_idle")
         if result.ok:
             return {"ok": True, "message": "GPU released for sleep via lifecycle", "state": result.to_state}
         # If lifecycle says invalid transition (e.g. already sleeping), that's ok

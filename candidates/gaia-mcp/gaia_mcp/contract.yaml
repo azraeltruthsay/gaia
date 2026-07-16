@@ -1,0 +1,219 @@
+service: gaia-mcp
+port: 8765
+role: "The Hands — sandboxed tool execution (JSON-RPC 2.0)"
+protocol: http + json-rpc-2.0
+framework: FastAPI
+
+notes: |
+  gaia-mcp exposes GAIA's tools via JSON-RPC 2.0. Sensitive tools require
+  explicit human approval through the /request_approval + /approve_action flow
+  unless GAIA_MCP_BYPASS is enabled.
+
+provides:
+  # ── HTTP Endpoints ─────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Health check."
+    consumers: [gaia-doctor, gaia-web]
+
+  - endpoint: /
+    method: GET
+    description: "Root status message."
+    consumers: []
+
+  - endpoint: /request_approval
+    method: POST
+    description: "Request human approval for a sensitive tool call. Returns action_id and challenge."
+    request_schema:
+      fields:
+        method: string (tool name)
+        params: dict
+    response_schema:
+      fields:
+        ok: bool
+        action_id: string
+        challenge: string
+        message: string
+    consumers: [gaia-core]
+
+  - endpoint: /approve_action
+    method: POST
+    description: "Approve a pending action using the challenge response. Executes the tool if approved."
+    request_schema:
+      fields:
+        action_id: string
+        approval: string
+    response_schema:
+      fields:
+        ok: bool
+        method: string
+        result: any
+    consumers: [gaia-web]
+
+  # ── JSON-RPC 2.0 Interface ────────────────────────────────────────
+  - endpoint: /jsonrpc
+    method: POST
+    description: "JSON-RPC 2.0 tool execution endpoint. Dispatches to registered tool handlers."
+    protocol: json-rpc-2.0
+    request_schema:
+      ref: ../schemas/json_rpc.yaml
+    consumers: [gaia-core]
+
+json_rpc_methods:
+  # Tools registered in gaia_common.utils.tools_registry
+  # Sensitive tools (require approval): ai_write, write_file, run_shell,
+  # memory_rebuild_index, promotion_create_request, kanka_create_entity,
+  # kanka_update_entity, notebooklm_create_note, audio_listen_start
+
+  - method: ai_read
+    description: "Read a file"
+    sensitive: false
+
+  - method: ai_write
+    description: "Write content to a file"
+    sensitive: true
+
+  - method: write_file
+    description: "Write raw content to a file path"
+    sensitive: true
+
+  - method: run_shell
+    description: "Execute a shell command in sandbox"
+    sensitive: true
+
+  - method: web_search
+    description: "Search the web"
+    sensitive: false
+
+  - method: web_fetch
+    description: "Fetch a web page"
+    sensitive: false
+
+  - method: memory_search
+    description: "Search vector memory"
+    sensitive: false
+
+  - method: memory_rebuild_index
+    description: "Rebuild the vector memory index"
+    sensitive: true
+
+  - method: introspect_logs
+    description: "Read service log files"
+    sensitive: false
+
+  - method: world_state
+    description: "Get current system world state"
+    sensitive: false
+
+  - method: cfr_search
+    description: "Search conversation feedback records"
+    sensitive: false
+
+  - method: kanka_list_campaigns
+    description: "List Kanka campaigns"
+    sensitive: false
+
+  - method: kanka_search
+    description: "Search Kanka entities"
+    sensitive: false
+
+  - method: kanka_list_entities
+    description: "List Kanka entities"
+    sensitive: false
+
+  - method: kanka_get_entity
+    description: "Get a Kanka entity by ID"
+    sensitive: false
+
+  - method: kanka_create_entity
+    description: "Create a Kanka entity"
+    sensitive: true
+
+  - method: kanka_update_entity
+    description: "Update a Kanka entity"
+    sensitive: true
+
+  - method: notebooklm_list_notebooks
+    description: "List NotebookLM notebooks"
+    sensitive: false
+
+  - method: notebooklm_chat
+    description: "Chat with a NotebookLM notebook"
+    sensitive: false
+
+  - method: notebooklm_create_note
+    description: "Create a note in NotebookLM"
+    sensitive: true
+
+  - method: audio_listen_start
+    description: "Start ambient audio listening"
+    sensitive: true
+
+  - method: audio_listen_stop
+    description: "Stop ambient audio listening"
+    sensitive: false
+
+  - method: audio_listen_status
+    description: "Get audio listener status"
+    sensitive: false
+
+  - method: audio_inbox_status
+    description: "Get audio inbox status"
+    sensitive: false
+
+  - method: audio_inbox_list
+    description: "List audio inbox items"
+    sensitive: false
+
+  - method: audio_inbox_review
+    description: "Review an audio inbox item"
+    sensitive: false
+
+  - method: audio_inbox_process
+    description: "Process audio inbox items"
+    sensitive: false
+
+consumes: []
+  # gaia-mcp does not directly call other GAIA services.
+  # Tool implementations may call external APIs (Kanka, NotebookLM, web).
+
+environment:
+  SANDBOX_ROOT: "/sandbox"
+  MCP_APPROVAL_TTL: "900"
+  GAIA_MCP_BYPASS: "false"
+  KANKA_API_KEY: "${KANKA_API_KEY}"
+
+volumes:
+  - path: /gaia-common
+    mode: ro
+    purpose: "Shared library"
+  - path: /app
+    mode: rw
+    purpose: "Service source code"
+  - path: /knowledge
+    mode: rw
+    purpose: "Knowledge base (tool reference)"
+  - path: /models
+    mode: ro
+    purpose: "Model files (embeddings)"
+  - path: /sandbox
+    mode: rw
+    purpose: "Sandboxed workspace (isolated)"
+  - path: /logs
+    mode: rw
+    purpose: "Log access for introspect_logs tool"
+  - path: /shared
+    mode: rw
+    purpose: "Shared state"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+security:
+  no_new_privileges: true
+  cap_drop: [ALL]
+  cap_add: [CHOWN, SETGID, SETUID]

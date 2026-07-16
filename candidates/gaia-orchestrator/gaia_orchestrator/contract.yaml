@@ -1,0 +1,389 @@
+service: gaia-orchestrator
+port: 6410
+role: "The Coordinator — GPU lifecycle, HA overlay, handoff, container management"
+protocol: http
+framework: FastAPI
+
+provides:
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Health check."
+    consumers: [gaia-doctor]
+
+  - endpoint: /
+    method: GET
+    description: "Root endpoint with full API directory."
+    consumers: []
+
+  - endpoint: /status
+    method: GET
+    description: "Complete orchestrator status: GPU owner, watch state, nano, containers, active handoff."
+    consumers: [gaia-web]
+
+  # ── GPU Management ─────────────────────────────────────────────────
+  - endpoint: /gpu/status
+    method: GET
+    description: "Current GPU ownership status with optional memory info."
+    consumers: [gaia-web]
+
+  - endpoint: /gpu/acquire
+    method: POST
+    description: "Request GPU ownership. Queues if already owned."
+    request_schema:
+      fields:
+        requester: "core | study | core_candidate | study_candidate"
+        reason: string
+        timeout_seconds: int (default 60)
+    consumers: [gaia-core, gaia-study]
+
+  - endpoint: /gpu/release
+    method: POST
+    description: "Release GPU ownership. Next queued requester is notified."
+    request_schema:
+      query_params:
+        lease_id: string (optional)
+    consumers: [gaia-core, gaia-study]
+
+  - endpoint: /gpu/wait
+    method: POST
+    description: "Wait for GPU to become available, then acquire. Polls with timeout."
+    consumers: [gaia-core, gaia-study]
+
+  - endpoint: /gpu/sleep
+    method: POST
+    description: "Release GPU for sleep cycle. Uses lifecycle machine if available."
+    consumers: [gaia-core]
+
+  - endpoint: /gpu/wake
+    method: POST
+    description: "Reclaim GPU after wake. Uses lifecycle machine if available."
+    consumers: [gaia-core]
+
+  # ── Container Lifecycle ────────────────────────────────────────────
+  - endpoint: /containers/status
+    method: GET
+    description: "Status of all containers (refreshed from Docker if available)."
+    consumers: [gaia-web]
+
+  - endpoint: /containers/live/stop
+    method: POST
+    description: "Stop the live stack and release GPU."
+    consumers: [gaia-web]
+
+  - endpoint: /containers/live/start
+    method: POST
+    description: "Start the live stack."
+    request_schema:
+      fields:
+        gpu_enabled: bool
+    consumers: [gaia-web]
+
+  - endpoint: /containers/candidate/stop
+    method: POST
+    description: "Stop the candidate stack."
+    consumers: [gaia-web]
+
+  - endpoint: /containers/candidate/start
+    method: POST
+    description: "Start the candidate stack."
+    request_schema:
+      fields:
+        gpu_enabled: bool
+    consumers: [gaia-web]
+
+  - endpoint: /containers/swap
+    method: POST
+    description: "Swap a service between live and candidate."
+    request_schema:
+      fields:
+        service: string
+        target: "live | candidate"
+    consumers: [gaia-web]
+
+  - endpoint: /containers/{container_name}/restart
+    method: POST
+    description: "Restart a single container (whitelisted: core, prime, nano, web, study, mcp)."
+    consumers: [gaia-study]
+
+  # ── Handoff Protocol ───────────────────────────────────────────────
+  - endpoint: /handoff/prime-to-study
+    method: POST
+    description: "Initiate GPU handoff to Study (transition to MEDITATION via lifecycle)."
+    consumers: [gaia-core]
+
+  - endpoint: /handoff/study-to-prime
+    method: POST
+    description: "Return GPU from Study (transition from MEDITATION to AWAKE)."
+    consumers: [gaia-core, gaia-study]
+
+  - endpoint: /handoff/{handoff_id}/status
+    method: GET
+    description: "Get status of a handoff operation."
+    consumers: [gaia-core]
+
+  # ── Training Monitoring ────────────────────────────────────────────
+  - endpoint: /training/status
+    method: GET
+    description: "Get training subprocess status from gaia-study."
+    consumers: [gaia-web]
+
+  - endpoint: /training/validate
+    method: POST
+    description: "Validate a completed training run."
+    consumers: [gaia-web]
+
+  - endpoint: /training/kill
+    method: POST
+    description: "Force-kill the training subprocess."
+    consumers: [gaia-web]
+
+  # ── Nano GPU Backoff ───────────────────────────────────────────────
+  - endpoint: /nano/status
+    method: GET
+    description: "Nano GPU/CPU placement status."
+    consumers: [gaia-web]
+
+  - endpoint: /nano/backoff
+    method: POST
+    description: "Evict Nano from GPU to CPU to free VRAM."
+    consumers: [gaia-web]
+
+  - endpoint: /nano/restore
+    method: POST
+    description: "Restore Nano to GPU."
+    consumers: [gaia-web]
+
+  # ── Watch Rotation ─────────────────────────────────────────────────
+  - endpoint: /watch/state
+    method: GET
+    description: "Current GPU watch rotation state."
+    consumers: [gaia-web]
+
+  - endpoint: /watch/focus
+    method: POST
+    description: "Transition to FOCUSING — load Prime, unload Core+Nano."
+    consumers: [gaia-web]
+
+  - endpoint: /watch/idle
+    method: POST
+    description: "Transition to AWAKE — unload Prime, load Core+Nano on GPU."
+    consumers: [gaia-web]
+
+  # ── Tier Router ────────────────────────────────────────────────────
+  - endpoint: /tier/infer
+    method: POST
+    description: "Infer on a specific tier with automatic GPU handoff."
+    request_schema:
+      fields:
+        tier: string
+        messages: list
+        max_tokens: int # default 512
+        temperature: float # default 0.7
+        device: "cuda | cpu" # default cuda
+    consumers: [gaia-core]
+
+  - endpoint: /tier/ensure
+    method: POST
+    description: "Ensure a tier's model is loaded on GPU (unloads others first)."
+    consumers: [gaia-core]
+
+  - endpoint: /tier/status
+    method: GET
+    description: "Which tiers currently have models loaded."
+    consumers: [gaia-core, gaia-web]
+
+  - endpoint: /tier/unload-all
+    method: POST
+    description: "Unload all tiers — zero GPU memory."
+    consumers: [gaia-core]
+
+  - endpoint: /tier/sae-record
+    method: POST
+    description: "Trigger SAE atlas recording on a loaded tier."
+    consumers: [gaia-core]
+
+  # ── Lifecycle State Machine ────────────────────────────────────────
+  - endpoint: /lifecycle/state
+    method: GET
+    description: "Current lifecycle snapshot — the single source of truth."
+    consumers: [gaia-core, gaia-web]
+
+  - endpoint: /lifecycle/transition
+    method: POST
+    description: "Request a lifecycle state transition."
+    request_schema:
+      fields:
+        trigger: string (TransitionTrigger enum value)
+        target: string (optional LifecycleState)
+        reason: string
+    consumers: [gaia-core, gaia-web]
+
+  - endpoint: /lifecycle/transitions
+    method: GET
+    description: "Available transitions from current state."
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/history
+    method: GET
+    description: "Recent transition history."
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/reconcile
+    method: POST
+    description: "Force reconciliation — probe all tiers and infer actual state."
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/tiers
+    method: GET
+    description: "Live per-tier status (probes all engines)."
+    consumers: [gaia-web]
+
+  # ── Candidate Rollback ─────────────────────────────────────────────
+  - endpoint: /candidate/snapshot
+    method: GET
+    description: "Return current git HEAD SHA."
+    consumers: [gaia-doctor]
+
+  - endpoint: /candidate/rollback
+    method: POST
+    description: "Restore candidates/ to a given git SHA and restart affected containers."
+    request_schema:
+      fields:
+        sha: string (git SHA)
+        services: list of string
+    consumers: [gaia-doctor]
+
+  # ── Warm Pool ──────────────────────────────────────────────────────
+  - endpoint: /warm-pool/sync
+    method: POST
+    description: "Copy a model from gaia-models/ to /warm_pool/ for Prime."
+    request_schema:
+      fields:
+        model: string
+    consumers: [gaia-study]
+
+  # ── Notifications ──────────────────────────────────────────────────
+  - endpoint: /notify/oracle-fallback
+    method: POST
+    description: "Receive notification that Oracle fallback is being used."
+    consumers: [gaia-core]
+
+  - endpoint: /ws/notifications
+    method: WebSocket
+    description: "Real-time notifications WebSocket."
+    consumers: [gaia-web]
+
+consumes:
+  - service: gaia-core
+    endpoint: /gpu/release
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Update core model pool after GPU release"
+
+  - service: gaia-core
+    endpoint: /gpu/reclaim
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Restore core model pool after GPU reclaim"
+
+  - service: gaia-core
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 6415
+    description: "Health watchdog polling"
+
+  - service: gaia-core
+    endpoint: /sleep/study-handoff
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Notify study handoff direction"
+
+  - service: gaia-prime
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 7777
+    description: "Health watchdog polling"
+
+  - service: gaia-prime
+    endpoint: /model/load
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Load model on Prime GPU"
+
+  - service: gaia-prime
+    endpoint: /model/unload
+    method: POST
+    protocol: http
+    port: 7777
+    description: "Unload model from Prime"
+
+  - service: gaia-study
+    endpoint: /study/gpu-ready
+    method: POST
+    protocol: http
+    port: 8766
+    description: "Signal GPU available for training"
+
+  - service: gaia-study
+    endpoint: /study/gpu-release
+    method: POST
+    protocol: http
+    port: 8766
+    description: "Request GPU release from training"
+
+  - service: gaia-study
+    endpoint: /study/training/status
+    method: GET
+    protocol: http
+    port: 8766
+    description: "Monitor training subprocess"
+
+  - service: gaia-study
+    endpoint: /study/training/kill
+    method: POST
+    protocol: http
+    port: 8766
+    description: "Force-kill training subprocess"
+
+  - service: gaia-audio
+    endpoint: /gpu/status
+    method: GET
+    protocol: http
+    port: 8080
+    description: "Check audio GPU usage for idle detection"
+
+environment:
+  ORCHESTRATOR_PORT: "6410"
+  ORCHESTRATOR_CORE_URL: "http://gaia-core:6415"
+  ORCHESTRATOR_PRIME_URL: "http://gaia-prime:7777"
+  ORCHESTRATOR_STUDY_URL: "http://gaia-study:8766"
+  ORCHESTRATOR_WEB_URL: "http://gaia-web:6414"
+  ORCHESTRATOR_MCP_URL: "http://gaia-mcp:8765"
+
+volumes:
+  - path: /var/run/docker.sock
+    mode: ro
+    purpose: "Docker socket for container management"
+  - path: /shared
+    mode: rw
+    purpose: "State persistence"
+  - path: /gaia/GAIA_Project
+    mode: ro
+    purpose: "Project root for compose file access"
+  - path: /warm_pool
+    mode: rw
+    purpose: "Warm pool for model sync"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s

@@ -1,0 +1,308 @@
+service: gaia-doctor
+port: 6419
+role: "The Immune System — persistent HA watchdog (stdlib only)"
+protocol: http
+framework: "stdlib http.server (zero external dependencies)"
+
+notes: |
+  gaia-doctor uses Python stdlib only (no FastAPI, no third-party deps). This
+  makes it ultra-reliable — it cannot fail due to dependency issues. Endpoints
+  are plain do_GET/do_POST handlers on BaseHTTPRequestHandler.
+
+  Doctor polls all services every POLL_INTERVAL seconds, tracks consecutive
+  failures, and auto-restarts via docker compose with the HA overlay after
+  FAILURE_THRESHOLD consecutive failures (with RESTART_COOLDOWN between restarts).
+
+  DRY_RUN mode (for candidate doctor) observes but never restarts.
+
+provides:
+  # ── Health & Status ────────────────────────────────────────────────
+  - endpoint: /health
+    method: GET
+    description: "Health check."
+    consumers: [gaia-web]
+
+  - endpoint: /status
+    method: GET
+    description: "Full status: service health map, alarms, irritations summary, remediations, serenity reference."
+    consumers: [gaia-web]
+
+  - endpoint: /alarms
+    method: GET
+    description: "List currently active alarms."
+    consumers: [gaia-web]
+
+  - endpoint: /irritations
+    method: GET
+    description: "Full irritation list with details."
+    consumers: [gaia-web]
+
+  - endpoint: /dissonance
+    method: GET
+    description: "Prod vs candidate dissonance report (file diffs, hash comparison)."
+    consumers: [gaia-web]
+
+  - endpoint: /serenity
+    method: GET
+    description: "Serenity state (reads from shared file, fallback for gaia-monkey)."
+    consumers: [gaia-web]
+
+  # ── GPU & Model Info ───────────────────────────────────────────────
+  - endpoint: /gpu
+    method: GET
+    description: "GPU status information."
+    consumers: [gaia-web]
+
+  - endpoint: /model
+    method: GET
+    description: "Model status information."
+    consumers: [gaia-web]
+
+  # ── Cognitive Battery ──────────────────────────────────────────────
+  - endpoint: /cognitive/status
+    method: GET
+    description: "Cognitive test battery status + alignment level."
+    consumers: [gaia-web]
+
+  - endpoint: /cognitive/results
+    method: GET
+    description: "Full cognitive test battery results."
+    consumers: [gaia-web]
+
+  - endpoint: /cognitive/tests
+    method: GET
+    description: "List all registered cognitive tests."
+    consumers: [gaia-web]
+
+  - endpoint: /cognitive/run
+    method: POST
+    description: "Trigger a cognitive test battery run (async thread)."
+    consumers: [gaia-web]
+
+  - endpoint: /cognitive/monitor
+    method: GET
+    description: "Cognitive heartbeat monitor status."
+    consumers: [gaia-web]
+
+  # ── Pipeline ───────────────────────────────────────────────────────
+  - endpoint: /pipeline
+    method: GET
+    description: "Self-awareness training pipeline status."
+    consumers: [gaia-web]
+
+  - endpoint: /pipeline/run
+    method: POST
+    description: "Trigger pipeline run (delegates to gaia-study)."
+    consumers: [gaia-web]
+
+  # ── KV Cache ───────────────────────────────────────────────────────
+  - endpoint: /kv-cache
+    method: GET
+    description: "KV cache status."
+    consumers: [gaia-web]
+
+  # ── Maintenance Mode ───────────────────────────────────────────────
+  - endpoint: /maintenance/status
+    method: GET
+    description: "Get maintenance mode status."
+    consumers: [gaia-web]
+
+  - endpoint: /maintenance/enter
+    method: POST
+    description: "Enter maintenance mode (suppresses auto-restarts)."
+    request_schema:
+      fields:
+        reason: string
+        entered_by: string
+    consumers: [gaia-web]
+
+  - endpoint: /maintenance/exit
+    method: POST
+    description: "Exit maintenance mode."
+    consumers: [gaia-web]
+
+  # ── Surgeon Approval Queue ─────────────────────────────────────────
+  - endpoint: /surgeon/config
+    method: GET/POST
+    description: "Get or toggle surgeon approval mode."
+    consumers: [gaia-web]
+
+  - endpoint: /surgeon/queue
+    method: GET
+    description: "Get pending surgeon repair proposals."
+    consumers: [gaia-web]
+
+  - endpoint: /surgeon/approve
+    method: POST
+    description: "Approve a queued surgeon repair."
+    consumers: [gaia-web]
+
+  - endpoint: /surgeon/reject
+    method: POST
+    description: "Reject a queued surgeon repair."
+    consumers: [gaia-web]
+
+  - endpoint: /surgeon/history
+    method: GET
+    description: "Surgeon repair history."
+    consumers: [gaia-web]
+
+  # ── Logging ────────────────────────────────────────────────────────
+  - endpoint: /logs
+    method: GET
+    description: "Service log viewer."
+    consumers: [gaia-web]
+
+  - endpoint: /logs/health
+    method: GET
+    description: "Health check log."
+    consumers: [gaia-web]
+
+  - endpoint: /logs/counts
+    method: GET
+    description: "Log level counts."
+    consumers: [gaia-web]
+
+  # ── OOM & Errors ───────────────────────────────────────────────────
+  - endpoint: /oom/history
+    method: GET
+    description: "OOM resolution history."
+    consumers: [gaia-web]
+
+  - endpoint: /errors
+    method: GET
+    description: "Error registry entries."
+    consumers: [gaia-web]
+
+  # ── Service Registry ───────────────────────────────────────────────
+  - endpoint: /registry
+    method: GET
+    description: "Service registry wiring validation status."
+    consumers: [gaia-web]
+
+  # ── Chaos Integration ──────────────────────────────────────────────
+  - endpoint: /notify/chaos_injection
+    method: POST
+    description: "Receive chaos injection notification from gaia-monkey."
+    consumers: [gaia-monkey]
+
+consumes:
+  - service: gaia-core
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 6415
+    description: "Health polling (every POLL_INTERVAL)"
+
+  - service: gaia-core
+    endpoint: /api/repair/structural
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Cognitive repair for structural errors"
+
+  - service: gaia-core
+    endpoint: /api/doctor/diagnose
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Doctor-initiated diagnostic turn"
+
+  - service: gaia-core
+    endpoint: /api/doctor/review
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Sovereign promotion review"
+
+  - service: gaia-core
+    endpoint: /api/cognitive/query
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Cognitive test queries"
+
+  - service: gaia-core
+    endpoint: /api/cognitive/similarity
+    method: POST
+    protocol: http
+    port: 6415
+    description: "Semantic similarity for test validation"
+
+  - service: gaia-prime
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 7777
+    description: "Health polling"
+
+  - service: gaia-web
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 6414
+    description: "Health polling"
+
+  - service: gaia-mcp
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 8765
+    description: "Health polling"
+
+  - service: gaia-audio
+    endpoint: /health
+    method: GET
+    protocol: http
+    port: 8080
+    description: "Health polling"
+
+  - service: gaia-monkey
+    endpoint: /serenity/record_recovery
+    method: POST
+    protocol: http
+    port: 6420
+    description: "Report recovery events for serenity scoring"
+
+  - service: gaia-monkey
+    endpoint: /serenity
+    method: GET
+    protocol: http
+    port: 6420
+    description: "Read serenity state"
+
+environment:
+  POLL_INTERVAL: "15"
+  FAILURE_THRESHOLD: "2"
+  RESTART_COOLDOWN: "300"
+  HTTP_PORT: "6419"
+  CORE_ENDPOINT: "http://gaia-core:6415"
+  MONKEY_ENDPOINT: "http://gaia-monkey:6420"
+  COGNITIVE_MONITOR_INTERVAL: "300"
+
+volumes:
+  - path: /var/run/docker.sock
+    mode: rw
+    purpose: "Docker socket (restarts containers)"
+  - path: /usr/bin/docker
+    mode: ro
+    purpose: "Docker CLI"
+  - path: /usr/lib/docker/cli-plugins/docker-compose
+    mode: ro
+    purpose: "Docker compose plugin"
+  - path: /gaia/GAIA_Project
+    mode: ro
+    purpose: "Project root for code monitoring"
+  - path: /shared
+    mode: rw
+    purpose: "Status persistence, maintenance flag"
+  - path: /compose
+    mode: ro
+    purpose: "HA overlay compose files"
+
+health_check:
+  endpoint: /health
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s

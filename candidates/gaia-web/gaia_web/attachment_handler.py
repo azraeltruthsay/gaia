@@ -9,7 +9,6 @@ import hashlib
 import logging
 import os
 import subprocess
-import tempfile
 import uuid
 from typing import Any, Dict, List, Optional
 

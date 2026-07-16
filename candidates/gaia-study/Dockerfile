@@ -43,6 +43,13 @@ COPY gaia-study/requirements.txt .
 # being pulled in by transitive deps (sentence-transformers, etc.)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 
+# Multimodal training prereqs — Gemma4Processor pulls in
+# Gemma4VideoProcessor (torchvision) and Gemma4AudioFeatureExtractor
+# (librosa), and image handling needs PIL. Without these, AutoProcessor
+# fails and the training script can't build a multimodal dataset.
+RUN pip install --no-cache-dir pillow librosa
+RUN pip install --no-cache-dir torchvision --index-url https://download.pytorch.org/whl/cu128
+
 # Install Python dependencies (torch already satisfied from CUDA index above)
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -50,11 +57,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Must be installed after torch, with --no-build-isolation so it sees torch.
 # CUDA_ARCH_LIST set manually since nvidia-smi isn't available during build.
 # 12.0 = Blackwell (RTX 5080)
-RUN CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
-    pip install --no-cache-dir --no-build-isolation gptqmodel>=5.7.0
+# gptqmodel 5.7.0's pyproject.toml has a dual-format license field that
+# setuptools >=78 rejects. Downgrade setuptools before build, restore after.
+RUN pip install --no-cache-dir "setuptools==77.0.3" \
+    && CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
+       pip install --no-cache-dir --no-build-isolation gptqmodel==5.7.0 \
+    && pip install --no-cache-dir --upgrade setuptools
 
 # optimum is required by PEFT when gptqmodel is present
 RUN pip install --no-cache-dir optimum>=1.24.0
+
+# quanto: CPU-first int4 quantization for large models that don't fit GPU in bf16
+RUN pip install --no-cache-dir quanto>=0.2.0
 
 # AutoAWQ needs torch at build time for CUDA kernel compilation.
 RUN CUDA_ARCH_LIST="12.0" TORCH_CUDA_ARCH_LIST="12.0" \
