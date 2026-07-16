@@ -352,3 +352,4 @@ class VectorIndexer:
             "index_exists": self.index_path.exists(),
             "model_loaded": self._model is not None,
         }
+# nfi3 loop-closure drill marker 20260716T193703 — promoted+deployed autonomously
