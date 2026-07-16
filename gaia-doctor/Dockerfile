@@ -19,6 +19,7 @@ WORKDIR /app
 # Copy watchdog script + cognitive battery (stdlib only — no pip install needed)
 COPY candidates/gaia-doctor/doctor.py .
 COPY candidates/gaia-doctor/cognitive_test_battery.py .
+COPY candidates/gaia-doctor/canary_pool.json .
 COPY candidates/gaia-doctor/test_assets ./test_assets
 
 # Create shared state directory

@@ -156,8 +156,20 @@ VITAL_ORGANS = [
     "gaia-study/gaia_study/merge_and_requantize.py",
 ]
 
-HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-study", "gaia-orchestrator"]
+# gaia-prime is excluded BY DESIGN: candidates/gaia-prime is a deliberately
+# different experimental stack (raw vLLM/LMCache, bead foh), not a mirror.
+# gaia-audio has no candidate mirror. The doctor hashes itself (r67d).
+HASHED_SERVICES = ["gaia-core", "gaia-web", "gaia-mcp", "gaia-common", "gaia-study", "gaia-orchestrator", "gaia-doctor"]
+
+# Beyond .py: the 2026-07-02 candidate rot (stale model path, wrong build
+# context) lived in entrypoints/Dockerfiles/config — none of it .py (r67d).
+HASHED_GLOBS = ("*.py", "entrypoint.sh", "Dockerfile", "*.yaml", "constants/*.json")
 HASH_REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "file_hashes.json"
+
+# Candidate-parity alerting (r67d) — persistent, deduped drift alerts
+DRIFT_ALERTS_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "drift_alerts.jsonl"
+DRIFT_ALERT_COOLDOWN = int(os.environ.get("DRIFT_ALERT_COOLDOWN", "86400"))
+COMPOSE_SANITY_INTERVAL = int(os.environ.get("COMPOSE_SANITY_INTERVAL", "3600"))
 
 # KV cache pressure monitoring — independent of gaia-core
 # (nano entry removed: retired tier was a socat alias to core's engine,
@@ -198,7 +210,17 @@ _HARDCODED_SERVICES = {
     "gaia-translate": ("http://gaia-translate:5000/languages", None),
     "gaia-core-candidate": ("http://gaia-core-candidate:6415/health", "ha"),
     "gaia-mcp-candidate": ("http://gaia-mcp-candidate:8765/health", "ha"),
+    "gaia-web-candidate": ("http://gaia-web-candidate:6414/health", "ha"),
+    "gaia-study-candidate": ("http://gaia-study-candidate:8766/health", "ha"),
+    "gaia-doctor-candidate": ("http://gaia-doctor-candidate:6419/health", "ha"),
+    # Experimental raw-vLLM stack (bead foh) — code parity exempt, but health
+    # is watched and remediated like the other candidates (r67d decision:
+    # auto-restart all; use maintenance mode to keep one deliberately down).
+    "gaia-prime-candidate": ("http://gaia-prime-candidate:7777/health", "ha"),
 }
+
+# Candidate services watched even when absent from the compiled registry.
+_CANDIDATE_SERVICES = tuple(n for n in _HARDCODED_SERVICES if n.endswith("-candidate"))
 
 REGISTRY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "registry" / "service_registry.json"
 
@@ -232,7 +254,7 @@ def _load_service_registry() -> dict:
                 services[sid] = (health_url, remediation)
 
             # Always include candidate services (not in blueprints but monitored)
-            for cand_id in ("gaia-core-candidate", "gaia-mcp-candidate"):
+            for cand_id in _CANDIDATE_SERVICES:
                 if cand_id not in services:
                     services[cand_id] = _HARDCODED_SERVICES.get(cand_id, (f"http://{cand_id}:6415/health", "ha"))
 
@@ -503,6 +525,10 @@ SERVICE_CODE_DIRS = {
     # Candidates
     "gaia-core-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-core",
     "gaia-mcp-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-mcp",
+    "gaia-web-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-web",
+    "gaia-study-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-study",
+    "gaia-doctor-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-doctor",
+    "gaia-prime-candidate": GAIA_PROJECT_ROOT / "candidates" / "gaia-prime",
 }
 
 
@@ -523,7 +549,9 @@ def get_dissonance_report() -> dict:
     total_files = 0
     matches = 0
     skip_dirs = {"__pycache__", ".pytest_cache", "venv", ".venv", "node_modules",
-                  "unsloth_compiled_cache", "gptqmodel_offload"}
+                  "unsloth_compiled_cache", "gptqmodel_offload",
+                  # runtime/throwaway noise — not code parity (r67d)
+                  "scratch", "data", "test_assets"}
 
     def _hash_file(path: Path) -> str:
         if not path.exists():
@@ -550,7 +578,15 @@ def get_dissonance_report() -> dict:
         if not live_dir.exists():
             continue
 
-        for py_file in live_dir.rglob("*.py"):
+        seen: set = set()
+        hashed_files = []
+        for pattern in HASHED_GLOBS:
+            for f in live_dir.rglob(pattern):
+                if f.is_file() and f not in seen:
+                    seen.add(f)
+                    hashed_files.append(f)
+
+        for py_file in hashed_files:
             # Skip excluded directories
             if any(part in skip_dirs for part in py_file.parts):
                 continue
@@ -587,6 +623,122 @@ def get_dissonance_report() -> dict:
         # Backwards compat — old callers used "divergent_files"
         "divergent_files": vital_divergent + standard_divergent,
     }
+
+
+_drift_alert_last: dict = {}      # (kind:subject) -> monotonic time of last alert
+_compose_sanity_cache: dict = {}
+_compose_sanity_last_run: float = 0.0
+
+
+def record_drift_alert(kind: str, subject: str, detail: str) -> None:
+    """Append a candidate-parity alert to the persistent JSONL (r67d).
+
+    Deduped per (kind, subject) with a re-alert cooldown so a standing
+    divergence produces one record per day, not one per poll cycle.
+    """
+    key = f"{kind}:{subject}"
+    now = time.monotonic()
+    last = _drift_alert_last.get(key, 0.0)
+    if last and now - last < DRIFT_ALERT_COOLDOWN:
+        return
+    _drift_alert_last[key] = now
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "kind": kind,
+        "subject": subject,
+        "detail": detail,
+    }
+    try:
+        DRIFT_ALERTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with DRIFT_ALERTS_PATH.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        log.debug("Failed to write drift alert", exc_info=True)
+    log.warning("DRIFT ALERT [%s] %s: %s", kind, subject, detail)
+
+
+def check_compose_sanity() -> dict:
+    """Verify candidate compose wiring against the tree (the 2026-07-02 rot class).
+
+    Stdlib line/indent scan of docker-compose.candidate.yml (no PyYAML — the
+    doctor is stdlib by charter). Checks that every hashed service has a
+    candidate service block, and that declared build contexts/dockerfiles
+    exist on disk (gaia-prime-candidate once pointed at a build context that
+    could never build, and nothing noticed).
+    """
+    compose_path = GAIA_PROJECT_ROOT / "docker-compose.candidate.yml"
+    issues: list = []
+    try:
+        text = compose_path.read_text()
+    except OSError as e:
+        return {"ok": False, "issues": [f"cannot read {compose_path.name}: {e}"]}
+
+    services_found: set = set()
+    builds: dict = {}          # service key -> {"context": ..., "dockerfile": ...}
+    current = None
+    in_services = False
+    in_build = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if indent == 0:
+            in_services = stripped == "services:"
+            current = None
+            in_build = False
+            continue
+        if not in_services:
+            continue
+        if indent == 2 and stripped.endswith(":"):
+            current = stripped[:-1]
+            services_found.add(current)
+            in_build = False
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("container_name:"):
+            services_found.add(stripped.split(":", 1)[1].strip())
+        elif stripped == "build:" or stripped.startswith("build: "):
+            val = stripped[len("build:"):].strip()
+            if val:
+                builds.setdefault(current, {})["context"] = val
+                in_build = False
+            else:
+                in_build = True
+        elif in_build and stripped.startswith("context:"):
+            builds.setdefault(current, {})["context"] = stripped.split(":", 1)[1].strip()
+        elif in_build and stripped.startswith("dockerfile:"):
+            builds.setdefault(current, {})["dockerfile"] = stripped.split(":", 1)[1].strip()
+        elif in_build and indent <= 4:
+            in_build = False
+
+    # Every mirrored service should have a candidate block. Exempt:
+    # gaia-common (a library, not a container) and gaia-orchestrator
+    # (candidate source exists for parity diffing, but only one gearbox
+    # controller may own the GPU lifecycle — it never runs as a container).
+    for svc in HASHED_SERVICES:
+        if svc in ("gaia-common", "gaia-orchestrator"):
+            continue
+        cand = f"{svc}-candidate"
+        if cand not in services_found and svc not in services_found:
+            issues.append(f"{cand}: no service/container block in {compose_path.name}")
+
+    # Declared build contexts and dockerfiles must exist on disk.
+    for svc, b in builds.items():
+        ctx = b.get("context")
+        if not ctx:
+            continue
+        ctx_dir = (compose_path.parent / ctx).resolve()
+        if not ctx_dir.is_dir():
+            issues.append(f"{svc}: build context '{ctx}' does not exist")
+            continue
+        dockerfile = b.get("dockerfile", "Dockerfile")
+        if not (ctx_dir / dockerfile).is_file():
+            issues.append(f"{svc}: dockerfile '{ctx}/{dockerfile}' does not exist")
+
+    return {"ok": not issues, "issues": issues,
+            "services_checked": len(services_found), "builds_checked": len(builds)}
 
 
 def _get_service_mtime(name: str) -> float:
@@ -2907,6 +3059,9 @@ def poll_cycle():
                     if not _is_meditation_active() and name in ("gaia-core", "gaia-web", "gaia-mcp", "gaia-orchestrator"):
                         _notify_monkey_break_serenity(f"Vital service {name} went DOWN")
                 _service_state[name]["healthy"] = False
+                if name.endswith("-candidate"):
+                    record_drift_alert("candidate_health", name,
+                                       f"unhealthy for {failures} consecutive checks")
 
                 # Enforce structural audit before ANY remediation
                 if not run_structural_audit(name):
@@ -2935,10 +3090,21 @@ def poll_cycle():
         log.warning("VITAL ORGAN DISSONANCE: %d vital files diverged — %s",
                      len(_dissonance_report["vital_divergent"]),
                      [f["file"] for f in _dissonance_report["vital_divergent"]])
+        for entry in _dissonance_report["vital_divergent"]:
+            record_drift_alert("vital_dissonance", entry["file"],
+                               f"status={entry['status']} live={entry['live_hash']} cand={entry['cand_hash']}")
     if _dissonance_report.get("standard_divergent"):
         log.info("Standard dissonance: %d files diverged (parity %.1f%%)",
                  len(_dissonance_report["standard_divergent"]),
                  _dissonance_report["parity_percent"])
+
+    # Compose parity sanity (r67d) — hourly, catches build-context/wiring rot
+    global _compose_sanity_last_run, _compose_sanity_cache
+    if time.time() - _compose_sanity_last_run >= COMPOSE_SANITY_INTERVAL:
+        _compose_sanity_last_run = time.time()
+        _compose_sanity_cache = check_compose_sanity()
+        for issue in _compose_sanity_cache.get("issues", []):
+            record_drift_alert("compose_sanity", issue.split(":", 1)[0], issue)
 
     # Sovereign promotion: if candidate is healthy and files have diverged, trigger review
     # Rate-limited to prevent flooding the cognitive pipeline with 16K-token review packets.
@@ -3060,6 +3226,18 @@ def _build_status() -> dict:
         "recent_alarms": _active_alarms[-10:],
         "recent_irritations": _irritations[-5:],
         "dissonance_report": _dissonance_report,
+        "candidate_parity": {
+            "parity_percent": _dissonance_report.get("parity_percent"),
+            "vital_divergent": len(_dissonance_report.get("vital_divergent", [])),
+            "standard_divergent": len(_dissonance_report.get("standard_divergent", [])),
+            "watched_candidates": {
+                name: state.get("healthy")
+                for name, state in _service_state.items()
+                if name.endswith("-candidate")
+            },
+            "compose_sanity": _compose_sanity_cache or None,
+            "drift_alerts_active": len(_drift_alert_last),
+        },
         "serenity": _get_serenity_report(),
         "defensive_meditation": _is_meditation_active(),
         # Enriched subsystem status (populated per poll cycle)
