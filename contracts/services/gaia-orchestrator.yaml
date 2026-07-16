@@ -249,11 +249,40 @@ provides:
 
   - endpoint: /candidate/rollback
     method: POST
-    description: "Restore candidates/ to a given git SHA and restart affected containers."
+    description: >
+      Restore candidates/ to a given git SHA and restart affected containers.
+      NOTE: requires the repo mounted rw (fixed in kmcb — was silently broken
+      by the :ro mount from birth). Prefer /deploy/rollback for new callers.
     request_schema:
       fields:
         sha: string (git SHA)
         services: list of string
+    consumers: [gaia-core (CandidateCheckpointManager)]
+
+  - endpoint: /deploy/rollback
+    method: POST
+    description: >
+      Self-deploy rollback (kmcb): git checkout <sha> -- <service dirs> for the
+      production tree, candidates/, or both, then restart affected containers.
+      Called by gaia-doctor when a self-deploy fails its deadman check.
+    request_schema:
+      fields:
+        sha: string (git SHA)
+        services: list of string   # logical: core|web|mcp|study|audio|orchestrator|common
+        scope: string              # production | candidates | both (default production)
+    consumers: [gaia-doctor]
+
+  - endpoint: /deploy/commit
+    method: POST
+    description: >
+      Auto-commit a verified self-deploy (both trees for the named services).
+      Committer identity "GAIA Self-Deploy <gaia@localhost>"; local only, never
+      pushed. 409 when nothing is staged. Called by gaia-doctor after the
+      deadman passes; the returned SHA becomes the LKG rollback anchor.
+    request_schema:
+      fields:
+        services: list of string
+        message: string
     consumers: [gaia-doctor]
 
   # ── Warm Pool ──────────────────────────────────────────────────────

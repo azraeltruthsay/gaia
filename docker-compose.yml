@@ -50,8 +50,10 @@ services:
       # Shared state for persistence
       - gaia-shared:/shared:rw
       - gaia-candidate-shared:/candidate-shared:rw
-      # Project root for compose file access (read-only)
-      - .:/gaia/GAIA_Project:ro
+      # Project root rw: the orchestrator is the self-deploy "hands" — it
+      # runs git checkout/commit for rollback + auto-commit (kmcb). Was ro,
+      # which silently broke /candidate/rollback (EROFS on checkout).
+      - .:/gaia/GAIA_Project:rw
       # Warm pool for model sync (self-awareness pipeline)
       - /mnt/gaia_warm_pool:/warm_pool:rw
 
@@ -825,6 +827,10 @@ services:
       - POLL_INTERVAL=15
       - FAILURE_THRESHOLD=${DOCTOR_FAILURE_THRESHOLD:-4}
       - RESTART_COOLDOWN=${DOCTOR_RESTART_COOLDOWN:-300}
+      # Self-deploy supervision (kmcb): kill switch + deadman tuning
+      - SELF_DEPLOY_ENABLED=${SELF_DEPLOY_ENABLED:-1}
+      - DEADMAN_TIMEOUT=${DEADMAN_TIMEOUT:-300}
+      - DEADMAN_RUN_BATTERY=${DEADMAN_RUN_BATTERY:-0}
       - COMPOSE_PROJECT_NAME=gaia_project
       # HA candidate compose must resolve relative volume paths (./candidates/...)
       # against the real project root, NOT the /compose mount point — otherwise

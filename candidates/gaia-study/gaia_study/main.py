@@ -63,4 +63,3 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", "8766")),
         reload=os.getenv("GAIA_ENV", "production") == "development",
     )
-this is a deliberate syntax error for the kmcb rollback drill (

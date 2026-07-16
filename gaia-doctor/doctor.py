@@ -171,6 +171,25 @@ DRIFT_ALERTS_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "
 DRIFT_ALERT_COOLDOWN = int(os.environ.get("DRIFT_ALERT_COOLDOWN", "86400"))
 COMPOSE_SANITY_INTERVAL = int(os.environ.get("COMPOSE_SANITY_INTERVAL", "3600"))
 
+# Self-deploy supervision (kmcb) — manifest drop-box + deadman rollback.
+# Contract: contracts/schemas/restart_manifest.yaml
+# Design:   knowledge/blueprints/GAIA_SELF_RESTART.md
+RESTART_REQUESTS_DIR = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "restart_requests"
+LKG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "lkg.json"
+SELF_DEPLOY_ENABLED = os.environ.get("SELF_DEPLOY_ENABLED", "0") == "1"
+DEADMAN_TIMEOUT = int(os.environ.get("DEADMAN_TIMEOUT", "300"))
+# Battery slice is opt-in: in sleep gear inference is CPU-slow and a
+# GPU-calibrated battery would false-fail deploys (cf. q5ab).
+DEADMAN_RUN_BATTERY = os.environ.get("DEADMAN_RUN_BATTERY", "0") == "1"
+DEADMAN_BATTERY_MIN = float(os.environ.get("DEADMAN_BATTERY_MIN", "0.6"))
+
+# Logical service -> production container ("common" is a library, no container)
+_SELF_DEPLOY_SERVICES: dict = {
+    "core": "gaia-core", "web": "gaia-web", "mcp": "gaia-mcp",
+    "study": "gaia-study", "audio": "gaia-audio",
+    "orchestrator": "gaia-orchestrator", "common": None,
+}
+
 # KV cache pressure monitoring — independent of gaia-core
 # (nano entry removed: retired tier was a socat alias to core's engine,
 # so polling it double-counted the same slots)
@@ -741,6 +760,268 @@ def check_compose_sanity() -> dict:
             "services_checked": len(services_found), "builds_checked": len(builds)}
 
 
+# ---------------------------------------------------------------------------
+# Self-deploy supervision (kmcb): the doctor is the deadman supervisor;
+# the orchestrator is the hands (git checkout/commit + container restarts).
+# A process never restarts itself — and the supervisor never supervises
+# its own restart (manifests targeting "doctor" are rejected).
+# ---------------------------------------------------------------------------
+
+_self_deploy_running = False
+_self_deploy_last: dict = {}      # last terminal manifest summary (for status.json)
+# Containers under active supervised deploy. While a container is in this set
+# the reflexive immune machinery (DOWN remediation, structural repair) must
+# stand down — the deadman is the only judge. Lesson from the first failure
+# drill: Tier-2 HA Surgery healed the broken file mid-deploy, so the deadman
+# blessed a deploy whose content no longer matched its manifest.
+_deploy_guard: set = set()
+
+
+def _source_digest(services: list) -> str:
+    """Combined content hash of the prod source dirs for the named services.
+
+    Used by the deadman to verify the deployed content SURVIVED verification —
+    if anything (immune surgery, another writer) mutated the source between
+    execution start and health-pass, the deploy is not what was requested.
+    """
+    h = hashlib.sha256()
+    for svc in sorted(services):
+        base = GAIA_PROJECT_ROOT / f"gaia-{svc}" if svc != "common" else GAIA_PROJECT_ROOT / "gaia-common"
+        if not base.exists():
+            continue
+        for f in sorted(base.rglob("*.py")):
+            if "__pycache__" in f.parts:
+                continue
+            try:
+                h.update(str(f.relative_to(base)).encode())
+                h.update(f.read_bytes())
+            except OSError:
+                continue
+    return h.hexdigest()
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _orch_json(path: str, payload: dict | None = None, timeout: int = 30) -> dict:
+    """GET (payload None) or POST JSON to the orchestrator."""
+    url = f"{ORCHESTRATOR_ENDPOINT}{path}"
+    if payload is None:
+        req = Request(url, method="GET")
+    else:
+        req = Request(url, data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _manifest_write(path: Path, manifest: dict, **fields) -> None:
+    manifest.update(fields)
+    try:
+        path.write_text(json.dumps(manifest, indent=2))
+    except OSError:
+        log.warning("Failed to update manifest %s", path, exc_info=True)
+
+
+def _manifest_archive(path: Path) -> None:
+    try:
+        dest = RESTART_REQUESTS_DIR / "archive"
+        dest.mkdir(parents=True, exist_ok=True)
+        path.rename(dest / path.name)
+    except OSError:
+        log.warning("Failed to archive manifest %s", path, exc_info=True)
+
+
+def process_restart_manifests() -> None:
+    """Poll-cycle hook: pick up at most one pending restart manifest.
+
+    Permanent gate failures reject the manifest; transient conditions
+    (maintenance mode, wrong gear, orchestrator unreachable) defer it —
+    the manifest stays pending for the next cycle.
+    """
+    global _self_deploy_running
+    if _self_deploy_running or not RESTART_REQUESTS_DIR.exists():
+        return
+    for path in sorted(RESTART_REQUESTS_DIR.glob("*.json")):
+        try:
+            manifest = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if manifest.get("status") != "pending":
+            continue
+        mid = manifest.get("id", path.stem)
+
+        # ── Permanent gates → reject ──
+        required = ("id", "requested_by", "services", "tier", "change_summary")
+        missing = [k for k in required if not manifest.get(k)]
+        reason = None
+        if not SELF_DEPLOY_ENABLED:
+            reason = "self-deploy kill switch off (SELF_DEPLOY_ENABLED != 1)"
+        elif manifest.get("manifest_version") != 1 or missing:
+            reason = f"schema invalid (missing: {missing or 'manifest_version'})"
+        elif manifest.get("tier") != "source":
+            reason = (f"tier {manifest.get('tier')!r} exceeds source-tier autonomy — "
+                      "image/compose deploys require the Architect")
+        elif "doctor" in manifest["services"]:
+            reason = "the deadman supervisor cannot supervise its own restart"
+        elif not set(manifest["services"]) <= set(_SELF_DEPLOY_SERVICES):
+            reason = f"unknown services: {sorted(set(manifest['services']) - set(_SELF_DEPLOY_SERVICES))}"
+        if reason:
+            log.warning("Self-deploy %s REJECTED: %s", mid, reason)
+            record_drift_alert("self_deploy_rejected", mid, reason)
+            _manifest_write(path, manifest, status="rejected",
+                            result={"reason": reason, "completed_at": _utcnow_iso()})
+            _manifest_archive(path)
+            continue
+
+        # ── Transient gates → defer (stay pending) ──
+        if is_maintenance_active():
+            log.info("Self-deploy %s deferred: maintenance mode active", mid)
+            return
+        try:
+            gear = str(_orch_json("/lifecycle/state", timeout=5).get("state", "")).lower()
+        except Exception as e:
+            log.info("Self-deploy %s deferred: lifecycle state unavailable (%s)", mid, e)
+            return
+        if gear not in ("sleep", "parked", "deep_sleep"):
+            log.info("Self-deploy %s deferred: gear=%s (needs sleep/parked/deep_sleep)", mid, gear)
+            return
+
+        # One deploy at a time, off the watch loop so health polling keeps beating
+        _self_deploy_running = True
+        threading.Thread(target=_execute_self_deploy, args=(path, manifest), daemon=True).start()
+        return
+
+
+def _deadman_verify(containers: list, services: list) -> tuple:
+    """(ok, detail, battery_score): deep health for every deployed container
+    within DEADMAN_TIMEOUT; optional cognitive battery slice when core deployed."""
+    deadline = time.monotonic() + DEADMAN_TIMEOUT
+    pending = {name: SERVICES.get(name, (f"http://{name}:8080/health", None))[0]
+               for name in containers}
+    while pending and time.monotonic() < deadline:
+        for name, url in list(pending.items()):
+            if check_health(name, url):
+                pending.pop(name)
+        if pending:
+            time.sleep(10)
+    if pending:
+        return False, f"health timeout after {DEADMAN_TIMEOUT}s: {sorted(pending)}", None
+
+    battery_score = None
+    if DEADMAN_RUN_BATTERY and _run_cognitive_battery is not None and "core" in services:
+        try:
+            res = _run_cognitive_battery()
+            battery_score = res.get("pass_rate")
+            if battery_score is None and res.get("total"):
+                battery_score = res.get("passed", 0) / res["total"]
+            if battery_score is not None and battery_score < DEADMAN_BATTERY_MIN:
+                return False, f"battery {battery_score:.2f} < {DEADMAN_BATTERY_MIN}", battery_score
+        except Exception as e:
+            log.warning("Deadman battery errored (non-fatal): %s", e)
+    return True, "ok", battery_score
+
+
+def _execute_self_deploy(path: Path, manifest: dict) -> None:
+    global _self_deploy_running, _self_deploy_last
+    mid = manifest.get("id", path.stem)
+    try:
+        try:
+            pre_sha = _orch_json("/candidate/snapshot", timeout=10)["sha"]
+        except Exception as e:
+            log.warning("Self-deploy %s deferred: cannot snapshot pre-SHA (%s)", mid, e)
+            return
+        log.warning("SELF-DEPLOY %s: executing (services=%s, pre_sha=%s)",
+                    mid, manifest["services"], pre_sha[:8])
+        _manifest_write(path, manifest, status="executing", pre_sha=pre_sha)
+
+        containers = [_SELF_DEPLOY_SERVICES[s] for s in manifest["services"]
+                      if _SELF_DEPLOY_SERVICES.get(s)]
+        deployed_digest = _source_digest(manifest["services"])
+        _deploy_guard.update(containers)
+        try:
+            for name in containers:
+                if name == "gaia-orchestrator":
+                    docker_restart(name)   # the hands can't restart themselves
+                else:
+                    _orch_json(f"/containers/{name}/restart", payload={}, timeout=120)
+
+            ok, detail, battery_score = _deadman_verify(containers, manifest["services"])
+            # Content survival check: health alone is not enough — if the source
+            # was mutated between execution start and health-pass (immune
+            # surgery, another writer), what's running is NOT the deploy the
+            # manifest described. Treat as failure and roll back to LKG.
+            if ok and _source_digest(manifest["services"]) != deployed_digest:
+                ok = False
+                detail = ("deployed source mutated during verification "
+                          "(immune surgery or concurrent writer) — running state "
+                          "does not match the manifest")
+        finally:
+            _deploy_guard.difference_update(containers)
+        if ok:
+            commit_sha = None
+            try:
+                msg = (f"gaia-self-deploy({mid}): {manifest['change_summary']}\n\n"
+                       f"Bead: {manifest.get('bead', '')}\n"
+                       f"Requested-by: {manifest['requested_by']}\n"
+                       f"Deadman: health ok"
+                       + (f", battery {battery_score:.2f}" if battery_score is not None else ""))
+                commit_sha = _orch_json("/deploy/commit",
+                                        payload={"services": manifest["services"], "message": msg},
+                                        timeout=60).get("sha")
+            except Exception as e:
+                # 409 = nothing staged (change was committed already) — non-fatal
+                log.warning("Self-deploy %s: auto-commit skipped/failed: %s", mid, e)
+            if commit_sha:
+                try:
+                    LKG_FILE.write_text(json.dumps(
+                        {"sha": commit_sha, "manifest_id": mid, "time": _utcnow_iso()}, indent=2))
+                except OSError:
+                    log.warning("Failed to rotate lkg.json", exc_info=True)
+            log.warning("SELF-DEPLOY %s: DEPLOYED (commit=%s)", mid, (commit_sha or "none")[:8])
+            _manifest_write(path, manifest, status="deployed",
+                            result={"health_ok": True, "battery_score": battery_score,
+                                    "commit_sha": commit_sha, "completed_at": _utcnow_iso()})
+        else:
+            rb_sha = pre_sha
+            try:
+                rb_sha = json.loads(LKG_FILE.read_text()).get("sha") or pre_sha
+            except (OSError, json.JSONDecodeError):
+                pass
+            log.error("SELF-DEPLOY %s: DEADMAN FAILED (%s) — rolling back to %s",
+                      mid, detail, rb_sha[:8])
+            captured = ""
+            try:
+                captured = subprocess.run(
+                    ["docker", "logs", "--tail", "100", containers[0]],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout[-4000:]
+            except Exception:
+                pass
+            try:
+                _orch_json("/deploy/rollback",
+                           payload={"sha": rb_sha, "services": manifest["services"],
+                                    "scope": "both"},
+                           timeout=180)
+            except Exception as e:
+                log.critical("Self-deploy %s: ROLLBACK FAILED (%s) — manual intervention required",
+                             mid, e)
+                record_drift_alert("self_deploy_rollback_failed", mid, str(e))
+            record_drift_alert("self_deploy_failed", mid, detail)
+            _manifest_write(path, manifest, status="rolled_back",
+                            result={"reason": detail, "health_ok": False,
+                                    "battery_score": battery_score, "rollback_sha": rb_sha,
+                                    "captured_logs": captured, "completed_at": _utcnow_iso()})
+        _self_deploy_last = {"id": mid, "status": manifest["status"],
+                             "completed_at": _utcnow_iso()}
+        _manifest_archive(path)
+    except Exception:
+        log.exception("Self-deploy %s: unexpected error", mid)
+    finally:
+        _self_deploy_running = False
+
+
 def _get_service_mtime(name: str) -> float:
     """Get the maximum mtime of all .py files in a service directory."""
     code_dir = SERVICE_CODE_DIRS.get(name)
@@ -774,6 +1055,10 @@ def audit_code():
             continue
 
         if current_mtime > last_mtime:
+            if name in _deploy_guard:
+                log.info("CODE CHANGE in %s is a supervised self-deploy — audit deferred to deadman", name)
+                _code_mtimes[name] = current_mtime
+                continue
             log.info("CODE CHANGE detected for %s. Auditing...", name)
             _code_mtimes[name] = current_mtime
             
@@ -2057,8 +2342,14 @@ if broken: sys.exit(1)
         )
         
         if audit_res.returncode != 0:
+            if DRY_RUN:
+                # The shadow doctor observes — it never cuts. Live surgery from
+                # the candidate raced (and beat) the production doctor's deploy
+                # guard during the kmcb failure drills.
+                log.info("[DRY_RUN] Structural error detected in %s — would repair, skipping (candidate mode)", name)
+                return False
             log.warning("Structural error detected in %s. Attempting repair...", name)
-            
+
             # Extract broken file path from stdout
             broken_file = None
             for line in audit_res.stdout.splitlines():
@@ -3041,6 +3332,13 @@ def poll_cycle():
             failures = _consecutive_failures[name]
 
             if failures >= FAILURE_THRESHOLD:
+                # Supervised deploy in flight: the deadman owns this container.
+                # Reflexive remediation/surgery here would race the deploy
+                # verdict (first failure drill: Tier-2 surgery healed the file
+                # and the deadman blessed a mutated deploy).
+                if name in _deploy_guard:
+                    log.info("%s is under supervised self-deploy — remediation deferred to deadman", name)
+                    continue
                 # Second opinion: one fresh confirmation poll before pulling the
                 # trigger. The service may have recovered since the last cycle (a
                 # transient blip across check intervals, a GC pause, a load spike).
@@ -3105,6 +3403,12 @@ def poll_cycle():
         _compose_sanity_cache = check_compose_sanity()
         for issue in _compose_sanity_cache.get("issues", []):
             record_drift_alert("compose_sanity", issue.split(":", 1)[0], issue)
+
+    # Self-deploy manifests (kmcb) — gated pickup, deadman-supervised
+    try:
+        process_restart_manifests()
+    except Exception:
+        log.debug("Self-deploy manifest processing failed", exc_info=True)
 
     # Sovereign promotion: if candidate is healthy and files have diverged, trigger review
     # Rate-limited to prevent flooding the cognitive pipeline with 16K-token review packets.
@@ -3237,6 +3541,13 @@ def _build_status() -> dict:
             },
             "compose_sanity": _compose_sanity_cache or None,
             "drift_alerts_active": len(_drift_alert_last),
+        },
+        "self_deploy": {
+            "enabled": SELF_DEPLOY_ENABLED,
+            "executing": _self_deploy_running,
+            "pending": (len([p for p in RESTART_REQUESTS_DIR.glob("*.json")])
+                        if RESTART_REQUESTS_DIR.exists() else 0),
+            "last": _self_deploy_last or None,
         },
         "serenity": _get_serenity_report(),
         "defensive_meditation": _is_meditation_active(),

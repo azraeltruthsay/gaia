@@ -708,7 +708,7 @@ async def gpu_wake():
 
 _RESTART_ALLOWED = {
     "gaia-prime", "gaia-nano", "gaia-core", "gaia-web",
-    "gaia-study", "gaia-mcp",
+    "gaia-study", "gaia-mcp", "gaia-audio",
 }
 
 
@@ -922,6 +922,167 @@ async def candidate_rollback(request: RollbackRequest):
         )
 
     return response
+
+
+# =============================================================================
+# Self-Deploy: production rollback + auto-commit (kmcb)
+# Design: knowledge/blueprints/GAIA_SELF_RESTART.md — the orchestrator is the
+# "hands" (git + docker); gaia-doctor is the deadman supervisor that calls
+# these endpoints. Requires the repo mounted rw (docker-compose.yml).
+# =============================================================================
+
+_PROD_CONTAINERS: dict[str, str] = {
+    "core": "gaia-core",
+    "web": "gaia-web",
+    "mcp": "gaia-mcp",
+    "study": "gaia-study",
+    "orchestrator": "gaia-orchestrator",
+    "audio": "gaia-audio",
+}
+
+# Logical service -> git pathspecs (prod tree). "common" is a library:
+# it has source to restore but no container of its own.
+_PROD_SRC_DIRS: dict[str, list] = {
+    "core": ["gaia-core"],
+    "web": ["gaia-web"],
+    "mcp": ["gaia-mcp"],
+    "study": ["gaia-study"],
+    "orchestrator": ["gaia-orchestrator"],
+    "audio": ["gaia-audio"],
+    "common": ["gaia-common"],
+}
+
+
+class DeployRollbackRequest(BaseModel):
+    sha: str
+    services: List[str]
+    scope: str = "production"   # production | candidates | both
+
+    @field_validator("sha")
+    @classmethod
+    def _validate_sha(cls, v: str) -> str:
+        if not _SHA_RE.match(v):
+            raise ValueError(f"Invalid git SHA: {v!r}")
+        return v
+
+    @field_validator("services")
+    @classmethod
+    def _validate_services(cls, v: List[str]) -> List[str]:
+        unknown = set(v) - set(_PROD_SRC_DIRS)
+        if unknown:
+            raise ValueError(f"Unknown services: {unknown}")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def _validate_scope(cls, v: str) -> str:
+        if v not in ("production", "candidates", "both"):
+            raise ValueError(f"Unknown scope: {v!r}")
+        return v
+
+
+class DeployCommitRequest(BaseModel):
+    services: List[str]
+    message: str
+
+    @field_validator("services")
+    @classmethod
+    def _validate_services(cls, v: List[str]) -> List[str]:
+        unknown = set(v) - set(_PROD_SRC_DIRS)
+        if unknown:
+            raise ValueError(f"Unknown services: {unknown}")
+        return v
+
+
+def _run_git(args: list, timeout: int = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=_REPO_ROOT, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+@app.post("/deploy/rollback")
+async def deploy_rollback(request: DeployRollbackRequest):
+    """Restore service source dirs to a git SHA and restart their containers.
+
+    The production-tree generalization of /candidate/rollback. Called by
+    gaia-doctor when a self-deploy fails its deadman check.
+    """
+    if _docker_manager is None:
+        raise HTTPException(status_code=501, detail="Docker manager not available")
+
+    pathspecs: list = []
+    for svc in request.services:
+        if request.scope in ("production", "both"):
+            pathspecs.extend(_PROD_SRC_DIRS[svc])
+        if request.scope in ("candidates", "both"):
+            pathspecs.extend(f"candidates/{d}" for d in _PROD_SRC_DIRS[svc])
+
+    logger.warning("DEPLOY ROLLBACK: sha=%s scope=%s services=%s",
+                   request.sha[:8], request.scope, request.services)
+    try:
+        result = _run_git(["checkout", request.sha, "--", *pathspecs])
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="git checkout timed out")
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"git checkout failed: {result.stderr.strip()}")
+
+    restart_self = "orchestrator" in request.services
+    containers = []
+    if request.scope in ("production", "both"):
+        containers.extend(_PROD_CONTAINERS[s] for s in request.services
+                          if s != "orchestrator" and s in _PROD_CONTAINERS)
+    if request.scope in ("candidates", "both"):
+        containers.extend(_CANDIDATE_CONTAINERS[s] for s in request.services
+                          if s != "orchestrator" and s in _CANDIDATE_CONTAINERS)
+
+    errors: list = []
+    for name in containers:
+        try:
+            if not await _docker_manager.restart_container(name):
+                errors.append(f"{name}: restart returned False")
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+
+    if restart_self:
+        logger.warning("Scheduling self-restart (gaia-orchestrator)...")
+        asyncio.get_event_loop().call_later(
+            1.0, lambda: subprocess.Popen(["docker", "restart", "gaia-orchestrator"]))
+
+    return {"ok": not errors, "sha": request.sha, "scope": request.scope,
+            "containers_restarted": containers, "errors": errors}
+
+
+@app.post("/deploy/commit")
+async def deploy_commit(request: DeployCommitRequest):
+    """Auto-commit a verified self-deploy (kmcb decision 2026-07-16).
+
+    Called by gaia-doctor after the deadman passes. Each successful
+    self-deploy becomes a rollback anchor and an audit-trail commit.
+    Commits locally only — GAIA never pushes.
+    """
+    pathspecs = [d for svc in request.services for d in _PROD_SRC_DIRS[svc]]
+    pathspecs += [f"candidates/{d}" for svc in request.services for d in _PROD_SRC_DIRS[svc]]
+
+    try:
+        add = _run_git(["add", "--", *pathspecs])
+        if add.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git add failed: {add.stderr.strip()}")
+        staged = _run_git(["diff", "--cached", "--quiet"])
+        if staged.returncode == 0:
+            raise HTTPException(status_code=409, detail="nothing staged — no changes to commit")
+        commit = _run_git([
+            "-c", "user.name=GAIA Self-Deploy",
+            "-c", "user.email=gaia@localhost",
+            "commit", "-m", request.message,
+        ])
+        if commit.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git commit failed: {commit.stderr.strip()}")
+        sha = _run_git(["rev-parse", "HEAD"]).stdout.strip()
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="git operation timed out")
+
+    logger.warning("SELF-DEPLOY COMMIT: %s (%s)", sha[:8], request.message.splitlines()[0][:80])
+    return {"ok": True, "sha": sha}
 
 
 # =============================================================================

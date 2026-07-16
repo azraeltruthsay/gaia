@@ -306,3 +306,22 @@ health_check:
   timeout: 5s
   retries: 3
   start_period: 10s
+
+# ── Self-deploy supervision (kmcb) ──────────────────────────────────────────
+# Design: knowledge/blueprints/GAIA_SELF_RESTART.md
+# Manifest schema: contracts/schemas/restart_manifest.yaml
+self_deploy:
+  drop_box: /shared/doctor/restart_requests/   # requester writes <id>.json, status=pending
+  lkg_file: /shared/doctor/lkg.json            # rotated on each successful deploy commit
+  env:
+    SELF_DEPLOY_ENABLED: "kill switch (default 0 in code; compose sets 1)"
+    DEADMAN_TIMEOUT: "seconds for all deployed services to pass deep health (default 300)"
+    DEADMAN_RUN_BATTERY: "opt-in cognitive battery slice when core deployed (default 0 — CPU-gear false-fail risk)"
+    DEADMAN_BATTERY_MIN: "minimum battery pass rate (default 0.6)"
+  gates:
+    permanent_reject: [kill switch off, schema invalid, tier != source, services include doctor, unknown services]
+    transient_defer: [maintenance mode active, orchestrator gear not in sleep|parked|deep_sleep, orchestrator unreachable]
+  execution:
+    restarts_via: "orchestrator POST /containers/{name}/restart (orchestrator itself via doctor's own docker_restart)"
+    on_pass: "orchestrator POST /deploy/commit -> rotate lkg.json -> manifest deployed -> archive"
+    on_fail: "orchestrator POST /deploy/rollback (scope=both, LKG SHA else pre_sha) -> drift alert self_deploy_failed -> manifest rolled_back"

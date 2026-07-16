@@ -1,7 +1,43 @@
 # GAIA Self-Restart & Deployment Roles — Design Standard
 
-> **Status**: Design (agreed 2026-07-16, Azrael + Claude) · **Beads**: `GAIA_Project-kmcb` (design), `GAIA_Project-r67d` (candidate parity, blocks kmcb)
+> **Status**: **v1 IMPLEMENTED** (2026-07-16) · **Beads**: `GAIA_Project-kmcb` (implemented), `GAIA_Project-r67d` (candidate parity, done)
 > **Scope**: How GAIA autonomously deploys her own code changes that require a container restart — with no negative impact and no outside influence.
+
+## v1 Implementation Notes (2026-07-16)
+
+Implementation revised the division of labor: the **orchestrator is the hands**
+(it already had git, `/candidate/snapshot`, `/containers/*` and docker manager;
+kmcb fixed its silently-broken rollback — repo was mounted `:ro` — and added
+`POST /deploy/rollback` + `POST /deploy/commit`), while the **doctor is the
+deadman supervisor** (manifest watcher in `doctor.py`, gates + deadman +
+rollback trigger). A process still never restarts itself; the supervisor never
+supervises its own restart (manifests targeting `doctor` are rejected).
+
+- Manifest schema: `contracts/schemas/restart_manifest.yaml`; drop-box
+  `/shared/doctor/restart_requests/`.
+- **Auto-commit on success** (Azrael decision 2026-07-16): orchestrator
+  `/deploy/commit` as `GAIA Self-Deploy <gaia@localhost>`, local only, never
+  pushed. Each success rotates `/shared/doctor/lkg.json` — the rollback anchor.
+- Rollback = `git checkout <LKG SHA> -- <service dirs>` in **both** trees
+  (candidate parity preserved on rollback), then container restarts.
+- Deadman v1 = deep `/health` for every deployed service within
+  `DEADMAN_TIMEOUT` (300s); the cognitive-battery slice is opt-in
+  (`DEADMAN_RUN_BATTERY=1`) because CPU-gear inference would false-fail
+  GPU-calibrated expectations.
+- Kill switch: `SELF_DEPLOY_ENABLED` (compose sets 1 for production doctor).
+- **One judge at a time (drill 3 lesson)**: the doctor's pre-existing reflexive
+  immune machinery (structural audit → Tier-2 HA Surgery) raced the first
+  failure drill — it healed the deliberately broken file mid-deploy, so the
+  deadman blessed a deploy whose content no longer matched its manifest and
+  auto-committed a half-poisoned tree. Fixes: (a) `_deploy_guard` — containers
+  under supervised deploy are exempt from reflexive remediation and code-change
+  audits; the deadman is the only judge until it rules; (b) **content survival
+  check** — the deadman records a source digest at execution start and fails
+  the deploy if the running source was mutated during verification, even when
+  health passes. Health alone is necessary but not sufficient.
+- Phase 2 (deferred, own bead): CodeMind writes manifests autonomously;
+  `/containers/swap` web-upstream handoff during core restarts; image-tier
+  deploys; code-template scaffolds to constrain CodeMind generation.
 
 ## Premise
 

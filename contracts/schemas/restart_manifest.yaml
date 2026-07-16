@@ -1,0 +1,66 @@
+# Restart Manifest — GAIA autonomous supervised self-restart (kmcb)
+#
+# Design: knowledge/blueprints/GAIA_SELF_RESTART.md
+# Drop-box: /shared/doctor/restart_requests/<id>.json  (archive/ after terminal state)
+# Writer: gaia-core (CodeMind / sleep tasks / manual) creates the file with
+#         status=pending. gaia-doctor is the ONLY writer after that — it owns
+#         the lifecycle fields (status, pre_sha, result).
+# Executor: gaia-doctor gates and supervises; gaia-orchestrator performs
+#           git + container operations (/deploy/rollback, /deploy/commit).
+#
+# Cardinal rules enforced by the doctor:
+#   - tier must be "source" (volume-mounted code only; image/compose changes
+#     are Architect-tier and are REJECTED)
+#   - services must not include "doctor" (the supervisor cannot supervise itself)
+#   - executed only in sleep/parked/deep_sleep gear, never in maintenance mode
+
+manifest_version: 1
+
+file:
+  location: /shared/doctor/restart_requests/
+  naming: "<id>.json"           # id: unique, e.g. "2026-07-16T02-11-00_study_q5ab"
+  archive: /shared/doctor/restart_requests/archive/
+
+# ── Fields written by the requester (immutable after creation) ──────────────
+request_fields:
+  manifest_version: int          # must equal 1
+  id: string                     # unique manifest id (matches filename stem)
+  requested_by: string           # e.g. "codemind", "sleep_task:code_evolution", "azrael"
+  bead: string                   # originating bd issue id (audit trail), "" if none
+  services: [string]             # logical names: core|web|mcp|study|audio|orchestrator
+  tier: string                   # "source" (only accepted value in v1)
+  change_summary: string         # one-paragraph human-readable description
+  tests_run: [string]            # evidence: test suites/drills run in candidates
+  created_at: string             # ISO-8601 UTC
+
+# ── Fields owned by gaia-doctor after pickup ────────────────────────────────
+lifecycle_fields:
+  status: string                 # pending -> rejected | executing -> deployed | rolled_back
+  pre_sha: string                # git HEAD at execution start (orchestrator /candidate/snapshot)
+  result:
+    reason: string               # rejection reason or failure detail
+    health_ok: bool              # deadman health verdict
+    battery_score: float | null  # cognitive battery slice score (0..1)
+    commit_sha: string | null    # auto-commit SHA on success
+    rollback_sha: string | null  # SHA restored on failure
+    captured_logs: string | null # docker logs tail on failure
+    completed_at: string         # ISO-8601 UTC
+
+status_lifecycle:
+  pending: "written by requester; awaiting doctor pickup (next poll cycle)"
+  rejected: "a gate failed (kill switch, tier, target, gear, maintenance, schema)"
+  executing: "doctor recorded pre_sha and initiated container restart"
+  deployed: "deadman passed; orchestrator auto-committed; lkg.json rotated"
+  rolled_back: "deadman failed; source restored to LKG/pre_sha and service re-verified"
+
+example:
+  manifest_version: 1
+  id: "2026-07-16T02-11-00_study_q5ab"
+  requested_by: "azrael"
+  bead: "GAIA_Project-q5ab"
+  services: ["study"]
+  tier: "source"
+  change_summary: "CPU-scaled inference timeouts for sleep tasks"
+  tests_run: ["pytest gaia_core/cognition/tests/test_sleep_task_scheduler.py (41 passed)"]
+  created_at: "2026-07-16T02:11:00+00:00"
+  status: "pending"

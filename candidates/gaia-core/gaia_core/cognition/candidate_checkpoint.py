@@ -28,13 +28,17 @@ _HEALTH_URLS: dict[str, str] = {
     "web":          "http://gaia-web-candidate:6414/health",
     "mcp":          "http://gaia-mcp-candidate:8765/health",
     "study":        "http://gaia-study-candidate:8766/health",
-    "orchestrator": "http://gaia-orchestrator-candidate:6410/health",
+    # Production orchestrator: an orchestrator-candidate deliberately does not
+    # exist — only one gearbox controller may own the GPU lifecycle (r67d).
+    "orchestrator": "http://gaia-orchestrator:6410/health",
     "audio":        "http://gaia-audio-candidate:8080/health",
     "prime":        "http://gaia-prime-candidate:7777/health",
 }
 
-# ── Orchestrator endpoint (candidate orchestrator, on the same docker network) ──
-_ORCHESTRATOR_URL = "http://gaia-orchestrator-candidate:6410"
+# ── Orchestrator endpoint — PRODUCTION orchestrator: the candidate one
+# deliberately does not exist (single gearbox controller). This URL was dead
+# from birth; the restore() safety net silently never worked until kmcb.
+_ORCHESTRATOR_URL = "http://gaia-orchestrator:6410"
 
 
 @dataclass(frozen=True)
