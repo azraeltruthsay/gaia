@@ -272,6 +272,19 @@ provides:
         scope: string              # production | candidates | both (default production)
     consumers: [gaia-doctor]
 
+  - endpoint: /deploy/promote
+    method: POST
+    description: >
+      Promote validated candidate files into the production tree (nfi3):
+      copies candidates/<p> -> <p> for each path. Paths must live under
+      candidates/<known service dir>/ with no traversal. Called by
+      gaia-doctor before restarting a self-deploy whose manifest carries
+      promote_files.
+    request_schema:
+      fields:
+        files: list of string      # repo-relative, under candidates/
+    consumers: [gaia-doctor]
+
   - endpoint: /deploy/commit
     method: POST
     description: >

@@ -35,9 +35,24 @@ supervises its own restart (manifests targeting `doctor` are rejected).
   check** — the deadman records a source digest at execution start and fails
   the deploy if the running source was mutated during verification, even when
   health passes. Health alone is necessary but not sufficient.
-- Phase 2 (deferred, own bead): CodeMind writes manifests autonomously;
-  `/containers/swap` web-upstream handoff during core restarts; image-tier
-  deploys; code-template scaffolds to constrain CodeMind generation.
+- **Phase 2 SHIPPED (nfi3, 2026-07-16)** — the loop is closed: CodeMind's
+  validated candidate fixes become restart manifests automatically
+  (`codemind_manifest.build_manifest_for_files`, rendered via the s4r2
+  `restart_manifest` scaffold, `CODEMIND.self_deploy` default true — Azrael's
+  "live now" decision). Manifests may carry `promote_files`; the doctor calls
+  orchestrator `POST /deploy/promote` (candidates→prod copy) before restart,
+  and a promote failure aborts pre-restart. Full autonomous chain:
+  **detect → patch (s4r2) → validate → manifest → promote → deadman → commit/rollback.**
+- Web handoff during core restarts needs no new machinery: gaia-web already
+  falls back to `gaia-core-candidate` via `CORE_FALLBACK_ENDPOINT`
+  (docker-compose.yml). First autonomous *core* self-deploy should still be
+  Architect-supervised.
+- Image-tier manifests are rejected from the autonomous path but staged to
+  `/shared/doctor/architect_queue/` — the Architect's review inbox.
+- Deadman battery is CPU-aware and ON (identity section,
+  `DEADMAN_BATTERY_QUERY_TIMEOUT=180`s per query).
+- Remaining future work: scaffold-aware skill_llm_body prompts; image-tier
+  approval UX beyond the queue dir.
 
 ## Premise
 

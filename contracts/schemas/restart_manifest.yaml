@@ -32,6 +32,9 @@ request_fields:
   change_summary: string         # one-paragraph human-readable description
   tests_run: [string]            # evidence: test suites/drills run in candidates
   created_at: string             # ISO-8601 UTC
+  promote_files: [string]        # OPTIONAL (nfi3): repo-relative candidates/ paths the
+                                 # doctor promotes to prod (orchestrator /deploy/promote)
+                                 # BEFORE restarting. Promote failure aborts pre-restart.
 
 # ── Fields owned by gaia-doctor after pickup ────────────────────────────────
 lifecycle_fields:

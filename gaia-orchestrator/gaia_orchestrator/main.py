@@ -1085,6 +1085,58 @@ async def deploy_commit(request: DeployCommitRequest):
     return {"ok": True, "sha": sha}
 
 
+class DeployPromoteRequest(BaseModel):
+    files: List[str]
+
+    @field_validator("files")
+    @classmethod
+    def _validate_files(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("files must be non-empty")
+        allowed_prefixes = tuple(
+            f"candidates/{d}/" for dirs in _PROD_SRC_DIRS.values() for d in dirs
+        )
+        for p in v:
+            if ".." in p or p.startswith("/"):
+                raise ValueError(f"Illegal path: {p!r}")
+            if not p.startswith(allowed_prefixes):
+                raise ValueError(f"Path outside promotable service dirs: {p!r}")
+        return v
+
+
+@app.post("/deploy/promote")
+async def deploy_promote(request: DeployPromoteRequest):
+    """Promote validated candidate files into the production tree (nfi3).
+
+    Called by gaia-doctor before restarting a self-deploy's containers,
+    for manifests carrying promote_files (CodeMind fixes land in
+    candidates/ first; this is the candidate->prod copy step). Rollback
+    (scope=both) restores both trees if the deploy fails its deadman.
+    """
+    import shutil
+
+    promoted: list = []
+    errors: list = []
+    for rel in request.files:
+        src = _REPO_ROOT / rel
+        dst = _REPO_ROOT / rel[len("candidates/"):]
+        if not src.is_file():
+            errors.append(f"{rel}: candidate file does not exist")
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            promoted.append(str(dst.relative_to(_REPO_ROOT)))
+        except OSError as exc:
+            errors.append(f"{rel}: {exc}")
+
+    if errors and not promoted:
+        raise HTTPException(status_code=500, detail={"errors": errors})
+    logger.warning("SELF-DEPLOY PROMOTE: %d file(s) candidates->prod%s",
+                   len(promoted), f" ({len(errors)} errors)" if errors else "")
+    return {"ok": not errors, "promoted": promoted, "errors": errors}
+
+
 # =============================================================================
 # Training Subprocess Monitoring
 # =============================================================================

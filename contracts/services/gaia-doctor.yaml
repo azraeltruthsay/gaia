@@ -322,6 +322,11 @@ self_deploy:
     permanent_reject: [kill switch off, schema invalid, tier != source, services include doctor, unknown services]
     transient_defer: [maintenance mode active, orchestrator gear not in sleep|parked|deep_sleep, orchestrator unreachable]
   execution:
+    promote: "nfi3: manifests with promote_files -> orchestrator POST /deploy/promote (candidates->prod copy) BEFORE restart; promote failure aborts pre-restart (nothing to roll back)"
     restarts_via: "orchestrator POST /containers/{name}/restart (orchestrator itself via doctor's own docker_restart)"
     on_pass: "orchestrator POST /deploy/commit -> rotate lkg.json -> manifest deployed -> archive"
     on_fail: "orchestrator POST /deploy/rollback (scope=both, LKG SHA else pre_sha) -> drift alert self_deploy_failed -> manifest rolled_back"
+    image_tier: "tier: image manifests are rejected from the autonomous path and staged to /shared/doctor/architect_queue/ for human review (nfi3)"
+  deadman_battery:
+    DEADMAN_BATTERY_SECTION: "battery section to run when core deployed (default identity)"
+    DEADMAN_BATTERY_QUERY_TIMEOUT: "per-query seconds, CPU-gear scaled (default 180)"

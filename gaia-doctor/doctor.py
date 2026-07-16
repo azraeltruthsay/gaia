@@ -178,10 +178,17 @@ RESTART_REQUESTS_DIR = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" 
 LKG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "lkg.json"
 SELF_DEPLOY_ENABLED = os.environ.get("SELF_DEPLOY_ENABLED", "0") == "1"
 DEADMAN_TIMEOUT = int(os.environ.get("DEADMAN_TIMEOUT", "300"))
-# Battery slice is opt-in: in sleep gear inference is CPU-slow and a
-# GPU-calibrated battery would false-fail deploys (cf. q5ab).
+# Battery slice: CPU-aware since nfi3 — a small section with a per-query
+# timeout scaled for sleep-gear CPU inference (q5ab lesson). Code default
+# stays off; production compose enables it.
 DEADMAN_RUN_BATTERY = os.environ.get("DEADMAN_RUN_BATTERY", "0") == "1"
 DEADMAN_BATTERY_MIN = float(os.environ.get("DEADMAN_BATTERY_MIN", "0.6"))
+DEADMAN_BATTERY_SECTION = os.environ.get("DEADMAN_BATTERY_SECTION", "identity")
+DEADMAN_BATTERY_QUERY_TIMEOUT = int(os.environ.get("DEADMAN_BATTERY_QUERY_TIMEOUT", "180"))
+
+# nfi3: tier:image manifests are Architect-gated — rejected from the
+# autonomous path but staged to a review inbox instead of the archive.
+ARCHITECT_QUEUE_DIR = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "architect_queue"
 
 # Logical service -> production container ("common" is a library, no container)
 _SELF_DEPLOY_SERVICES: dict = {
@@ -872,7 +879,18 @@ def process_restart_manifests() -> None:
             record_drift_alert("self_deploy_rejected", mid, reason)
             _manifest_write(path, manifest, status="rejected",
                             result={"reason": reason, "completed_at": _utcnow_iso()})
-            _manifest_archive(path)
+            # nfi3: image-tier deploys are Architect-gated, not forbidden —
+            # stage them to the review inbox instead of the archive.
+            if manifest.get("tier") == "image":
+                try:
+                    ARCHITECT_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+                    path.rename(ARCHITECT_QUEUE_DIR / path.name)
+                    log.warning("Self-deploy %s staged to architect queue (image tier)", mid)
+                except OSError:
+                    log.warning("Failed to stage %s to architect queue", mid, exc_info=True)
+                    _manifest_archive(path)
+            else:
+                _manifest_archive(path)
             continue
 
         # ── Transient gates → defer (stay pending) ──
@@ -912,7 +930,10 @@ def _deadman_verify(containers: list, services: list) -> tuple:
     battery_score = None
     if DEADMAN_RUN_BATTERY and _run_cognitive_battery is not None and "core" in services:
         try:
-            res = _run_cognitive_battery()
+            res = _run_cognitive_battery(
+                section=DEADMAN_BATTERY_SECTION,
+                timeout=DEADMAN_BATTERY_QUERY_TIMEOUT,
+            )
             battery_score = res.get("pass_rate")
             if battery_score is None and res.get("total"):
                 battery_score = res.get("passed", 0) / res["total"]
@@ -935,6 +956,27 @@ def _execute_self_deploy(path: Path, manifest: dict) -> None:
         log.warning("SELF-DEPLOY %s: executing (services=%s, pre_sha=%s)",
                     mid, manifest["services"], pre_sha[:8])
         _manifest_write(path, manifest, status="executing", pre_sha=pre_sha)
+
+        # nfi3: promote validated candidate files to the prod tree first.
+        # A promote failure aborts BEFORE any restart — nothing to roll back.
+        promote_files = manifest.get("promote_files") or []
+        if promote_files:
+            try:
+                pres = _orch_json("/deploy/promote",
+                                  payload={"files": promote_files}, timeout=60)
+                if not pres.get("ok"):
+                    raise RuntimeError(f"promote errors: {pres.get('errors')}")
+                log.warning("SELF-DEPLOY %s: promoted %d file(s) candidates->prod",
+                            mid, len(pres.get("promoted", [])))
+            except Exception as e:
+                log.error("SELF-DEPLOY %s: PROMOTE FAILED (%s) — aborting before restart", mid, e)
+                record_drift_alert("self_deploy_failed", mid, f"promote failed: {e}")
+                _manifest_write(path, manifest, status="rolled_back",
+                                result={"reason": f"promote failed: {e}",
+                                        "health_ok": None,
+                                        "completed_at": _utcnow_iso()})
+                _manifest_archive(path)
+                return
 
         containers = [_SELF_DEPLOY_SERVICES[s] for s in manifest["services"]
                       if _SELF_DEPLOY_SERVICES.get(s)]

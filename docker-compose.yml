@@ -830,7 +830,11 @@ services:
       # Self-deploy supervision (kmcb): kill switch + deadman tuning
       - SELF_DEPLOY_ENABLED=${SELF_DEPLOY_ENABLED:-1}
       - DEADMAN_TIMEOUT=${DEADMAN_TIMEOUT:-300}
-      - DEADMAN_RUN_BATTERY=${DEADMAN_RUN_BATTERY:-0}
+      # nfi3: battery on, CPU-aware — small identity section, per-query
+      # timeout scaled for sleep-gear CPU inference
+      - DEADMAN_RUN_BATTERY=${DEADMAN_RUN_BATTERY:-1}
+      - DEADMAN_BATTERY_SECTION=${DEADMAN_BATTERY_SECTION:-identity}
+      - DEADMAN_BATTERY_QUERY_TIMEOUT=${DEADMAN_BATTERY_QUERY_TIMEOUT:-180}
       - COMPOSE_PROJECT_NAME=gaia_project
       # HA candidate compose must resolve relative volume paths (./candidates/...)
       # against the real project root, NOT the /compose mount point — otherwise

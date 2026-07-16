@@ -1388,6 +1388,10 @@ class SleepTaskScheduler:
             )
             from gaia_common.utils.codemind_detector import consume_detections, emit_detection
 
+            # nfi3: candidate files successfully fixed this cycle — becomes
+            # a restart manifest at cycle end (self-deploy loop closure).
+            _cycle_applied_files: list = []
+
             # ── Direct seed bridge (fallback if initiative_cycle didn't run) ──
             # Initiative cycle is gated on serenity; this ensures seeds
             # reach the detect queue even when GAIA isn't serene.
@@ -1661,6 +1665,7 @@ class SleepTaskScheduler:
                         f.write(proposed_content)
                     change.applied = True
                     logger.info("CodeMind: applied fix to %s (backup at %s)", file_path, backup_path)
+                    _cycle_applied_files.append(file_path)
                 except Exception as e:
                     change.error = f"Apply failed: {e}"
                     logger.warning("CodeMind: apply failed for %s: %s", file_path, e)
@@ -1670,6 +1675,34 @@ class SleepTaskScheduler:
 
             result = engine.end_cycle("complete")
             logger.info("CodeMind cycle complete: %s", result)
+
+            # ── nfi3: close the loop — validated candidate fixes become a
+            # restart manifest (promote + deadman-supervised deploy). The
+            # doctor still gates everything (kill switch, gear, rollback).
+            if _cycle_applied_files and bool(codemind_cfg.get("self_deploy", True)):
+                try:
+                    from gaia_common.utils.codemind_manifest import build_manifest_for_files
+                    manifest, merr = build_manifest_for_files(
+                        _cycle_applied_files,
+                        requested_by="codemind",
+                        evidence=[f"validate_full + diff_safety passed on {len(_cycle_applied_files)} file(s)"],
+                    )
+                    if merr:
+                        logger.info("CodeMind: no self-deploy manifest (%s)", merr)
+                    else:
+                        req_dir = os.path.join(
+                            os.environ.get("SHARED_DIR", "/shared"),
+                            "doctor", "restart_requests")
+                        os.makedirs(req_dir, exist_ok=True)
+                        mpath = os.path.join(req_dir, f"{manifest['id']}.json")
+                        with open(mpath, "w", encoding="utf-8") as f:
+                            _json.dump(manifest, f, indent=2)
+                        logger.info(
+                            "CodeMind: self-deploy manifest written: %s (services=%s, %d file(s))",
+                            manifest["id"], manifest["services"], len(_cycle_applied_files))
+                except Exception:
+                    logger.warning("CodeMind: manifest write failed (fixes remain in candidates)",
+                                   exc_info=True)
 
         except Exception as e:
             logger.warning("CodeMind cycle failed: %s", e, exc_info=True)
