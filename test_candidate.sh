@@ -33,6 +33,16 @@ case "${1:-}" in
         ;;
 esac
 
+# Normalize service name (e.g. "gaia-core" or "core" -> SERVICE="gaia-core", SERVICE_SHORT="core")
+if [ "${SERVICE}" = "all" ]; then
+    SERVICE_SHORT="all"
+else
+    # Strip gaia- prefix if present to get SERVICE_SHORT
+    SERVICE_SHORT="${SERVICE#gaia-}"
+    # Re-add gaia- prefix to get SERVICE
+    SERVICE="gaia-${SERVICE_SHORT}"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -99,7 +109,8 @@ init_candidates() {
 # Run unit tests in candidate
 run_unit_tests() {
     local target_service="${1:-$SERVICE}"
-    log_info "Running unit tests for gaia-${target_service}-candidate..."
+    local target_short="${target_service#gaia-}"
+    log_info "Running unit tests for gaia-${target_short}-candidate..."
 
     local test_failed=false
 
@@ -140,7 +151,7 @@ run_unit_tests() {
             _run_service_tests "$svc"
         done
     else
-        _run_service_tests "$target_service"
+        _run_service_tests "$target_short"
     fi
 
     if [ "$test_failed" = true ]; then
@@ -228,10 +239,10 @@ start_candidate() {
 
         local port
         case "$SERVICE" in
-            core) port=6416 ;;
-            web) port=6417 ;;
-            mcp) port=8767 ;;
-            study) port=8768 ;;
+            gaia-core|core) port=6416 ;;
+            gaia-web|web) port=6417 ;;
+            gaia-mcp|mcp) port=8767 ;;
+            gaia-study|study) port=8768 ;;
         esac
 
         if ! wait_for_health "http://localhost:${port}/health" "${SERVICE}-candidate" 6 5; then
@@ -270,22 +281,22 @@ inject_candidate() {
     local endpoint_url
 
     case "$SERVICE" in
-        core)
+        gaia-core|core)
             port=6416
             endpoint_var="CORE_ENDPOINT"
             endpoint_url="http://gaia-core-candidate:6415"
             ;;
-        mcp)
+        gaia-mcp|mcp)
             port=8767
             endpoint_var="MCP_ENDPOINT"
             endpoint_url="http://gaia-mcp-candidate:8765/jsonrpc"
             ;;
-        study)
+        gaia-study|study)
             port=8768
             endpoint_var="STUDY_ENDPOINT"
             endpoint_url="http://gaia-study-candidate:8766"
             ;;
-        web)
+        gaia-web|web)
             port=6417
             log_warn "Web candidate doesn't need injection - access directly at http://localhost:${port}"
             log_info "Configure web candidate to point at live or candidate core as needed"
@@ -352,19 +363,19 @@ eject_candidate() {
 
     # Restart the live service caller with default endpoints
     case "$SERVICE" in
-        mcp)
+        gaia-mcp|mcp)
             log_info "Restarting live gaia-core with default MCP endpoint..."
             docker compose -f "$LIVE_COMPOSE_FILE" up -d gaia-core
             ;;
-        study)
+        gaia-study|study)
             log_info "Restarting live gaia-core with default Study endpoint..."
             docker compose -f "$LIVE_COMPOSE_FILE" up -d gaia-core
             ;;
-        core)
+        gaia-core|core)
             log_info "Restarting live gaia-web with default Core endpoint..."
             docker compose -f "$LIVE_COMPOSE_FILE" up -d gaia-web
             ;;
-        web)
+        gaia-web|web)
             log_info "Web candidate stopped"
             ;;
     esac
@@ -398,11 +409,12 @@ view_logs() {
 # Runs unit tests and (if available) promote_candidate.sh --validate
 run_pre_promotion_checks() {
     local target="${1:-$SERVICE}"
+    local target_short="${target#gaia-}"
 
-    log_info "Running pre-promotion validation for gaia-${target}..."
+    log_info "Running pre-promotion validation for gaia-${target_short}..."
 
     # Step 1: Unit tests (always run)
-    if ! run_unit_tests "$target"; then
+    if ! run_unit_tests "$target_short"; then
         log_error "Pre-promotion unit tests FAILED. Promotion aborted."
         exit 1
     fi
@@ -419,8 +431,8 @@ run_pre_promotion_checks() {
                 }
             done
         else
-            "$promote_script" "gaia-${target}" --validate --no-restart --no-backup 2>&1 || {
-                log_error "Containerized validation failed for gaia-${target}. Promotion aborted."
+            "$promote_script" "gaia-${target_short}" --validate --no-restart --no-backup 2>&1 || {
+                log_error "Containerized validation failed for gaia-${target_short}. Promotion aborted."
                 exit 1
             }
         fi
@@ -513,7 +525,7 @@ diff_candidate() {
         done
     else
         log_info "Differences between candidate and active:"
-        diff -rq "$CANDIDATE_DIR/gaia_${SERVICE}" "$ACTIVE_DIR/gaia_${SERVICE}" 2>/dev/null || true
+        diff -rq "$CANDIDATE_DIR/gaia_${SERVICE_SHORT}" "$ACTIVE_DIR/gaia_${SERVICE_SHORT}" 2>/dev/null || true
     fi
 }
 
@@ -612,7 +624,7 @@ show_status() {
 release_live_gpu() {
     log_info "Releasing GPU from live gaia-core service..."
 
-    local live_core_url="http://localhost:${port}"
+    local live_core_url="http://localhost:6415"
 
     # Check if live core is running
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
@@ -630,14 +642,32 @@ release_live_gpu() {
     # Release GPU
     log_info "Sending GPU release request..."
     local response
-    response=$(curl -sf -X POST "${live_core_url}/gpu/release" 2>&1) || {
+    response=$(python3 -c '
+import sys, urllib.request, urllib.error, os
+sys.path.append("/gaia/GAIA_Project/gaia-common")
+key_path = os.path.expanduser("~/.gaia/secrets/gaia_service_key")
+if os.path.exists(key_path):
+    os.environ["GAIA_SERVICE_KEY_PATH"] = key_path
+from gaia_common.utils.service_auth import auth_headers
+url = "http://localhost:6415/gpu/release"
+try:
+    headers = auth_headers("POST", "/gpu/release")
+    headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=b"{}", headers=headers, method="POST")
+    with urllib.request.urlopen(req) as r:
+        print(r.read().decode())
+except Exception as e:
+    err = e.read().decode() if hasattr(e, "read") else str(e)
+    print(f"ERROR: {err}")
+    sys.exit(1)
+' 2>&1) || {
         log_error "Failed to release GPU: $response"
         exit 1
     }
 
     echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
 
-    if echo "$response" | grep -q '"success": true'; then
+    if echo "$response" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
         log_success "GPU released! Live service will use CPU/API fallbacks."
         echo ""
         echo "You can now start candidates with GPU:"
@@ -655,7 +685,7 @@ release_live_gpu() {
 reclaim_live_gpu() {
     log_info "Reclaiming GPU for live gaia-core service..."
 
-    local live_core_url="http://localhost:${port}"
+    local live_core_url="http://localhost:6415"
 
     # Check if live core is running
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
@@ -674,14 +704,32 @@ reclaim_live_gpu() {
     # Reclaim GPU
     log_info "Sending GPU reclaim request..."
     local response
-    response=$(curl -sf -X POST "${live_core_url}/gpu/reclaim" 2>&1) || {
+    response=$(python3 -c '
+import sys, urllib.request, urllib.error, os
+sys.path.append("/gaia/GAIA_Project/gaia-common")
+key_path = os.path.expanduser("~/.gaia/secrets/gaia_service_key")
+if os.path.exists(key_path):
+    os.environ["GAIA_SERVICE_KEY_PATH"] = key_path
+from gaia_common.utils.service_auth import auth_headers
+url = "http://localhost:6415/gpu/reclaim"
+try:
+    headers = auth_headers("POST", "/gpu/reclaim")
+    headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=b"{}", headers=headers, method="POST")
+    with urllib.request.urlopen(req) as r:
+        print(r.read().decode())
+except Exception as e:
+    err = e.read().decode() if hasattr(e, "read") else str(e)
+    print(f"ERROR: {err}")
+    sys.exit(1)
+' 2>&1) || {
         log_error "Failed to reclaim GPU: $response"
         exit 1
     }
 
     echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
 
-    if echo "$response" | grep -q '"success": true'; then
+    if echo "$response" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
         log_success "GPU reclaimed! Live service has GPU inference capability."
     else
         log_warn "GPU reclaim may have partially failed. Check response above."
@@ -697,7 +745,7 @@ reclaim_live_gpu() {
 
 # Show GPU status from live service
 show_gpu_status() {
-    local live_core_url="http://localhost:${port}"
+    local live_core_url="http://localhost:6415"
 
     if ! curl -sf "${live_core_url}/health" > /dev/null 2>&1; then
         log_error "Live gaia-core is not running at ${live_core_url}"
