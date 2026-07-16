@@ -352,3 +352,4 @@ class VectorIndexer:
             "index_exists": self.index_path.exists(),
             "model_loaded": self._model is not None,
         }
+# kmcb self-deploy drill marker 20260716T054739 — deployed autonomously via restart manifest
