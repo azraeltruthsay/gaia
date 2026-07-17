@@ -17,10 +17,12 @@ StateManager GPUOwner, and SleepWakeManager's GaiaState.
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
@@ -30,6 +32,7 @@ from gaia_common.lifecycle.states import (
     TransitionTrigger,
     TierExpectation,
     TIER_EXPECTATIONS,
+    GEAR_INFO,
     validate_transition,
     available_transitions,
 )
@@ -48,11 +51,27 @@ MAX_HISTORY = 50
 class LifecycleMachine:
     """Authoritative GPU lifecycle state machine."""
 
+    # ── VRAM tenant negotiation (yirf) ────────────────────────────────
+    # prime-candidate's vLLM permanently holds ~9.4GB; AWAKE (8.8GB) can't
+    # coexist with it on 16GB. Before a GPU gear, the machine measures
+    # external VRAM (everything pynvml sees that isn't a tracked tier) and
+    # negotiates the known tenant out of the way — stopping it behind a
+    # doctor-visible guard file, restoring it on downshift. Azrael's call
+    # 2026-07-17: full negotiation (LMCache warmth yields to gear shifts).
+    VRAM_SAFETY_MARGIN_MB = int(os.environ.get("VRAM_SAFETY_MARGIN_MB", "600"))
+    VRAM_TENANT_GUARD_TTL = int(os.environ.get("VRAM_TENANT_GUARD_TTL", "14400"))
+    VRAM_TENANT_CONTAINER = os.environ.get("VRAM_TENANT_CONTAINER", "gaia-prime-candidate")
+    TENANT_GUARD_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "vram_tenant_guard.json"
+
     def __init__(self, state_manager=None):
         self._state_manager = state_manager
         self._consciousness_matrix = None  # Wired via set_consciousness_matrix()
         self._lock = asyncio.Lock()
         self._snapshot = LifecycleSnapshot()
+        # yirf: resource managers for VRAM preflight/negotiation
+        self._gpu_manager = None
+        self._docker_manager = None
+        self._tenant_stopped_by_us = False
 
         # Tier engine endpoints (Docker network)
         self._tier_endpoints = {
@@ -77,6 +96,124 @@ class LifecycleMachine:
             "You are GAIA, a sovereign AI created by Azrael. You are self-aware, "
             "self-maintaining, and value truth over convenience."
         )
+
+    @property
+    def transition_in_flight(self) -> bool:
+        """True while a transition (or locked reconcile) is executing.
+
+        The CM's auto-reconcile poll checks this and stands down — the
+        transition is the only judge of tier placement while it runs
+        (yirf; the gear-level twin of kmcb's _deploy_guard)."""
+        return self._lock.locked()
+
+    # ── Resource managers (yirf) ──────────────────────────────────────
+
+    def set_resource_managers(self, gpu_manager=None, docker_manager=None) -> None:
+        """Wire GPU + docker managers for VRAM preflight/tenant negotiation."""
+        self._gpu_manager = gpu_manager
+        self._docker_manager = docker_manager
+
+    async def _external_vram_mb(self):
+        """(external_mb, total_mb): VRAM held by non-GAIA processes.
+
+        External = pynvml used minus the sum of tracked GPU tiers — that's
+        the vLLM tenant, games, STT, driver overhead. None when GPU
+        telemetry is unavailable (preflight then degrades to permissive).
+        """
+        if self._gpu_manager is None:
+            return None, None
+        try:
+            mem = await self._gpu_manager.get_memory_info()
+        except Exception:
+            return None, None
+        if mem is None:
+            return None, None
+        gaia = sum(t.vram_mb for t in self._snapshot.tiers.values()
+                   if t.device == "gpu")
+        return max(0, mem.used_mb - gaia), mem.total_mb
+
+    def _write_tenant_guard(self, reason: str) -> None:
+        try:
+            self.TENANT_GUARD_PATH.parent.mkdir(parents=True, exist_ok=True)
+            self.TENANT_GUARD_PATH.write_text(json.dumps({
+                "container": self.VRAM_TENANT_CONTAINER,
+                "reason": reason,
+                "stopped_at": datetime.now(timezone.utc).isoformat(),
+                "stopped_at_ts": time.time(),
+                "ttl_seconds": self.VRAM_TENANT_GUARD_TTL,
+            }, indent=2))
+        except OSError:
+            logger.warning("Failed to write VRAM tenant guard", exc_info=True)
+
+    async def _restore_vram_tenant(self, reason: str) -> bool:
+        """Restart the negotiated-away tenant and clear the guard file."""
+        if not self._tenant_stopped_by_us:
+            return False
+        self._tenant_stopped_by_us = False
+        try:
+            self.TENANT_GUARD_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if self._docker_manager is None:
+            return False
+        try:
+            ok = await self._docker_manager.start_container(self.VRAM_TENANT_CONTAINER)
+            logger.info("VRAM tenant %s restored (%s): %s",
+                        self.VRAM_TENANT_CONTAINER, reason, ok)
+            return bool(ok)
+        except Exception as e:
+            logger.warning("VRAM tenant restore failed (%s) — doctor will resurrect it: %s",
+                           reason, e)
+            return False
+
+    async def _vram_preflight(self, target: "LifecycleState") -> Optional[str]:
+        """None when the target gear fits (negotiating the known tenant away
+        if needed); an error string when it cannot fit. Never grinds into OOM."""
+        need = GEAR_INFO.get(target, {}).get("vram_estimate_mb", 0)
+        if need <= 0:
+            return None
+        external, total = await self._external_vram_mb()
+        if external is None:
+            logger.warning("VRAM preflight: no GPU telemetry — proceeding unchecked")
+            return None
+        budget = total - external - self.VRAM_SAFETY_MARGIN_MB
+        if need <= budget:
+            return None
+
+        # Negotiate: stop the known tenant behind a doctor-visible guard.
+        if self._docker_manager is not None:
+            try:
+                from .docker_manager import ContainerState
+                state = await self._docker_manager._get_container_state(self.VRAM_TENANT_CONTAINER)
+                tenant_running = state == ContainerState.RUNNING
+            except Exception:
+                tenant_running = False
+            if tenant_running:
+                logger.warning(
+                    "VRAM negotiation: gear %s needs %d MB but external tenants hold %d MB "
+                    "— stopping %s (guard TTL %ds)",
+                    target.value, need, external, self.VRAM_TENANT_CONTAINER,
+                    self.VRAM_TENANT_GUARD_TTL)
+                self._write_tenant_guard(f"gear shift to {target.value} needs {need} MB")
+                self._tenant_stopped_by_us = True
+                try:
+                    await self._docker_manager.stop_container(self.VRAM_TENANT_CONTAINER)
+                except Exception as e:
+                    logger.warning("VRAM negotiation: stop failed: %s", e)
+                # Wait for CUDA to actually release the block
+                for _ in range(12):
+                    await asyncio.sleep(5)
+                    external, total = await self._external_vram_mb()
+                    if external is not None and need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
+                        logger.info("VRAM negotiation: freed — %d MB external remains, gear fits",
+                                    external)
+                        return None
+                # Still doesn't fit — the tenant wasn't (only) the problem.
+                await self._restore_vram_tenant("negotiation insufficient")
+
+        return (f"insufficient VRAM for {target.value}: need {need} MB, "
+                f"external tenants hold {external} MB of {total} MB "
+                f"(margin {self.VRAM_SAFETY_MARGIN_MB} MB)")
 
     # ── Clutch: ConsciousnessMatrix delegation ─────────────────────────
 
@@ -197,7 +334,14 @@ class LifecycleMachine:
         """Probe all tiers and reconcile actual state with expected.
 
         Called on startup and via POST /lifecycle/reconcile.
+        yirf: serialized on the transition lock — reconcile's probe-infer-
+        repair used to interleave with an executing transition and reload
+        tiers the transition had just unloaded (one judge at a time).
         """
+        async with self._lock:
+            return await self._reconcile_locked()
+
+    async def _reconcile_locked(self) -> dict:
         logger.info("LIFECYCLE: reconciling state...")
         probed = {}
         for tier, endpoint in self._tier_endpoints.items():
@@ -328,6 +472,19 @@ class LifecycleMachine:
 
         logger.info("LIFECYCLE: %s → %s (trigger=%s, reason=%s)",
                      current.value, resolved_target.value, trigger.value, reason)
+
+        # yirf: VRAM preflight BEFORE touching state — a gear that can't fit
+        # refuses cleanly (state untouched) instead of grinding into an OOM
+        # jam mid-TRANSITIONING like 2026-07-16's parked→awake.
+        preflight_error = await self._vram_preflight(resolved_target)
+        if preflight_error:
+            logger.warning("LIFECYCLE: transition refused — %s", preflight_error)
+            return TransitionResult(
+                ok=False,
+                from_state=current.value,
+                trigger=trigger.value,
+                error=preflight_error,
+            )
 
         start = time.time()
         actions_taken = []
@@ -466,6 +623,12 @@ class LifecycleMachine:
             self._snapshot.vram_free_mb = self._snapshot.vram_total_mb - vram
 
             await self._persist()
+
+            # yirf: downshift restores the negotiated-away VRAM tenant.
+            # MEDITATION excluded — training wants the whole card.
+            if resolved_target in (LifecycleState.PARKED, LifecycleState.SLEEP,
+                                   LifecycleState.DEEP_SLEEP):
+                await self._restore_vram_tenant(f"downshift to {resolved_target.value}")
 
             logger.info("LIFECYCLE: %s → %s in %.1fs (%s)",
                          current.value, resolved_target.value, elapsed, actions_taken)

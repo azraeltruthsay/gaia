@@ -126,6 +126,9 @@ async def lifespan(app: FastAPI):
         global _lifecycle_machine
         from .lifecycle_machine import LifecycleMachine
         _lifecycle_machine = LifecycleMachine(_state_manager)
+        # yirf: VRAM preflight + tenant negotiation need GPU + docker access
+        _lifecycle_machine.set_resource_managers(
+            gpu_manager=_gpu_manager, docker_manager=_docker_manager)
         await _lifecycle_machine.load_persisted_state()
         # Don't reconcile during startup — it can block for minutes loading models.
         # The periodic reconcile loop (line 183) handles this after startup.

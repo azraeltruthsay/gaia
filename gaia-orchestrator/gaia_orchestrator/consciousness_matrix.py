@@ -936,6 +936,17 @@ class ConsciousnessMatrix:
                     await asyncio.sleep(interval)
                     continue
 
+                # yirf: skip auto-reconcile while a lifecycle transition is
+                # executing — the transition is the only judge of tier
+                # placement until it completes. Without this, the poll's
+                # mismatch upshift raced a finishing transition and re-woke
+                # tiers the gear had just parked (observed 2026-07-16).
+                if self._lifecycle_machine is not None and \
+                        getattr(self._lifecycle_machine, "transition_in_flight", False):
+                    logger.debug("Consciousness poll: lifecycle transition in flight — standing down")
+                    await asyncio.sleep(interval)
+                    continue
+
                 # Auto-reconcile: if target != actual, transition the tier.
                 # Handles both upshifts (load) and downshifts (unload/demote).
                 #

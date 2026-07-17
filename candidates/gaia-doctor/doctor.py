@@ -190,6 +190,39 @@ DEADMAN_BATTERY_QUERY_TIMEOUT = int(os.environ.get("DEADMAN_BATTERY_QUERY_TIMEOU
 # autonomous path but staged to a review inbox instead of the archive.
 ARCHITECT_QUEUE_DIR = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "architect_queue"
 
+# yirf: the gearbox may stop a VRAM tenant (prime-candidate's vLLM) to fit
+# a GPU gear. While this guard names a container and its TTL is live, the
+# doctor must not resurrect it — the orchestrator owns that VRAM.
+VRAM_TENANT_GUARD_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "vram_tenant_guard.json"
+
+
+def _read_tenant_guard_safe():
+    try:
+        if VRAM_TENANT_GUARD_PATH.exists():
+            return json.loads(VRAM_TENANT_GUARD_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _vram_tenant_guarded(name: str) -> bool:
+    """True when the gearbox holds this container's VRAM (guard live)."""
+    try:
+        if not VRAM_TENANT_GUARD_PATH.exists():
+            return False
+        guard = json.loads(VRAM_TENANT_GUARD_PATH.read_text())
+        if guard.get("container") != name:
+            return False
+        age = time.time() - float(guard.get("stopped_at_ts", 0))
+        if age > float(guard.get("ttl_seconds", 14400)):
+            log.warning("VRAM tenant guard for %s expired (%.0fs old) — removing stale guard",
+                        name, age)
+            VRAM_TENANT_GUARD_PATH.unlink(missing_ok=True)
+            return False
+        return True
+    except (json.JSONDecodeError, OSError, ValueError):
+        return False
+
 # Logical service -> production container ("common" is a library, no container)
 _SELF_DEPLOY_SERVICES: dict = {
     "core": "gaia-core", "web": "gaia-web", "mcp": "gaia-mcp",
@@ -3381,6 +3414,11 @@ def poll_cycle():
                 if name in _deploy_guard:
                     log.info("%s is under supervised self-deploy — remediation deferred to deadman", name)
                     continue
+                # yirf: the gearbox negotiated this tenant's VRAM away for a
+                # GPU gear — do not resurrect it until the guard clears.
+                if _vram_tenant_guarded(name):
+                    log.info("%s is a negotiated VRAM tenant (gearbox holds its VRAM) — skipping remediation", name)
+                    continue
                 # Second opinion: one fresh confirmation poll before pulling the
                 # trigger. The service may have recovered since the last cycle (a
                 # transient blip across check intervals, a GC pause, a load spike).
@@ -3584,6 +3622,7 @@ def _build_status() -> dict:
             "compose_sanity": _compose_sanity_cache or None,
             "drift_alerts_active": len(_drift_alert_last),
         },
+        "vram_tenant_guard": _read_tenant_guard_safe(),
         "self_deploy": {
             "enabled": SELF_DEPLOY_ENABLED,
             "executing": _self_deploy_running,

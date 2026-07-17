@@ -330,3 +330,16 @@ self_deploy:
   deadman_battery:
     DEADMAN_BATTERY_SECTION: "battery section to run when core deployed (default identity)"
     DEADMAN_BATTERY_QUERY_TIMEOUT: "per-query seconds, CPU-gear scaled (default 180)"
+
+# ── VRAM tenant guard (yirf) ────────────────────────────────────────────────
+# The orchestrator's gearbox may stop gaia-prime-candidate (its vLLM holds
+# ~9.4GB; AWAKE needs 8.8GB — they cannot coexist on 16GB) to fit a GPU gear.
+# It writes /shared/doctor/vram_tenant_guard.json {container, reason,
+# stopped_at, stopped_at_ts, ttl_seconds}. While the guard is live the doctor
+# skips remediation for that container ("the gearbox holds its VRAM"); the
+# orchestrator restarts the tenant + clears the guard on downshift
+# (parked/sleep/deep_sleep). Expired guards are removed as stale.
+vram_tenant_guard:
+  path: /shared/doctor/vram_tenant_guard.json
+  writer: gaia-orchestrator (lifecycle_machine._vram_preflight)
+  ttl_default_seconds: 14400

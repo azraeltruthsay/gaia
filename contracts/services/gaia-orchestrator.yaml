@@ -272,6 +272,19 @@ provides:
         scope: string              # production | candidates | both (default production)
     consumers: [gaia-doctor]
 
+  - endpoint: /lifecycle/transition
+    method: POST
+    description: >
+      Request a gear shift. yirf: GPU-bearing targets run a VRAM preflight
+      first — external tenants (measured via pynvml minus tracked tiers) are
+      negotiated away (gaia-prime-candidate stopped behind the doctor-visible
+      vram_tenant_guard, restored on downshift to parked/sleep/deep_sleep) or
+      the transition refuses cleanly with ok=false and error
+      "insufficient VRAM: need X MB, external tenants hold Y MB" — it never
+      grinds into OOM. Env: VRAM_SAFETY_MARGIN_MB (600), VRAM_TENANT_CONTAINER
+      (gaia-prime-candidate), VRAM_TENANT_GUARD_TTL (14400).
+    consumers: [gaia-core, gaia-doctor, dashboard, azrael]
+
   - endpoint: /deploy/promote
     method: POST
     description: >
