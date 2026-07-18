@@ -656,6 +656,20 @@ async def health_check():
             inference_ok = resp.status_code == 200
             if not inference_ok:
                 inference_detail = f"status={resp.status_code}"
+            else:
+                # 29yq: the engine's drain flag 503s ALL inference while
+                # /health stays 200 — a stale drain (never resumed) left the
+                # pipeline dead-but-"healthy" for days and the doctor never
+                # remediated. A drain is legitimate for the seconds of a gear
+                # shift; the doctor's failure threshold + confirmation
+                # re-check absorb that. One that persists across polls is
+                # stale and MUST surface as degraded.
+                try:
+                    if resp.json().get("draining"):
+                        inference_ok = False
+                        inference_detail = "engine draining (503s all inference; stale if persistent)"
+                except Exception:
+                    pass
     except Exception as _inf_exc:
         inference_detail = str(_inf_exc)[:100]
 
