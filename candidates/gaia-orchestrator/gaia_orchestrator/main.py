@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
@@ -1423,6 +1423,37 @@ async def lifecycle_reconcile():
 
     result = await _lifecycle_machine.reconcile()
     return result
+
+
+@app.post("/lifecycle/release_gpu")
+async def lifecycle_release_gpu(request: Request):
+    """9zrx: release ALL VRAM — deep-sleep the gearbox and stop the external
+    VRAM tenant (prime-candidate's vLLM) behind a user-hold guard.
+
+    The hold persists across gear changes until /lifecycle/restore_tenant
+    or guard TTL expiry (doctor resurrects after that). Body (optional):
+    {"ttl_seconds": int, "reason": str}.
+    """
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    result = await _lifecycle_machine.release_gpu(
+        ttl_seconds=body.get("ttl_seconds"),
+        reason=body.get("reason") or "dashboard release",
+    )
+    return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)
+
+
+@app.post("/lifecycle/restore_tenant")
+async def lifecycle_restore_tenant():
+    """9zrx: lift the user hold and restart the VRAM tenant container."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    result = await _lifecycle_machine.restore_tenant()
+    return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)
 
 
 @app.get("/lifecycle/tiers")

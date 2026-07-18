@@ -248,4 +248,9 @@ class OrchestratorState(BaseModel):
     containers: ContainerStatus = Field(default_factory=ContainerStatus)
     active_handoff: Optional[HandoffStatus] = None
     handoff_history: List[HandoffStatus] = Field(default_factory=list)
+    # 9zrx: lifecycle machine snapshot. Without this field, _persist()'s
+    # `state.lifecycle = ...` raised inside pydantic and was silently
+    # swallowed — lifecycle state never survived a restart, so every boot
+    # claimed AWAKE until the next transition.
+    lifecycle: Optional[Dict[str, Any]] = None
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

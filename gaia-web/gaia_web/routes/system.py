@@ -649,6 +649,33 @@ async def lifecycle_reconcile():
         return {"ok": False, "error": str(e)}
 
 
+@router.post("/lifecycle/release_gpu")
+async def lifecycle_release_gpu(request: Request):
+    """Release ALL VRAM: deep-sleep + stop the external tenant (user hold)."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/release_gpu",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/lifecycle/restore_tenant")
+async def lifecycle_restore_tenant():
+    """Lift the user hold and restart the VRAM tenant container."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{ORCHESTRATOR_URL}/lifecycle/restore_tenant")
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.get("/consciousness")
 async def consciousness_matrix():
     """Proxy to orchestrator's consciousness matrix."""

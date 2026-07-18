@@ -430,6 +430,7 @@ function orchestratorPanel() {
     lifecycleState: '--',
     vramUsed: 0,
     vramFree: 0,
+    vramExternal: 0,
     vramPercent: 0,
     history: [],
     _pollTimer: null,
@@ -470,9 +471,12 @@ function orchestratorPanel() {
         if (lcResp.ok) {
           const lc = await lcResp.json();
           this.lifecycleState = lc.state || '--';
-          this.vramUsed = lc.vram_used_mb || 0;
-          this.vramFree = lc.vram_free_mb || 0;
+          // Prefer measured (pynvml) figures — the tracked-tier sum hides
+          // external tenants like the vLLM candidate.
           const total = (lc.vram_total_mb || 16000);
+          this.vramUsed = (lc.vram_actual_used_mb != null) ? lc.vram_actual_used_mb : (lc.vram_used_mb || 0);
+          this.vramFree = (lc.vram_actual_free_mb != null) ? lc.vram_actual_free_mb : (lc.vram_free_mb || 0);
+          this.vramExternal = lc.vram_external_mb || 0;
           this.vramPercent = total > 0 ? Math.round((this.vramUsed / total) * 100) : 0;
 
           // Container states from tier data
@@ -2995,6 +2999,8 @@ function lifecyclePanel() {
     vramUsed: 0,
     vramTotal: 15833,
     vramSegments: [],
+    externalMb: 0,
+    tenant: null,
     freePct: 100,
     transitioning: false,
     transPhase: '',
@@ -3017,16 +3023,20 @@ function lifecyclePanel() {
         const data = await resp.json();
         this.state = data.state || 'unknown';
         this.tiers = data.tiers || {};
-        // Compute VRAM totals from tier data (API doesn't provide top-level totals)
+        // Measured VRAM (pynvml) beats the tracked-tier sum — external
+        // tenants (vLLM candidate, STT, desktop) are invisible to tiers.
         let usedSum = 0;
         for (const info of Object.values(this.tiers)) {
           if (info.vram_mb > 0) usedSum += info.vram_mb;
         }
-        this.vramUsed = data.vram_used_mb || usedSum;
         this.vramTotal = data.vram_total_mb || 15833;
+        const actual = data.vram_actual_used_mb;
+        this.vramUsed = (actual != null) ? actual : (data.vram_used_mb || usedSum);
+        this.externalMb = data.vram_external_mb || 0;
+        this.tenant = data.vram_tenant || null;
         this.freePct = Math.max(0, ((this.vramTotal - this.vramUsed) / this.vramTotal) * 100);
 
-        // Build VRAM segments
+        // Build VRAM segments: tracked tiers + one external segment
         const segs = [];
         for (const [tier, info] of Object.entries(this.tiers)) {
           if (info.vram_mb > 0) {
@@ -3036,6 +3046,13 @@ function lifecyclePanel() {
               pct: (info.vram_mb / this.vramTotal) * 100,
             });
           }
+        }
+        if (this.externalMb > 0) {
+          segs.push({
+            tier: 'external',
+            mb: this.externalMb,
+            pct: (this.externalMb / this.vramTotal) * 100,
+          });
         }
         this.vramSegments = segs;
 
@@ -3083,6 +3100,40 @@ function lifecyclePanel() {
       try {
         const resp = await fetch('/api/system/lifecycle/reconcile', { method: 'POST' });
         this.lastResult = await resp.json();
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    async releaseGpu() {
+      // Deep-sleep + stop the external tenant behind a user hold.
+      this.transitioning = true;
+      this.transPhase = 'releasing GPU';
+      try {
+        const resp = await fetch('/api/system/lifecycle/release_gpu', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard release' }),
+        });
+        const r = await resp.json();
+        this.lastResult = { ok: r.ok, from_state: '', to_state: r.state || 'deep_sleep',
+                            error: r.error || null };
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    async restoreTenant() {
+      this.transitioning = true;
+      this.transPhase = 'restoring tenant';
+      try {
+        const resp = await fetch('/api/system/lifecycle/restore_tenant', { method: 'POST' });
+        const r = await resp.json();
+        this.lastResult = { ok: r.ok, from_state: '', to_state: r.tenant || '', error: r.error || null };
       } catch (e) {
         this.lastResult = { ok: false, error: e.message };
       }

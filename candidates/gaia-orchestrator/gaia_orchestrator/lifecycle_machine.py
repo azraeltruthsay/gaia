@@ -72,6 +72,11 @@ class LifecycleMachine:
         self._gpu_manager = None
         self._docker_manager = None
         self._tenant_stopped_by_us = False
+        # 9zrx: user-requested full GPU release — while held, downshift
+        # restore must NOT resurrect the tenant (the guard file carries
+        # hold=true so the state survives an orchestrator restart).
+        self._tenant_user_hold = False
+        self._tenant_state_cache = (0.0, None)  # (ts, running: Optional[bool])
 
         # Tier engine endpoints (Docker network)
         self._tier_endpoints = {
@@ -132,7 +137,8 @@ class LifecycleMachine:
                    if t.device == "gpu")
         return max(0, mem.used_mb - gaia), mem.total_mb
 
-    def _write_tenant_guard(self, reason: str) -> None:
+    def _write_tenant_guard(self, reason: str, hold: bool = False,
+                            ttl_seconds: Optional[int] = None) -> None:
         try:
             self.TENANT_GUARD_PATH.parent.mkdir(parents=True, exist_ok=True)
             self.TENANT_GUARD_PATH.write_text(json.dumps({
@@ -140,13 +146,42 @@ class LifecycleMachine:
                 "reason": reason,
                 "stopped_at": datetime.now(timezone.utc).isoformat(),
                 "stopped_at_ts": time.time(),
-                "ttl_seconds": self.VRAM_TENANT_GUARD_TTL,
+                "ttl_seconds": int(ttl_seconds or self.VRAM_TENANT_GUARD_TTL),
+                "hold": bool(hold),
             }, indent=2))
         except OSError:
             logger.warning("Failed to write VRAM tenant guard", exc_info=True)
 
+    def _read_tenant_guard(self) -> Optional[dict]:
+        try:
+            if self.TENANT_GUARD_PATH.exists():
+                return json.loads(self.TENANT_GUARD_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
+    async def _tenant_running(self, max_age_s: float = 10.0) -> Optional[bool]:
+        """Is the VRAM tenant container running? Cached to keep the 5s
+        dashboard poll from hammering the Docker API. None = unknown."""
+        ts, cached = self._tenant_state_cache
+        if time.time() - ts < max_age_s:
+            return cached
+        running: Optional[bool] = None
+        if self._docker_manager is not None:
+            try:
+                from .docker_manager import ContainerState
+                state = await self._docker_manager._get_container_state(self.VRAM_TENANT_CONTAINER)
+                running = state == ContainerState.RUNNING
+            except Exception:
+                running = None
+        self._tenant_state_cache = (time.time(), running)
+        return running
+
     async def _restore_vram_tenant(self, reason: str) -> bool:
         """Restart the negotiated-away tenant and clear the guard file."""
+        if self._tenant_user_hold or (self._read_tenant_guard() or {}).get("hold"):
+            logger.info("VRAM tenant restore skipped (%s): user hold active", reason)
+            return False
         if not self._tenant_stopped_by_us:
             return False
         self._tenant_stopped_by_us = False
@@ -158,6 +193,7 @@ class LifecycleMachine:
             return False
         try:
             ok = await self._docker_manager.start_container(self.VRAM_TENANT_CONTAINER)
+            self._tenant_state_cache = (0.0, None)
             logger.info("VRAM tenant %s restored (%s): %s",
                         self.VRAM_TENANT_CONTAINER, reason, ok)
             return bool(ok)
@@ -215,6 +251,86 @@ class LifecycleMachine:
                 f"external tenants hold {external} MB of {total} MB "
                 f"(margin {self.VRAM_SAFETY_MARGIN_MB} MB)")
 
+    async def release_gpu(self, ttl_seconds: Optional[int] = None,
+                          reason: str = "dashboard release") -> dict:
+        """9zrx: release ALL VRAM — deep-sleep the gearbox AND stop the
+        external tenant behind a user-hold guard.
+
+        Unlike negotiation (which restores the tenant on downshift), a user
+        hold persists until restore_tenant() or guard TTL expiry — this is
+        the 'I need the whole card' path (gaming, training, host work).
+        """
+        # Hold first, so the deep_sleep downshift hook doesn't restore
+        # a previously-negotiated-away tenant mid-release.
+        self._tenant_user_hold = True
+
+        transition_error = None
+        if LifecycleState(self._snapshot.state) != LifecycleState.DEEP_SLEEP:
+            result = await self.transition(
+                TransitionTrigger.USER_REQUEST, LifecycleState.DEEP_SLEEP, reason)
+            if not result.ok:
+                transition_error = result.error
+
+        stopped = False
+        if await self._tenant_running() and self._docker_manager is not None:
+            self._write_tenant_guard(reason, hold=True, ttl_seconds=ttl_seconds)
+            self._tenant_stopped_by_us = False  # user hold, not negotiation
+            try:
+                await self._docker_manager.stop_container(self.VRAM_TENANT_CONTAINER)
+                stopped = True
+            except Exception as e:
+                logger.warning("release_gpu: tenant stop failed: %s", e)
+            self._tenant_state_cache = (0.0, None)
+            # Wait for CUDA to actually hand the block back
+            for _ in range(6):
+                external, total = await self._external_vram_mb()
+                if external is not None and external < 2000:
+                    break
+                await asyncio.sleep(5)
+        else:
+            # Tenant already down — still record the hold so nothing revives it.
+            self._write_tenant_guard(reason, hold=True, ttl_seconds=ttl_seconds)
+
+        mem = None
+        try:
+            if self._gpu_manager is not None:
+                mem = await self._gpu_manager.get_memory_info()
+        except Exception:
+            pass
+        logger.info("release_gpu: state=%s tenant_stopped=%s vram_used=%s",
+                    self._snapshot.state, stopped,
+                    getattr(mem, "used_mb", "unknown"))
+        return {
+            "ok": transition_error is None,
+            "state": getattr(self._snapshot.state, "value", self._snapshot.state),
+            "tenant": self.VRAM_TENANT_CONTAINER,
+            "tenant_stopped": stopped,
+            "hold": True,
+            "vram_used_mb": getattr(mem, "used_mb", None),
+            "vram_total_mb": getattr(mem, "total_mb", None),
+            "error": transition_error,
+        }
+
+    async def restore_tenant(self, reason: str = "dashboard restore") -> dict:
+        """9zrx: lift the user hold and bring the VRAM tenant back."""
+        self._tenant_user_hold = False
+        self._tenant_stopped_by_us = False
+        try:
+            self.TENANT_GUARD_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        started = False
+        if self._docker_manager is not None:
+            try:
+                started = bool(await self._docker_manager.start_container(self.VRAM_TENANT_CONTAINER))
+            except Exception as e:
+                logger.warning("restore_tenant: start failed: %s", e)
+        self._tenant_state_cache = (0.0, None)
+        logger.info("restore_tenant (%s): %s started=%s",
+                    reason, self.VRAM_TENANT_CONTAINER, started)
+        return {"ok": started, "tenant": self.VRAM_TENANT_CONTAINER,
+                "started": started, "hold": False}
+
     # ── Clutch: ConsciousnessMatrix delegation ─────────────────────────
 
     def set_consciousness_matrix(self, cm) -> None:
@@ -241,6 +357,33 @@ class LifecycleMachine:
         vram = sum(t.vram_mb for t in self._snapshot.tiers.values())
         self._snapshot.vram_used_mb = vram
         self._snapshot.vram_free_mb = self._snapshot.vram_total_mb - vram
+
+        # 9zrx: measured truth — the tracked-tier sum hides external tenants
+        # (prime-candidate's vLLM ~9.4GB, STT, desktop). Dashboards were
+        # showing "100% free" while the card held 10GB.
+        try:
+            mem = await self._gpu_manager.get_memory_info() if self._gpu_manager else None
+        except Exception:
+            mem = None
+        if mem is not None:
+            gaia_gpu = sum(t.vram_mb for t in self._snapshot.tiers.values()
+                           if t.device == "gpu")
+            self._snapshot.vram_actual_used_mb = mem.used_mb
+            self._snapshot.vram_actual_free_mb = mem.total_mb - mem.used_mb
+            self._snapshot.vram_external_mb = max(0, mem.used_mb - gaia_gpu)
+        else:
+            self._snapshot.vram_actual_used_mb = None
+            self._snapshot.vram_actual_free_mb = None
+            self._snapshot.vram_external_mb = None
+
+        guard = self._read_tenant_guard()
+        self._snapshot.vram_tenant = {
+            "container": self.VRAM_TENANT_CONTAINER,
+            "running": await self._tenant_running(),
+            "guard_active": guard is not None,
+            "guard_reason": (guard or {}).get("reason"),
+            "hold": bool((guard or {}).get("hold")) or self._tenant_user_hold,
+        }
         return self._snapshot.model_copy()
 
     async def get_available_transitions(self) -> List[dict]:

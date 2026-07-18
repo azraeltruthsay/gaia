@@ -268,6 +268,7 @@
             </div>
             <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-top:2px;">
               <span x-text="vramUsed + ' MB used'"></span>
+              <span x-show="vramExternal > 0" x-text="vramExternal + ' MB external'" style="color:var(--yellow);"></span>
               <span x-text="vramFree + ' MB free'"></span>
             </div>
           </div>
@@ -510,6 +511,21 @@
                   x-text="transitionLabel(t)"></button>
         </template>
         <button class="lc-btn lc-reconcile" @click="reconcile()" :disabled="transitioning">Reconcile</button>
+        <button class="lc-btn lc-release" @click="releaseGpu()" :disabled="transitioning"
+                x-show="!tenant?.hold"
+                title="Deep sleep + stop the external VRAM tenant (vLLM candidate). Doctor won't resurrect it until Restore or guard TTL.">Release GPU</button>
+        <button class="lc-btn lc-restore" @click="restoreTenant()" :disabled="transitioning"
+                x-show="tenant?.hold"
+                title="Lift the hold and restart the VRAM tenant container.">Restore Tenant</button>
+      </div>
+
+      <!-- VRAM tenant status -->
+      <div class="lc-tenant-line" x-show="tenant" style="font-size:9px;color:var(--text-muted);margin-top:4px;">
+        <span x-text="tenant?.container"></span>:
+        <span x-text="tenant?.running ? 'running' : 'stopped'"
+              :style="tenant?.running ? 'color:var(--green)' : 'color:var(--yellow)'"></span>
+        <span x-show="tenant?.guard_active" style="color:var(--yellow);"
+              x-text="' — guard active' + (tenant?.hold ? ' (user hold)' : '')"></span>
       </div>
 
       <!-- Transition Status -->

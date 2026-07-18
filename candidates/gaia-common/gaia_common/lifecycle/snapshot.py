@@ -54,10 +54,21 @@ class LifecycleSnapshot(BaseModel):
         "study": TierLiveStatus(),
     })
 
-    # GPU memory
+    # GPU memory — tracked-tier estimate (sum of GAIA tiers' reported vram_mb)
     vram_total_mb: int = 15833      # RTX 5080 usable
     vram_used_mb: int = 0
     vram_free_mb: int = 15833
+
+    # GPU memory — measured (pynvml). None when telemetry is unavailable.
+    # actual = what the card really holds; external = actual minus tracked
+    # GAIA tiers (the vLLM tenant, STT, games, desktop, driver overhead).
+    vram_actual_used_mb: Optional[int] = None
+    vram_actual_free_mb: Optional[int] = None
+    vram_external_mb: Optional[int] = None
+
+    # VRAM tenant (yirf): the known external holder and its guard status.
+    # {container, running, guard_active, guard_reason, hold}
+    vram_tenant: Optional[Dict] = None
 
     # Transition metadata (populated during TRANSITIONING)
     transition_from: Optional[LifecycleState] = None

@@ -208,7 +208,11 @@ provides:
   # ── Lifecycle State Machine ────────────────────────────────────────
   - endpoint: /lifecycle/state
     method: GET
-    description: "Current lifecycle snapshot — the single source of truth."
+    description: >
+      Current lifecycle snapshot — the single source of truth. Includes both
+      tracked-tier VRAM (vram_used_mb) and measured pynvml figures
+      (vram_actual_used_mb / vram_actual_free_mb / vram_external_mb) plus
+      vram_tenant {container, running, guard_active, guard_reason, hold} (9zrx).
     consumers: [gaia-core, gaia-web]
 
   - endpoint: /lifecycle/transition
@@ -239,6 +243,25 @@ provides:
   - endpoint: /lifecycle/tiers
     method: GET
     description: "Live per-tier status (probes all engines)."
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/release_gpu
+    method: POST
+    description: >
+      Release ALL VRAM (9zrx): deep-sleep the gearbox and stop the external
+      VRAM tenant (gaia-prime-candidate) behind a user-hold guard file
+      (/shared/doctor/vram_tenant_guard.json, hold=true). Downshift restore
+      and doctor revival both stand down until /lifecycle/restore_tenant or
+      guard TTL expiry.
+    request_schema:
+      fields:
+        ttl_seconds: int (optional, default VRAM_TENANT_GUARD_TTL)
+        reason: string (optional)
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/restore_tenant
+    method: POST
+    description: "Lift the user hold and restart the VRAM tenant container (9zrx)."
     consumers: [gaia-web]
 
   # ── Candidate Rollback ─────────────────────────────────────────────

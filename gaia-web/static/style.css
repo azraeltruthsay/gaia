@@ -1438,6 +1438,10 @@ html, body {
 .vram-prime { background: #ffa726; }
 .vram-study { background: #ef5350; }
 .vram-audio { background: #ab47bc; }
+.vram-external {
+  background: repeating-linear-gradient(45deg, #78909c, #78909c 4px, #546e7a 4px, #546e7a 8px);
+}
+.vram-external .vram-seg-label { color: #fff; }
 .vram-free { background: rgba(255,255,255,0.03); }
 
 /* Tier Cards */
@@ -1493,6 +1497,10 @@ html, body {
 .lc-meditation { border-color: #ffa726; color: #ffa726; }
 .lc-listening { border-color: #ce93d8; color: #ce93d8; }
 .lc-reconcile { border-color: var(--text-dim); color: var(--text-dim); }
+.lc-release { border-color: #ef5350; color: #ef5350; }
+.lc-release:hover:not(:disabled) { background: #ef5350; color: #fff; }
+.lc-restore { border-color: #66bb6a; color: #66bb6a; }
+.lc-restore:hover:not(:disabled) { background: #66bb6a; color: #000; }
 .lc-cancel { border-color: #ef5350; color: #ef5350; font-size: 9px; padding: 1px 6px; margin-top: 3px; }
 .lc-cancel:hover { background: #ef5350; color: #fff; }
 .th-drain { background: #ff9800; color: #000; font-size: 8px; font-weight: bold; padding: 0 3px; border-radius: 2px; }
