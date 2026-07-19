@@ -432,6 +432,8 @@ function orchestratorPanel() {
     vramFree: 0,
     vramExternal: 0,
     vramPercent: 0,
+    tenant: null,
+    actionMsg: '',
     history: [],
     _pollTimer: null,
 
@@ -477,6 +479,7 @@ function orchestratorPanel() {
           this.vramUsed = (lc.vram_actual_used_mb != null) ? lc.vram_actual_used_mb : (lc.vram_used_mb || 0);
           this.vramFree = (lc.vram_actual_free_mb != null) ? lc.vram_actual_free_mb : (lc.vram_free_mb || 0);
           this.vramExternal = lc.vram_external_mb || 0;
+          this.tenant = lc.vram_tenant || null;
           this.vramPercent = total > 0 ? Math.round((this.vramUsed / total) * 100) : 0;
 
           // Container states from tier data
@@ -505,12 +508,50 @@ function orchestratorPanel() {
     },
 
     async transition(target) {
+      this.actionMsg = `${target}: requested...`;
       try {
         const resp = await fetch(`/api/system/consciousness/${target}`, { method: 'POST' });
         if (resp.ok) {
+          this.actionMsg = `${target}: transition started (gear buttons don't free external VRAM)`;
           setTimeout(() => this._poll(), 1000);
+          setTimeout(() => { this.actionMsg = ''; }, 8000);
+        } else {
+          this.actionMsg = `${target}: failed (${resp.status})`;
         }
-      } catch {}
+      } catch (e) {
+        this.actionMsg = `${target}: ${e.message}`;
+      }
+    },
+
+    async releaseGpu() {
+      // Deep-sleep + stop the external VRAM tenant behind a user hold.
+      this.actionMsg = 'releasing GPU (stopping external tenant)...';
+      try {
+        const resp = await fetch('/api/system/lifecycle/release_gpu', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard release' }),
+        });
+        const r = await resp.json();
+        this.actionMsg = r.ok
+          ? `GPU released — ${r.vram_used_mb ?? '?'} MB still resident (STT/desktop)`
+          : `release failed: ${r.error || 'unknown'}`;
+      } catch (e) {
+        this.actionMsg = `release failed: ${e.message}`;
+      }
+      setTimeout(() => this._poll(), 1000);
+    },
+
+    async restoreTenant() {
+      this.actionMsg = 'restoring tenant...';
+      try {
+        const resp = await fetch('/api/system/lifecycle/restore_tenant', { method: 'POST' });
+        const r = await resp.json();
+        this.actionMsg = r.ok ? `${r.tenant} restarting` : `restore failed: ${r.error || 'unknown'}`;
+      } catch (e) {
+        this.actionMsg = `restore failed: ${e.message}`;
+      }
+      setTimeout(() => this._poll(), 1000);
     },
   };
 }

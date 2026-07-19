@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GAIA Mission Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260324b">
+  <link rel="stylesheet" href="/static/style.css?v=20260718a">
   <!-- marked.js for markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- D3.js for graph visualization -->
@@ -271,6 +271,9 @@
               <span x-show="vramExternal > 0" x-text="vramExternal + ' MB external'" style="color:var(--yellow);"></span>
               <span x-text="vramFree + ' MB free'"></span>
             </div>
+            <div x-show="vramExternal > 1500" style="font-size:9px;color:var(--yellow);margin-top:2px;">
+              External tenant holds this VRAM — gear buttons can't free it; use Release GPU.
+            </div>
           </div>
 
           <!-- Quick Actions -->
@@ -281,8 +284,15 @@
               <button class="btn-sm" @click="transition('awake')" :disabled="lifecycleState==='awake'">Gear 1</button>
               <button class="btn-sm" @click="transition('focusing')" :disabled="lifecycleState==='focusing'">Gear 2</button>
               <button class="btn-sm" @click="transition('sleep')" :disabled="lifecycleState==='sleep'">Sleep</button>
-              <button class="btn-sm" @click="transition('deep-sleep')">Off</button>
+              <button class="btn-sm" @click="transition('deep-sleep')" :disabled="lifecycleState==='deep_sleep'">Off</button>
+              <button class="btn-sm" @click="releaseGpu()" x-show="!tenant?.hold"
+                      style="border-color:var(--red);color:var(--red);"
+                      title="Deep sleep + stop the external VRAM tenant (vLLM candidate) — frees the whole card">Release GPU</button>
+              <button class="btn-sm" @click="restoreTenant()" x-show="tenant?.hold"
+                      style="border-color:var(--green);color:var(--green);"
+                      title="Lift the hold and restart the VRAM tenant container">Restore Tenant</button>
             </div>
+            <div x-show="actionMsg" x-text="actionMsg" style="font-size:9px;color:var(--text-muted);margin-top:4px;"></div>
           </div>
 
           <!-- Recent Transitions -->
@@ -1638,6 +1648,6 @@
     </template>
   </section>
 
-  <script src="/static/app.js?v=20260324b"></script>
+  <script src="/static/app.js?v=20260718a"></script>
 </body>
 </html>
