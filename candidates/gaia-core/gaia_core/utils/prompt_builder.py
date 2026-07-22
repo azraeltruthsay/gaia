@@ -291,6 +291,34 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         _li = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
         _chitchat = _li in {"chat", "greeting", "farewell", "gratitude", "smalltalk",
                             "social", "chitchat", "acknowledgment", "affirmation"}
+        # tr7f: prompt mode was chosen solely by the CURRENT message's intent —
+        # but a CFR-admitted history snippet can carry a technical/system
+        # question a stale greeting-intent turn shouldn't be allowed to
+        # silence (tools suppressed + system-health block dropped while a
+        # dangling technical question sits in context = an incoherent prompt
+        # state). Same keyword list intent_detection.py's "system keyword
+        # override" checks the CURRENT message against (nlu/intent_detection.py
+        # model_intent_detection) — applied here to injected snippets instead.
+        # Duplicated rather than imported to keep prompt_builder's import
+        # graph light; keep the two lists in sync if either changes.
+        _SNIPPET_SYSTEM_KEYWORDS = (
+            "docker", "container", "mcp", "localhost", "endpoint",
+            "vllm", "llama.cpp", "gguf", "safetensors", "orchestrator",
+            "sqlite", "database", "filesystem", "directory structure",
+            "folder structure", "repository", "git status", "git branch",
+            "error log", "codebase", "code structure",
+        )
+        _snippets = getattr(getattr(packet, "context", None), "relevant_history_snippet", None) or []
+        _snippet_has_system_kw = any(
+            kw in (getattr(s, "summary", "") or "").lower()
+            for s in _snippets for kw in _SNIPPET_SYSTEM_KEYWORDS
+        )
+        if _chitchat and _snippet_has_system_kw:
+            logger.info(
+                "PromptBuilder: chitchat intent '%s' but an admitted history "
+                "snippet carries a system/technical keyword — staying in "
+                "standard mode (tr7f) instead of lean social mode", _li)
+            _chitchat = False
         # World-state-answerable intents (e.g. time): the clock/uptime/load are
         # already injected via world_state_snapshot, so a tool is redundant.
         # Skip the capability block so Core answers from context instead of

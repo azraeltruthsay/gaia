@@ -19,9 +19,24 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, List, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.CFR.Conversation")
+
+
+def _parse_turn_timestamp(raw) -> Optional[datetime]:
+    """Parse a turn's ISO timestamp (session_manager.add_message format).
+    None on missing/unparseable — callers must treat that as "no penalty",
+    not as maximally stale, so pre-timestamp history isn't wrongly blurred."""
+    if not raw:
+        return None
+    try:
+        ts = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(ts)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
 
 
 def cfr_conversation_enabled() -> bool:
@@ -89,6 +104,16 @@ def select_focus_turns(
         # 0.20 was too low — it let the greeting↔clock bleed through.
         floor = _cfg_float("CFR_RELEVANCE_FLOOR", 0.30)
     halflife = _cfg_float("CFR_RECENCY_HALFLIFE_TURNS", 12.0)
+    # tr7f: turn-distance decay alone can't catch a dangling question sitting
+    # right before a much-later "good morning" — that pair has age_turns=1
+    # regardless of the real gap. Beyond CFR_STALE_AFTER_HOURS of real elapsed
+    # time, relevance is ALSO required to clear the floor after a short
+    # wall-clock halflife — active, continuous sessions (small real gaps
+    # between turns) are completely unaffected; only genuine idle-gap resumes
+    # (hours/days) get the extra penalty.
+    stale_after_hours = _cfg_float("CFR_STALE_AFTER_HOURS", 2.0)
+    stale_halflife_hours = _cfg_float("CFR_STALE_HALFLIFE_HOURS", 3.0)
+    now = datetime.now(timezone.utc)
 
     if not history:
         return [], {"focus": 0, "blurred": 0, "floor": floor}
@@ -103,8 +128,24 @@ def select_focus_turns(
         floor = min(floor, 0.15)
 
     anchor_n = max(0, min(anchor_n, len(history)))
-    anchor = history[-anchor_n:] if anchor_n else []
-    candidates = history[:-anchor_n] if anchor_n else list(history)
+    _tail = history[-anchor_n:] if anchor_n else []
+    # tr7f: the anchor exists for continuity across a LIVE exchange — it
+    # force-keeps the trailing turn(s) regardless of relevance. But across a
+    # real idle gap (hours/days), the positionally-last turn is often a
+    # stale dangling thread (e.g. an unanswered question the user never
+    # followed up on), not continuity — anchoring it unconditionally is
+    # exactly how a 3-day-old technical question rides into an unrelated
+    # "good morning". Demote stale tail turns out of the anchor and back
+    # into the normally-scored candidate pool instead of exempting them.
+    anchor = []
+    for t in _tail:
+        ts = _parse_turn_timestamp(t.get("timestamp"))
+        age_h = (now - ts).total_seconds() / 3600.0 if ts else 0.0
+        if ts and age_h > stale_after_hours:
+            continue
+        anchor.append(t)
+    _anchor_ids = {id(t) for t in anchor}
+    candidates = [t for t in history if id(t) not in _anchor_ids]
     keep_budget = max(0, max_focus - len(anchor))
 
     if not candidates or keep_budget == 0:
@@ -120,7 +161,14 @@ def select_focus_turns(
         model = None
 
     if model is None:
-        focus = candidates[-keep_budget:] + list(anchor)
+        # tr7f: no relevance signal available at all here — recency is the
+        # only guard, so at minimum drop candidates old enough to fail the
+        # same wall-clock staleness gate the scored path applies.
+        def _is_stale(t):
+            ts = _parse_turn_timestamp(t.get("timestamp"))
+            return ts is not None and (now - ts).total_seconds() / 3600.0 > stale_after_hours
+        _fresh_candidates = [t for t in candidates if not _is_stale(t)]
+        focus = _fresh_candidates[-keep_budget:] + list(anchor)
         return focus, {"focus": len(focus), "blurred": len(candidates) - keep_budget,
                        "floor": round(floor, 3), "anchor": len(anchor), "fallback": "no_embed"}
 
@@ -136,9 +184,15 @@ def select_focus_turns(
             rel = _cosine_similarity(q, embs[i + 1])
             age_turns = n - i  # 1 = most recent candidate, larger = older
             decay = 0.5 ** (age_turns / halflife) if halflife > 0 else 1.0
-            scored.append({"score": rel * decay, "rel": rel, "turn": t})
+            ts = _parse_turn_timestamp(t.get("timestamp"))
+            age_hours = (now - ts).total_seconds() / 3600.0 if ts else 0.0
+            stale_decay = 1.0
+            if age_hours > stale_after_hours and stale_halflife_hours > 0:
+                stale_decay = 0.5 ** ((age_hours - stale_after_hours) / stale_halflife_hours)
+                decay *= stale_decay
+            scored.append({"score": rel * decay, "rel": rel, "turn": t, "stale_decay": stale_decay})
 
-        eligible = [s for s in scored if s["rel"] >= floor]
+        eligible = [s for s in scored if s["rel"] >= floor and s["rel"] * s["stale_decay"] >= floor]
         eligible.sort(key=lambda s: -s["score"])
         chosen = [s["turn"] for s in eligible[:keep_budget]]
 
