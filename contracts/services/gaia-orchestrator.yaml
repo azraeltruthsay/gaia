@@ -212,7 +212,11 @@ provides:
       Current lifecycle snapshot — the single source of truth. Includes both
       tracked-tier VRAM (vram_used_mb) and measured pynvml figures
       (vram_actual_used_mb / vram_actual_free_mb / vram_external_mb) plus
-      vram_tenant {container, running, guard_active, guard_reason, hold} (9zrx).
+      vram_tenant {container, running, guard_active, guard_reason, hold} (9zrx),
+      vram_tenants [{container, running, kind, engine_device, holds_gpu,
+      guard_active, hold, policy}], gpu_holders [names] and
+      gpu_single_holder_ok — the doctrine that exactly ONE of Core/Prime/
+      Core-Candidate/Prime-Candidate may hold GPU VRAM at a time (85mb).
     consumers: [gaia-core, gaia-web]
 
   - endpoint: /lifecycle/transition
@@ -261,7 +265,24 @@ provides:
 
   - endpoint: /lifecycle/restore_tenant
     method: POST
-    description: "Lift the user hold and restart the VRAM tenant container (9zrx)."
+    description: >
+      Lift the user hold and restart a VRAM tenant container (9zrx/85mb).
+      Optional body {container}; explicit restore overrides a 'stopped' policy.
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/tenant/{name}/start
+    method: POST
+    description: >
+      Engage a GPU-tenant container for testing (85mb). Refused with 409
+      while a GPU gear (awake/listening/focusing/meditation) is active,
+      unless body {force: true} — the single-holder invariant. Registry:
+      GPU_TENANTS (env VRAM_TENANTS), default gaia-prime-candidate (vllm)
+      + gaia-core-candidate (managed engine).
+    consumers: [gaia-web]
+
+  - endpoint: /lifecycle/tenant/{name}/stop
+    method: POST
+    description: "Stop a GPU-tenant container behind a hold guard (85mb)."
     consumers: [gaia-web]
 
   # ── Candidate Rollback ─────────────────────────────────────────────

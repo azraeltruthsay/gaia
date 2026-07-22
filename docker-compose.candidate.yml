@@ -50,12 +50,14 @@ services:
       # embedded engine silently never started (GAIA_Project-jov).
       - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
       - CORE_CPU_MODEL_PATH=/models/core.gguf
-      - CORE_DEVICE=${CORE_DEVICE:-cuda}
+      # 85mb: HA mirror is CPU-pinned — single-GPU-holder doctrine. GPU-path
+      # candidate testing = set CANDIDATE_CORE_DEVICE=cuda + gearbox engage.
+      - CORE_DEVICE=${CANDIDATE_CORE_DEVICE:-cpu}
       - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       - SHARED_DIR=/shared
-      - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-999}
+      - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-0}
       - GAIA_AUTOLOAD_MODELS=1
       # Parity with production gaia-core: operator timezone + Locality organ
       # (place + live open-meteo weather in the [Here & Now] block). Without

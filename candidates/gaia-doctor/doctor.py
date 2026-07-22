@@ -206,12 +206,19 @@ def _read_tenant_guard_safe():
 
 
 def _vram_tenant_guarded(name: str) -> bool:
-    """True when the gearbox holds this container's VRAM (guard live)."""
+    """True when the gearbox holds this container's VRAM (guard live).
+
+    Guard v2 (85mb): `containers` lists every guarded name; falls back to
+    the v1 single `container` field for old writers.
+    """
     try:
         if not VRAM_TENANT_GUARD_PATH.exists():
             return False
         guard = json.loads(VRAM_TENANT_GUARD_PATH.read_text())
-        if guard.get("container") != name:
+        names = guard.get("containers")
+        if not (isinstance(names, list) and names):
+            names = [guard.get("container")]
+        if name not in names:
             return False
         age = time.time() - float(guard.get("stopped_at_ts", 0))
         if age > float(guard.get("ttl_seconds", 14400)):
@@ -222,6 +229,29 @@ def _vram_tenant_guarded(name: str) -> bool:
         return True
     except (json.JSONDecodeError, OSError, ValueError):
         return False
+
+
+TENANT_POLICY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "tenant_policy.json"
+
+
+def _read_tenant_policy_safe() -> dict:
+    try:
+        if TENANT_POLICY_PATH.exists():
+            data = json.loads(TENANT_POLICY_PATH.read_text())
+            if isinstance(data, dict):
+                return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _tenant_default_stopped(name: str) -> bool:
+    """85mb: durable per-container policy — a tenant whose default lifecycle
+    is 'stopped' is engaged only for testing; the doctor must not revive it.
+    Unlike the VRAM guard, there is no TTL: policy holds until the file says
+    otherwise."""
+    entry = _read_tenant_policy_safe().get(name)
+    return isinstance(entry, dict) and entry.get("default") == "stopped"
 
 # Logical service -> production container ("common" is a library, no container)
 _SELF_DEPLOY_SERVICES: dict = {
@@ -3363,6 +3393,17 @@ def poll_cycle():
     # Then check HTTP health
     for name, (url, remediation) in SERVICES.items():
         healthy = check_health(name, url)
+        # 85mb: a default-stopped GPU tenant is healthy BY being down — an
+        # unhealthy probe is its intended state, not a failure. While
+        # engaged (probe passes) it's watched normally; when it drops, it
+        # simply returns to policy default with no alarms.
+        if not healthy and _tenant_default_stopped(name):
+            _consecutive_failures[name] = 0
+            _alarmed_services.discard(name)
+            _service_state[name]["healthy"] = None
+            _service_state[name]["last_check"] = datetime.now(timezone.utc).isoformat()
+            _service_state[name]["policy"] = "default-stopped"
+            continue
         _service_state[name]["last_check"] = datetime.now(timezone.utc).isoformat()
 
         if healthy:
@@ -3418,6 +3459,11 @@ def poll_cycle():
                 # GPU gear — do not resurrect it until the guard clears.
                 if _vram_tenant_guarded(name):
                     log.info("%s is a negotiated VRAM tenant (gearbox holds its VRAM) — skipping remediation", name)
+                    continue
+                # 85mb: durable tenant policy — default-stopped tenants are
+                # engaged only for testing; being down is their healthy state.
+                if _tenant_default_stopped(name):
+                    log.info("%s is a default-stopped GPU tenant (policy) — skipping remediation", name)
                     continue
                 # Second opinion: one fresh confirmation poll before pulling the
                 # trigger. The service may have recovered since the last cycle (a
@@ -3623,6 +3669,7 @@ def _build_status() -> dict:
             "drift_alerts_active": len(_drift_alert_last),
         },
         "vram_tenant_guard": _read_tenant_guard_safe(),
+        "tenant_policy": _read_tenant_policy_safe() or None,
         "self_deploy": {
             "enabled": SELF_DEPLOY_ENABLED,
             "executing": _self_deploy_running,

@@ -66,9 +66,19 @@ class LifecycleSnapshot(BaseModel):
     vram_actual_free_mb: Optional[int] = None
     vram_external_mb: Optional[int] = None
 
-    # VRAM tenant (yirf): the known external holder and its guard status.
+    # VRAM tenant (yirf): the primary external holder and its guard status.
     # {container, running, guard_active, guard_reason, hold}
     vram_tenant: Optional[Dict] = None
+
+    # GPU tenant registry (85mb): all known GPU-capable non-tier containers.
+    # Each: {container, running, kind, engine_device, holds_gpu,
+    #        guard_active, hold, policy}
+    vram_tenants: List[Dict] = Field(default_factory=list)
+
+    # Single-holder invariant (85mb): exactly one of Core/Prime/
+    # Core-Candidate/Prime-Candidate may hold GPU VRAM at a time.
+    gpu_holders: List[str] = Field(default_factory=list)
+    gpu_single_holder_ok: bool = True
 
     # Transition metadata (populated during TRANSITIONING)
     transition_from: Optional[LifecycleState] = None

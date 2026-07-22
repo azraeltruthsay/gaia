@@ -1448,11 +1448,51 @@ async def lifecycle_release_gpu(request: Request):
 
 
 @app.post("/lifecycle/restore_tenant")
-async def lifecycle_restore_tenant():
-    """9zrx: lift the user hold and restart the VRAM tenant container."""
+async def lifecycle_restore_tenant(request: Request):
+    """9zrx/85mb: lift the user hold and restart a VRAM tenant container.
+
+    Optional body {"container": name} — explicit restore overrides a
+    'stopped' policy. Defaults to the primary tenant.
+    """
     if _lifecycle_machine is None:
         raise HTTPException(status_code=501, detail="Lifecycle machine not available")
-    result = await _lifecycle_machine.restore_tenant()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    result = await _lifecycle_machine.restore_tenant(container=body.get("container"))
+    return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)
+
+
+@app.post("/lifecycle/tenant/{name}/start")
+async def lifecycle_tenant_start(name: str, request: Request):
+    """85mb: engage a GPU-tenant container for testing.
+
+    Refused while a GPU gear is active (single-holder invariant) unless
+    body {"force": true}. Body may also carry {"reason": str}.
+    """
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    result = await _lifecycle_machine.tenant_start(
+        name, force=bool(body.get("force")), reason=body.get("reason") or "api engage")
+    return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)
+
+
+@app.post("/lifecycle/tenant/{name}/stop")
+async def lifecycle_tenant_stop(name: str, request: Request):
+    """85mb: stop a GPU-tenant container behind a hold guard."""
+    if _lifecycle_machine is None:
+        raise HTTPException(status_code=501, detail="Lifecycle machine not available")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    result = await _lifecycle_machine.tenant_stop(
+        name, reason=body.get("reason") or "api disengage")
     return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)
 
 

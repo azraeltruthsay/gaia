@@ -3042,6 +3042,9 @@ function lifecyclePanel() {
     vramSegments: [],
     externalMb: 0,
     tenant: null,
+    vramTenants: [],
+    gpuHolders: [],
+    singleHolderOk: true,
     freePct: 100,
     transitioning: false,
     transPhase: '',
@@ -3075,6 +3078,9 @@ function lifecyclePanel() {
         this.vramUsed = (actual != null) ? actual : (data.vram_used_mb || usedSum);
         this.externalMb = data.vram_external_mb || 0;
         this.tenant = data.vram_tenant || null;
+        this.vramTenants = data.vram_tenants || [];
+        this.gpuHolders = data.gpu_holders || [];
+        this.singleHolderOk = data.gpu_single_holder_ok !== false;
         this.freePct = Math.max(0, ((this.vramTotal - this.vramUsed) / this.vramTotal) * 100);
 
         // Build VRAM segments: tracked tiers + one external segment
@@ -3175,6 +3181,42 @@ function lifecyclePanel() {
         const resp = await fetch('/api/system/lifecycle/restore_tenant', { method: 'POST' });
         const r = await resp.json();
         this.lastResult = { ok: r.ok, from_state: '', to_state: r.tenant || '', error: r.error || null };
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    async engageTenant(name) {
+      this.transitioning = true;
+      this.transPhase = 'engaging ' + name;
+      try {
+        const resp = await fetch(`/api/system/lifecycle/tenant/${name}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard engage' }),
+        });
+        const r = await resp.json();
+        this.lastResult = { ok: r.ok, from_state: '', to_state: name, error: r.error || null };
+      } catch (e) {
+        this.lastResult = { ok: false, error: e.message };
+      }
+      this.transitioning = false;
+      this.refresh();
+    },
+
+    async stopTenant(name) {
+      this.transitioning = true;
+      this.transPhase = 'stopping ' + name;
+      try {
+        const resp = await fetch(`/api/system/lifecycle/tenant/${name}/stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'dashboard disengage' }),
+        });
+        const r = await resp.json();
+        this.lastResult = { ok: r.ok, from_state: '', to_state: name, error: r.error || null };
       } catch (e) {
         this.lastResult = { ok: false, error: e.message };
       }

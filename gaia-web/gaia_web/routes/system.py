@@ -666,11 +666,48 @@ async def lifecycle_release_gpu(request: Request):
 
 
 @router.post("/lifecycle/restore_tenant")
-async def lifecycle_restore_tenant():
-    """Lift the user hold and restart the VRAM tenant container."""
+async def lifecycle_restore_tenant(request: Request):
+    """Lift the user hold and restart a VRAM tenant container."""
     try:
+        body = await request.body()
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(f"{ORCHESTRATOR_URL}/lifecycle/restore_tenant")
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/restore_tenant",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/lifecycle/tenant/{name}/start")
+async def lifecycle_tenant_start(name: str, request: Request):
+    """Engage a GPU-tenant container for testing (85mb)."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/tenant/{name}/start",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/lifecycle/tenant/{name}/stop")
+async def lifecycle_tenant_stop(name: str, request: Request):
+    """Stop a GPU-tenant container behind a hold guard (85mb)."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/tenant/{name}/stop",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
             return resp.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}

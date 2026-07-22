@@ -63,6 +63,26 @@ class LifecycleMachine:
     VRAM_TENANT_CONTAINER = os.environ.get("VRAM_TENANT_CONTAINER", "gaia-prime-candidate")
     TENANT_GUARD_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "vram_tenant_guard.json"
 
+    # 85mb: registry of GPU-capable non-tier containers. Doctrine: exactly
+    # ONE of Core/Prime/Core-Candidate/Prime-Candidate may hold GPU VRAM at
+    # a time. kind "vllm" preallocates on start (holds GPU iff running);
+    # kind "managed" holds GPU iff its engine reports a cuda device.
+    # policy is the DEFAULT lifecycle: "stopped" tenants are engaged only
+    # for testing (doctor won't revive them; downshift won't restart them).
+    # Override registry via env VRAM_TENANTS (JSON list), policy via
+    # /shared/doctor/tenant_policy.json {container: {"default": ...}}.
+    _DEFAULT_GPU_TENANTS = [
+        {"container": "gaia-prime-candidate", "kind": "vllm",
+         "health": "http://gaia-prime-candidate:7777/health", "policy": "stopped"},
+        {"container": "gaia-core-candidate", "kind": "managed",
+         "health": "http://gaia-core-candidate:8092/health", "policy": "running"},
+    ]
+    try:
+        GPU_TENANTS = json.loads(os.environ["VRAM_TENANTS"])
+    except (KeyError, json.JSONDecodeError):
+        GPU_TENANTS = _DEFAULT_GPU_TENANTS
+    TENANT_POLICY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "tenant_policy.json"
+
     def __init__(self, state_manager=None):
         self._state_manager = state_manager
         self._consciousness_matrix = None  # Wired via set_consciousness_matrix()
@@ -76,7 +96,8 @@ class LifecycleMachine:
         # restore must NOT resurrect the tenant (the guard file carries
         # hold=true so the state survives an orchestrator restart).
         self._tenant_user_hold = False
-        self._tenant_state_cache = (0.0, None)  # (ts, running: Optional[bool])
+        # Per-container (ts, running) cache — dashboard polls every 5s.
+        self._container_state_cache: dict = {}
 
         # Tier engine endpoints (Docker network)
         self._tier_endpoints = {
@@ -138,11 +159,16 @@ class LifecycleMachine:
         return max(0, mem.used_mb - gaia), mem.total_mb
 
     def _write_tenant_guard(self, reason: str, hold: bool = False,
-                            ttl_seconds: Optional[int] = None) -> None:
+                            ttl_seconds: Optional[int] = None,
+                            containers: Optional[list] = None) -> None:
+        """Guard v2 (85mb): `containers` lists every guarded name; the v1
+        `container` field stays as the first entry for old readers."""
+        names = list(containers) if containers else [self.VRAM_TENANT_CONTAINER]
         try:
             self.TENANT_GUARD_PATH.parent.mkdir(parents=True, exist_ok=True)
             self.TENANT_GUARD_PATH.write_text(json.dumps({
-                "container": self.VRAM_TENANT_CONTAINER,
+                "container": names[0],
+                "containers": names,
                 "reason": reason,
                 "stopped_at": datetime.now(timezone.utc).isoformat(),
                 "stopped_at_ts": time.time(),
@@ -160,47 +186,117 @@ class LifecycleMachine:
             pass
         return None
 
-    async def _tenant_running(self, max_age_s: float = 10.0) -> Optional[bool]:
-        """Is the VRAM tenant container running? Cached to keep the 5s
-        dashboard poll from hammering the Docker API. None = unknown."""
-        ts, cached = self._tenant_state_cache
+    @staticmethod
+    def _guard_names(guard: Optional[dict]) -> list:
+        if not guard:
+            return []
+        names = guard.get("containers")
+        if isinstance(names, list) and names:
+            return names
+        return [guard["container"]] if guard.get("container") else []
+
+    def _tenant_policy(self, name: str) -> str:
+        """Effective default lifecycle for a tenant: the durable policy file
+        overrides the registry default. Returns 'stopped' or 'running'."""
+        try:
+            if self.TENANT_POLICY_PATH.exists():
+                policy = json.loads(self.TENANT_POLICY_PATH.read_text())
+                entry = policy.get(name)
+                if isinstance(entry, dict) and entry.get("default") in ("stopped", "running"):
+                    return entry["default"]
+        except (json.JSONDecodeError, OSError):
+            pass
+        for t in self.GPU_TENANTS:
+            if t.get("container") == name:
+                return t.get("policy", "running")
+        return "running"
+
+    async def _container_running(self, name: str, max_age_s: float = 10.0) -> Optional[bool]:
+        """Is a container running? Cached to keep the 5s dashboard poll
+        from hammering the Docker API. None = unknown."""
+        ts, cached = self._container_state_cache.get(name, (0.0, None))
         if time.time() - ts < max_age_s:
             return cached
         running: Optional[bool] = None
         if self._docker_manager is not None:
             try:
                 from .docker_manager import ContainerState
-                state = await self._docker_manager._get_container_state(self.VRAM_TENANT_CONTAINER)
+                state = await self._docker_manager._get_container_state(name)
                 running = state == ContainerState.RUNNING
             except Exception:
                 running = None
-        self._tenant_state_cache = (time.time(), running)
+        self._container_state_cache[name] = (time.time(), running)
         return running
 
+    async def _tenant_running(self, max_age_s: float = 10.0) -> Optional[bool]:
+        """Back-compat: primary tenant's running state."""
+        return await self._container_running(self.VRAM_TENANT_CONTAINER, max_age_s)
+
+    async def _probe_tenant(self, tenant: dict) -> dict:
+        """Live status of one registry tenant for reporting + the invariant.
+
+        vllm holds GPU whenever running (static preallocation); managed
+        holds GPU only when its engine reports a cuda device.
+        """
+        name = tenant.get("container", "?")
+        running = await self._container_running(name)
+        engine_device = None
+        if running and tenant.get("kind") == "managed" and tenant.get("health"):
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(tenant["health"])
+                    if resp.status_code == 200:
+                        engine_device = resp.json().get("device")
+            except Exception:
+                engine_device = None
+        if tenant.get("kind") == "vllm":
+            holds_gpu = bool(running)
+        else:
+            holds_gpu = bool(engine_device and str(engine_device).startswith("cuda"))
+        guard = self._read_tenant_guard()
+        return {
+            "container": name,
+            "running": running,
+            "kind": tenant.get("kind", "unknown"),
+            "engine_device": engine_device,
+            "holds_gpu": holds_gpu,
+            "guard_active": name in self._guard_names(guard),
+            "hold": bool((guard or {}).get("hold")) and name in self._guard_names(guard),
+            "policy": self._tenant_policy(name),
+        }
+
     async def _restore_vram_tenant(self, reason: str) -> bool:
-        """Restart the negotiated-away tenant and clear the guard file."""
+        """Downshift restore: restart negotiated-away tenants and clear the
+        guard. 85mb: only tenants whose policy is 'running' come back —
+        default-stopped tenants stay down until explicitly engaged."""
         if self._tenant_user_hold or (self._read_tenant_guard() or {}).get("hold"):
             logger.info("VRAM tenant restore skipped (%s): user hold active", reason)
             return False
         if not self._tenant_stopped_by_us:
             return False
         self._tenant_stopped_by_us = False
+        names = self._guard_names(self._read_tenant_guard()) or [self.VRAM_TENANT_CONTAINER]
         try:
             self.TENANT_GUARD_PATH.unlink(missing_ok=True)
         except OSError:
             pass
         if self._docker_manager is None:
             return False
-        try:
-            ok = await self._docker_manager.start_container(self.VRAM_TENANT_CONTAINER)
-            self._tenant_state_cache = (0.0, None)
-            logger.info("VRAM tenant %s restored (%s): %s",
-                        self.VRAM_TENANT_CONTAINER, reason, ok)
-            return bool(ok)
-        except Exception as e:
-            logger.warning("VRAM tenant restore failed (%s) — doctor will resurrect it: %s",
-                           reason, e)
-            return False
+        any_ok = False
+        for name in names:
+            if self._tenant_policy(name) == "stopped":
+                logger.info("VRAM tenant %s stays down (%s): policy default=stopped",
+                            name, reason)
+                continue
+            try:
+                ok = await self._docker_manager.start_container(name)
+                self._container_state_cache.pop(name, None)
+                logger.info("VRAM tenant %s restored (%s): %s", name, reason, ok)
+                any_ok = any_ok or bool(ok)
+            except Exception as e:
+                logger.warning("VRAM tenant %s restore failed (%s) — doctor may revive it: %s",
+                               name, reason, e)
+        return any_ok
 
     async def _vram_preflight(self, target: "LifecycleState") -> Optional[str]:
         """None when the target gear fits (negotiating the known tenant away
@@ -216,26 +312,28 @@ class LifecycleMachine:
         if need <= budget:
             return None
 
-        # Negotiate: stop the known tenant behind a doctor-visible guard.
+        # Negotiate: stop every running GPU-holding registry tenant behind
+        # a doctor-visible guard (85mb: was single hardcoded container).
         if self._docker_manager is not None:
-            try:
-                from .docker_manager import ContainerState
-                state = await self._docker_manager._get_container_state(self.VRAM_TENANT_CONTAINER)
-                tenant_running = state == ContainerState.RUNNING
-            except Exception:
-                tenant_running = False
-            if tenant_running:
+            holders = []
+            for t in self.GPU_TENANTS:
+                status = await self._probe_tenant(t)
+                if status["running"] and status["holds_gpu"]:
+                    holders.append(status["container"])
+            if holders:
                 logger.warning(
                     "VRAM negotiation: gear %s needs %d MB but external tenants hold %d MB "
                     "— stopping %s (guard TTL %ds)",
-                    target.value, need, external, self.VRAM_TENANT_CONTAINER,
-                    self.VRAM_TENANT_GUARD_TTL)
-                self._write_tenant_guard(f"gear shift to {target.value} needs {need} MB")
+                    target.value, need, external, holders, self.VRAM_TENANT_GUARD_TTL)
+                self._write_tenant_guard(
+                    f"gear shift to {target.value} needs {need} MB", containers=holders)
                 self._tenant_stopped_by_us = True
-                try:
-                    await self._docker_manager.stop_container(self.VRAM_TENANT_CONTAINER)
-                except Exception as e:
-                    logger.warning("VRAM negotiation: stop failed: %s", e)
+                for name in holders:
+                    try:
+                        await self._docker_manager.stop_container(name)
+                        self._container_state_cache.pop(name, None)
+                    except Exception as e:
+                        logger.warning("VRAM negotiation: stop %s failed: %s", name, e)
                 # Wait for CUDA to actually release the block
                 for _ in range(12):
                     await asyncio.sleep(5)
@@ -244,7 +342,7 @@ class LifecycleMachine:
                         logger.info("VRAM negotiation: freed — %d MB external remains, gear fits",
                                     external)
                         return None
-                # Still doesn't fit — the tenant wasn't (only) the problem.
+                # Still doesn't fit — the tenants weren't (only) the problem.
                 await self._restore_vram_tenant("negotiation insufficient")
 
         return (f"insufficient VRAM for {target.value}: need {need} MB, "
@@ -271,16 +369,25 @@ class LifecycleMachine:
             if not result.ok:
                 transition_error = result.error
 
+        # 85mb: stop EVERY running GPU-holding registry tenant, not just
+        # the primary — the user asked for the whole card.
+        holders = []
+        for t in self.GPU_TENANTS:
+            status = await self._probe_tenant(t)
+            if status["running"] and status["holds_gpu"]:
+                holders.append(status["container"])
         stopped = False
-        if await self._tenant_running() and self._docker_manager is not None:
-            self._write_tenant_guard(reason, hold=True, ttl_seconds=ttl_seconds)
+        if holders and self._docker_manager is not None:
+            self._write_tenant_guard(reason, hold=True, ttl_seconds=ttl_seconds,
+                                     containers=holders)
             self._tenant_stopped_by_us = False  # user hold, not negotiation
-            try:
-                await self._docker_manager.stop_container(self.VRAM_TENANT_CONTAINER)
-                stopped = True
-            except Exception as e:
-                logger.warning("release_gpu: tenant stop failed: %s", e)
-            self._tenant_state_cache = (0.0, None)
+            for name in holders:
+                try:
+                    await self._docker_manager.stop_container(name)
+                    self._container_state_cache.pop(name, None)
+                    stopped = True
+                except Exception as e:
+                    logger.warning("release_gpu: %s stop failed: %s", name, e)
             # Wait for CUDA to actually hand the block back
             for _ in range(6):
                 external, total = await self._external_vram_mb()
@@ -288,7 +395,7 @@ class LifecycleMachine:
                     break
                 await asyncio.sleep(5)
         else:
-            # Tenant already down — still record the hold so nothing revives it.
+            # Tenants already down — still record the hold so nothing revives them.
             self._write_tenant_guard(reason, hold=True, ttl_seconds=ttl_seconds)
 
         mem = None
@@ -311,8 +418,14 @@ class LifecycleMachine:
             "error": transition_error,
         }
 
-    async def restore_tenant(self, reason: str = "dashboard restore") -> dict:
-        """9zrx: lift the user hold and bring the VRAM tenant back."""
+    async def restore_tenant(self, reason: str = "dashboard restore",
+                             container: Optional[str] = None) -> dict:
+        """9zrx/85mb: lift the user hold and start a tenant container.
+
+        Explicit restore overrides a 'stopped' policy — the human asked.
+        Without `container`, starts the primary tenant (back-compat).
+        """
+        name = container or self.VRAM_TENANT_CONTAINER
         self._tenant_user_hold = False
         self._tenant_stopped_by_us = False
         try:
@@ -322,14 +435,56 @@ class LifecycleMachine:
         started = False
         if self._docker_manager is not None:
             try:
-                started = bool(await self._docker_manager.start_container(self.VRAM_TENANT_CONTAINER))
+                started = bool(await self._docker_manager.start_container(name))
             except Exception as e:
                 logger.warning("restore_tenant: start failed: %s", e)
-        self._tenant_state_cache = (0.0, None)
-        logger.info("restore_tenant (%s): %s started=%s",
-                    reason, self.VRAM_TENANT_CONTAINER, started)
-        return {"ok": started, "tenant": self.VRAM_TENANT_CONTAINER,
-                "started": started, "hold": False}
+        self._container_state_cache.pop(name, None)
+        logger.info("restore_tenant (%s): %s started=%s", reason, name, started)
+        return {"ok": started, "tenant": name, "started": started, "hold": False}
+
+    async def tenant_start(self, name: str, force: bool = False,
+                           reason: str = "engage") -> dict:
+        """85mb: engage a registry tenant for testing.
+
+        Refused while a GPU gear is active (the invariant) unless forced —
+        engaging a vLLM tenant under AWAKE would grind the card into OOM.
+        """
+        if not any(t.get("container") == name for t in self.GPU_TENANTS):
+            return {"ok": False, "tenant": name, "error": "unknown tenant"}
+        gear = LifecycleState(self._snapshot.state)
+        gpu_free_gears = (LifecycleState.PARKED, LifecycleState.SLEEP,
+                          LifecycleState.DEEP_SLEEP)
+        if gear not in gpu_free_gears and not force:
+            return {"ok": False, "tenant": name,
+                    "error": f"gear {gear.value} holds the GPU — park/sleep first "
+                             f"or pass force=true"}
+        if self._docker_manager is None:
+            return {"ok": False, "tenant": name, "error": "docker manager unavailable"}
+        started = False
+        try:
+            started = bool(await self._docker_manager.start_container(name))
+        except Exception as e:
+            return {"ok": False, "tenant": name, "error": str(e)}
+        self._container_state_cache.pop(name, None)
+        logger.info("tenant_start (%s): %s started=%s", reason, name, started)
+        return {"ok": started, "tenant": name, "started": started}
+
+    async def tenant_stop(self, name: str, reason: str = "disengage") -> dict:
+        """85mb: stop a registry tenant behind a hold guard."""
+        if not any(t.get("container") == name for t in self.GPU_TENANTS):
+            return {"ok": False, "tenant": name, "error": "unknown tenant"}
+        if self._docker_manager is None:
+            return {"ok": False, "tenant": name, "error": "docker manager unavailable"}
+        guard = self._read_tenant_guard()
+        names = sorted(set(self._guard_names(guard) + [name]))
+        self._write_tenant_guard(reason, hold=True, containers=names)
+        try:
+            await self._docker_manager.stop_container(name)
+        except Exception as e:
+            return {"ok": False, "tenant": name, "error": str(e)}
+        self._container_state_cache.pop(name, None)
+        logger.info("tenant_stop (%s): %s", reason, name)
+        return {"ok": True, "tenant": name, "stopped": True}
 
     # ── Clutch: ConsciousnessMatrix delegation ─────────────────────────
 
@@ -376,13 +531,36 @@ class LifecycleMachine:
             self._snapshot.vram_actual_free_mb = None
             self._snapshot.vram_external_mb = None
 
+        # 85mb: probe the GPU-tenant registry and enforce visibility of the
+        # single-holder doctrine: exactly one of Core/Prime/Core-Candidate/
+        # Prime-Candidate may hold GPU VRAM at a time.
         guard = self._read_tenant_guard()
+        tenants = []
+        for t in self.GPU_TENANTS:
+            try:
+                tenants.append(await self._probe_tenant(t))
+            except Exception:
+                logger.debug("tenant probe failed: %s", t, exc_info=True)
+        self._snapshot.vram_tenants = tenants
+        holders = [name for name, tier in self._snapshot.tiers.items()
+                   if tier.device == "gpu"]
+        holders += [s["container"] for s in tenants if s.get("holds_gpu")]
+        self._snapshot.gpu_holders = holders
+        self._snapshot.gpu_single_holder_ok = len(holders) <= 1
+        if len(holders) > 1:
+            logger.warning("GPU single-holder invariant VIOLATED: %s", holders)
+
+        # Back-compat: primary tenant summary (dashboard 9zrx-era fields).
+        primary = next((s for s in tenants
+                        if s["container"] == self.VRAM_TENANT_CONTAINER), None)
         self._snapshot.vram_tenant = {
             "container": self.VRAM_TENANT_CONTAINER,
-            "running": await self._tenant_running(),
-            "guard_active": guard is not None,
+            "running": primary["running"] if primary else await self._tenant_running(),
+            "guard_active": self.VRAM_TENANT_CONTAINER in self._guard_names(guard),
             "guard_reason": (guard or {}).get("reason"),
-            "hold": bool((guard or {}).get("hold")) or self._tenant_user_hold,
+            "hold": (bool((guard or {}).get("hold"))
+                     and self.VRAM_TENANT_CONTAINER in self._guard_names(guard))
+                    or self._tenant_user_hold,
         }
         return self._snapshot.model_copy()
 

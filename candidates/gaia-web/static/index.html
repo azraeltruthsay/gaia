@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GAIA Mission Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260718a">
+  <link rel="stylesheet" href="/static/style.css?v=20260719a">
   <!-- marked.js for markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- D3.js for graph visualization -->
@@ -509,6 +509,25 @@
             <button class="lc-btn lc-cancel" x-show="info.model_loaded"
                     @click="cancelInference(tier)" title="Stop generating">Stop</button>
           </div>
+        </template>
+      </div>
+
+      <!-- GPU Tenants (85mb): non-tier GPU-capable containers + single-holder invariant -->
+      <div class="lc-tenants" x-show="vramTenants.length > 0">
+        <span class="lc-tenants-label">GPU Tenants</span>
+        <span class="lc-holder-badge" :class="singleHolderOk ? 'lc-holder-ok' : 'lc-holder-bad'"
+              :title="'GPU holders: ' + (gpuHolders.join(', ') || 'none')"
+              x-text="singleHolderOk ? (gpuHolders.length ? 'holder: ' + gpuHolders[0] : 'GPU free') : 'INVARIANT VIOLATED: ' + gpuHolders.join(' + ')"></span>
+        <template x-for="t in vramTenants" :key="t.container">
+          <span class="lc-tenant-chip" :class="t.holds_gpu ? 'tc-holds' : (t.running ? 'tc-running' : 'tc-stopped')">
+            <span x-text="t.container.replace('gaia-','')"></span>
+            <span class="tc-state" x-text="t.running ? (t.holds_gpu ? 'GPU' : (t.engine_device || 'up')) : 'off'"></span>
+            <span class="tc-policy" x-show="t.policy === 'stopped'" title="Default-stopped: engaged only for testing">P:off</span>
+            <button class="lc-btn tc-btn" x-show="!t.running" @click="engageTenant(t.container)"
+                    :disabled="transitioning" title="Start for testing (refused while a gear holds the GPU)">Engage</button>
+            <button class="lc-btn tc-btn" x-show="t.running" @click="stopTenant(t.container)"
+                    :disabled="transitioning" title="Stop behind a hold guard">Stop</button>
+          </span>
         </template>
       </div>
 
@@ -1648,6 +1667,6 @@
     </template>
   </section>
 
-  <script src="/static/app.js?v=20260718a"></script>
+  <script src="/static/app.js?v=20260719a"></script>
 </body>
 </html>

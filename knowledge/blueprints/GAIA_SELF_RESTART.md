@@ -136,6 +136,28 @@ verification-shaped sleep task — no GPU needed), doctor health-watching of can
 prod seriousness, mirror-back discipline for prod-first hotfixes, and an exempt-by-design
 carve-out for `gaia-prime-candidate` (deliberately a different stack: raw vLLM/LMCache).
 
+## Sidebar: Single-GPU-Holder Doctrine (`85mb`, 2026-07-19)
+
+Of the four inference systems — Core, Prime, Core-Candidate, Prime-Candidate — **exactly
+one may hold GPU VRAM at any time**. The gearbox is the judge: its GPU-tenant registry
+(`GPU_TENANTS` in `lifecycle_machine.py`) probes non-tier GPU-capable containers and the
+snapshot reports `vram_tenants` / `gpu_holders` / `gpu_single_holder_ok`. Enforcement:
+
+- **VRAM preflight** negotiates away *every* running GPU-holding tenant before a GPU gear
+  (guard file v2 lists all stopped containers; the doctor stands down while it's live).
+- **`gaia-prime-candidate` is default-stopped** (`/shared/doctor/tenant_policy.json`,
+  durable, no TTL): its vLLM preallocates ~9.4 GB the moment it starts, so down IS its
+  healthy state — the doctor neither revives nor alarms on it, and downshift restore
+  leaves it down. Engage for testing via `POST /lifecycle/tenant/{name}/start` (refused
+  while a GPU gear is active, unless forced) or the dashboard GPU Tenants row.
+- **`gaia-core-candidate` is CPU-pinned** (`CANDIDATE_CORE_DEVICE=cpu`, `N_GPU_LAYERS=0`):
+  the HA mirror never spontaneously grabs VRAM; GPU-path candidate testing is a
+  deliberate env override + engage.
+
+This refines the r67d carve-out: prime-candidate remains a different stack (raw
+vLLM/LMCache), and is additionally not a resident — it is a *guest* of the GPU, admitted
+only when the gearbox has parked.
+
 ## Related
 
 - Sleep cognition contract: dream-work never wakes the GPU (`2l9`), heartbeats are waking

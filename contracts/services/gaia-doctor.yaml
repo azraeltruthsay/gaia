@@ -343,3 +343,20 @@ vram_tenant_guard:
   path: /shared/doctor/vram_tenant_guard.json
   writer: gaia-orchestrator (lifecycle_machine._vram_preflight)
   ttl_default_seconds: 14400
+  # v2 (85mb): `containers: [..]` lists every guarded name (v1 `container`
+  # kept as first entry for old readers); `hold: true` marks a user hold —
+  # downshift restore stands down until restore/TTL expiry.
+  schema_v2_fields: [containers, hold]
+
+# ── GPU tenant policy (85mb) ────────────────────────────────────────────────
+# Durable per-container lifecycle policy — no TTL. A tenant whose default is
+# "stopped" is engaged only for testing: the doctor skips revival AND health
+# alarms while it is down (down IS its healthy state); the gearbox's
+# downshift restore leaves it down. Single-holder doctrine: exactly one of
+# Core/Prime/Core-Candidate/Prime-Candidate may hold GPU VRAM at a time,
+# reported via the orchestrator snapshot (gpu_holders/gpu_single_holder_ok).
+tenant_policy:
+  path: /shared/doctor/tenant_policy.json
+  schema: '{"<container>": {"default": "stopped"|"running", "reason": str, "set_by": str}}'
+  readers: [gaia-doctor, gaia-orchestrator]
+  current: gaia-prime-candidate default=stopped (Azrael 2026-07-19)
