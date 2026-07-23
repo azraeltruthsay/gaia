@@ -1701,6 +1701,39 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
 
+            # 29yq: a native tool call detected mid-stream (ParseEventType.
+            # TOOL_CALL_DETECTED, above) BREAKS out of the loop consuming
+            # run_turn()'s generator (the `break` at the top of this function)
+            # to execute the tool and continue generation via
+            # generate_continuation() — a separate call. run_turn() itself is
+            # then abandoned mid-iteration: its generator is simply never
+            # advanced again, so whatever code inside it runs AFTER that
+            # token's `yield` — including, apparently, session persistence of
+            # the assistant turn — never executes. NOTE: final_packet_dict
+            # being None is NOT on its own a signal of this — run_turn()
+            # commonly finishes without ever yielding a terminal packet even
+            # on a clean, no-tool-call turn (gaia-web's discord_interface.py
+            # "sending accumulated response" fallback is the normal delivery
+            # path already, and run_turn persists that case fine on its own).
+            # Gate strictly on the abandonment condition itself
+            # (_pending_tool_calls nonempty = the break fired) so this safety
+            # net never double-persists an already-healthy turn.
+            if _pending_tool_calls and not final_packet_dict and full_response.strip():
+                log_gaia_error(
+                    logger, "GAIA-CORE-081",
+                    f"session={session_id}: native tool call abandoned run_turn() "
+                    "mid-stream and its continuation was never persisted to "
+                    "session history — persisting and synthesizing a terminal "
+                    "packet as a safety net so this turn isn't silently dropped")
+                try:
+                    _agent_core.session_manager.add_message(session_id, "assistant", full_response)
+                except Exception:
+                    logger.warning("Safety-net session persistence failed", exc_info=True)
+                from gaia_common.protocols.cognition_packet import PacketState
+                packet.status.state = PacketState.COMPLETED
+                packet.response.candidate = full_response
+                final_packet_dict = packet.to_serializable_dict()
+
             if final_packet_dict:
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
