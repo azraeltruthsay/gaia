@@ -151,6 +151,19 @@ class SafeConfigProxy:
         return True
 
 
+def _parse_iso_timestamp(raw) -> Optional[datetime]:
+    """Parse an ISO timestamp (session_manager/tool-ledger format). None on
+    missing/unparseable — callers must treat that as "no age penalty"."""
+    if not raw:
+        return None
+    try:
+        ts = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(ts)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
 def _format_retrieved_session_context(results: dict) -> str:
     """Format RAG-retrieved session turns and topics into a readable context block."""
     parts = []
@@ -726,11 +739,31 @@ class AgentCore:
         # surfaced via tools. Independent of the CFR working set, so a later
         # "what's its name / the link?" can ground on it even when CFR blurs the
         # content turn. prompt_builder renders the 'tool' role natively.
+        #
+        # 3bno: unlike conversation_cfr (tr7f), this ledger has no staleness or
+        # content filtering at all — TOOL_LEDGER_MAX bounds it by COUNT only, so
+        # a session with few tool calls can carry a days-old, completely empty
+        # stub (no title/url/gist/body — every field blank except the tool
+        # name) into every subsequent prompt indefinitely. Observed live: a
+        # 5-day-old {tool: study, action: adapter_list} stub with nothing to
+        # say rendered as the nonsensical "Retrieved via study: study" and
+        # correlates with an off-topic "which turn/transcript" confabulation
+        # on an otherwise plain greeting. Filter both dimensions here — this
+        # is specifically the auto-injection path; get_tool_ledger() itself is
+        # left alone since expand_context's by-id recall (main.py) deliberately
+        # wants old entries still reachable.
+        _TOOL_LEDGER_STALE_AFTER_HOURS = 2.0
         try:
             _ledger = self.session_manager.get_tool_ledger(session_id) if session_id else []
         except Exception:
             _ledger = []
+        _ledger_now = datetime.now(timezone.utc)
         for _e in _ledger:
+            if not (_e.get("title") or _e.get("url") or _e.get("gist") or _e.get("body")):
+                continue  # nothing informative to say regardless of age
+            _e_ts = _parse_iso_timestamp(_e.get("timestamp"))
+            if _e_ts and (_ledger_now - _e_ts).total_seconds() / 3600.0 > _TOOL_LEDGER_STALE_AFTER_HOURS:
+                continue
             _prov = _e.get("title") or _e.get("url") or _e.get("source") or _e.get("tool", "")
             _bits = [f"Retrieved via {_e.get('tool', 'tool')}: {_prov}"]
             if _e.get("url") and _e.get("url") != _prov:
@@ -3262,6 +3295,23 @@ class AgentCore:
             if _use_slim:
                 text = self._run_slim_prompt(selected_model_name, user_input, history, plan.intent, session_id=session_id, source=source, metadata=_metadata, packet=packet)
                 if text is not None:
+                    # 5jl2: this is the primary conversational path (OPERATOR/
+                    # slim-prompt) and was the one branch missing the
+                    # whole-block dedup pass that every OTHER branch in this
+                    # file already applies (fallback ~3360, plan ~3733, full
+                    # pipeline ~4195, reflex ~6045, etc.) — small models tend
+                    # to echo/continue a recently-seen turn (her own last
+                    # reply, present in relevant_history_snippet) as a
+                    # back-to-back near-duplicate block within THIS single
+                    # completion. _run_slim_prompt returns the complete text
+                    # in one shot (not streamed), so this runs before either
+                    # the yield or the persist — both the live reply and what
+                    # gets remembered are the deduped version.
+                    text = self._suppress_repetition(text)
+                    # 5jl2: separate cross-turn check — is THIS reply a near-
+                    # duplicate of GAIA's own immediately-previous turn (not
+                    # duplication within itself, which the pass above covers)?
+                    text = self._guard_against_echo(text, history, user_input, selected_model_name)
                     _responding = getattr(self, '_last_responding_model', None) or selected_model_name
                     _header = self._build_response_header(_responding, packet, None, None, None)
                     yield {"type": "token", "value": _header + text}
@@ -5015,7 +5065,90 @@ class AgentCore:
             self.logger.error(f"Error during knowledge acquisition workflow: {e}")
 
         return packet
-        
+
+    def _guard_against_echo(self, text: str, history: list, user_input: str,
+                            selected_model_name: str) -> str:
+        """5jl2: one-shot cross-turn echo guard.
+
+        _suppress_repetition catches duplication WITHIN a single completion;
+        this catches the separate failure mode the bead actually describes —
+        a candidate reply that's a near-duplicate of GAIA's own immediately
+        PREVIOUS turn (a small model, seeing its own recent reply present in
+        relevant_history_snippet, imitates it when the new user message is
+        similar in register and adds little new information — e.g. two
+        consecutive greetings). Embedding cosine (robust to paraphrase,
+        unlike the word-Jaccard _dedup_block) vs the last assistant turn;
+        on a high match, ONE direct re-roll with an explicit anti-echo
+        instruction. Falls back to the original text if the embed model is
+        unavailable, the re-roll fails, or the re-roll ALSO echoes — never
+        loops more than once.
+        """
+        if not text or not history:
+            return text
+        last_assistant = None
+        for h in reversed(history):
+            if h.get("role") == "assistant" and (h.get("content") or "").strip():
+                last_assistant = h.get("content").strip()
+                break
+        if not last_assistant:
+            return text
+        try:
+            from gaia_core.memory.session_history_indexer import _get_embed_model, _cosine_similarity
+            model = _get_embed_model()
+            if model is None:
+                return text
+            embs = model.encode([text, last_assistant], show_progress_bar=False)
+            similarity = _cosine_similarity(embs[0], embs[1])
+        except Exception:
+            self.logger.debug("Echo guard similarity check failed (non-fatal)", exc_info=True)
+            return text
+        # Calibrated against real data (2026-07-23): the actual 07-18 near-
+        # verbatim echo pair (bead 5jl2's original example) scores 0.957;
+        # the observed within-response paraphrase duplication (two reworded
+        # near-identical greeting halves) scores 0.807; a merely same-topic
+        # but genuinely distinct pair of replies scored 0.62. 0.87 missed the
+        # 0.807 case entirely — general sentence-embedding cosine runs lower
+        # for reworded (vs verbatim) duplicates than intuition suggests.
+        threshold = float(os.environ.get("ECHO_GUARD_THRESHOLD", "0.78"))
+        if similarity < threshold:
+            return text
+        self.logger.info(
+            "Echo guard: candidate reply %.3f similar to GAIA's own last turn — re-rolling once",
+            similarity)
+        try:
+            reroll = self.model_pool.forward_to_model(
+                selected_model_name,
+                messages=[
+                    {"role": "system", "content": (
+                        "You are GAIA. Your draft reply below is a near-duplicate "
+                        "of what you just said in your PREVIOUS turn. The user "
+                        "sent a new message — respond to THIS message freshly, "
+                        "in different words. Do not repeat your prior reply's "
+                        "phrasing or structure."
+                    )},
+                    {"role": "assistant", "content": last_assistant},
+                    {"role": "user", "content": user_input},
+                ],
+                max_tokens=200,
+                temperature=self.config.temperature,
+            )
+            reroll_text = reroll["choices"][0]["message"]["content"]
+            reroll_text = strip_think_tags(reroll_text).strip()
+            reroll_text = self._suppress_repetition(reroll_text)
+            if not reroll_text:
+                return text
+            embs2 = model.encode([reroll_text, last_assistant], show_progress_bar=False)
+            similarity2 = _cosine_similarity(embs2[0], embs2[1])
+            if similarity2 < threshold:
+                self.logger.info("Echo guard: re-roll succeeded (%.3f -> %.3f similarity)",
+                                 similarity, similarity2)
+                return reroll_text
+            self.logger.info("Echo guard: re-roll still similar (%.3f) — keeping original", similarity2)
+            return text
+        except Exception:
+            self.logger.debug("Echo guard re-roll failed (non-fatal)", exc_info=True)
+            return text
+
     def _suppress_repetition(self, text: str, max_repeat: int = 2) -> str:
         """
         Collapse runaway repetition by limiting how many times a sentence-level fragment
