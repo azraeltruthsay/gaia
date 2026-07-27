@@ -19,6 +19,25 @@
   --border-dim: rgba(37, 54, 88, 0.5);
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* HUD theme (m610): cool "systems" accent, distinct from the crimson --highlight */
+  --accent-cyan: #4dd8e6;
+  --accent-cyan-bright: #8ff3ff;
+  --accent-cyan-dim: rgba(77, 216, 230, 0.15);
+  --glow-nominal: 0 0 8px rgba(77, 216, 230, 0.45);
+  --glow-attention: 0 0 8px rgba(255, 167, 38, 0.5);
+  --glow-alarm: 0 0 8px rgba(233, 69, 96, 0.55);
+  --hud-chamfer: 10px;
+  --hud-scanline: repeating-linear-gradient(to bottom, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px);
+
+  /* Aliases (m610): these were referenced across index.html/style.css but never
+     defined, rendering as invalid/inherited color — additive fix, no behavior change. */
+  --green: #4caf50;
+  --red: #e94560;
+  --yellow: #ffa726;
+  --ok: #4caf50;
+  --panel-bg: #16213e;
+  --bg: #1a1a2e;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -74,9 +93,9 @@ html, body {
   color: var(--text-muted);
 }
 
-.badge-ok { background: rgba(76, 175, 80, 0.2); color: var(--success); }
-.badge-warn { background: rgba(255, 167, 38, 0.2); color: var(--warn); }
-.badge-error { background: rgba(233, 69, 96, 0.2); color: var(--error); }
+.badge-ok { background: rgba(76, 175, 80, 0.2); color: var(--success); box-shadow: var(--glow-nominal); }
+.badge-warn { background: rgba(255, 167, 38, 0.2); color: var(--warn); box-shadow: var(--glow-attention); }
+.badge-error { background: rgba(233, 69, 96, 0.2); color: var(--error); box-shadow: var(--glow-alarm); }
 
 [x-cloak] { display: none !important; }
 
@@ -151,7 +170,8 @@ html, body {
   letter-spacing: 1.5px;
   color: var(--text-muted);
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--accent-cyan-dim);
+  text-shadow: 0 0 4px var(--accent-cyan-dim);
 }
 
 .panel-subheader {
@@ -1558,6 +1578,134 @@ html, body {
 @media (max-width: 800px) {
   .lifecycle-tiers { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── HUD Flyout Shell (m610) ──────────── */
+
+.hud-view {
+  position: relative;
+  display: flex;
+}
+
+.hud-rail {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 10px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.hud-chamfer {
+  clip-path: polygon(0 0, calc(100% - var(--hud-chamfer)) 0, 100% var(--hud-chamfer),
+                      100% 100%, var(--hud-chamfer) 100%, 0 calc(100% - var(--hud-chamfer)));
+}
+
+.hud-rail-icon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 62px;
+  padding: 10px 4px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.hud-rail-icon:hover { color: var(--text); border-color: var(--accent-cyan-dim); }
+
+.hud-rail-icon.hud-rail-active {
+  color: var(--accent-cyan-bright);
+  border-color: var(--accent-cyan);
+  box-shadow: var(--glow-nominal);
+}
+
+.hud-rail-glyph { font-size: 18px; line-height: 1; }
+.hud-rail-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.hud-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.hud-dot-nominal { background: var(--accent-cyan); box-shadow: var(--glow-nominal); }
+.hud-dot-attention { background: var(--warn); box-shadow: var(--glow-attention); }
+.hud-dot-alarm { background: var(--error); box-shadow: var(--glow-alarm); animation: pulse-glow 2s infinite; }
+
+.hud-backdrop {
+  /* absolute (not fixed) — scoped to .hud-view's own stacking context so it
+     dims only the Commands content, not the top bar / tab bar above it */
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.hud-flyout {
+  position: absolute;
+  top: 0;
+  left: 90px;
+  z-index: 25;
+  width: min(760px, calc(100% - 110px));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  background-image: var(--hud-scanline);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent-cyan);
+  box-shadow: var(--glow-nominal), 4px 0 24px rgba(0,0,0,0.4);
+}
+
+.hud-flyout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent-cyan-bright);
+  text-shadow: 0 0 6px var(--accent-cyan-dim);
+}
+
+.hud-flyout-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.hud-flyout-close:hover { color: var(--error); }
+
+.hud-flyout-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Flyout open/close transition — plain CSS, no Alpine Collapse plugin dependency */
+.hud-fly-enter { transition: opacity 0.18s ease, transform 0.18s ease; }
+.hud-fly-enter-start { opacity: 0; transform: translateX(-12px); }
+.hud-fly-enter-end { opacity: 1; transform: translateX(0); }
+.hud-fly-leave { transition: opacity 0.12s ease, transform 0.12s ease; }
+.hud-fly-leave-start { opacity: 1; transform: translateX(0); }
+.hud-fly-leave-end { opacity: 0; transform: translateX(-12px); }
 
 /* ── Hook/Command Panel ──────────────── */
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GAIA Mission Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260719a">
+  <link rel="stylesheet" href="/static/style.css?v=20260727a">
   <!-- marked.js for markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- D3.js for graph visualization -->
@@ -472,8 +472,50 @@
   </section>
 
   <!-- ── Commands View (Hooks Panel) ── -->
-  <section class="view" x-data x-show="$store.nav.currentView === 'hooks'" x-cloak>
-    <!-- ── Mission Control: Lifecycle State Machine ── -->
+  <section class="view hud-view" x-data x-show="$store.nav.currentView === 'hooks'" x-cloak
+           @keydown.escape.window="$store.flyout.close()">
+
+    <div class="hud-rail">
+      <button class="hud-rail-icon hud-chamfer" @click.stop="$store.flyout.toggle('gearbox')"
+              :class="{ 'hud-rail-active': $store.flyout.active === 'gearbox' }"
+              title="Gearbox — Lifecycle & GPU">
+        <span class="hud-rail-glyph">⚙</span>
+        <span class="hud-rail-label">Gearbox</span>
+        <span class="hud-dot" :class="'hud-dot-' + $store.flyout.status.gearbox"></span>
+      </button>
+      <button class="hud-rail-icon hud-chamfer" @click.stop="$store.flyout.toggle('ops')"
+              :class="{ 'hud-rail-active': $store.flyout.active === 'ops' }"
+              title="Ops Console — Sleep, Wake, GPU Management, Codex, Action Log">
+        <span class="hud-rail-glyph">🛰</span>
+        <span class="hud-rail-label">Ops</span>
+        <span class="hud-dot" :class="'hud-dot-' + $store.flyout.status.ops"></span>
+      </button>
+      <button class="hud-rail-icon hud-chamfer" @click.stop="$store.flyout.toggle('immune')"
+              :class="{ 'hud-rail-active': $store.flyout.active === 'immune' }"
+              title="Immune System — Doctor, Surgeon, Chaos Monkey">
+        <span class="hud-rail-glyph">🛡</span>
+        <span class="hud-rail-label">Immune</span>
+        <span class="hud-dot" :class="'hud-dot-' + $store.flyout.status.immune"></span>
+      </button>
+      <button class="hud-rail-icon hud-chamfer" @click.stop="$store.flyout.toggle('training')"
+              :class="{ 'hud-rail-active': $store.flyout.active === 'training' }"
+              title="Training & Validation — Cognitive Battery, Pipeline, Monitor">
+        <span class="hud-rail-glyph">📊</span>
+        <span class="hud-rail-label">Training</span>
+        <span class="hud-dot" :class="'hud-dot-' + $store.flyout.status.training"></span>
+      </button>
+    </div>
+
+    <div class="hud-backdrop" x-show="$store.flyout.active" x-transition.opacity @click="$store.flyout.close()"></div>
+
+    <div class="hud-flyout" x-show="$store.flyout.active === 'gearbox'" @click.outside="$store.flyout.close()"
+         x-transition:enter="hud-fly-enter" x-transition:enter-start="hud-fly-enter-start" x-transition:enter-end="hud-fly-enter-end"
+         x-transition:leave="hud-fly-leave" x-transition:leave-start="hud-fly-leave-start" x-transition:leave-end="hud-fly-leave-end">
+      <div class="hud-flyout-header hud-chamfer">
+        <span>Gearbox</span>
+        <button class="hud-flyout-close" @click="$store.flyout.close()">&times;</button>
+      </div>
+      <div class="hud-flyout-body">
     <div class="lifecycle-panel" x-data="lifecyclePanel()">
       <div class="lifecycle-header">
         <span class="lifecycle-title">Mission Control</span>
@@ -582,8 +624,18 @@
         </template>
       </div>
     </div>
+      </div>
+    </div>
 
-    <div class="hooks-grid" x-data="hooksPanel()">
+    <div class="hud-flyout" x-show="$store.flyout.active === 'ops'" @click.outside="$store.flyout.close()"
+         x-transition:enter="hud-fly-enter" x-transition:enter-start="hud-fly-enter-start" x-transition:enter-end="hud-fly-enter-end"
+         x-transition:leave="hud-fly-leave" x-transition:leave-start="hud-fly-leave-start" x-transition:leave-end="hud-fly-leave-end">
+      <div class="hud-flyout-header hud-chamfer">
+        <span>Ops Console</span>
+        <button class="hud-flyout-close" @click="$store.flyout.close()">&times;</button>
+      </div>
+      <div class="hud-flyout-body">
+        <div class="hooks-grid" x-data="hooksPanel()">
 
       <!-- Sleep Control -->
       <div class="hook-group">
@@ -660,7 +712,62 @@
         </div>
       </div>
 
-      <!-- Chaos Monkey -->
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Semantic Codex Lookup</div>
+        <div class="hook-search-row">
+          <input type="text" x-model="codexQuery" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off"
+                 @keydown.enter.prevent="codexSearch()">
+          <button class="hook-btn hook-btn-primary" @click="codexSearch()">Search</button>
+        </div>
+        <div class="hook-codex-results">
+          <template x-if="codexSearching">
+            <div class="hook-codex-placeholder">Searching...</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && !codexQuery">
+            <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
+          </template>
+          <template x-if="!codexSearching && codexResults.length === 0 && codexQuery && codexSearched">
+            <div class="hook-codex-placeholder">No results found.</div>
+          </template>
+          <template x-for="r in codexResults" :key="r.id || r.title">
+            <div class="hook-codex-result">
+              <span x-show="r.score != null" class="hook-codex-result-score" x-text="r.score?.toFixed(3)"></span>
+              <div class="hook-codex-result-title" x-text="r.title || r.key || r.id || 'untitled'"></div>
+              <div class="hook-codex-result-snippet" x-text="(r.snippet || r.text || r.content || '').substring(0, 200)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="hook-group hook-group-wide">
+        <div class="hook-group-header">Action Log</div>
+        <div class="hook-action-log">
+          <template x-if="actionLog.length === 0">
+            <div class="hook-log-placeholder">Actions will appear here.</div>
+          </template>
+          <template x-for="entry in actionLog" :key="entry.id">
+            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
+              <span class="hook-log-time" x-text="entry.time"></span>
+              <span class="hook-log-action" x-text="entry.action"></span>
+              <span class="hook-log-result" x-text="entry.result"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud-flyout" x-show="$store.flyout.active === 'immune'" @click.outside="$store.flyout.close()"
+         x-transition:enter="hud-fly-enter" x-transition:enter-start="hud-fly-enter-start" x-transition:enter-end="hud-fly-enter-end"
+         x-transition:leave="hud-fly-leave" x-transition:leave-start="hud-fly-leave-start" x-transition:leave-end="hud-fly-leave-end">
+      <div class="hud-flyout-header hud-chamfer">
+        <span>Immune System</span>
+        <button class="hud-flyout-close" @click="$store.flyout.close()">&times;</button>
+      </div>
+      <div class="hud-flyout-body">
+        <div class="hooks-grid">
+
       <div class="hook-group" x-data="chaosPanel()" x-init="init()">
         <div class="hook-group-header chaos-header">
           <span>🐒 Chaos Monkey</span>
@@ -696,109 +803,6 @@
         <div x-show="lastResult" class="chaos-result" x-text="lastResult"></div>
       </div>
 
-      <!-- Cognitive Battery -->
-      <div class="hook-group" x-data="cognitivePanel()" x-init="init()">
-        <div class="hook-group-header cognitive-header">
-          <span>Cognitive Battery</span>
-          <span class="alignment-badge" :class="'align-' + alignment.toLowerCase()"
-                x-text="alignment"></span>
-        </div>
-        <div class="hook-status">
-          <span class="hook-status-label">Status:</span>
-          <span class="hook-status-value" x-text="running ? 'Running...' : 'Idle'"></span>
-        </div>
-        <div x-show="lastRun.pass_rate != null" class="hook-status">
-          <span class="hook-status-label">Pass Rate:</span>
-          <span class="hook-status-value" :class="lastRun.pass_rate >= 0.85 ? 'ok' : 'warn'"
-                x-text="lastRun.pass_rate != null ? (lastRun.pass_rate * 100).toFixed(0) + '%' : '--'"></span>
-        </div>
-        <div x-show="lastRun.total" class="hook-status">
-          <span class="hook-status-label">Tests:</span>
-          <span class="hook-status-value" x-text="(lastRun.passed || 0) + '/' + (lastRun.total || 0) + ' passed'"></span>
-        </div>
-        <div x-show="lastRun.elapsed_seconds" class="hook-status">
-          <span class="hook-status-label">Duration:</span>
-          <span class="hook-status-value" x-text="lastRun.elapsed_seconds ? lastRun.elapsed_seconds.toFixed(0) + 's' : '--'"></span>
-        </div>
-        <div class="hook-status">
-          <span class="hook-status-label">Section:</span>
-          <select class="chaos-mode-select" x-model="selectedSection">
-            <option value="">All Sections</option>
-            <option value="architecture">Architecture</option>
-            <option value="self_repair">Self-Repair</option>
-            <option value="epistemic">Epistemic</option>
-            <option value="identity">Identity</option>
-            <option value="personality">Personality</option>
-            <option value="tool_routing">Tool Routing</option>
-            <option value="safety">Safety</option>
-            <option value="knowledge_retrieval">Knowledge</option>
-            <option value="loop_resistance">Loop Resistance</option>
-          </select>
-        </div>
-        <div class="hook-actions">
-          <button class="hook-btn cognitive-run-btn" @click="runBattery()" :disabled="running">
-            <span x-show="!running">Run Battery</span>
-            <span x-show="running">Running...</span>
-          </button>
-          <button class="hook-btn hook-btn-primary" @click="showResults = !showResults" x-show="lastRun.total">
-            <span x-text="showResults ? 'Hide' : 'Details'"></span>
-          </button>
-        </div>
-        <div x-show="showResults && failures.length > 0" class="cognitive-failures">
-          <div class="cognitive-failure-header">Failed Tests:</div>
-          <template x-for="f in failures" :key="f.id">
-            <div class="cognitive-failure-entry">
-              <span class="cognitive-failure-id" x-text="f.id"></span>
-              <span class="cognitive-failure-prompt" x-text="f.prompt.substring(0, 60) + '...'"></span>
-            </div>
-          </template>
-        </div>
-        <div x-show="showResults && bySection" class="cognitive-sections">
-          <div class="cognitive-section-header">By Section:</div>
-          <template x-for="[sec, data] in Object.entries(bySection || {})" :key="sec">
-            <div class="cognitive-section-entry">
-              <span class="cognitive-section-name" x-text="sec"></span>
-              <span class="cognitive-section-score" :class="data.passed === data.total ? 'ok' : 'warn'"
-                    x-text="data.passed + '/' + data.total"></span>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Training Pipeline -->
-      <div class="hook-group" x-data="pipelinePanel()" x-init="init()">
-        <div class="hook-group-header">Training Pipeline</div>
-        <div class="hook-status">
-          <span class="hook-status-label">Status:</span>
-          <span class="hook-status-value" x-text="pipelineStatus"></span>
-        </div>
-        <div x-show="currentStage" class="hook-status">
-          <span class="hook-status-label">Stage:</span>
-          <span class="hook-status-value" x-text="currentStage"></span>
-        </div>
-        <div x-show="alignmentStatus" class="hook-status">
-          <span class="hook-status-label">Alignment:</span>
-          <span class="hook-status-value alignment-badge" :class="'align-' + alignmentStatus.toLowerCase()"
-                x-text="alignmentStatus"></span>
-        </div>
-        <div class="hook-status">
-          <span class="hook-status-label">Options:</span>
-          <div style="display:flex;gap:10px;font-size:12px;">
-            <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
-          </div>
-        </div>
-        <div class="hook-actions">
-          <button class="hook-btn hook-btn-primary" @click="runPipeline()" :disabled="pipelineRunning">
-            <span x-show="!pipelineRunning">Run Pipeline</span>
-            <span x-show="pipelineRunning">Running...</span>
-          </button>
-          <button class="hook-btn cognitive-run-btn" @click="runSmoke()" :disabled="pipelineRunning">
-            Smoke Only
-          </button>
-        </div>
-      </div>
-
-      <!-- Doctor & Immunity -->
       <div class="hook-group hook-group-wide" x-data="doctorPanel()" x-init="init()">
         <div class="hook-group-header">Doctor & Immunity</div>
 
@@ -944,8 +948,120 @@
           </template>
         </div>
       </div>
+        </div>
+      </div>
+    </div>
 
-      <!-- Training Monitor -->
+    <div class="hud-flyout" x-show="$store.flyout.active === 'training'" @click.outside="$store.flyout.close()"
+         x-transition:enter="hud-fly-enter" x-transition:enter-start="hud-fly-enter-start" x-transition:enter-end="hud-fly-enter-end"
+         x-transition:leave="hud-fly-leave" x-transition:leave-start="hud-fly-leave-start" x-transition:leave-end="hud-fly-leave-end">
+      <div class="hud-flyout-header hud-chamfer">
+        <span>Training & Validation</span>
+        <button class="hud-flyout-close" @click="$store.flyout.close()">&times;</button>
+      </div>
+      <div class="hud-flyout-body">
+        <div class="hooks-grid">
+
+      <div class="hook-group" x-data="cognitivePanel()" x-init="init()">
+        <div class="hook-group-header cognitive-header">
+          <span>Cognitive Battery</span>
+          <span class="alignment-badge" :class="'align-' + alignment.toLowerCase()"
+                x-text="alignment"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="running ? 'Running...' : 'Idle'"></span>
+        </div>
+        <div x-show="lastRun.pass_rate != null" class="hook-status">
+          <span class="hook-status-label">Pass Rate:</span>
+          <span class="hook-status-value" :class="lastRun.pass_rate >= 0.85 ? 'ok' : 'warn'"
+                x-text="lastRun.pass_rate != null ? (lastRun.pass_rate * 100).toFixed(0) + '%' : '--'"></span>
+        </div>
+        <div x-show="lastRun.total" class="hook-status">
+          <span class="hook-status-label">Tests:</span>
+          <span class="hook-status-value" x-text="(lastRun.passed || 0) + '/' + (lastRun.total || 0) + ' passed'"></span>
+        </div>
+        <div x-show="lastRun.elapsed_seconds" class="hook-status">
+          <span class="hook-status-label">Duration:</span>
+          <span class="hook-status-value" x-text="lastRun.elapsed_seconds ? lastRun.elapsed_seconds.toFixed(0) + 's' : '--'"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Section:</span>
+          <select class="chaos-mode-select" x-model="selectedSection">
+            <option value="">All Sections</option>
+            <option value="architecture">Architecture</option>
+            <option value="self_repair">Self-Repair</option>
+            <option value="epistemic">Epistemic</option>
+            <option value="identity">Identity</option>
+            <option value="personality">Personality</option>
+            <option value="tool_routing">Tool Routing</option>
+            <option value="safety">Safety</option>
+            <option value="knowledge_retrieval">Knowledge</option>
+            <option value="loop_resistance">Loop Resistance</option>
+          </select>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn cognitive-run-btn" @click="runBattery()" :disabled="running">
+            <span x-show="!running">Run Battery</span>
+            <span x-show="running">Running...</span>
+          </button>
+          <button class="hook-btn hook-btn-primary" @click="showResults = !showResults" x-show="lastRun.total">
+            <span x-text="showResults ? 'Hide' : 'Details'"></span>
+          </button>
+        </div>
+        <div x-show="showResults && failures.length > 0" class="cognitive-failures">
+          <div class="cognitive-failure-header">Failed Tests:</div>
+          <template x-for="f in failures" :key="f.id">
+            <div class="cognitive-failure-entry">
+              <span class="cognitive-failure-id" x-text="f.id"></span>
+              <span class="cognitive-failure-prompt" x-text="f.prompt.substring(0, 60) + '...'"></span>
+            </div>
+          </template>
+        </div>
+        <div x-show="showResults && bySection" class="cognitive-sections">
+          <div class="cognitive-section-header">By Section:</div>
+          <template x-for="[sec, data] in Object.entries(bySection || {})" :key="sec">
+            <div class="cognitive-section-entry">
+              <span class="cognitive-section-name" x-text="sec"></span>
+              <span class="cognitive-section-score" :class="data.passed === data.total ? 'ok' : 'warn'"
+                    x-text="data.passed + '/' + data.total"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="hook-group" x-data="pipelinePanel()" x-init="init()">
+        <div class="hook-group-header">Training Pipeline</div>
+        <div class="hook-status">
+          <span class="hook-status-label">Status:</span>
+          <span class="hook-status-value" x-text="pipelineStatus"></span>
+        </div>
+        <div x-show="currentStage" class="hook-status">
+          <span class="hook-status-label">Stage:</span>
+          <span class="hook-status-value" x-text="currentStage"></span>
+        </div>
+        <div x-show="alignmentStatus" class="hook-status">
+          <span class="hook-status-label">Alignment:</span>
+          <span class="hook-status-value alignment-badge" :class="'align-' + alignmentStatus.toLowerCase()"
+                x-text="alignmentStatus"></span>
+        </div>
+        <div class="hook-status">
+          <span class="hook-status-label">Options:</span>
+          <div style="display:flex;gap:10px;font-size:12px;">
+            <label><input type="checkbox" x-model="dryRun"> Dry Run</label>
+          </div>
+        </div>
+        <div class="hook-actions">
+          <button class="hook-btn hook-btn-primary" @click="runPipeline()" :disabled="pipelineRunning">
+            <span x-show="!pipelineRunning">Run Pipeline</span>
+            <span x-show="pipelineRunning">Running...</span>
+          </button>
+          <button class="hook-btn cognitive-run-btn" @click="runSmoke()" :disabled="pipelineRunning">
+            Smoke Only
+          </button>
+        </div>
+      </div>
+
       <div class="hook-group hook-group-wide" x-data="trainingMonitor()" x-init="init()">
         <div class="hook-group-header training-header">
           Training Monitor
@@ -1039,93 +1155,10 @@
           </div>
         </template>
       </div>
-
-      <!-- Semantic Codex -->
-      <div class="hook-group hook-group-wide">
-        <div class="hook-group-header">Semantic Codex Lookup</div>
-        <div class="hook-search-row">
-          <input type="text" x-model="codexQuery" class="hook-search-input" placeholder="Search the knowledge base..." autocomplete="off"
-                 @keydown.enter.prevent="codexSearch()">
-          <button class="hook-btn hook-btn-primary" @click="codexSearch()">Search</button>
-        </div>
-        <div class="hook-codex-results">
-          <template x-if="codexSearching">
-            <div class="hook-codex-placeholder">Searching...</div>
-          </template>
-          <template x-if="!codexSearching && codexResults.length === 0 && !codexQuery">
-            <div class="hook-codex-placeholder">Enter a query to search GAIA's semantic codex.</div>
-          </template>
-          <template x-if="!codexSearching && codexResults.length === 0 && codexQuery && codexSearched">
-            <div class="hook-codex-placeholder">No results found.</div>
-          </template>
-          <template x-for="r in codexResults" :key="r.id || r.title">
-            <div class="hook-codex-result">
-              <span x-show="r.score != null" class="hook-codex-result-score" x-text="r.score?.toFixed(3)"></span>
-              <div class="hook-codex-result-title" x-text="r.title || r.key || r.id || 'untitled'"></div>
-              <div class="hook-codex-result-snippet" x-text="(r.snippet || r.text || r.content || '').substring(0, 200)"></div>
-            </div>
-          </template>
         </div>
       </div>
-
-      <!-- Change Log -->
-      <div class="hook-group hook-group-wide" x-data="changelogPanel()" x-init="init()">
-        <div class="hook-group-header">Change Log</div>
-        <div class="changelog-filters">
-          <select class="chaos-mode-select" x-model="serviceFilter" @change="load()">
-            <option value="">All Services</option>
-            <option value="gaia-core">gaia-core</option>
-            <option value="gaia-web">gaia-web</option>
-            <option value="gaia-common">gaia-common</option>
-            <option value="gaia-study">gaia-study</option>
-            <option value="gaia-mcp">gaia-mcp</option>
-            <option value="gaia-audio">gaia-audio</option>
-            <option value="multi">multi</option>
-          </select>
-          <select class="chaos-mode-select" x-model="typeFilter" @change="load()">
-            <option value="">All Types</option>
-            <option value="feat">feat</option>
-            <option value="fix">fix</option>
-            <option value="refactor">refactor</option>
-            <option value="promote">promote</option>
-            <option value="docs">docs</option>
-            <option value="config">config</option>
-            <option value="manual">manual</option>
-          </select>
-        </div>
-        <div class="changelog-timeline">
-          <template x-if="entries.length === 0">
-            <div class="hook-codex-placeholder">No changelog entries yet.</div>
-          </template>
-          <template x-for="e in entries" :key="e.id">
-            <div class="changelog-entry">
-              <span class="changelog-icon" x-text="typeIcon(e.type)"></span>
-              <span class="changelog-service" x-text="e.service"></span>
-              <span class="changelog-summary" x-text="e.summary"></span>
-              <span class="changelog-meta" x-text="e.timestamp?.substring(0, 16).replace('T', ' ')"></span>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Hook Action Log -->
-      <div class="hook-group hook-group-wide">
-        <div class="hook-group-header">Action Log</div>
-        <div class="hook-action-log">
-          <template x-if="actionLog.length === 0">
-            <div class="hook-log-placeholder">Actions will appear here.</div>
-          </template>
-          <template x-for="entry in actionLog" :key="entry.id">
-            <div class="hook-log-entry" :class="entry.isError ? 'error' : 'success'">
-              <span class="hook-log-time" x-text="entry.time"></span>
-              <span class="hook-log-action" x-text="entry.action"></span>
-              <span class="hook-log-result" x-text="entry.result"></span>
-            </div>
-          </template>
-        </div>
-      </div>
-
     </div>
+
   </section>
 
   <!-- ── Files View ── -->
@@ -1586,6 +1619,7 @@
       <button class="logs-subtab" :class="logsTab === 'mcp' ? 'active' : ''" @click="logsTab = 'mcp'">MCP</button>
       <button class="logs-subtab" :class="logsTab === 'study' ? 'active' : ''" @click="logsTab = 'study'">Study</button>
       <button class="logs-subtab" :class="logsTab === 'discord' ? 'active' : ''" @click="logsTab = 'discord'">Discord</button>
+      <button class="logs-subtab" :class="logsTab === 'changelog' ? 'active' : ''" @click="logsTab = 'changelog'">Change Log</button>
       <div style="flex:1"></div>
       <a href="http://localhost:5601" target="_blank" rel="noopener" class="logs-subtab logs-kibana-link" title="Open Kibana (ELK log explorer)">Kibana ↗</a>
     </div>
@@ -1630,8 +1664,50 @@
       </div>
     </div>
 
+    <!-- Change Log sub-tab -->
+    <template x-if="logsTab === 'changelog'">
+      <div class="hook-group hook-group-wide" x-data="changelogPanel()" x-init="init()">
+        <div class="hook-group-header">Change Log</div>
+        <div class="changelog-filters">
+          <select class="chaos-mode-select" x-model="serviceFilter" @change="load()">
+            <option value="">All Services</option>
+            <option value="gaia-core">gaia-core</option>
+            <option value="gaia-web">gaia-web</option>
+            <option value="gaia-common">gaia-common</option>
+            <option value="gaia-study">gaia-study</option>
+            <option value="gaia-mcp">gaia-mcp</option>
+            <option value="gaia-audio">gaia-audio</option>
+            <option value="multi">multi</option>
+          </select>
+          <select class="chaos-mode-select" x-model="typeFilter" @change="load()">
+            <option value="">All Types</option>
+            <option value="feat">feat</option>
+            <option value="fix">fix</option>
+            <option value="refactor">refactor</option>
+            <option value="promote">promote</option>
+            <option value="docs">docs</option>
+            <option value="config">config</option>
+            <option value="manual">manual</option>
+          </select>
+        </div>
+        <div class="changelog-timeline">
+          <template x-if="entries.length === 0">
+            <div class="hook-codex-placeholder">No changelog entries yet.</div>
+          </template>
+          <template x-for="e in entries" :key="e.id">
+            <div class="changelog-entry">
+              <span class="changelog-icon" x-text="typeIcon(e.type)"></span>
+              <span class="changelog-service" x-text="e.service"></span>
+              <span class="changelog-summary" x-text="e.summary"></span>
+              <span class="changelog-meta" x-text="e.timestamp?.substring(0, 16).replace('T', ' ')"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
     <!-- Service log sub-tabs -->
-    <template x-if="logsTab !== 'generation'">
+    <template x-if="logsTab !== 'generation' && logsTab !== 'changelog'">
       <div class="logs-svc-panel" x-data="serviceLogsPanel()" x-init="switchService(logsTab)" x-effect="switchService(logsTab)">
         <div class="gen-toolbar">
           <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Disconnected'"></span>
@@ -1667,6 +1743,6 @@
     </template>
   </section>
 
-  <script src="/static/app.js?v=20260719a"></script>
+  <script src="/static/app.js?v=20260727a"></script>
 </body>
 </html>

@@ -118,6 +118,25 @@ document.addEventListener('alpine:init', () => {
     discordTitle: 'Discord connectivity',
   });
 
+  // Commands view flyout overlays (m610): single-active panel, toggled from the
+  // HUD icon rail. status.<id> drives each rail icon's nominal/attention/alarm
+  // dot, written by that group's own existing poll routine (see hooksPanel,
+  // lifecyclePanel, doctorPanel, chaosPanel, trainingMonitor below).
+  Alpine.store('flyout', {
+    active: null,
+    status: { gearbox: 'nominal', ops: 'nominal', immune: 'nominal', training: 'nominal' },
+    _rank: { nominal: 0, attention: 1, alarm: 2 },
+    open(id) { this.active = id; },
+    close() { this.active = null; },
+    toggle(id) { this.active = (this.active === id) ? null : id; },
+    // Raise-only write: a second signal source for the same dot (e.g. chaos
+    // serenity alongside doctor alarms both feed 'immune') can bump severity
+    // up but never silently overwrite a worse state a sibling poll just set.
+    escalate(id, severity) {
+      if (this._rank[severity] > this._rank[this.status[id]]) this.status[id] = severity;
+    },
+  });
+
   // ── Shared Chat Store (Multi-Conversation) ────────────────────────────
   // Single source of truth for all conversations, shared between Chat tab and Dashboard panel.
   const CONV_STORAGE_KEY = 'gaia_conversations';
@@ -3118,6 +3137,10 @@ function lifecyclePanel() {
         // Fetch history
         const hResp = await fetch('/api/system/lifecycle/history');
         if (hResp.ok) this.history = await hResp.json();
+
+        // m610: rail status dot — invariant violation or mid-transition = attention
+        Alpine.store('flyout').status.gearbox =
+          !this.singleHolderOk ? 'alarm' : (this.transitioning ? 'attention' : 'nominal');
       } catch { /* silent */ }
     },
 
@@ -3439,6 +3462,9 @@ function hooksPanel() {
 
     async refreshAll() {
       await Promise.all([this.refreshSleep(), this.refreshGpu(), this.refreshWakeConfig()]);
+      // m610: rail status dot — unreachable sleep/GPU state = attention
+      Alpine.store('flyout').status.ops =
+        (this.gpuOwner === 'unreachable') ? 'attention' : 'nominal';
     },
 
     async action(endpoint) {
@@ -3560,6 +3586,10 @@ function chaosPanel() {
       try {
         const r = await fetch('/api/chaos/serenity');
         if (r.ok) this.serenity = await r.json();
+        // m610: rail status dot — raise-only, doctorPanel's poll owns the reset
+        if (this.serenity && this.serenity.serene === false) {
+          Alpine.store('flyout').escalate('immune', 'attention');
+        }
       } catch (e) {}
     },
 
@@ -3895,6 +3925,11 @@ function doctorPanel() {
           }
         } catch {}
       }
+
+      // m610: rail status dot — authoritative reset each poll (chaosPanel's
+      // serenity check only escalates, never overwrites this with 'nominal')
+      Alpine.store('flyout').status.immune =
+        (this.alarmCount > 0) ? 'alarm' : (this.irritationCount > 0 ? 'attention' : 'nominal');
     },
 
     async toggleIrritations() {
@@ -4136,6 +4171,10 @@ function trainingMonitor() {
           this.avgLoss = null;
         }
       }
+
+      // m610: rail status dot
+      Alpine.store('flyout').status.training =
+        (this.state === 'failed') ? 'alarm' : (this.state === 'training' ? 'attention' : 'nominal');
     },
 
     toggleLog() {
