@@ -4,6 +4,8 @@
 
 GAIA is a self-hosted, containerized AI system built around a locally-served language model. She operates as a service-oriented architecture where each service owns a single responsibility — cognition, inference, tools, learning, audio, and interface — coordinated by an orchestrator that manages GPU resources and the system-wide Consciousness Matrix.
 
+**Blog**: [azraeltruthsay.github.io/gaia](https://azraeltruthsay.github.io/gaia/) — dispatches from the project, with a link to GAIA's Grotto on Discord.
+
 ## Hardware
 
 - **GPU**: NVIDIA RTX 5080 (16 GB VRAM, Blackwell sm_120)
