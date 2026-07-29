@@ -468,6 +468,31 @@ def _significance_from_evidence(
     return 1
 
 
+# yswm: small-model reply sometimes echoes the user's own greeting-vocative
+# back verbatim as its opening ("Good morning, GAIA." -> "Good morning, GAIA.
+# How can I help you today?"), treating her own name as if it were the
+# user's. This is a POST-generation strip, not a new prompt instruction —
+# CLAUDE.md's cognitive-architecture note and this file's own casual-mode
+# comments (search "backfire") both document that in-prompt behavioral
+# instructions backfire on Gemma4-E4B for this exact conversational path;
+# negative framing especially makes it fixate on the named concept. A
+# process-level fix avoids repeating that known failure mode.
+def _strip_leading_input_echo(final_response: str, user_input: str) -> str:
+    """Strip a leading near-verbatim echo of the user's own message, but
+    only when that message addresses GAIA by name — a narrow, low-risk
+    trigger that leaves ordinary replies untouched."""
+    if not final_response or not user_input or "gaia" not in user_input.lower():
+        return final_response
+    ui = user_input.strip().rstrip(".!?")
+    fr = final_response.strip()
+    if not ui or not fr.lower().startswith(ui.lower()):
+        return final_response
+    rest = fr[len(ui):].lstrip(" .,!?")
+    if not rest:
+        return final_response
+    return rest[0].upper() + rest[1:]
+
+
 # ── Orchestrator ────────────────────────────────────────────────────────
 
 def deliberate(
@@ -552,6 +577,7 @@ def deliberate(
     elapsed_ms = (time.time() - t0) * 1000.0
 
     thinking, final_response, fallback_used = _split_think_and_response(raw)
+    final_response = _strip_leading_input_echo(final_response, user_input)
     voice_evidence = _detect_voice_evidence(thinking)
     forbidden_hits = _detect_forbidden_phrases(final_response)
     confabulation_flags = _detect_confabulation(final_response)
