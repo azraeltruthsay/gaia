@@ -269,6 +269,42 @@ class DeliberationResult:
 
 _UNCLOSED_THINK_RE = re.compile(r"<think>(.*)", re.DOTALL | re.IGNORECASE)
 
+# lr3u: labeled scaffold recital — the model skips <think> tags entirely and
+# instead narrates its Observe/Recall/Verify/Draft/Critique reasoning as the
+# whole visible completion (observed live 2026-07-08, 2026-06-30, 2026-07-29).
+_SCAFFOLD_LABEL_RE = re.compile(
+    r"^\s*(?:Observe|Recall|Verify|Draft|Critique|Check)\s*:",
+    re.IGNORECASE | re.MULTILINE,
+)
+_SCAFFOLD_DRAFT_RE = re.compile(
+    r"(?:^|\n)\s*Draft\s*:\s*(.*?)(?=\n\s*(?:Observe|Recall|Verify|Critique|Check)\s*:|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _extract_draft_from_scaffold(raw: str) -> Optional[str]:
+    """lr3u: salvage the actual candidate answer out of a leaked scaffold.
+
+    When the model narrates its reasoning out loud instead of wrapping it in
+    <think>, the naive fallback surfaces the ENTIRE scaffold to the user —
+    including quoted forbidden-phrase examples from the model's own "don't
+    say X" reasoning, which then spuriously trips the confabulation/
+    forbidden-phrase gate on top of the raw text already being wrong. If the
+    raw text carries at least two labeled scaffold markers, pull out just the
+    "Draft:" content (the model's actual answer) instead. Returns None if
+    this doesn't look like a scaffold recital, so ordinary fallback text is
+    left untouched.
+    """
+    if len(_SCAFFOLD_LABEL_RE.findall(raw)) < 2:
+        return None
+    m = _SCAFFOLD_DRAFT_RE.search(raw)
+    if not m:
+        return None
+    draft = m.group(1).strip()
+    if len(draft) >= 2 and draft[0] in "\"“" and draft[-1] in "\"”":
+        draft = draft[1:-1].strip()
+    return draft or None
+
 
 def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
     """Pull <think>...</think> out of the raw output.
@@ -325,6 +361,12 @@ def _split_think_and_response(raw: str) -> Tuple[str, str, bool]:
             # No pre-think text; degrade to using the thinking as response so
             # the user sees something instead of an empty bubble.
             return thinking, thinking, True
+        # lr3u: no <think> tag at all — check for a labeled scaffold recital
+        # (Observe/Recall/Verify/Draft/Critique narrated as the whole
+        # completion) before falling back to surfacing the raw text verbatim.
+        salvaged = _extract_draft_from_scaffold(raw)
+        if salvaged:
+            return raw.strip(), salvaged, True
         return "", raw.strip(), True
     thinking = m.group(1).strip()
     final = (raw[:m.start()] + raw[m.end():]).strip()
