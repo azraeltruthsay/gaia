@@ -986,6 +986,21 @@ async def delete_session(session_id: str):
     # Remove from active sessions
     sm.reset_session(session_id)
 
+    # olqt: reset_session() only clears the active-history record — the RAG
+    # vector-store file survives on its own, so old conversation content
+    # stays retrievable even after a "delete". Purge it too, and evict any
+    # cached in-memory indexer instance (otherwise a live cached object would
+    # just get resaved on the next turn, silently resurrecting what we just
+    # deleted).
+    try:
+        from gaia_core.memory.session_history_indexer import SessionHistoryIndexer, _DEFAULT_PERSIST_DIR
+        SessionHistoryIndexer._instances.pop(session_id, None)
+        vec_path = os.path.join(_DEFAULT_PERSIST_DIR, f"{session_id}.json")
+        if os.path.exists(vec_path):
+            os.remove(vec_path)
+    except Exception:
+        logger.warning("delete_session: vector purge failed for %s", session_id, exc_info=True)
+
     return {"status": "deleted", "session_id": session_id}
 
 

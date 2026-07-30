@@ -212,6 +212,16 @@ class DiscordInterface:
                 )
                 return
 
+            # olqt: bot.process_commands() below only runs for non-DM messages
+            # (guild), so a "!"-prefixed DM message used to fall straight
+            # through to should_respond/_handle_message and get forwarded to
+            # gaia-core as ordinary chat text — !call/!hangup/!translate/
+            # !forget never actually fired in a DM. Short-circuit into the
+            # command framework here instead.
+            if is_dm and message.content.strip().startswith(bot.command_prefix):
+                await bot.process_commands(message)
+                return
+
             should_respond = False
 
             if is_dm:
@@ -447,6 +457,60 @@ class DiscordInterface:
                 except ImportError:
                     logger.warning("!translate error: %s", exc)
                 await ctx.send("An error occurred during translation.")
+
+        @bot.command(name="forget")
+        async def forget_dm(ctx):
+            """Delete all of GAIA's own messages in this DM and reset her memory of it.
+
+            olqt: Discord bots cannot delete another user's messages in a DM
+            channel (bulk-delete is guild-only; DM deletion is per-message and
+            only ever covers the bot's own messages) — so this only ever
+            touches GAIA's side. The human deletes their own messages
+            separately. Bundled with a gaia-core session + vector-memory
+            reset so it's a genuine fresh start, not just a tidied view.
+            """
+            if ctx.guild is not None:
+                await ctx.send("This only works in a DM.")
+                return
+
+            to_delete = [m async for m in ctx.channel.history(limit=None) if m.author == bot.user]
+            if not to_delete:
+                await ctx.send("Nothing to delete here.")
+                return
+
+            warn = await ctx.send(
+                f"This will permanently delete {len(to_delete)} of my messages in this "
+                f"DM and reset my memory of our conversation. React ✅ within 60s to confirm."
+            )
+            await warn.add_reaction("✅")
+
+            def _confirmed(reaction, user):
+                return (reaction.message.id == warn.id and user.id == ctx.author.id
+                        and str(reaction.emoji) == "✅")
+
+            try:
+                await bot.wait_for("reaction_add", timeout=60.0, check=_confirmed)
+            except asyncio.TimeoutError:
+                await ctx.send("Timed out — nothing deleted.")
+                return
+
+            deleted = 0
+            for msg in to_delete:
+                try:
+                    await msg.delete()
+                    deleted += 1
+                except discord.HTTPException:
+                    await asyncio.sleep(2)  # simple backoff, then keep going
+                await asyncio.sleep(0.5)  # stay well under DM delete rate limits
+
+            session_id = f"discord_dm_{ctx.author.id}"
+            try:
+                core_client = await get_core_client()
+                await core_client.delete(f"{self.core_endpoint}/api/sessions/{session_id}")
+            except Exception:
+                logger.warning("!forget: session reset call failed for %s", session_id, exc_info=True)
+
+            await ctx.send(f"Done — deleted {deleted} messages and reset my memory of this conversation.")
 
         self._bot = bot
         global _bot
