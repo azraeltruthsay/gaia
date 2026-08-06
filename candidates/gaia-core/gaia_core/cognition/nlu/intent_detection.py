@@ -19,6 +19,95 @@ from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifie
 
 logger = logging.getLogger("GAIA.IntentDetection")
 
+# ── Named-work detection (shared by fragmentation heuristic + router) ──
+
+# Well-known works that are likely to be lengthy
+_KNOWN_WORKS = [
+    "the raven",
+    "jabberwocky",
+    "ozymandias",
+    "the road not taken",
+    "invictus",
+    "howl",
+    "if—",
+    "if by rudyard",
+    "do not go gentle",
+    "stopping by woods",
+    "the wasteland",
+    "kubla khan",
+    "rime of the ancient mariner",
+    "the tyger",
+    "to be or not to be",
+    "hamlet",
+    "romeo and juliet",
+    "macbeth",
+    "casey at the bat",
+    "paul revere",
+    "charge of the light brigade",
+    "gunga din",
+    "annabel lee",
+    "the bells",
+    # GAIA core documents
+    "gaia constitution",
+    "the constitution",
+    "declaration of artisanal",
+    "artisanal intelligence",
+    "layered identity",
+    "identity model",
+    "coalition of minds",
+    "mindscape manifest",
+    "cognition protocol",
+    "core blueprint",
+    "gaia core blueprint",
+]
+
+
+def _has_word_or_phrase(needles, haystack: str) -> bool:
+    """Word-boundary match for single words, substring match for phrases."""
+    for n in needles:
+        n_clean = n.strip()
+        if " " in n_clean:
+            if n_clean in haystack:
+                return True
+        else:
+            if re.search(r'\b' + re.escape(n_clean) + r'\b', haystack):
+                return True
+    return False
+
+
+def _has_named_work_signal(text: str) -> bool:
+    """True if the text identifies a SPECIFIC, named work rather than a
+    generic form ("a haiku", "a poem") with no real-world referent.
+
+    Recitation of a named work legitimately needs faithful sourcing; a
+    generic form request has nothing to fetch — GAIA should just compose
+    it. Without this gate, "recite a haiku" and "recite Jabberwocky" were
+    indistinguishable and both triggered the same web-fetch pipeline.
+    """
+    lowered = (text or "").lower()
+
+    if _has_word_or_phrase(_KNOWN_WORKS, lowered):
+        return True
+
+    # Quoted title: recite "Ozymandias"
+    if re.search(r'["‘’“”\']([^"\'‘’“”]{3,80})["‘’“”\']', text or ""):
+        return True
+
+    # Author attribution: "... by Edgar Allan Poe"
+    if re.search(r'\bby\s+[A-Z][\w.]*(?:\s+[A-Z][\w.]*){0,3}', text or ""):
+        return True
+
+    # Capitalized title after a recitation verb: recite The Raven
+    # NOTE: match "recite" case-insensitively but keep [A-Z] case-SENSITIVE
+    # (a global IGNORECASE flag here would make [A-Z] match lowercase too,
+    # defeating the whole point of the capitalization check — see the
+    # pre-existing bug this replaces at the old rule-4 title_pattern below).
+    if re.search(r'(?i:recite)\s+["\']?([A-Z][^"\'.]+)["\']?', text or ""):
+        return True
+
+    return False
+
+
 # ── Nano injection confirmation ─────────────────────────────────────────
 
 # Sovereign Duality: use Core for entity extraction (Nano deprecated).
@@ -366,46 +455,6 @@ def _detect_fragmentation_request(text: str) -> bool:
         "blueprint",
     ]
 
-    # Well-known works that are likely to be lengthy
-    known_works = [
-        "the raven",
-        "jabberwocky",
-        "ozymandias",
-        "the road not taken",
-        "invictus",
-        "howl",
-        "if—",
-        "if by rudyard",
-        "do not go gentle",
-        "stopping by woods",
-        "the wasteland",
-        "kubla khan",
-        "rime of the ancient mariner",
-        "the tyger",
-        "to be or not to be",
-        "hamlet",
-        "romeo and juliet",
-        "macbeth",
-        "casey at the bat",
-        "paul revere",
-        "charge of the light brigade",
-        "gunga din",
-        "annabel lee",
-        "the bells",
-        # GAIA core documents
-        "gaia constitution",
-        "the constitution",
-        "declaration of artisanal",
-        "artisanal intelligence",
-        "layered identity",
-        "identity model",
-        "coalition of minds",
-        "mindscape manifest",
-        "cognition protocol",
-        "core blueprint",
-        "gaia core blueprint",
-    ]
-
     # Check for explicit recitation verbs
     has_recitation_verb = any(v in lowered for v in recitation_verbs)
 
@@ -416,24 +465,14 @@ def _detect_fragmentation_request(text: str) -> bool:
     # like "verse" don't false-positive on "in-universe" (the substring case
     # that wrongly tagged D&D queries as recitation requests). Multi-word
     # entries get plain substring matching since boundary regex on phrases
-    # is brittle.
-    def _has_word_or_phrase(needles, haystack):
-        for n in needles:
-            n_clean = n.strip()
-            if " " in n_clean:
-                if n_clean in haystack:
-                    return True
-            else:
-                if re.search(r'\b' + re.escape(n_clean) + r'\b', haystack):
-                    return True
-        return False
-
+    # is brittle. (_has_word_or_phrase and _KNOWN_WORKS are module-level —
+    # shared with _has_named_work_signal above.)
     has_work_type = _has_word_or_phrase(work_types, lowered)
 
     # Known works are mostly phrases (poem titles) — substring is fine for
     # them since "the raven" or "jabberwocky" don't have the same boundary
     # issue. But apply word-boundary to single-word entries too.
-    has_known_work = _has_word_or_phrase(known_works, lowered)
+    has_known_work = _has_word_or_phrase(_KNOWN_WORKS, lowered)
 
     # Surgical/partial indicators — requesting a specific part of a work
     # is comprehension, NOT full recitation. These should route to the
@@ -456,17 +495,24 @@ def _detect_fragmentation_request(text: str) -> bool:
         return False
 
     # Decision logic:
-    # 1. Explicit recitation verb + work type = fragmentation
-    # 2. Long-form modifier + work type = fragmentation
+    # 1. Explicit recitation verb + work type + a NAMED work = fragmentation
+    # 2. Long-form modifier + work type + a NAMED work = fragmentation
     # 3. Known work (regardless of verb) = fragmentation
     # 4. Recitation verb + known work = fragmentation
+    #
+    # Rules 1 & 2 additionally require _has_named_work_signal: a bare
+    # "recite a poem"/"recite a haiku" has no real-world referent to fetch —
+    # GAIA should compose it, not web-fetch it. Without this gate, generic
+    # form requests were indistinguishable from "recite Jabberwocky" and
+    # both triggered the same (unvalidated) web-fetch pipeline.
+    has_named_work = _has_named_work_signal(text)
 
-    if has_recitation_verb and has_work_type:
-        logger.debug("Fragmentation detected: recitation verb + work type")
+    if has_recitation_verb and has_work_type and has_named_work:
+        logger.debug("Fragmentation detected: recitation verb + work type + named work")
         return True
 
-    if has_long_form and has_work_type:
-        logger.debug("Fragmentation detected: long-form modifier + work type")
+    if has_long_form and has_work_type and has_named_work:
+        logger.debug("Fragmentation detected: long-form modifier + work type + named work")
         return True
 
     if has_known_work:
@@ -483,12 +529,9 @@ def _detect_fragmentation_request(text: str) -> bool:
         return True
 
     # Additional pattern: "recite [title]" without explicit work type
-    if has_recitation_verb:
-        # Match quoted strings or capitalized sequences after recite verbs
-        title_pattern = r'recite\s+["\']?([A-Z][^"\'\.]+)["\']?'
-        if re.search(title_pattern, text, re.IGNORECASE):
-            logger.debug("Fragmentation detected: recite + title pattern")
-            return True
+    if has_recitation_verb and has_named_work:
+        logger.debug("Fragmentation detected: recite + named work signal")
+        return True
 
     return False
 
@@ -861,6 +904,13 @@ def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fa
                 if _embed_intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
                     logger.info("Embed intent '%s' (%.3f) lacks file keywords; downgrading to 'chat'.", _embed_intent, _embed_score)
                     return "chat"
+                # Named-work guard: "recitation" without an identifiable named
+                # work ("recite a haiku" vs. "recite Jabberwocky") has nothing
+                # real to fetch — remap to brainstorming so Core just composes
+                # it instead of web-fetching an unrelated page (GAIA_Project-9n8z).
+                if _embed_intent == "recitation" and not _has_named_work_signal(text):
+                    logger.info("Embed intent 'recitation' (%.3f) has no named-work signal; downgrading to 'brainstorming'.", _embed_score)
+                    return "brainstorming"
                 logger.info("Embed intent classification (authoritative): %s (score=%.3f)", _embed_intent, _embed_score)
                 return _embed_intent
             elif _embed_intent == "injection":
@@ -908,6 +958,9 @@ def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fa
         if _embed_intent in {"read_file", "write_file", "find_file"} and not _mentions_file_like_action(text):
             logger.info("Embed intent %s rejected (no file keywords): treating as 'chat'", _embed_intent)
             return "chat"
+        if _embed_intent == "recitation" and not _has_named_work_signal(text):
+            logger.info("Tentative embed intent 'recitation' (%.3f) has no named-work signal; downgrading to 'brainstorming'.", _embed_score)
+            return "brainstorming"
         logger.info("Embed intent accepted (post-heuristic): %s (score=%.3f)", _embed_intent, _embed_score)
         return _embed_intent
 
@@ -922,6 +975,9 @@ def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fa
     model = lite_llm
     if model is not None and not _is_llama_cpp_instance(model):
         intent = _run_llm_intent_classification(model, text, probe_context)
+        if intent == "recitation" and not _has_named_work_signal(text):
+            logger.info("LLM intent 'recitation' has no named-work signal; downgrading to 'brainstorming'.")
+            intent = "brainstorming"
         if intent != "other":
             logger.info(f"Model intent detection: {intent}")
             return intent

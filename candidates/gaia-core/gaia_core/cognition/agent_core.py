@@ -2760,44 +2760,49 @@ class AgentCore:
                 packet.content.original_prompt = user_input
 
             # ── Recitation Pipeline ────────────────────────────────────
-            # When the classifier detects intent=recitation, fetch the source
-            # material and stream it directly.  Follow-up questions about
-            # already-recited content are classified as "comprehension" by the
-            # embedding classifier and go through the normal cognitive pipeline.
+            # When the classifier detects intent=recitation (only reachable
+            # now for requests naming a specific work — see
+            # _has_named_work_signal in nlu/intent_detection.py), fetch the
+            # validated source material and stream it directly.  Follow-up
+            # questions about already-recited content are classified as
+            # "comprehension" by the embedding classifier and go through the
+            # normal cognitive pipeline.
+            #
+            # Single retrieval path: _web_retrieve_for_recitation builds a
+            # clean search query and runs _validate_recitation_content on
+            # every candidate before accepting it (GAIA_Project-9n8z — the
+            # old _fetch_recitation_source streamed the first hit verbatim
+            # with no validation at all, which is how a poets.org lesson
+            # plan got recited as if it were a poem).
             if plan.intent == "recitation":
                 try:
                     self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
-                    _recitation_text = self._fetch_recitation_source(user_input)
-                    if _recitation_text:
-                        # Direct stream: skip the full cognitive pipeline.
-                        # Extract title and clean body from the retrieved text.
-                        _lines = _recitation_text.strip().split('\n')
-                        _title_line = ""
-                        _source_line = ""
-                        _body_lines = []
-                        for _l in _lines:
-                            if _l.startswith("[Retrieved Document"):
-                                _title_line = _l.replace("[Retrieved Document — ", "").rstrip("]")
-                            elif _l.startswith("Source:"):
-                                _source_line = _l
-                            elif _l.strip():
-                                _body_lines.append(_l)
-                        _body = "\n".join(_body_lines)
+                    _recitation_doc = self._web_retrieve_for_recitation(user_input, session_id)
+                    if _recitation_doc:
+                        _title_line = _recitation_doc.get("title", "")
+                        _body = (_recitation_doc.get("content", "") or "").strip()
                         _intro = f"Here is **{_title_line or 'the requested text'}**:\n\n"
-                        _attribution = f"\n\n---\n*{_source_line}*" if _source_line else ""
 
                         self.logger.info("Recitation pipeline: direct streaming %d chars", len(_body))
-                        yield {"type": "token", "value": _intro + _body + _attribution}
+                        yield {"type": "token", "value": _intro + _body}
                         yield {"type": "flush"}
 
                         # Finalize the packet and yield it for Discord/web consumers
                         import gaia_common.protocols.cognition_packet as _cp
-                        packet.response.candidate = _intro + _body + _attribution
+                        packet.response.candidate = _intro + _body
                         packet.response.confidence = 1.0
                         packet.status.state = _cp.PacketState.COMPLETED
                         self.session_manager.add_message(session_id, "assistant", packet.response.candidate)
                         yield {"type": "packet", "value": packet.to_dict()}
                         return
+                    else:
+                        # No validated source found for a request that DOES
+                        # name a specific work — don't keep treating this as
+                        # "recitation" (that forces temperature=0.0 later,
+                        # inviting confabulation with no source to be
+                        # faithful to). Let Core answer honestly instead.
+                        self.logger.info("Recitation pipeline: no validated source found — downgrading intent to comprehension")
+                        plan.intent = "comprehension"
                 except Exception:
                     self.logger.warning("Recitation pipeline failed — falling through to cognitive pipeline", exc_info=True)
 
@@ -6214,100 +6219,6 @@ class AgentCore:
         """Legacy internal wrapper."""
         return self.generate_instant_reflex(packet)
 
-    def _fetch_recitation_source(self, user_input: str) -> str:
-        """Fetch the actual source text for a recitation request.
-
-        Pipeline: local cache check → web_search → web_fetch → save locally.
-        Checks /knowledge/research/ first to avoid redundant web fetches
-        when the text was already retrieved in a previous turn.
-
-        Returns the cleaned document text, or empty string on failure.
-        """
-        import os
-        import glob
-
-        # 0. Check local cache first — may already have it from a previous turn
-        try:
-            research_dir = "/knowledge/research"
-            if os.path.isdir(research_dir):
-                # Extract key terms from user input for matching
-                query_lower = user_input.lower()
-                for cached_file in glob.glob(os.path.join(research_dir, "*.txt")):
-                    fname = os.path.basename(cached_file).lower().replace(".txt", "").replace("-", " ").replace("_", " ")
-                    # Match if any significant word from the filename appears in the query
-                    fname_words = [w for w in fname.split() if len(w) > 3]
-                    if fname_words and any(w in query_lower for w in fname_words):
-                        with open(cached_file, "r") as f:
-                            cached_text = f.read()
-                        if len(cached_text) > 50:
-                            self.logger.info("Recitation: using cached source from %s", cached_file)
-                            return cached_text
-        except Exception:
-            self.logger.debug("Recitation: local cache check failed", exc_info=True)
-
-        # 1. Search for the source material (web fallback)
-        try:
-            search_result = mcp_client.call_jsonrpc("web_search", {
-                "query": user_input,
-                "content_type": "poem",
-                "max_results": 3,
-            }, timeout=10)
-            results = search_result.get("response", {}).get("result", {}).get("results", [])
-            if not results:
-                self.logger.info("Recitation: no web search results")
-                return ""
-        except Exception as e:
-            self.logger.warning("Recitation: web_search failed: %s", e)
-            return ""
-
-        # 2. Pick the best URL — prefer clean poem pages by domain priority
-        _PREFERRED_DOMAINS = ["poetryfoundation.org", "poets.org", "wikisource.org"]
-        best_url = ""
-        for preferred in _PREFERRED_DOMAINS:
-            for r in results:
-                if preferred in r.get("domain", ""):
-                    best_url = r.get("url", "")
-                    break
-            if best_url:
-                break
-        if not best_url and results:
-            best_url = results[0].get("url", "")
-        if not best_url:
-            return ""
-
-        # 3. Fetch the full page content
-        try:
-            self.logger.info("Recitation: fetching %s", best_url)
-            fetch_result = mcp_client.call_jsonrpc("web_fetch", {
-                "url": best_url,
-            }, timeout=15)
-            content = fetch_result.get("response", {}).get("result", {}).get("content", "")
-            title = fetch_result.get("response", {}).get("result", {}).get("title", "")
-            if not content:
-                self.logger.warning("Recitation: web_fetch returned empty content")
-                return ""
-        except Exception as e:
-            self.logger.warning("Recitation: web_fetch failed: %s", e)
-            return ""
-
-        # 4. Clean: truncate to reasonable size for RAG injection
-        # Most poems are < 5000 chars; cap at 8000 to leave room in context
-        clean_text = content.strip()[:8000]
-
-        # 5. Save locally for future RAG (non-blocking, best-effort)
-        try:
-            safe_title = "".join(c if c.isalnum() or c in " -_" else "" for c in title)[:60].strip()
-            save_path = f"/knowledge/research/{safe_title or 'recitation'}.txt"
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, "w") as f:
-                f.write(f"# {title}\nSource: {best_url}\n\n{clean_text}")
-            self.logger.info("Recitation: saved to %s (%d chars)", save_path, len(clean_text))
-        except Exception:
-            self.logger.debug("Recitation: failed to save locally", exc_info=True)
-
-        # 6. Format for RAG injection
-        return f"[Retrieved Document — {title}]\nSource: {best_url}\n\n{clean_text}"
-
     def _nano_triage(self, user_input: str) -> str:
         """
         Use the Nano model (0.5B) to perform a quick triage of the request.
@@ -7106,9 +7017,39 @@ RESULT: COMPLEX (reason: <brief reason>)
             q += " full text"
         return q
 
+    # Marks a page as being ABOUT a work (a lesson plan, study guide,
+    # discussion aid) rather than the work itself. Domain trust doesn't
+    # disambiguate this — poets.org hosts both poem pages and lesson-plan
+    # pages (GAIA_Project-9n8z: "recite a haiku" validated a poets.org
+    # lesson-plan page because it mentioned "haiku" enough times to pass
+    # the old keyword-only check).
+    _INSTRUCTIONAL_CONTENT_MARKERS = (
+        "lesson plan", "discussion questions", "warm-up:", "warm up:",
+        "extension for grade", "teach this poem", "for teachers",
+        "classroom activity", "small group discussion", "whole class discussion",
+        "teachers, you may wish", "adapt this lesson",
+    )
+
+    @staticmethod
+    def _is_instructional_url(url: str) -> bool:
+        """True if the URL path itself signals an about-the-work page
+        (lesson plan, curriculum, study guide) rather than the work."""
+        import urllib.parse
+        try:
+            path = urllib.parse.urlparse(url).path.lower()
+        except Exception:
+            path = (url or "").lower()
+        return any(seg in path for seg in (
+            "/lesson-plan", "/lesson_plan", "/teach", "/curriculum",
+            "/study-guide", "/study_guide", "/analysis",
+        ))
+
     def _validate_recitation_content(self, content: str, user_input: str) -> bool:
-        """Gate on length (200–100k chars) and minimal relevance to the request."""
+        """Gate on length, minimal relevance, and reject instructional/meta pages."""
         if not content or len(content) < 200 or len(content) > 100_000:
+            return False
+        content_lower = content.lower()
+        if any(marker in content_lower for marker in self._INSTRUCTIONAL_CONTENT_MARKERS):
             return False
         # Extract salient nouns from the user input for a rough relevance check
         import re
@@ -7120,7 +7061,6 @@ RESULT: COMPLEX (reason: <brief reason>)
         keywords = [w for w in words if w not in stop]
         if not keywords:
             return True  # no keywords to check — accept on length alone
-        content_lower = content.lower()
         hits = sum(1 for kw in keywords if kw in content_lower)
         return hits >= 1  # at least one salient keyword present
 
@@ -7181,6 +7121,14 @@ RESULT: COMPLEX (reason: <brief reason>)
             # Sort by trust tier: trusted > reliable > unknown
             tier_priority = {"trusted": 0, "reliable": 1, "unknown": 2}
             results.sort(key=lambda r: tier_priority.get(r.get("trust_tier", "unknown"), 2))
+
+            # Domain trust doesn't disambiguate lesson-plan/study-guide pages
+            # from the work itself (poets.org hosts both) — screen by path
+            # before spending a fetch on a candidate that can't pass anyway.
+            results = [r for r in results if not self._is_instructional_url(r.get("url", ""))]
+            if not results:
+                self.logger.info("All recitation candidates were instructional/about-the-work pages")
+                return None
 
             # Try fetching top 3 results
             for result in results[:3]:

@@ -237,6 +237,14 @@ class NeuralRouter:
             if embed_intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
                 embed_intent = "chat"
 
+            # Named-work guard — "recitation" without an identifiable named
+            # work ("recite a haiku" vs. "recite Jabberwocky") has nothing
+            # real to fetch; remap to brainstorming so Core just composes it
+            # instead of the recitation pipeline web-fetching an unrelated
+            # page (GAIA_Project-9n8z).
+            if embed_intent == "recitation" and not _has_named_work_signal(text):
+                embed_intent = "brainstorming"
+
             # Injection detection — escalate to Nano for confirmation
             if embed_intent == "injection":
                 if _nano_confirm_injection(text):
