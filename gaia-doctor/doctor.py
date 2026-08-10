@@ -70,6 +70,34 @@ try:
 except ImportError:
     # Inline stdlib-only implementation (doctor can't import gaia-common)
     _MAINT_FLAG_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "maintenance_mode.json"
+    # 5jdw: same TTL default as gaia_common.utils.maintenance / the VRAM
+    # tenant guard (85mb/9zrx) — a stuck flag must not block wake forever.
+    _MAINT_DEFAULT_TTL_SECONDS = int(os.environ.get("MAINTENANCE_MODE_TTL", "14400"))
+
+    def _maint_is_stale(data):
+        entered_at = data.get("entered_at")
+        if not entered_at or entered_at == "unknown":
+            return True
+        try:
+            entered = datetime.fromisoformat(entered_at)
+            age = (datetime.now(timezone.utc) - entered).total_seconds()
+        except (ValueError, TypeError):
+            return True
+        try:
+            ttl = float(data.get("ttl_seconds", _MAINT_DEFAULT_TTL_SECONDS))
+        except (TypeError, ValueError):
+            ttl = _MAINT_DEFAULT_TTL_SECONDS
+        return age > ttl
+
+    def _maint_clear_flags():
+        try:
+            _MAINT_FLAG_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            MAINTENANCE_FLAG.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def is_maintenance_active():
         # JSON flag is authoritative; legacy ha_maintenance is a mirror only.
@@ -79,6 +107,15 @@ except ImportError:
             if _MAINT_FLAG_FILE.exists():
                 data = json.loads(_MAINT_FLAG_FILE.read_text())
                 if data.get("active", False):
+                    if _maint_is_stale(data):
+                        log.warning(
+                            "Maintenance mode flag stale (entered_at=%s, ttl_seconds=%s) "
+                            "— auto-clearing (GAIA_Project-5jdw)",
+                            data.get("entered_at", "unknown"),
+                            data.get("ttl_seconds", _MAINT_DEFAULT_TTL_SECONDS),
+                        )
+                        _maint_clear_flags()
+                        return False
                     return True
         except (json.JSONDecodeError, OSError):
             pass
@@ -101,13 +138,14 @@ except ImportError:
             return {"active": True, "entered_at": "unknown", "entered_by": "legacy", "reason": "ha_maintenance flag"}
         return None
 
-    def enter_maintenance(reason="manual", entered_by="unknown"):
+    def enter_maintenance(reason="manual", entered_by="unknown", ttl_seconds=None):
         _MAINT_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "active": True,
             "entered_at": datetime.now(timezone.utc).isoformat(),
             "entered_by": entered_by,
             "reason": reason,
+            "ttl_seconds": int(ttl_seconds) if ttl_seconds is not None else _MAINT_DEFAULT_TTL_SECONDS,
         }
         _MAINT_FLAG_FILE.write_text(json.dumps(data, indent=2))
         MAINTENANCE_FLAG.touch()
@@ -122,14 +160,7 @@ except ImportError:
                 duration = (datetime.now(timezone.utc) - entered).total_seconds()
             except (ValueError, TypeError):
                 pass
-        try:
-            _MAINT_FLAG_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
-        try:
-            MAINTENANCE_FLAG.unlink(missing_ok=True)
-        except OSError:
-            pass
+        _maint_clear_flags()
         return {"active": False, "exited_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": duration, "previous": info}
 STATUS_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "status.json"
 ALARMS_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "alarms.json"
@@ -2415,6 +2446,42 @@ def raise_alarm(name: str, reason: str):
         log.debug("Failed to write alarms file", exc_info=True)
 
 
+# 5jdw: how long maintenance mode may run before the doctor raises a
+# doctor-visible alarm — well before the TTL in maintenance.py auto-clears
+# the flag, so an operator notices ("still in maintenance?") instead of
+# only finding out once Discord wake was silently broken for days.
+MAINTENANCE_ALARM_THRESHOLD = int(os.environ.get("MAINTENANCE_ALARM_THRESHOLD", "3600"))
+
+
+def _check_maintenance_staleness():
+    """Raise (once) or clear the 'maintenance_mode' alarm based on live state.
+
+    is_maintenance_active()/get_maintenance_info() already auto-clear the
+    flag past its TTL (gaia_common.utils.maintenance / the inline fallback
+    above) — this only adds earlier, human-visible surfacing so the
+    condition doesn't run silently up to that TTL.
+    """
+    info = get_maintenance_info()
+    if not info:
+        _alarmed_services.discard("maintenance_mode")
+        return
+    entered_at = info.get("entered_at")
+    if not entered_at or entered_at == "unknown":
+        return
+    try:
+        entered = datetime.fromisoformat(entered_at)
+        age = (datetime.now(timezone.utc) - entered).total_seconds()
+    except (ValueError, TypeError):
+        return
+    if age > MAINTENANCE_ALARM_THRESHOLD and "maintenance_mode" not in _alarmed_services:
+        raise_alarm(
+            "maintenance_mode",
+            f"Maintenance mode active for {age / 3600:.1f}h (entered_by="
+            f"{info.get('entered_by')}, reason={info.get('reason')}) — "
+            f"Discord wake and log-error scoring are suppressed while active.",
+        )
+
+
 def run_structural_audit(name: str) -> bool:
     """Perform pre-restart structural validation and autonomous repair."""
     code_dir = SERVICE_CODE_DIRS.get(name)
@@ -3377,6 +3444,13 @@ def poll_cycle():
     except Exception:
         log.debug("Wiring validation check failed", exc_info=True)
 
+    # Surface a doctor-visible alarm once maintenance mode has run long
+    # enough to look stuck (5jdw) — before its own TTL auto-clears it.
+    try:
+        _check_maintenance_staleness()
+    except Exception:
+        log.debug("Maintenance staleness check failed", exc_info=True)
+
     # First scan logs for irritations (skip scoring in maintenance mode)
     if not is_maintenance_active():
         scan_logs()
@@ -3635,6 +3709,7 @@ def _build_status() -> dict:
         "uptime_seconds": uptime,
         "poll_interval": POLL_INTERVAL,
         "maintenance_mode": is_maintenance_active(),
+        "maintenance_info": get_maintenance_info(),
         "active_alarms": list(_alarmed_services),
         "irritation_count": len(_irritations),
         "dissonance": _dissonance_report,
@@ -3876,8 +3951,10 @@ class DoctorHandler(BaseHTTPRequestHandler):
                 params = {}
             reason = params.get("reason", "manual")
             entered_by = params.get("entered_by", "api")
-            result = enter_maintenance(reason=reason, entered_by=entered_by)
-            log.warning("🔧 MAINTENANCE MODE ENTERED: %s (by %s)", reason, entered_by)
+            ttl_seconds = params.get("ttl_seconds")
+            result = enter_maintenance(reason=reason, entered_by=entered_by, ttl_seconds=ttl_seconds)
+            log.warning("🔧 MAINTENANCE MODE ENTERED: %s (by %s, ttl=%ss)",
+                        reason, entered_by, result.get("ttl_seconds"))
             self._json_response(200, result)
         elif self.path == "/maintenance/exit":
             result = exit_maintenance()
