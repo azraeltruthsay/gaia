@@ -19,6 +19,11 @@ from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifie
 
 logger = logging.getLogger("GAIA.IntentDetection")
 
+# Embed-classifier score above which a match is treated as authoritative
+# rather than tentative. Shared between the embed stage and the system-
+# keyword override so the override can tell a confident match from a guess.
+_HIGH_CONFIDENCE = 0.55
+
 # ── Nano injection confirmation ─────────────────────────────────────────
 
 # Sovereign Duality: use Core for entity extraction (Nano deprecated).
@@ -791,9 +796,22 @@ _VALID_INTENTS = {
 }
 
 
+# Intents the system-keyword override applies to: "chat" is the classic
+# case, but "greeting" and "list_tools" are weak/conversational intents
+# that infra questions can land on too — e.g. "Good morning, how many
+# docker containers are you running?" scores closer to the greeting
+# exemplars than to chat, and a low-confidence embed miss can fall through
+# to the LLM stage mislabeling a system question as list_tools
+# (GAIA_Project-akmh). "chat" and "greeting" are weak enough on their own
+# that any system keyword should win; "list_tools" additionally requires a
+# genuine, confidently-matched list_tools request ("what MCP tools do you
+# have?") to survive — see the confidence gate below.
+_SYSTEM_KEYWORD_OVERRIDE_INTENTS = {"chat", "greeting", "list_tools"}
+
+
 def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
     intent_str = _model_intent_detection_inner(text, config, lite_llm, full_llm, fallback_llm, probe_context, embed_model, source)
-    if intent_str == "chat" and text:
+    if intent_str in _SYSTEM_KEYWORD_OVERRIDE_INTENTS and text:
         lowered = text.lower()
         system_keywords = [
             "docker", "container", "mcp", "localhost", "endpoint",
@@ -805,9 +823,37 @@ def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_
         is_system_kw = any(k in lowered for k in system_keywords)
         is_isolated_sys_word = any(f" {k} " in f" {lowered} " for k in ["port", "ports", "service", "services", "logs", "file", "files", "script", "scripts", "process", "processes", "git"])
         if is_system_kw or is_isolated_sys_word:
-            logger.info("System keyword override: upgrading intent 'chat' -> 'other' for system awareness.")
+            if intent_str == "list_tools" and _is_confident_list_tools(text, config, embed_model):
+                logger.info("System keyword override skipped: '%s' is a confident list_tools match.", text[:80])
+                return intent_str
+            logger.info("System keyword override: upgrading intent '%s' -> 'other' for system awareness.", intent_str)
             return "other"
     return intent_str
+
+
+def _is_confident_list_tools(text: str, config, embed_model) -> bool:
+    """True if the embed classifier independently, confidently agrees this is list_tools.
+
+    Guards the system-keyword override from clobbering genuine requests like
+    "what MCP tools do you have?" that legitimately contain a system keyword
+    ("mcp") but are still asking for the tool registry, not for infra facts.
+    """
+    if embed_model is None:
+        return False
+    try:
+        embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
+    except Exception:
+        embed_intent_cfg = {}
+    if not embed_intent_cfg.get("enabled", True):
+        return False
+    classifier = EmbedIntentClassifier.instance()
+    if not classifier.ready:
+        classifier.initialise(embed_model, config=embed_intent_cfg)
+    if not classifier.ready:
+        return False
+    threshold = embed_intent_cfg.get("confidence_threshold", 0.42)
+    embed_intent, embed_score = classifier.classify(text, confidence_threshold=threshold)
+    return embed_intent == "list_tools" and embed_score >= _HIGH_CONFIDENCE
 
 
 def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
@@ -841,7 +887,6 @@ def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fa
     # exemplar bank.  When confidence is high (>= 0.55), it's authoritative
     # and we skip all heuristic stages.  This replaces the growing pile of
     # regex/keyword guards with a single semantic classifier.
-    _HIGH_CONFIDENCE = 0.55
     embed_intent_cfg = {}
     try:
         embed_intent_cfg = config.constants.get("EMBED_INTENT", {})
