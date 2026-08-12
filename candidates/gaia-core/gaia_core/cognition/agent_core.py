@@ -9511,45 +9511,20 @@ Start your response with the first line of the file."""
                 bytes_written = len((params.get("content") or "").encode("utf-8"))
             return f"Wrote {bytes_written} bytes to `{path}`."
 
-        # web.search — Core E4B can't reliably synthesise search-result lists
-        # (degenerates into URL-spam loops), so format the results directly
-        # rather than hand them to the model. User gets real links instead
-        # of hallucinated ones.
-        if tool_name == "web" and action == "search":
-            if not result.success:
-                err = result.error or out.get("error") or "unknown error"
-                return f"Tried to search the web but it failed: {err}"
-            results = out.get("results") or []
-            query = (params.get("query") or out.get("query") or "").strip()
-            if not results:
-                return f"I searched for `{query}` but didn't find anything useful."
-            lines = [f"Here's what I found for **{query}**:" if query else "Here's what I found:"]
-            for i, r in enumerate(results[:5], 1):
-                title = (r.get("title") or "(untitled)").strip()
-                snippet = (r.get("snippet") or "").strip().replace("\n", " ")
-                if len(snippet) > 220:
-                    snippet = snippet[:217] + "…"
-                url = (r.get("url") or "").strip()
-                if url:
-                    lines.append(f"{i}. **{title}** — {snippet} [link]({url})")
-                else:
-                    lines.append(f"{i}. **{title}** — {snippet}")
-            return "\n".join(lines)
-
-        # web.fetch — return a brief preview rather than letting the model
-        # try to summarise an entire fetched page.
-        if tool_name == "web" and action == "fetch":
-            if not result.success:
-                err = result.error or out.get("error") or "unknown error"
-                return f"Tried to fetch but it failed: {err}"
-            url = out.get("url") or params.get("url") or "the URL"
-            content = (out.get("content") or out.get("text") or "").strip()
-            if not content:
-                return f"Fetched `{url}` but the page was empty."
-            preview = content[:600].rstrip()
-            if len(content) > 600:
-                preview += "…"
-            return f"Fetched `{url}`:\n\n{preview}"
+        # web.search / web.fetch — deliberately NOT deterministic (GAIA_Project-ssgd).
+        # This used to format results directly and bypass the LLM entirely
+        # (added in bc6e96d to dodge Core E4B degenerating into URL-spam loops
+        # when synthesising search results) — but that meant a misrouted or
+        # irrelevant search got relayed verbatim with zero review, which is
+        # exactly what happened when "have you heard of the Ship of Theseus"
+        # got misrouted into a news search and the raw headlines got sent as
+        # the answer. Falls through to normal LLM narration now, which can
+        # see the results (wired into packet.content.data_fields just above
+        # this call) and either compose a reply around them or set them aside
+        # if they don't actually address the question. _is_degenerate_output
+        # still catches repetition-loop output generically and escalates.
+        if tool_name == "web" and action in ("search", "fetch"):
+            return None
 
         return None
 

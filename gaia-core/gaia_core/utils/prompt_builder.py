@@ -1539,9 +1539,15 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         system_content_parts.append(tool_result_content)
         system_content_parts.append(
             "INSTRUCTION: The system already executed a tool on your behalf and the "
-            "results are shown above. Use these results to answer the user's question. "
-            "Do NOT say you cannot search the web or fetch content — it has already been done. "
-            "Summarize and present the results helpfully."
+            "results are shown above. Do NOT say you cannot search the web or fetch "
+            "content — it has already been done.\n"
+            "Review the results before using them: if one or more genuinely address "
+            "what the user asked, use them — either in your own words, or by relaying "
+            "the most relevant 1-3 (title + URL exactly as shown above; do not invent "
+            "additional links or content). If NONE of the results actually address the "
+            "user's question (e.g. a search came back with unrelated results), say so "
+            "briefly and answer from your own knowledge instead — do not force "
+            "irrelevant results into your reply just because they were retrieved."
         )
 
     # 8. Memory Guidance & Snapshot

@@ -171,6 +171,15 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
     # Current-info / news / "do you know recent X" patterns — these need a
     # web search even though the user didn't explicitly say "search". Fires
     # BEFORE the explicit-search block so the question itself is the query.
+    # NOTE: no bare "have you heard (about|of)" trigger here (GAIA_Project-ssgd)
+    # — that's an ordinary conversational opener for ANY topic ("have you
+    # heard of the Ship of Theseus?"), not a news signal. It used to force a
+    # web search here, and when topic extraction found nothing (it only looks
+    # for "about|on|regarding", not "of"), silently fell back to querying
+    # "today's news headlines" — a philosophy question got answered with raw
+    # news headlines. The recency-qualified patterns below ("have you heard
+    # ANY recent news", etc. — see do-you-know-any-recent-news) still catch
+    # genuine current-events phrasing.
     news_re = re.compile(
         r'\b(?:'
         r'(?:any|some|the|recent|latest|today\'?s|breaking)\s+news\b|'
@@ -178,7 +187,6 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
         r'what\'?s\s+(?:happening|going on|in the news|new)\b|'
         r'(?:news|info|information|details?|updates?)\s+(?:about|on)\s+\S+|'
         r'tell\s+me\s+about\s+(?:recent|today\'?s|the\s+latest)\b|'
-        r'have\s+you\s+heard\s+(?:about|of)\b|'
         r'do\s+you\s+know\s+(?:any|about|of)\s+(?:recent|news|the\s+latest)\b'
         r')',
         re.IGNORECASE,
@@ -747,11 +755,29 @@ def inject_tool_result_into_packet(packet: CognitionPacket) -> CognitionPacket:
     result = packet.tool_routing.execution_result
     tool = packet.tool_routing.selected_tool
 
+    # prompt_builder.py's tool-result formatting (build_from_packet, ~line
+    # 854) keys off flat names "web_search"/"web_fetch" — matching the older
+    # MCP naming convention it was written against — not the domain/action
+    # pair ("web" + action="search") the tool_routing pipeline actually uses.
+    # Without this translation the flat-name check never matches, output
+    # falls into the generic `elif output:` branch, and the model gets shown
+    # a raw Python dict repr (str(output)) instead of the clean formatted
+    # list — which produced garbled non-answers to genuine search results
+    # (GAIA_Project-ssgd).
+    _tool_name = tool.tool_name if tool else "unknown"
+    _action = (tool.params or {}).get("action") if tool else None
+    if _tool_name == "web" and _action == "search":
+        _flat_tool_name = "web_search"
+    elif _tool_name == "web" and _action == "fetch":
+        _flat_tool_name = "web_fetch"
+    else:
+        _flat_tool_name = _tool_name
+
     # Create a data field with the tool result
     result_field = DataField(
         key="tool_result",
         value={
-            "tool": tool.tool_name if tool else "unknown",
+            "tool": _flat_tool_name,
             "params": tool.params if tool else {},
             "success": result.success,
             "output": result.output,

@@ -1548,8 +1548,20 @@ class AgentCore:
                 logger.info("Stage 0 Grounding skipped: short conversational prompt (no entities worth grounding)")
 
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
+            if probe_result and probe_result.primary_collection == "dnd_campaign":
+                from gaia_core.behavior.persona_switcher import PERSONA_KEYWORDS, _normalize_text
+                _ul_chk = (user_input or "").lower()
+                _un_chk = _normalize_text(_ul_chk)
+                _dnd_kws = PERSONA_KEYWORDS.get("dnd_player_assistant", [])
+                _has_dnd_kw = any(kw in _ul_chk or kw in _un_chk for kw in _dnd_kws)
+                if not _has_dnd_kw and not _is_roleplay_invite:
+                    logger.info(
+                        "Probe hit dnd_campaign but query lacks D&D keywords/roleplay markers — suppressing campaign persona hijack"
+                    )
+                    probe_result.primary_collection = None
+
             if probe_result and probe_result.primary_collection:
-            # Probe found a dominant domain — adopt that persona
+                # Probe found a dominant domain — adopt that persona
                 knowledge_base_name = probe_result.primary_collection
                 persona_name = get_persona_for_knowledge_base(knowledge_base_name)
                 if not persona_name:
@@ -4978,6 +4990,35 @@ class AgentCore:
             packet.metrics.latency_ms = int((_time.perf_counter() - t0) * 1000)
             logger.info(f"AgentCore: run_turn total took {packet.metrics.latency_ms / 1000:.2f}s")
             
+            # Record turn telemetry for centralized visibility
+            try:
+                _telemetry_event = {
+                    "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+                    "session_id": session_id,
+                    "source": source,
+                    "persona": persona_name or "dev",
+                    "kb_name": knowledge_base_name,
+                    "model": selected_model_name or "default",
+                    "user_input": (user_input or "")[:300],
+                    "assistant_output": (packet.get_latest_assistant_response() or "")[:300],
+                    "latency_ms": packet.metrics.latency_ms,
+                    "error_flag": False,
+                }
+                from pathlib import Path
+                for _t_path in [
+                    Path("/shared/logs/turn_telemetry.jsonl"),
+                    Path("/gaia/GAIA_Project/logs/turn_telemetry.jsonl"),
+                ]:
+                    try:
+                        _t_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(_t_path, "a", encoding="utf-8") as _tf:
+                            _tf.write(json.dumps(_telemetry_event) + "\n")
+                        break
+                    except Exception:
+                        continue
+            except Exception as _telem_exc:
+                logger.debug("AgentCore: turn telemetry logging failed: %s", _telem_exc)
+
             # YIELD THE FINAL PACKET
             yield {"type": "packet", "value": packet.to_serializable_dict()}
         finally:
@@ -9563,45 +9604,20 @@ Start your response with the first line of the file."""
                 bytes_written = len((params.get("content") or "").encode("utf-8"))
             return f"Wrote {bytes_written} bytes to `{path}`."
 
-        # web.search — Core E4B can't reliably synthesise search-result lists
-        # (degenerates into URL-spam loops), so format the results directly
-        # rather than hand them to the model. User gets real links instead
-        # of hallucinated ones.
-        if tool_name == "web" and action == "search":
-            if not result.success:
-                err = result.error or out.get("error") or "unknown error"
-                return f"Tried to search the web but it failed: {err}"
-            results = out.get("results") or []
-            query = (params.get("query") or out.get("query") or "").strip()
-            if not results:
-                return f"I searched for `{query}` but didn't find anything useful."
-            lines = [f"Here's what I found for **{query}**:" if query else "Here's what I found:"]
-            for i, r in enumerate(results[:5], 1):
-                title = (r.get("title") or "(untitled)").strip()
-                snippet = (r.get("snippet") or "").strip().replace("\n", " ")
-                if len(snippet) > 220:
-                    snippet = snippet[:217] + "…"
-                url = (r.get("url") or "").strip()
-                if url:
-                    lines.append(f"{i}. **{title}** — {snippet} [link]({url})")
-                else:
-                    lines.append(f"{i}. **{title}** — {snippet}")
-            return "\n".join(lines)
-
-        # web.fetch — return a brief preview rather than letting the model
-        # try to summarise an entire fetched page.
-        if tool_name == "web" and action == "fetch":
-            if not result.success:
-                err = result.error or out.get("error") or "unknown error"
-                return f"Tried to fetch but it failed: {err}"
-            url = out.get("url") or params.get("url") or "the URL"
-            content = (out.get("content") or out.get("text") or "").strip()
-            if not content:
-                return f"Fetched `{url}` but the page was empty."
-            preview = content[:600].rstrip()
-            if len(content) > 600:
-                preview += "…"
-            return f"Fetched `{url}`:\n\n{preview}"
+        # web.search / web.fetch — deliberately NOT deterministic (GAIA_Project-ssgd).
+        # This used to format results directly and bypass the LLM entirely
+        # (added in bc6e96d to dodge Core E4B degenerating into URL-spam loops
+        # when synthesising search results) — but that meant a misrouted or
+        # irrelevant search got relayed verbatim with zero review, which is
+        # exactly what happened when "have you heard of the Ship of Theseus"
+        # got misrouted into a news search and the raw headlines got sent as
+        # the answer. Falls through to normal LLM narration now, which can
+        # see the results (wired into packet.content.data_fields just above
+        # this call) and either compose a reply around them or set them aside
+        # if they don't actually address the question. _is_degenerate_output
+        # still catches repetition-loop output generically and escalates.
+        if tool_name == "web" and action in ("search", "fetch"):
+            return None
 
         return None
 
