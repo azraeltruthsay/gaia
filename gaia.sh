@@ -451,6 +451,9 @@ main() {
         warm-pool)
             cmd_warm_pool
             ;;
+        logs)
+            python3 "$PROJECT_ROOT/gaia-core/scripts/review_discord_logs.py" "$@"
+            ;;
         status)
             show_status
             ;;
@@ -463,6 +466,7 @@ main() {
             echo "  live [start|stop|status]         Manage live stack"
             echo "  candidate [start|stop|status]    Manage candidate stack"
             echo "  swap <service> [live|candidate]  Swap component in live flow"
+            echo "  logs [--latest|--telemetry|...]  Review Web/Discord chat & cognitive logs"
             echo "  orchestrator [start|stop|status|build|logs]  Manage orchestrator"
             echo "  gpu [status|release]             GPU management via orchestrator"
             echo "  handoff [prime-to-study|study-to-prime|status]  GPU handoff"

@@ -212,12 +212,23 @@ def get_persona_for_request(
                     threshold = float(embed_cfg.get("confidence_threshold", 0.45))
                     persona_label, score = clf.classify(user_input, confidence_threshold=threshold)
                     if persona_label:
-                        logger.info(
-                            "Persona embed match: '%s' (score=%.3f, no keyword hit)",
-                            persona_label, score,
-                        )
-                        knowledge_base_name = get_knowledge_base_for_persona(persona_label)
-                        return persona_label, knowledge_base_name
+                        # Guard against false-positive embed matches for roleplay personas
+                        if persona_label == "dnd_player_assistant":
+                            dnd_kws = PERSONA_KEYWORDS.get("dnd_player_assistant", [])
+                            has_kw = any(kw in input_lower or kw in input_normalized for kw in dnd_kws)
+                            if not has_kw and score < 0.75:
+                                logger.info(
+                                    "Persona embed matched 'dnd_player_assistant' (score=%.3f) but query lacks D&D keywords — ignoring false positive",
+                                    score,
+                                )
+                                persona_label = None
+                        if persona_label:
+                            logger.info(
+                                "Persona embed match: '%s' (score=%.3f, no keyword hit)",
+                                persona_label, score,
+                            )
+                            knowledge_base_name = get_knowledge_base_for_persona(persona_label)
+                            return persona_label, knowledge_base_name
             except Exception:
                 logger.debug("Persona embed classifier failed (non-fatal)", exc_info=True)
 

@@ -36,16 +36,56 @@ ERROR_FALLBACKS = (
 )
 
 
-def _load_sessions() -> dict:
-    try:
-        with open(SESSIONS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except OSError as exc:
-        sys.exit(f"Cannot read {SESSIONS_PATH}: {exc}")
-    return data if isinstance(data, dict) else {}
+def _load_sessions(source_filter: str = "all") -> dict:
+    data = {}
+    if os.path.exists(SESSIONS_PATH):
+        try:
+            with open(SESSIONS_PATH, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+                if isinstance(raw, dict):
+                    data.update(raw)
+        except OSError:
+            pass
+
+    # Also scan session_vectors directory for web UI sessions
+    vec_dirs = [
+        os.path.join(os.path.dirname(SESSIONS_PATH), "session_vectors"),
+        "/gaia/GAIA_Project/gaia-core/data/shared/session_vectors",
+        "/app/data/shared/session_vectors",
+    ]
+    for vd in vec_dirs:
+        if os.path.isdir(vd):
+            for fn in os.listdir(vd):
+                if fn.endswith(".json") and (fn.startswith("web_") or fn.startswith("discord_")):
+                    sid = fn[:-5]
+                    if sid not in data:
+                        fp = os.path.join(vd, fn)
+                        try:
+                            with open(fp, "r", encoding="utf-8") as fh:
+                                sdata = json.load(fh)
+                                if isinstance(sdata, dict):
+                                    data[sid] = sdata
+                        except Exception:
+                            pass
+
+    # Apply source filter
+    if source_filter == "discord":
+        return {k: v for k, v in data.items() if str(k).startswith("discord")}
+    elif source_filter == "web":
+        return {k: v for k, v in data.items() if str(k).startswith("web")}
+    return data
 
 
 def _messages(sess: dict) -> list:
+    if "turns" in sess and isinstance(sess["turns"], list):
+        out = []
+        for t in sess["turns"]:
+            if isinstance(t, dict):
+                if "user" in t:
+                    out.append({"role": "user", "content": t["user"], "timestamp": t.get("timestamp", "")})
+                if "assistant" in t:
+                    out.append({"role": "assistant", "content": t["assistant"], "timestamp": t.get("timestamp", "")})
+        return out
     return sess.get("history") or sess.get("messages") or []
 
 
@@ -72,11 +112,8 @@ def _is_error_session(sess: dict) -> bool:
     return False
 
 
-def _discord_sessions(data: dict) -> list:
-    out = []
-    for sid, sess in data.items():
-        if isinstance(sess, dict) and str(sid).startswith("discord"):
-            out.append((sid, sess))
+def _sorted_sessions(data: dict) -> list:
+    out = [(sid, sess) for sid, sess in data.items() if isinstance(sess, dict)]
     out.sort(key=lambda kv: _last_ts(kv[1]), reverse=True)
     return out
 
@@ -97,21 +134,67 @@ def _print_conversation(sid: str, sess: dict) -> None:
         print()
 
 
+def _print_telemetry(limit: int = 15) -> None:
+    telem_paths = [
+        "/shared/logs/turn_telemetry.jsonl",
+        "/gaia/GAIA_Project/logs/turn_telemetry.jsonl",
+    ]
+    found = None
+    for tp in telem_paths:
+        if os.path.exists(tp):
+            found = tp
+            break
+    if not found:
+        print("No turn_telemetry.jsonl log file found yet.")
+        return
+
+    print("=" * 72)
+    print(f"TURN TELEMETRY LOGS ({found})")
+    print("-" * 72)
+    lines = []
+    with open(found, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    lines.append(json.loads(line))
+                except Exception:
+                    pass
+    lines = lines[-limit:]
+    for ev in reversed(lines):
+        ts = ev.get("timestamp", "")[:19]
+        sid = ev.get("session_id", "?")
+        persona = ev.get("persona", "dev")
+        kb = ev.get("kb_name") or "-"
+        model = ev.get("model", "-")
+        lat = ev.get("latency_ms", 0)
+        inp = (ev.get("user_input") or "").replace("\n", " ")[:50]
+        print(f"[{ts}] {sid} | p:{persona} kb:{kb} m:{model} ({lat}ms)")
+        print(f"  User: {inp}")
+        print()
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Review GAIA Discord conversations from sessions.json")
+    ap = argparse.ArgumentParser(description="Review GAIA Web & Discord conversations and cognitive telemetry")
     ap.add_argument("-n", "--limit", type=int, default=12, help="How many recent sessions to list (default 12)")
+    ap.add_argument("--source", type=str, choices=["all", "web", "discord"], default="all", help="Filter by session source")
     ap.add_argument("--latest", action="store_true", help="Print the single most recent conversation in full")
     ap.add_argument("--session", type=str, help="Print one conversation in full by session_id")
     ap.add_argument("--errors", action="store_true", help="Only sessions whose last GAIA reply was an error fallback")
+    ap.add_argument("--telemetry", action="store_true", help="Display recent turn telemetry events (persona, KB, model, latency)")
     args = ap.parse_args()
 
-    data = _load_sessions()
-    sessions = _discord_sessions(data)
+    if args.telemetry:
+        _print_telemetry(args.limit)
+        return
+
+    data = _load_sessions(source_filter=args.source)
+    sessions = _sorted_sessions(data)
 
     if args.session:
         sess = data.get(args.session)
         if not sess:
-            sys.exit(f"No session '{args.session}' in {SESSIONS_PATH}")
+            sys.exit(f"No session '{args.session}' found.")
         _print_conversation(args.session, sess)
         return
 
@@ -120,21 +203,22 @@ def main() -> None:
 
     if args.latest:
         if not sessions:
-            sys.exit("No Discord sessions found.")
+            sys.exit("No matching sessions found.")
         _print_conversation(*sessions[0])
         return
 
     # List mode
-    print(f"{len(sessions)} Discord session(s) in {SESSIONS_PATH}"
-          + (" (error-fallback only)" if args.errors else ""))
+    print(f"{len(sessions)} session(s) found (source={args.source}"
+          + (", error-fallback only" if args.errors else "") + ")")
     print(f"{'last activity':19s} | msgs | err | session_id")
     print("-" * 72)
     for sid, sess in sessions[: args.limit]:
         msgs = _messages(sess)
         err = "ERR" if _is_error_session(sess) else "   "
         print(f"{_last_ts(sess)[:19]:19s} | {len(msgs):4d} | {err} | {sid}")
-    print("\nTip: --latest for the newest chat, --session <id> for one, --errors for failed turns.")
+    print("\nTip: --latest for newest chat, --session <id> for one, --telemetry for cognitive logs.")
 
 
 if __name__ == "__main__":
     main()
+
