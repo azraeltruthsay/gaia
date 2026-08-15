@@ -54,6 +54,15 @@ META_RESULT_CLOSE = "<tool_response|>"
 META_TOOL_OPEN_ALT = "<|tool|>"
 META_TOOL_CLOSE_ALT = "<|/tool|>"
 
+# GAIA_Project-415r: a 4th format observed live from Prime — the domain.action
+# is embedded IN the opening tag itself (<tool_calling: knowledge.search>),
+# with the body containing only bare params JSON (no "tool"/"action" keys).
+# Structurally different from the three formats above (which have a
+# fixed-string open tag and self-contained body), so it needs its own
+# open-tag-header parsing phase — see _in_tool_calling_header in feed().
+TOOL_CALLING_OPEN_PREFIX = "<tool_calling:"
+TOOL_CALLING_CLOSE = "</tool_calling>"
+
 # Regex for parsing verb(param=value, param=value) format
 _META_VERB_RE = re.compile(
     r'^(\w+)\((.*)\)$', re.DOTALL
@@ -143,6 +152,8 @@ class ToolCallParser:
         self._buffer = ""
         self._in_tool_call = False
         self._is_meta_verb = False
+        self._in_tool_calling_header = False
+        self._pending_tool_calling_header = None
         self._tool_calls_found: List[Dict] = []
 
     def reset(self):
@@ -150,6 +161,8 @@ class ToolCallParser:
         self._buffer = ""
         self._in_tool_call = False
         self._is_meta_verb = False
+        self._in_tool_calling_header = False
+        self._pending_tool_calling_header = None
         self._tool_calls_found = []
 
     def feed(self, token: str) -> List[ParseEvent]:
@@ -164,29 +177,45 @@ class ToolCallParser:
         self._buffer += token
 
         while True:
+            if self._in_tool_calling_header:
+                # GAIA_Project-415r: mid-header for <tool_calling: domain.action>
+                # — the domain.action lives INSIDE the open tag, so we can't
+                # transition to _in_tool_call until we've seen the '>' that
+                # closes the header itself.
+                close_idx = self._buffer.find(">")
+                if close_idx == -1:
+                    break  # header not fully received yet — wait for more tokens
+                self._pending_tool_calling_header = self._buffer[:close_idx].strip()
+                self._buffer = self._buffer[close_idx + 1:]
+                self._in_tool_calling_header = False
+                self._in_tool_call = True
+                self._active_close_tag = TOOL_CALLING_CLOSE
+                continue
+
             if not self._in_tool_call:
                 # Look for tool call opening tags — check all supported formats.
                 # Priority: Gemma 4 native tokens first, then XML-style tags.
                 _candidates = [
-                    (self._buffer.find(META_TOOL_OPEN), META_TOOL_OPEN, META_TOOL_CLOSE, True),
-                    (self._buffer.find(TOOL_CALL_OPEN), TOOL_CALL_OPEN, TOOL_CALL_CLOSE, False),
-                    (self._buffer.find(TOOL_RESPONSE_OPEN), TOOL_RESPONSE_OPEN, TOOL_RESPONSE_CLOSE, False),
+                    (self._buffer.find(META_TOOL_OPEN), META_TOOL_OPEN, META_TOOL_CLOSE, True, False),
+                    (self._buffer.find(TOOL_CALL_OPEN), TOOL_CALL_OPEN, TOOL_CALL_CLOSE, False, False),
+                    (self._buffer.find(TOOL_RESPONSE_OPEN), TOOL_RESPONSE_OPEN, TOOL_RESPONSE_CLOSE, False, False),
+                    (self._buffer.find(TOOL_CALLING_OPEN_PREFIX), TOOL_CALLING_OPEN_PREFIX, None, False, True),
                 ]
                 # Pick the earliest match
                 best = None
-                for idx, otag, ctag, is_meta in _candidates:
+                for idx, otag, ctag, is_meta, is_tool_calling in _candidates:
                     if idx != -1 and (best is None or idx < best[0]):
-                        best = (idx, otag, ctag, is_meta)
+                        best = (idx, otag, ctag, is_meta, is_tool_calling)
 
                 if best is None:
                     open_idx = -1
                 else:
-                    open_idx, open_tag, close_tag, self._is_meta_verb = best
+                    open_idx, open_tag, close_tag, self._is_meta_verb, is_tool_calling = best
 
                 if open_idx == -1:
                     # No tag found — emit all buffered text except last few chars
                     # (which might be a partial tag like "<tool_" or "<|tool")
-                    _longest_tag = max(len(META_TOOL_OPEN), len(TOOL_RESPONSE_OPEN))
+                    _longest_tag = max(len(META_TOOL_OPEN), len(TOOL_RESPONSE_OPEN), len(TOOL_CALLING_OPEN_PREFIX))
                     safe_len = len(self._buffer) - _longest_tag
                     if safe_len > 0:
                         events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer[:safe_len]))
@@ -197,6 +226,9 @@ class ToolCallParser:
                     if open_idx > 0:
                         events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer[:open_idx]))
                     self._buffer = self._buffer[open_idx + len(open_tag):]
+                    if is_tool_calling:
+                        self._in_tool_calling_header = True
+                        continue
                     self._in_tool_call = True
                     self._active_close_tag = close_tag
 
@@ -214,7 +246,13 @@ class ToolCallParser:
                     self._in_tool_call = False
 
                     # Parse based on format
-                    if getattr(self, '_is_meta_verb', False):
+                    if self._pending_tool_calling_header is not None:
+                        # <tool_calling: domain.action>{params}</tool_calling>
+                        event = self._parse_tool_calling_variant(
+                            tool_content, self._pending_tool_calling_header
+                        )
+                        self._pending_tool_calling_header = None
+                    elif getattr(self, '_is_meta_verb', False):
                         # Meta-verb format: verb(param=value, ...)
                         parsed = parse_meta_verb(tool_content)
                         if parsed:
@@ -245,15 +283,24 @@ class ToolCallParser:
     def flush(self) -> List[ParseEvent]:
         """Flush any remaining buffered text."""
         events = []
-        if self._buffer:
-            if self._in_tool_call:
+        if self._buffer or self._in_tool_calling_header:
+            if self._in_tool_calling_header:
+                # Generation ended mid-header (never saw the '>' that closes
+                # <tool_calling: domain.action>) — malformed, emit as text
+                # rather than silently dropping it.
+                logger.warning("Unclosed <tool_calling: ...> header — emitting as text")
+                events.append(ParseEvent(type=ParseEventType.TEXT, text=TOOL_CALLING_OPEN_PREFIX + self._buffer))
+            elif self._in_tool_call:
                 # Unclosed tool call — emit as text (malformed)
-                logger.warning("Unclosed <tool_call> tag — emitting as text")
-                events.append(ParseEvent(type=ParseEventType.TEXT, text=TOOL_CALL_OPEN + self._buffer))
+                open_tag = TOOL_CALLING_OPEN_PREFIX if self._pending_tool_calling_header is not None else TOOL_CALL_OPEN
+                logger.warning("Unclosed tool-call tag — emitting as text")
+                events.append(ParseEvent(type=ParseEventType.TEXT, text=open_tag + self._buffer))
             else:
                 events.append(ParseEvent(type=ParseEventType.TEXT, text=self._buffer))
             self._buffer = ""
             self._in_tool_call = False
+            self._in_tool_calling_header = False
+            self._pending_tool_calling_header = None
         return events
 
     def _parse_tool_call(self, json_str: str) -> ParseEvent:
@@ -308,6 +355,52 @@ class ToolCallParser:
             type=ParseEventType.TOOL_ERROR,
             error=f"Malformed tool call JSON",
             text=f"{TOOL_CALL_OPEN}{json_str}{TOOL_CALL_CLOSE}",
+        )
+
+    def _parse_tool_calling_variant(self, params_str: str, header: str) -> ParseEvent:
+        """Parse <tool_calling: domain.action>{params}</tool_calling> (GAIA_Project-415r).
+
+        `header` is "domain.action" (or just "domain" with no action) captured
+        from inside the opening tag; `params_str` is a bare params JSON object
+        with no "tool"/"action" keys of its own.
+        """
+        header = (header or "").strip()
+        if "." in header:
+            tool, action = header.split(".", 1)
+        else:
+            tool, action = header, ""
+
+        params: Dict[str, Any] = {}
+        raw = (params_str or "").strip()
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    params = parsed
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Malformed <tool_calling: %s> params JSON (repair failed): %s",
+                    header, raw[:100],
+                )
+                return ParseEvent(
+                    type=ParseEventType.TOOL_ERROR,
+                    error="Malformed tool_calling params JSON",
+                    text=f"{TOOL_CALLING_OPEN_PREFIX} {header}>{params_str}{TOOL_CALLING_CLOSE}",
+                )
+
+        if not tool:
+            return ParseEvent(
+                type=ParseEventType.TOOL_ERROR,
+                error=f"Empty tool name in <tool_calling: {header}>",
+                text=f"{TOOL_CALLING_OPEN_PREFIX} {header}>{params_str}{TOOL_CALLING_CLOSE}",
+            )
+
+        logger.info("Tool call detected (tool_calling variant): %s(action=%s, %s)", tool, action, params)
+        return ParseEvent(
+            type=ParseEventType.TOOL_CALL_DETECTED,
+            tool_name=tool,
+            tool_action=action,
+            tool_params=params,
         )
 
     @property
