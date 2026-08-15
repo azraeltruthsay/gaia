@@ -68,6 +68,11 @@ _TELL_PATTERNS = [
     re.compile(r"\bsocial cue\b", re.I),
     re.compile(r"the ['\"]?\w+['\"]? (refers to|implies|expects|signals|is a probe)", re.I),
     re.compile(r"\bexpects the register\b", re.I),
+    # Prime's native tool-calling scaffold marker — leaked verbatim into real
+    # Discord replies (GAIA_Project-pfdw) since nothing stripped it once the
+    # tool_call itself stopped leaking. Distinctive training-scaffold token,
+    # never natural conversation — safe as a high-precision literal tell.
+    re.compile(r"\bTHOUGHT_SEED\s*:", re.I),
 ]
 
 
