@@ -1655,6 +1655,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     except StopIteration:
                                         return None
 
+                                # The continuation system prompt tells the
+                                # model not to emit another <tool_call> unless
+                                # asked — but nothing enforced that until now.
+                                # Without this, a disobedient continuation's
+                                # raw <tool_call> text streamed straight to
+                                # the user unprotected (GAIA_Project-pfdw).
+                                # Re-parse the continuation the same way the
+                                # first pass is parsed; suppress (don't
+                                # execute, don't leak as text) any tool call
+                                # it emits instead.
+                                _cont_tc_parser = ToolCallParser() if _tc_enabled else None
+
                                 while True:
                                     cont_event = await loop.run_in_executor(None, _next_cont)
                                     if cont_event is None:
@@ -1662,9 +1674,28 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     if isinstance(cont_event, dict) and cont_event.get("type") == "token":
                                         cont_val = cont_event.get("value", "")
                                         cont_val = _strip_think_token(cont_val)
-                                        if cont_val:
+                                        if not cont_val:
+                                            continue
+                                        if _cont_tc_parser is not None:
+                                            for cpe in _cont_tc_parser.feed(cont_val):
+                                                if cpe.type == ParseEventType.TEXT:
+                                                    response_pieces.append(cpe.text)
+                                                    yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
+                                                elif cpe.type in (ParseEventType.TOOL_CALL_DETECTED, ParseEventType.TOOL_ERROR):
+                                                    logger.warning(
+                                                        "Continuation emitted an unexpected tool_call "
+                                                        "(disobeyed no-retry instruction) — suppressed: %s",
+                                                        cpe.tool_name or cpe.error,
+                                                    )
+                                        else:
                                             response_pieces.append(cont_val)
                                             yield json.dumps({"type": "token", "value": cont_val}) + "\n"
+
+                                if _cont_tc_parser is not None:
+                                    for cpe in _cont_tc_parser.flush():
+                                        if cpe.type == ParseEventType.TEXT and cpe.text:
+                                            response_pieces.append(cpe.text)
+                                            yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
                         except Exception as cont_err:
                             logger.warning("Continuation generation failed: %s", cont_err)
                             # Fallback: just append the raw result

@@ -536,6 +536,21 @@ def deliberate(
     else:
         messages.insert(0, {"role": "system", "content": _instructions})
 
+    # Ground tool-calling in the REAL tool list. Without this, the model has
+    # no grounding for what tools exist and can hallucinate plausible-sounding
+    # ones (e.g. a nonexistent "discord" domain) inside a <tool_call> it emits
+    # here — this path had never injected the schema at all (GAIA_Project-pfdw).
+    try:
+        from gaia_common.utils.tool_call_parser import build_tool_schema_injection
+        _tool_schema = build_tool_schema_injection()
+        if _tool_schema:
+            messages[0] = {
+                **messages[0],
+                "content": (messages[0].get("content", "").rstrip() + "\n\n---\n" + _tool_schema),
+            }
+    except Exception:
+        logger.debug("Deliberation: tool schema injection skipped (non-fatal)", exc_info=True)
+
     model = None
     raw = ""
     try:

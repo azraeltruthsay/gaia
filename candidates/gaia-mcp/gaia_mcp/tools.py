@@ -242,11 +242,15 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "browser_type": lambda p: _browser_tool({"action": "type", "full_browser": True, **p}),
         "browser_screenshot": lambda p: _browser_tool({"action": "screenshot", "full_browser": True, **p}),
         "cfr_review_conversation": lambda p: _cfr_review_conversation(p),
-        # Knowledge base tools (VectorIndexer from gaia_common)
-        "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name")).build_index_from_docs(),
-        "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).query(p.get("query"), top_k=p.get("top_k", 5)),
-        "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
-        "index_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name")).add_document(p.get("file_path")),
+        # Knowledge base tools (VectorIndexer from gaia_common). Default to
+        # "system" when the caller omits knowledge_base_name — p.get() returns
+        # None for a missing key, and an explicit None overrides
+        # VectorIndexer.instance's own default="system", crashing __init__
+        # with "Knowledge base 'None' not found in configuration." (GAIA_Project-pfdw).
+        "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name") or "system").build_index_from_docs(),
+        "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").query(p.get("query"), top_k=p.get("top_k", 5)),
+        "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")),
+        "index_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")),
         # Knowledge Graph (temporal triple store)
         "kg_query": lambda p: _kg_query_impl(p),
         "kg_add": lambda p: _kg_add_impl(p),
