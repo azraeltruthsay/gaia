@@ -1460,8 +1460,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     # then continue generation with the result
                                     break
                                 elif pe.type == ParseEventType.TOOL_ERROR:
-                                    response_pieces.append(pe.text)
-                                    yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                                    # Malformed/unparseable tool-call syntax (bad
+                                    # JSON, empty tool name, etc). pe.text holds
+                                    # the reconstructed raw tag — do NOT show that
+                                    # to the user (nz4w): it's parser internals,
+                                    # not conversation. Same treatment as the
+                                    # continuation path (~line 1689) already gives
+                                    # this event type. Suppress; the model's
+                                    # surrounding prose (if any) still streams.
+                                    logger.warning(
+                                        "Suppressed malformed tool-call syntax from user-visible stream: %s",
+                                        pe.error or pe.text[:100],
+                                    )
 
                         # If we just detected a tool call, break the generation loop
                         # to execute it immediately
