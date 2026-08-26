@@ -1,23 +1,32 @@
 import asyncio
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
+from typing import List, Optional, Set
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from notebooklm import NotebookLMClient, SourceStatus, SourceProcessingError, SourceTimeoutError, SourceNotFoundError, SourceAddError
+from notebooklm import (
+    NotebookLMClient,
+    SourceStatus,
+    SourceProcessingError,
+    SourceTimeoutError,
+    SourceNotFoundError,
+    SourceAddError,
+)
 from notebooklm.paths import get_storage_path, get_browser_profile_dir
-from typing import List, Optional
 
 # Configuration
 WATCH_DIRECTORY = "/gaia/gaia-instance/artifacts/GAIA_Condensed_flat"
 NOTEBOOK_NAME = "GAIA Codebase"
-UPLOAD_WAIT_TIMEOUT = 180.0  # seconds to wait for source to become READY (raised from 90)
-MAX_RETRIES = 3               # retry failed uploads this many times (raised from 2)
-VALIDATION_INTERVAL = 600     # seconds between periodic validation sweeps (10 min, was 5)
-AUTH_REFRESH_COOLDOWN = 600   # min seconds between auto-refresh attempts (10 min)
-UPLOAD_RATE_LIMIT = 3.0       # seconds between consecutive uploads (prevent API flood)
-MAX_FILE_SIZE_BYTES = 500_000 # skip files larger than 500KB (Google often times out on these)
+UPLOAD_WAIT_TIMEOUT = 180.0   # seconds to wait for source to become READY
+MAX_RETRIES = 3                # retry failed uploads this many times
+VALIDATION_INTERVAL = 600      # seconds between periodic validation sweeps (10 min)
+AUTH_REFRESH_COOLDOWN = 600    # min seconds between auto-refresh attempts (10 min)
+UPLOAD_RATE_LIMIT = 3.0        # seconds between consecutive uploads (prevent API flood)
+MAX_FILE_SIZE_BYTES = 500_000  # skip files larger than 500KB (Google often times out on these)
+EXIT_CODE_AUTH_REQUIRED = 78   # EX_CONFIG: signals systemd not to auto-restart indefinitely
 
 _last_auth_refresh = 0.0
 
@@ -26,13 +35,11 @@ def _refresh_auth_headless() -> bool:
     """Re-export storage_state.json from the persistent browser profile.
 
     The persistent profile at ~/.notebooklm/browser_profile/ maintains
-    Google's session across browser launches (Chrome handles cookie refresh
-    internally). We launch headless Chromium with this profile, navigate to
-    NotebookLM, and re-export the cookies.
+    Google's session across browser launches. We launch headless Chromium
+    with this profile, navigate to NotebookLM, and re-export the cookies.
 
     Returns True if refresh succeeded, False otherwise.
     """
-    import time
     global _last_auth_refresh
     now = time.time()
     if now - _last_auth_refresh < AUTH_REFRESH_COOLDOWN:
@@ -67,11 +74,10 @@ def _refresh_auth_headless() -> bool:
                 wait_until="domcontentloaded",
                 timeout=30000,
             )
-            # Check if we actually landed on NotebookLM (not a login redirect)
             final_url = page.url
             if "accounts.google.com" in final_url:
                 print(f"Auto-refresh failed: redirected to login ({final_url[:80]}...)")
-                print("Manual 'notebooklm login' required to re-authenticate.")
+                print("Interactive 'notebooklm login' required to re-authenticate.")
                 context.close()
                 return False
 
@@ -88,7 +94,7 @@ def _refresh_auth_headless() -> bool:
         return False
 
 
-async def validate_sources(client, notebook_id) -> int:
+async def validate_sources(client: NotebookLMClient, notebook_id: str) -> int:
     """Check all remote sources for ERROR or stuck states and remove them.
     Returns the count of sources removed."""
     try:
@@ -114,7 +120,6 @@ async def validate_sources(client, notebook_id) -> int:
         # Remove sources stuck in PROCESSING or PREPARING
         elif source.is_processing or source.status == SourceStatus.PREPARING:
             status_name = "PROCESSING" if source.is_processing else "PREPARING"
-            # Try wait_until_ready with short timeout to see if it's actually moving
             try:
                 await client.sources.wait_until_ready(notebook_id, source.id, timeout=10.0)
             except SourceTimeoutError:
@@ -139,9 +144,14 @@ async def validate_sources(client, notebook_id) -> int:
     return removed
 
 
-async def upload_with_validation(client, notebook_id, file_name, file_path, retries=MAX_RETRIES) -> bool:
+async def upload_with_validation(
+    client: NotebookLMClient,
+    notebook_id: str,
+    file_name: str,
+    file_path: str,
+    retries: int = MAX_RETRIES,
+) -> bool:
     """Upload a file using add_text and wait for it to reach READY state. Retry with exponential backoff."""
-    # Pre-flight: skip oversized files (Google often times out on large uploads)
     try:
         file_size = os.path.getsize(file_path)
         if file_size > MAX_FILE_SIZE_BYTES:
@@ -151,7 +161,6 @@ async def upload_with_validation(client, notebook_id, file_name, file_path, retr
             print(f"  SKIP: {file_name} (empty file)")
             return False
             
-        # Read file content for add_text
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except OSError as e:
@@ -161,11 +170,9 @@ async def upload_with_validation(client, notebook_id, file_name, file_path, retr
     for attempt in range(1, retries + 1):
         try:
             print(f"  -> {file_name} (attempt {attempt}/{retries}, {file_size // 1024}KB, using add_text)")
-            
-            # Using add_text instead of add_file for better reliability on script files
             source = await client.sources.add_text(notebook_id, file_name, content)
 
-            # Wait for processing to complete (extended timeout)
+            # Wait for processing to complete
             ready_source = await client.sources.wait_until_ready(
                 notebook_id, source.id, timeout=UPLOAD_WAIT_TIMEOUT
             )
@@ -199,7 +206,6 @@ async def upload_with_validation(client, notebook_id, file_name, file_path, retr
                 print(f"  UNEXPECTED ERROR uploading {file_name}: {err_str[:120]}")
 
         if attempt < retries:
-            # Exponential backoff: 4s, 8s, 16s (give Google API breathing room)
             wait = 4 * (2 ** (attempt - 1))
             print(f"  Retrying {file_name} in {wait}s...")
             await asyncio.sleep(wait)
@@ -208,7 +214,12 @@ async def upload_with_validation(client, notebook_id, file_name, file_path, retr
     return False
 
 
-async def reconcile_state(client, notebook_id, modified_file_name: Optional[str] = None):
+async def reconcile_state(
+    client: NotebookLMClient,
+    notebook_id: str,
+    changed_files: Optional[Set[str]] = None,
+):
+    """Reconcile local flat files with remote NotebookLM sources in a single batch pass."""
     print("Starting State Reconciliation...")
 
     # 1. Get Remote State
@@ -229,9 +240,7 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
         traceback.print_exc(file=sys.stdout)
         remote_sources = []
 
-    # Filter out sources already in ERROR or stuck states during reconciliation
-    # Note: we treat PREPARING as a stuck state if it's found during full reconciliation
-    # because it means it was left over from a previous session or failed upload.
+    # Clean bad sources
     bad_sources = [s for s in remote_sources if s.is_error or s.status == SourceStatus.PREPARING]
     if bad_sources:
         print(f"Found {len(bad_sources)} source(s) in ERROR/STUCK state — removing before reconciliation...")
@@ -242,12 +251,9 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
                 print(f"  Removed {s.status}: {s.title}")
             except Exception as e:
                 print(f"  Failed to remove bad source {s.title}: {e}")
-        # Re-list after cleanup
         remote_sources = [s for s in remote_sources if s not in bad_sources]
 
-    # Build remote map and detect duplicates
-    # A dict overwrites earlier entries, so duplicates become invisible.
-    # We need to find all source IDs per title, keep the newest, delete the rest.
+    # Deduplicate remote sources by title
     remote_by_title: dict[str, list] = {}
     for s in remote_sources:
         remote_by_title.setdefault(s.title, []).append(s)
@@ -255,7 +261,6 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
     duplicate_ids = []
     for title, sources in remote_by_title.items():
         if len(sources) > 1:
-            # Keep the most recent (last in list), delete the rest
             sources.sort(key=lambda x: x.created_at or 0)
             duplicate_ids.extend(s.id for s in sources[:-1])
             print(f"DEDUP: '{title}' has {len(sources)} copies — removing {len(sources) - 1}")
@@ -269,32 +274,39 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
             except Exception as e:
                 print(f"  Failed to delete duplicate {source_id}: {e}")
 
-    # After dedup, build a clean 1:1 map
+    # Build clean title -> id map
     remote_map = {}
     for title, sources in remote_by_title.items():
-        # Pick the one we kept (last after sort), or first if only one
         kept = [s for s in sources if s.id not in duplicate_ids]
         if kept:
             remote_map[title] = kept[0].id
 
     # 2. Get Local State
+    if not os.path.exists(WATCH_DIRECTORY):
+        os.makedirs(WATCH_DIRECTORY, exist_ok=True)
     local_files = [f for f in os.listdir(WATCH_DIRECTORY) if os.path.isfile(os.path.join(WATCH_DIRECTORY, f))]
     local_set = set(local_files)
 
     to_delete = []
     to_upload = []
 
-    if modified_file_name:
-        print(f"Detected modification for: {modified_file_name}")
-        if modified_file_name in remote_map:
-            to_delete.append(remote_map[modified_file_name])
-        if modified_file_name in local_set:
-            to_upload.append(modified_file_name)
-        else:
-            print(f"Modified file {modified_file_name} not found locally. Treating as deletion.")
-            if modified_file_name in remote_map:
-                to_delete.append(remote_map[modified_file_name])
+    if changed_files is not None:
+        print(f"Batch reconciling {len(changed_files)} detected file changes...")
+        # For changed files: if already in remote, remove old version first
+        for fname in sorted(changed_files):
+            if fname in remote_map:
+                to_delete.append(remote_map[fname])
+            if fname in local_set:
+                to_upload.append(fname)
+            else:
+                print(f"  File {fname} removed locally. Marking remote source for deletion.")
+        
+        # Also clean any remote files that no longer exist locally
+        for name, s_id in remote_map.items():
+            if name not in local_set and s_id not in to_delete:
+                to_delete.append(s_id)
     else:
+        # Full reconciliation sweep
         to_delete = [remote_map[name] for name in remote_map if name not in local_set]
         to_upload = [name for name in local_set if name not in remote_map]
 
@@ -308,7 +320,7 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
                 print(f"  Delete failed for {source_id}: {e}")
             await asyncio.sleep(0.2)
 
-    # 4. Execute Uploads with validation
+    # 4. Execute Uploads
     if to_upload:
         print(f"Uploading {len(to_upload)} new/updated sources...")
         succeeded = 0
@@ -326,43 +338,38 @@ async def reconcile_state(client, notebook_id, modified_file_name: Optional[str]
                 succeeded += 1
             else:
                 failed += 1
-            # Rate limit: prevent API flood (was 0.3s — now configurable)
             await asyncio.sleep(UPLOAD_RATE_LIMIT)
 
         print(f"Upload results: {succeeded} succeeded, {failed} failed")
 
     if not to_delete and not to_upload:
-        if not modified_file_name:
-            print("Local and remote states are already in sync.")
-        else:
-            print(f"Modified file {modified_file_name} processed.")
+        print("Local and remote states are in sync.")
     else:
-        print("Synchronization complete.")
+        print("Synchronization cycle complete.")
 
 
 class SyncHandler(FileSystemEventHandler):
-    """Collects file events into a batch, then runs ONE reconciliation after a
-    quiet period.  This prevents the N-concurrent-reconciliation storm that
-    occurs when flatten_soa.sh touches dozens of files at once."""
+    """Collects file events into a batch, then runs ONE batch reconciliation
+    after a quiet period. This avoids flooding Google's RPC endpoint."""
 
     BATCH_WINDOW = 5.0  # seconds of quiet before flushing the batch
 
     def __init__(self, loop, notebook_id):
         self.loop = loop
         self.notebook_id = notebook_id
-        self._pending: set = set()
+        self._pending: Set[str] = set()
         self._flush_handle: Optional[asyncio.TimerHandle] = None
         self._lock = asyncio.Lock()
 
     def _schedule_flush(self):
-        """(Re)start the batch timer.  Called from watchdog thread."""
+        """(Re)start the batch timer from the watchdog thread."""
         if self._flush_handle is not None:
             self._flush_handle.cancel()
         self._flush_handle = self.loop.call_later(
             self.BATCH_WINDOW, lambda: asyncio.ensure_future(self._flush_batch())
         )
 
-    def _on_event(self, file_name):
+    def _on_event(self, file_name: str):
         self._pending.add(file_name)
         self.loop.call_soon_threadsafe(self._schedule_flush)
 
@@ -372,14 +379,13 @@ class SyncHandler(FileSystemEventHandler):
             self._pending.clear()
         if not batch:
             return
-        print(f"Batch sync: {len(batch)} file(s) changed, running single reconciliation...")
+        print(f"Batch sync: {len(batch)} file(s) changed, running single reconciliation pass...")
         try:
             async with await NotebookLMClient.from_storage() as client:
-                # Per-file reconcile for each changed file (sequentially, one client)
-                for file_name in sorted(batch):
-                    await reconcile_state(client, self.notebook_id, modified_file_name=file_name)
+                await reconcile_state(client, self.notebook_id, changed_files=batch)
         except Exception as e:
             print(f"Batch sync error: {e}")
+            traceback.print_exc(file=sys.stdout)
 
     def on_modified(self, event):
         if not event.is_directory:
@@ -394,28 +400,25 @@ class SyncHandler(FileSystemEventHandler):
             self._on_event(os.path.basename(event.src_path))
 
 
-async def periodic_validation(client, notebook_id):
-    """Background task: periodically validate sources and do a full reconcile
-    to catch any drift from missed watchdog events."""
+async def periodic_validation(client: NotebookLMClient, notebook_id: str):
+    """Background task: periodically validate sources and perform a full reconcile."""
     while True:
         await asyncio.sleep(VALIDATION_INTERVAL)
-        print(f"--- Periodic validation + reconciliation sweep ---")
+        print("--- Periodic validation + reconciliation sweep ---")
         try:
             async with await NotebookLMClient.from_storage() as fresh_client:
                 await validate_sources(fresh_client, notebook_id)
-                # Always do a full reconcile to catch drift (deleted/added files
-                # that watchdog may have missed after long uptime)
                 await reconcile_state(fresh_client, notebook_id)
         except ValueError as e:
             err_msg = str(e)
             if "expired" in err_msg.lower() or "login" in err_msg.lower() or "redirect" in err_msg.lower():
-                print(f"Periodic validation: auth expired. Attempting auto-refresh...")
+                print("Periodic validation: auth expired. Attempting auto-refresh...")
                 loop = asyncio.get_running_loop()
                 refreshed = await loop.run_in_executor(None, _refresh_auth_headless)
                 if refreshed:
                     print("Auth refreshed. Next validation sweep will use new cookies.")
                 else:
-                    print("Auto-refresh failed. Run 'notebooklm login' manually.")
+                    print("Auto-refresh failed. Manual 'notebooklm login' required.")
             else:
                 print(f"Periodic validation error: {e}")
         except Exception as e:
@@ -423,13 +426,14 @@ async def periodic_validation(client, notebook_id):
 
 
 async def start_watcher():
-    print("--- start_watcher() called ---")
+    print("--- Starting NotebookLM Sync Service ---")
     if not os.path.exists(WATCH_DIRECTORY):
         print(f"Creating WATCH_DIRECTORY: {WATCH_DIRECTORY}")
-        os.makedirs(WATCH_DIRECTORY)
+        os.makedirs(WATCH_DIRECTORY, exist_ok=True)
 
     # Try connecting; auto-refresh auth if expired
     max_auth_retries = 2
+    client_ctx = None
     for auth_attempt in range(max_auth_retries + 1):
         try:
             print("Connecting to NotebookLM...")
@@ -442,8 +446,13 @@ async def start_watcher():
                 loop = asyncio.get_running_loop()
                 refreshed = await loop.run_in_executor(None, _refresh_auth_headless)
                 if not refreshed:
-                    print("Auto-refresh failed. Run 'notebooklm login' manually.")
-                    sys.exit(1)
+                    print("\n" + "=" * 70)
+                    print("CRITICAL: NotebookLM authentication expired or invalid.")
+                    print("Auto-refresh via persistent browser profile failed.")
+                    print("Interactive login is required:")
+                    print("  /gaia/GAIA_Project/venv_notebooklm/bin/notebooklm login")
+                    print("=" * 70 + "\n")
+                    sys.exit(EXIT_CODE_AUTH_REQUIRED)
                 continue
             raise
 
@@ -487,6 +496,8 @@ async def start_watcher():
             finally:
                 observer.join()
                 print("Observer joined.")
+    except SystemExit:
+        raise
     except Exception as e:
         print(f"FATAL ERROR in start_watcher(): {e}", file=sys.stdout, flush=True)
         traceback.print_exc(file=sys.stdout)
@@ -497,6 +508,8 @@ if __name__ == "__main__":
     print("--- NotebookLM Sync with validation ---")
     try:
         asyncio.run(start_watcher())
+    except SystemExit:
+        raise
     except Exception as e:
         print(f"FATAL ERROR during asyncio.run(): {e}", file=sys.stdout, flush=True)
         traceback.print_exc(file=sys.stdout)

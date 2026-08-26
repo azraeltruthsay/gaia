@@ -3,6 +3,8 @@ Description=GAIA NotebookLM Sync — watches GAIA_Condensed_flat and pushes to G
 Documentation=file:///gaia/GAIA_Project/notebooklm_sync.py
 After=network-online.target gaia-flatten-soa.service
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,6 +15,7 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/gaia/GAIA_Project/venv_notebooklm/bin/python /gaia/GAIA_Project/notebooklm_sync.py
 Restart=on-failure
 RestartSec=30
+RestartPreventExitStatus=78
 
 # Logging
 StandardOutput=journal
