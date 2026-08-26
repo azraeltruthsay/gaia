@@ -1182,8 +1182,29 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # explicit format examples. Omit the format instruction; the pipeline's
         # tool parser handles tool detection without priming the model.
         # Only include for models that need explicit tool format guidance.
+        #
+        # 2026-08-26: live-verified this omission fixes Core's hallucination on
+        # plain creative-writing requests ("make a haiku" -> a fabricated
+        # worldbuild(action=poe) call). Tried widening the same omission to
+        # Prime (Qwen3-VL) on the theory this isn't Gemma-specific — Prime
+        # reproduces a near-identical hallucination (poetry(action=subtraction))
+        # on the same kind of request — but removing the instruction did NOT
+        # stop it (4/4 test attempts still hallucinated with the instruction
+        # omitted). So Prime's version has a different root cause, not prompt-
+        # priming by this instruction; reverted the widening to avoid an
+        # unproven behavior change with no measured benefit. See nxxl.
         _model_name = getattr(packet, 'header', None) and getattr(packet.header, 'model', None) and getattr(packet.header.model, 'name', '') or ''
-        _is_gemma = 'gemma' in _model_name.lower() or 'gemma' in str(getattr(packet, '_model_family', '')).lower()
+        # header.model.name is usually the tier alias ("core"/"prime"), not the
+        # actual model family — 'gemma' never appears in it, so this check was
+        # dead on arrival for Core (always Gemma4-E4B in Sovereign Duality) and
+        # the hallucination this comment warns about was never actually
+        # prevented. _model_family is also never populated anywhere in the
+        # codebase (kept for forward-compat). Recognize the tier alias too.
+        _is_gemma = (
+            'gemma' in _model_name.lower()
+            or _model_name.lower() == 'core'
+            or 'gemma' in str(getattr(packet, '_model_family', '')).lower()
+        )
         tool_already_executed = (
             getattr(packet, 'tool_routing', None)
             and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED

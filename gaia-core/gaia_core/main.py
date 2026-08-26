@@ -1593,13 +1593,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 "hint": "Tool call failed. Acknowledge the failure briefly to the user and continue conversationally. Do NOT invent error-report URLs, support forms, or ticket-filing procedures. Do NOT retry with a different action unless the user asked you to."
                             })
 
-                        # Show tool execution status to user. On failure, use the
-                        # already-normalized _norm_msg (built above), NOT the raw
-                        # `error` value — that raw value can contain internal HTTP
-                        # status text and service URLs (e.g. "500 Server Error:
-                        # Internal Server Error for url: http://gaia-mcp:8765/...")
-                        # which read to the user as GAIA herself erroring out (9t27).
-                        result_preview = str(actual_result)[:200] if rpc_result.get("ok") else _norm_msg[:200]
+                        # Show tool execution status to user. On failure, never show
+                        # error detail here regardless of shape — _norm_msg is a
+                        # best-effort strip of two known MCP error patterns for the
+                        # MODEL's context (result_xml above), not a guarantee it's
+                        # clean of internal HTTP status text/service URLs for every
+                        # failure shape (9t27 fixed the known-pattern case; this
+                        # closes the gap for anything _norm_msg's pattern matching
+                        # doesn't recognize — e.g. a nonexistent tool domain).
+                        if rpc_result.get("ok"):
+                            result_preview = str(actual_result)[:200]
+                        else:
+                            result_preview = "failed"
                         yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
