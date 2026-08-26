@@ -1583,8 +1583,13 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 "hint": "Tool call failed. Acknowledge the failure briefly to the user and continue conversationally. Do NOT invent error-report URLs, support forms, or ticket-filing procedures. Do NOT retry with a different action unless the user asked you to."
                             })
 
-                        # Show tool execution status to user
-                        result_preview = str(actual_result)[:200] if rpc_result.get("ok") else str(error)[:200]
+                        # Show tool execution status to user. On failure, use the
+                        # already-normalized _norm_msg (built above), NOT the raw
+                        # `error` value — that raw value can contain internal HTTP
+                        # status text and service URLs (e.g. "500 Server Error:
+                        # Internal Server Error for url: http://gaia-mcp:8765/...")
+                        # which read to the user as GAIA herself erroring out (9t27).
+                        result_preview = str(actual_result)[:200] if rpc_result.get("ok") else _norm_msg[:200]
                         yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
@@ -1702,8 +1707,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                             response_pieces.append(f"\n{result_xml}\n")
 
                     except Exception as e:
+                        # Full detail server-side only — never surface raw
+                        # exception text (internal URLs, HTTP status strings)
+                        # to the user (9t27).
                         logger.warning("Tool call execution failed: %s", e)
-                        yield json.dumps({"type": "token", "value": f"\n*[tool error: {e}]*\n"}) + "\n"
+                        yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name} call failed]*\n"}) + "\n"
 
             # Ensure a flush is always emitted so front-ends send accumulated text
             if response_pieces:

@@ -3105,7 +3105,7 @@ class AgentCore:
                 _ui_pers = (user_input or "").lower()
                 _is_personal = _kr_intent in {
                     "greeting", "farewell", "gratitude", "smalltalk", "social",
-                    "chitchat", "acknowledgment", "affirmation",
+                    "chitchat", "acknowledgment", "affirmation", "chat",
                 } or any(m in _ui_pers for m in (
                     "how are you", "how're you", "how are u", "how you doing",
                     "how are things", "how do you feel", "how you feeling",

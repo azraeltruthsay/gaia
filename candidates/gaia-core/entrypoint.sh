@@ -20,6 +20,15 @@
 
 set -euo pipefail
 
+# A CMD override (e.g. validate.sh's `docker run ... image python -m ruff
+# check ...`) means the caller wants that command run instead of the
+# cognitive pipeline server — skip all engine-startup machinery below and
+# exec it directly. Without this, ad hoc `docker run` checks silently boot
+# the full server (which never exits) instead of the requested command.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 CORE_CPU_PORT="${CORE_CPU_PORT:-8092}"
 CORE_CPU_MODEL_PATH="${CORE_CPU_MODEL_PATH:-/models/Qwen3.5-4B-Abliterated-Q4_K_M.gguf}"
 CORE_SAFETENSORS_PATH="${CORE_SAFETENSORS_PATH:-}"
