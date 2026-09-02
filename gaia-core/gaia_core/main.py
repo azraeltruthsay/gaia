@@ -1415,6 +1415,45 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 logger.debug("intent pre-check for tool suppression failed (non-fatal)", exc_info=True)
 
+            # nxxl follow-up: Core (and Prime) sometimes hallucinate an
+            # entire nonexistent tool domain on creative-writing requests
+            # (poet, poetry, amusement, worldbuild/poe, ...) — a
+            # well-formed call to a tool that was never real, not the
+            # malformed-syntax case nz4w already covers. The packet's
+            # available_mcp_tools is the actual whitelist for this turn;
+            # anything outside it (plus the meta-verb aliases and the
+            # local expand_context pseudo-tool) is hallucinated. Flag
+            # these at detection time so we can skip the doomed MCP
+            # round-trip AND the "*[calling ...]*" / "*[... -> failed]*"
+            # plumbing markers — that internal-mechanics text is
+            # meaningless noise for a tool that was never real, and it's
+            # exactly what showed up as a bare "failed tool call" with no
+            # actual poem (live repro, 2026-09-02).
+            _META_VERBS = {"search", "do", "learn", "remember", "ask"}
+            _tool_allowlist_active = bool(getattr(packet.context, "available_mcp_tools", None))
+            _valid_tool_names = (
+                {n.lower() for n in (packet.context.available_mcp_tools or [])}
+                | _META_VERBS | {"expand_context"}
+            )
+            _invalid_tool_ids: set = set()
+
+            # Degenerate-repetition guard (live repro, 2026-09-02): Core
+            # occasionally never closes a single <tool_call>/<tool_calling:>
+            # tag and instead spins for the entire token budget emitting
+            # dozens of near-duplicate malformed attempts back to back. Per
+            # 415r's deliberate design, an unclosed tag at flush() is
+            # surfaced as TEXT rather than dropped — correct for the case
+            # that design targets (a genuine reply cut off mid-tag, exactly
+            # ONE occurrence). But a flush buffer containing MULTIPLE
+            # open-tag markers is not a truncated reply, it's a repetition
+            # collapse — showing that raw to the user leaks the same
+            # internal tool-call plumbing nz4w/pfdw already fixed for the
+            # single-occurrence case. Two-plus occurrences is the signal.
+            from gaia_common.utils.tool_call_parser import TOOL_CALL_OPEN as _TCO, TOOL_CALLING_OPEN_PREFIX as _TCLO, META_TOOL_OPEN as _MTO
+
+            def _is_repetition_garbage(text: str) -> bool:
+                return (text.count(_TCO) + text.count(_TCLO) + text.count(_MTO)) >= 2
+
             while True:
                 event = await loop.run_in_executor(None, _next_event)
                 if event is None:
@@ -1450,10 +1489,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         continue
                                     _seen_tool_calls.add(_tc_key)
 
-                                    _action_display = f"({pe.tool_action})" if pe.tool_action else ""
-                                    tool_display = f"\n*[calling {pe.tool_name}{_action_display}...]*\n"
-                                    yield json.dumps({"type": "token", "value": tool_display}) + "\n"
-                                    yield json.dumps({"type": "flush"}) + "\n"
+                                    if _tool_allowlist_active and pe.tool_name.lower() not in _valid_tool_names:
+                                        logger.warning(
+                                            "Hallucinated tool call (not in available_mcp_tools): %s(%s) — "
+                                            "skipping MCP round-trip, no plumbing shown to user",
+                                            pe.tool_name, pe.tool_action,
+                                        )
+                                        _invalid_tool_ids.add(id(pe))
+                                    else:
+                                        _action_display = f"({pe.tool_action})" if pe.tool_action else ""
+                                        tool_display = f"\n*[calling {pe.tool_name}{_action_display}...]*\n"
+                                        yield json.dumps({"type": "token", "value": tool_display}) + "\n"
+                                        yield json.dumps({"type": "flush"}) + "\n"
                                     _pending_tool_calls.append(pe)
 
                                     # Stop generation after first tool call — execute it,
@@ -1498,12 +1545,24 @@ async def process_packet(packet_data: Dict[str, Any]):
             if _tc_enabled and _tc_parser:
                 for pe in _tc_parser.flush():
                     if pe.type == ParseEventType.TEXT and pe.text:
-                        response_pieces.append(pe.text)
-                        yield json.dumps({"type": "token", "value": pe.text}) + "\n"
+                        if _is_repetition_garbage(pe.text):
+                            logger.warning(
+                                "Suppressed degenerate repetition-loop garbage from flush "
+                                "(%d tool-call markers in one buffer): %s",
+                                pe.text.count(_TCO) + pe.text.count(_TCLO) + pe.text.count(_MTO),
+                                pe.text[:150],
+                            )
+                            _apology = "I got stuck trying to write that — mind asking me again in a moment?"
+                            response_pieces.append(_apology)
+                            yield json.dumps({"type": "token", "value": _apology}) + "\n"
+                        else:
+                            response_pieces.append(pe.text)
+                            yield json.dumps({"type": "token", "value": pe.text}) + "\n"
 
             # ── Execute pending tool calls and generate continuation ───
             if _pending_tool_calls:
                 for tc in _pending_tool_calls:
+                    _is_invalid_tool = id(tc) in _invalid_tool_ids
                     try:
                         # Execute via MCP JSON-RPC
                         from gaia_core.utils.mcp_client import call_jsonrpc
@@ -1511,7 +1570,15 @@ async def process_packet(packet_data: Dict[str, Any]):
                         _META_VERBS = {"search", "do", "learn", "remember", "ask"}
                         _is_meta = tc.tool_name in _META_VERBS
 
-                        if tc.tool_name == "expand_context":
+                        if _is_invalid_tool:
+                            # Flagged as hallucinated at detection time — skip the
+                            # doomed MCP round-trip entirely (gaia-mcp would just
+                            # return the same "not a valid, implemented tool" error).
+                            rpc_result = {
+                                "ok": False,
+                                "error": f"Tool '{tc.tool_name}' is not a valid, implemented tool.",
+                            }
+                        elif tc.tool_name == "expand_context":
                             # CFR Phase 2b page-fault: resolve a BLURred turn's full
                             # text locally from this session's history (the backing
                             # store) — no MCP. Produce an rpc_result in call_jsonrpc's
@@ -1587,10 +1654,25 @@ async def process_packet(packet_data: Dict[str, Any]):
                             elif "Internal error:" in _err_str:
                                 _idx2 = _err_str.find("Internal error:")
                                 _norm_msg = _err_str[_idx2:].split("\n")[0]
+                            if _is_invalid_tool:
+                                # Sharper, targeted correction (nxxl follow-up):
+                                # the generic "tool call failed, acknowledge and
+                                # move on" hint wasn't enough to stop a second
+                                # hallucinated attempt in production (2026-09-02
+                                # live repro) — name the false belief directly
+                                # instead of a vague failure acknowledgment.
+                                _hint = (
+                                    f"There is no tool named '{tc.tool_name}' — you do not have that "
+                                    "capability and never did. Do not attempt any other tool call for "
+                                    "this request. Write the content the user asked for yourself, "
+                                    "directly, in plain text, right now."
+                                )
+                            else:
+                                _hint = "Tool call failed. Acknowledge the failure briefly to the user and continue conversationally. Do NOT invent error-report URLs, support forms, or ticket-filing procedures. Do NOT retry with a different action unless the user asked you to."
                             result_xml = format_tool_result({
                                 "ok": False,
                                 "error": _norm_msg,
-                                "hint": "Tool call failed. Acknowledge the failure briefly to the user and continue conversationally. Do NOT invent error-report URLs, support forms, or ticket-filing procedures. Do NOT retry with a different action unless the user asked you to."
+                                "hint": _hint,
                             })
 
                         # Show tool execution status to user. On failure, never show
@@ -1601,11 +1683,19 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # failure shape (9t27 fixed the known-pattern case; this
                         # closes the gap for anything _norm_msg's pattern matching
                         # doesn't recognize — e.g. a nonexistent tool domain).
-                        if rpc_result.get("ok"):
-                            result_preview = str(actual_result)[:200]
+                        if _is_invalid_tool:
+                            # No plumbing marker for a tool that never
+                            # existed — showing "*[poet(create) -> failed]*"
+                            # to the user for a hallucinated capability is
+                            # confusing internal mechanics, not useful
+                            # transparency (nxxl follow-up).
+                            pass
                         else:
-                            result_preview = "failed"
-                        yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
+                            if rpc_result.get("ok"):
+                                result_preview = str(actual_result)[:200]
+                            else:
+                                result_preview = "failed"
+                            yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
                         # Affect appraisal (P0): competence drive ← tool outcome
@@ -1686,6 +1776,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 # execute, don't leak as text) any tool call
                                 # it emits instead.
                                 _cont_tc_parser = ToolCallParser() if _tc_enabled else None
+                                _cont_produced_text = False
+                                _cont_hallucinated_again = False
 
                                 while True:
                                     cont_event = await loop.run_in_executor(None, _next_cont)
@@ -1699,23 +1791,125 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         if _cont_tc_parser is not None:
                                             for cpe in _cont_tc_parser.feed(cont_val):
                                                 if cpe.type == ParseEventType.TEXT:
+                                                    if cpe.text.strip():
+                                                        _cont_produced_text = True
                                                     response_pieces.append(cpe.text)
                                                     yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
                                                 elif cpe.type in (ParseEventType.TOOL_CALL_DETECTED, ParseEventType.TOOL_ERROR):
+                                                    _cont_hallucinated_again = True
                                                     logger.warning(
                                                         "Continuation emitted an unexpected tool_call "
                                                         "(disobeyed no-retry instruction) — suppressed: %s",
                                                         cpe.tool_name or cpe.error,
                                                     )
                                         else:
+                                            if cont_val.strip():
+                                                _cont_produced_text = True
                                             response_pieces.append(cont_val)
                                             yield json.dumps({"type": "token", "value": cont_val}) + "\n"
 
                                 if _cont_tc_parser is not None:
                                     for cpe in _cont_tc_parser.flush():
                                         if cpe.type == ParseEventType.TEXT and cpe.text:
-                                            response_pieces.append(cpe.text)
-                                            yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
+                                            if _is_repetition_garbage(cpe.text):
+                                                logger.warning(
+                                                    "Suppressed degenerate repetition-loop garbage from "
+                                                    "continuation flush: %s", cpe.text[:150],
+                                                )
+                                                _cont_hallucinated_again = True
+                                            elif cpe.text.strip():
+                                                _cont_produced_text = True
+                                                response_pieces.append(cpe.text)
+                                                yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
+                                            else:
+                                                response_pieces.append(cpe.text)
+                                                yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
+
+                                # nxxl follow-up: the continuation disobeyed the
+                                # "no retry" instruction AND produced nothing
+                                # else usable — the user would otherwise get a
+                                # bare "[tool -> failed]" marker (now suppressed
+                                # for invalid tools above) with no actual content
+                                # at all (live repro, 2026-09-02). One bounded,
+                                # clean-slate retry: a fresh completion with NO
+                                # tool-call turn anywhere in its history (a prior
+                                # tool_call in-context measurably increases the
+                                # odds of imitating it again) and a blunt
+                                # no-tools instruction. If even THIS hallucinates,
+                                # give up gracefully with an honest one-line
+                                # apology rather than silence or more plumbing.
+                                if _cont_hallucinated_again and not _cont_produced_text:
+                                    logger.info("Attempting one clean-slate corrective retry (no tool-call precedent in history)")
+                                    _retry_messages = [
+                                        {"role": "system", "content": (
+                                            "You are GAIA, a direct and capable writer. You do not have "
+                                            "and cannot use any tools, functions, JSON, or XML tags for "
+                                            "this — just answer the user's request directly, in plain "
+                                            "natural-language text, right now."
+                                        )},
+                                        {"role": "user", "content": user_input},
+                                    ]
+                                    try:
+                                        _retry_gen = _agent_core.generate_continuation(
+                                            messages=_retry_messages,
+                                            session_id=session_id,
+                                        )
+                                        _retry_parser = ToolCallParser() if _tc_enabled else None
+                                        _retry_hallucinated = False
+                                        if _retry_gen:
+                                            def _next_retry():
+                                                try:
+                                                    return next(_retry_gen)
+                                                except StopIteration:
+                                                    return None
+                                            while True:
+                                                _retry_event = await loop.run_in_executor(None, _next_retry)
+                                                if _retry_event is None:
+                                                    break
+                                                if isinstance(_retry_event, dict) and _retry_event.get("type") == "token":
+                                                    _retry_val = _strip_think_token(_retry_event.get("value", ""))
+                                                    if not _retry_val:
+                                                        continue
+                                                    if _retry_parser is not None:
+                                                        for rpe in _retry_parser.feed(_retry_val):
+                                                            if rpe.type == ParseEventType.TEXT:
+                                                                if _is_repetition_garbage(rpe.text):
+                                                                    logger.warning("Suppressed repetition-loop garbage from clean-slate retry stream")
+                                                                    _retry_hallucinated = True
+                                                                else:
+                                                                    if rpe.text.strip():
+                                                                        _cont_produced_text = True
+                                                                    response_pieces.append(rpe.text)
+                                                                    yield json.dumps({"type": "token", "value": rpe.text}) + "\n"
+                                                            elif rpe.type in (ParseEventType.TOOL_CALL_DETECTED, ParseEventType.TOOL_ERROR):
+                                                                _retry_hallucinated = True
+                                                    else:
+                                                        if _retry_val.strip():
+                                                            _cont_produced_text = True
+                                                        response_pieces.append(_retry_val)
+                                                        yield json.dumps({"type": "token", "value": _retry_val}) + "\n"
+                                            if _retry_parser is not None:
+                                                for rpe in _retry_parser.flush():
+                                                    if rpe.type == ParseEventType.TEXT and rpe.text:
+                                                        if _is_repetition_garbage(rpe.text):
+                                                            logger.warning("Suppressed repetition-loop garbage from clean-slate retry flush")
+                                                            _retry_hallucinated = True
+                                                        else:
+                                                            if rpe.text.strip():
+                                                                _cont_produced_text = True
+                                                            response_pieces.append(rpe.text)
+                                                            yield json.dumps({"type": "token", "value": rpe.text}) + "\n"
+                                        if _retry_hallucinated or not _cont_produced_text:
+                                            logger.warning("Clean-slate retry also failed to produce usable text — falling back to an honest apology")
+                                            _apology = "I'm having trouble putting that into words right now — mind asking me again in a moment?"
+                                            response_pieces.append(_apology)
+                                            yield json.dumps({"type": "token", "value": _apology}) + "\n"
+                                    except Exception as retry_err:
+                                        logger.warning("Clean-slate corrective retry failed: %s", retry_err)
+                                        _apology = "I'm having trouble putting that into words right now — mind asking me again in a moment?"
+                                        response_pieces.append(_apology)
+                                        yield json.dumps({"type": "token", "value": _apology}) + "\n"
+                                    yield json.dumps({"type": "flush"}) + "\n"
                         except Exception as cont_err:
                             logger.warning("Continuation generation failed: %s", cont_err)
                             # Fallback: just append the raw result

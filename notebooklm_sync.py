@@ -1,6 +1,14 @@
 import asyncio
 import os
 import sys
+
+# Ensure unbuffered line logging
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 import time
 import traceback
 from pathlib import Path
@@ -261,7 +269,11 @@ async def reconcile_state(
     duplicate_ids = []
     for title, sources in remote_by_title.items():
         if len(sources) > 1:
-            sources.sort(key=lambda x: x.created_at or 0)
+            sources.sort(
+                key=lambda x: x.created_at.timestamp()
+                if getattr(x, "created_at", None) and hasattr(x.created_at, "timestamp")
+                else 0.0
+            )
             duplicate_ids.extend(s.id for s in sources[:-1])
             print(f"DEDUP: '{title}' has {len(sources)} copies — removing {len(sources) - 1}")
 
@@ -433,69 +445,66 @@ async def start_watcher():
 
     # Try connecting; auto-refresh auth if expired
     max_auth_retries = 2
-    client_ctx = None
-    for auth_attempt in range(max_auth_retries + 1):
-        try:
-            print("Connecting to NotebookLM...")
-            client_ctx = await NotebookLMClient.from_storage()
-            break
-        except ValueError as e:
-            err_msg = str(e)
-            if ("expired" in err_msg.lower() or "login" in err_msg.lower() or "redirect" in err_msg.lower()) and auth_attempt < max_auth_retries:
-                print(f"Auth expired on startup (attempt {auth_attempt + 1}/{max_auth_retries}). Auto-refreshing...")
-                loop = asyncio.get_running_loop()
-                refreshed = await loop.run_in_executor(None, _refresh_auth_headless)
-                if not refreshed:
-                    print("\n" + "=" * 70)
-                    print("CRITICAL: NotebookLM authentication expired or invalid.")
-                    print("Auto-refresh via persistent browser profile failed.")
-                    print("Interactive login is required:")
-                    print("  /gaia/GAIA_Project/venv_notebooklm/bin/notebooklm login")
-                    print("=" * 70 + "\n")
-                    sys.exit(EXIT_CODE_AUTH_REQUIRED)
-                continue
-            raise
-
     try:
-        async with client_ctx as client:
-            notebooks = await client.notebooks.list()
-            target_nb = next((nb for nb in notebooks if nb.title == NOTEBOOK_NAME), None)
-
-            if not target_nb:
-                print(f"Notebook '{NOTEBOOK_NAME}' not found. Creating new notebook.")
-                target_nb = await client.notebooks.create(NOTEBOOK_NAME)
-            else:
-                print(f"Notebook '{NOTEBOOK_NAME}' found (ID: {target_nb.id}).")
-
-            # Validate existing sources before initial reconciliation
-            print("Running pre-sync validation...")
-            await validate_sources(client, target_nb.id)
-
-            print("Performing initial state reconciliation...")
-            await reconcile_state(client, target_nb.id)
-
-            print(f"Monitoring {WATCH_DIRECTORY} for changes. Press Ctrl+C to stop.")
-
-            loop = asyncio.get_running_loop()
-            handler = SyncHandler(loop, target_nb.id)
-            observer = Observer()
-            observer.schedule(handler, WATCH_DIRECTORY, recursive=False)
-            observer.start()
-            print("Watchdog observer started.")
-
-            # Start periodic validation in background
-            validation_task = asyncio.create_task(periodic_validation(client, target_nb.id))
-
+        for auth_attempt in range(max_auth_retries + 1):
             try:
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                print("KeyboardInterrupt detected. Stopping...")
-                observer.stop()
-                validation_task.cancel()
-            finally:
-                observer.join()
-                print("Observer joined.")
+                print("Connecting to NotebookLM...")
+                async with NotebookLMClient.from_storage() as client:
+                    notebooks = await client.notebooks.list()
+                    target_nb = next((nb for nb in notebooks if nb.title == NOTEBOOK_NAME), None)
+
+                    if not target_nb:
+                        print(f"Notebook '{NOTEBOOK_NAME}' not found. Creating new notebook.")
+                        target_nb = await client.notebooks.create(NOTEBOOK_NAME)
+                    else:
+                        print(f"Notebook '{NOTEBOOK_NAME}' found (ID: {target_nb.id}).")
+
+                    # Validate existing sources before initial reconciliation
+                    print("Running pre-sync validation...")
+                    await validate_sources(client, target_nb.id)
+
+                    print("Performing initial state reconciliation...")
+                    await reconcile_state(client, target_nb.id)
+
+                    print(f"Monitoring {WATCH_DIRECTORY} for changes. Press Ctrl+C to stop.")
+
+                    loop = asyncio.get_running_loop()
+                    handler = SyncHandler(loop, target_nb.id)
+                    observer = Observer()
+                    observer.schedule(handler, WATCH_DIRECTORY, recursive=False)
+                    observer.start()
+                    print("Watchdog observer started.")
+
+                    # Start periodic validation in background
+                    validation_task = asyncio.create_task(periodic_validation(client, target_nb.id))
+
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                    except KeyboardInterrupt:
+                        print("KeyboardInterrupt detected. Stopping...")
+                        observer.stop()
+                        validation_task.cancel()
+                    finally:
+                        observer.join()
+                        print("Observer joined.")
+                break
+            except ValueError as e:
+                err_msg = str(e)
+                if ("expired" in err_msg.lower() or "login" in err_msg.lower() or "redirect" in err_msg.lower()) and auth_attempt < max_auth_retries:
+                    print(f"Auth expired on startup (attempt {auth_attempt + 1}/{max_auth_retries}). Auto-refreshing...")
+                    loop = asyncio.get_running_loop()
+                    refreshed = await loop.run_in_executor(None, _refresh_auth_headless)
+                    if not refreshed:
+                        print("\n" + "=" * 70)
+                        print("CRITICAL: NotebookLM authentication expired or invalid.")
+                        print("Auto-refresh via persistent browser profile failed.")
+                        print("Interactive login is required:")
+                        print("  /gaia/GAIA_Project/venv_notebooklm/bin/notebooklm login")
+                        print("=" * 70 + "\n")
+                        sys.exit(EXIT_CODE_AUTH_REQUIRED)
+                    continue
+                raise
     except SystemExit:
         raise
     except Exception as e:
