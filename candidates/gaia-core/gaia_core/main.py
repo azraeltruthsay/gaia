@@ -1496,6 +1496,43 @@ async def process_packet(packet_data: Dict[str, Any]):
                                             pe.tool_name, pe.tool_action,
                                         )
                                         _invalid_tool_ids.add(id(pe))
+                                        # vp52: a hallucinated tool call is a real demand
+                                        # signal for a missing capability, not just noise
+                                        # to suppress — feed it into the existing
+                                        # thought_seed -> CodeMind capability_gap bridge
+                                        # (sleep_task_scheduler._run_initiative_cycle /
+                                        # _run_codemind_cycle) instead of only correcting
+                                        # it. Back off like the other seed planters
+                                        # (knowledge_ingestion.py, docs_maintenance.py)
+                                        # when the backlog is already at cap.
+                                        try:
+                                            from gaia_core.cognition.thought_seed import (
+                                                save_thought_seed,
+                                                seed_backlog_count,
+                                            )
+                                            _seed_cap = int(os.environ.get("THOUGHT_SEED_MAX_PENDING", "2000"))
+                                            if seed_backlog_count() < _seed_cap:
+                                                from datetime import datetime, timezone
+                                                _gap_payload = {
+                                                    "attempted_tool_name": pe.tool_name,
+                                                    "attempted_tool_action": pe.tool_action,
+                                                    "attempted_tool_params": pe.tool_params,
+                                                    "user_request": user_input,
+                                                    "session_id": session_id,
+                                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                                }
+                                                _seed_text = (
+                                                    "THOUGHT_SEED: capability gap — hallucinated tool call. "
+                                                    f"No tool named '{pe.tool_name}' exists; this could be "
+                                                    "researched and built as a real capability (knowledge gap). "
+                                                    f"Payload: {json.dumps(_gap_payload, default=str)}"
+                                                )
+                                                save_thought_seed(_seed_text, packet, _agent_core.config)
+                                        except Exception:
+                                            logger.debug(
+                                                "Failed to plant capability_gap thought seed for hallucinated tool '%s'",
+                                                pe.tool_name, exc_info=True,
+                                            )
                                     else:
                                         _action_display = f"({pe.tool_action})" if pe.tool_action else ""
                                         tool_display = f"\n*[calling {pe.tool_name}{_action_display}...]*\n"
