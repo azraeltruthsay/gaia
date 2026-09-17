@@ -22,7 +22,7 @@ logger = logging.getLogger("GAIA.PlanningOrchestrator")
 
 
 # Phase definitions for structured planning
-PLAN_PHASES = [
+PLAN_PHASES: List[Dict[str, Any]] = [
     {"id": "requirements", "label": "Requirements & Scope", "max_tokens": 512,
      "prompt_suffix": "Define what needs to change, which services are affected, and the acceptance criteria."},
     {"id": "architecture", "label": "Architecture & File Changes", "max_tokens": 1024,

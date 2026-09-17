@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any, Dict
 
 import pytest
 
@@ -32,7 +33,7 @@ def _patch_samvega_dirs(tmp_path, monkeypatch):
 
 def _make_artifact(**overrides) -> SamvegaArtifact:
     """Create a test artifact with sensible defaults."""
-    defaults = dict(
+    defaults: Dict[str, Any] = dict(
         timestamp="2026-02-27T12:00:00+00:00",
         session_id="test-session",
         packet_id="pkt-001",

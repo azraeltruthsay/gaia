@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 import uuid
-from typing import List, Dict
+from typing import Any, List, Dict
 from datetime import datetime, timedelta, timezone
 from gaia_core.config import Config
 
@@ -156,7 +156,7 @@ class SessionManager:
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return
         session = self.get_or_create_session(session_id)
-        turn = {
+        turn: Dict[str, Any] = {
             "id": f"m{uuid.uuid4().hex[:8]}",
             "role": role,
             "content": content,
