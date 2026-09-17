@@ -187,11 +187,15 @@ class NeuralRouter:
         # source context, and text complexity markers.
         if audio_payloads:
             target, reason = self._triage_audio(text, source, audio_payloads)
-            score = {TargetEngine.NANO: 0.2, TargetEngine.CORE: 0.6, TargetEngine.PRIME: 0.9}
+            # o9dh/saq3: was named `score`, colliding (same-scope reuse of one
+            # name for two different types) with the per-call float `score`
+            # assigned throughout the rest of this method — confused mypy's
+            # type inference for ~20 lines below, though harmless at runtime.
+            _audio_base_scores = {TargetEngine.NANO: 0.2, TargetEngine.CORE: 0.6, TargetEngine.PRIME: 0.9}
             return self._build_result(
                 target=target,
                 intent="audio_inbox_review",
-                score=score.get(target, 0.6),
+                score=_audio_base_scores.get(target, 0.6),
                 confidence=1.0,
                 source="multimodal_audio",
                 escalation_reason=reason,

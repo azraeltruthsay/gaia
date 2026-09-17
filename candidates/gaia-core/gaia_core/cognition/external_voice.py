@@ -340,7 +340,7 @@ class ExternalVoice:
                     buf_len = len(self._active_observer_buffer)
                     if buf_len > 0 and buf_len % 50 == 0 and (self._active_observer_future is None or self._active_observer_future.done()):
                         accumulated = "".join(self._active_observer_buffer)
-                        packet = self.context.get("packet")
+                        packet: Optional[CognitionPacket] = self.context.get("packet")
                         self._active_observer_future = self._observer_executor.submit(
                             self.active_stream_observer.observe, packet, accumulated
                         )
@@ -354,7 +354,7 @@ class ExternalVoice:
                             is_think_tag = "Think-tag" in loop_interrupt.reason
                             interrupt_type = "think_tag_loop" if is_think_tag else "loop_detection"
                             logger.warning(f"ExternalVoice: loop detector interrupted stream ({interrupt_type}): {loop_interrupt.reason}")
-                            packet: CognitionPacket = self.context.get("packet")
+                            packet = self.context.get("packet")
                             if packet:
                                 try:
                                     packet.status.state = PacketState.ABORTED
@@ -425,7 +425,7 @@ class ExternalVoice:
                             self._last_observer_at = time.time()
                             self._observer_calls += 1
                             if interrupt:
-                                packet: CognitionPacket = self.context.get("packet")
+                                packet = self.context.get("packet")
                                 if interrupt.level == "BLOCK":
                                     # [GCP v0.3] Update the packet status for terminal aborts
                                     if packet:

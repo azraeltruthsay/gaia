@@ -10,7 +10,7 @@ from gaia_core.memory.semantic_codex import SemanticCodex
 from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_core.memory.codex_writer import CodexWriter
 from dataclasses import dataclass
-from typing import Generator, Dict, Any, List, Optional
+from typing import Generator, Dict, Any, List, Optional, Tuple
 
 from gaia_core.cognition.external_voice import ExternalVoice
 from gaia_core.cognition.self_reflection import reflect_and_refine
@@ -185,7 +185,7 @@ def _format_retrieved_session_context(results: dict) -> str:
 
 # Known documents that can be recited, with keyword triggers and file paths
 # Keywords are checked case-insensitively against the user's request
-RECITABLE_DOCUMENTS = {
+RECITABLE_DOCUMENTS: Dict[str, Dict[str, Any]] = {
     "constitution": {
         "keywords": ["gaia constitution", "gaia's constitution", "your constitution"],
         "path": "knowledge/system_reference/core_documents/gaia_constitution.md",
@@ -955,7 +955,7 @@ class AgentCore:
             status=status
         )
 
-    def _run_pre_generation_safety_check(self, packet: CognitionPacket, assembled_prompt: str) -> (bool, str):
+    def _run_pre_generation_safety_check(self, packet: CognitionPacket, assembled_prompt: str) -> Tuple[bool, str]:
         """
         Run the EthicalSentinel (preferred) or CoreIdentityGuardian (fallback) to determine
         whether generation should proceed.
@@ -2174,7 +2174,13 @@ class AgentCore:
                 llama_mod = __import__("llama_cpp")
                 Llama = getattr(llama_mod, "Llama", None)
                 if Llama is not None and isinstance(selected_model, Llama):
-                    from gaia_core.models.model_pool import SafeModelProxy
+                    # o9dh/saq3: model_pool.py (the public shim) never
+                    # re-exported SafeModelProxy — only _model_pool_impl.py
+                    # (where it's actually defined) has it. This import
+                    # raised ImportError on every call, silently swallowed
+                    # by the except below, so this defensive wrapping guard
+                    # never actually fired.
+                    from gaia_core.models._model_pool_impl import SafeModelProxy
                     wrapped = SafeModelProxy(selected_model, pool=self.model_pool, role=selected_model_name)
                     # update pool and local reference
                     try:
@@ -4703,7 +4709,11 @@ class AgentCore:
                 _scorer = get_observer_scorer(self.config)
                 if _scorer:
                     import threading
-                    _obs_review = review if 'review' in dir() else None
+                    # `review` may or may not have been assigned by an earlier
+                    # branch in this function — the dir()-based existence
+                    # check is intentional (a genuine runtime conditional),
+                    # not resolvable by mypy's flow analysis.
+                    _obs_review = review if 'review' in dir() else None  # type: ignore[has-type]
                     threading.Thread(
                         target=_scorer.score_turn,
                         args=(user_input, full_response, packet),
@@ -8474,7 +8484,7 @@ REASONING: [Brief explanation of your analysis]"""
         """
         import subprocess
 
-        results = []
+        results: List[Dict[str, Any]] = []
         app_dir = Path("/app") if Path("/app").exists() else Path.cwd() / "app"
 
         # Keywords derived from topic
@@ -8621,7 +8631,7 @@ SUGGESTIONS:
             response_text = strip_think_tags(response_text)
 
             # Parse the response
-            parsed = {"summary": "", "issues": [], "suggestions": [], "files_analyzed": file_paths}
+            parsed: Dict[str, Any] = {"summary": "", "issues": [], "suggestions": [], "files_analyzed": file_paths}
 
             current_section = None
             for line in response_text.split("\n"):
@@ -9674,7 +9684,7 @@ Start your response with the first line of the file."""
                 # functions (mcp_client.py) — the asyncio.run() wrapper
                 # here raised TypeError on every call to this branch (the
                 # local shim path for read_file/write_file/run_shell).
-                result: Dict[str, Any] = mcp_client.ai_read(tool.params.get("path", ""))
+                result = mcp_client.ai_read(tool.params.get("path", ""))
 
             elif canonical_name == "write_file":
                 if not allow_write:
