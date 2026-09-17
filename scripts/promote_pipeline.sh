@@ -501,26 +501,41 @@ else
         stage_fail "Graceful Live Shutdown" "docker compose down failed (exit $down_exit)"
     fi
 
-    # 1c. Verify all live containers are actually stopped.
-    # o9dh/saq3: `docker compose down` can return success while a few
-    # heavier containers (elasticsearch, etc.) are still finishing their
-    # own teardown/network-detach -- observed live: down_exit=0, most
-    # containers logged "Removed", but "Network gaia-network Removing /
-    # Resource is still in use" (something was still attached), and a
-    # single immediate `docker compose ps -q` check right after counted
-    # 6 stragglers that had, in fact, all fully exited within about a
-    # minute on their own. A single instant check treated that normal
-    # teardown tail as a hard failure and aborted the whole pipeline with
-    # production already mid-shutdown (briefly fully offline until
-    # manually restarted). Poll instead of checking once.
-    live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
+    # 1c. Verify all live (production) containers are actually stopped.
+    #
+    # o9dh/saq3 -- TWO bugs found here, fixed together:
+    #
+    # Root cause (the real one): production and candidate containers
+    # share ONE Compose project name ("gaia_project", set explicitly in
+    # both docker-compose.yml and docker-compose.candidate.yml). Plain
+    # `docker compose ps -q` (no service args) lists every container
+    # under that PROJECT label, not just the services the current `-f`
+    # resolution defines -- so it always included the candidate stack
+    # (gaia-core-candidate, gaia-mcp-candidate, etc. -- 5-6 containers,
+    # by design always running) as "still live," even the instant after
+    # a fully successful, complete production shutdown. This check could
+    # never pass, on any run, regardless of whether shutdown actually
+    # succeeded -- confirmed live: 3 separate attempts all failed with
+    # "6 live containers still running" while `docker compose ps -a`
+    # simultaneously showed zero production containers. Fixed by scoping
+    # the check to just the service NAMES docker-compose.yml itself
+    # defines (`docker compose config --services`, which -- unlike
+    # `ps` -- does NOT pull in the candidate override file when it's not
+    # passed), matching exactly what `docker compose down` above targets.
+    #
+    # Secondary, genuinely-possible race (kept as defense in depth): a
+    # heavier container (elasticsearch, etc.) can still be finishing its
+    # own teardown for a few seconds after `docker compose down` returns.
+    # Poll briefly rather than a single instant check.
+    prod_services=$(docker compose config --services 2>/dev/null)
+    live_remaining=$(docker compose ps -q $prod_services 2>/dev/null | wc -l)
     if [ "$live_remaining" -gt 0 ]; then
         log "  ${YELLOW}⚠${RESET} $live_remaining live container(s) still stopping, waiting up to 60s..."
         waited=0
         while [ "$live_remaining" -gt 0 ] && [ "$waited" -lt 60 ]; do
             sleep 3
             waited=$((waited + 3))
-            live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
+            live_remaining=$(docker compose ps -q $prod_services 2>/dev/null | wc -l)
         done
         if [ "$live_remaining" -gt 0 ]; then
             log "  ${YELLOW}⚠${RESET} $live_remaining live containers still running after ${waited}s"
