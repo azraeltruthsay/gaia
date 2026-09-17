@@ -172,8 +172,22 @@ run_mypy() {
     local svc=$2
     local ruff_path="${RUFF_PATHS[$svc]}"
 
-    docker run --rm "${COMMON_ENV[@]}" "$image_name" \
-        python -m mypy "$ruff_path" 2>&1
+    # o9dh/saq3: mypy's config discovery walks UP from the process's cwd
+    # looking for pyproject.toml -- it does NOT search from the scanned
+    # path argument the way ruff does. Without -w here, cwd is whatever
+    # the image's Dockerfile WORKDIR is (/app for every service), which
+    # only happens to contain pyproject.toml directly for services that
+    # COPY it straight to /app (gaia-core). gaia-mcp copies its
+    # pyproject.toml to /app/gaia-mcp/pyproject.toml instead -- one level
+    # below cwd, so mypy silently found no config, applied bare defaults,
+    # and validated gaia-mcp with NONE of its own settings (ignore lists,
+    # disable_error_code, etc.) for as long as this check has run at all.
+    # Setting -w to the same path being scanned makes mypy's upward walk
+    # start at-or-below wherever that service's pyproject.toml actually
+    # lives, for every service, regardless of each Dockerfile's own COPY
+    # layout.
+    docker run --rm -w "$ruff_path" "${COMMON_ENV[@]}" "$image_name" \
+        python -m mypy . 2>&1
 }
 
 run_pytest() {
