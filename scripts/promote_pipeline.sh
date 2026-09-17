@@ -747,38 +747,43 @@ else
     # unless it's explicitly started first. Only attempt this when live was
     # actually stopped in Stage 1 (LIVE_STOPPED=true), so the GPU is free
     # and no force-preemption of a running production tenant is needed.
+    #
+    # Originally this went through the orchestrator's tenant lifecycle API
+    # (/lifecycle/tenant/.../start) -- but Stage 1's `docker compose down`
+    # stops gaia-orchestrator along with everything else in the live stack,
+    # so by the time Stage 4 runs, no orchestrator is reachable to ask.
+    # Since LIVE_STOPPED=true already proves the GPU is free (nothing else
+    # can be holding it), managing the candidate container directly via
+    # docker compose is safe here and doesn't need the orchestrator's
+    # bookkeeping at all.
     prime_candidate_started=false
     if [ "$LIVE_STOPPED" = true ]; then
-        orch_url=$(_find_orchestrator)
-        if [ -n "$orch_url" ]; then
-            log "  Starting gaia-prime-candidate GPU tenant for Prime-routed tests..."
-            set +e
-            tenant_response=$(curl -sf --max-time 15 -X POST "$orch_url/lifecycle/tenant/gaia-prime-candidate/start" 2>&1)
-            tenant_exit=$?
-            set -e
-            if [ $tenant_exit -eq 0 ]; then
-                log "  ${GREEN}✓${RESET} Tenant start requested — waiting for readiness (up to 90s)..."
-                waited=0
-                ready=false
-                while [ "$waited" -lt 90 ]; do
-                    if curl -sf --max-time 3 "http://localhost:7778/health" > /dev/null 2>&1; then
-                        ready=true
-                        break
-                    fi
-                    sleep 5
-                    waited=$((waited + 5))
-                done
-                if [ "$ready" = true ]; then
-                    log "  ${GREEN}✓${RESET} gaia-prime-candidate ready after ${waited}s"
-                    prime_candidate_started=true
-                else
-                    log "  ${YELLOW}⚠${RESET} gaia-prime-candidate not ready after ${waited}s — Prime-routed tests may fail"
+        log "  Starting gaia-prime-candidate GPU tenant for Prime-routed tests..."
+        set +e
+        docker compose -f docker-compose.candidate.yml up -d gaia-prime-candidate \
+            >> "$LOG_FILE" 2>&1
+        tenant_exit=$?
+        set -e
+        if [ $tenant_exit -eq 0 ]; then
+            log "  ${GREEN}✓${RESET} gaia-prime-candidate starting — waiting for readiness (up to 90s)..."
+            waited=0
+            ready=false
+            while [ "$waited" -lt 90 ]; do
+                if curl -sf --max-time 3 "http://localhost:7778/health" > /dev/null 2>&1; then
+                    ready=true
+                    break
                 fi
+                sleep 5
+                waited=$((waited + 5))
+            done
+            if [ "$ready" = true ]; then
+                log "  ${GREEN}✓${RESET} gaia-prime-candidate ready after ${waited}s"
+                prime_candidate_started=true
             else
-                log "  ${YELLOW}⚠${RESET} Tenant start request failed: $tenant_response — Prime-routed tests may fail"
+                log "  ${YELLOW}⚠${RESET} gaia-prime-candidate not ready after ${waited}s — Prime-routed tests may fail"
             fi
         else
-            log "  ${YELLOW}⚠${RESET} No orchestrator reachable — cannot start gaia-prime-candidate"
+            log "  ${YELLOW}⚠${RESET} docker compose up failed for gaia-prime-candidate — Prime-routed tests may fail"
         fi
     else
         log "  ${DIM}Live not stopped (--keep-live or Stage 1 skipped) — leaving gaia-prime-candidate at its default state to avoid GPU contention${RESET}"
@@ -803,7 +808,7 @@ else
     # of smoke test outcome, matching tenant_policy.json's documented default.
     if [ "$prime_candidate_started" = true ]; then
         log "  Stopping gaia-prime-candidate GPU tenant (restoring default-stopped state)..."
-        curl -sf --max-time 15 -X POST "$orch_url/lifecycle/tenant/gaia-prime-candidate/stop" > /dev/null 2>&1 || true
+        docker compose -f docker-compose.candidate.yml stop gaia-prime-candidate >> "$LOG_FILE" 2>&1 || true
     fi
 
     if [ $smoke_exit -eq 0 ]; then
