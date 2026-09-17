@@ -51,7 +51,7 @@ class HFModel:
                         preferred_dtype = None
 
                 # encourage accelerate to keep weights on GPU: construct an explicit max_memory mapping
-                load_kwargs = {
+                load_kwargs: Dict[str, Any] = {
                     "trust_remote_code": True,
                 }
                 # Try to reduce peak CPU memory during model deserialization
@@ -195,7 +195,11 @@ class HFModel:
         # Tokenize input; prefer returning PyTorch tensors to leverage device map
         self.tokenizer(prompt, return_tensors="pt")
 
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        # transformers' own stubs type TextIteratorStreamer's first arg as
+        # AutoTokenizer specifically, but AutoTokenizer.from_pretrained (used
+        # above) returns a union of concrete backend classes -- an overly
+        # narrow stub, not a real type mismatch (duck-typed at runtime).
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)  # type: ignore[arg-type]
 
         def _generate():
             try:

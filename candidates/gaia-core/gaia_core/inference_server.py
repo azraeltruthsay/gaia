@@ -246,7 +246,7 @@ def load_model(model_path: str, device: str = "cuda", dtype=torch.bfloat16):
     )
     # Move explicitly to device (avoids FLA mixed-device issues with device_map)
     if device == "cuda" and torch.cuda.is_available():
-        _model = _model.to("cuda")
+        _model = _model.to("cuda")  # type: ignore[arg-type]
     _model.eval()
 
     _device = device
@@ -282,7 +282,7 @@ def migrate_to(target_device: str) -> dict:
         start = time.time()
 
         if target_device == "cpu":
-            _model = _model.to("cpu")
+            _model = _model.to("cpu")  # type: ignore[arg-type]
             if _kv_cache:
                 _kv_cache.invalidate()  # free cached KV tensors on GPU
             # Aggressive VRAM cleanup — release as much as possible
@@ -294,7 +294,7 @@ def migrate_to(target_device: str) -> dict:
         elif target_device == "cuda":
             if not torch.cuda.is_available():
                 return {"ok": False, "error": "CUDA not available"}
-            _model = _model.to("cuda")
+            _model = _model.to("cuda")  # type: ignore[arg-type]
             if _kv_cache:
                 _kv_cache.migrate_device("cuda")
             _device = "cuda"
@@ -546,7 +546,11 @@ def generate(messages: list, max_tokens: int = 512, temperature: float = 0.7,
             input_ids, past_kv, max_tokens, temperature, top_p,
         )
 
-        response_text = _tokenizer.decode(generated_ids, skip_special_tokens=True)
+        # tokenizer.decode()'s stub return type is str | List[str] (batched
+        # decode support), but a single generated sequence always decodes to
+        # str at runtime -- str() cast makes that concrete for mypy without
+        # changing behavior (every other use below already assumed str).
+        response_text = str(_tokenizer.decode(generated_ids, skip_special_tokens=True))
 
         # Strip think tags if present
         if "<think>" in response_text:

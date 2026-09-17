@@ -53,9 +53,9 @@ except Exception:
     VLLMRemoteModel = None
 try:
     from .groq_model import GroqAPIModel as _GroqAPIModel
-    GroqAPIModel = _GroqAPIModel  # type: ignore[misc]
+    GroqAPIModel = _GroqAPIModel
 except Exception:
-    GroqAPIModel = None
+    GroqAPIModel = None  # type: ignore[assignment,misc]
 import os
 from typing import Any, Dict, List, Optional
 
