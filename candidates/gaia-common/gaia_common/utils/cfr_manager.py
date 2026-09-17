@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -221,9 +222,21 @@ class CFRManager:
     """Cognitive Focus and Resolution — hierarchical document comprehension."""
 
     # Inside containers, use /shared. On host, fall back to project-local path.
+    # o9dh/saq3: a third case exists -- neither /shared nor /gaia present,
+    # e.g. a throwaway validation container with no volumes mounted (found
+    # live: validate.sh's fresh build crashed constructing CFRManager()
+    # with PermissionError trying to create /gaia itself, a host-only
+    # path that doesn't exist and isn't writable inside such a
+    # container). Fall back to a temp dir rather than assuming one of the
+    # two real deployment shapes.
     _CONTAINER_DIR = Path("/shared/gaia_state/cfr")
     _HOST_DIR = Path("/gaia/GAIA_Project/gaia-core/shared/gaia_state/cfr")
-    DEFAULT_STATE_DIR = _CONTAINER_DIR if _CONTAINER_DIR.parent.exists() else _HOST_DIR
+    if _CONTAINER_DIR.parent.exists():
+        DEFAULT_STATE_DIR = _CONTAINER_DIR
+    elif Path("/gaia").exists():
+        DEFAULT_STATE_DIR = _HOST_DIR
+    else:
+        DEFAULT_STATE_DIR = Path(tempfile.gettempdir()) / "gaia_state" / "cfr"
     INDEX_FILENAME = "_index.json"
 
     # Chunking defaults

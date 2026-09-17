@@ -37,8 +37,19 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "httpx>=0.25.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
+    # o9dh/saq3: pinned exact, not >=. Unpinned floors let every fresh
+    # `pip install` (validate.sh builds a throwaway image every run)
+    # silently resolve whatever's newest -- discovered live: the running
+    # candidate container had ruff 0.15.8/mypy 1.19.1 (what this codebase
+    # has actually been validated and cleaned up against), while a fresh
+    # validate.sh build resolved ruff 0.16.4/mypy 2.3.1 and reported
+    # thousands of newly-in-scope rule violations under different
+    # defaults -- a real gaia-core cleanup effort (tracked separately),
+    # not something to silently absorb by pinning around it forever, but
+    # pinning now makes validation deterministic instead of drifting
+    # with upstream releases between one run and the next.
+    "ruff==0.15.8",
+    "mypy==1.19.1",
 ]
 
 [tool.hatch.build.targets.wheel]

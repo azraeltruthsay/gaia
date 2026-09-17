@@ -5,6 +5,7 @@ import pytest
 
 from gaia_common.utils.packet_factory import build_packet, PacketSource
 from gaia_common.protocols.cognition_packet import (
+    COGPACKET_VERSION,
     CognitionPacket,
     OutputDestination,
     PacketState,
@@ -21,9 +22,12 @@ class TestBuildPacketAllSources:
     """Each PacketSource produces a valid packet with the right defaults."""
 
     @pytest.mark.parametrize("source", list(PacketSource))
-    def test_version_is_0_3(self, source: PacketSource):
+    def test_version_matches_current_cogpacket_version(self, source: PacketSource):
+        # o9dh/saq3/zbmo: was a hardcoded "0.3" -- stale since the packet
+        # schema moved to v0.5 (COGPACKET_VERSION). Assert against the
+        # real constant so this can't go stale the same way again.
         pkt = build_packet(source, "hello")
-        assert pkt.version == "0.3"
+        assert pkt.version == COGPACKET_VERSION
 
     @pytest.mark.parametrize(
         "source, expected_dest",
@@ -45,7 +49,11 @@ class TestBuildPacketAllSources:
             (PacketSource.WEB, TargetEngine.PRIME),
             (PacketSource.DISCORD, TargetEngine.PRIME),
             (PacketSource.AUDIO_GATEWAY, TargetEngine.PRIME),
-            (PacketSource.VOICE_PRIME, TargetEngine.PRIME),
+            # o9dh/saq3/zbmo: VOICE_PRIME was deliberately repinned to
+            # CORE (GAIA_Project-a1t) -- pre-pinning to Prime bypassed
+            # the NeuralRouter and forced every voice turn onto
+            # Prime-on-CPU (8-17s latency). This test predated that fix.
+            (PacketSource.VOICE_PRIME, TargetEngine.CORE),
             (PacketSource.VOICE_LITE, TargetEngine.LITE),
         ],
     )
@@ -59,7 +67,9 @@ class TestBuildPacketAllSources:
             (PacketSource.WEB, 2048, 30000),
             (PacketSource.DISCORD, 2048, 30000),
             (PacketSource.AUDIO_GATEWAY, 2048, 30000),
-            (PacketSource.VOICE_PRIME, 512, 15000),
+            # o9dh/saq3/zbmo: max_tokens trimmed to 256 alongside the
+            # CORE repin above (snappy spoken replies) -- test predated it.
+            (PacketSource.VOICE_PRIME, 256, 15000),
             (PacketSource.VOICE_LITE, 128, 5000),
         ],
     )
