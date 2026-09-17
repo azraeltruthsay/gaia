@@ -28,7 +28,7 @@ from gaia_core.memory.status_tracker import GAIAStatus
 try:
     from gaia_core.memory.dev_matrix import GAIADevMatrix  # optional
 except Exception:
-    GAIADevMatrix = None
+    GAIADevMatrix = None  # type: ignore[assignment,misc]
 
 # ----------------------------
 # small internal utilities

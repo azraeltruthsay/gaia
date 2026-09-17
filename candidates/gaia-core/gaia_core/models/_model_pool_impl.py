@@ -4,7 +4,7 @@
 try:
     from llama_cpp import Llama
 except Exception:
-    Llama = None
+    Llama = None  # type: ignore[assignment,misc]
 
 from gaia_core.config import get_config, Config
 import logging
@@ -29,7 +29,7 @@ VLLMChatModel = None
 try:
     from .dev_model import DevModel
 except Exception:
-    DevModel = None
+    DevModel = None  # type: ignore[assignment,misc]
 try:
     from .hf_model import HFModel as _HFModel
     HFModel = _HFModel
@@ -53,7 +53,7 @@ except Exception:
     VLLMRemoteModel = None
 try:
     from .groq_model import GroqAPIModel as _GroqAPIModel
-    GroqAPIModel = _GroqAPIModel
+    GroqAPIModel = _GroqAPIModel  # type: ignore[misc]
 except Exception:
     GroqAPIModel = None
 import os
@@ -145,7 +145,7 @@ def _ensure_download(role: str, spec: dict, models_dir: Path, scripts_dir: Path,
     dl = scripts_dir / "download_models.py"
     if not dl.exists():
         return out
-    cmd = [os.sys.executable, str(dl), "--role", role]
+    cmd = [sys.executable, str(dl), "--role", role]
     try:
         subprocess.check_call(cmd)
     except Exception as e:
@@ -620,7 +620,7 @@ class ModelPool:
                 global Llama
                 if Llama is None:
                     from llama_cpp import Llama as _L
-                    Llama = _L
+                    Llama = _L  # type: ignore[misc]
                 desired_n_gpu = int(getattr(self.config, 'n_gpu_layers', 0) or 0)
                 free_bytes, total_bytes = _get_gpu_free_total_bytes()
                 if free_bytes is None:

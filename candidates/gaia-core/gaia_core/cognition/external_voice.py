@@ -30,7 +30,7 @@ try:
     LOOP_DETECTION_AVAILABLE = True
 except ImportError:
     LOOP_DETECTION_AVAILABLE = False
-    LoopDetectorObserver = None
+    LoopDetectorObserver = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("GAIA.ExternalVoice")
 
@@ -91,7 +91,7 @@ class ExternalVoice:
         # In FOCUSING: Core (CPU) observes Thinker (Prime GPU).
         self.active_stream_observer = active_stream_observer
         self._active_observer_buffer: List[str] = []
-        self._active_observer_future = None
+        self._active_observer_future: Optional[concurrent.futures.Future] = None
 
         self.logical_stop_punct = getattr(self.config, 'LOGICAL_STOP_PUNCTUATION', None) or self.config.constants.get("LOGICAL_STOP_PUNCTUATION", [".", "!", "?", "\n"])
         self.observer_threshold = getattr(self.config, 'OBSERVER_TOKEN_THRESHOLD', None) or self.config.constants.get("OBSERVER_TOKEN_THRESHOLD", 1000)
@@ -225,6 +225,7 @@ class ExternalVoice:
             # as a dict instead of a streaming generator. Normalize those
             # single-shot payloads into a one-item iterable so downstream
             # logic can treat stream and batch paths uniformly.
+            iterable: Any
             if isinstance(token_stream, Mapping):
                 iterable = [token_stream]
             elif isinstance(token_stream, (str, bytes, bytearray)):
