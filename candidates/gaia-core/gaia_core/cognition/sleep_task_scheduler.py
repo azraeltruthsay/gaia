@@ -204,6 +204,17 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_samvega_introspection,
+            # o9dh: unthrottled P2 tasks are ALWAYS eligible, so
+            # get_next_task()'s priority-first sort meant this (with
+            # samvega_kv_fold/tier5_training below) won every single tick,
+            # forever — the exact starvation pattern 2wr fixed for P1
+            # tasks, just recreated here for P3+ (confirmed live: 72h of
+            # logs showed this task at run #780+ while penpal_review,
+            # codemind_cycle, skill_creator_cycle, and doc_sentinel_* had
+            # ZERO runs). 120s matches its own cost (mostly a fast no-op
+            # when the artifact queue is empty) while actually giving
+            # lower-priority tasks a slot.
+            min_interval_seconds=120,
         ))
 
         self.register_task(SleepTask(
@@ -213,6 +224,7 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_samvega_kv_fold,
+            min_interval_seconds=120,
         ))
 
         self.register_task(SleepTask(
@@ -222,6 +234,7 @@ class SleepTaskScheduler:
             interruptible=False,
             estimated_duration_seconds=30,
             handler=self._run_tier5_training,
+            min_interval_seconds=300,
         ))
 
         self.register_task(SleepTask(
@@ -241,6 +254,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=420,
             handler=self._run_blueprint_validation,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -250,6 +265,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_code_evolution,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=600,
         ))
 
         self.register_task(SleepTask(
@@ -259,6 +276,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=90,
             handler=self._run_promotion_readiness,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=900,
         ))
 
         self.register_task(SleepTask(
@@ -268,6 +287,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_code_review,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -277,6 +298,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=180,
             handler=self._run_knowledge_research,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -286,6 +309,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=300,
             handler=self._run_knowledge_ingestion,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Session hygiene — archive stale sessions to prevent retrieval
@@ -298,6 +323,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=15,
             handler=self._run_session_hygiene,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Self-narrative journal writer — synthesizes recent activity into
@@ -310,6 +337,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=45,
             handler=self._run_journal_write,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Journal re-reading + inspired reflection — Phase B of vam.
@@ -323,6 +352,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_journal_reflection,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -332,6 +363,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_wiki_doc_regen,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -341,6 +374,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_adversarial_resilience_drill,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -350,6 +385,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_initiative_cycle,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=900,
         ))
 
         self.register_task(SleepTask(
@@ -389,6 +426,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=15,
             handler=self._run_doc_sentinel_glossary,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -398,6 +437,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=10,
             handler=self._run_doc_sentinel_catalog,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -407,6 +448,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=300,
             handler=self._run_curriculum_sync,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -416,6 +459,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=180,
             handler=self._run_codemind_cycle,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
     # ------------------------------------------------------------------
