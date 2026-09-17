@@ -1216,10 +1216,17 @@ def audit_code():
 
 def run_service_tests(name: str) -> bool:
     """Run ruff and pytest inside the container to validate code changes."""
-    # 1. Lint Check (all F-rules: F401 unused import, F811 redef, F821 undef, etc.)
+    # o9dh/saq3: no --select override -- let ruff auto-discover the
+    # service's own pyproject.toml [tool.ruff.lint] ignore list (F401,
+    # F811, F841, etc. are deliberately non-blocking project policy,
+    # e.g. F811 is the intentional guarded-optional-import idiom used
+    # throughout this codebase). --select "F" was bypassing that policy
+    # entirely, so this check (and the self-repair loop it triggers,
+    # up to and including restoring a candidate file from production)
+    # was firing on code the project has explicitly decided is fine.
     log.info("Running lint audit for %s...", name)
     try:
-        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F", "--no-cache"]
+        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             log.error("LINT ERROR in %s:\n%s", name, lint_res.stdout)
@@ -1262,7 +1269,14 @@ def run_service_tests(name: str) -> bool:
 # Lint Auto-Fix (safe subset of F-rules)
 # ---------------------------------------------------------------------------
 
-# Rules safe for unattended auto-fix (ruff --fix handles these deterministically):
+# o9dh/saq3: F401/F541/F811/F841 are ALL in this project's own
+# pyproject.toml [tool.ruff.lint] ignore list (deliberately non-blocking
+# -- e.g. F811 is the intentional guarded-optional-import idiom used
+# throughout the codebase; ruff --fix on it could delete one arm of a
+# real fallback). Kept only as a label for the proposal record below;
+# no longer passed as a --select override, so this function now only
+# ever finds something to "fix" when the service's own pyproject.toml
+# considers it a real, non-ignored issue.
 _LINT_AUTOFIX_RULES = "F401,F541,F811,F841"
 
 
@@ -1272,11 +1286,11 @@ def _attempt_lint_autofix(name: str) -> bool:
     Returns True if fixes were applied successfully.
     If surgeon approval is required, queues a proposal and returns False.
     """
-    # 1. Preview fixable issues
+    # 1. Preview fixable issues (service's own pyproject.toml ignore list applies)
     try:
         preview_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", _LINT_AUTOFIX_RULES, "--no-cache",
+            "--no-cache",
         ]
         preview = subprocess.run(preview_cmd, capture_output=True, text=True, timeout=30)
         if preview.returncode == 0:
@@ -1308,22 +1322,22 @@ def _attempt_lint_autofix(name: str) -> bool:
         log.info("Surgeon approval required — queued lint autofix %s for %s", repair_id, name)
         return False
 
-    # 3. Apply fixes
+    # 3. Apply fixes (service's own pyproject.toml ignore list applies)
     try:
         fix_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", _LINT_AUTOFIX_RULES, "--fix", "--no-cache",
+            "--fix", "--no-cache",
         ]
         fix_res = subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
     except Exception as e:
         log.warning("Lint autofix apply failed for %s: %s", name, e)
         return False
 
-    # 4. Validate — full F-rule check
+    # 4. Validate — same (config-respecting) check, confirm it's now clean
     try:
         verify_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", "F", "--no-cache",
+            "--no-cache",
         ]
         verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
     except Exception as e:
@@ -1593,10 +1607,13 @@ def _validate_repair(service: str, container_path: str) -> dict:
         ast.parse(content)
     except SyntaxError as e:
         return {"valid": False, "reason": f"syntax error: {e}"}
-    # Lint check — just this file
+    # Lint check — just this file. F821 (undefined name) only: real danger,
+    # not ignored by project policy. F811 (redefinition) dropped -- it's
+    # the intentional guarded-optional-import idiom used throughout this
+    # codebase and is in every service's pyproject.toml ignore list (o9dh/saq3).
     try:
         lint_cmd = ["docker", "exec", service, "python", "-m", "ruff", "check",
-                    container_path, "--select", "F821,F811", "--no-cache"]
+                    container_path, "--select", "F821", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             return {"valid": False, "reason": f"lint errors: {lint_res.stdout[:200]}"}
@@ -4201,17 +4218,18 @@ class DoctorHandler(BaseHTTPRequestHandler):
         file_path = proposal["file"]
 
         # ── Lint autofix branch — run ruff --fix instead of writing fixed_code ──
+        # o9dh/saq3: no --select override -- respects the service's own
+        # pyproject.toml ignore list (see _attempt_lint_autofix above).
         if proposal.get("method") == "lint_autofix":
-            rules = proposal.get("rules", _LINT_AUTOFIX_RULES)
             try:
                 fix_cmd = [
                     "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
-                    "--select", rules, "--fix", "--no-cache",
+                    "--fix", "--no-cache",
                 ]
                 subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
                 verify_cmd = [
                     "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
-                    "--select", "F", "--no-cache",
+                    "--no-cache",
                 ]
                 verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
             except Exception as e:
