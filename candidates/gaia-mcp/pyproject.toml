@@ -64,3 +64,7 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 warn_return_any = false
 no_strict_optional = true
+# o9dh/saq3: ignore_missing_imports covers modules mypy can't find at
+# all; requests IS installed but ships without py.typed/stubs, a
+# separate error code (import-untyped) that flag doesn't suppress.
+disable_error_code = ["import-untyped"]

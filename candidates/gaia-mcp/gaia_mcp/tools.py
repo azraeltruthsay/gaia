@@ -6,7 +6,7 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, List
 
 from gaia_common.utils import get_logger
 try:
@@ -324,7 +324,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "send_discord_message": lambda p: _send_discord_message_impl(p),
     }
 
-    async_tool_map = {
+    async_tool_map: Dict[str, Callable[..., Any]] = {
         # CFR tools that call LLM inference (blocking HTTP → run in thread pool with timeout)
         "cfr_compress": lambda p: _run_blocking_with_timeout(
             _cfr_manager.compress, doc_id=p["doc_id"], section_index=int(p["section_index"]),
@@ -562,7 +562,7 @@ def _list_files_impl(params: dict):
     if not root_path.exists() or not root_path.is_dir():
         raise ValueError(f"{root_path} is not a directory")
 
-    results = []
+    results: List[str] = []
     exclude_dirs = {".git", ".pytest_cache", "__pycache__", ".cache", ".venv", "node_modules", "archive"}
     def walk(path: Path, depth: int):
         if depth > max_depth or len(results) >= max_entries:
@@ -1350,7 +1350,7 @@ def _find_files_impl(params: dict):
     if not root.exists() or not root.is_dir():
         raise ValueError(f"{root} is not a directory")
 
-    results = []
+    results: List[str] = []
     exclude_dirs = {".git", ".pytest_cache", "__pycache__", ".cache", ".venv", "node_modules"}
     def walk(path: Path, depth: int):
         if depth > max_depth or len(results) >= max_results:

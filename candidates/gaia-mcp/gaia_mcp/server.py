@@ -230,27 +230,34 @@ async def approve_action_endpoint(request: Request):
         if not action_id or not approval_response:
             raise HTTPException(status_code=400, detail="action_id and approval are required")
             
-        # 1. Validate the approval
-        pending = approval_store.validate_approval(action_id, approval_response)
-        if not pending:
-            return JSONResponse(content={"ok": False, "error": "Invalid action_id or incorrect challenge response."}, status_code=403)
-            
+        # 1. Validate the approval. approve() removes the pending entry
+        # itself on success (o9dh/saq3: this endpoint called
+        # validate_approval()/clear_request(), neither of which exist on
+        # ApprovalStore -- real methods are approve()/cancel(). Every call
+        # to this endpoint AttributeError'd, caught by the outer
+        # try/except below, always returning a 500. This is the live
+        # server side of mcp_client.approve_action_via_mcp() -- the
+        # client-side asyncio.run() bug fixed earlier this session in
+        # agent_core.py was calling into a server endpoint that was
+        # ALSO broken).
+        try:
+            pending = approval_store.approve(action_id, approval_response)
+        except (KeyError, ValueError) as e:
+            return JSONResponse(content={"ok": False, "error": f"Invalid action_id or incorrect challenge response: {e}"}, status_code=403)
+
         # 2. Execute the tool (since it's now approved)
         method = pending["method"]
         params = pending["params"]
-        
+
         logger.info(f"✅ ACTION APPROVED: '{method}' (ID: {action_id})")
-        
+
         result = await execute_limb(
-            method=method, 
-            params=params, 
+            method=method,
+            params=params,
             approval_store=approval_store,
             pre_approved=True # Explicitly approved
         )
-        
-        # 3. Mark as completed
-        approval_store.clear_request(action_id)
-        
+
         return {
             "ok": True,
             "method": method,

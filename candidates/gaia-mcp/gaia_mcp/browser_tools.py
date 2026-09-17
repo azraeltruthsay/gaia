@@ -108,7 +108,10 @@ def _http_browse(url: str, extract: str = "text") -> Dict:
     elif extract == "links":
         links = []
         for a in soup.find_all("a", href=True):
-            href = a["href"]
+            # bs4's stub types Tag.__getitem__ as str | AttributeValueList
+            # (multi-valued attrs like class= can be a list) -- href is
+            # always a single string in practice.
+            href = str(a["href"])
             text = a.get_text(strip=True)
             if href.startswith("http") and text:
                 links.append({"text": text[:100], "href": href})

@@ -14,7 +14,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.SkillPackage")
 
@@ -77,9 +77,9 @@ def _parse_frontmatter(text: str) -> tuple:
     body = match.group(2).strip()
 
     # Simple YAML parser — avoids PyYAML dependency in gaia-mcp
-    fm = {}
+    fm: Dict[str, Any] = {}
     current_key = None
-    current_list = None
+    current_list: Optional[List[Any]] = None
 
     for line in fm_text.split("\n"):
         stripped = line.strip()
@@ -206,7 +206,7 @@ def load_all_packages(skills_dir: Path) -> Dict[str, SkillPackage]:
     Returns:
         Dict mapping skill name to SkillPackage
     """
-    packages = {}
+    packages: Dict[str, SkillPackage] = {}
     if not skills_dir.exists():
         logger.info("Skills directory %s does not exist", skills_dir)
         return packages
