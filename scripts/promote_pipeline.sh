@@ -741,6 +741,49 @@ stage_header 4 "Cognitive Smoke Tests (Candidate)"
 if [ "$SKIP_SMOKE" = true ]; then
     stage_skip "Smoke Tests (Candidate)"
 else
+    # 7lih: gaia-prime-candidate is a default-stopped GPU tenant (single-
+    # GPU-holder doctrine) -- Prime-routed smoke tests (e.g. "recursion",
+    # deep-reasoning prompts) fail with a DNS/connection error against it
+    # unless it's explicitly started first. Only attempt this when live was
+    # actually stopped in Stage 1 (LIVE_STOPPED=true), so the GPU is free
+    # and no force-preemption of a running production tenant is needed.
+    prime_candidate_started=false
+    if [ "$LIVE_STOPPED" = true ]; then
+        orch_url=$(_find_orchestrator)
+        if [ -n "$orch_url" ]; then
+            log "  Starting gaia-prime-candidate GPU tenant for Prime-routed tests..."
+            set +e
+            tenant_response=$(curl -sf --max-time 15 -X POST "$orch_url/lifecycle/tenant/gaia-prime-candidate/start" 2>&1)
+            tenant_exit=$?
+            set -e
+            if [ $tenant_exit -eq 0 ]; then
+                log "  ${GREEN}✓${RESET} Tenant start requested — waiting for readiness (up to 90s)..."
+                waited=0
+                ready=false
+                while [ "$waited" -lt 90 ]; do
+                    if curl -sf --max-time 3 "http://localhost:7778/health" > /dev/null 2>&1; then
+                        ready=true
+                        break
+                    fi
+                    sleep 5
+                    waited=$((waited + 5))
+                done
+                if [ "$ready" = true ]; then
+                    log "  ${GREEN}✓${RESET} gaia-prime-candidate ready after ${waited}s"
+                    prime_candidate_started=true
+                else
+                    log "  ${YELLOW}⚠${RESET} gaia-prime-candidate not ready after ${waited}s — Prime-routed tests may fail"
+                fi
+            else
+                log "  ${YELLOW}⚠${RESET} Tenant start request failed: $tenant_response — Prime-routed tests may fail"
+            fi
+        else
+            log "  ${YELLOW}⚠${RESET} No orchestrator reachable — cannot start gaia-prime-candidate"
+        fi
+    else
+        log "  ${DIM}Live not stopped (--keep-live or Stage 1 skipped) — leaving gaia-prime-candidate at its default state to avoid GPU contention${RESET}"
+    fi
+
     log "  Running 20-test battery against candidate (port 6416)..."
     log "  Script: $SMOKE_SCRIPT"
     echo ""
@@ -755,6 +798,13 @@ else
 
     # Log to file (strip ANSI)
     echo "$smoke_output" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+
+    # Best-effort: return the tenant to its default-stopped state regardless
+    # of smoke test outcome, matching tenant_policy.json's documented default.
+    if [ "$prime_candidate_started" = true ]; then
+        log "  Stopping gaia-prime-candidate GPU tenant (restoring default-stopped state)..."
+        curl -sf --max-time 15 -X POST "$orch_url/lifecycle/tenant/gaia-prime-candidate/stop" > /dev/null 2>&1 || true
+    fi
 
     if [ $smoke_exit -eq 0 ]; then
         stage_pass "Smoke Tests (Candidate)"

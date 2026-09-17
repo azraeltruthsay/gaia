@@ -59,6 +59,14 @@ services:
       - SHARED_DIR=/shared
       - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-0}
       - GAIA_AUTOLOAD_MODELS=1
+      # 7lih: entrypoint.sh's engine-manager autoload gate checks this
+      # SINGULAR var (no S) -- a different, shell-level flag from
+      # GAIA_AUTOLOAD_MODELS above (Python ModelPool autoload). Without it,
+      # entrypoint.sh defaults to standby and waits for a POST /model/load
+      # that never arrives, since the candidate has no orchestrator to send
+      # one (unlike production, which relies on gaia-orchestrator's
+      # /gpu/wake during normal gear-shift operation).
+      - GAIA_AUTOLOAD_MODEL=1
       # Parity with production gaia-core: operator timezone + Locality organ
       # (place + live open-meteo weather in the [Here & Now] block). Without
       # these the HA mirror renders UTC and no place. Values come from .env.
