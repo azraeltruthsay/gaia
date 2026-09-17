@@ -238,7 +238,16 @@ Markdown Output:
         documents = self.process_documents(path, tier="2_semantic")
         if not documents:
             return 0
-        self.vector_store_manager.add_documents(documents)
+        # o9dh/saq3: self.vector_store_manager was never assigned anywhere
+        # (not in __init__, not here) -- this raised AttributeError
+        # uncaught on every call. No live callers found (dead code today),
+        # but wiring it correctly rather than just silencing the type
+        # error. Lazy/local rather than in __init__ since VectorStoreManager
+        # eagerly loads an embedding model and every other DocumentProcessor
+        # method works fine without one.
+        from gaia_core.models.vector_store import VectorStoreManager
+        vector_store_manager = VectorStoreManager(self.config)
+        vector_store_manager.add_documents(documents)
         return len(documents)
 
     def generate_artifacts(self) -> int:

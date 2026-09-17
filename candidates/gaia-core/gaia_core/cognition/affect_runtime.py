@@ -235,7 +235,7 @@ def affect_felt_line(snapshot: Optional[dict] = None) -> str:
 #     "reasons": list[str],            # why each adjustment was made (for audit)
 #   }
 
-_DEFAULT_MOD = {
+_DEFAULT_MOD: Dict[str, Any] = {
     "temperature_delta": 0.0,
     "max_tokens_multiplier": 1.0,
     "escalate_to_prime": False,
