@@ -121,7 +121,11 @@ class SkillGateway:
         embedder = self._get_embedder()
         if embedder is None or not self._packages:
             return
-        names = list(self._packages.keys())
+        # 9ar0: draft/disabled skills (e.g. unpromoted CodeMind drafts) must
+        # not be surfaced as discovery suggestions either.
+        names = [n for n, pkg in self._packages.items() if pkg.is_routable]
+        if not names:
+            return
         texts = [
             f"{name.replace('-', ' ').replace('_', ' ')}: {self._packages[name].description}"
             for name in names
@@ -301,6 +305,8 @@ class SkillGateway:
         query_words = set(query.lower().split())
         scores = []
         for name, pkg in self._packages.items():
+            if not pkg.is_routable:
+                continue
             name_words = set(name.lower().replace("-", " ").replace("_", " ").split())
             desc_words = set(pkg.description.lower().split())
             all_words = name_words | desc_words
@@ -343,6 +349,16 @@ class SkillGateway:
             return {
                 "ok": False,
                 "error": f"Skill '{skill_name}' not found. Available: {available}...",
+            }
+
+        # 9ar0: draft/disabled skills (e.g. CodeMind capability_gap drafts
+        # awaiting manual promotion) must never execute, regardless of how
+        # they're addressed here — this is the routing-layer half of the
+        # draft gate; drafting itself never writes into a live skills dir.
+        if not pkg.is_routable:
+            return {
+                "ok": False,
+                "error": f"Skill '{pkg.name}' is not active (status={pkg.status}, enabled={pkg.enabled}).",
             }
 
         # Approval check

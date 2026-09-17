@@ -43,6 +43,11 @@ class SkillPackage:
     source_path: Optional[Path] = None
     domain: str = "custom"
     dependencies: List[str] = field(default_factory=list)
+    # 9ar0: gates a package out of routing/discovery. Defaults preserve
+    # existing behavior for every hand-written skill that predates these
+    # fields (no frontmatter change needed for them to keep working).
+    status: str = "active"
+    enabled: bool = True
 
     @property
     def is_knowledge(self) -> bool:
@@ -51,6 +56,11 @@ class SkillPackage:
     @property
     def is_playbook(self) -> bool:
         return self.execution_mode.upper() == "PLAYBOOK"
+
+    @property
+    def is_routable(self) -> bool:
+        """False for draft/disabled packages — must not be executed or surfaced."""
+        return self.enabled and self.status == "active"
 
 
 def _parse_frontmatter(text: str) -> tuple:
@@ -183,6 +193,8 @@ def load_skill_package(path: Path) -> Optional[SkillPackage]:
         source_path=path,
         domain=fm.get("domain", "custom"),
         dependencies=fm.get("dependencies", []),
+        status=fm.get("status") or "active",
+        enabled=fm.get("enabled") if fm.get("enabled") is not None else True,
     )
 
 
