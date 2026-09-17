@@ -349,7 +349,7 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
             params = dict(params)
             params.pop("_allow_pending", None)
 
-        payload = {"method": method, "params": params}
+        payload: Dict[str, Any] = {"method": method, "params": params}
         if allow_pending:
             payload["allow_pending"] = True
 
@@ -515,7 +515,7 @@ def discover(endpoint: str = None, timeout: int = None) -> Dict:
                             elif isinstance(payload, dict):
                                 return {"ok": True, "methods": list(payload.keys()), "raw": str(payload)[:400], "endpoint": url}
                             elif isinstance(payload, list):
-                                return {"ok": True, "methods": [str(x) for x in payload], "raw": str(payload)[:400], "endpoint": url}
+                                return {"ok": True, "methods": [str(x) for x in payload], "raw": str(payload)[:400], "endpoint": url}  # type: ignore[attr-defined]
                         except Exception:
                             return {"ok": True, "methods": [], "raw": r.text[:400], "endpoint": url}
                 except Exception:
@@ -536,7 +536,7 @@ def discover(endpoint: str = None, timeout: int = None) -> Dict:
                             else:
                                 return {"ok": True, "methods": list(payload.keys()), "raw": str(payload)[:400]}
                         elif isinstance(payload, list):
-                            return {"ok": True, "methods": [str(x) for x in payload], "raw": str(payload)[:400]}
+                            return {"ok": True, "methods": [str(x) for x in payload], "raw": str(payload)[:400]}  # type: ignore[attr-defined]
                     except Exception:
                         return {"ok": True, "methods": [], "raw": r.text[:400]}
             except Exception:

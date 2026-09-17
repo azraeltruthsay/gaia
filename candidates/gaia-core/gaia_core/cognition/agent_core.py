@@ -54,7 +54,19 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request
-from gaia_core.cognition.nlu.router import TargetEngine
+# o9dh/saq3: aliased -- this is a DIFFERENT enum from cognition_packet's
+# TargetEngine (different members: NANO/CORE/PRIME here vs PRIME/CORE/LITE/
+# CODEMIND/COUNCIL there, and even different string values, "prime" vs
+# "Prime"). The unaliased `from ... import TargetEngine` used to shadow
+# the cognition_packet one at module scope, silently causing
+# Routing(target_engine=TargetEngine.PRIME) (a real packet-construction
+# call elsewhere in this file) to store the WRONG ENUM CLASS in a field
+# typed for cognition_packet.TargetEngine -- any `== TargetEngine.PRIME`
+# comparison against the correct enum elsewhere would always be False,
+# since different Enum classes' members never compare equal. Also the
+# literal duplicate import that gaia-doctor's lint_autofix loop was
+# repeatedly (and unsuccessfully) trying to auto-fix every ~30s.
+from gaia_core.cognition.nlu.router import TargetEngine as NeuralTargetEngine
 import gaia_core.utils.gaia_rescue_helper as rescue_helper
 
 # Loop Detection System
@@ -2084,7 +2096,7 @@ class AgentCore:
                     )
 
                     # Map TargetEngine -> model key, with availability checks
-                    if _route.target == TargetEngine.PRIME:
+                    if _route.target == NeuralTargetEngine.PRIME:
                         yield {"type": "token", "value": "[(i) NeuralRouter: Deep reasoning required. Routing to Prime...]\n\n"}
                         _escalated = False
                         for cand in ["prime", "cpu_prime"]:
@@ -2113,7 +2125,7 @@ class AgentCore:
                         if not _escalated:
                             selected_model_name = "core"
                             logger.info("[CASCADE] No Prime-tier reachable; falling back to Core")
-                    elif _route.target == TargetEngine.CORE:
+                    elif _route.target == NeuralTargetEngine.CORE:
                         selected_model_name = "core"
                     else:  # NANO
                         # o9dh/saq3: was `nano_key`, never defined anywhere —

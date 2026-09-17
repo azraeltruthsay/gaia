@@ -18,7 +18,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.KnowledgeRouter")
 
@@ -250,7 +250,7 @@ def _query_web(query: str) -> List[GroundingResult]:
         raw = mcp_client.call_jsonrpc("web_search", {
             "query": query[:120], "max_results": 2
         })
-        inner = raw
+        inner: Any = raw
         if isinstance(raw, dict):
             inner = raw.get("response", raw)
             if isinstance(inner, dict):

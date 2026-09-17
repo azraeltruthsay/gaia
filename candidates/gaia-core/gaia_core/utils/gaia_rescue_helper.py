@@ -564,7 +564,11 @@ class GAIARescueHelper:
             logger.error(f"Shell execution failed: {e}")
             stderr = str(e)
         result = (stdout or "").strip() or (stderr or "").strip()
-        GAIAStatus.set("last_command_output", result)
+        # o9dh/saq3: GAIAStatus has no .set() — was .update() everywhere
+        # else in this codebase; this call would AttributeError uncaught
+        # (outside the try/except above) every time this rescue-shell
+        # EXECUTE path ran, before sketchpad_write below ever fired.
+        GAIAStatus.update("last_command_output", result)
         self.sketchpad_write("ShellCommand", f"EXECUTE: {command}\n\n{result}")
 
     # -------------

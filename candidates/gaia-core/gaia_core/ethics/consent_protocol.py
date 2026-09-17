@@ -5,6 +5,7 @@ from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_core.ethics.ethical_sentinel import EthicalSentinel
 from gaia_core.memory.status_tracker import GAIAStatus
 from gaia_core.cognition.self_reflection import run_self_reflection
+from gaia_core.cognition.packet_utils import upgrade_v2_to_v3_packet
 
 logger = logging.getLogger("GAIA.ConsentProtocol")
 
@@ -35,9 +36,20 @@ Context for this consent request:
         logger.info("🔐 Requesting GAIA consent to operate...")
 
         try:
+            # o9dh/saq3: run_self_reflection requires a CognitionPacket
+            # (packet.content.original_prompt becomes what's reflected on)
+            # and has no `prompt` kwarg at all -- this call was raising
+            # TypeError on every invocation, caught below, so GAIA's boot
+            # consent check has always silently gone to the except branch
+            # ("error" status, consent withheld) rather than actually
+            # running. Fold the carefully-built context into `output`
+            # (what gets reflected on) since there's no separate slot for
+            # it, and build a minimal valid packet via the same converter
+            # used elsewhere for legacy/synthetic packets.
+            reflection_packet = upgrade_v2_to_v3_packet({})
             reviewed = run_self_reflection(
-                output="✅ I consent to operate.",
-                prompt=prompt,
+                packet=reflection_packet,
+                output=f"{prompt}\n\n✅ I consent to operate.",
                 config=config
             )
 
