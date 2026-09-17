@@ -76,6 +76,11 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 warn_return_any = false
 no_strict_optional = true
+# o9dh/saq3: ignore_missing_imports covers modules mypy can't find at all;
+# requests/yaml ARE installed but ship without py.typed/stubs, which is a
+# separate error code (import-untyped) that flag doesn't suppress. These
+# are third-party type-coverage gaps, not bugs in our code.
+disable_error_code = ["import-untyped"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

@@ -428,7 +428,7 @@ def maybe_write_consolidation_entry(
     """Sleep-task entry point. Self-throttled via LiteJournal entry count
     and 24h backstop. No-ops if neither threshold is met.
     """
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         cfg = (config.constants if hasattr(config, "constants") else config).get("JOURNAL_WRITER", {}) or {}
     except Exception:

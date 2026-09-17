@@ -40,7 +40,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from gaia_core.memory import journal as _j
 
@@ -663,7 +663,7 @@ def run_deliberated_turn(
       - retry_on_confabulation (default "warn"; alternatives: "prime", "none")
       - low_confidence_prefix (default a short bracketed marker)
     """
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         constants = config.constants if hasattr(config, "constants") else config
         cfg = (constants or {}).get("DELIBERATION", {}) or {}

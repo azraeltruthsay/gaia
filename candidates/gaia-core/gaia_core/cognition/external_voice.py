@@ -90,7 +90,7 @@ class ExternalVoice:
         # In AWAKE: Prime (CPU) observes Operator (Core GPU).
         # In FOCUSING: Core (CPU) observes Thinker (Prime GPU).
         self.active_stream_observer = active_stream_observer
-        self._active_observer_buffer = []
+        self._active_observer_buffer: List[str] = []
         self._active_observer_future = None
 
         self.logical_stop_punct = getattr(self.config, 'LOGICAL_STOP_PUNCTUATION', None) or self.config.constants.get("LOGICAL_STOP_PUNCTUATION", [".", "!", "?", "\n"])

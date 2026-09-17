@@ -43,7 +43,7 @@ import os
 import random
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from gaia_core.memory.journal import (
     JournalEntry,
@@ -325,7 +325,7 @@ def maybe_write_reflection_entry(
     """Sleep-task entry point. Self-throttled by weekly cadence + min
     candidate count. No-ops unless both gates pass.
     """
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         cfg = (config.constants if hasattr(config, "constants") else config).get("JOURNAL_REFLECTOR", {}) or {}
     except Exception:

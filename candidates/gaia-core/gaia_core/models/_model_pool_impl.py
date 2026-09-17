@@ -57,7 +57,7 @@ try:
 except Exception:
     GroqAPIModel = None
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # --- resolver imports (added) ----------------------------------------------
 import subprocess
@@ -307,8 +307,8 @@ class SafeModelProxy:
 class ModelPool:
     def __init__(self, config: Config = None):
         self.config = config or get_config()
-        self.models = {}
-        self.model_status = {}  # new: track each model's current role
+        self.models: Dict[str, Any] = {}
+        self.model_status: Dict[str, Any] = {}  # new: track each model's current role
         self.persona_manager = PersonaManager(self.config.PERSONAS_DIR)  # Initialize PersonaManager
         self.active_persona_obj = None  # Store the active PersonaAdapter object
         self.resource_monitor = ResourceMonitor.get_instance() # New line

@@ -8,7 +8,7 @@ import logging
 import os
 import unicodedata
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Any, Dict, Tuple, Optional
 
 logger = logging.getLogger("GAIA.PersonaSwitcher")
 
@@ -196,7 +196,7 @@ def get_persona_for_request(
 
     # Layer 2: embed classifier fallback (only if model + config allow)
     if embed_model is not None:
-        embed_cfg = {}
+        embed_cfg: Dict[str, Any] = {}
         try:
             if config is not None:
                 embed_cfg = (config.constants if hasattr(config, "constants") else config).get("EMBED_PERSONA", {}) or {}

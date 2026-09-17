@@ -93,7 +93,8 @@ def _somatic_state() -> str:
                     if line.startswith(("MemTotal", "MemAvailable", "MemFree")):
                         k, v = line.split(":", 1)
                         mi[k] = int(v.strip().split()[0])  # kB value
-            total = mi.get("MemTotal"); avail = mi.get("MemAvailable") or mi.get("MemFree")
+            total = mi.get("MemTotal")
+            avail = mi.get("MemAvailable") or mi.get("MemFree")
             if total and avail and (avail / total) < 0.10:
                 feel = "strained — memory tight"
         except Exception:
@@ -332,6 +333,19 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
             lines.append(build_prompt_catalog())
         except ImportError:
             lines.append("MCP tools: " + ", ".join(tools))
+
+    # o9dh/saq3: _capability_affordances existed as a complete, working
+    # helper but was never actually called from here — the module
+    # docstring promises "MCP/tool affordances" as part of this snapshot,
+    # and the debug log below referenced its result under this same name
+    # without it ever being computed (a silent NameError, caught by that
+    # log statement's own try/except). Includes the tokenizer-blindness
+    # (count_chars) and episodic-memory (recall_events) hints — exactly
+    # the kind of grounding that keeps GAIA from reaching for a tool that
+    # doesn't exist or guessing at something a real tool already answers.
+    affordances = _capability_affordances(tools)
+    if affordances:
+        lines.append("Capabilities: " + " ".join(affordances))
 
     # Self-knowledge hint - where GAIA's core documents live
     lines.append(

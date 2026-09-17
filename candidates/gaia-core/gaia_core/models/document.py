@@ -201,7 +201,7 @@ Markdown Output:
 
     def process_documents(self, directory: str, tier: Optional[str] = None, project: Optional[str] = None) -> List[Document]:
         """Load and wrap markdown documents from a directory with metadata."""
-        documents = []
+        documents: List[Document] = []
         if not os.path.isdir(directory):
             logger.warning(f"Directory not found or invalid: {directory}")
             return documents

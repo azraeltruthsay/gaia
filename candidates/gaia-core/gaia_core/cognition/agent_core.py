@@ -4,7 +4,6 @@ import uuid
 import json
 import sys
 import os
-import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from gaia_core.memory.semantic_codex import SemanticCodex
@@ -642,7 +641,7 @@ class AgentCore:
         persona_safety_ref = str(getattr(self.config, 'identity_file_path', '') or '')
 
         # Build persona traits safely from active_persona (may be a simple object)
-        persona_traits = {}
+        persona_traits: Dict[str, Any] = {}
         try:
             persona_traits = getattr(active_persona, 'traits', {}) or {}
         except Exception:
@@ -696,7 +695,7 @@ class AgentCore:
         # BLUR (drop) clearly-unrelated ones — so a greeting after a clock chat
         # no longer pulls the clock turns in. Embedding-only (no LLM on the hot
         # path). Legacy recency window + greeting heuristic stays as the default.
-        _blurred_turns = []  # Phase 2 breadcrumb: turns BLURred this turn (CFR on)
+        _blurred_turns: List[Dict[str, Any]] = []  # Phase 2 breadcrumb: turns BLURred this turn (CFR on)
         try:
             from gaia_core.memory.conversation_cfr import cfr_conversation_enabled, select_focus_turns
             _cfr_on = cfr_conversation_enabled()
@@ -1038,7 +1037,7 @@ class AgentCore:
             identity_guardian = getattr(self, 'identity_guardian', None) or getattr(self.ai_manager, 'identity_guardian', None)
             if identity_guardian:
                 # Build persona_traits robustly
-                persona_traits = {}
+                persona_traits: Dict[str, Any] = {}
                 try:
                     persona_traits = getattr(packet.header.persona, 'traits', {}) or {}
                 except Exception:
@@ -1316,6 +1315,14 @@ class AgentCore:
             # load-bearing case — "I broke my leg" during a D&D session).
             # Phase 2 only classifies + logs + stashes on the packet; the
             # user-facing clarification UX is a follow-up issue.
+            #
+            # o9dh/saq3: this runs before `packet` exists (created much later,
+            # at self._create_initial_packet below) — the packet-attach used
+            # to reference `packet` here and silently NameError on every call
+            # (caught by the try/except, so classification+logging still ran,
+            # but the "stash on packet" half never did). _stakes_result is
+            # carried in this local var and attached once packet exists.
+            _stakes_result = None
             try:
                 from gaia_core.cognition.stakes_classifier import (
                     classify_stakes, is_role_play_active,
@@ -1337,17 +1344,6 @@ class AgentCore:
                         _stakes_result.matched_safety[:3],
                         _stakes_result.matched_game[:3],
                     )
-                # Stash on packet for downstream consumers (clarification
-                # flow, log analysis, training-data labeling).
-                try:
-                    packet.content.data_fields.append(DataField(
-                        key="stakes_classification",
-                        value=_stakes_result.to_dict(),
-                        type="json",
-                        source="stakes_classifier_6ho",
-                    ))
-                except Exception:
-                    logger.debug("stakes_classification attach failed", exc_info=True)
             except Exception:
                 logger.debug("Stakes classification failed", exc_info=True)
 
@@ -1418,7 +1414,15 @@ class AgentCore:
                         _ei, _es = _clf.classify(user_input, confidence_threshold=_thr)
                         if _ei:
                             _early_intent = _ei
-                            packet.intent.user_intent = _ei
+                            # o9dh/saq3: `packet` doesn't exist yet here either
+                            # (see the stakes-classification note above) — this
+                            # used to NameError silently every call. The real
+                            # routing/grounding gates below already read
+                            # _early_intent directly (and _detected_intent
+                            # falls back to it once packet exists), so this
+                            # was never blocking; still seeded onto packet
+                            # once created so downstream consumers that read
+                            # packet.intent.user_intent directly see it too.
                             logger.info(
                                 "Early intent estimate (embed-only): %s (score=%.3f)",
                                 _early_intent, _es,
@@ -1659,7 +1663,7 @@ class AgentCore:
                     _word = _spell_match.group(1).lower()
                     _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
                     # Build letter frequency
-                    _freq = {}
+                    _freq: Dict[str, int] = {}
                     for c in _word:
                         _freq[c] = _freq.get(c, 0) + 1
                     _freq_str = ", ".join(f"{c}={n}" for c, n in sorted(_freq.items()) if n > 1)
@@ -2053,13 +2057,25 @@ class AgentCore:
                 if _has_inbound_image:
                     logger.info("[CASCADE] Image attachment(s) — NeuralRouter bypassed; staying on Core")
                 elif selected_model_name in ("core", "nano") and not force_operator and not is_forced_thinker:
+                    # o9dh/saq3: NeuralRouter was never imported here — this
+                    # whole cascade-routing branch NameError'd on its very
+                    # first line and was caught by the except below on every
+                    # call, so it has never actually run. probe_context also
+                    # referenced a nonexistent `_probe_context` name; the
+                    # router expects a plain domain-hint string, same value
+                    # used for knowledge_base_name below (probe_result's top
+                    # matched collection).
+                    from gaia_core.cognition.nlu.router import NeuralRouter
                     _router = NeuralRouter(self.config, model_pool=self.model_pool, embed_model=_embed_model)
                     _route = _router.route(
                         user_input,
                         source=source,
                         is_factual=is_factual,
                         is_trivial=is_trivial,
-                        probe_context=_probe_context,
+                        probe_context=(
+                            probe_result.primary_collection
+                            if probe_result and probe_result.has_hits else ""
+                        ),
                         audio_payloads=_audio_payloads or None,
                     )
                     logger.info(
@@ -2100,7 +2116,9 @@ class AgentCore:
                     elif _route.target == TargetEngine.CORE:
                         selected_model_name = "core"
                     else:  # NANO
-                        selected_model_name = nano_key
+                        # o9dh/saq3: was `nano_key`, never defined anywhere —
+                        # TargetEngine.NANO's own value is "nano" (router.py).
+                        selected_model_name = "nano"
                         logger.info("[CASCADE] NeuralRouter: SIMPLE request, staying on Nano")
             except Exception:
                 logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
@@ -2204,6 +2222,25 @@ class AgentCore:
                     type='json',
                     source='semantic_probe',
                 ))
+
+            # o9dh/saq3: seed the packet with the two pre-packet-creation
+            # results computed above (stakes classification, early intent
+            # estimate) now that `packet` actually exists.
+            if _early_intent:
+                try:
+                    packet.intent.user_intent = _early_intent
+                except Exception:
+                    logger.debug("early intent attach to packet failed", exc_info=True)
+            if _stakes_result is not None:
+                try:
+                    packet.content.data_fields.append(DataField(
+                        key="stakes_classification",
+                        value=_stakes_result.to_dict(),
+                        type="json",
+                        source="stakes_classifier_6ho",
+                    ))
+                except Exception:
+                    logger.debug("stakes_classification attach failed", exc_info=True)
     
             # Determine detected intent FIRST so all grounding paths can gate
             # on it. The CIL grounding (cognitive index blueprint lookup) was
@@ -3771,7 +3808,7 @@ class AgentCore:
 
             debate_turn = 0
             MAX_DEBATE_TURNS = 3
-            council_history = []
+            council_history: List[str] = []
             full_response = ""
             
             while debate_turn < MAX_DEBATE_TURNS:
@@ -4065,7 +4102,7 @@ class AgentCore:
                 
                 yield {"type": "token", "value": phase_header}
 
-                current_turn_pieces = []
+                current_turn_pieces: List[str] = []
                 _stream_buf = ""  # Rolling buffer for live repetition detection
                 try:
                     stream_generator = voice.stream_response()
@@ -7675,7 +7712,11 @@ Assembled response:"""
         output_path = f"/sandbox/{filename}"
 
         # Write the file using MCP client
-        result = asyncio.run(mcp_client.ai_write(output_path, content))
+        # o9dh/saq3: ai_write is a plain sync function (mcp_client.py), not
+        # a coroutine — wrapping it in asyncio.run() raised TypeError on
+        # every call. Same fix applied to every asyncio.run(mcp_client....)
+        # site in this file (all of mcp_client's functions are sync).
+        result: Dict[str, Any] = mcp_client.ai_write(output_path, content)
 
         if result.get("ok"):
             file_size = result.get("bytes", len(content))
@@ -7755,10 +7796,10 @@ Assembled response:"""
                 preview = "\n".join(tree.splitlines()[:20])
                 target_path = "/knowledge/system_reference/tree_latest.txt"
                 # Write via MCP so it is auditable/approved
-                write_req = asyncio.run(mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True}))
+                write_req: Dict[str, Any] = mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True})
                 if write_req.get("ok") and write_req.get("action_id") and write_req.get("challenge"):
                     approval = write_req["challenge"][::-1]
-                    write_appr = asyncio.run(mcp_client.approve_action_via_mcp(write_req["action_id"], approval))
+                    write_appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(write_req["action_id"], approval)
                     if not write_appr.get("ok"):
                         return f"(Saved tree skipped due to approval error: {write_appr.get('error')})\nPreview:\n{preview}"
                     try:
@@ -7797,7 +7838,7 @@ Assembled response:"""
             return f"list_tree failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = asyncio.run(mcp_client.request_approval_via_mcp("list_tree", params))
+        req: Dict[str, Any] = mcp_client.request_approval_via_mcp("list_tree", params)
         if not req.get("ok"):
             return f"Could not request approval for list_tree: {req.get('error')}"
         action_id = req.get("action_id")
@@ -7805,7 +7846,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
+        appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(action_id, approval)
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -7839,7 +7880,7 @@ Assembled response:"""
             return f"list_files failed: {resp.get('error') or resp}"
 
         # Request approval then auto-approve using reversed challenge
-        req = asyncio.run(mcp_client.request_approval_via_mcp("list_files", params))
+        req: Dict[str, Any] = mcp_client.request_approval_via_mcp("list_files", params)
         if not req.get("ok"):
             return f"Could not request approval for list_files: {req.get('error')}"
         action_id = req.get("action_id")
@@ -7847,7 +7888,7 @@ Assembled response:"""
         if not action_id or not challenge:
             return "Approval request did not return action_id/challenge."
         approval = challenge[::-1]
-        appr = asyncio.run(mcp_client.approve_action_via_mcp(action_id, approval))
+        appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(action_id, approval)
         if not appr.get("ok"):
             return f"Approval failed: {appr.get('error')}"
         result = appr.get("result") or {}
@@ -9629,7 +9670,11 @@ Start your response with the first line of the file."""
                 pass  # domain_tools not available, fall through to legacy handling
 
             if canonical_name == "read_file":
-                result = asyncio.run(mcp_client.ai_read(tool.params.get("path", "")))
+                # o9dh/saq3: ai_read/ai_write/ai_execute are plain sync
+                # functions (mcp_client.py) — the asyncio.run() wrapper
+                # here raised TypeError on every call to this branch (the
+                # local shim path for read_file/write_file/run_shell).
+                result: Dict[str, Any] = mcp_client.ai_read(tool.params.get("path", ""))
 
             elif canonical_name == "write_file":
                 if not allow_write:
@@ -9637,10 +9682,10 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable."
                     )
-                result = asyncio.run(mcp_client.ai_write(
+                result = mcp_client.ai_write(
                     tool.params.get("path", ""),
                     tool.params.get("content", "")
-                ))
+                )
 
             elif canonical_name == "run_shell":
                 if not allow_execute:
@@ -9648,10 +9693,10 @@ Start your response with the first line of the file."""
                         success=False,
                         error="Execute operations are disabled. Set TOOL_ROUTING.ALLOW_EXECUTE_TOOLS=true to enable."
                     )
-                result = asyncio.run(mcp_client.ai_execute(
+                result = mcp_client.ai_execute(
                     tool.params.get("command", ""),
                     dry_run=not allow_execute
-                ))
+                )
 
             else:
                 # Dispatch via MCP JSON-RPC for tools not handled by local shims

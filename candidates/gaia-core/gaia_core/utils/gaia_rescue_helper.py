@@ -117,7 +117,7 @@ class GAIARescueHelper:
         }
         # Try MCP read/write for auditing. Fallback to local file I/O if MCP is not available.
         try:
-            existing = {"sketchpad": []}
+            existing: Dict[str, Any] = {"sketchpad": []}
             if self.sketchpad_path.exists():
                 r = mcp_ai_read(str(self.sketchpad_path))
                 if r.get("ok"):
@@ -130,7 +130,7 @@ class GAIARescueHelper:
             pass
 
         # Fallback to local write
-        data = {"sketchpad": []}
+        data: Dict[str, Any] = {"sketchpad": []}
         if self.sketchpad_path.exists():
             try:
                 with open(self.sketchpad_path, "r", encoding="utf-8") as f:
@@ -195,7 +195,7 @@ class GAIARescueHelper:
     # ----------------------
     def _load_fragments_store(self) -> Dict[str, Any]:
         """Load the fragments store from disk."""
-        data = {"fragments": {}, "pending": []}
+        data: Dict[str, Any] = {"fragments": {}, "pending": []}
         if self.fragments_path.exists():
             try:
                 with open(self.fragments_path, "r", encoding="utf-8") as f:
@@ -313,7 +313,7 @@ class GAIARescueHelper:
             logger.warning("Fragment assembly: duplicate sequences detected: %s", set(duplicates))
 
         # Assemble content
-        assembled_parts = []
+        assembled_parts: List[str] = []
         for i, frag in enumerate(fragments):
             content = frag.get("content", "")
 
@@ -381,7 +381,7 @@ class GAIARescueHelper:
     # Memory helpers
     # ---------------
     def _load_memory_store(self) -> Dict[str, Any]:
-        data = {"facts": []}
+        data: Dict[str, Any] = {"facts": []}
         if self.memory_store_path.exists():
             # MCP read first for auditability
             try:

@@ -11,6 +11,7 @@ import os
 import time
 import re
 import copy
+from typing import Any, Dict
 from gaia_core.config import Config
 from gaia_core.memory.conversation.summarizer import ConversationSummarizer
 from gaia_common.utils.gaia_rescue_helper import sketch, clear_sketchpad
@@ -211,7 +212,7 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
         if ethical_sentinel:
             try:
                 # Prepare persona_traits (best-effort): look for explicit traits or fallback to empty dict
-                persona_traits = {}
+                persona_traits: Dict[str, Any] = {}
                 try:
                     persona_traits = getattr(packet.header.persona, 'traits', {}) or {}
                 except Exception as _trait_exc:

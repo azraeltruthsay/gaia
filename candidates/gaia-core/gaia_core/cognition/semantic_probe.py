@@ -683,7 +683,7 @@ def _load_cil_index() -> Dict[str, Dict]:
         # Parse [ID-XXX] entries with their -> pointers
         current_id = None
         current_desc = ""
-        current_paths = []
+        current_paths: List[str] = []
 
         for line in text.split("\n"):
             line = line.strip()

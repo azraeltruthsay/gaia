@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.DriftDetector")
 
@@ -184,7 +184,7 @@ def scan_response(
       - samvega artifact emitted if severity warrants
       - packet.reasoning.reflection_log appended (when packet provided)
     """
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         constants = config.constants if hasattr(config, "constants") else config
         cfg = (constants or {}).get("OBSERVER_DRIFT", {}) or {}

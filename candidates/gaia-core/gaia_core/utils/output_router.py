@@ -10,7 +10,7 @@ Handles:
 import json
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 # [GCP v0.3] Import new packet structure and safety gate
 from gaia_common.protocols import CognitionPacket, PacketState, OutputDestination
@@ -170,7 +170,7 @@ def route_output(response_text: str, packet: CognitionPacket, ai_manager, sessio
     execution_results = []
     side_effects = []
     response_to_user = ""
-    council_messages = []
+    council_messages: List[str] = []
 
     # Extract any council debate messages before parsing other directives
     cleaned_response, council_messages = _extract_council_tags(response_text)

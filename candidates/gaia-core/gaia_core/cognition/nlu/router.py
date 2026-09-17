@@ -41,6 +41,7 @@ from gaia_core.cognition.nlu.intent_detection import (
     _detect_fragmentation_request,
     _detect_tool_routing_request,
     _mentions_file_like_action,
+    _has_named_work_signal,
     _keyword_intent_classify,
     _nano_confirm_injection,
 )

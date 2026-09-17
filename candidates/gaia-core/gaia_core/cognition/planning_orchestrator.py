@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Generator
+from typing import Dict, List, Any, Generator, Set
 
 logger = logging.getLogger("GAIA.PlanningOrchestrator")
 
@@ -61,7 +61,7 @@ def run_planning_pipeline(
     yield {"type": "token", "value": "[(i) Planning mode activated]\n\n"}
     yield {"type": "flush"}
 
-    plan_fragments = []
+    plan_fragments: List[Dict[str, Any]] = []
     sketchpad = packet.reasoning.sketchpad
 
     # ── Phase 0: Context Assembly (RAG + self-exploration + CFR) ──
@@ -343,8 +343,8 @@ def _find_relevant_source_files(user_request: str) -> List[str]:
     base = Path("/gaia/GAIA_Project") if Path("/gaia/GAIA_Project/candidates").exists() else Path(".")
     candidates_dir = base / "candidates"
     request_lower = user_request.lower()
-    results = []
-    seen = set()
+    results: List[str] = []
+    seen: Set[str] = set()
 
     # Discover which service directories exist
     service_dirs = []
