@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Any, Dict
 
 logger = logging.getLogger("GAIA.InboxTools")
 
@@ -49,7 +50,7 @@ def audio_inbox_status(params: dict) -> dict:
 
 def audio_inbox_list(params: dict) -> dict:
     """List audio files in each inbox state (new/processing/done)."""
-    result = {"ok": True, "new": [], "processing": [], "done": []}
+    result: Dict[str, Any] = {"ok": True, "new": [], "processing": [], "done": []}
 
     for state in ("new", "processing", "done"):
         state_dir = _INBOX_DIR / state
@@ -92,7 +93,7 @@ def audio_inbox_review(params: dict) -> dict:
     if not transcript_path.exists() and not review_path.exists():
         return {"ok": False, "error": f"No sidecars found for '{filename}' in done/"}
 
-    result = {"ok": True, "filename": filename, "stem": stem}
+    result: Dict[str, Any] = {"ok": True, "filename": filename, "stem": stem}
 
     if transcript_path.exists():
         result["transcript"] = transcript_path.read_text(encoding="utf-8")

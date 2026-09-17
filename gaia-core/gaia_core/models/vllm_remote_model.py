@@ -412,8 +412,15 @@ class VLLMRemoteModel:
         adapter_name: str,
         messages: List[Dict[str, Any]],
         **kwargs,
-    ) -> Dict[str, Any]:
-        """One-shot chat completion using a specific LoRA adapter."""
+    ) -> Dict[str, Any] | Generator[Dict[str, Any], None, None]:
+        """One-shot chat completion using a specific LoRA adapter.
+
+        Return type matches create_chat_completion's -- a caller passing
+        stream=True via **kwargs gets a Generator back despite this
+        method's "one-shot" docstring; narrowing the annotation to just
+        Dict[str, Any] would have hidden that real possibility rather
+        than fixing it (o9dh/saq3).
+        """
         prev = self._active_adapter
         try:
             self.set_active_adapter(adapter_name)
@@ -803,7 +810,7 @@ class VLLMRemoteModel:
         at the front, preserving order.
         """
         system_parts: list[str] = []
-        non_system: list[dict[str, str]] = []
+        non_system: list[dict[str, Any]] = []
 
         for msg in messages:
             role = msg.get("role", "user")

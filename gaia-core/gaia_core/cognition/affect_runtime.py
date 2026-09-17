@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger("GAIA.AffectRuntime")
 
@@ -61,7 +61,7 @@ def reset_for_tests(affect_kg=None) -> None:
 
 # ── Snapshot ────────────────────────────────────────────────────────
 
-_EMPTY_SNAPSHOT = {
+_EMPTY_SNAPSHOT: Dict[str, Any] = {
     "traits": {}, "feels": {}, "drives": {},
     "curious_about": {}, "tired_of": {},
     "active_context": None, "as_of": None,
@@ -235,7 +235,7 @@ def affect_felt_line(snapshot: Optional[dict] = None) -> str:
 #     "reasons": list[str],            # why each adjustment was made (for audit)
 #   }
 
-_DEFAULT_MOD = {
+_DEFAULT_MOD: Dict[str, Any] = {
     "temperature_delta": 0.0,
     "max_tokens_multiplier": 1.0,
     "escalate_to_prime": False,
@@ -416,7 +416,7 @@ def apply_affect_modulation(
 # predicate is given (user_input_lower, history) and returns True to
 # activate. Predicates are intentionally cheap heuristics; the proper
 # version will come from an intent classifier later.
-_CONTEXT_RULES: dict[str, callable] = {
+_CONTEXT_RULES: Dict[str, Callable] = {
     "dnd_session": lambda u, h: any(kw in u for kw in (
         "/roll", "dnd", "d&d", "campaign", "encounter", "initiative",
         "spell slot", "saving throw",

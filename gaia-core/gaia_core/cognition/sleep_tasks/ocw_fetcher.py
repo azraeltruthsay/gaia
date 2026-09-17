@@ -10,7 +10,7 @@ All content fetched is CC BY-NC-SA 4.0 licensed (MIT OCW standard license).
 import json
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger("GAIA.OCWFetcher")
@@ -21,7 +21,7 @@ logger = logging.getLogger("GAIA.OCWFetcher")
 
 OCW_BASE = "https://ocw.mit.edu"
 
-PHASE_A_COURSES = [
+PHASE_A_COURSES: List[Dict[str, Any]] = [
     {
         "course_id": "6-858-computer-systems-security-fall-2014",
         "department": "6",
@@ -121,7 +121,7 @@ def get_course_manifest(course_id: str) -> List[Dict[str, str]]:
     Falls back to a default page list if the course is not in PHASE_A_COURSES.
     """
     default_pages = ["syllabus", "lecture-notes", "assignments"]
-    pages = default_pages
+    pages: Sequence[str] = default_pages
 
     for course in PHASE_A_COURSES:
         if course["course_id"] == course_id:

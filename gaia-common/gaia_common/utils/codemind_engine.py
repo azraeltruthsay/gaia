@@ -371,6 +371,59 @@ CURRENT CODE:
 Respond with ONLY the complete fixed file content. No markdown fences. No explanation.
 Start with the first line of the file."""
 
+    # ── Capability-Skill Prompt Construction (9ar0) ─────────────────────
+
+    @staticmethod
+    def build_capability_skill_prompt(
+        attempted_tool_name: str,
+        attempted_tool_action: str,
+        attempted_tool_params: dict,
+        user_request: str,
+    ) -> str:
+        """Build the LLM prompt for drafting a real PLAYBOOK skill from a
+        hallucinated-tool-call capability_gap seed (vp52 → 9ar0).
+
+        Unlike build_fix_prompt/build_awareness_prompt, this authors NEW
+        executable code, not a patch to existing code — the output is a
+        complete, self-contained Python module implementing the capability
+        the model reached for a nonexistent tool to get. The harness never
+        trusts this prompt as the safety boundary: every response is
+        AST-validated, statically lint-checked (skill_code_safety), and
+        sandbox-executed in a subprocess before it's even written as a
+        draft, and never wired into a live registry without a separate
+        manual promotion step.
+        """
+        params_json = json.dumps(attempted_tool_params, default=str, indent=2)
+        return f"""You are CodeMind, GAIA's code self-improvement layer. Core or Prime \
+hallucinated a call to a tool that doesn't exist, because no real tool covers this \
+request. Draft ONE real, self-contained skill that would have handled it.
+
+CONTEXT — what was attempted and why it failed:
+- Hallucinated tool: {attempted_tool_name} (action: {attempted_tool_action or "none"})
+- Attempted call params: {params_json}
+- Original user request: {user_request}
+
+RULES:
+- Output a COMPLETE, self-contained Python module — nothing outside it.
+- It MUST define: def execute(params: dict) -> dict
+- execute() must always return a dict with an "ok" key (True/False).
+- Implement the capability directly (e.g. compose the requested text, do the
+  requested calculation) — do not simulate calling other tools or services.
+- Only stdlib imports. Do NOT import subprocess, socket, ctypes, or anything
+  that spawns processes or opens network sockets.
+- Do NOT call eval, exec, compile, or os.system/os.popen/os.exec*.
+- Do NOT read or write files outside /tmp or /shared/scratch.
+- If the request is too ambiguous to implement safely, return
+  {{"ok": False, "error": "<clear reason>"}} rather than guessing.
+- No comments explaining what you're doing, no docstring essays — a single
+  one-line docstring on execute() is enough.
+- If this genuinely cannot be a self-contained skill (needs real external
+  API access with credentials you don't have, etc.), respond with exactly:
+  CANNOT_DRAFT: <reason>
+
+Respond with ONLY the Python module source. No markdown fences. No explanation.
+Start with the first line of the file (an import or the function definition)."""
+
     # ── Awareness Prompt Construction ─────────────────────────────────
 
     @staticmethod

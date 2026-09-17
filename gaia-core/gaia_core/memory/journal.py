@@ -594,7 +594,7 @@ def list_entries(
         # Self-only — original layout, exclude subdirs that are non-self contexts
         paths = sorted(
             p for p in JOURNAL_ROOT.glob("*/*/*.md")
-            if not p.relative_to(JOURNAL_ROOT).parts[0] in _NON_SELF_CONTEXTS
+            if p.relative_to(JOURNAL_ROOT).parts[0] not in _NON_SELF_CONTEXTS
         )
         paths = sorted(paths, reverse=True)
     elif context is not None:
@@ -607,7 +607,7 @@ def list_entries(
         # All contexts — root self-style scan + each context subdir
         self_paths = [
             p for p in JOURNAL_ROOT.glob("*/*/*.md")
-            if not p.relative_to(JOURNAL_ROOT).parts[0] in _NON_SELF_CONTEXTS
+            if p.relative_to(JOURNAL_ROOT).parts[0] not in _NON_SELF_CONTEXTS
         ]
         ctx_paths: List[Path] = []
         for ctx in _NON_SELF_CONTEXTS:

@@ -410,7 +410,7 @@ async def lifespan(app: FastAPI):
 
 def _write_shutdown_checkpoints(app: FastAPI) -> dict:
     """Write prime.md and Core.md checkpoints (called on shutdown and via endpoint)."""
-    results = {}
+    results: Dict[str, Dict[str, Any]] = {}
 
     if _ai_manager is None:
         logger.warning("Cannot write checkpoints — cognitive system not initialized")

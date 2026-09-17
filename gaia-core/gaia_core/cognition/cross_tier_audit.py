@@ -39,7 +39,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.CrossTierAudit")
 
@@ -303,7 +303,7 @@ def run_cross_tier_audit_sync(
     audit_temperature: Optional[float] = None,
 ) -> AuditResult:
     """Synchronous cross-tier audit. Reads config; usually called from a thread."""
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         constants = config.constants if hasattr(config, "constants") else config
         cfg = (constants or {}).get("CROSS_TIER_AUDIT", {}) or {}
@@ -409,7 +409,7 @@ def schedule_cross_tier_audit(
 
     Returns None if config-disabled, otherwise the started Thread.
     """
-    cfg = {}
+    cfg: Dict[str, Any] = {}
     try:
         constants = config.constants if hasattr(config, "constants") else config
         cfg = (constants or {}).get("CROSS_TIER_AUDIT", {}) or {}

@@ -95,6 +95,11 @@ class SleepWakeManager:
         self.voice_active: bool = False
         self._task_scheduler = None  # Set via set_task_scheduler()
         self.auto_sleep_enabled: bool = True
+        # o9dh/saq3: were only ever assigned dynamically (first use inside
+        # set_auto_sleep/hold_wake), not declared here -- release_hold()
+        # already had to defend against that with getattr(..., None).
+        self._sleep_hold_until: Optional[datetime] = None
+        self._sleep_hold_reason: str = ""
 
         logger.info("SleepWakeManager initialized")
 
@@ -312,12 +317,20 @@ class SleepWakeManager:
             self.last_state_change = datetime.now(timezone.utc)
             return False
 
-    def receive_wake_signal(self) -> None:
-        """Called by gaia-web (via POST /sleep/wake) when a message is queued."""
+    def receive_wake_signal(self, reason: str = "") -> None:
+        """Called by gaia-web (via POST /sleep/wake) when a message is queued.
+
+        o9dh/saq3: `reason` was added because hold_wake() below calls this
+        with reason=... — that call was raising TypeError (unexpected
+        keyword argument) on every hold_wake() invocation while not
+        already ACTIVE, uncaught, breaking the live /sleep/hold_wake API.
+        """
         if is_maintenance_active():
             logger.info("Wake signal suppressed — maintenance mode active")
             return
 
+        if reason:
+            logger.info("Wake signal received: %s", reason)
         self.wake_signal_pending = True
 
         # Immediately signal the task scheduler so interruptible tasks can

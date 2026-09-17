@@ -7,7 +7,7 @@ Lightweight heuristics for identifying important terms.
 
 import re
 import logging
-from typing import List
+from typing import Dict, List
 
 logger = logging.getLogger("GAIA.KeywordExtractor")
 
@@ -29,7 +29,7 @@ class ConversationKeywordExtractor:
         try:
             all_text = " ".join(msg['content'] for msg in messages if msg.get('content'))
             words = re.findall(r"\b[a-zA-Z]{4,}\b", all_text.lower())
-            counts = {}
+            counts: Dict[str, int] = {}
 
             for word in words:
                 if word in COMMON_WORDS:

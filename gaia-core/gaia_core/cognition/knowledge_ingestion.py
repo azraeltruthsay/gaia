@@ -9,7 +9,7 @@ and writes + embeds via MCP.
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from gaia_core.utils import mcp_client
 
@@ -158,7 +158,7 @@ _CATEGORY_KEYWORDS = {
 }
 
 
-def classify_content(text: str) -> Dict[str, str]:
+def classify_content(text: str) -> Dict[str, Any]:
     """
     Keyword-based categorization of D&D content.
 
@@ -606,7 +606,7 @@ _RETRIEVAL_SIMILARITY_THRESHOLD = 0.5
 
 def detect_knowledge_update(
     user_input: str, kb_name: str
-) -> Optional[Dict[str, str]]:
+) -> Optional[Dict[str, Any]]:
     """
     Detect casual knowledge updates referencing known entities.
 

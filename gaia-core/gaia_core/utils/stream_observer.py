@@ -48,11 +48,11 @@ class StreamObserver:
         self.source = name
         self.llm = llm  # May be None — rule-based checks still work without an LLM
         self.interrupted = False
-        self.interrupt_reason = None
+        self.interrupt_reason: Optional[str] = None
         # Cache the last observed buffer/result and use a small time-based
         # throttle so we doesn't call the LLM too frequently during streaming.
-        self._last_output = None
-        self._last_result = None
+        self._last_output: Optional[str] = None
+        self._last_result: Optional[Interrupt] = None
         self._last_obs_time = 0.0
         self._min_interval = getattr(self.config, "OBSERVER_MIN_INTERVAL", 0.5)
         # Grace and heuristic thresholds (configurable via constants or ENV)
@@ -146,8 +146,12 @@ class StreamObserver:
             read_only_flag = flags.get("read_only", False)
         else:
             try:
-                # look for data_fields entry named 'read_only_intent'
-                for df in getattr(packet, "content", {}).data_fields or []:
+                # look for data_fields entry named 'read_only_intent'.
+                # getattr's {} fallback is deliberately dict-typed (no
+                # .data_fields) for the case packet.content is missing —
+                # caught by the except below, same as any other AttributeError
+                # from a malformed/partial packet here.
+                for df in getattr(packet, "content", {}).data_fields or []:  # type: ignore[union-attr]
                     if getattr(df, "key", None) == "read_only_intent":
                         read_only_flag = bool(getattr(df, "value", False))
                         break

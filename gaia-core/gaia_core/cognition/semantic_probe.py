@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.SemanticProbe")
 
@@ -138,6 +138,15 @@ class SemanticProbeResult:
     phrases_tested: List[str] = field(default_factory=list)
     from_cache: int = 0
     probe_strength: str = ""  # "strong", "moderate", "weak", or "" (no primary)
+    # o9dh/saq3: these were only ever set dynamically via
+    # `result.cil_grounding = getattr(result, "cil_grounding", {})`
+    # elsewhere in this module (worked at runtime -- dataclasses allow
+    # arbitrary instance attrs -- but were invisible to to_dict(), so any
+    # consumer relying on the serialized dict silently lost this data).
+    # Declared properly now; agent_core.py's existing hasattr/getattr
+    # reads of these still work unchanged.
+    cil_grounding: Optional[Dict[str, Any]] = None
+    web_grounding: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -148,6 +157,8 @@ class SemanticProbeResult:
             "phrases_tested": self.phrases_tested,
             "from_cache": self.from_cache,
             "probe_strength": self.probe_strength,
+            "cil_grounding": self.cil_grounding,
+            "web_grounding": self.web_grounding,
         }
 
     @property
@@ -683,7 +694,7 @@ def _load_cil_index() -> Dict[str, Dict]:
         # Parse [ID-XXX] entries with their -> pointers
         current_id = None
         current_desc = ""
-        current_paths = []
+        current_paths: List[str] = []
 
         for line in text.split("\n"):
             line = line.strip()
@@ -967,7 +978,8 @@ def run_semantic_probe(
             topic_path = topic_info.get("path")
             topic_snippet = topic_info.get("snippet", "")
             if topic_snippet:
-                result.cil_grounding = getattr(result, "cil_grounding", {})
+                if result.cil_grounding is None:
+                    result.cil_grounding = {}
                 result.cil_grounding[phrase] = {
                     "path": topic_path,
                     "snippet": topic_snippet,
@@ -981,7 +993,8 @@ def run_semantic_probe(
     if ungrounded:
         web_results = _web_search_fallback(ungrounded)
         if web_results:
-            result.web_grounding = getattr(result, "web_grounding", {})
+            if result.web_grounding is None:
+                result.web_grounding = {}
             result.web_grounding.update(web_results)
             logger.info("SemanticProbe: web fallback grounded %d entities: %s",
                          len(web_results), list(web_results.keys()))

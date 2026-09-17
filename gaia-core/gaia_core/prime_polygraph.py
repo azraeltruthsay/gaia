@@ -136,11 +136,17 @@ def analyze(prompt: str, system: str = "", max_tokens: int = 50) -> dict:
             }
 
         # Also generate a short response for context
-        gen_ids = _model.generate(
+        # transformers' stubs have an internal self-type mismatch between
+        # the mixin that declares .generate() and the concrete loaded
+        # model class -- a stub quirk (same family as the tokenizer/torch
+        # stub issues fixed earlier this session), not a real bug.
+        gen_ids = _model.generate(  # type: ignore[misc]
             input_ids, max_new_tokens=max_tokens,
             do_sample=False, pad_token_id=_tokenizer.pad_token_id,
         )
-        response = _tokenizer.decode(gen_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
+        # tokenizer.decode()'s stub return type is str | List[str] (batched
+        # decode support); a single sequence always decodes to str at runtime.
+        response = str(_tokenizer.decode(gen_ids[0][input_ids.shape[1]:], skip_special_tokens=True))
 
         _request_count += 1
         _last_activations = activations

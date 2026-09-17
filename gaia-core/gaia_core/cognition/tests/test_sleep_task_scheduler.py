@@ -755,3 +755,69 @@ class TestWikiDocRegen:
         finally:
             for p in patches:
                 p.stop()
+
+
+# ------------------------------------------------------------------
+# P2 hot-task starvation fix (GAIA_Project-o9dh)
+# ------------------------------------------------------------------
+
+
+class TestP2StarvationFix:
+    """samvega_introspection/samvega_kv_fold/tier5_training (P2) had no
+    throttle at all, so get_next_task()'s priority-first sort meant they
+    were perpetually eligible and won EVERY scheduling tick forever — the
+    same starvation pattern 2wr fixed for P1, recreated for P3+ tasks.
+
+    Confirmed live via 72h of gaia-core production logs: these three
+    tasks cycled every ~2 seconds (run #780+) while penpal_review (P5),
+    codemind_cycle (P4), skill_creator_cycle (P5), and doc_sentinel_*
+    (P6) had ZERO run-log lines in that window — explains why the PenPal
+    podcast stopped producing letters after 2026-06-07, and would have
+    silently prevented 9ar0's new CodeMind capability_gap drafting path
+    from ever running in production.
+    """
+
+    _HOT_P2_IDS = {"samvega_introspection", "samvega_kv_fold", "tier5_training"}
+
+    def test_hot_p2_tasks_are_throttled(self, scheduler):
+        for task in scheduler._tasks:
+            if task.task_id in self._HOT_P2_IDS:
+                assert task.min_interval_seconds > 0, (
+                    f"{task.task_id} must be throttled — an unthrottled P2 task "
+                    "is perpetually eligible and starves every P3+ task forever"
+                )
+
+    def test_p3_plus_task_can_win_once_p1_p2_are_cooling(self, scheduler):
+        """Steady-state repro: P1/P2 tasks just ran (cooling), P3+ tasks
+        never have. A P3+ task (e.g. codemind_cycle, penpal_review) must
+        now be selectable — pre-fix this was mathematically impossible."""
+        now = datetime.now(timezone.utc)
+        for task in scheduler._tasks:
+            if task.priority <= 2:
+                task.last_run = now
+
+        next_task = scheduler.get_next_task()
+
+        assert next_task is not None, (
+            "no task was eligible — P3+ tasks are still starved"
+        )
+        assert next_task.priority >= 3, (
+            f"expected a P3+ task to win once P1/P2 are cooling, got "
+            f"'{next_task.task_id}' (priority {next_task.priority})"
+        )
+
+    def test_codemind_cycle_specifically_can_win(self, scheduler):
+        """9ar0's new capability_gap skill-drafting path lives in
+        codemind_cycle (P4) — must be reachable. Cool every other task
+        (including its P4 sibling code_review, which wins the priority
+        tie by registration order when both are equally eligible) so
+        codemind_cycle is the only one left eligible."""
+        now = datetime.now(timezone.utc)
+        for task in scheduler._tasks:
+            if task.task_id != "codemind_cycle":
+                task.last_run = now
+
+        next_task = scheduler.get_next_task()
+
+        assert next_task is not None
+        assert next_task.task_id == "codemind_cycle"

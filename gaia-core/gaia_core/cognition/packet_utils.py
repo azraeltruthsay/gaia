@@ -1,10 +1,9 @@
 from __future__ import annotations
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime, timezone
 from gaia_common.protocols.cognition_packet import (
     CognitionPacket, Header, Persona, Routing, Model, Intent, Context,
-    SessionHistoryRef, Constraints, Content, DataField,
-    Reasoning, Response,
+    SessionHistoryRef, Constraints, Content, DataField, Cheatsheet, Reasoning, Response,
     Governance, Safety, Metrics, TokenUsage, Status, PacketState, PersonaRole, Origin, TargetEngine, SystemTask
 )
 
@@ -84,7 +83,7 @@ def upgrade_v2_to_v3_packet(old_packet_data: Dict) -> CognitionPacket:
 
     # Context: minimal mapping
     session_ref = SessionHistoryRef(type="session", value=session_id)
-    cheatsheets = []
+    cheatsheets: List[Cheatsheet] = []
     constraints = Constraints(max_tokens=int(g("max_tokens", 4096)), time_budget_ms=int(g("time_budget_ms", 60000)), safety_mode=str(g("safety_mode", "standard")))
     context = Context(session_history_ref=session_ref, cheatsheets=cheatsheets, constraints=constraints)
 

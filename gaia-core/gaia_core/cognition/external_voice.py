@@ -30,7 +30,7 @@ try:
     LOOP_DETECTION_AVAILABLE = True
 except ImportError:
     LOOP_DETECTION_AVAILABLE = False
-    LoopDetectorObserver = None
+    LoopDetectorObserver = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("GAIA.ExternalVoice")
 
@@ -90,8 +90,8 @@ class ExternalVoice:
         # In AWAKE: Prime (CPU) observes Operator (Core GPU).
         # In FOCUSING: Core (CPU) observes Thinker (Prime GPU).
         self.active_stream_observer = active_stream_observer
-        self._active_observer_buffer = []
-        self._active_observer_future = None
+        self._active_observer_buffer: List[str] = []
+        self._active_observer_future: Optional[concurrent.futures.Future] = None
 
         self.logical_stop_punct = getattr(self.config, 'LOGICAL_STOP_PUNCTUATION', None) or self.config.constants.get("LOGICAL_STOP_PUNCTUATION", [".", "!", "?", "\n"])
         self.observer_threshold = getattr(self.config, 'OBSERVER_TOKEN_THRESHOLD', None) or self.config.constants.get("OBSERVER_TOKEN_THRESHOLD", 1000)
@@ -225,6 +225,7 @@ class ExternalVoice:
             # as a dict instead of a streaming generator. Normalize those
             # single-shot payloads into a one-item iterable so downstream
             # logic can treat stream and batch paths uniformly.
+            iterable: Any
             if isinstance(token_stream, Mapping):
                 iterable = [token_stream]
             elif isinstance(token_stream, (str, bytes, bytearray)):
@@ -340,7 +341,7 @@ class ExternalVoice:
                     buf_len = len(self._active_observer_buffer)
                     if buf_len > 0 and buf_len % 50 == 0 and (self._active_observer_future is None or self._active_observer_future.done()):
                         accumulated = "".join(self._active_observer_buffer)
-                        packet = self.context.get("packet")
+                        packet: Optional[CognitionPacket] = self.context.get("packet")
                         self._active_observer_future = self._observer_executor.submit(
                             self.active_stream_observer.observe, packet, accumulated
                         )
@@ -354,7 +355,7 @@ class ExternalVoice:
                             is_think_tag = "Think-tag" in loop_interrupt.reason
                             interrupt_type = "think_tag_loop" if is_think_tag else "loop_detection"
                             logger.warning(f"ExternalVoice: loop detector interrupted stream ({interrupt_type}): {loop_interrupt.reason}")
-                            packet: CognitionPacket = self.context.get("packet")
+                            packet = self.context.get("packet")
                             if packet:
                                 try:
                                     packet.status.state = PacketState.ABORTED
@@ -425,7 +426,7 @@ class ExternalVoice:
                             self._last_observer_at = time.time()
                             self._observer_calls += 1
                             if interrupt:
-                                packet: CognitionPacket = self.context.get("packet")
+                                packet = self.context.get("packet")
                                 if interrupt.level == "BLOCK":
                                     # [GCP v0.3] Update the packet status for terminal aborts
                                     if packet:

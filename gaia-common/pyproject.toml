@@ -37,8 +37,18 @@ dependencies = [
 engine = ["gaia-engine"]
 dev = [
     "pytest>=7.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
+    # o9dh/saq3: was missing entirely (gaia-core/gaia-mcp both have it) --
+    # every @pytest.mark.asyncio test here silently "failed" instantly,
+    # since without the plugin pytest just sees an unawaited coroutine
+    # object rather than actually running the async test body. This is
+    # the real cause of test_service_client_failover.py/test_resilience.py's
+    # failures, not a logic bug in the tests or the code under test.
+    "pytest-asyncio>=0.21.0",
+    # o9dh/saq3: pinned exact -- see gaia-core/pyproject.toml for why
+    # (unpinned floors let validate.sh's fresh builds silently resolve a
+    # different ruff/mypy than the long-running candidate container).
+    "ruff==0.15.8",
+    "mypy==1.19.1",
     "types-PyYAML>=6.0",
 ]
 
@@ -74,3 +84,11 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 warn_return_any = false
 no_strict_optional = true
+# o9dh/saq3: validate.sh invokes `mypy /app` (an absolute path, from cwd
+# /app where `pip install -e ".[dev]"` also registered /app as an import
+# root) -- without this, mypy discovers gaia_common/engine/core.py twice
+# under two different computed module names (app.gaia_common.engine.core
+# vs gaia_common.engine.core) and refuses to proceed at all. This tells
+# mypy to infer package roots from the nearest __init__.py boundary
+# instead of the scanned path itself.
+explicit_package_bases = true

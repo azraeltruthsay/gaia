@@ -3,6 +3,7 @@ import time
 import psutil
 import logging
 from pathlib import Path
+from typing import Any, Dict
 from gaia_core.config import Config
 from gaia_core.memory.status_tracker import GAIAStatus
 
@@ -53,7 +54,7 @@ def scan_files():
         logger.info(f"📂 Detected file changes: {changes}")
 
 
-def get_gpu_usage() -> dict[str, any]:
+def get_gpu_usage() -> Dict[str, Any]:
     """
     Gathers GPU usage statistics using pynvml.
 
@@ -80,7 +81,7 @@ def get_gpu_usage() -> dict[str, any]:
         logger.debug(f"Could not get GPU usage: {e}")
         return {}
 
-def get_hardware_profile() -> dict[str, any]:
+def get_hardware_profile() -> Dict[str, Any]:
     """
     Gathers static information about the system's hardware.
     """
@@ -103,7 +104,7 @@ def get_hardware_profile() -> dict[str, any]:
         logger.error(f"Error gathering hardware profile: {e}")
         return {}
 
-def get_system_resources() -> dict[str, any]:
+def get_system_resources() -> Dict[str, Any]:
     """
     Gathers system resource usage statistics (CPU, memory, disk, and optionally GPU).
 

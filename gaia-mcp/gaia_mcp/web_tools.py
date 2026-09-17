@@ -296,7 +296,7 @@ def _ddg_search(query: str, max_results: int) -> List[dict]:
 
     # Try legacy duckduckgo_search library
     try:
-        from duckduckgo_search import DDGS
+        from duckduckgo_search import DDGS  # type: ignore[assignment]
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
         if results:

@@ -204,6 +204,17 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_samvega_introspection,
+            # o9dh: unthrottled P2 tasks are ALWAYS eligible, so
+            # get_next_task()'s priority-first sort meant this (with
+            # samvega_kv_fold/tier5_training below) won every single tick,
+            # forever — the exact starvation pattern 2wr fixed for P1
+            # tasks, just recreated here for P3+ (confirmed live: 72h of
+            # logs showed this task at run #780+ while penpal_review,
+            # codemind_cycle, skill_creator_cycle, and doc_sentinel_* had
+            # ZERO runs). 120s matches its own cost (mostly a fast no-op
+            # when the artifact queue is empty) while actually giving
+            # lower-priority tasks a slot.
+            min_interval_seconds=120,
         ))
 
         self.register_task(SleepTask(
@@ -213,6 +224,7 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_samvega_kv_fold,
+            min_interval_seconds=120,
         ))
 
         self.register_task(SleepTask(
@@ -222,6 +234,7 @@ class SleepTaskScheduler:
             interruptible=False,
             estimated_duration_seconds=30,
             handler=self._run_tier5_training,
+            min_interval_seconds=300,
         ))
 
         self.register_task(SleepTask(
@@ -241,6 +254,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=420,
             handler=self._run_blueprint_validation,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -250,6 +265,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_code_evolution,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=600,
         ))
 
         self.register_task(SleepTask(
@@ -259,6 +276,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=90,
             handler=self._run_promotion_readiness,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=900,
         ))
 
         self.register_task(SleepTask(
@@ -268,6 +287,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_code_review,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -277,6 +298,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=180,
             handler=self._run_knowledge_research,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -286,6 +309,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=300,
             handler=self._run_knowledge_ingestion,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Session hygiene — archive stale sessions to prevent retrieval
@@ -298,6 +323,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=15,
             handler=self._run_session_hygiene,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Self-narrative journal writer — synthesizes recent activity into
@@ -310,6 +337,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=45,
             handler=self._run_journal_write,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         # Journal re-reading + inspired reflection — Phase B of vam.
@@ -323,6 +352,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_journal_reflection,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -332,6 +363,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=30,
             handler=self._run_wiki_doc_regen,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -341,6 +374,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=120,
             handler=self._run_adversarial_resilience_drill,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -350,6 +385,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=60,
             handler=self._run_initiative_cycle,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=900,
         ))
 
         self.register_task(SleepTask(
@@ -389,6 +426,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=15,
             handler=self._run_doc_sentinel_glossary,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -398,6 +437,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=10,
             handler=self._run_doc_sentinel_catalog,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=3600,
         ))
 
         self.register_task(SleepTask(
@@ -407,6 +448,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=300,
             handler=self._run_curriculum_sync,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
         self.register_task(SleepTask(
@@ -416,6 +459,8 @@ class SleepTaskScheduler:
             interruptible=True,
             estimated_duration_seconds=180,
             handler=self._run_codemind_cycle,
+            # o9dh: was unthrottled -- part of the same starvation bug
+            min_interval_seconds=1800,
         ))
 
     # ------------------------------------------------------------------
@@ -1459,8 +1504,17 @@ class SleepTaskScheduler:
                 file_path = detection.get("file_path", "")
                 issue = detection.get("description", "")
 
-                # ── Capability gap → awareness update (not code fix) ──
+                # ── Capability gap: hallucinated-tool-call payload (vp52) →
+                # draft a real skill (9ar0); anything else → awareness note ──
                 if detection.get("issue_type") == "capability_gap":
+                    _skill_payload = self._parse_capability_gap_payload(issue)
+                    if _skill_payload:
+                        try:
+                            self._draft_capability_skill(engine, detection, _skill_payload, cycle)
+                        except Exception as exc:
+                            logger.error("CodeMind: capability skill draft failed: %s", exc, exc_info=True)
+                            self._mark_seed_reviewed(detection, "skill_draft_failed")
+                        continue
                     try:
                         awareness_path = file_path or "knowledge/awareness/operational/architecture_facts.md"
                         current_awareness = ""
@@ -1724,6 +1778,196 @@ class SleepTaskScheduler:
                 update_seed(fname, seed_data)
         except Exception as exc:
             logger.debug("CodeMind: failed to mark seed reviewed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Capability-gap → real skill draft (9ar0)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_capability_gap_payload(seed_text: str) -> Optional[dict]:
+        """Extract vp52's structured payload from a capability_gap seed's text.
+
+        vp52 (gaia_core/main.py) embeds attempted_tool_name/action/params/
+        user_request as one JSON blob appended after "Payload: " in the
+        seed text it plants. Returns None (falls through to the generic
+        awareness-note path) for anything not shaped this way — older/other
+        capability_gap seeds, or a parse failure, must never change existing
+        behavior.
+        """
+        if not seed_text or "Payload: " not in seed_text:
+            return None
+        try:
+            raw = seed_text.split("Payload: ", 1)[1].strip()
+            payload = _json.loads(raw)
+            if isinstance(payload, dict) and payload.get("attempted_tool_name"):
+                return payload
+        except Exception:
+            pass
+        return None
+
+    def _draft_capability_skill(
+        self, engine, detection: dict, payload: dict, cycle,
+    ) -> None:
+        """9ar0: draft a real, sandbox-tested PLAYBOOK skill for a
+        hallucinated tool call, instead of only documenting the gap.
+
+        Lands the draft INERT under knowledge/skills/auto/ — status: draft,
+        enabled: false in frontmatter, enforced at the routing layer by
+        SkillGateway (not just documentation) — and never writes into
+        gaia-mcp's live skills directory. Promotion is a separate, manual
+        step (scripts/promote_capability_skill.sh).
+        """
+        from gaia_common.utils.codemind_engine import CodeMindChange
+        from gaia_common.utils.codemind_validator import validate_syntax
+        from gaia_common.utils.skill_code_safety import lint_skill_source
+        from gaia_common.utils.skill_sandbox import run_sandboxed
+        from gaia_common.utils.skill_creator import slugify_pattern
+
+        attempted_tool_name = str(payload.get("attempted_tool_name", "")).strip()
+        attempted_tool_action = str(payload.get("attempted_tool_action") or "").strip()
+        attempted_tool_params = payload.get("attempted_tool_params") or {}
+        user_request = str(payload.get("user_request", "")).strip()
+
+        slug = "capgap_" + slugify_pattern(f"{attempted_tool_name}_{attempted_tool_action or 'default'}")
+        # Absolute, config-driven path (matches main.py:2244's
+        # architecture_facts.md convention and every other KNOWLEDGE_DIR
+        # consumer in this codebase) — NOT a relative "knowledge/..." path.
+        # Verified live in gaia-core-candidate: cwd is /app, where a
+        # relative "knowledge/" resolves to a stray, near-empty local dir
+        # (only a "seeds" subdir) — the real knowledge tree is bind-mounted
+        # at the absolute path self.config.KNOWLEDGE_DIR (/knowledge). The
+        # adjacent capability_gap awareness-note branch above still uses a
+        # relative path and appears to share this bug (filed separately).
+        skill_dir = Path(self.config.KNOWLEDGE_DIR) / "skills" / "auto" / slug
+        skill_md_path = skill_dir / "SKILL.md"
+        source_path = skill_dir / "skill_source.py"
+
+        if skill_md_path.exists():
+            logger.info("CodeMind: capability skill draft already exists for '%s', skipping", slug)
+            self._mark_seed_reviewed(detection, "already_drafted")
+            return
+
+        prompt = engine.build_capability_skill_prompt(
+            attempted_tool_name, attempted_tool_action, attempted_tool_params, user_request,
+        )
+        code = self._codemind_propose(prompt)
+
+        if not code or code.strip().startswith("CANNOT_DRAFT"):
+            logger.info(
+                "CodeMind: declined to draft a capability skill for '%s': %s",
+                attempted_tool_name, (code or "no response")[:200],
+            )
+            self._mark_seed_reviewed(detection, "draft_declined")
+            return
+
+        # Bounded retry: syntax, then safety lint — one reroll each,
+        # feedback-driven. Never write a broken or unsafe draft to disk.
+        syntax_result = validate_syntax(code)
+        if not syntax_result.passed:
+            retry_prompt = prompt + (
+                f"\n\nYour previous attempt failed to parse: {'; '.join(syntax_result.errors)}. "
+                "Respond again with ONLY a corrected, complete module."
+            )
+            code = self._codemind_propose(retry_prompt) or ""
+            syntax_result = validate_syntax(code)
+            if not syntax_result.passed:
+                logger.warning(
+                    "CodeMind: capability skill draft for '%s' failed syntax twice, abandoning: %s",
+                    attempted_tool_name, syntax_result.errors,
+                )
+                self._mark_seed_reviewed(detection, "skill_draft_failed")
+                return
+
+        lint_result = lint_skill_source(code)
+        if not lint_result.ok:
+            retry_prompt = prompt + (
+                f"\n\nYour previous attempt violated safety rules: {'; '.join(lint_result.violations)}. "
+                "Respond again with ONLY a corrected, complete module that avoids these."
+            )
+            code = self._codemind_propose(retry_prompt) or ""
+            if not validate_syntax(code).passed:
+                logger.warning(
+                    "CodeMind: capability skill draft for '%s' broke syntax on lint-retry, abandoning",
+                    attempted_tool_name,
+                )
+                self._mark_seed_reviewed(detection, "skill_draft_failed")
+                return
+            lint_result = lint_skill_source(code)
+            if not lint_result.ok:
+                logger.warning(
+                    "CodeMind: capability skill draft for '%s' failed safety lint twice, abandoning: %s",
+                    attempted_tool_name, lint_result.violations,
+                )
+                self._mark_seed_reviewed(detection, "skill_draft_failed")
+                return
+
+        sandbox_result = run_sandboxed(code, attempted_tool_params)
+
+        if cycle.dry_run:
+            logger.info(
+                "CodeMind [dry_run]: would draft capability skill '%s' (sandbox_ok=%s)",
+                slug, sandbox_result.ok,
+            )
+            engine.record_change(CodeMindChange(
+                file_path=str(skill_md_path),
+                issue=user_request,
+                scope_tier=2,
+                diff_summary=f"[dry_run] would draft PLAYBOOK skill (sandbox_ok={sandbox_result.ok})",
+                applied=False,
+            ))
+            self._mark_seed_reviewed(detection, "skill_drafted_dry_run")
+            return
+
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(code, encoding="utf-8")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        description = (
+            user_request[:200].replace("\n", " ").strip()
+            or f"Auto-drafted handler for {attempted_tool_name}"
+        )
+        sandbox_summary = (sandbox_result.error or "ok")[:200].replace("\n", " ")
+        frontmatter = (
+            "---\n"
+            f"name: {slug}\n"
+            f"description: {description}\n"
+            "version: 1\n"
+            "execution_mode: PLAYBOOK\n"
+            "domain: auto\n"
+            "status: draft\n"
+            "enabled: false\n"
+            "codemind_source: capability_gap\n"
+            f"attempted_tool_name: {attempted_tool_name}\n"
+            f"attempted_tool_action: {attempted_tool_action or 'none'}\n"
+            f"source_seed: {detection.get('metadata', {}).get('seed_file', '')}\n"
+            f"sandbox_tested: {'true' if sandbox_result.ok else 'false'}\n"
+            f"sandbox_summary: {sandbox_summary}\n"
+            f"generated_at: {now_iso}\n"
+            "---\n\n"
+            f"# CodeMind-drafted skill for hallucinated tool `{attempted_tool_name}`\n\n"
+            "**Status**: draft — landed inert (status: draft, enabled: false) via the "
+            "CodeMind capability_gap loop (9ar0/vp52). Requires manual review and "
+            "`scripts/promote_capability_skill.sh` before it is reachable by Core/Prime.\n\n"
+            f"**Original user request**: {user_request}\n\n"
+            f"**Hallucinated call**: `{attempted_tool_name}({attempted_tool_action}, "
+            f"{_json.dumps(attempted_tool_params, default=str)})`\n\n"
+            f"**Sandbox result**: ok={sandbox_result.ok} — {sandbox_summary}\n\n"
+            "See `skill_source.py` in this directory for the drafted implementation.\n"
+        )
+        skill_md_path.write_text(frontmatter, encoding="utf-8")
+
+        logger.info(
+            "CodeMind: drafted capability skill '%s' (sandbox_ok=%s) -> %s",
+            slug, sandbox_result.ok, skill_md_path,
+        )
+
+        engine.record_change(CodeMindChange(
+            file_path=str(skill_md_path),
+            issue=user_request,
+            scope_tier=2,
+            diff_summary=f"drafted PLAYBOOK skill, draft/disabled, sandbox_ok={sandbox_result.ok}",
+            applied=False,
+        ))
+        self._mark_seed_reviewed(detection, "skill_drafted")
 
     # CodeMind — LLM proposal via code-architect adapter
     # ------------------------------------------------------------------

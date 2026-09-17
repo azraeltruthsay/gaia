@@ -171,7 +171,7 @@ def run_docs_maintenance(
 
 def _check_doctor_dissonance() -> List[Dict[str, Any]]:
     """Query gaia-doctor /dissonance for live != candidate hash mismatches."""
-    results = []
+    results: List[Dict[str, Any]] = []
     try:
         import httpx
         resp = httpx.get(
@@ -225,7 +225,7 @@ def _is_doc_related(path: str) -> bool:
 
 def _check_git_staleness() -> List[Dict[str, Any]]:
     """Check if recently changed source files have corresponding stale docs."""
-    results = []
+    results: List[Dict[str, Any]] = []
     try:
         # Get files changed in the last 7 days
         recent_changes = _git_recent_changes(days=7)

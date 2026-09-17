@@ -14,7 +14,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.SkillPackage")
 
@@ -43,6 +43,11 @@ class SkillPackage:
     source_path: Optional[Path] = None
     domain: str = "custom"
     dependencies: List[str] = field(default_factory=list)
+    # 9ar0: gates a package out of routing/discovery. Defaults preserve
+    # existing behavior for every hand-written skill that predates these
+    # fields (no frontmatter change needed for them to keep working).
+    status: str = "active"
+    enabled: bool = True
 
     @property
     def is_knowledge(self) -> bool:
@@ -51,6 +56,11 @@ class SkillPackage:
     @property
     def is_playbook(self) -> bool:
         return self.execution_mode.upper() == "PLAYBOOK"
+
+    @property
+    def is_routable(self) -> bool:
+        """False for draft/disabled packages — must not be executed or surfaced."""
+        return self.enabled and self.status == "active"
 
 
 def _parse_frontmatter(text: str) -> tuple:
@@ -67,9 +77,9 @@ def _parse_frontmatter(text: str) -> tuple:
     body = match.group(2).strip()
 
     # Simple YAML parser — avoids PyYAML dependency in gaia-mcp
-    fm = {}
+    fm: Dict[str, Any] = {}
     current_key = None
-    current_list = None
+    current_list: Optional[List[Any]] = None
 
     for line in fm_text.split("\n"):
         stripped = line.strip()
@@ -183,6 +193,8 @@ def load_skill_package(path: Path) -> Optional[SkillPackage]:
         source_path=path,
         domain=fm.get("domain", "custom"),
         dependencies=fm.get("dependencies", []),
+        status=fm.get("status") or "active",
+        enabled=fm.get("enabled") if fm.get("enabled") is not None else True,
     )
 
 
@@ -194,7 +206,7 @@ def load_all_packages(skills_dir: Path) -> Dict[str, SkillPackage]:
     Returns:
         Dict mapping skill name to SkillPackage
     """
-    packages = {}
+    packages: Dict[str, SkillPackage] = {}
     if not skills_dir.exists():
         logger.info("Skills directory %s does not exist", skills_dir)
         return packages

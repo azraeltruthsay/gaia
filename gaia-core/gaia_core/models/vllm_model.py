@@ -4,8 +4,15 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Collection, Dict, Generator, Iterable, Iterator, List, Optional, Tuple
 import inspect
+
+if TYPE_CHECKING:
+    # vLLM is a heavy, optional-at-import-time dependency (loaded lazily
+    # below, after the worker-method env var is set) — this guarded import
+    # exists only so annotations referencing SamplingParams resolve for
+    # static analysis, never at runtime.
+    from vllm import SamplingParams
 
 # Defer importing vLLM until after we set the worker-method env var so the
 # vLLM library can initialize multiprocessing with the desired start method.
@@ -229,7 +236,11 @@ class VLLMChatModel:
         top_p: float = 0.9,
         presence_penalty: float = 0.0,
         stream: bool = False,
-        stop: Optional[Iterable[str]] = None,
+        # o9dh/saq3: was Iterable[str] but the body below calls len(stop)
+        # -- a bare Iterable doesn't guarantee that. Collection does and
+        # every real caller already passes a list/tuple (a lazy generator
+        # would already have broken the existing len() call).
+        stop: Optional[Collection[str]] = None,
         **kwargs,
     ):
         # Heuristic: allow longer outputs and anti-repetition for clearly long-form asks (poems, stories, recitals).

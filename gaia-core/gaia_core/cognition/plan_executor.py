@@ -20,7 +20,7 @@ logger = logging.getLogger("GAIA.PlanExecutor")
 _BASE = Path("/gaia/GAIA_Project") if Path("/gaia/GAIA_Project/candidates").exists() else Path(".")
 
 # Service directories to scan (discovered, not prescribed)
-_SERVICE_DIRS = None
+_SERVICE_DIRS: Optional[List[Path]] = None
 
 
 def _get_service_dirs() -> List[Path]:

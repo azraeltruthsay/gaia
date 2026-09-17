@@ -1,7 +1,7 @@
 # /home/azrael/Project/gaia-assistant/app/memory/conversation/summarizer.py
 
 import logging
-from typing import List, Dict
+from typing import Any, List, Dict
 from gaia_core.config import Config as GAIAConfig
 import requests
 import os
@@ -47,7 +47,7 @@ class ConversationSummarizer:
         except Exception:
             self.embed_model = embed_model
 
-    def generate_summary(self, messages: List[dict], packet: object = None) -> str:
+    def generate_summary(self, messages: List[dict], packet: Any = None) -> str:
         if not messages:
             return "(No messages to summarize)"
 

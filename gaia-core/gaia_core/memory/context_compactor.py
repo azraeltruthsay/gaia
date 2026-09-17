@@ -354,7 +354,7 @@ class ContextCompactor:
         all_messages = result.middle_turns + result.recent_turns
 
         # Track user message hashes
-        seen_hashes = {}
+        seen_hashes: Dict[str, int] = {}
         for i, msg in enumerate(all_messages):
             if msg.get("role") != "user":
                 continue

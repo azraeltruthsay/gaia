@@ -514,7 +514,7 @@ if __name__ == "__main__":
                     },
                 }
             }
-        config = _StubConfig()
+        config = _StubConfig()  # type: ignore[assignment]
 
     result = run_knowledge_ingestion(config)
     print(json.dumps(result, indent=2))

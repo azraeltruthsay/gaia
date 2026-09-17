@@ -1,11 +1,12 @@
 import threading
+from typing import Any, Dict
 
 class GAIAStatus:
     """
     Thread-safe global status manager for GAIA boot and runtime state.
     Allows concurrent modules to update and query boot sequence and health.
     """
-    _status = {}
+    _status: Dict[str, Any] = {}
     _lock = threading.Lock()
 
     @classmethod

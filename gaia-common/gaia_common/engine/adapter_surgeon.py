@@ -34,9 +34,16 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    # torch is a heavy, optional-at-import-time dependency (loaded lazily
+    # inside the methods that actually need it) — this guarded import
+    # exists only so the type annotations below resolve for static
+    # analysis, never at runtime.
+    import torch
 
 logger = logging.getLogger("GAIA.AdapterSurgeon")
 
@@ -121,7 +128,7 @@ class AdapterSurgeon:
         logger.info("SAE atlas loaded: %d layers from %s",
                     len(self._saes), self.sae_atlas_path)
 
-    def _get_activations(self, prompt: str, layers: List[int]) -> Dict[int, "torch.Tensor"]:
+    def _get_activations(self, prompt: str, layers: List[int]) -> Dict[int, torch.Tensor]:
         """Get hidden state activations for a prompt at specified layers."""
         import torch
 
@@ -141,7 +148,7 @@ class AdapterSurgeon:
 
         return result
 
-    def _sae_decompose(self, activation: "torch.Tensor", layer_idx: int) -> Dict[int, float]:
+    def _sae_decompose(self, activation: torch.Tensor, layer_idx: int) -> Dict[int, float]:
         """Decompose an activation vector into SAE feature strengths."""
         import torch
         import torch.nn.functional as F

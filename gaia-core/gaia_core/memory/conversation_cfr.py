@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.CFR.Conversation")
 
@@ -177,7 +177,7 @@ def select_focus_turns(
         embs = model.encode(texts, show_progress_bar=False)
         q = embs[0]
         n = len(candidates)
-        scored = []
+        scored: List[Dict[str, Any]] = []
         for i, t in enumerate(candidates):
             if not (t.get("content") or "").strip():
                 continue

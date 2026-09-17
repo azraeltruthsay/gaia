@@ -31,7 +31,7 @@ class DiscordConnector(DestinationConnector):
         super().__init__("discord", OutputDestination.DISCORD)
         self.config = config or DiscordConfig.from_env()
         self._webhook_sender: Optional[DiscordWebhookSender] = None
-        self._bot_client = None  # Will hold discord.py client when available
+        self._bot_client: Optional[Any] = None  # Will hold discord.py client when available
         self._message_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
 
         # Check if Discord integration is enabled

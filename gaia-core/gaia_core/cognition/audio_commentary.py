@@ -45,7 +45,7 @@ class AudioCommentaryEvaluator:
         self.sleep_wake_manager = sleep_wake_manager
 
         # Load config from constants
-        constants = {}
+        constants: Dict[str, Any] = {}
         if config is not None:
             constants = getattr(config, "constants", {})
         audio_cfg = constants.get("AUDIO_COMMENTARY", {})

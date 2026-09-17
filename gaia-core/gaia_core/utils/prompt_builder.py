@@ -7,7 +7,7 @@ Prompt Builder (robust, persona/context-aware)
 
 import logging
 import os
-from typing import List, Dict
+from typing import Any, List, Dict
 
 # [GCP v0.3] Import the new packet structure
 from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
@@ -750,7 +750,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                     if hits:
                         lines = []
                         # Group hits by collection, primary first
-                        by_collection = {}
+                        by_collection: Dict[str, List[Dict[str, Any]]] = {}
                         for h in hits:
                             coll = h.get('collection', 'unknown')
                             by_collection.setdefault(coll, []).append(h)
@@ -2137,7 +2137,7 @@ def _build_prompt_core(
         summary_tokens = count_tokens(summary_prompt['content'])
         remaining_budget -= summary_tokens
 
-    history_to_include = []
+    history_to_include: List[Dict[str, Any]] = []
     for message in reversed(history):
         msg_tokens = count_tokens(message['content'])
         if msg_tokens <= remaining_budget:

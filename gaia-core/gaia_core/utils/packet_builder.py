@@ -44,7 +44,7 @@ def build_packet_snapshot(session_id: str, persona_id: str, original_prompt: str
     except Exception:
         identity_excerpt = ""
 
-    packet = {
+    packet: Dict[str, Any] = {
         'header': {
             'session_id': session_id,
             'persona': {
