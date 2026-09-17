@@ -501,11 +501,32 @@ else
         stage_fail "Graceful Live Shutdown" "docker compose down failed (exit $down_exit)"
     fi
 
-    # 1c. Verify all live containers are actually stopped
+    # 1c. Verify all live containers are actually stopped.
+    # o9dh/saq3: `docker compose down` can return success while a few
+    # heavier containers (elasticsearch, etc.) are still finishing their
+    # own teardown/network-detach -- observed live: down_exit=0, most
+    # containers logged "Removed", but "Network gaia-network Removing /
+    # Resource is still in use" (something was still attached), and a
+    # single immediate `docker compose ps -q` check right after counted
+    # 6 stragglers that had, in fact, all fully exited within about a
+    # minute on their own. A single instant check treated that normal
+    # teardown tail as a hard failure and aborted the whole pipeline with
+    # production already mid-shutdown (briefly fully offline until
+    # manually restarted). Poll instead of checking once.
     live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
     if [ "$live_remaining" -gt 0 ]; then
-        log "  ${YELLOW}⚠${RESET} $live_remaining live containers still running"
-        stage_fail "Graceful Live Shutdown" "Live containers did not stop cleanly"
+        log "  ${YELLOW}⚠${RESET} $live_remaining live container(s) still stopping, waiting up to 60s..."
+        waited=0
+        while [ "$live_remaining" -gt 0 ] && [ "$waited" -lt 60 ]; do
+            sleep 3
+            waited=$((waited + 3))
+            live_remaining=$(docker compose ps -q 2>/dev/null | wc -l)
+        done
+        if [ "$live_remaining" -gt 0 ]; then
+            log "  ${YELLOW}⚠${RESET} $live_remaining live containers still running after ${waited}s"
+            stage_fail "Graceful Live Shutdown" "Live containers did not stop cleanly"
+        fi
+        log "  ${GREEN}✓${RESET} All live containers stopped after ${waited}s"
     fi
 
     LIVE_STOPPED=true
