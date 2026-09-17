@@ -647,7 +647,12 @@ Respond with JSON:
             # Cannot safely retry on the same model instance.
             # Auto-approve the selection rather than blocking the pipeline.
             logger.warning("Review timed out; auto-approving tool selection")
-            return True, 0.5, "Review timed out — auto-approved"
+            # o9dh/saq3: was a 3-tuple (True, 0.5, "...") but this function
+            # is typed/documented/called as (confidence, reasoning) -- the
+            # sole caller does `confidence, reasoning = review_selection(...)`,
+            # which would ValueError ("too many values to unpack") on every
+            # timeout.
+            return 0.5, "Review timed out — auto-approved"
 
         content = _extract_content(result)
         json_content = _extract_json_from_response(content)
