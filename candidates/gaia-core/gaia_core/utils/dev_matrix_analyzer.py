@@ -23,7 +23,12 @@ class DevMatrixAnalyzer:
     def __init__(self, config):
         self.config = config
         self.dev_matrix = GAIADevMatrix(config)
-        self._base_path = Path(getattr(config, 'base_path', '/gaia/GAIA_Project/gaia-assistant'))
+        # `or <default>`: SafeConfigProxy (agent_core.py) returns None for any
+        # attribute outside its small fallback_map instead of raising
+        # AttributeError, defeating getattr's own default. Live crash
+        # 2026-10-13: Path(None) TypeError here killed a whole turn's
+        # streaming loop (uncaught — the caller only guarded ImportError).
+        self._base_path = Path(getattr(config, 'base_path', None) or '/gaia/GAIA_Project/gaia-assistant')
 
         # Registry of task verification functions
         # Maps task name (or partial match) to a verification function

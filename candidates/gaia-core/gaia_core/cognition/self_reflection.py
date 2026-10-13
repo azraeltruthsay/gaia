@@ -58,7 +58,13 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
         logger.warning(f"SelfReflection: intent detection failed: {e}")
 
     # -- Reflection budget handling --
-    MAX_REFLECTION_TOKENS = getattr(config, 'max_reflection_tokens', 500)
+    # `or 500`: SafeConfigProxy.__getattr__ (agent_core.py) returns None for
+    # any attribute outside its small hardcoded fallback_map instead of
+    # raising AttributeError, which silently defeats getattr's own `default`
+    # arg below. Live crash 2026-10-13: int > None TypeError here took down
+    # a whole turn on observer CAUTION re-reflection. See GAIA_Project bead
+    # for the SafeConfigProxy footgun audit.
+    MAX_REFLECTION_TOKENS = getattr(config, 'max_reflection_tokens', 500) or 500
     output_tokens = count_tokens(output)
     if output_tokens > MAX_REFLECTION_TOKENS:
         logger.info(f"SelfReflection: summarizing output of {output_tokens} tokens (threshold {MAX_REFLECTION_TOKENS})")
@@ -95,9 +101,11 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
     messages = build_from_packet(reflection_packet, task_instruction_key="refinement")
 
     final_thought = ""
-    iterations = getattr(config, 'max_reflection_iterations', 3)
-    threshold = getattr(config, 'reflection_threshold', 0.9)
-    max_tokens = getattr(config, 'reflection_max_tokens', 256)
+    # `or <default>` guards against SafeConfigProxy's None-for-unmapped-attr
+    # behavior (see note above) — range(None) and None comparisons both crash.
+    iterations = getattr(config, 'max_reflection_iterations', 3) or 3
+    threshold = getattr(config, 'reflection_threshold', 0.9) or 0.9
+    max_tokens = getattr(config, 'reflection_max_tokens', 256) or 256
 
 
     # Iterative observation/self-reflection loop (configurable)
@@ -106,7 +114,7 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
     for i in range(iterations):
         t_iter_start = time.perf_counter()
         try:
-            def _reflect_llm(msgs=messages, mt=max_tokens, temp=getattr(config, 'reflection_temperature', 0.3)):
+            def _reflect_llm(msgs=messages, mt=max_tokens, temp=getattr(config, 'reflection_temperature', 0.3) or 0.3):
                 return llm.create_chat_completion(
                     messages=msgs, max_tokens=mt, temperature=temp
                 )
@@ -189,7 +197,7 @@ def reflect_and_refine(packet: CognitionPacket, output: str, config, llm, ethica
     logger.info(f"SelfReflection: completed up to {iterations} iterations; final confidence approx {score}")
 
     # --- Saṃvega Integration: Capture discernment artifacts if confidence is low ---
-    SAMVEGA_THRESHOLD = getattr(config, 'samvega_threshold', 0.7)
+    SAMVEGA_THRESHOLD = getattr(config, 'samvega_threshold', 0.7) or 0.7
     if score < SAMVEGA_THRESHOLD:
         logger.info("SelfReflection: Low confidence detected (%.2f < %.2f), generating Saṃvega artifact...", score, SAMVEGA_THRESHOLD)
         try:
@@ -262,7 +270,7 @@ def run_self_reflection(packet: CognitionPacket, output: str, config=None, llm=N
     if llm is None and hasattr(config, "model_pool"):
         llm = config.model_pool.get_model_for_role("prime")
 
-    MAX_REFLECTION_TOKENS = getattr(config, 'max_reflection_tokens', 500)
+    MAX_REFLECTION_TOKENS = getattr(config, 'max_reflection_tokens', 500) or 500
     output_tokens = count_tokens(output)
     if output_tokens > MAX_REFLECTION_TOKENS:
         logger.info(f"SelfReflection: summarizing output of {output_tokens} tokens")

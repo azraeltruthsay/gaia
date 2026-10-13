@@ -5019,12 +5019,22 @@ class AgentCore:
     
             # Analyze dev_matrix for task completion
             # TODO: [GAIA-REFACTOR] dev_matrix_analyzer.py module not yet migrated.
+            # Best-effort bookkeeping step — must NEVER take down the turn it
+            # rides on. Live crash 2026-10-13: a TypeError inside
+            # DevMatrixAnalyzer.__init__ (base_path resolved to None) was only
+            # caught by `except ImportError`, so it propagated out of
+            # run_turn() and killed the whole streaming response — the user
+            # got nothing, not even the synthesized error packet. Catch
+            # broadly; log so a real regression here is still visible.
             try:
                 from gaia_core.utils.dev_matrix_analyzer import DevMatrixAnalyzer
                 dev_matrix_analyzer = DevMatrixAnalyzer(self.config)
                 newly_resolved = dev_matrix_analyzer.analyze_and_update()
             except ImportError:
                 newly_resolved = []  # Placeholder until migration
+            except Exception:
+                logger.exception("dev_matrix analysis failed (non-fatal, turn continues)")
+                newly_resolved = []
     
             # If we're in Discord and the Discord task was just resolved, log it prominently
             if newly_resolved and "discord" in source.lower():
