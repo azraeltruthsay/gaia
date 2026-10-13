@@ -1398,6 +1398,11 @@ async def process_packet(packet_data: Dict[str, Any]):
             # never need a tool, so drop such calls silently (the surrounding
             # reply text still streams).
             _suppress_tools = False
+            # 7o99: counts calls dropped below so a turn whose ENTIRE output
+            # was suppressed tool-call markup (no surrounding prose at all)
+            # can get a graceful fallback instead of dead silence — see the
+            # empty-response_pieces check near the post-loop flush.
+            _suppressed_tool_count = 0
             try:
                 from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
                 _eic = EmbedIntentClassifier.instance()
@@ -1481,6 +1486,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     # into focus, and is meaningful even on a chatty turn.
                                     if _suppress_tools and pe.tool_name != "expand_context":
                                         logger.info("Tool call '%s' suppressed (tool-free intent)", pe.tool_name)
+                                        _suppressed_tool_count += 1
                                         continue
                                     # Dedup: only process each unique tool call once
                                     _tc_key = f"{pe.tool_name}:{pe.tool_action}:{json.dumps(pe.tool_params, sort_keys=True)}"
@@ -1958,6 +1964,19 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # to the user (9t27).
                         logger.warning("Tool call execution failed: %s", e)
                         yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name} call failed]*\n"}) + "\n"
+
+            # 7o99 (live incident 2026-10-13): a turn can legitimately end with
+            # response_pieces totally empty — not a crash, not malformed-syntax
+            # garbage (that's the flush() repetition-garbage apology above),
+            # just a deliberation pass that emitted nothing but cleanly-parsed,
+            # correctly-suppressed tool calls and zero surrounding prose. Every
+            # downstream consumer (Discord included) treats silence + no final
+            # packet as total failure with no way to tell the user anything
+            # went wrong at all. Give them something rather than nothing.
+            if not response_pieces and _suppressed_tool_count > 0:
+                _apology = "Sorry — I got tangled up trying to answer that. Could you ask again?"
+                response_pieces.append(_apology)
+                yield json.dumps({"type": "token", "value": _apology}) + "\n"
 
             # Ensure a flush is always emitted so front-ends send accumulated text
             if response_pieces:
