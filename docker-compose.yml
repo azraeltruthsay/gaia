@@ -273,6 +273,12 @@ services:
       # gaps) write FUNCTIONAL drives/foci (never feels — those are hers). DEFAULT
       # OFF while it soaks; the report path (P1) isn't wired yet. Set 1 to populate.
       - AFFECT_APPRAISAL_ENABLED=${AFFECT_APPRAISAL_ENABLED:-0}
+      # Project-pulse tonic (rbc9): floors an "investment" drive from recent
+      # git commit recency, so project momentum can surface on the Inner-
+      # weather felt line on casual turns (which strip arch_fact/[Here & Now]
+      # — see 7n3). Experimental, own flag, independent of AFFECT_APPRAISAL_
+      # ENABLED above — needs live validation before enabling. DEFAULT OFF.
+      - PROJECT_PULSE_ENABLED=${PROJECT_PULSE_ENABLED:-0}
       # Thought-seed backlog cap (audit A2): heartbeat prunes pending+root to the
       # newest N (archives the rest oldest-first); planters back off when full.
       # Was an unbounded 11k+ landfill because LLM triage perpetually defers.

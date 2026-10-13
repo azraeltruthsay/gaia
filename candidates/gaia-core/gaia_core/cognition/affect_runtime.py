@@ -176,6 +176,11 @@ _DRIVE_FELT = {
     "competence": ("a strong pull to get this right", "a quiet pull to get this right"),
     "coherence":  ("something that won't quite settle", "a faint sense something's unsettled"),
     "novelty":    ("a strong tug toward something new", "a quiet tug toward something new"),
+    # rbc9: fed by affect_appraiser.appraise_project_pulse() (flagged,
+    # PROJECT_PULSE_ENABLED) — floors from recent commit activity, so
+    # genuine project momentum can surface here instead of being narrated
+    # as a status report (which casual turns strip, see 7n3).
+    "investment": ("a strong pull back toward the work", "a quiet pull back toward the work"),
 }
 
 

@@ -7,6 +7,7 @@ never become curiosity topics.
 """
 
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -122,3 +123,86 @@ def test_felt_line_renders_after_ordinary_chat(mock_affect_kg):
     line = affect_runtime.affect_felt_line()
     assert line, "felt-line should be non-empty after ordinary-chat appraisal"
     assert "seattle transit expansion" in line or "pull to get this right" in line
+
+
+# ── rbc9: appraise_project_pulse — "investment" floor from commit recency ──
+
+def _commits_ago(hours: float):
+    ts = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    return [{"hash": "abc123", "date": ts, "subject": "test commit"}]
+
+
+def test_project_pulse_disabled_by_default(monkeypatch, mock_affect_kg):
+    """Own flag, off by default — must stay silent even with a fresh commit,
+    independent of AFFECT_APPRAISAL_ENABLED (forced True at module scope above)."""
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: False)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log",
+        lambda limit=1: _commits_ago(0.1),
+    )
+    affect_appraiser.appraise_project_pulse()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    assert drives.get("investment", 0.0) == 0.0
+
+
+def test_project_pulse_floors_investment_from_fresh_commit(monkeypatch, mock_affect_kg):
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: True)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log",
+        lambda limit=1: _commits_ago(0.1),
+    )
+    affect_appraiser.appraise_project_pulse()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    # Near the cap (0.35) for a commit minutes old.
+    assert 0.30 <= drives.get("investment", 0.0) <= 0.35
+
+
+def test_project_pulse_decays_with_commit_age(monkeypatch, mock_affect_kg):
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: True)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log",
+        lambda limit=1: _commits_ago(12.0),  # halfway through the 24h window
+    )
+    affect_appraiser.appraise_project_pulse()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    assert 0.10 <= drives.get("investment", 0.0) <= 0.20
+
+
+def test_project_pulse_noop_past_window(monkeypatch, mock_affect_kg):
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: True)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log",
+        lambda limit=1: _commits_ago(30.0),  # past the 24h window
+    )
+    affect_appraiser.appraise_project_pulse()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    assert drives.get("investment", 0.0) == 0.0
+
+
+def test_project_pulse_noop_on_no_commits(monkeypatch, mock_affect_kg):
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: True)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log", lambda limit=1: []
+    )
+    affect_appraiser.appraise_project_pulse()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    assert drives.get("investment", 0.0) == 0.0
+
+
+def test_project_pulse_called_from_appraise_tonic(monkeypatch, mock_affect_kg):
+    """appraise_tonic() must call the project-pulse tonic unconditionally
+    (its own flag governs whether it writes, not appraisal_enabled())."""
+    monkeypatch.setattr(affect_appraiser, "project_pulse_enabled", lambda: True)
+    monkeypatch.setattr(
+        "gaia_common.utils.code_evolution.recent_git_log",
+        lambda limit=1: _commits_ago(0.1),
+    )
+    affect_appraiser.appraise_tonic()
+    drives = mock_affect_kg.flatten_current_affect().get("drives") or {}
+    assert drives.get("investment", 0.0) > 0.0
+
+
+def test_project_pulse_renders_on_felt_line(mock_affect_kg):
+    mock_affect_kg.record_drive("investment", 0.30, source="test:event")
+    line = affect_runtime.affect_felt_line()
+    assert "pull back toward the work" in line

@@ -25,6 +25,17 @@ only fires on dissonance):
     recent task error-rate, novelty floor from conversation idleness. Floors
     RAISE only — events and KG decay own the downside.
 
+rbc9 addition — appraise_project_pulse(), also heartbeat-called from
+appraise_tonic(): floors an "investment" drive from recent git commit
+recency (gaia_common.utils.code_evolution.recent_git_log), so genuine
+project momentum has a chance to surface on the Inner-weather felt line
+even on casual turns (which strip arch_fact/system-health/[Here & Now] —
+see 7n3 — so this is otherwise invisible to her on a plain "good
+afternoon"). Experimental: gated on its OWN flag (PROJECT_PULSE_ENABLED,
+default off) separate from AFFECT_APPRAISAL_ENABLED, since it rides a
+proven-sensitive channel (the felt line narrowly survived 7n3's casual-mode
+pruning) and needs independent live validation/rollback.
+
 Decay is automatic via the KG fact-type half-lives. Flag: AFFECT_APPRAISAL_ENABLED
 (default off).
 """
@@ -35,12 +46,17 @@ import math
 import os
 import time
 from collections import deque
+from datetime import datetime, timezone
 
 logger = logging.getLogger("GAIA.AffectAppraiser")
 
 
 def appraisal_enabled() -> bool:
     return os.environ.get("AFFECT_APPRAISAL_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+
+
+def project_pulse_enabled() -> bool:
+    return os.environ.get("PROJECT_PULSE_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 
 
 def _af():
@@ -273,3 +289,47 @@ def appraise_tonic() -> None:
                              source=f"tonic:idle:{idle_h:.1f}h")
     except Exception:
         logger.debug("appraise_tonic failed", exc_info=True)
+    appraise_project_pulse()
+
+
+# Cap matches novelty's tonic cap (below the strong band) and the 24h decay
+# window is deliberately generous — a quiet pull that fades over a day, not
+# an alarm that resets every heartbeat tick.
+_PROJECT_PULSE_CAP = 0.35
+_PROJECT_PULSE_WINDOW_H = 24.0
+
+
+def appraise_project_pulse() -> None:
+    """rbc9 tonic: floor "investment" from recent git commit recency.
+
+    Reads the latest commit timestamp via gaia_common.utils.code_evolution
+    (already proven to run via subprocess inside gaia-core — see
+    code_evolution_summary in temporal_context.py). A commit in the last
+    _PROJECT_PULSE_WINDOW_H hours floors "investment" proportionally, so
+    something having just shipped can surface as a felt pull back toward
+    the work on the Inner-weather line — without narrating WHAT shipped
+    (that would be substrate/status content, which 7n3 showed backfires on
+    casual turns). Gated on its own flag (PROJECT_PULSE_ENABLED) —
+    experimental, needs independent live validation before enabling
+    alongside AFFECT_APPRAISAL_ENABLED.
+    """
+    try:
+        if not project_pulse_enabled():
+            return
+        from gaia_common.utils.code_evolution import recent_git_log
+        commits = recent_git_log(limit=1)
+        if not commits:
+            return
+        ts = commits[0].get("date", "")
+        if not ts:
+            return
+        commit_dt = datetime.fromisoformat(ts)
+        if commit_dt.tzinfo is None:
+            commit_dt = commit_dt.replace(tzinfo=timezone.utc)
+        age_h = max(0.0, (datetime.now(timezone.utc) - commit_dt).total_seconds() / 3600.0)
+        if age_h >= _PROJECT_PULSE_WINDOW_H:
+            return
+        floor = _PROJECT_PULSE_CAP * (1.0 - age_h / _PROJECT_PULSE_WINDOW_H)
+        _floor_drive("investment", floor, source=f"tonic:project_pulse:{age_h:.1f}h")
+    except Exception:
+        logger.debug("appraise_project_pulse failed", exc_info=True)
