@@ -8,7 +8,7 @@ GPU inference is unavailable.
 Key sourcing (zero-trust, see .claude/rules/safety.md):
     1. Docker secret at /run/secrets/groq_api_key (preferred)
     2. GROQ_API_KEY environment variable (fallback)
-    GROQ_MODEL: Model to use (default: llama-3.3-70b-versatile)
+    GROQ_MODEL: Model to use (default: qwen/qwen3.8-27b)
     GROQ_TIMEOUT: Request timeout in seconds (default: 60)
 """
 
@@ -62,37 +62,20 @@ class GroqAPIModel:
     Compatible with GAIA's model pool and can serve as a fallback for gpu_prime.
 
     Attributes:
-        model_name: Groq model identifier (e.g., "llama-3.3-70b-versatile")
+        model_name: Groq model identifier (e.g., "qwen/qwen3.8-27b")
         api_key: Groq API key
         timeout: Request timeout in seconds
     """
 
-    # Available models and their characteristics
+    # Available models and their characteristics.
+    # Groq retired the llama-3.x chat lineup (2026-10-12) -- qwen/qwen3.8-27b is
+    # the only remaining large-context chat model that isn't OpenAI-sourced
+    # (openai/gpt-oss-* excluded per CLAUDE.md's "OpenAI RETIRED" rule).
     AVAILABLE_MODELS = {
-        "llama-3.3-70b-versatile": {
-            "context_window": 128000,
-            "description": "Best quality, general purpose",
+        "qwen/qwen3.8-27b": {
+            "context_window": 131072,
+            "description": "Non-OpenAI chat model, general purpose",
             "tokens_per_minute": 6000,
-        },
-        "llama-3.1-70b-versatile": {
-            "context_window": 128000,
-            "description": "Previous gen, still excellent",
-            "tokens_per_minute": 6000,
-        },
-        "llama-3.1-8b-instant": {
-            "context_window": 128000,
-            "description": "Fast, good for simple tasks",
-            "tokens_per_minute": 20000,
-        },
-        "mixtral-8x7b-32768": {
-            "context_window": 32768,
-            "description": "MoE model, good balance",
-            "tokens_per_minute": 5000,
-        },
-        "gemma2-9b-it": {
-            "context_window": 8192,
-            "description": "Google Gemma, instruction-tuned",
-            "tokens_per_minute": 15000,
         },
     }
 
@@ -104,7 +87,7 @@ class GroqAPIModel:
     ):
         _ensure_groq_imported()
 
-        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model_name = model_name or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
         self.api_key = api_key or resolve_groq_api_key()
         self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "60"))
 

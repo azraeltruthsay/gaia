@@ -43,7 +43,7 @@ Place downloaded models in the `gaia-instance/gaia-models/` directory (adjacent 
 
 | Backend | Model | Purpose |
 |---------|-------|---------|
-| `groq_fallback` | llama-3.3-70b-versatile | Cloud escalation / external fallback (the only cloud backend) |
+| `groq_fallback` | qwen/qwen3.8-27b | Cloud escalation / external fallback (the only cloud backend) |
 
 > OpenAI/Oracle (gpt-4o-mini) is **retired** — GAIA no longer uses OpenAI for any task. Groq is the sole cloud fallback.
 

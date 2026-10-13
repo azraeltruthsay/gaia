@@ -35,7 +35,7 @@ Last Updated: 2026-03-19
   - *Endpoint:* `http://gaia-nano:8080`
   - *Modes:* Safetensors on GPU (primary), GGUF fallback
 - **Oracle:** `gpt-4o-mini` (OpenAI API)
-- **Groq Fallback:** `llama-3.3-70b-versatile` (Groq API)
+- **Groq Fallback:** `qwen/qwen3.8-27b` (Groq API)
 - **Embedding:** `all-MiniLM-L6-v2` (sentence-transformers, gaia-study)
 
 Two model families: Qwen3.5 for Nano/Core, Qwen3 (Huihui abliterated) for Prime.

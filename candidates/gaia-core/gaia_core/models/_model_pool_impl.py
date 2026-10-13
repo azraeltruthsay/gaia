@@ -739,7 +739,7 @@ class ModelPool:
                         f"Groq key absent (no /run/secrets/groq_api_key, no GROQ_API_KEY); skipping {model_name}"
                     )
                     return False
-                model_id = model_config.get("model", "llama-3.3-70b-versatile")
+                model_id = model_config.get("model", "qwen/qwen3.8-27b")
                 self.models[model_name] = GroqAPIModel(model_name=model_id, api_key=api_key)
             else:
                 if model_type and model_type != 'api':

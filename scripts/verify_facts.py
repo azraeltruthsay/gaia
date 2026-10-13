@@ -135,7 +135,7 @@ def _get_groq_key() -> Optional[str]:
 def _query_groq(prompt: str, api_key: str) -> Optional[dict]:
     """Query Groq API for referee verdict."""
     payload = json.dumps({
-        "model": "llama-3.3-70b-versatile",
+        "model": "qwen/qwen3.8-27b",
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 256,
         "temperature": 0.1,
