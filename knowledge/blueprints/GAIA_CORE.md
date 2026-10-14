@@ -84,7 +84,37 @@ The core reasoning loop in `AgentCore.run_turn()`:
 | `nano` | **The Reflex** (Nano) | llama.cpp (GGUF) | In-process | Full (All) |
 | `groq_fallback` | Emergency Thinker | Groq API | HTTPS | N/A |
 
+## ⚠️ Accuracy Notice (2026-10-14)
+
+Everything above this line is **Blueprint Version 0.6, last touched
+2026-03-02** and describes the pre-Sovereign-Duality 3-tier Nano/Operator/
+Prime(AWQ) architecture. That architecture was retired: Nano is explicitly
+deprecated ("Core handles all triage" per `CLAUDE.md`), the real stack is
+2-tier Core (Gemma4-E4B-GAIA-Core-v1) / Prime (Qwen3-VL-8B-GAIA-Prime-v1-
+abliterated, vision-language, not AWQ), and `PRIME_MODEL=/models/Qwen3-8B-
+abliterated-AWQ` in the env table above is a known-dead placeholder path
+(corrected elsewhere to `/models/prime` back on 2026-07-02). The 20-step
+Cognitive Pipeline list also predates CFR, the Observer, cross-tier audit,
+samvega, affect_appraiser, and the locality organ — all live per `CLAUDE.md`
+but undocumented here. Treat `CLAUDE.md`'s "Sovereign Duality" and
+"Cognitive Systems & Flags" sections as authoritative over this document
+until the full rewrite tracked in **GAIA_Project-okhq** lands. This notice
+was added while landing a narrower, already-detected fix (the two
+constants below) rather than attempting that rewrite tonight.
+
 ## Meta
-**Status**: live
+**Status**: stale — see Accuracy Notice above; full rewrite tracked in GAIA_Project-okhq
 **Blueprint Version**: 0.6
-**Last Updated**: 2026-03-02
+**Last Updated**: 2026-03-02 (content) / 2026-10-14 (accuracy notice only)
+
+## Changelog
+
+### 2026-10-14
+Resolved the `blueprint_validation` sleep task's 2026-09-17 finding: both
+`HISTORY_SUMMARY_THRESHOLD = 20` and `MAX_OUTPUT_LENGTH = 500` are defined
+in `gaia_core/cognition/agent_core.py` (lines 80-81) but, per a full grep of
+the codebase, are not referenced anywhere else — they're currently dead
+constants, not live config knobs. Documenting that honestly here rather
+than presenting them as active behavior. Also added the Accuracy Notice
+above after finding this document describes a retired model architecture
+(see GAIA_Project-okhq).
