@@ -133,6 +133,45 @@ class TestWeightCalculation:
         # 0.6 * 2.0 = 1.2 → clamped to 1.0
         assert w == pytest.approx(1.0)
 
+    def test_cross_tier_audit_single_low_severity(self):
+        # GAIA_Project-e8hf: severity 1, 1 finding → 0.25 * 1 = 0.25,
+        # below samvega_kv_fold's default min_weight (0.3) — intentional,
+        # matches _maybe_emit_samvega's own gate which doesn't emit for a
+        # lone low-severity finding either.
+        w = compute_samvega_weight(
+            SamvegaTrigger.CROSS_TIER_AUDIT.value,
+            audit_finding_count=1,
+            audit_max_severity=1,
+        )
+        assert w == pytest.approx(0.25)
+
+    def test_cross_tier_audit_serious_finding(self):
+        # Severity 3 (serious), 1 finding → 0.25 * 3 = 0.75, clears both
+        # the 0.3 fold threshold and the 0.7 tier5 promotion threshold.
+        w = compute_samvega_weight(
+            SamvegaTrigger.CROSS_TIER_AUDIT.value,
+            audit_finding_count=1,
+            audit_max_severity=3,
+        )
+        assert w == pytest.approx(0.75)
+
+    def test_cross_tier_audit_multiple_findings_bump(self):
+        # Severity 2, 3 findings → 0.25*2 + 0.05*(3-1) = 0.5 + 0.1 = 0.6
+        w = compute_samvega_weight(
+            SamvegaTrigger.CROSS_TIER_AUDIT.value,
+            audit_finding_count=3,
+            audit_max_severity=2,
+        )
+        assert w == pytest.approx(0.6)
+
+    def test_cross_tier_audit_clamped_to_one(self):
+        w = compute_samvega_weight(
+            SamvegaTrigger.CROSS_TIER_AUDIT.value,
+            audit_finding_count=10,
+            audit_max_severity=3,
+        )
+        assert w == pytest.approx(1.0)
+
 
 # ── File CRUD ────────────────────────────────────────────────────────────
 

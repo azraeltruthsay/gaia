@@ -38,7 +38,6 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.CrossTierAudit")
@@ -48,7 +47,8 @@ logger = logging.getLogger("GAIA.CrossTierAudit")
 
 DEFAULT_ORCH_URL = os.environ.get("GAIA_ORCHESTRATOR_URL",
                                   "http://gaia-orchestrator:6410")
-SAMVEGA_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/knowledge")) / "samvega"
+# Samvega storage path/schema now owned by gaia_core.cognition.samvega
+# (SamvegaArtifact / save_samvega_artifact) — see _maybe_emit_samvega below.
 
 # Lifecycle states where Prime CPU is generally available for an audit.
 # AWAKE: Core is on GPU, Prime is on CPU GGUF. Audit runs on Prime CPU.
@@ -226,8 +226,18 @@ def _maybe_emit_samvega(
     final_response: str,
     journal_entry_id: Optional[str],
     summary: str,
+    session_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Emit a samvega artifact when findings are serious. Returns path or None."""
+    """Emit a samvega artifact when findings are serious. Returns path or None.
+
+    GAIA_Project-e8hf (2026-10-14): this must build a real SamvegaArtifact and
+    go through save_samvega_artifact(), not write an ad-hoc dict. The actual
+    correction-learning pipeline (samvega_kv_fold, run during the sleep
+    cycle's DREAMING phase) only treats an artifact as eligible when it has a
+    non-zero `weight` and a non-empty `corrected_understanding` — fields the
+    old ad-hoc payload never set, so every audit-flagged confabulation was
+    silently invisible to the one mechanism designed to act on it.
+    """
     if not findings:
         return None
     # Heuristic: emit samvega only when we have ≥2 findings or any
@@ -235,34 +245,53 @@ def _maybe_emit_samvega(
     # don't escalate to samvega (avoid noise).
     if len(findings) < 2 and not any(f.severity >= 3 for f in findings):
         return None
-    SAMVEGA_DIR.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc)
-    artifact_id = f"samvega_cross_tier_{now.strftime('%Y%m%d_%H%M%S')}_{(journal_entry_id or 'unknown')[-12:]}"
-    payload = {
-        "id": artifact_id,
-        "type": "cross_tier_audit",
-        "created_at": now.isoformat(),
-        "trigger": "cross_tier_audit_flagged",
-        "journal_entry_id": journal_entry_id,
-        "user_input": user_input[:400],
-        "final_response": final_response[:600],
-        "findings": [
-            {"category": f.category, "concern": f.concern, "severity": f.severity}
-            for f in findings
-        ],
-        "summary": summary,
-    }
-    out = SAMVEGA_DIR / f"{artifact_id}.json"
-    try:
-        tmp = out.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(out)
-        logger.info("Cross-tier audit: samvega %s emitted (%d findings)",
-                    artifact_id, len(findings))
-        return str(out)
-    except Exception:
-        logger.exception("Cross-tier audit: failed to write samvega artifact")
+
+    from gaia_core.cognition.samvega import (
+        SamvegaArtifact, SamvegaTrigger, compute_samvega_weight, save_samvega_artifact,
+    )
+
+    max_severity = max(f.severity for f in findings)
+    weight = compute_samvega_weight(
+        trigger=SamvegaTrigger.CROSS_TIER_AUDIT.value,
+        audit_finding_count=len(findings),
+        audit_max_severity=max_severity,
+    )
+
+    # Dominant category becomes root_cause so _run_samvega_introspection's
+    # clustering (group-by-root_cause, boost repeated patterns) actually
+    # groups repeated confabulation/identity/etc. findings together instead
+    # of lumping every audit artifact into one bucket.
+    category_counts: Dict[str, int] = {}
+    for f in findings:
+        category_counts[f.category] = category_counts.get(f.category, 0) + 1
+    root_cause = max(category_counts, key=category_counts.get)
+
+    corrected_understanding = summary.strip() or "Response was flagged by cross-tier audit."
+    concern_lines = "; ".join(f"[{f.category}] {f.concern}" for f in findings)
+    if concern_lines:
+        corrected_understanding = f"{corrected_understanding} {concern_lines}"
+
+    artifact = SamvegaArtifact(
+        artifact_type="samvega",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        session_id=session_id or "",
+        packet_id=journal_entry_id or "",
+        trigger=SamvegaTrigger.CROSS_TIER_AUDIT.value,
+        original_output_summary=final_response[:600],
+        what_went_wrong=concern_lines or summary,
+        root_cause=root_cause,
+        corrected_understanding=corrected_understanding,
+        weight=weight,
+    )
+
+    out = save_samvega_artifact(artifact)
+    if out is None:
         return None
+    logger.info(
+        "Cross-tier audit: samvega %s emitted (%d findings, weight=%.2f, root_cause=%s)",
+        out.name, len(findings), weight, root_cause,
+    )
+    return str(out)
 
 
 # ── Per-entry de-dup (one audit per journal entry) ──────────────────────
@@ -374,6 +403,7 @@ def run_cross_tier_audit_sync(
         final_response=final_response,
         journal_entry_id=journal_entry_id,
         summary=summary,
+        session_id=session_id,
     )
 
     logger.info(
