@@ -162,7 +162,15 @@ managed_http_api:
       request: { messages: list, max_tokens: int, temperature: float, stream: bool }
       response: "OpenAI ChatCompletion or SSE stream"
       description: "Chat completion — proxied to worker subprocess"
-      notes: "Serialized through inference semaphore (max_concurrent). SSE streaming via readline proxy."
+      notes: "Serialized through inference semaphore (max_concurrent). SSE streaming via readline proxy.
+        Non-streaming errors: 500 {error} for a normal generation failure; 503
+        {error, error_code: GAIA-ENGINE-GPU-DEAD} specifically when the engine
+        expects CUDA but torch.cuda.is_available() is False (stale driver
+        context after a host reboot — GAIA_Project-448j/t0f2) — distinguishes
+        'this worker needs a restart' from an ordinary request/model error.
+        On the streaming path the 200 + SSE headers are already sent before
+        generation starts, so a mid-stream failure of either kind cannot be
+        reported via status code."
 
     - endpoint: /v1/completions
       method: POST
