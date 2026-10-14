@@ -339,3 +339,40 @@ def test_observer_health_snapshot_shape():
     h = observer_health()
     assert set(("observations", "failures", "fail_rate", "healthy")).issubset(h.keys())
     assert isinstance(h["healthy"], bool)
+
+
+class _NoneForUnmappedConfig:
+    """Mimics agent_core.SafeConfigProxy's real behavior: any attribute it
+    doesn't explicitly recognize resolves to None (not AttributeError),
+    which silently defeats a caller's own getattr(..., default) default.
+    Deliberately NOT a MagicMock, which would auto-create a truthy attribute
+    for anything and mask this exact bug (GAIA_Project-md2o)."""
+
+    constants = {}
+    # CoreIdentityGuardian (constructed inside StreamObserver.__init__) does
+    # a bare self.config.identity_file_path access with no default -- give
+    # it a harmless nonexistent path rather than None so this stub exercises
+    # only the OBSERVER_MIN_INTERVAL behavior under test.
+    identity_file_path = "/nonexistent/identity.json"
+
+    def __getattr__(self, name):
+        return None
+
+
+class TestMinIntervalDefault:
+    """GAIA_Project-md2o: OBSERVER_MIN_INTERVAL isn't a real Config
+    attribute anywhere in the codebase, so under the real SafeConfigProxy
+    this always resolved to None instead of StreamObserver's intended 0.5
+    default — and _min_interval is later passed through float(), which
+    raises TypeError on None the first time two observations are compared."""
+
+    def test_defaults_to_0_5_when_proxy_returns_none(self):
+        obs = StreamObserver(config=_NoneForUnmappedConfig(), llm=None, name="Test")
+        assert obs._min_interval == 0.5
+        float(obs._min_interval)  # must not raise
+
+    def test_respects_a_real_configured_value(self):
+        config = _NoneForUnmappedConfig()
+        config.OBSERVER_MIN_INTERVAL = 2.5
+        obs = StreamObserver(config=config, llm=None, name="Test")
+        assert obs._min_interval == 2.5

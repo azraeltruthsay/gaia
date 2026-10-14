@@ -54,7 +54,7 @@ class StreamObserver:
         self._last_output: Optional[str] = None
         self._last_result: Optional[Interrupt] = None
         self._last_obs_time = 0.0
-        self._min_interval = getattr(self.config, "OBSERVER_MIN_INTERVAL", 0.5)
+        self._min_interval = getattr(self.config, "OBSERVER_MIN_INTERVAL", 0.5) or 0.5
         # Grace and heuristic thresholds (configurable via constants or ENV)
         try:
             self._grace_tokens = int(os.getenv("OBSERVER_GRACE_TOKENS") or self.config.constants.get("OBSERVER_GRACE_TOKENS", 12))
