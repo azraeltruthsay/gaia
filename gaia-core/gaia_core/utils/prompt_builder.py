@@ -699,22 +699,33 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             world_state_block_content = ""
 
     # For personal/chitchat turns (e.g. "how are you?"), strip the OPERATIONAL
-    # world-state lines — uptime/load/mem, immune system, lifecycle "Recent
-    # Events", model paths, self-knowledge. Otherwise GAIA reads her *state* off
-    # the monitoring snapshot and answers like an ops console ("clean run, no
-    # escalations, last sleep cycle, waking circle, running laundry on the
-    # consciousness stack") instead of as herself. Keep only the clock and the
-    # "Context: in Discord" line — harmless and useful, no ops vocabulary.
+    # world-state lines — raw uptime/load/mem numbers, immune system, lifecycle
+    # "Recent Events", model paths, self-knowledge. Otherwise GAIA reads her
+    # *state* off the monitoring snapshot and answers like an ops console
+    # ("clean run, no escalations, last sleep cycle, waking circle, running
+    # laundry on the consciousness stack") instead of as herself.
+    #
+    # itws (2026-10-15): "Body:" and "Lifecycle:" are kept too, unlike the rest
+    # of the operational block above — they're not raw telemetry, they're
+    # ALREADY rendered as felt, declarative facts (_somatic_state() in
+    # world_state.py: "Body: running easy"/"working hard, under load", and the
+    # "Lifecycle ≠ biography" framing on the gearbox-state line), the same
+    # register that already works for Locality's weather line and the Inner-
+    # weather felt-line. Flagged (CASUAL_SOMATIC_ENABLED) so this can be killed
+    # without a redeploy if live use shows it reintroducing 7n3's status-report
+    # narration after all.
     try:
         _ws_intent = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
         if world_state_block_content and _ws_intent in {
             "chat", "greeting", "farewell", "gratitude", "smalltalk", "social",
             "chitchat", "acknowledgment", "affirmation",
         }:
-            _keep = ("Clock:", "User's local time", "Context:")
-            _trimmed = [l for l in world_state_block_content.splitlines() if l.strip().startswith(_keep)]
+            _keep = ["Clock:", "User's local time", "Context:"]
+            if os.environ.get("CASUAL_SOMATIC_ENABLED", "1").lower() in ("1", "true", "yes", "on"):
+                _keep.extend(["Body:", "Lifecycle:"])
+            _trimmed = [l for l in world_state_block_content.splitlines() if l.strip().startswith(tuple(_keep))]
             world_state_block_content = "\n".join(_trimmed)
-            logger.info("PromptBuilder: trimmed world-state to clock/context for personal intent '%s'", _ws_intent)
+            logger.info("PromptBuilder: trimmed world-state to %s for personal intent '%s'", _keep, _ws_intent)
     except Exception:
         logger.debug("world-state personal-trim failed", exc_info=True)
 
