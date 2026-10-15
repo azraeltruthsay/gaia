@@ -348,7 +348,7 @@ class _NoneForUnmappedConfig:
     Deliberately NOT a MagicMock, which would auto-create a truthy attribute
     for anything and mask this exact bug (GAIA_Project-md2o)."""
 
-    constants = {}
+    constants: dict = {}
     # CoreIdentityGuardian (constructed inside StreamObserver.__init__) does
     # a bare self.config.identity_file_path access with no default -- give
     # it a harmless nonexistent path rather than None so this stub exercises

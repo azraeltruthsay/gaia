@@ -39,12 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# Re-use the samvega directory layout from cross_tier_audit so artifacts
-# from both detectors land together and the review queue stays unified.
-from gaia_core.cognition.cross_tier_audit import (
-    AuditFinding,
-    SAMVEGA_DIR,
-)
+from gaia_core.cognition.cross_tier_audit import AuditFinding
 
 logger = logging.getLogger("GAIA.ConsistencyDetector")
 
@@ -399,45 +394,63 @@ def _emit_samvega(
     session_id: Optional[str],
     summary: str,
 ) -> Optional[str]:
-    """Emit a samvega artifact when findings are serious. Returns path or None.
+    """Emit a samvega artifact when findings exist. Returns path or None.
 
-    Single severity-3 finding is sufficient — fabricated entities are
-    high-confidence confabulation signals, no need to wait for ≥2.
+    GAIA_Project-e8hf: this mirrored cross_tier_audit.py's OLD ad-hoc dict
+    write, missing the `weight`/`corrected_understanding` fields
+    samvega_kv_fold.py's eligibility filter requires -- every fabricated-
+    entity finding from this detector was invisible to the sleep-cycle
+    correction fold, same as cross_tier_audit's findings were before that
+    bead's fix. Also explains why the affect-coherence hook this module's
+    own caller comment says "lives in samvega.save_samvega_artifact" was
+    never actually firing for consistency violations -- this never called
+    that function at all.
     """
     if not findings:
         return None
-    SAMVEGA_DIR.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc)
-    suffix = (journal_entry_id or session_id or "unknown")[-12:]
-    artifact_id = f"samvega_consistency_{now.strftime('%Y%m%d_%H%M%S')}_{suffix}"
-    payload = {
-        "id": artifact_id,
-        "type": "consistency_violation",
-        "created_at": now.isoformat(),
-        "trigger": "consistency_detector_flagged",
-        "journal_entry_id": journal_entry_id,
-        "session_id": session_id,
-        "user_input": (user_input or "")[:400],
-        "final_response": (final_response or "")[:600],
-        "findings": [
-            {"category": f.category, "concern": f.concern, "severity": f.severity}
-            for f in findings
-        ],
-        "summary": summary,
-    }
-    out = SAMVEGA_DIR / f"{artifact_id}.json"
-    try:
-        tmp = out.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(out)
-        logger.info(
-            "Consistency-violation samvega emitted: %s (%d finding%s)",
-            artifact_id, len(findings), "" if len(findings) == 1 else "s",
-        )
-        return str(out)
-    except Exception:
-        logger.exception("Consistency-violation samvega write failed")
+
+    from gaia_core.cognition.samvega import (
+        SamvegaArtifact, SamvegaTrigger, compute_samvega_weight, save_samvega_artifact,
+    )
+
+    max_severity = max(f.severity for f in findings)
+    weight = compute_samvega_weight(
+        trigger=SamvegaTrigger.CONSISTENCY_VIOLATION.value,
+        audit_finding_count=len(findings),
+        audit_max_severity=max_severity,
+    )
+
+    category_counts: Dict[str, int] = {}
+    for f in findings:
+        category_counts[f.category] = category_counts.get(f.category, 0) + 1
+    root_cause = max(category_counts, key=category_counts.get)
+
+    corrected_understanding = summary.strip() or "Response flagged by consistency detector."
+    concern_lines = "; ".join(f"[{f.category}] {f.concern}" for f in findings)
+    if concern_lines:
+        corrected_understanding = f"{corrected_understanding} {concern_lines}"
+
+    artifact = SamvegaArtifact(
+        artifact_type="samvega",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        session_id=session_id or "",
+        packet_id=journal_entry_id or "",
+        trigger=SamvegaTrigger.CONSISTENCY_VIOLATION.value,
+        original_output_summary=(final_response or "")[:600],
+        what_went_wrong=concern_lines or summary,
+        root_cause=root_cause,
+        corrected_understanding=corrected_understanding,
+        weight=weight,
+    )
+
+    out = save_samvega_artifact(artifact)
+    if out is None:
         return None
+    logger.info(
+        "Consistency-violation samvega emitted: %s (%d finding%s, weight=%.2f, root_cause=%s)",
+        out.name, len(findings), "" if len(findings) == 1 else "s", weight, root_cause,
+    )
+    return str(out)
 
 
 # ── Per-entry dedup so we don't re-audit the same response ─────────────

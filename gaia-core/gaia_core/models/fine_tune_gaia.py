@@ -73,7 +73,6 @@ def run_fine_tuning(config: Config, dataset_path: str, base_model_name: str, new
         num_train_epochs=1,  # Keep it short for a demo
         per_device_train_batch_size=1, # Keep it small to avoid memory issues
         learning_rate=5e-5,
-        logging_dir=os.path.join(output_dir, 'logs'),
         logging_steps=10,
         save_steps=50,
         report_to="none" # Can be "tensorboard", "wandb" etc.

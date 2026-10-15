@@ -92,6 +92,13 @@ no_strict_optional = true
 # separate error code (import-untyped) that flag doesn't suppress. These
 # are third-party type-coverage gaps, not bugs in our code.
 disable_error_code = ["import-untyped"]
+# GAIA_Project-cjja: scripts/legacy/ holds an archived prior version of
+# smoke_test_cognitive.py kept for reference, not live code. Without
+# __init__.py anywhere in scripts/, mypy's module resolution sees two
+# files both named "smoke_test_cognitive" and aborts entirely before
+# checking anything else ("Duplicate module named..."). Exclude the
+# archive rather than add package scaffolding to a script directory.
+exclude = ["^scripts/legacy/"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

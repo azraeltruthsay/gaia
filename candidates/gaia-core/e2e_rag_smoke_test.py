@@ -158,9 +158,9 @@ def main() -> int:
         os.remove(persist_path)
     archive_dir = os.path.join(indexer.persist_dir, "archive")
     if os.path.isdir(archive_dir):
-        for f in os.listdir(archive_dir):
-            if f.startswith(test_session):
-                os.remove(os.path.join(archive_dir, f))
+        for fname in os.listdir(archive_dir):
+            if fname.startswith(test_session):
+                os.remove(os.path.join(archive_dir, fname))
     SessionHistoryIndexer._instances.pop(test_session, None)
 
     # --- Summary ---

@@ -587,8 +587,14 @@ def rescue_chat_loop(ai: MinimalAIManager, session_id: str, initial_mode: str = 
                     print("✅ Approved. Executing command...")
                     logger.info("Approval granted for pending command")
                     logger.debug("[DEBUG] Approval granted command_len=%d", len(last_command or ""))
-                    # Call agent_core with approval flag
-                    for event in agent_core.run_turn(last_command, session_id=session_id, destination="cli_chat", execute_approved=True):
+                    # GAIA_Project-cjja: execute_approved was removed from
+                    # run_turn's signature at some point and nothing replaced
+                    # it -- this call would have raised TypeError if ever
+                    # actually reached. Dropping it makes the retry behave
+                    # like any other run_turn call (no execution-bypass);
+                    # see GAIA_Project-dv4d for restoring real approved-retry
+                    # semantics, which needs its own investigation.
+                    for event in agent_core.run_turn(last_command, session_id=session_id, destination="cli_chat"):
                         et = event.get("type")
                         val = event.get("value")
                         if et == "token":
@@ -821,11 +827,14 @@ def start_discord_listener(ai: MinimalAIManager = None, session_id_prefix: str =
             logger.error("Cannot start Discord listener: DISCORD_BOT_TOKEN not set")
             return None
 
-        # Build sanitization callback from SessionManager
-        _session_mgr = getattr(ai, 'session_manager', None)
-        _sanitize_cb = _session_mgr.sanitize_sessions if _session_mgr else None
-
-        connector = DiscordConnector(config, sanitize_callback=_sanitize_cb)
+        # GAIA_Project-cjja: DiscordConnector.__init__ no longer accepts
+        # sanitize_callback -- removed at some point, and SessionManager.
+        # sanitize_sessions() has had no other caller anywhere in the
+        # codebase since. This call would have raised TypeError if ever
+        # actually reached. Session sanitization-on-Discord-events is
+        # genuinely orphaned, not moved elsewhere -- see GAIA_Project-dv4d,
+        # needs its own look, not a blind re-wire here.
+        connector = DiscordConnector(config)
 
         def handle_discord_message(content: str, author_id: str, metadata: dict):
             """Callback for incoming Discord messages (channels and DMs)."""
