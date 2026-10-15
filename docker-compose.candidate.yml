@@ -20,6 +20,21 @@ services:
     volumes:
       - ./candidates/gaia-core:/app:rw
       - ./candidates/gaia-common:/gaia-common:ro
+      # GAIA Engine Python overlay (GAIA_Project-p6j9): candidate never had
+      # these mounts at all, so the embedded engine silently fell back to
+      # gaia_common's vendored copy (gaia_common/engine/__init__.py's
+      # ImportError fallback) instead of the real gaia_engine package --
+      # missing fixes (e.g. health_response() skipping the proxy during
+      # in-flight generation) and degenerate generation resulted. Mirrors
+      # production's gaia-core block in docker-compose.yml exactly.
+      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
+      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
+      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
+      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
+      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
+      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
+      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
+      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
       - ../gaia-instance/knowledge:/knowledge:ro
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
