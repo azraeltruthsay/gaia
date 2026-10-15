@@ -657,6 +657,10 @@ async def health_check():
             if not inference_ok:
                 inference_detail = f"status={resp.status_code}"
             else:
+                try:
+                    _engine_health = resp.json()
+                except Exception:
+                    _engine_health = {}
                 # 29yq: the engine's drain flag 503s ALL inference while
                 # /health stays 200 — a stale drain (never resumed) left the
                 # pipeline dead-but-"healthy" for days and the doctor never
@@ -664,12 +668,19 @@ async def health_check():
                 # shift; the doctor's failure threshold + confirmation
                 # re-check absorb that. One that persists across polls is
                 # stale and MUST surface as degraded.
-                try:
-                    if resp.json().get("draining"):
-                        inference_ok = False
-                        inference_detail = "engine draining (503s all inference; stale if persistent)"
-                except Exception:
-                    pass
+                if _engine_health.get("draining"):
+                    inference_ok = False
+                    inference_detail = "engine draining (503s all inference; stale if persistent)"
+                # t0f2: the embedded engine's own /health now probes CUDA
+                # when it expects to be on GPU (see gaia-engine manager.py
+                # health_response()) — a stale driver context after a host
+                # reboot used to report "healthy" right up until a real
+                # request crashed. Surface that here the same way draining
+                # is surfaced, so Doctor's existing degraded-status
+                # remediation picks it up with no Doctor-side changes.
+                if _engine_health.get("cuda_healthy") is False:
+                    inference_ok = False
+                    inference_detail = f"embedded engine: {_engine_health.get('cuda_detail', 'CUDA unhealthy')}"
     except Exception as _inf_exc:
         inference_detail = str(_inf_exc)[:100]
 
