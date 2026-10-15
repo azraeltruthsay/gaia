@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # VoiceWhitelist tests
 # ---------------------------------------------------------------------------
@@ -151,10 +150,11 @@ class TestSimpleVAD:
 
 class TestAudioConversion:
     def test_pcm_to_wav_base64(self):
-        from gaia_web.voice_manager import pcm_to_wav_base64
         import base64
-        import wave
         import io
+        import wave
+
+        from gaia_web.voice_manager import pcm_to_wav_base64
 
         pcm = b"\x00" * 3200  # 100ms of 16kHz mono silence
         result = pcm_to_wav_base64(pcm, sample_rate=16000)
@@ -177,7 +177,7 @@ class TestAudioConversion:
 @pytest.fixture
 def voice_client(tmp_path):
     """Create a test client with mocked VoiceManager."""
-    from gaia_web.voice_manager import VoiceWhitelist, VoiceManager
+    from gaia_web.voice_manager import VoiceManager, VoiceWhitelist
 
     whitelist = VoiceWhitelist(data_dir=str(tmp_path))
     whitelist.record_seen("100", "Alice", "guild1")
@@ -191,8 +191,9 @@ def voice_client(tmp_path):
     )
 
     # Patch the main app to avoid importing everything
-    from gaia_web.routes.voice import router
     from fastapi import FastAPI
+
+    from gaia_web.routes.voice import router
 
     test_app = FastAPI()
     test_app.include_router(router)

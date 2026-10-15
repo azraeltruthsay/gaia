@@ -49,8 +49,7 @@ def _make_run(
         (run_dir / "battery_results.json").write_text(json.dumps(battery))
     if metrics is not None:
         with open(run_dir / "metrics.jsonl", "w") as f:
-            for m in metrics:
-                f.write(json.dumps(m) + "\n")
+            f.writelines(json.dumps(m) + "\n" for m in metrics)
     if checkpoints is not None:
         ckpt_dir = run_dir / "checkpoints"
         ckpt_dir.mkdir()

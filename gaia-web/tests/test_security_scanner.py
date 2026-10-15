@@ -6,19 +6,18 @@ Run in Docker: docker compose exec -T gaia-web python -m pytest tests/test_secur
 """
 
 import base64
-import sys
 import os
+import sys
 
 # Ensure gaia-web package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from gaia_web.security.middleware import SecurityScanMiddleware
 from gaia_web.security.scanner import (
-    PromptInjectionScanner,
     PIIRedactionScanner,
+    PromptInjectionScanner,
     SecretsScanner,
 )
-from gaia_web.security.middleware import SecurityScanMiddleware
-
 
 # ---------------------------------------------------------------------------
 # Test 1 — Role override injection → BLOCK

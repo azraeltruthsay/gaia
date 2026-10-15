@@ -38,8 +38,7 @@ def streamed_layers(tmp_path: Path):
 
 def _write_stream_records(path: Path, records: list[dict]) -> None:
     with open(path, "w") as f:
-        for rec in records:
-            f.write(json.dumps(rec) + "\n")
+        f.writelines(json.dumps(rec) + "\n" for rec in records)
 
 
 def _rec(token: str, tier: str, layers: list[int]) -> dict:
