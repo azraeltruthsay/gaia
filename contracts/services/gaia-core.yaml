@@ -430,6 +430,13 @@ consumes:
     port: 6414
     description: "Update Discord bot presence from the sleep cycle (direction corrected 2026-07-02)"
 
+  - service: gaia-web
+    endpoint: /api/conversations/{session_id}/push
+    method: POST
+    protocol: http
+    port: 6414
+    description: "e8hf Phase B: cross_tier_audit.py's fire-and-forget background thread delivers a visible same-conversation self-correction when it flags a confabulated turn serious enough to emit a samvega artifact. Best-effort; failures are logged and swallowed, not retried."
+
   - service: localhost:8092
     endpoint: /v1/chat/completions
     method: POST

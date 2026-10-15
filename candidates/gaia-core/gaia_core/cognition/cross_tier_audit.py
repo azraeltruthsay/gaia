@@ -47,6 +47,7 @@ logger = logging.getLogger("GAIA.CrossTierAudit")
 
 DEFAULT_ORCH_URL = os.environ.get("GAIA_ORCHESTRATOR_URL",
                                   "http://gaia-orchestrator:6410")
+DEFAULT_WEB_URL = os.environ.get("GAIA_WEB_URL", "http://gaia-web:6414")
 # Samvega storage path/schema now owned by gaia_core.cognition.samvega
 # (SamvegaArtifact / save_samvega_artifact) — see _maybe_emit_samvega below.
 
@@ -72,6 +73,7 @@ class AuditResult:
     clean: bool
     findings: List[AuditFinding] = field(default_factory=list)
     summary: str = ""
+    followup: str = ""  # natural in-voice correction, set only when flagged
     raw_output: str = ""
     elapsed_ms: float = 0.0
     skipped_reason: Optional[str] = None  # set if audit skipped (lifecycle, etc.)
@@ -145,6 +147,21 @@ FLAGS:
 
 SUMMARY: <one short sentence under 25 words>
 
+If flagged, also write a short, natural, first-person follow-up message \
+GAIA could send the user right now to correct herself mid-conversation \
+— as if she just noticed her own mistake. Rules for this message:
+  - Speak as GAIA, first person, warm and brief (2-4 sentences).
+  - If the user asked a direct factual/trivia question and Core deflected \
+or got it wrong, answer it correctly and plainly now.
+  - Never mention "audit", "Prime", "cross-tier", or "samvega", and never \
+describe your own review process — just correct the substance.
+  - Don't apologize profusely; this is a quick, natural correction, not \
+an incident report.
+
+FOLLOWUP: <the message>
+
+Omit the FOLLOWUP line entirely if AUDIT is clean.
+
 If you genuinely have no concerns, output "AUDIT: clean" with the \
 SUMMARY line and nothing else. Don't invent concerns to fill space."""
 
@@ -174,6 +191,8 @@ _FLAG_LINE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _SUMMARY_RE = re.compile(r"^\s*SUMMARY:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+# FOLLOWUP is written last and may span multiple lines — capture to end of output.
+_FOLLOWUP_RE = re.compile(r"^\s*FOLLOWUP:\s*(.+)", re.IGNORECASE | re.DOTALL | re.MULTILINE)
 
 
 def _normalize_category(raw: str) -> str:
@@ -183,10 +202,10 @@ def _normalize_category(raw: str) -> str:
     return raw
 
 
-def _parse_audit_response(raw: str) -> Tuple[bool, List[AuditFinding], str]:
-    """Parse Prime's audit text into (clean, findings, summary)."""
+def _parse_audit_response(raw: str) -> Tuple[bool, List[AuditFinding], str, str]:
+    """Parse Prime's audit text into (clean, findings, summary, followup)."""
     if not raw:
-        return False, [], ""
+        return False, [], "", ""
 
     verdict_match = _VERDICT_RE.search(raw)
     clean: Optional[bool] = None
@@ -208,6 +227,11 @@ def _parse_audit_response(raw: str) -> Tuple[bool, List[AuditFinding], str]:
     if sm:
         summary = sm.group(1).strip()
 
+    followup = ""
+    fm = _FOLLOWUP_RE.search(raw)
+    if fm:
+        followup = fm.group(1).strip()
+
     # If we found bullet flags but verdict says "clean", trust the flags
     if findings and clean is True:
         clean = False
@@ -215,7 +239,11 @@ def _parse_audit_response(raw: str) -> Tuple[bool, List[AuditFinding], str]:
     if clean is None:
         clean = not findings
 
-    return clean, findings, summary
+    # A follow-up only makes sense for a flagged turn.
+    if clean:
+        followup = ""
+
+    return clean, findings, summary, followup
 
 
 # ── Samvega artifact ────────────────────────────────────────────────────
@@ -292,6 +320,36 @@ def _maybe_emit_samvega(
         out.name, len(findings), weight, root_cause,
     )
     return str(out)
+
+
+# ── Visible same-conversation follow-up (e8hf Phase B) ──────────────────
+
+def _maybe_push_followup(session_id: str, followup: str, cfg: Dict[str, Any]) -> bool:
+    """Best-effort delivery of a visible self-correction into the live
+    session. Routed by gaia-web, which knows how to reach each transport
+    (Discord bot push vs. the Mission Control autonomous-message SSE feed)
+    from the session_id's existing prefix scheme. Never raises — this is a
+    background daemon thread with no caller waiting on it.
+    """
+    if not cfg.get("followup_enabled", True):
+        return False
+    url = f"{DEFAULT_WEB_URL}/api/conversations/{session_id}/push"
+    payload = json.dumps({
+        "text": followup,
+        "source": "cross_tier_audit_correction",
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url, data=payload, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as r:
+            ok = 200 <= r.status < 300
+        logger.info("Cross-tier audit: follow-up push to %s -> %s", session_id, "ok" if ok else r.status)
+        return ok
+    except Exception as e:
+        logger.warning("Cross-tier audit: follow-up push failed for %s: %s", session_id, e)
+        return False
 
 
 # ── Per-entry de-dup (one audit per journal entry) ──────────────────────
@@ -374,7 +432,7 @@ def run_cross_tier_audit_sync(
         )
 
     elapsed_ms = (time.time() - t0) * 1000.0
-    clean, findings, summary = _parse_audit_response(raw)
+    clean, findings, summary, followup = _parse_audit_response(raw)
 
     # Annotate the journal entry — clean or flagged
     annotated = None
@@ -406,16 +464,25 @@ def run_cross_tier_audit_sync(
         session_id=session_id,
     )
 
+    # e8hf Phase B: a flagged-and-samvega-serious turn gets a visible,
+    # same-conversation follow-up, not just a silent next-sleep-cycle fold.
+    # Reuses _maybe_emit_samvega's own severity bar (>=2 findings, or any
+    # severity-3) rather than inventing a second threshold.
+    if samvega_path and followup and session_id:
+        _maybe_push_followup(session_id, followup, cfg)
+
     logger.info(
-        "Cross-tier audit complete: entry=%s clean=%s findings=%d elapsed=%.0fms samvega=%s",
+        "Cross-tier audit complete: entry=%s clean=%s findings=%d elapsed=%.0fms samvega=%s followup=%s",
         journal_entry_id, clean, len(findings), elapsed_ms,
         os.path.basename(samvega_path) if samvega_path else "-",
+        "yes" if (samvega_path and followup) else "no",
     )
 
     return AuditResult(
         clean=clean,
         findings=findings,
         summary=summary,
+        followup=followup,
         raw_output=raw,
         elapsed_ms=elapsed_ms,
         annotated_entry=annotated,

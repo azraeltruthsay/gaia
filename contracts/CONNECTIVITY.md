@@ -8,6 +8,7 @@ Every inter-service call in the GAIA mesh. Read as: **Consumer calls Provider**.
 |----------|----------|----------|----------|------|---------|
 | gaia-web | gaia-core | HTTP POST (streaming) | `/process_packet` | 6415 | Primary cognition entry: sends CognitionPacket, receives NDJSON token stream |
 | gaia-core | gaia-web | HTTP POST | `/presence` | 6414 | Update Discord bot presence from sleep cycle (direction corrected 2026-07-02: core's sleep_cycle_loop calls web) |
+| gaia-core | gaia-web | HTTP POST | `/api/conversations/{session_id}/push` | 6414 | e8hf Phase B (2026-10-15): cross_tier_audit's background thread delivers a visible same-conversation self-correction when a flagged turn is serious enough to emit samvega; gaia-web routes it to Discord bot push or the Mission Control autonomous-SSE feed by session_id prefix |
 | gaia-web | gaia-core | HTTP POST | `/api/voice_gate` | 6415 | Discord path strips leaked meta-commentary from each outgoing message (added 2026-07-02) |
 | gaia-web | gaia-core | HTTP GET | `/sleep/status` | 6415 | Poll sleep state for dashboard |
 | gaia-web | gaia-core | HTTP POST | `/sleep/wake` | 6415 | Send wake signal on first message during sleep |

@@ -135,6 +135,51 @@ async def get_history(session_id: str):
         return JSONResponse(status_code=502, content={"error": str(e)})
 
 
+@router.post("/{session_id}/push")
+async def push_message(session_id: str, request: Request):
+    """Deliver a message into a live session, routed by the session_id's
+    existing transport prefix (``discord_dm_<user_id>``, ``discord_<channel_id>``,
+    ``web_<hash>``). Used by gaia-core's cross-tier audit (e8hf Phase B) to
+    surface a same-conversation self-correction instead of only a silent
+    next-sleep-cycle samvega fold. Best-effort for the caller: always
+    returns 200 with a ``delivered`` flag rather than raising, since the
+    caller is a fire-and-forget background thread with nothing to retry on.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
+
+    text = (body or {}).get("text", "").strip()
+    source = (body or {}).get("source", "autonomous")
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "Missing 'text'"})
+
+    try:
+        if session_id.startswith("discord_dm_"):
+            from gaia_web.discord_interface import send_to_user
+            user_id = session_id[len("discord_dm_"):]
+            ok = await send_to_user(user_id, text)
+            return {"delivered": ok, "channel": "discord_dm"}
+
+        if session_id.startswith("discord_"):
+            from gaia_web.discord_interface import send_to_channel
+            channel_id = session_id[len("discord_"):]
+            ok = await send_to_channel(channel_id, text)
+            return {"delivered": ok, "channel": "discord_channel"}
+
+        if session_id.startswith("web_"):
+            from gaia_web.routes.autonomous import append_autonomous_message
+            ok = append_autonomous_message(text, source, session_id)
+            return {"delivered": ok, "channel": "web"}
+
+        logger.info("push_message: unrecognized session_id prefix %s", session_id)
+        return {"delivered": False, "channel": "none"}
+    except Exception as e:
+        logger.error("push_message failed for %s: %s", session_id, e)
+        return JSONResponse(status_code=200, content={"delivered": False, "error": str(e)})
+
+
 @router.post("/{session_id}/pool-summary")
 async def generate_pool_summary(session_id: str):
     """Generate a context pool summary for this conversation."""

@@ -32,6 +32,27 @@ provides:
         status: "idle | online | dnd | invisible"
     consumers: [gaia-core]
 
+  - endpoint: /api/conversations/{session_id}/push
+    method: POST
+    description: >
+      e8hf Phase B. Delivers a message into a live session, routed by the
+      session_id's existing transport prefix: discord_dm_<user_id> ->
+      DiscordInterface.send_to_user, discord_<channel_id> ->
+      DiscordInterface.send_to_channel, web_<hash> -> appends to
+      /logs/autonomous_messages.jsonl (same file+schema gaia_audio_inbox.py's
+      writer uses), which /api/autonomous/stream already tails for the
+      Mission Control dashboard's SSE feed. Always returns 200 with a
+      {delivered: bool} flag rather than raising.
+    request_schema:
+      fields:
+        text: string
+        source: string (optional, default "autonomous")
+    response_schema:
+      fields:
+        delivered: boolean
+        channel: "discord_dm | discord_channel | web | none"
+    consumers: [gaia-core]
+
   # ── System Routes (prefix: /api/system) ────────────────────────────
   # These are all proxy routes to backend services, exposed for the dashboard.
   - endpoint: /api/system/services

@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter
 from starlette.responses import StreamingResponse
@@ -22,6 +24,32 @@ router = APIRouter(prefix="/api/autonomous", tags=["autonomous"])
 _LOG_PATH = os.getenv("GAIA_AUTONOMOUS_LOG_PATH", "/logs/autonomous_messages.jsonl")
 _POLL_INTERVAL = 0.25  # 250 ms (lower frequency than generation stream)
 _HEARTBEAT_INTERVAL = 15.0  # seconds
+
+
+def append_autonomous_message(text: str, source: str, session_id: Optional[str] = None) -> bool:
+    """Append one line to the autonomous-message log, same shape
+    ``scripts/gaia_audio_inbox.py``'s ``_push_autonomous_message()`` writes.
+    ``_event_generator`` above tails this file for the Mission Control
+    dashboard's SSE feed, so a line appended here shows up live in the
+    chat panel (as the ``gaia-auto`` message type) with no page refresh.
+    Returns False (logged, not raised) on any write failure.
+    """
+    entry = {
+        "type": "autonomous",
+        "text": text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }
+    if session_id:
+        entry["session_id"] = session_id
+    try:
+        os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return True
+    except OSError:
+        logger.exception("Failed to append autonomous message (source=%s)", source)
+        return False
 
 
 @router.get("/stream")

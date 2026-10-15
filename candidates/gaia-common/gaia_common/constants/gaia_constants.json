@@ -458,7 +458,8 @@
   "CROSS_TIER_AUDIT": {
     "enabled": true,
     "max_audit_tokens": 350,
-    "audit_temperature": 0.3
+    "audit_temperature": 0.3,
+    "followup_enabled": true
   },
   "OBSERVER_DRIFT": {
     "enabled": true,

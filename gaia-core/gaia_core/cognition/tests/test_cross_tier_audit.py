@@ -13,7 +13,9 @@ import json
 
 import pytest
 
-from gaia_core.cognition.cross_tier_audit import AuditFinding, _maybe_emit_samvega
+from gaia_core.cognition.cross_tier_audit import (
+    AuditFinding, _maybe_emit_samvega, _parse_audit_response,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +30,44 @@ def _patch_samvega_dirs(tmp_path, monkeypatch):
 
 def _read(path: str) -> dict:
     return json.loads(open(path, encoding="utf-8").read())
+
+
+class TestParseAuditResponseFollowup:
+    """e8hf Phase B: a flagged turn can carry a FOLLOWUP line (the visible
+    same-conversation self-correction); a clean one never should, even if
+    Prime hallucinates one anyway."""
+
+    def test_flagged_with_followup_extracts_it(self):
+        raw = (
+            "AUDIT: flagged\n"
+            "FLAGS:\n"
+            "- confabulation: invented a fictional training detail\n"
+            "\n"
+            "SUMMARY: Core made something up instead of answering directly.\n"
+            "\n"
+            "FOLLOWUP: Quick correction — the sword's name is Excalibur.\n"
+        )
+        clean, findings, summary, followup = _parse_audit_response(raw)
+        assert clean is False
+        assert len(findings) == 1
+        assert followup == "Quick correction — the sword's name is Excalibur."
+
+    def test_clean_ignores_followup_even_if_present(self):
+        raw = "AUDIT: clean\nSUMMARY: No concerns.\nFOLLOWUP: should never surface.\n"
+        clean, findings, summary, followup = _parse_audit_response(raw)
+        assert clean is True
+        assert followup == ""
+
+    def test_flagged_without_followup_is_empty(self):
+        raw = (
+            "AUDIT: flagged\n"
+            "FLAGS:\n"
+            "- deflection: dodged a direct question\n"
+            "SUMMARY: Core deflected.\n"
+        )
+        clean, findings, summary, followup = _parse_audit_response(raw)
+        assert clean is False
+        assert followup == ""
 
 
 class TestMaybeEmitSamvega:
